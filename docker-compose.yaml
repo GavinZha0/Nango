@@ -1,0 +1,76 @@
+# Nango Frontend — Docker Compose
+#
+# Usage (Docker):
+#   docker compose up -d                 # Start all (pull pre-built image)
+#   docker compose up -d --build         # Build locally and start all
+#   docker compose up -d nango-db        # Start DB only (for local dev)
+#   docker compose down                  # Stop all
+#   docker compose logs -f nango-app     # Follow app logs
+#
+# Usage (Podman):
+#   podman compose up -d                 # Same commands, replace 'docker' with 'podman'
+#   podman compose up -d --build
+#   podman compose up -d nango-db
+
+name: nango
+
+services:
+  nango-app:
+    image: ${NANGO_IMAGE:-nango:latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      NO_HTTPS: ${NO_HTTPS:-1}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-secret-change-me-32chars}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      CREDENTIAL_ENCRYPTION_KEYRING: ${CREDENTIAL_ENCRYPTION_KEYRING:?Set CREDENTIAL_ENCRYPTION_KEYRING in .env or environment (e.g. k1=<64-hex>)}
+      CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID: ${CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID:?Set CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID in .env or environment (e.g. k1)}
+      # POSTGRES_HOST is hardcoded to the Docker service name.
+      # The .env file may set POSTGRES_HOST=localhost for local dev,
+      # but inside Docker the DB is always reachable at 'nango-db'.
+      POSTGRES_HOST: nango-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-nango}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nango}
+      POSTGRES_DB: ${POSTGRES_DB:-nango}
+    depends_on:
+      nango-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"http=require('http');req=http.request({host:'127.0.0.1',port:3000,path:'/'},res=>{process.exit(res.statusCode>=200&&res.statusCode<500?0:1)});req.on('error',()=>process.exit(1));req.end()\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  nango-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nango}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nango}
+      POSTGRES_DB: ${POSTGRES_DB:-nango}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - nango-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nango}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  nango-db-data:

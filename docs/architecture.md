@@ -1,0 +1,599 @@
+# Nango Architecture
+
+> Status: v1 (initial)
+> Scope: `nango` frontend AI workspace
+> Audience: full-stack engineers, architects, agent platform developers
+
+---
+
+## 1. Project Positioning
+
+Nango is an **AI agent workspace frontend** that unifies multi-backend agent integration, in-app agent construction, and AI artifact management into a single platform. Technically it is a Next.js App Router monolith (frontend + backend in one repo); server-side capabilities are exposed via API Routes / Server Components, and **all third-party secrets and agent traffic stay strictly on the server**.
+
+### Runtime boundary (v1)
+
+- **Single-instance runtime.** Nango is designed to run on one process / one node.
+- **Single-node multi-tenant positioning.** The runtime targets personal and small-team use: one deployment can host multiple tenants.
+- **Tenant model is evolving.** Multi-tenant capabilities are supported in principle and will be refined in follow-up iterations.
+- **No automatic horizontal scaling.** Do not enable multi-replica auto-scaling for the app runtime.
+- **Complex work is delegated outward.** Long-running and heavy tasks should be executed by backend agent platforms (agno / Mastra / Dify / others).
+- **Built-in agents are a lightweight complement.** Built-in runtime is for local orchestration glue and lightweight capabilities, not distributed heavy execution.
+
+Three core capabilities:
+
+| Capability | Description | Key modules |
+|---|---|---|
+| **Multi-backend agent integration** | Connect heterogeneous agent platforms (agno / Mastra / Dify); browser sees a uniform **AG-UI protocol** | `src/lib/backends/` |
+| **Built-in Agent + MCP** | Build agents in-app via the CopilotKit runtime; extend tools through the Model Context Protocol (MCP) | `src/lib/builtin-agents/agent-pool.ts`, `src/lib/mcp/provider-pool.ts`, `src/lib/mcp/client-providers.ts` |
+| **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs (V1 — charts); promotable into the permanent Artifact library via Save | `src/store/outcome-store.ts`, `src/components/workspace/OutcomesPanel.tsx`, `ArtifactTable` |
+
+---
+
+## 2. Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 16.2.4 (App Router + Turbopack) |
+| Language | TypeScript 6 / React 19 |
+| Auth | better-auth (email/password, admin plugin, session cookies) |
+| Database | PostgreSQL 18 + Drizzle ORM 0.45 |
+| State | Zustand (client) + SWR (data fetching) |
+| UI | shadcn/ui, Tailwind CSS 4, Lucide, next-themes, react-resizable-panels |
+| AI Runtime | `@copilotkit/runtime`, `@copilotkit/react-core`, `@ag-ui/client` |
+| Tool protocols | `@modelcontextprotocol/sdk` (MCP), `@ai-sdk/mcp` |
+| Validation | Zod 4 |
+| Encryption | AES-256-GCM (credential storage) |
+| Observability | pino (structured logs) + Langfuse (tracing) |
+
+---
+
+## 3. Overall Architecture
+
+### 3.1 Layered View
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Browser (React 19)                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐   │
+│  │ ThreePanel   │  │ Zustand      │  │ <CopilotKit/> v2          │   │
+│  │ Layout       │  │ workspace +  │  │  - Frontend tools         │   │
+│  │ (left/main/  │  │ sidebar      │  │    (render_chart, HITL …) │   │
+│  │  right)      │  │              │  │  - AG-UI client           │   │
+│  └──────────────┘  └──────────────┘  └──────────────────────────┘   │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │  HTTP (cookies + X-Credential-Id;
+                               │         agentId in URL path)
+┌──────────────────────────────▼──────────────────────────────────────┐
+│                Next.js API Routes (server-only)                     │
+│                                                                     │
+│  /api/copilotkit/[...path]   ──►  Backend chat → Runner → AG-UI     │
+│  /api/copilotkit/builtin/... ──►  Built-in chat → Runner → AG-UI    │
+│  /api/builtin-agents              CRUD: BuiltinAgent + Tools        │
+│  /api/mcp-servers                 CRUD + discover/call-tool         │
+│  /api/skills                      Skills CRUD + helper file read    │
+│  /api/schedules                   Schedule CRUD + trigger-now       │
+│  /api/notifications               Inbox CRUD                        │
+│  /api/runs/stream                 SSE: notifications + finalized    │
+│  /api/admin/{credentials, runs}   Admin: creds, run forensics       │
+│  /api/auth/[...all]               better-auth handler               │
+│                                                                     │
+│  ┌──────────────────┐  ┌──────────────────────────────────────────┐ │
+│  │ Runner kernel    │  │ Process-wide caches (6)                  │ │
+│  │ entity_run +     │  │  agentPool          (LRU + 10-min TTL)    │ │
+│  │ entity_run_event │  │  mcpProviderPool    (refcounted + reaper) │ │
+│  │ EventBus + SSE   │  │  skillPool          (LRU + 10-min TTL)    │ │
+│  │ Scheduler        │  │  credential cache   (10-min TTL)          │ │
+│  └──────────────────┘  │  EntityCatalog      (control plane, TTL)  │ │
+│                        │  thread-state       (LRU, backend chat)   │ │
+│                        └──────────────────────────────────────────┘ │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+   ┌───────────┬───────────────┼───────────────┬──────────────┬──────────────┐
+   ▼           ▼               ▼               ▼              ▼              ▼
+┌────────┐ ┌─────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────┐ ┌──────────┐
+│Postgres│ │ Backend │ │ MCP Servers  │ │ SSH Hosts    │ │External  │ │ LLM      │
+│SQL     │ │ Agent   │ │ (stdio /     │ │ (Linux /     │ │ DBs      │ │ Providers│
+│(Nango  │ │ Platform│ │  sse /       │ │  network     │ │ (Postgres│ │ (OpenAI /│
+│ DB)    │ │ — agno /│ │  streamable) │ │  devices)    │ │ MySQL /  │ │ Anthropic│
+└────────┘ │ Mastra /│ └──────────────┘ └──────────────┘ │ MariaDB /│ │ /…)      │
+           │ Dify…)  │                                    │ Vertica) │ └──────────┘
+           └─────────┘                                    └──────────┘
+```
+
+**See also**: a self-contained visual rendering of this architecture lives at `docs/diagrams/architecture-diagram.html` (open in any browser; supports PNG / PDF export). Other diagrams in `docs/diagrams/` cover the chat-dispatch downstream / upstream paths and the tool-execution lifecycle.
+
+### 3.2 Architectural Principles
+
+1. **Protocol unification.** The browser only ever sees an **AG-UI event stream**. Every backend chat handler bridges its upstream platform's REST + SSE into AG-UI events on the fly (agno / Mastra / Dify all share this shape). When the credential has `aguiUrl` populated, every handler short-circuits to an AG-UI passthrough (`HttpAgent`) at the top of `buildAgent`.
+2. **Server-side secret isolation.** All third-party secrets (API keys, bearer tokens) are AES-256-GCM encrypted in the `credential` table. Decryption only happens in modules marked `import "server-only"`; secrets never reach the browser bundle.
+3. **Parallel multi-source loading.** `WorkspaceProvider` loads three agent sources in parallel on mount (Backend Agents / Backend Teams / Built-in Agents). The first source with available agents auto-selects the default; the UI is never blocked by the slowest source.
+4. **Adapter pattern.** Each backend platform plugs in by implementing `IBackendAdapter` (metadata) and `IBackendChatHandler` (chat). The registry uses `satisfies Record<BackendId, …>` so forgetting to register an adapter is a compile error.
+5. **Cache with precise, reverse-indexed invalidation.** Six process-wide caches live in the Node process. Four back the Built-in runtime: the credential lookup cache, the `AgentSpec` pool (LRU + 10-min TTL), the MCP provider pool (refcounted + idle reaper), and the Skill pool (LRU + 10-min TTL). The fifth is the control-plane `EntityCatalog` cache (`backends/entity-catalog.ts`, keyed by `credentialId`, 10-min TTL) used for UI entity listing, supervisor catalog rendering, and schedule validation. The sixth is the `thread-state` cache (`backends/thread-state.server.ts`, LRU keyed by `(credentialId, threadId)`) that fronts the `backend_thread_state` table for upstream-session tokens (Dify `conversation_id` today). Writes invalidate only the entries that depend on the mutated row, never the whole world. **All six caches** — plus the related `langfuse` and `oauth-token-manager` singletons — are pinned to `globalThis` slots so dev-server HMR reloads don't lose state mid-session. See `docs/cache.md` (full inventory + §2.7 HMR pinning rule) and `docs/builtin-runtime.md` (per-pool contracts).
+6. **Run-as-first-class.** Every dispatch (chat, supervisor delegation, async, scheduled, **workflow refresh**) produces one `entity_run` row + an append-only `entity_run_event` timeline. Async runs notify on terminal events; scheduled runs reuse the async path so the inbox is uniform. Workflow refresh adds three node-level event types (`workflow_node_attempt_started` / `_failed` / `workflow_node_completed`) on the `forceFresh: true` path only — see `docs/workflow.md` §5.3 and `docs/runner-events.md` §8.1. See `docs/orchestrator.md` for the full dispatch model.
+7. **Supervisor catalog inlined, not tooled.** Nango (the user's `is_supervisor` agent) sees the routable specialist catalog as part of its system prompt — no `list_agents` round-trip. Delegation tools reference catalog entries by `displayName` and the server resolves the keys, so the LLM cannot leak credential ids or pick non-routable targets.
+8. **Vendor lock-in mitigation (CopilotKit + AG-UI).** `@copilotkit/runtime/v2` and `@copilotkit/react-core/v2` are in active iteration; we already absorbed v1 → v2 once. Concentrate the import surface so the next upgrade is a single-file edit, not a 10-file sed:
+   - **Server runtime**: every `@copilotkit/runtime/v2` import MUST go through `lib/copilot/index.server.ts`.
+   - **Client UI**: every `@copilotkit/react-core/v2` import MUST go through `lib/copilot/client.ts`.
+   - **AG-UI protocol**: every `@ag-ui/client` import MUST go through `lib/copilot/index.server.ts`. CopilotKit pins its own `@ag-ui/client` version internally; routing all consumers through one barrel forces a single resolution path so an `instanceof AbstractAgent` mismatch from npm dedupe drift becomes detectable here, not in random call sites. Type-only imports from this server-only file are safe in client components — `import type` is erased before webpack sees the module reference.
+   - **CSS stylesheet**: `@copilotkit/react-ui/v2/styles.css` is imported directly in `RightPanel.tsx` and `ChatPanel.tsx`. Explicit exception — barrels cannot abstract `import "...css"` side-effects.
+   - **What this principle is NOT**: it's a vendor-surface containment, NOT a directory layout rule. `defineTool` calls live in their domain module (`skills/runtime-tools.ts`, `data-sources/runtime-tools.ts`, `sandbox/runtime-tools.ts`) — that's the right home; only the import path is funnelled. Same for AG-UI types in backend bridges (`agno/chat.server.ts`, `mastra/chat.server.ts`, `dify/chat.server.ts`).
+9. **LLM is direct, not adapted.** Built-in agents reach LLM providers (OpenAI / Anthropic / Vertex / …) **directly** through the CopilotKit + AI SDK runtime — there is no pool / adapter layer between agent and LLM. This is a deliberate asymmetry: MCP servers, SSH hosts, data sources, and the sandbox all get wrapped behind their respective pool / adapter (different protocols, lifecycles, connection caching), but the LLM call is the **driver** of agent reasoning, not a tool the agent decides to call. Backend agents reach LLM transitively through their upstream platform (agno / Mastra / Dify), which is opaque to us.
+
+### 3.3 Four Integration Layers (Adapter Pattern)
+
+Nango exposes four peer integration layers, each shielding the agent runtime from a different axis of upstream / runtime diversity. They share the same architectural pattern (adapter interface + per-implementation provider module + uniform interface to consumers) and live side-by-side at the same level of the dependency graph.
+
+```
+                                External World
+  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+  │ Remote agent │  │ External     │  │ SSH hosts    │  │ (no external —│
+  │ platforms    │  │ data sources │  │ (Linux /     │  │  local        │
+  │ agno /       │  │ MySQL /      │  │  network     │  │  sandbox is a │
+  │ Mastra /     │  │ Postgres /   │  │  devices)    │  │  local OS/VM  │
+  │ Dify / …     │  │ Vertica / …  │  │              │  │  capability)  │
+  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └───────────────┘
+         │                  │                  │
+  ░░░░░░░│░░░░░░░░░░░░░░░░░░│░░░░░░░░░░░░░░░░░░│░  trust / network boundary  ░░░
+         │                  │                  │
+╔════════│══════════════════│══════════════════│═════ Nango Server ═══════════╗
+║        ▼                  ▼                  ▼                              ║
+║  ┌──────────────┐   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    ║
+║  │ IBackend-     │   │ IDataSource- │  │ SSH client    │  │ ISandbox-     │    ║
+║  │  Adapter      │   │  Adapter     │  │ (node-ssh +   │  │  Adapter      │    ║
+║  │               │   │              │  │  host-key pin)│  │               │    ║
+║  │ agno / Mastra │   │ MySQL /      │  │               │  │ LocalDocker / │    ║
+║  │ / Dify / …    │   │ Postgres /   │  │ login-shell   │  │ Subprocess    │    ║
+║  │               │   │ Vertica / …  │  │  wrap option  │  │ (remote — V2) │    ║
+║  │ writes:       │   │ writes:      │  │ writes:       │  │ reads:        │    ║
+║  │  AG-UI events │   │  Parquet     │  │  exec result  │  │  Parquet      │    ║
+║  │               │   │  files       │  │               │  │  files        │    ║
+║  │               │   │      ↓       │  │               │  │      ↑        │    ║
+║  │               │   │ ┌────────────────────────────┐  │  │               │    ║
+║  │               │   │ │ Parquet Cache (shared FS)  │  │  │               │    ║
+║  │               │   │ │  /data/shared_cache/       │  │  │               │    ║
+║  │               │   │ │ owned by data-source layer;│  │  │               │    ║
+║  │               │   │ │ read-only mounted by sandbox│ │  │               │    ║
+║  │               │   │ └────────────────────────────┘  │  │               │    ║
+║  └──────┬───────┘   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘    ║
+║         │                  │                  │                  │           ║
+║         └──────────────────┴──────────┬───────┴──────────────────┘           ║
+║                                       ▼                                      ║
+║                            Agent runtime / agent tools                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+| | Agent Adapter Layer | Data Source Adapter Layer | SSH Layer | Sandbox Adapter Layer |
+|---|---|---|---|---|
+| **Status** | shipped | shipped | shipped | shipped (local); remote planned |
+| **Code** | `src/lib/backends/` | `src/lib/data-sources/` | `src/lib/ssh/` | `src/lib/sandbox/` |
+| **Interface** | `IBackendAdapter` | `IDataSourceAdapter` | direct `node-ssh` client + policy | `ISandboxAdapter` |
+| **Hides** | Agent platform protocol diversity | Database protocol diversity | Per-host auth + login-shell quirks | OS isolation tech diversity |
+| **External** | REST + SSE per platform | DB wire protocol per source | SSH protocol; strict host-key pin | Docker daemon (local); HTTP service (remote V2) |
+| **Credentials** | `credential` table (encrypted) | `credential` table (encrypted) | `credential` table (`basic_auth` or `private_key`) | none |
+| **Output** | AG-UI event stream | Parquet files in shared cache | stdout / stderr / exit code | Bounded code execution |
+
+**Parquet cache as the data-source ↔ sandbox handshake.** The two layers do not call each other directly. The data-source layer writes Parquet to `/data/shared_cache/`; the sandbox layer mounts those files read-only into the jail. This keeps the layers independently swappable and means the trust boundary is a file-system region, not an RPC interface.
+
+**Same pattern, four uses.** Each layer uses the same authoring shape: a typed adapter interface (or equivalent — SSH uses a more direct client wrapper since the protocol surface is already uniform), a per-implementation provider module aggregating its parts, a server-only registry that fails compilation if a registered key is missing an implementation. Adding a new agent platform / data source / isolation backend always follows the same four-step recipe.
+
+For detailed design and implementation phases, see:
+
+- `docs/data-sources.md` — `IDataSourceAdapter` contract, Parquet cache strategy, per-source adapter onboarding, multi-tenancy / sharing rules.
+- `docs/ssh.md` — SSH client design, host-key pinning, login-shell wrap, command allow/deny policy, runtime tools (`run_ssh_command` / `list_ssh_hosts`).
+- `docs/sandbox.md` — `ISandboxAdapter` contract, local providers (Subprocess / LocalDocker), virtual path mapping, output truncation / masking, agent-tool surface (`run_code_in_sandbox`).
+
+---
+
+## 4. Module Layout
+
+### 4.1 Route Groups
+
+| Group | Paths | Guards | Purpose |
+|---|---|---|---|
+| `(auth)` | `/sign-in`, `/sign-up` | none | accessible while signed out |
+| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/schedule[/[id]]`, `/notifications` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
+| API | `/api/*` | `getSession()` per-route | unified 401 handling |
+
+### 4.2 Frontend Layout (Three-Pane)
+
+`ThreePanelContent` uses `react-resizable-panels` for draggable, collapsible panels:
+
+- **Left**: `SidePanel`, renders one of `DashboardPanel` / `ArtifactPanel` / `AgentPanel` / `McpPanel` / `SkillsPanel` / `SchedulesPanel` based on `useSidebarStore.activeLeftPanel`.
+- **Center**: route-driven main area. `/outcomes` shows the current thread's transient Outcomes panel (V1); editor routes like `/agent/[id]` render their own pages; `/` is the welcome page.
+- **Right**: `RightPanel` — hosts the CopilotKit provider plus `ChatPanel` / `HistoryPanel` / `BuiltinAgentEditor`.
+
+The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on purpose: switching agents remounts only the chat subtree, never the page chrome (header, toolbar, panel widths).
+
+### 4.3 Backend API Route Matrix
+
+| Route | Method | Function | Auth |
+|---|---|---|---|
+| `/api/copilotkit/[...path]` | GET/POST | Backend agent chat proxy (AG-UI), routed through Runner | session + header validation |
+| `/api/copilotkit/builtin/[...path]` | GET/POST | Built-in Agent CopilotRuntime, routed through Runner | session |
+| `/api/entities` | GET | Unified entity list across all enabled agent credentials | session |
+| `/api/agent-credentials` | GET | Agent-type credentials visible to current user (no secret) | session |
+| `/api/builtin-agents`, `/[id]` | CRUD | Built-in agent + tool bindings (incl. `is_supervisor` flag) | session |
+| `/api/mcp-servers`, `/[id]/discover`, `/[id]/call-tool` | CRUD/RPC | MCP server registration, tool discovery, invocation | session |
+| `/api/skills`, `/api/skills/[id]`, `/api/skills/[id]/files/[...]` | CRUD | Skills CRUD + helper-file read | session |
+| `/api/notifications`, `/api/notifications/[id]` | GET/POST/PATCH/DELETE | Inbox list / mark-all-read / mark-read / delete | session |
+| `/api/runs/stream` | GET (SSE) | Live notification + `run_finalized` stream keyed by ownerId. Notification frames carry `id: <uuidv7>`; on EventSource auto-reconnect we replay missed `notification` rows via `Last-Event-ID` (header or `?lastEventId=`), capped at 200 rows per resume. | session |
+| `/api/threads`, `/api/threads/[id]`, `/api/threads/[id]/messages` | GET / DELETE / GET | Unified chat history surface. Lists threads (filtered by optional `?entityId=`), reconstructs AG-UI `Message[]` from `entity_run.input_task` + post-coalesce `entity_run_event` rows, deletes a thread + its delegation sub-tree via recursive CTE. owner-scoped end to end (`owner_id = session.user.id`); sub-runs excluded by `parent_run_id IS NULL`. Replaces the previous reverse-proxy of upstream agent platform `/sessions` APIs. | session |
+| `/api/schedules`, `/api/schedules/[id]`, `/api/schedules/[id]/trigger` | CRUD/RPC | Schedule CRUD + manual trigger | session |
+| `/api/admin/credentials` | CRUD | Credential management | requireAdmin |
+| `/api/admin/threads`, `/api/admin/threads/[id]` | GET | Thread forensics list + detail (runs + per-run metrics) | requireAdmin |
+| `/api/admin/runs/[id]` | GET | Single-run events (children + last 1000 events) — fetched lazily by the thread detail right column | requireAdmin |
+| `/api/auth/[...all]` | better-auth | Sign-in / sign-up etc. | — |
+
+### 4.4 Core Library (`src/lib/`)
+
+| Module | Responsibility |
+|---|---|
+| `backends/types.ts` | Domain models (`EntityDescriptor` / `SessionDescriptor`), interfaces (`IBackendAdapter` / `IBackendChatHandler`), `BackendCapabilities` flags |
+| `backends/facade.ts` | Façade: fan-out across credentials, capability checks, error aggregation |
+| `backends/registry.ts` | Client-safe `IBackendAdapter` map (`ADAPTERS`) |
+| `backends/registry.server.ts` | Server-only `BackendModule` map (`PROVIDERS`) — single source of truth for chat handler + entity fetcher + adapter per platform |
+| `backends/entity-catalog.ts` | Entity discovery + caching (`EntityCatalog.list / .invalidate`); reads `PROVIDERS` to dispatch fetch. Used by the agent picker (warm) and once-per-dispatch on the chat route to look up `kind` server-side. |
+| `backends/<slug>/index.server.ts` | Per-platform `BackendModule` aggregator (one per provider) |
+| `backends/bridge-runtime-kit.server.ts` | Shared bridge spine: `createBridgeRunObservable`, `attachBridgeConfig`, `readSseLines`, `resolveBridgeCredential`, `ToolCallFilter`, `TextStreamState`, `lastUserText` (`user_id` is server-injected upstream by `lib/runner/inject-user-id.ts`) |
+| `backends/runtime.server.ts` | Single AG-UI runtime entry point (`runWithAgents`) — plugs an `Record<string, AbstractAgent>` map into `CopilotRuntime` and returns the AG-UI SSE response. Used by BOTH backend and built-in chat dispatch — this is the "execution convergence point" for the two routes. Also hosts `trimHistoricalMessages` (only enabled when `trimMessages: true`, i.e. backend dispatches) |
+| `auth/auth-instance.ts` | better-auth instance, `getSession` / `requireAdmin` / `requireSession` |
+| `db/schema.ts` | All Drizzle table definitions (auth + Nango domain) |
+| `credentials/crypto.ts` | AES-256-GCM `encrypt`/`decrypt`; keyring from `CREDENTIAL_ENCRYPTION_KEYRING` (+ `CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID`); ciphertext format `v1:<keyId>:<iv>:<tag>:<ct>` |
+| `credentials/lookup.ts` | Decrypt + lookup with in-memory cache and explicit invalidation |
+| `access/agent-visibility.ts` | Server-side visibility checks: `isAgentVisibleTo` (point lookup) and `listVisibleAgentIds` (enumeration). Replaces implicit cache-based authorization. |
+| `builtin-agents/agent-pool.ts` + `builtin-agents/index.ts` | Process-wide LRU cache (max 500, 10-min TTL) of decrypted `AgentSpec` keyed by agentId. Singleton in `builtin-agents/index.ts`. |
+| `builtin-agents/agent-spec.ts` | Polymorphic `AgentToolRef` (mcp_server / mcp_tool / skill / builtin_tool) decoded from `builtin_agent_tool` rows. |
+| `mcp/provider-pool.ts` + `mcp/index.ts` | Process-wide MCP provider pool: one transport per server, refcounted, with idle reaper and detach-on-evict. Singleton in `mcp/index.ts`. |
+| `credentials/invalidation.ts` | Cross-cutting helpers: `invalidateForCredentialChange` and `invalidateForMcpServerChange`. Call from any write path. |
+| `mcp/client-providers.ts` | `createGracefulMcpProvider` — degrade MCP failures without aborting agent runs |
+| `runner/runner.ts` | Execution kernel: `runChatRequest` (backend) / `runBuiltinChatRequest` (built-in) / `start` (programmatic, sync + async). Every dispatch produces an `entity_run` row. |
+| `runner/persisting-agent.ts` | AG-UI event tee — wraps every dispatched agent so the event stream both reaches the browser and persists into `entity_run_event`. Storage is **coalesced**: TEXT_MESSAGE_CONTENT / REASONING_MESSAGE_CONTENT deltas are buffered in memory and flushed to a single `message` / `reasoning` row at each natural boundary (tool call, message-id change, stream end). The browser still sees real-time deltas on the wire. |
+| `runner/event-bus.ts` | In-process pub/sub keyed by `ownerId`, surfaced via `/api/runs/stream` SSE; `globalThis` slot for HMR safety. |
+| `runner/notifications.ts` | `recordRunNotification` (NUL-strip + 280-char preview + 16 KB body cap); used by async + scheduled fires + recovery. |
+| `runner/recovery.ts` | `recoverStrandedRuns(currentBootStartedAt)` — boot-time sweep flipping `running` rows from a prior process (`started_at < currentBootStartedAt`) to `failed` and emitting recovery notifications. Wired in `instrumentation.ts` AFTER `recordProcessBoot()`. |
+| `runner/process-boot.ts` | `recordProcessBoot()` — inserts one `process_boot` row per Node process start; caches `(id, startedAt)` in a `globalThis` slot so HMR / instrumentation re-evaluation does not duplicate. Provides the boot epoch consumed by `recoverStrandedRuns`. |
+| `runner/scheduler.ts` | In-process `setTimeout`-based scheduler over `schedule` rows: `(startAt, [intervalValue, intervalUnit], [endAt])`. One-shot rows auto-disable after firing; recurring rows auto-disable past `endAt`. Calendar arithmetic uses the row's IANA timezone for DST safety. |
+| `runner/supervisor-tools.server.ts` | `delegate_to_agent` (sync) + `delegate_async` (async) + `create_schedule` / `list_schedules` / `update_schedule` / `delete_schedule`. Injected on `is_supervisor` agents only. The supervisor's catalog of routable specialists is rendered via `formatCatalogBlock` and inlined into the system prompt — no `list_agents` round-trip. |
+| `runner/schedule-mutate.ts` | `applyScheduleUpdate` — single source of truth for schedule partial updates (merge → validate → persist → in-process timer re-arm). Shared by the REST PATCH route and the supervisor `update_schedule` tool; the latter sets `requireFutureStartAt` so the LLM can't backfill. |
+| `orchestration/modes.ts` | Mode registry: `auto | tool-call | handoff | async`. Each mode contributes a `promptDirective` merged into the supervisor prompt at dispatch time. |
+| `orchestration/display-name.ts` | Stable `${sourceLabel} / ${name}` rendering shared between server (catalog block) and client (panels, editors). |
+| `observability/logger.ts` | pino structured logging with automatic secret redaction |
+| `domain/artifact.ts` | Artifact type enum: `code` / `chart` / `dashboard` / `image` / `html` / `ppt` / `report` |
+
+### 4.5 Client State (Zustand)
+
+| Store | Key fields |
+|---|---|
+| `workspace.ts` | agent list cache (agents/teams/builtinAgents), `activeAgentId`/`activeAgentSource`/`activeCredentialId`/`activeProvider`, `threadId` (CopilotKit v2), `pinnedSessions` (persisted), `orchestrationMode` |
+| `outcome-store.ts` | Thread-scoped polymorphic Outcome list (chart V1; html/image Phase 2), `addOutcome` upsert, `markSaved`, `toggleCollapse`, `loadForThread` (replay from `entity_run_event`) |
+| `sidebar.ts` | left-panel switcher, right-panel open flag |
+| `notifications.ts` | inbox items, `isStreamConnected` flag (SSE), updated by `useStartNotifications` + BroadcastChannel for cross-tab sync |
+| `schedules.ts` | schedule list cache + `scheduleActions` (refresh / create / patch / remove / triggerNow) |
+
+Only `pinnedSessions` is persisted to `localStorage` via the `persist` middleware; everything else is transient.
+
+> Per-run timing (TTFT, duration, inter-event gaps) is **not** kept in
+> client state. The authoritative timeline lives on
+> `entity_run` + `entity_run_event` (server-side timestamps) and is
+> surfaced through `/admin/thread/[id]` (`ThreadDetailView`).
+
+---
+
+## 5. Key Flows
+
+### 5.1 Backend Agent Chat (Unified to AG-UI)
+
+```
+Browser                       /api/copilotkit                Backend Agent Platform
+   │                                 │                              │
+   │  POST /agent/{agentId}/run      │                              │
+   │  cookies: session                │                              │
+   │  X-Credential-Id: <uuid>         │                              │
+   │ ─────────────────────────────────►                              │
+   │                                  │ getSession() → 401?          │
+   │                                  │ getCredentialConfigById()    │
+   │                                  │   ↳ 10min cache hit?         │
+   │                                  │   ↳ AES-256-GCM decrypt      │
+   │                                  │ getChatHandler(provider)     │
+   │                                  │                              │
+   │                                  │  AG-UI native (agno/mastra)  │
+   │                                  │  → passthroughAgUiChat       │
+   │                                  │  → HttpAgent(aguiUrl)        │
+   │                                  │ ───────────────────────────► │
+   │                                  │                              │
+   │                                  │  Bridge (dify)               │
+   │                                  │  → custom AbstractAgent      │
+   │                                  │  → parse upstream SSE        │
+   │                                  │  → emit AG-UI events         │
+   │                                  │                              │
+   │  ◄──────────────────  AG-UI SSE  ◄────────────────────────────  │
+   │  (TEXT_MESSAGE_CHUNK,            │                              │
+   │   TOOL_CALL_*, RUN_FINISHED, …)  │                              │
+```
+
+**Header contract**:
+- `X-Credential-Id` selects the backend connection (one credential = one connection config). It is the only client-supplied identity field on the chat route; everything else is server-derived. See `docs/orchestrator.md` "Custom HTTP Headers".
+- `agentId` is parsed from the URL path (`/agent/<id>/run|connect|stop`) by `route.ts`.
+- `agentKind` is looked up server-side from `EntityCatalog.list(credentialId)`.
+- The server reads `aguiUrl` (template containing `{agentId}`) and the bearer token from the credential cache. The browser never sees either.
+
+### 5.2 Built-in Agent Chat
+
+```
+Browser → /api/copilotkit/builtin/[...path]
+            │
+            ├─ getSession() → userId
+            │
+            ├─ classifyBuiltinPath(url)
+            │     └─ { agentId, action: "run" | "connect" }   ├─ single-agent path
+            │     └─ null  ("/info", "/threads/*", …)        └─ listing path
+            │
+            ├─ Authorize
+            │     single-agent: isAgentVisibleTo(agentId, userId) || 404
+            │     listing:      agentIds = listVisibleAgentIds(userId)  (503 if empty)
+            │
+            ├─ For each agentId:
+            │     spec = agentPool.get(agentId)            # usually a hit
+            │     for tool in spec.tools where kind="mcp_server":
+            │        provider = mcpProviderPool.borrow(serverId)  # usually a hit
+            │        ledger.push({ serverId, provider })
+            │     agents[id] = new BuiltInAgent(spec, providers)
+            │
+            ├─ runtime = new CopilotRuntime({ agents })
+            ├─ handleRequest = createCopilotRuntimeHandler({ runtime, basePath })
+            ├─ dispatch(req)
+            └─ finally: release every borrow
+```
+
+**Design notes**:
+- The `CopilotRuntime` is built per request; the cost amortizes through the AgentSpec pool (decryption + DB query) and the MCP provider pool (network connection).
+- Authorization is explicit, not a side effect of cache contents. The single-agent path uses an indexed point lookup; the listing path enumerates.
+- MCP connections are injected via `mcpClients` (pool-managed lifecycle); `BuiltInAgent` does not own them.
+- Cache invalidation is precise: see `docs/builtin-runtime.md`.
+
+Full pool semantics (refcounting, reaper, detach-on-evict, dedupe of concurrent borrows) are documented in `docs/builtin-runtime.md`.
+
+### 5.3 MCP Server Discovery & Invocation
+
+```
+Registration: user enters url + auth credential in McpPanel
+   ↓
+/api/mcp-servers/[id]/discover
+   ├─ decrypt credential → inject Authorization header
+   ├─ MCP client connects (SSE / HTTP transport)
+   ├─ list_tools → diff against stored snapshot
+   └─ persist mcp_server.tools
+
+Runtime (inside Built-in Agent):
+   spec = agentPool.get(agentId)        # AgentToolRef[] already decoded
+   for tool in spec.tools where kind="mcp_server":
+      provider = mcpProviderPool.borrow(serverId)   # shared, refcounted
+   inject providers into BuiltInAgent.mcpClients
+   release every provider in the route's `finally`
+```
+
+### 5.4 Outcomes Panel & Artifact Library
+
+Two distinct surfaces, deliberately separated — see `docs/data-visualization.md` for the full design.
+
+**Transient Outcomes Panel — `/outcomes` (V1):**
+
+```
+Built-in agent calls render_chart frontend tool
+   ↓
+useOutcomeTools handler (handler-only) runs
+   ├─ enforce 64KB hard cap on option JSON
+   ├─ capture agentId + threadId from workspaceStore
+   ├─ outcomeStore.addOutcome({ outcomeId, kind:"chart", option, … })
+   ├─ if pathname === "/" AND first outcome of thread → router.push("/outcomes")
+   ↓
+/outcomes → OutcomesPanel → OutcomeCard list (grid or focus view)
+   ├─ shadcn Collapsible + Card per outcome (no react-grid-layout)
+   ├─ EChartsRenderer (next/dynamic + next-themes dark)
+   ├─ per-card ChartErrorBoundary
+   ├─ Save icon → POST /api/artifacts (idempotent)
+```
+
+`useRenderTool` registers `ChartPreviewCard` for the chat-side inline preview. The handler/render split is mandatory — combining them on `useFrontendTool` collides with the wildcard `useDefaultRenderTool("*")`. See `useInteractiveTools.tsx:13-33` for the same pitfall.
+
+Thread switches in `workspaceStore.runtimeThreadId` drive `outcomeStore.clearForThreadSwitch + loadForThread` via a `WorkspaceProvider` subscriber. The replay endpoint `GET /api/threads/[threadId]/outcomes` rebuilds the panel from `entity_run_event` `tool_call_chunk` rows where `payload->>'toolName' = 'render_chart'`, back-filling `savedArtifactId` from the `artifact` table.
+
+**Permanent Artifact Library — `/artifact` (V2, scaffolded):**
+
+The `artifact` table (with V1 additions `source_thread_id` / `source_outcome_id` for idempotent save) backs the future Artifact library. V1 only ships the WRITE side (`POST /api/artifacts`); list / detail / categorization UI is V2.
+
+**Don't confuse the two:** the Outcomes panel is per-thread, derived from `entity_run_event` history, ephemeral; the Artifact library is permanent, user-owned, with visibility. The Save button on an outcome card is the only bridge.
+
+Legacy `workspaceStore.activeArtifact` / `openArtifact` / `closeArtifact` (the `open_artifact` / `close_artifact` frontend-tool scaffold) was deleted in V1 — see `docs/data-visualization.md` §6.4 for the rationale.
+
+### 5.5 Credential Lifecycle
+
+```
+Admin creates credential at /admin/credentials
+   ↓
+plaintext payload → encrypt() → "v1:<keyId>:<iv>:<authTag>:<ciphertext>"
+   ↓
+persist to credential table (with metadata.keyPreview for list views;
+                              avoids decryption when listing)
+   ↓
+every write calls invalidateCredentialCache() +
+                  invalidateForCredentialChange(id)   // pool-aware
+                                                       // → agentPool.invalidateByCredential
+                                                       // → mcpProviderPool.evict (per dependent server)
+   ↓
+Lookup paths (server-side only):
+   getCredentialConfigById(id)        // primary: token + restUrl + aguiUrl + provider
+   getCredentialTokenById(id)         // token only
+   getCredentialFieldsById(id)        // multi-field credentials (keypair, …)
+   getEnabledObservabilityCredential() // Langfuse-specific helper
+```
+
+---
+
+## 6. Data Model
+
+### 6.1 Table Groups
+
+| Domain | Tables | Notes |
+|---|---|---|
+| Auth (managed by better-auth) | `user`, `session`, `account`, `verification` | First registered user is automatically promoted to `admin` |
+| Credentials | `credential` | All secrets encrypted; `serviceType` ∈ `llm/search/agent/observability/integration/datasource/other` |
+| Built-in Agents | `builtin_agent`, `builtin_agent_tool` | Agent definition + tool bindings (discriminated union) |
+| Tool sources | `mcp_server`, `skill`, `skill_file` | MCP server / DB-resident Skill (helper bytes in `skill_file.content::bytea`) |
+| Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards |
+
+### 6.2 Built-in Agent → Tool Binding (Polymorphic FK)
+
+`builtin_agent_tool.tool_type` discriminates which FK column is meaningful:
+
+| toolType | Active FK | Meaning |
+|---|---|---|
+| `mcp_server` | `mcp_server_id` | whole server, all enabled tools |
+| `mcp_tool` | `mcp_server_id` + `mcp_tool_name` | single MCP tool |
+| `skill` | `skill_id` | DB-resident skill |
+| `builtin_tool` | `builtin_tool` (text) | named built-in tool e.g. `web_search` |
+| `datasource` | `data_source_id` | data source the agent is allowed to query via `extract_dataset_by_sql` |
+
+Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the user); deleting the parent agent uses `CASCADE`.
+
+> Plain REST APIs are not a first-class binding kind. To expose a REST endpoint to a built-in agent, wrap it as an MCP server (e.g. via [MCPHub](https://github.com/samanhappy/mcphub) or a similar OpenAPI→MCP bridge) and bind that MCP server through `mcp_server` / `mcp_tool`.
+
+### 6.3 Artifact Model
+
+`artifact` is a first-class resource for AI outputs, related to:
+- `menuItemId` → `menu_item` — placement in the dynamic menu tree
+- `visibility` — `private` | `shared`
+- `content` is JSONB (ECharts option / HTML string / image URL / …)
+
+---
+
+## 7. Security
+
+| Risk | Control |
+|---|---|
+| Secret leakage | AES-256-GCM at rest with a versioned keyring (`v1:<keyId>:…`); supports zero-downtime rotation (see `docs/key-rotation.md`). `CREDENTIAL_ENCRYPTION_KEYRING` and `BETTER_AUTH_SECRET` are deliberately separate. |
+| Secret in client bundle | All decryption modules start with `import "server-only"` (compile-time enforced) |
+| Session hijacking | better-auth session cookies + CSRF + secure cookies (forced HTTPS in production) |
+| Privilege escalation | `(workspace)` layout calls `requireSession()`; `admin/*` layout adds `requireAdmin()`; API routes also call `getSession()` |
+| Injection | `X-Credential-Id` is matched against a strict UUID regex (`/^[a-f0-9-]{36}$/`); `agentId` (parsed from URL path) against `/^[A-Za-z0-9._\-]{1,128}$/`; `entityKind` is server-derived from EntityCatalog so cannot be tampered |
+| Log leakage | pino redacts `headers.authorization` / `headers.cookie` / `headers['x-credential-id']` etc. automatically |
+| MCP failures | `GracefulMcpProvider` wraps tool calls: 5s timeout, errors degrade to readable text — never abort the LLM run |
+
+---
+
+## 8. Observability
+
+Two independent phases:
+
+1. **Structured logs (pino)** — covers credential lookup, proxy dispatch, Built-in runtime, etc. Tunable via `NANGO_LOG_ENABLED` / `LEVEL` / `PRETTY`. Sensitive fields are redacted automatically.
+2. **Langfuse tracing** — only traces what backends cannot see: Built-in agent runtime, frontend tool calls, proxy errors. Backends that already trace to Langfuse (agno / Mastra / Dify) are not re-traced. Master switch is the `enabled` flag on the `observability` credential — no restart required.
+
+See `docs/observability.md` for details.
+
+---
+
+## 9. Extensibility
+
+### 9.1 Adding a New Agent Backend
+
+The architectural reference (control / data plane separation,
+`BackendModule` pattern, security model, hot-path invariants) lives
+in `docs/backend-integration.md`; §10 of the same doc is the
+step-by-step onboarding walkthrough.
+
+Four-step summary: append the slug to `PROVIDER_IDS` in
+`src/lib/backends/types.ts`; create
+`src/lib/backends/<slug>/{adapter, chat.server, entity.server, index.server}.ts`
+(build the chat bridge on `bridge-runtime-kit.server.ts` — don't
+hand-roll an Observable); register in `src/lib/backends/registry.ts`
+(client-safe) and `src/lib/backends/registry.server.ts`
+(server-only). Both registries use `satisfies Record<BackendId, …>`
+so missing or typo-mismatched registrations fail `tsc`.
+
+### 9.2 Adding a New Outcome Kind
+
+The polymorphic `Outcome` union in `src/store/outcome-store.ts` already
+admits `kind: "chart" | "html" | "image"`. V1 only produces `"chart"`;
+adding a producer for the other kinds is mostly a matter of:
+
+1. (If a new kind) extend `OutcomeKind` and the discriminated union in `src/store/outcome-store.ts`.
+2. Add a `case` to `OutcomeBody` in `src/components/workspace/OutcomeCard.tsx` for the new kind's renderer (e.g. iframe sandbox for HTML).
+3. Add a frontend tool in `src/hooks/useOutcomeTools.tsx` (or split into `useOutcomeTools.tsx` once non-chart kinds ship) following the handler/render split rule.
+4. Update `toCreateArtifactBody` in `src/hooks/useSaveOutcome.ts` to shape the artifact body for the new kind.
+5. (Optional) update `src/lib/outcomes/prompt-block.server.ts` to tell qualified agents about the new tool.
+
+### 9.2bis Adding a New Saved-Artifact Type
+
+The persisted `artifact` table also has a `type` enum
+(`code`/`chart`/`dashboard`/`image`/`html`/`ppt`/`report`):
+
+1. Append the type to `ARTIFACT_TYPES` in `src/lib/domain/artifact.ts`.
+2. Add a branch to the `renderByType` switch in `ArtifactRenderer.tsx`.
+3. (V2) Add a branch in the future `/artifact/[id]` page.
+
+### 9.3 LLM Endpoints (Ollama / vLLM / Groq / …)
+
+Do **not** register raw LLM endpoints as agent backend platforms. Instead:
+1. Create a credential with `serviceType="llm"`.
+2. Pick that credential when authoring a Built-in Agent.
+3. CopilotKit Runtime drives the model through `BuiltInAgent` and the AI SDK provider.
+
+---
+
+## 10. Document Index
+
+- `AGENTS.md` — project-wide development rules and directory conventions
+- `CLAUDE.md` — Claude AI assistant context
+- `README.md` — getting started and scripts
+- `docs/backend-integration.md` — multi-backend integration architecture (layered view, control / data plane separation, `BackendModule` pattern, security model, hot-path invariants); §10 is the four-step onboarding walkthrough for a new platform
+- `docs/observability.md` — logging and tracing in depth
+- `docs/builtin-runtime.md` — Built-in runtime pools, invalidation contract, operator guide
+- `docs/key-rotation.md` — credential encryption keyring & rotation procedure
+- `docs/memory.md` — memory / conversation semantics
+- `docs/threadid-lifecycle.md` — CopilotKit v2 threadId lifecycle
+- `docs/orchestrator.md` — Runner kernel, supervisor, async, schedules, run forensics
+- `docs/runner-events.md` — event pipeline (reception → coalescing → persistence → replay → admin display) + AG-UI ↔ `EntityRunEventType` reference table
+- `docs/runner.md` — runner kernel implementation: dispatch paths, request flow, file layout
+- `docs/cache.md` — six process-wide caches: invalidation, HMR `globalThis` pinning (§2.7), observability
+- `docs/workflow.md` — workflow V1 reference: spec format (4 node types), save / refresh flows, the open chart-data-flow question (§7)
+- `docs/workflow-architecture.md` — workflow decision log (D1 → D38, considered / rejected, paused backlog)
+- `docs/skills.md` — DB-resident Skills runtime: build pipeline, boot reconcile, runtime tool surface
+- `docs/data-sources.md` — `IDataSourceAdapter` contract, Parquet cache strategy, per-source adapter onboarding
+- `docs/sandbox.md` — `ISandboxAdapter` contract, three local backends (Subprocess / Nsjail / LocalDocker), `./data/<name>/data.parquet` path contract (D38), agent-tool surface
+- `docs/data-visualization.md` — outcomes panel + chart UI, `render_chart` frontend tool
+- `docs/artifact-evolution.md` — artifact library V2 plans (enlarge / minimize, multi-type artifacts)
+
+---
+
+## Appendix A: Module Dependency Cheat-sheet
+
+```
+RightPanel ──► <CopilotKit/> v2
+                │
+                ├─ runtimeUrl=/api/copilotkit          (backend agents)
+                │                │
+                │                ├─ EntityCatalog.list(credentialId) → kind (server-derived)
+                │                ├─ getCredentialConfigById ── credential cache
+                │                └─ backends/registry.server → BackendModule
+                │                                              │
+                │                                              ├─ dataPlane.chatHandler.buildAgent
+                │                                              │   └─ BridgeAgent on
+                │                                              │      bridge-runtime-kit.server.ts
+                │                                              │      (agno / mastra / dify)
+                │                                              └─ wrapped by PersistingAgent
+                │                                                 (entity_run + entity_run_event)
+                │
+                ├─ runtimeUrl=/api/copilotkit/builtin  (built-in agents)
+                │                │
+                │                ├─ isAgentVisibleTo / listVisibleAgentIds
+                │                ├─ agentPool.get → AgentSpec
+                │                │     ↳ apiKey ← credential cache
+                │                ├─ mcpProviderPool.borrow × N
+                │                │     ↳ GracefulMcpProvider (refcounted, shared)
+                │                └─ new CopilotRuntime({ agents }) — per request
+                │
+                └─ useOutcomeTools: render_chart (frontend tool)
+                                              │
+                                              ├─ outcomeStore.addOutcome → /outcomes panel
+                                              └─ Save button → POST /api/artifacts
+```

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nango Built-in Agent — Tool Lifecycle</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; background: #020617; min-height: 100vh; padding: 2rem; color: white; }
+    .container { max-width: 1700px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container { background: rgba(15, 23, 42, 0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1.5rem; overflow-x: auto; }
+    svg { width: 100%; min-width: 1550px; display: block; }
+    .legend { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #94a3b8; }
+    .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+    .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid; }
+    .footer { text-align: center; margin-top: 1rem; color: #475569; font-size: 0.75rem; }
+    .toolbar { display: flex; gap: 0.5rem; margin-left: auto; flex-shrink: 0; align-items: center; }
+    .toolbar-toggle { background: transparent; border: none; color: #475569; cursor: pointer; font-size: 1.25rem; line-height: 1; padding: 0.25rem 0.5rem; border-radius: 0.375rem; transition: color 0.2s, background 0.2s; }
+    .toolbar-toggle:hover { color: #94a3b8; background: rgba(30, 41, 59, 0.5); }
+    .toolbar-actions { display: none; gap: 0.5rem; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button { background: rgba(30, 41, 59, 0.8); border: 1px solid #334155; color: #94a3b8; padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-family: inherit; font-size: 0.75rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+    .toolbar-actions button:hover { background: rgba(51, 65, 85, 0.8); color: white; border-color: #475569; }
+    @media print { body { background: #020617; padding: 1rem; } .toolbar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Nango Built-in Agent — Tool Lifecycle</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">2 lanes (MCP · Server) — common build / call operations; only MCP needs Release</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1582 1776">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <rect x="20" y="194" width="20" height="334" rx="2" fill="#fb7185" opacity="0.1"/>
+        <text x="30" y="361" fill="#fb7185" font-size="13" font-weight="700" text-anchor="middle" transform="rotate(-90, 30, 361)">PHASE 1 · BUILD / BORROW</text>
+        <rect x="20" y="1074" width="20" height="406" rx="2" fill="#34d399" opacity="0.1"/>
+        <text x="30" y="1277" fill="#34d399" font-size="13" font-weight="700" text-anchor="middle" transform="rotate(-90, 30, 1277)">PHASE 2 · CALL (Vercel AI SDK)</text>
+        <rect x="20" y="1616" width="20" height="140" rx="2" fill="#94a3b8" opacity="0.1"/>
+        <text x="30" y="1686" fill="#94a3b8" font-size="13" font-weight="700" text-anchor="middle" transform="rotate(-90, 30, 1686)">PHASE 3 · RELEASE</text>
+        <rect x="465" y="24" width="360" height="120" rx="6" fill="#0f172a"/>
+        <rect x="465" y="24" width="360" height="120" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="645" y="48" fill="white" font-size="14" font-weight="700" text-anchor="middle">User chat turn</text>
+        <text x="645" y="67" fill="#22d3ee" font-size="11" text-anchor="middle">POST /api/copilotkit/builtin/agent/{id}/run</text>
+        <text x="479" y="94" fill="#cbd5e1" font-size="11">→ runner.runBuiltinChatRequest(req, args)</text>
+        <text x="479" y="110" fill="#cbd5e1" font-size="11">→ buildBuiltinAgents(agentIds, log, ctx)</text>
+        <rect x="50" y="204" width="550" height="314" rx="6" fill="#0f172a"/>
+        <rect x="50" y="204" width="550" height="314" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="325" y="228" fill="white" font-size="14" font-weight="700" text-anchor="middle">MCP server tools</text>
+        <text x="325" y="247" fill="#a78bfa" font-size="11" text-anchor="middle">remote · stateful · ref-counted</text>
+        <text x="64" y="274" fill="#a78bfa" font-size="11" font-weight="700">Build  (per dispatch, for each binding)</text>
+        <text x="64" y="291" fill="#cbd5e1" font-size="11">  provider = mcpProviderPool.borrow(serverId)</text>
+        <text x="64" y="307" fill="#cbd5e1" font-size="11">    ↳ pool refcount++  (cache may hit)</text>
+        <text x="64" y="323" fill="#cbd5e1" font-size="11">    ↳ on cache miss: lazy warmup</text>
+        <text x="64" y="339" fill="#cbd5e1" font-size="11">         connect transport (HTTP / SSE)</text>
+        <text x="64" y="355" fill="#cbd5e1" font-size="11">         listTools() — discover tool schemas</text>
+        <text x="64" y="371" fill="#cbd5e1" font-size="11">         wrap each as dynamicTool, cache them</text>
+        <text x="64" y="387" fill="#cbd5e1" font-size="11">    ↳ await provider.tools() — confirm health</text>
+        <text x="64" y="403" fill="#cbd5e1" font-size="11">    ↳ failure → evictWithCooldown(30 s)</text>
+        <text x="64" y="419" fill="#cbd5e1" font-size="11">  providers[] → BuiltInAgent.mcpClients</text>
+        <rect x="690" y="204" width="550" height="314" rx="6" fill="#0f172a"/>
+        <rect x="690" y="204" width="550" height="314" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="965" y="228" fill="white" font-size="14" font-weight="700" text-anchor="middle">Server tools</text>
+        <text x="965" y="247" fill="#34d399" font-size="11" text-anchor="middle">in-process · stateless · GC-managed</text>
+        <text x="704" y="274" fill="#34d399" font-size="11" font-weight="700">Build  (per dispatch)</text>
+        <text x="704" y="291" fill="#cbd5e1" font-size="11">  collect tool specs from agent bindings</text>
+        <text x="704" y="307" fill="#cbd5e1" font-size="11">    (skills · data sources · SSH · supervisor</text>
+        <text x="704" y="323" fill="#cbd5e1" font-size="11">     flag · built-in tool slugs)</text>
+        <text x="704" y="339" fill="#cbd5e1" font-size="11">  for each spec:</text>
+        <text x="704" y="355" fill="#cbd5e1" font-size="11">    find the tool factory in the runtime</text>
+        <text x="704" y="371" fill="#cbd5e1" font-size="11">    validate spec (schema, permission, allow-list)</text>
+        <text x="704" y="387" fill="#cbd5e1" font-size="11">    build ToolDefinition (defineTool):</text>
+        <text x="704" y="403" fill="#cbd5e1" font-size="11">      · purpose + Zod / JSON Schema</text>
+        <text x="704" y="419" fill="#cbd5e1" font-size="11">      · execute closure (runs in-process)</text>
+        <text x="704" y="435" fill="#cbd5e1" font-size="11">    optionally inject promptBlock into the</text>
+        <text x="704" y="451" fill="#cbd5e1" font-size="11">      composed system prompt   ★ exception: sandbox</text>
+        <text x="704" y="467" fill="#cbd5e1" font-size="11">  flat array → BuiltInAgent.tools[]</text>
+        <rect x="105" y="574" width="1080" height="130" rx="6" fill="#0f172a"/>
+        <rect x="105" y="574" width="1080" height="130" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="645" y="598" fill="white" font-size="14" font-weight="700" text-anchor="middle">new BuiltInAgent({ ... })</text>
+        <text x="645" y="617" fill="#34d399" font-size="11" text-anchor="middle">@copilotkit/runtime — owns the LLM dispatch protocol</text>
+        <text x="119" y="644" fill="#cbd5e1" font-size="11">• mcpClients: providers[]       (from MCP class — handles only; tools() expanded lazily by CopilotKit inside run)</text>
+        <text x="119" y="660" fill="#cbd5e1" font-size="11">• tools: [ ...skillsRuntime.tools, ...supervisorTools, ...builtinTools, ...sshTools ]   (server class flat-merged)</text>
+        <text x="119" y="676" fill="#cbd5e1" font-size="11">• prompt:  spec.prompt + skillsBlock + dsBlock + sshBlock + chartBlock + supervisorCatalogBlock + errorPolicyBlock + modeSuffix</text>
+        <rect x="285" y="754" width="720" height="280" rx="6" fill="#0f172a"/>
+        <rect x="285" y="754" width="720" height="280" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="645" y="778" fill="white" font-size="14" font-weight="700" text-anchor="middle">CopilotKit BuiltInAgent.run()</text>
+        <text x="645" y="797" fill="#94a3b8" font-size="11" text-anchor="middle">wraps Vercel AI SDK streamText() — orchestrates the LLM I/O loop</text>
+        <text x="299" y="824" fill="#94a3b8" font-size="11" font-weight="700">Send to LLM  (each step)</text>
+        <text x="299" y="841" fill="#cbd5e1" font-size="11">  user message + history</text>
+        <text x="299" y="857" fill="#cbd5e1" font-size="11">  + tools catalog (each: name + description + schema; MCP and server tools merged)</text>
+        <text x="299" y="873" fill="#cbd5e1" font-size="11">  + composed system prompt</text>
+        <text x="299" y="897" fill="#94a3b8" font-size="11" font-weight="700">Receive from LLM (streamed, one of)</text>
+        <text x="299" y="914" fill="#cbd5e1" font-size="11"> · text deltas</text>
+        <text x="299" y="930" fill="#cbd5e1" font-size="11">   → forwarded as AG-UI TextMessageContent → Browser</text>
+        <text x="299" y="945" fill="#cbd5e1" font-size="11"> · tool_call deltas</text>
+        <text x="299" y="960" fill="#cbd5e1" font-size="11">   → AI SDK unifies 'tool-input-start/tool-input-delta/tool-input-end' parts</text>
+        <text x="299" y="975" fill="#cbd5e1" font-size="11">   → AI SDK builds tool_call decisions { name, arguments }</text>
+        <text x="299" y="990" fill="#cbd5e1" font-size="11">   → AI SDK invokes the matching tool.execute</text>
+        <rect x="50" y="1084" width="550" height="386" rx="6" fill="#0f172a"/>
+        <rect x="50" y="1084" width="550" height="386" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="325" y="1108" fill="white" font-size="14" font-weight="700" text-anchor="middle">MCP tool call</text>
+        <text x="325" y="1127" fill="#a78bfa" font-size="11" text-anchor="middle">remote · JSON-RPC over transport</text>
+        <text x="64" y="1154" fill="#a78bfa" font-size="11" font-weight="700">Dispatch</text>
+        <text x="64" y="1171" fill="#cbd5e1" font-size="11">  CopilotKit locates the tool by name in the</text>
+        <text x="64" y="1187" fill="#cbd5e1" font-size="11">  cached dynamicTool map (from provider.tools())</text>
+        <text x="64" y="1211" fill="#a78bfa" font-size="11" font-weight="700">Execute</text>
+        <text x="64" y="1228" fill="#cbd5e1" font-size="11">  build & validate args from LLM input</text>
+        <text x="64" y="1244" fill="#cbd5e1" font-size="11">    (Zod / JSON Schema — additionalProperties:false)</text>
+        <text x="64" y="1260" fill="#cbd5e1" font-size="11">  dynamicTool.execute(args):</text>
+        <text x="64" y="1276" fill="#cbd5e1" font-size="11">    ↳ client.callTool({ name, arguments })</text>
+        <text x="64" y="1292" fill="#cbd5e1" font-size="11">    ↳ JSON-RPC tools/call over open transport</text>
+        <text x="64" y="1308" fill="#cbd5e1" font-size="11">    ↳ remote MCP server runs the tool body</text>
+        <text x="64" y="1324" fill="#cbd5e1" font-size="11">    ↳ returns { content, isError? }</text>
+        <text x="64" y="1340" fill="#cbd5e1" font-size="11">  wrapToolExecute catches transport throws,</text>
+        <text x="64" y="1356" fill="#cbd5e1" font-size="11">    returns { isError:true, message, toolName }</text>
+        <rect x="690" y="1084" width="550" height="386" rx="6" fill="#0f172a"/>
+        <rect x="690" y="1084" width="550" height="386" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="965" y="1108" fill="white" font-size="14" font-weight="700" text-anchor="middle">Server tool call</text>
+        <text x="965" y="1127" fill="#34d399" font-size="11" text-anchor="middle">in-process · defineTool closure</text>
+        <text x="704" y="1154" fill="#34d399" font-size="11" font-weight="700">Dispatch</text>
+        <text x="704" y="1171" fill="#cbd5e1" font-size="11">  CopilotKit locates the tool by name in</text>
+        <text x="704" y="1187" fill="#cbd5e1" font-size="11">  BuiltInAgent.tools[] (assembled at Phase 1)</text>
+        <text x="704" y="1211" fill="#34d399" font-size="11" font-weight="700">Execute</text>
+        <text x="704" y="1228" fill="#cbd5e1" font-size="11">  build & validate args from LLM input</text>
+        <text x="704" y="1244" fill="#cbd5e1" font-size="11">    (Zod / JSON Schema)</text>
+        <text x="704" y="1260" fill="#cbd5e1" font-size="11">  ToolDefinition.execute(args):</text>
+        <text x="704" y="1276" fill="#cbd5e1" font-size="11">    ↳ resolve execution target by tool kind:</text>
+        <text x="704" y="1292" fill="#cbd5e1" font-size="11">        skills        — DB read or sandbox spawn</text>
+        <text x="704" y="1308" fill="#cbd5e1" font-size="11">        data sources  — policy gate + adapter</text>
+        <text x="704" y="1324" fill="#cbd5e1" font-size="11">                         → Parquet snapshot</text>
+        <text x="704" y="1340" fill="#cbd5e1" font-size="11">        SSH           — NodeSSH connect+exec+dispose</text>
+        <text x="704" y="1356" fill="#cbd5e1" font-size="11">        supervisor    — runner.start  ★ RECURSIVE</text>
+        <text x="704" y="1372" fill="#cbd5e1" font-size="11">                         (child re-enters dispatch</text>
+        <text x="704" y="1388" fill="#cbd5e1" font-size="11">                          with its own tool set)</text>
+        <text x="704" y="1404" fill="#cbd5e1" font-size="11">        sandbox       — Docker container spawn</text>
+        <text x="704" y="1420" fill="#cbd5e1" font-size="11">    ↳ run, capture output</text>
+        <text x="704" y="1436" fill="#cbd5e1" font-size="11">    ↳ return structured business result</text>
+        <text x="704" y="1452" fill="#cbd5e1" font-size="11">  wrapToolExecute catches uncaught throws,</text>
+        <text x="704" y="1468" fill="#cbd5e1" font-size="11">    returns { isError:true, message, toolName }</text>
+        <rect x="285" y="1510" width="720" height="60" rx="30" fill="#0f172a"/>
+        <rect x="285" y="1510" width="720" height="60" rx="30" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="645" y="1534" fill="white" font-size="14" font-weight="700" text-anchor="middle">tool_result → LLM → next tool_call</text>
+        <text x="645" y="1554" fill="#34d399" font-size="11" text-anchor="middle">CopilotKit re-invokes streamText with appended tool message; loop until LLM stops calling</text>
+        <rect x="105" y="1626" width="1080" height="120" rx="6" fill="#0f172a"/>
+        <rect x="105" y="1626" width="1080" height="120" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="645" y="1650" fill="white" font-size="14" font-weight="700" text-anchor="middle">releaseBuiltinBorrows(borrowed)   —   runner.finally{}</text>
+        <text x="645" y="1669" fill="#94a3b8" font-size="11" text-anchor="middle">only MCP class needs release; server class is GC-managed</text>
+        <text x="119" y="1696" fill="#cbd5e1" font-size="11">• MCP class:  mcpProviderPool.release(serverId, provider)</text>
+        <text x="119" y="1712" fill="#cbd5e1" font-size="11">                → refs--;  refs=0 → idleSince=now (reaper closes after 5 min idle)</text>
+        <text x="119" y="1728" fill="#cbd5e1" font-size="11">• Server class:  no-op  —  ToolDefinition closures are GC'd alongside the BuiltInAgent instance</text>
+        <rect x="1287" y="24" width="245" height="1722" rx="6" fill="#0f172a"/>
+        <rect x="1287" y="24" width="245" height="1722" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="1409" y="46" fill="white" font-size="14" font-weight="700" text-anchor="middle">Browser</text>
+        <text x="1409" y="63" fill="#22d3ee" font-size="11" text-anchor="middle">React UI · AG-UI SSE channel</text>
+        <line x1="1301" y1="74" x2="1518" y2="74" stroke="#22d3ee" stroke-width="0.8" opacity="0.5"/>
+        <text x="1301" y="90" fill="#22d3ee" font-size="11" font-weight="700">↓ User input</text>
+        <text x="1301" y="106" fill="#cbd5e1" font-size="10">  POST /api/copilotkit/</text>
+        <text x="1301" y="120" fill="#cbd5e1" font-size="10">    builtin/agent/{id}/run</text>
+        <line x1="1301" y1="134" x2="1518" y2="134" stroke="#22d3ee" stroke-width="0.8" opacity="0.5"/>
+        <text x="1301" y="833" fill="#34d399" font-size="11" font-weight="700">↑ from BuiltInAgent.run():</text>
+        <text x="1301" y="850" fill="#94a3b8" font-size="9.5" font-style="italic">  (LLM I/O &amp; lifecycle)</text>
+        <text x="1301" y="868" fill="#cbd5e1" font-size="10">  • TextMessageContent</text>
+        <text x="1301" y="883" fill="#cbd5e1" font-size="10">  • ToolCallStart</text>
+        <text x="1301" y="898" fill="#cbd5e1" font-size="10">  • ToolCallArgs (streaming)</text>
+        <text x="1301" y="913" fill="#cbd5e1" font-size="10">  • ToolCallEnd</text>
+        <text x="1301" y="928" fill="#cbd5e1" font-size="10">  • RunStarted / RunFinished</text>
+        <text x="1301" y="1500" fill="#fbbf24" font-size="11" font-weight="700">↑ from Phase 2 result:</text>
+        <text x="1301" y="1517" fill="#94a3b8" font-size="9.5" font-style="italic">  (after execute completes)</text>
+        <text x="1301" y="1534" fill="#cbd5e1" font-size="10">  • ToolCallResult</text>
+        <line x1="1301" y1="1638" x2="1518" y2="1638" stroke="#94a3b8" stroke-width="0.8" opacity="0.5"/>
+        <text x="1301" y="1660" fill="#94a3b8" font-size="11" font-weight="700">Phase 3 not surfaced</text>
+        <text x="1301" y="1678" fill="#cbd5e1" font-size="10">  backend-only cleanup —</text>
+        <text x="1301" y="1693" fill="#cbd5e1" font-size="10">  no AG-UI event emitted</text>
+        <line x1="615" y1="144" x2="325" y2="204" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="675" y1="144" x2="965" y2="204" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="325" y1="518" x2="615" y2="574" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="965" y1="518" x2="675" y2="574" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="645" y1="704" x2="645" y2="754" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="615" y1="1034" x2="325" y2="1084" stroke="#fb923c" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="675" y1="1034" x2="965" y2="1084" stroke="#fb923c" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="325" y1="1470" x2="615" y2="1510" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="965" y1="1470" x2="675" y2="1510" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="645" y1="1570" x2="645" y2="1626" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <line x1="1287" y1="84" x2="825" y2="84" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+        <text x="1056" y="78" fill="#22d3ee" font-size="10" font-weight="700" text-anchor="middle">POST chat</text>
+        <line x1="1005" y1="894" x2="1287" y2="894" stroke="#34d399" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+        <text x="1146" y="888" fill="#34d399" font-size="10" font-weight="700" text-anchor="middle">AG-UI events</text>
+        <line x1="1005" y1="1540" x2="1287" y2="1540" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+        <text x="1146" y="1534" fill="#fbbf24" font-size="10" font-weight="700" text-anchor="middle">ToolCallResult</text>
+      </svg>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-swatch" style="border-color: #a78bfa; background: rgba(76, 29, 149, 0.4);"></div>MCP (remote, stateful)</div>
+      <div class="legend-item"><div class="legend-swatch" style="border-color: #34d399; background: rgba(6, 78, 59, 0.4);"></div>Server tools (in-process)</div>
+      <div class="legend-item"><div class="legend-swatch" style="border-color: #22d3ee; background: rgba(8, 51, 68, 0.4);"></div>Browser (AG-UI channel)</div>
+      <div class="legend-item"><div class="legend-swatch" style="border-color: #fb923c; background: rgba(251, 146, 60, 0.3);"></div>Multi-step tool loop</div>
+    </div>
+
+    <p class="footer">dispatch/builtin.ts — buildBuiltinAgents · releaseBuiltinBorrows · MCP is the only class that crosses a process boundary at BUILD time and the only class that needs RELEASE</p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+      } catch (e) { btn.textContent = '✗ Failed'; }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'tool-lifecycle.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = '✓ Done!';
+      } catch (e) { btn.textContent = '✗ Failed'; }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('tool-lifecycle.pdf');
+        btn.textContent = '✓ Done!';
+      } catch (e) { btn.textContent = '✗ Failed'; }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>

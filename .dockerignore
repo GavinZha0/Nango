@@ -1,0 +1,53 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+.github
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build artifacts
+.next
+dist
+build
+out
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+tests
+playwright-report
+test-results
+vitest.config.ts
+
+# IDE
+.vscode
+.idea
+.cursor
+.windsurf
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (don't include Docker files in the build context)
+docker-compose.yaml
+.dockerignore
+
+# Misc
+*.md
+!README.md
+LICENSE

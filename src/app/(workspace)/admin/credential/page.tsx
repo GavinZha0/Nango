@@ -1,0 +1,12 @@
+import type { ReactNode } from "react";
+import { CredentialManagement } from "@/components/admin/CredentialManagement";
+
+export const metadata = { title: "Credentials — Nango" };
+
+export default function AdminCredentialPage(): ReactNode {
+  return (
+    <div className="flex h-full flex-col gap-6 overflow-auto p-8">
+      <CredentialManagement />
+    </div>
+  );
+}

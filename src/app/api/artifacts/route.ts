@@ -1,0 +1,50 @@
+import "server-only";
+
+import { NextResponse } from "next/server";
+import { z } from "zod";
+
+import { withSession } from "@/lib/http/route-handlers";
+import { parseBody } from "@/lib/http/validation";
+import { createFolder } from "@/lib/artifacts/service";
+
+/**
+ * POST /api/artifacts — create a folder in the per-user artifact tree.
+ *
+ * Folder-only since W1.7.7. The "create an artifact directly" branch
+ * (`kind: "artifact"`) was retired together with the parallel
+ * chart-save path through `useSaveOutcome` — the canonical save
+ * flow is `POST /api/artifacts/save`, which captures the source
+ * outcome's tool chain into a workflow plus an artifact row in
+ * one DB transaction (D31 / W1.6.5).
+ *
+ * The `kind: "folder"` body shape is preserved for client compat
+ * — `ArtifactPanel.tsx::postFolder` still sends it. The field
+ * documents intent at the call site; the discriminated-union
+ * machinery is gone because there's only one kind now.
+ *
+ * @see docs/artifact-dashboard-migration.md §4
+ * @see docs/workflow-architecture.md §10.1 (save-from-outcome path)
+ */
+const ROUTE = "/api/artifacts";
+
+const createFolderBodySchema = z
+  .object({
+    kind: z.literal("folder"),
+    name: z.string().min(1).max(200),
+    description: z.string().optional(),
+    /** Required — top-level (parent_id IS NULL) is system-seeded. */
+    parentId: z.string().uuid(),
+  })
+  .strict();
+
+export const POST = withSession(ROUTE, async ({ req, session, log }) => {
+  const body = await parseBody(req, createFolderBodySchema);
+  const row = await createFolder({
+    ownerId: session.user.id,
+    name: body.name,
+    parentId: body.parentId,
+    description: body.description ?? null,
+  });
+  log.info({ event: "artifact_folder_create", artifactId: row.id });
+  return NextResponse.json({ id: row.id });
+});

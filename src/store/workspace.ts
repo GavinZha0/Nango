@@ -1,0 +1,395 @@
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
+import type { BuiltinAgentRow } from "@/components/main-panels/BuiltinAgentEditor";
+import {
+  DEFAULT_ORCHESTRATION_MODE,
+  type OrchestrationModeId,
+} from "@/lib/orchestration/modes";
+
+// NOTE: the legacy `activeArtifact / openArtifact / closeArtifact`
+// fields were removed in V1 of the Outcomes panel (see
+// `docs/data-visualization.md` §6.4). The single-full-screen artifact
+// concept was Phase-3 scaffolding that no chat-side caller ever
+// invoked; it conflicted with the new thread-scoped Outcomes panel
+// at `/outcomes`. V2's per-artifact detail view will live at
+// `/artifact/[id]` and route normally.
+
+interface WorkspaceState {
+  // Entity list cache. Grouped for cheap UI rendering.
+
+  agents: EntityDescriptor[];
+  teams: EntityDescriptor[];
+  workflows: EntityDescriptor[];
+  builtinAgents: BuiltinAgentRow[];
+  /** True after at least one entity source has finished loading. */
+  agentsLoaded: boolean;
+  /** Replace the entire entity list across all kinds / credentials. */
+  setEntities: (entities: EntityDescriptor[]) => void;
+  /** Replace entities for given credentialIds (optionally filtered by kinds). Outside entries stay untouched. */
+  replaceEntitiesForCredentials: (
+    credentialIds: ReadonlySet<string>,
+    fresh: EntityDescriptor[],
+    kinds?: readonly EntityKind[],
+  ) => void;
+  mergeBuiltinAgents: (builtinAgents: BuiltinAgentRow[]) => void;
+
+  // Agent selection (drives CopilotKit runtimeUrl header)
+  activeAgentId: string;
+  /** Kind of the currently selected agent. UI-only state — used for
+   *  panel guards (e.g. workflows have no history list). Not carried
+   *  to the chat dispatch route; server looks up kind from
+   *  EntityCatalog. */
+  activeAgentType: EntityKind;
+  /** "backend" = external agno/Mastra/Dify; "builtin" = DB-configured. */
+  activeAgentSource: "backend" | "builtin";
+  /** Credential id that owns the active backend agent (undefined for builtin). */
+  activeCredentialId: string | undefined;
+  activeProvider: string | undefined;
+  setActiveAgent: (id: string, type?: EntityKind, source?: "backend" | "builtin", credentialId?: string, provider?: string) => void;
+
+  // Authenticated user
+  /** Stable UUID forwarded as user_id to backends. */
+  userId: string | undefined;
+  setUserId: (id: string | undefined) => void;
+
+  // Orchestration mode (Nango / supervisor only)
+  /** Transient — resets to `auto` on reload. */
+  activeMode: OrchestrationModeId;
+  setActiveMode: (mode: OrchestrationModeId) => void;
+
+  // Nango entry-point
+  /** Snapshot of the agent the user was on before switching into
+   *  Nango. Cleared when they return or pick a different agent. */
+  previousAgent: PreviousAgentSnapshot | null;
+  /** Switch to a Nango (supervisor) agent, remembering current as previous. */
+  enterNango: (supervisor: { id: string }) => void;
+  /** Restore the previous agent (no-op if none recorded). */
+  exitNango: () => void;
+  /** Switch to an arbitrary target agent, capturing current as
+   *  previous. Used by handoff mode. Pairs with
+   *  `pendingHandoffContext` — the new chat panel injects that as
+   *  the first user message on mount. */
+  enterAgent: (target: PreviousAgentSnapshot, contextSummary?: string) => void;
+  /** Routed through store because `<CopilotKitProvider>` remounts on agent switch. */
+  pendingHandoffContext: string | null;
+  /** Atomically read-and-clear the pending context. */
+  consumeHandoffContext: () => string | null;
+
+  // Session (thread) — split into two fields with disjoint semantics.
+  // @see docs/chat-flow-audit.md §1.11
+  /**
+   * Live thread id captured after CopilotKit's first `onAgentRunStarted`.
+   * Identifies the currently active conversation for history list, URL
+   * sync, GET /api/threads/[id]/messages, outcome attribution, etc.
+   *
+   * NEVER passed to <CopilotChat>. Feeding it back would flip
+   * hasExplicitThreadId false → true and break Inv-2.
+   *
+   * Maps 1:1 to backend session ids:
+   *   agno → session_id, Mastra → memory thread, Dify → conversation_id.
+   */
+  runtimeThreadId: string | null;
+  setRuntimeThreadId: (id: string | null) => void;
+  /**
+   * Only set when the user explicitly picks a stored thread (history
+   * click, URL navigation). The single field that flows into
+   * `<CopilotChat threadId>`; setting it forces remount + /connect.
+   * `null` = fresh chat mode (welcome screen, CopilotKit mints ABC).
+   */
+  explicitThreadId: string | null;
+  setExplicitThreadId: (id: string | null) => void;
+  /**
+   * Monotonic counter used as part of the React `key` on `<CopilotChat>`
+   * to force a full unmount + remount. This is the only way to make
+   * CopilotKit v2 mint a fresh non-explicit thread id while the
+   * `threadId` prop stays `undefined` — `useMemo(() => providedThreadId
+   * ?? randomUUID(), [providedThreadId])` otherwise caches the first
+   * ABC forever.
+   *
+   * Agent / Nango / handoff switches don't need a bump — `key`
+   * already includes `agentId`, so an agent change is itself a remount.
+   *
+   * Prefer `startFreshChat()` over manual bump+clear; the action
+   * encapsulates the required ordering so callers can't get it wrong.
+   *
+   * @see docs/threadid-lifecycle.md §"Lifecycle Events" #5
+   */
+  chatEpoch: number;
+  bumpChatEpoch: () => void;
+  /**
+   * Atomically reset both threadId fields and bump the chat epoch.
+   * Use this for any "start a new conversation" entry point (New Chat
+   * button, deleting the active thread, etc.).
+   *
+   * Why atomic: lazy-capture in `RightPanel.ChatProviderHooks`
+   * guards with `if (!state.runtimeThreadId) return;` — if a caller
+   * bumps the epoch before clearing `runtimeThreadId`, the new
+   * conversation's ABC arrives via `onAgentRunStarted` but the
+   * stale id refuses to be overwritten, silently losing the new
+   * thread's store-side identity (history list won't update,
+   * outcomes attributed to the wrong thread, etc.).
+   */
+  startFreshChat: () => void;
+
+  // Pinned sessions
+  pinnedSessions: Set<string>;
+  togglePin: (sessionId: string) => void;
+
+  // Chat error
+  /**
+   * Most recent failure for the active agent, or null. Set by
+   * RightPanel's `onRunFailed` / `onRunErrorEvent`; cleared on new
+   * run, agent switch, or manual dismiss.
+   *
+   * Banner ignores entries whose `agentId` does not match `activeAgentId`.
+   */
+  lastChatError: ChatError | null;
+  setChatError: (err: ChatError) => void;
+  clearChatError: () => void;
+}
+
+/** Lightweight chat-active agent snapshot captured before jumping
+ *  into Nango. Mirrors `setActiveAgent` fields. */
+export interface PreviousAgentSnapshot {
+  id: string;
+  type: EntityKind;
+  source: "backend" | "builtin";
+  credentialId?: string;
+  provider?: string;
+  /** Display name for the "Back to X" button label. */
+  name?: string;
+}
+
+export interface ChatError {
+  /** HTTP status if transport error, else null. */
+  status: number | null;
+  /** User-facing message (already localised at call site). */
+  message: string;
+  /** Used to filter stale errors after agent switch. */
+  agentId: string;
+  /** Wall-clock ms-since-epoch for ordering / debugging. */
+  timestamp: number;
+}
+
+function nameOfActiveAgent(state: WorkspaceState): string | undefined {
+  const id = state.activeAgentId;
+  if (!id) return undefined;
+  if (state.activeAgentSource === "builtin") {
+    return state.builtinAgents.find((b) => b.id === id)?.name;
+  }
+  const credId = state.activeCredentialId;
+  const list =
+    state.activeAgentType === "team"
+      ? state.teams
+      : state.activeAgentType === "workflow"
+        ? state.workflows
+        : state.agents;
+  return list.find((e) => e.id === id && e.credentialId === credId)?.name;
+}
+
+export const useWorkspaceStore = create<WorkspaceState>()(
+  persist(
+    (set, get) => ({
+      // Entity list cache
+      agents: [],
+      teams: [],
+      workflows: [],
+      builtinAgents: [],
+      agentsLoaded: false,
+      setEntities: (entities) =>
+        set({
+          agents: entities.filter((e) => e.kind === "agent"),
+          teams: entities.filter((e) => e.kind === "team"),
+          workflows: entities.filter((e) => e.kind === "workflow"),
+          agentsLoaded: true,
+        }),
+      replaceEntitiesForCredentials: (credentialIds, fresh, kinds) =>
+        set((state) => {
+          const targetKinds = kinds ?? (["agent", "team", "workflow"] as const);
+          const shouldReplace = (e: EntityDescriptor): boolean =>
+            !!e.credentialId
+            && credentialIds.has(e.credentialId)
+            && targetKinds.includes(e.kind);
+          // Drop the slice that's about to be replaced, then append.
+          const merged: EntityDescriptor[] = [
+            ...state.agents.filter((e) => !shouldReplace(e)),
+            ...state.teams.filter((e) => !shouldReplace(e)),
+            ...state.workflows.filter((e) => !shouldReplace(e)),
+            ...fresh,
+          ];
+          return {
+            agents: merged.filter((e) => e.kind === "agent"),
+            teams: merged.filter((e) => e.kind === "team"),
+            workflows: merged.filter((e) => e.kind === "workflow"),
+            agentsLoaded: true,
+          };
+        }),
+      mergeBuiltinAgents: (builtinAgents) => set({ builtinAgents, agentsLoaded: true }),
+
+      // Agent selection
+      activeAgentId: "",
+      activeAgentType: "agent",
+      activeAgentSource: "backend",
+      activeCredentialId: undefined,
+      activeProvider: undefined,
+      // @see docs/threadid-lifecycle.md
+      setActiveAgent: (id, type = "agent", source = "backend", credentialId, provider) =>
+        set((state) => {
+          const sameAgent =
+            state.activeAgentId === id &&
+            state.activeCredentialId === credentialId &&
+            state.activeAgentType === type;
+          return {
+            activeAgentId: id,
+            activeAgentType: type,
+            activeAgentSource: source,
+            activeCredentialId: credentialId,
+            activeProvider: provider,
+            runtimeThreadId: sameAgent ? state.runtimeThreadId : null,
+            explicitThreadId: sameAgent ? state.explicitThreadId : null,
+            // Preserve error on same-agent re-selection; clear on switch.
+            lastChatError: sameAgent ? state.lastChatError : null,
+            // Direct selection invalidates the Nango breadcrumb.
+            previousAgent: sameAgent ? state.previousAgent : null,
+          };
+        }),
+
+      // Authenticated user
+      userId: undefined,
+      setUserId: (id) => set({ userId: id }),
+
+      // Orchestration mode
+      activeMode: DEFAULT_ORCHESTRATION_MODE,
+      setActiveMode: (mode) => set({ activeMode: mode }),
+
+      // Nango breadcrumb
+      previousAgent: null,
+      enterNango: (supervisor) =>
+        set((state) => {
+          // Already on this supervisor — no-op, keep breadcrumb intact.
+          if (
+            state.activeAgentSource === "builtin"
+            && state.activeAgentId === supervisor.id
+          ) {
+            return state;
+          }
+          // Capture the agent we're leaving (only when the user
+          // actually had one selected).
+          const breadcrumb: PreviousAgentSnapshot | null = state.activeAgentId
+            ? {
+                id: state.activeAgentId,
+                type: state.activeAgentType,
+                source: state.activeAgentSource,
+                credentialId: state.activeCredentialId,
+                provider: state.activeProvider,
+                name: nameOfActiveAgent(state),
+              }
+            : null;
+          return {
+            previousAgent: breadcrumb,
+            activeAgentId: supervisor.id,
+            activeAgentType: "agent",
+            activeAgentSource: "builtin",
+            activeCredentialId: undefined,
+            activeProvider: undefined,
+            runtimeThreadId: null,
+            explicitThreadId: null,
+            lastChatError: null,
+          };
+        }),
+      exitNango: () =>
+        set((state) => {
+          const prev = state.previousAgent;
+          if (!prev) return { previousAgent: null };
+          return {
+            previousAgent: null,
+            activeAgentId: prev.id,
+            activeAgentType: prev.type,
+            activeAgentSource: prev.source,
+            activeCredentialId: prev.credentialId,
+            activeProvider: prev.provider,
+            runtimeThreadId: null,
+            explicitThreadId: null,
+            lastChatError: null,
+          };
+        }),
+      enterAgent: (target, contextSummary) =>
+        set((state) => {
+          const breadcrumb: PreviousAgentSnapshot | null = state.activeAgentId
+            ? {
+                id: state.activeAgentId,
+                type: state.activeAgentType,
+                source: state.activeAgentSource,
+                credentialId: state.activeCredentialId,
+                provider: state.activeProvider,
+                name: nameOfActiveAgent(state),
+              }
+            : null;
+          return {
+            previousAgent: breadcrumb,
+            activeAgentId: target.id,
+            activeAgentType: target.type,
+            activeAgentSource: target.source,
+            activeCredentialId: target.credentialId,
+            activeProvider: target.provider,
+            runtimeThreadId: null,
+            explicitThreadId: null,
+            lastChatError: null,
+            pendingHandoffContext:
+              contextSummary && contextSummary.trim().length > 0
+                ? contextSummary
+                : null,
+          };
+        }),
+      pendingHandoffContext: null,
+      consumeHandoffContext: () => {
+        const ctx = get().pendingHandoffContext;
+        if (ctx) set({ pendingHandoffContext: null });
+        return ctx;
+      },
+
+      // Session — see WorkspaceState above for semantics
+      runtimeThreadId: null,
+      setRuntimeThreadId: (id) => set({ runtimeThreadId: id }),
+      explicitThreadId: null,
+      setExplicitThreadId: (id) => set({ explicitThreadId: id }),
+      chatEpoch: 0,
+      bumpChatEpoch: () => set((s) => ({ chatEpoch: s.chatEpoch + 1 })),
+      startFreshChat: () =>
+        set((s) => ({
+          runtimeThreadId: null,
+          explicitThreadId: null,
+          chatEpoch: s.chatEpoch + 1,
+        })),
+
+      // Pinned sessions
+      pinnedSessions: new Set<string>(),
+      togglePin: (sessionId) =>
+        set((state) => {
+          const next = new Set(state.pinnedSessions);
+          if (next.has(sessionId)) {
+            next.delete(sessionId);
+          } else {
+            next.add(sessionId);
+          }
+          return { pinnedSessions: next };
+        }),
+
+      // Chat error
+      lastChatError: null,
+      setChatError: (err) => set({ lastChatError: err }),
+      clearChatError: () => set({ lastChatError: null }),
+    }),
+    {
+      name: "workspace-store",
+      // CONTRACT: only `pinnedSessions` is persisted; everything
+      // else is transient.
+      partialize: (state) => ({ pinnedSessions: Array.from(state.pinnedSessions) }),
+      merge: (persisted, current) => ({
+        ...current,
+        pinnedSessions: new Set((persisted as { pinnedSessions: string[] }).pinnedSessions ?? []),
+      }),
+    }
+  )
+);
