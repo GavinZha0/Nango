@@ -15,13 +15,31 @@ updates:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
       include: "scope"
+    # Major bumps must follow docs/docker-deployment.md §3 checklist.
+    # See docs/incidents.md 2026-05-29 for the cost of stacking majors.
+    ignore:
+      # Block all major bumps globally — human-only path.
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+      # next / react / eslint-config-next are exact-pinned in package.json
+      # because the Next.js standalone bundle is sensitive to minor drift
+      # (nft tracing + serverExternalPackages). Do not auto-PR them at all.
+      - dependency-name: "next"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "eslint-config-next"
+      # DuckDB ships custom suffix versions (e.g. 1.5.2-r.1); auto bumps
+      # break the pinned tag without warning.
+      - dependency-name: "@duckdb/node-api"
+      # AG-UI client is still 0.0.x — every minor/patch is potentially
+      # breaking for the bridge runtime. Human review only.
+      - dependency-name: "@ag-ui/client"
+      # @types/node tracks the Node.js runtime major. Bumping it without
+      # bumping the Docker base image causes type-passes-but-runtime-crashes.
+      # Upgrade in lockstep with Dockerfile node:N → docs/docker-deployment.md §3.4.
+      - dependency-name: "@types/node"
     groups:
-      next-stack:
-        patterns:
-          - "next"
-          - "react"
-          - "react-dom"
-          - "eslint-config-next"
       drizzle:
         patterns:
           - "drizzle-orm"
@@ -33,6 +51,11 @@ updates:
         patterns:
           - "@ai-sdk/*"
           - "ai"
+      # @rjsf/* are released in lockstep with peerDependencies between them —
+      # bumping one without the others breaks at runtime.
+      rjsf:
+        patterns:
+          - "@rjsf/*"
       types:
         patterns:
           - "@types/*"
@@ -52,6 +75,11 @@ updates:
     commit-message:
       prefix: "ci(deps)"
       include: "scope"
+    # Action major bumps (v4 → v6) occasionally break inputs / outputs.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   # Docker base images
   - package-ecosystem: "docker"
@@ -64,3 +92,9 @@ updates:
     commit-message:
       prefix: "build(docker)"
       include: "scope"
+    # Node base image major bumps must follow docs/docker-deployment.md §3.4
+    # (native bindings: pg-native / vertica-nodejs / ssh2).
+    ignore:
+      - dependency-name: "node"
+        update-types:
+          - "version-update:semver-major"
