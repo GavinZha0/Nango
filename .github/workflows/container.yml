@@ -4,6 +4,31 @@ on:
   push:
     branches:
       - main
+    # Skip the multi-arch build (amd64 + arm64, ~30-60 min) when the
+    # commit cannot change image contents. Code / Docker / deps changes
+    # are NOT listed here and always trigger.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.github/dependabot.yml'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE/**'
+      - '.husky/**'
+      - '.lintstagedrc.*'
+      - 'commitlint.config.*'
+      - '.editorconfig'
+      - '.gitignore'
+      - '.gitattributes'
+      - '.gitmessage'
+      # Test sources + test/lint configs are never copied into the
+      # final runner stage (Dockerfile copies only .next/standalone +
+      # migrations + start.sh), so changing them cannot change image
+      # contents. Triggering the multi-arch rebuild is pure waste.
+      - 'tests/**'
+      - 'playwright.config.*'
+      - 'vitest.config.*'
+      - 'eslint.config.*'
   release:
     types: [published]
   workflow_dispatch:

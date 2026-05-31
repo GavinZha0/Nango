@@ -15,6 +15,16 @@ updates:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
       include: "scope"
+    # Cooldown: wait N days after a version is published before proposing it.
+    # Pairs with pnpm 11's default `minimumReleaseAge: 1440` (1 day) — without
+    # this, Dependabot can open a PR for a version pnpm refuses to install,
+    # leaving Lint and Type Check CI permanently red (see fix that introduced
+    # this block). Also defends against early-release regressions.
+    cooldown:
+      default-days: 3
+      semver-patch-days: 2
+      semver-minor-days: 5
+      semver-major-days: 14
     # Major bumps must follow docs/docker-deployment.md §3 checklist.
     # See docs/incidents.md 2026-05-29 for the cost of stacking majors.
     ignore:
@@ -75,6 +85,8 @@ updates:
     commit-message:
       prefix: "ci(deps)"
       include: "scope"
+    cooldown:
+      default-days: 3
     # Action major bumps (v4 → v6) occasionally break inputs / outputs.
     ignore:
       - dependency-name: "*"
@@ -92,6 +104,8 @@ updates:
     commit-message:
       prefix: "build(docker)"
       include: "scope"
+    cooldown:
+      default-days: 3
     # Node base image major bumps must follow docs/docker-deployment.md §3.4
     # (native bindings: pg-native / vertica-nodejs / ssh2).
     ignore:

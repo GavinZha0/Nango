@@ -43,10 +43,15 @@ export default defineConfig({
     },
   ],
 
+  // CI starts the server explicitly via `next start` (bypassing the
+  // `prestart` hook to skip the Python-sandbox image build); see
+  // .github/workflows/e2e-tests.yml "Start application". Local devs
+  // usually have `pnpm dev` running. In either case playwright should
+  // reuse what is already on :9300 rather than spawn a second copy.
   webServer: {
     command: "pnpm start",
     url: "http://localhost:9300",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",
