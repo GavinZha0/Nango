@@ -59,7 +59,7 @@
     "ai": "^6.0.182",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "better-auth": "^1.6.11",
+    "better-auth": "^1.6.12",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
