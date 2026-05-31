@@ -1,5 +1,6 @@
 /**
  * PostgreSQL data-source — server-side `DataSourceModule` aggregator.
+ * See docs/data-sources.md.
  */
 
 import "server-only";

@@ -1,7 +1,6 @@
 /**
  * Dify chat handler — protocol bridge from Dify SSE → AG-UI.
- *
- * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
+ * See docs/backend-integration.md.
  */
 
 import "server-only";
@@ -60,31 +59,24 @@ async function postChat(
   });
 }
 
-// Dify event payloads (only the fields we read)
-//
-// Source of truth: dify/api/core/app/entities/task_entities.py.
-
+/** Dify event payload subset. Source of truth: dify/api/core/app/entities/task_entities.py. */
 interface DifyEvent {
   event?: string;
   conversation_id?: string;
   message_id?: string;
   /** message / agent_message: assistant answer delta. */
   answer?: string;
-  /** Stable thought row id — same across the (thought → tool →
-   *  observation) sequence, so it doubles as our toolCallId. */
+  /** Stable thought row id — same across (thought → tool → observation),
+   *  so it doubles as our toolCallId. */
   id?: string;
   position?: number;
-  /** Set when this thought decided to call a tool. */
   tool?: string;
-  /** JSON-encoded args (sometimes Dify emits a parsed object). */
+  /** JSON-encoded args; sometimes Dify emits a parsed object. */
   tool_input?: string | Record<string, unknown>;
-  /** Set when this thought received the tool's output. */
   observation?: string;
   message?: string;
   code?: string;
 }
-
-// Bridging Agent
 
 interface BridgeConfig {
   /** Trimmed, e.g. "https://api.dify.ai/v1". */
@@ -99,18 +91,13 @@ export class DifyBridgeAgent extends AbstractAgent {
     super();
   }
 
-  /**
-   * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
-   */
   clone(): this {
     return attachBridgeConfig(super.clone() as this, this.cfg);
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
     return createBridgeRunObservable(input, async ({ abortSignal, emit, isCancelled }) => {
-      // Server-trusted: runner injects `forwardedProps.user_id` from
-      // `session.user.id` (chat) or `ownerId` (programmatic dispatch)
-      // before this code is reached. @see lib/runner/inject-user-id.ts
+      // Server-injected upstream by lib/runner/inject-user-id.ts.
       const userId = input.forwardedProps?.user_id as string;
 
       const query = lastUserText(input.messages);
@@ -118,17 +105,11 @@ export class DifyBridgeAgent extends AbstractAgent {
         throw new Error("No user message to send to Dify.");
       }
 
-      // CONTRACT: Dify treats `conversation_id` as the upstream
-      // session token. We persist it in `backend_thread_state` so a
-      // Node restart between turns does NOT sever Dify-side LLM
-      // memory. On the very first message of a thread there is no
-      // mapping yet — we MUST omit `conversation_id` entirely
-      // (Dify generates conv_ids internally and rejects unknown
-      // values with 404, so passing Nango's threadId would always
-      // cost a wasted round-trip). The 404/400 retry below covers
-      // ONLY the stale-mapping case where we sent a known-but-
-      // expired conv_id; if the initial omit-conv_id request 4xxs
-      // it's a genuine error and the retry would not help.
+      // CONTRACT: Dify owns `conversation_id` — it generates the id
+      // internally and rejects unknown values with 404. On the first
+      // turn we MUST omit it; on later turns we send the persisted
+      // mapping. The 404/400 retry below covers stale mappings only;
+      // a first-turn 4xx is a genuine error and retry would not help.
       const persisted = await getThreadProviderState<DifyThreadState>(
         this.cfg.credentialId,
         input.threadId,
@@ -150,10 +131,8 @@ export class DifyBridgeAgent extends AbstractAgent {
       );
 
       if (mapped && (response.status === 404 || response.status === 400)) {
-        // Stale mapping: Dify-side conversation was deleted or
-        // expired out-of-band. Drop the mapping and retry without
-        // `conversation_id` so Dify allocates a fresh one;
-        // `message_end` will repopulate the cache below.
+        // Stale mapping — retry without conversation_id so Dify
+        // allocates a fresh one; message_end repopulates the cache.
         response = await postChat(
           this.cfg.baseUrl,
           this.cfg.apiKey,
@@ -171,7 +150,6 @@ export class DifyBridgeAgent extends AbstractAgent {
 
       const text = new TextStreamState(emit, `msg_${input.runId}`);
       let capturedConvId: string | null = null;
-      // @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
       const emittedToolThoughts = new Set<string>();
 
       for await (const line of readSseLines(response.body!)) {
@@ -199,8 +177,7 @@ export class DifyBridgeAgent extends AbstractAgent {
             const toolName = evt.tool ?? "";
             const observation = evt.observation ?? "";
 
-            // 1. Tool announcement — dify gives full args in one
-            //    shot, so emit START + ARGS + END together.
+            // Dify gives full args in one shot — emit START + ARGS + END together.
             if (thoughtId && toolName && !emittedToolThoughts.has(thoughtId)) {
               emittedToolThoughts.add(thoughtId);
               text.closeIfOpen();
@@ -224,13 +201,9 @@ export class DifyBridgeAgent extends AbstractAgent {
               });
             }
 
-            // 2. Observation pairs with an earlier START so
-            //    CopilotKit can close the tool call.
-            // SCHEMA NOTE: AG-UI requires `messageId` on TOOL_CALL_RESULT
-            // (the assistant message envelope the tool call belongs to).
-            // Pre-fix code omitted it under `as BaseEvent`. Synthesise
-            // a stable id from runId so persistence + replay link the
-            // result back to the same logical turn.
+            // Observation pairs with the earlier START so CopilotKit
+            // can close the tool call. AG-UI REQUIRES `messageId` on
+            // TOOL_CALL_RESULT — synthesise a stable id from runId.
             if (thoughtId && observation && emittedToolThoughts.has(thoughtId)) {
               emit({
                 type: EventType.TOOL_CALL_RESULT,
@@ -243,9 +216,9 @@ export class DifyBridgeAgent extends AbstractAgent {
               });
             }
 
-            // 3. Thought-only events carry intermediate reasoning;
-            //    dropped silently because Agent mode also emits
-            //    agent_message for the user-visible answer.
+            // Thought-only events carry intermediate reasoning; dropped
+            // silently because Agent mode also emits agent_message for
+            // the user-visible answer.
             break;
           }
 
@@ -265,10 +238,9 @@ export class DifyBridgeAgent extends AbstractAgent {
             break;
 
           default:
-            // Anything not yet bridged (workflow_*, node_*,
-            // iteration_*, loop_*, tts_*, message_file, …) gets
-            // debug-logged so support can spot growth without
-            // spamming production.
+            // workflow_*, node_*, iteration_*, loop_*, tts_*,
+            // message_file, … — debug-logged so support can spot
+            // growth without spamming production.
             log.debug(
               { event: "dify_unbridged_event", difyEvent: evt.event },
               "dify event not bridged",
@@ -281,10 +253,7 @@ export class DifyBridgeAgent extends AbstractAgent {
       text.closeIfOpen();
 
       if (capturedConvId) {
-        // Fire-and-forget: cache update is synchronous inside the
-        // DAO so this process reuses the value immediately; the DB
-        // write must not block the bridge stream's completion. A
-        // failed persist is logged inside the DAO.
+        // Fire-and-forget — DB write MUST NOT block stream completion.
         void setThreadProviderState(
           this.cfg.credentialId,
           input.threadId,
@@ -296,15 +265,11 @@ export class DifyBridgeAgent extends AbstractAgent {
   }
 }
 
-// Public chat handler
-
 export const difyChatHandler: IBackendChatHandler = {
   provider: "dify",
 
   async buildAgent(ctx: ChatContext) {
-    // Dify itself doesn't speak AG-UI today, but a deployer could
-    // front it with an AG-UI shim and configure `aguiUrl`. No-op
-    // otherwise.
+    // AG-UI fast-path when an upstream shim configures `aguiUrl`.
     const passthrough = await buildPassthroughAgentIfConfigured(ctx);
     if (passthrough) return passthrough;
 

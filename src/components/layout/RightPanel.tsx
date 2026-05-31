@@ -110,31 +110,19 @@ const TAB_SEGMENTS: {
   { id: "history", label: "History", icon: History },
 ];
 
-// Stable empty-object refs for CopilotKitProvider props that otherwise
-// default to a freshly-allocated `{}` on every render. Without these
-// the provider's setter useEffect re-runs every commit, which in turn
-// calls `setRuntimeTransport("auto")` while `_runtimeTransport` is
-// already `"rest"` (auto-detect mutates it). The dedup check inside
-// setRuntimeTransport fails, triggering a full updateRuntimeConnection
-// reconnect cycle — that rebuilds remoteAgents as new objects, blowing
-// up the per-thread clone cache and making HITL pickers vanish.
-//
-// @see docs/chat-flow-audit.md (HITL flash investigation)
+// Stable empty-object refs for `CopilotKitProvider` props. Fresh `{}`
+// per render triggers the provider's setter useEffect on every
+// commit, which kicks off a full reconnect cycle and breaks the
+// HITL render cache. See docs/chat-flow-audit.md.
 const STABLE_EMPTY_AGENTS = Object.freeze({}) as Record<string, never>;
 const STABLE_EMPTY_PROPS = Object.freeze({}) as Record<string, unknown>;
 
 // localStorage helpers for AgentSelector's disabled-agents set.
-//
-// Mirrors `AgentPanel`'s storage shape. A disabled agent is one the
-// user has hidden from the agent picker via the panel's checkbox.
-// Read via `useStoredValue` (`useSyncExternalStore` under the hood)
-// so SSR sees the empty set and the stored value flows in
-// post-hydration without a setState-in-effect. Cross-tab updates
-// arrive via the native `storage` event; same-tab writes from
-// `AgentPanel`'s checkbox arrive via the custom event the hook
-// dispatches. SSR_EMPTY_SET is shared between server snapshot and
-// the "no stored value" parse path so the hook's reference-equality
-// cache works (a fresh `new Set()` per call would never match).
+// Reads through `useStoredValue` (a `useSyncExternalStore` wrapper)
+// so SSR sees the empty set and cross-tab writes propagate via the
+// native `storage` event. SSR_EMPTY_SET is shared so the hook's
+// reference-equality cache holds (a fresh `new Set()` would never
+// match).
 
 const LS_KEY_DISABLED_BACKEND = "agent-panel-disabled-backend";
 
@@ -293,103 +281,53 @@ function RightPanelToolbar(): ReactNode {
 // Provider-scoped chat hooks (registered once per provider, not per tab)
 
 /**
- * Holds CopilotKit-provider-scoped concerns that must outlive tab
- * switches:
- *
- *  1. **Frontend tool registration** (`useOutcomeTools`,
- *     `useInteractiveTools`, `useHandoffTools`). Without these living
- *     at provider scope, switching to History mid-run would
- *     unregister the tools and break in-flight calls.
- *
- *  2. **Wildcard tool-call rendering** (`useRenderTool({ name: "*" })`).
- *     Registers `WildcardToolRenderer` — our replacement for CopilotKit's
- *     built-in default. Shows tool name, error/done/running badge,
- *     elapsed time, and expandable arguments + result for every
- *     server-side tool call that doesn't have a name-specific renderer.
- *
- *  3. **Lazy threadId capture**. When the user fires the very first run
- *     for the active agent, v2 mints an internal UUID; we capture it
- *     here off `onAgentRunStarted` and persist it to our store so future
- *     CopilotChat remounts find the WeakMap-cached thread clone.
- *
- * Renders nothing — pure side-effect host.
+ * Provider-scoped side effects that must outlive tab switches:
+ * frontend-tool registration, custom tool-call renderers, and
+ * threadId eager-capture. Renders nothing.
  */
 function ChatProviderHooks(): ReactNode {
-  // `render_chart` (handler-only) + matching `useRenderTool` for the
-  // ChartPreviewCard. See docs/data-visualization.md §6.3.
   useOutcomeTools();
-  // Specific renderer for the supervisor's `delegate_to_agent` tool —
-  // a Nango-themed card replaces the wildcard JSON view. Order does
-  // not matter: CopilotKit's matcher prefers an exact `name` match and
-  // only falls back to the wildcard renderer when none exists.
+  // Specific renderers — CopilotKit's matcher prefers exact name
+  // match before falling back to the wildcard.
   useRenderTool({
     name: "delegate_to_agent",
     parameters: delegateToAgentArgsSchema,
     render: DelegateToAgentCard,
   });
-  // Server-tool renderer: web_search runs server-side but its result
-  // both (a) shows a small inline preview in chat, and (b) writes a
-  // Report outcome via useEffect inside the component. See the
-  // bridge architecture note in WebSearchInlinePreview.
+  // web_search renders an inline preview AND writes a Report
+  // outcome via useEffect — see WebSearchInlinePreview.
   useRenderTool({
     name: "web_search",
     parameters: webSearchArgsSchema,
     render: WebSearchInlinePreview,
   });
-  // Handoff frontend tool — registered globally so any built-in agent
-  // capable of orchestration (currently only Nango) can invoke it.
-  // The action handler is a thin client-side router that mutates the
-  // workspace store; the active-agent change remounts CopilotKit on
-  // the next React commit and the new agent's chat panel injects the
-  // context summary as the first user message.
   useHandoffTools();
-  // HITL interactive tools — the `ask_user_*` family (choice,
-  // confirmation, input, datetime). Registered globally so any
-  // built-in agent can invoke them.
   useInteractiveTools();
-  // Custom wildcard fallback that replaces CopilotKit's built-in
-  // `DefaultToolCallRenderer`. Adds two behaviours the vendor default
-  // doesn't have: (a) red "Error" badge when the result carries
-  // `{ isError: true }` (MCP / `wrapToolExecute` fallback) or
-  // `{ ok: false }` (business shape), and (b) an elapsed timer keyed
-  // by `toolCallId`. Registered via `useRenderTool({ name: "*" })`
-  // (not `useDefaultRenderTool`) so the renderer receives `toolCallId`
-  // — `useDefaultRenderTool`'s prop shape omits it, which would break
-  // the per-call timing cache in `use-elapsed-seconds`. See
-  // `src/components/copilotkit/WildcardToolRenderer.tsx` for the
-  // detection rules and AGENTS.md item 19 for the wider rationale.
+  // Custom wildcard replaces CopilotKit's `DefaultToolCallRenderer`
+  // to add error badge + per-toolCallId elapsed timer. Registered
+  // via `useRenderTool({ name: "*" })` (not `useDefaultRenderTool`)
+  // because the latter's props omit `toolCallId` and break the
+  // timing cache. See `WildcardToolRenderer.tsx`.
   useRenderTool({
     name: "*",
     parameters: z.any(),
     render: WildcardToolRenderer,
   });
 
-  // Eager-capture: the SOLE mechanism that writes the post-first-run
-  // thread id into the store (eager-mint was removed as part of the
-  // chatView slot refactor). Writes happen on `onAgentRunStarted` —
-  // ABC is already present on `event.agent.threadId` at this point,
-  // so there is no reason to wait for `onRunFinalized`. Earlier write
-  // shrinks the "null window" for outcomes/save flows that read
-  // `runtimeThreadId` mid-run.
-  //
-  // We write `runtimeThreadId` only — feeding it back into
-  // <CopilotChat> via `explicitThreadId` is reserved for
-  // history-restore.
-  // @see docs/chat-flow-audit.md §1.11
-  // @see docs/threadid-lifecycle.md §"Lifecycle Events" #2
+  // threadId eager-capture: write `runtimeThreadId` once per agent
+  // on the first run's `onRunInitialized` (the id is already on
+  // `agent.threadId` by then). See docs/threadid-lifecycle.md and
+  // docs/chat-flow-audit.md.
   const storedThreadId = useWorkspaceStore((s) => s.runtimeThreadId);
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
   const setChatError = useWorkspaceStore((s) => s.setChatError);
   const clearChatError = useWorkspaceStore((s) => s.clearChatError);
   const { copilotkit } = useCopilotKit();
-  // 1.57 removed the global `onAgentRunStarted` event. Per-agent
-  // run lifecycle is now subscribed via the registry agent obtained
-  // through `useAgent` + `copilotkit.subscribeToAgentWithOptions`.
   const { agent } = useAgent({ agentId: activeAgentId || undefined });
 
   // threadId eager-capture
   useEffect(() => {
-    if (storedThreadId) return; // already captured for this agent
+    if (storedThreadId) return;
     if (!activeAgentId || !agent) return;
     const sub = copilotkit.subscribeToAgentWithOptions(
       agent,
@@ -397,9 +335,8 @@ function ChatProviderHooks(): ReactNode {
         onRunInitialized: () => {
           const tid = agent.threadId;
           if (!tid) return;
-          // Recheck inside the callback — the closure-captured guard
-          // (`storedThreadId`) could be stale if a sibling run finalized
-          // between effect set-up and this dispatch.
+          // Recheck inside the callback — the closure guard could be
+          // stale if a sibling run finalised between setup and dispatch.
           const state = useWorkspaceStore.getState();
           if (state.runtimeThreadId) return;
           if (state.activeAgentId !== activeAgentId) return;
@@ -411,20 +348,16 @@ function ChatProviderHooks(): ReactNode {
     return () => sub.unsubscribe();
   }, [storedThreadId, copilotkit, activeAgentId, agent]);
 
-  // Chat error capture (independent lifecycle)
-  //
-  // Capture transport/protocol errors. Clear stale errors on new runs.
+  // Chat error capture — onRunInitialized clears stale banners,
+  // onRunFailed / onRunErrorEvent populate them.
   useEffect(() => {
     if (!activeAgentId || !agent) return;
     const sub = copilotkit.subscribeToAgentWithOptions(
       agent,
       {
-        onRunInitialized: () => {
-          // Starting a new run wipes the slate — even if the previous
-          // run errored, we don't want a stale banner sitting on top of
-          // a successful response.
-          clearChatError();
-        },
+        // Starting a new run clears the slate so a previous run's
+        // error banner doesn't sit on top of fresh output.
+        onRunInitialized: () => clearChatError(),
         onRunFailed: ({ error }) => {
           setChatError(buildChatError(error, activeAgentId));
         },
@@ -437,24 +370,12 @@ function ChatProviderHooks(): ReactNode {
     return () => sub.unsubscribe();
   }, [copilotkit, activeAgentId, agent, setChatError, clearChatError]);
 
-  // New-chat reset.
-  //
-  // CopilotKit v2 stores messages on the per-agentId agent instance
-  // (inside `copilotkit` core), NOT on the <CopilotChat> component.
-  // Its built-in `connect-on-thread` effect (which would call
-  // `agent.setMessages([])` for us) ALSO short-circuits when
-  // `hasExplicitThreadId === false`. So in fresh-chat mode
-  // (explicitThreadId === null → CopilotChat threadId prop ===
-  // undefined → hasExplicitThreadId === false) clicking "New chat"
-  // remounts <CopilotChat> but leaves the agent's messages intact —
-  // user sees the prior conversation as if nothing happened.
-  //
-  // Drive the clear ourselves off `chatEpoch`: the store action
-  // `startFreshChat` bumps this counter, and we reset agent state
-  // here. First mount is a no-op because prev === current.
-  // Agent switches don't trigger because `<CopilotKitProvider key>`
-  // remounts this hook (resetting the ref to the current epoch).
-  // @see docs/threadid-lifecycle.md §"Lifecycle Events" #5
+  // New-chat reset. CopilotKit v2 holds messages on the per-agent
+  // instance (not on `<CopilotChat>`) and its `connect-on-thread`
+  // effect short-circuits in fresh-chat mode, so a remount alone
+  // leaves the prior conversation visible. Drive the clear off
+  // `chatEpoch`: `startFreshChat` bumps the counter, we reset agent
+  // state. See docs/threadid-lifecycle.md and docs/chat-flow-audit.md.
   const chatEpoch = useWorkspaceStore((s) => s.chatEpoch);
   const prevChatEpochRef = useRef(chatEpoch);
   useEffect(() => {
@@ -485,19 +406,13 @@ export function RightPanel(): ReactNode {
   // Memoize stable refs
   const activeMode = useWorkspaceStore((s) => s.activeMode);
 
+  // Custom chat headers — backend sends `X-Credential-Id`, built-in
+  // sends `X-Orchestration-Mode`. See docs/orchestrator.md.
   const headers = useMemo(() => {
     const h: Record<string, string> = {};
-    // Backend route: server reads `credentialId` from this header to
-    // pick the right BridgeAgent build. `agentId` is derived from the
-    // URL path (`/agent/<id>/run`); `agentKind` is looked up server-side
-    // via EntityCatalog. Nothing else needs to come from the client.
-    // @see docs/orchestrator.md "Custom HTTP Headers"
     if (agentSource === "backend" && credentialId) {
       h[CREDENTIAL_ID_HEADER] = credentialId;
     }
-    // Built-in route: only the user's transient orchestration-mode
-    // preference is carried. Server falls back to the registry
-    // default when absent, so this is "send when set", not required.
     if (agentSource === "builtin") {
       h[ORCHESTRATION_MODE_HEADER] = activeMode;
     }
@@ -537,9 +452,7 @@ export function RightPanel(): ReactNode {
           key={copilotKey}
           runtimeUrl={runtimeUrl}
           headers={headers}
-          // Explicit stable refs — see comment at top of file. Without
-          // these CopilotKit re-fetches /info on every commit which
-          // rebuilds remoteAgents and breaks HITL renders.
+          // Stable refs — see STABLE_EMPTY_AGENTS comment at top.
           properties={STABLE_EMPTY_PROPS}
           agents__unsafe_dev_only={STABLE_EMPTY_AGENTS}
           selfManagedAgents={STABLE_EMPTY_AGENTS}
@@ -552,9 +465,6 @@ export function RightPanel(): ReactNode {
             hidden={rightTab !== "chat"}
             className="flex h-full flex-col"
           >
-            {/* Sticky inline error banner — only renders when an error
-                exists for the active agent. See ChatErrorBanner.tsx for
-                the lifecycle contract. */}
             <ChatErrorBanner />
             <div className="min-h-0 flex-1">
               <ChatPanelBody />

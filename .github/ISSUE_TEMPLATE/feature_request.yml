@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a new feature or improvement
+title: "feat: <short description>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For significant features, please **start a discussion first** so we
+        can align on direction before you invest time in a PR.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      placeholder: As a user I want ... so that ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature, including UI sketches or API shape if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: References, related issues, screenshots from other tools, etc.

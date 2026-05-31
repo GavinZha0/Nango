@@ -54,7 +54,7 @@ export interface SidebarPanelDefinition {
   href: string;
   /**
    * Minimum role required to see / open this panel. Defaults to `"user"`
-   * (visible to everyone signed-in). See docs/rbac.md §5.6.
+   * (visible to everyone signed-in). See docs/rbac.md
    */
   requiredRole?: "user" | "editor" | "admin";
 }

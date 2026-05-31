@@ -1,37 +1,10 @@
 /**
  * Persist a workflow refresh execution to `entity_run` +
- * `entity_run_event` (D4a).
- *
- * Strategy B (per the D4a thread):
- *   - Only ACTIVE on `forceFresh: true` paths — the GET /artifact/<id>
- *     code path also drives `executeWorkflow`, but persisting passive
- *     page views as runs would flood the table. The recorder is
- *     created exclusively from the refresh endpoint until D-anything
- *     decides otherwise.
- *   - All DB writes are best-effort: a recordRunStart failure logs
- *     and returns `null`, after which the executor falls back to a
- *     noop emit. recordEvent / finalize errors log but don't
- *     surface — the workflow run itself must succeed or fail on its
- *     own merits, independent of forensic persistence.
- *
- * Engine events → DB row mapping (see EntityRunEventType doc in
- * `lib/db/schema.ts` for the rationale):
- *
- *   workflow_started              → "started"
- *   workflow_node_attempt_started → "workflow_node_attempt_started"
- *   workflow_node_attempt_failed  → "workflow_node_attempt_failed"
- *   workflow_node_completed       → "workflow_node_completed"
- *   workflow_completed            → "finished"
- *   workflow_failed               → "error"
- *
- * The full `WorkflowEngineEvent` JSON is stashed as payload —
- * `runId` is redundant with the row's run_id but kept for
- * symmetry with the engine type, and `nodeId` / `attempt` /
- * `durationMs` / `cached` / `outputs` / `errorCode` / `message`
- * survive intact for admin forensics queries.
- *
- * @see lib/db/schema.ts (EntityRunEventType)
- * @see lib/workflows/engine/index.ts (WorkflowEngineEvent)
+ * `entity_run_event`. Active only on `forceFresh: true` (passive
+ * GETs would flood the table). All DB writes are best-effort —
+ * the recorded run must not affect the workflow execution itself.
+ * Engine-event → persisted-row mapping is in
+ * `mapEngineEventToEventType` below. See docs/workflow.md.
  */
 
 import "server-only";
@@ -54,13 +27,13 @@ export interface WorkflowRunRecorder {
   readonly runId: string;
 
   /** Drop-in replacement for `noopEmitEvent`. Failures log; the
-   *  caller's engine.execute path is not affected. */
+   *  caller's `engine.execute` path is not affected. */
   emit(event: WorkflowEngineEvent): void;
 
-  /** Caller invokes after a successful engine.execute. */
+  /** Caller invokes after a successful `engine.execute`. */
   succeed(): Promise<void>;
 
-  /** Caller invokes on any thrown error from engine.execute.
+  /** Caller invokes on any thrown error from `engine.execute`.
    *  WorkflowError vs unexpected throws share this path; the
    *  error message lands in `entity_run.error_message`. */
   fail(err: unknown): Promise<void>;
@@ -95,9 +68,7 @@ export async function startRecording(
         : "Workflow refresh",
       ownerId: args.ownerId,
       // No separate `createdBy` slot for refresh-initiated runs —
-      // attribute to the owner. Future multi-tenant delegation
-      // (admin refreshes another user's artifact) would split
-      // these, but V1 keeps refresh single-owner.
+      // attribute to the owner. V1 keeps refresh single-owner.
       createdBy: args.ownerId,
     });
     return buildRecorder(row.id);
@@ -115,8 +86,8 @@ function buildRecorder(runId: string): WorkflowRunRecorder {
 
   function emit(event: WorkflowEngineEvent): void {
     const type: EntityRunEventType = mapEngineEventToEventType(event.type);
-    // recordEvent is async-fire-and-log — never block the engine
-    // event tape on DB latency.
+    // Async fire-and-log — never block the engine event tape on
+    // DB latency.
     void recordEvent(runId, seq++, type, event).catch((err: unknown) => {
       log.warn(
         { err, runId, eventType: event.type },

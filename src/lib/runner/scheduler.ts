@@ -1,5 +1,8 @@
 /**
- * In-process scheduler for `schedule` rows. One `setTimeout` per active schedule.
+ * In-process scheduler for `schedule` rows. One `setTimeout` per
+ * active schedule.
+ *
+ * See docs/orchestrator.md.
  */
 
 import "server-only";
@@ -26,8 +29,7 @@ const VALID_UNITS: readonly ScheduleIntervalUnit[] = [
   "month",
 ];
 
-/** IANA timezone set from ICU data bundled in Node / V8. Cached at
- *  module load — the set never changes within a process lifetime. */
+/** IANA timezone set from bundled ICU data. */
 const IANA_TIMEZONES: ReadonlySet<string> = new Set(
   Intl.supportedValuesOf("timeZone"),
 );
@@ -73,9 +75,8 @@ export function validateTriggerSpec(spec: {
       };
     }
   } else {
-    // QUIRK: one-shot startAt must be in the future. For recurring,
-    // a past startAt is fine (anchor; scheduler walks forward). The
-    // 5s slack absorbs clock skew between form submit and validation.
+    // One-shot startAt must be in the future. Recurring startAt acts
+    // as an anchor and may be in the past. 5s slack for clock skew.
     if (spec.startAt.getTime() < Date.now() - 5_000) {
       return {
         ok: false,
@@ -127,8 +128,7 @@ interface DateParts {
   second: number;
 }
 
-/** Decompose UTC instant → wall-clock parts in the named tz via
- *  `Intl.DateTimeFormat.formatToParts` (no third-party tz lib needed). */
+/** UTC instant → wall-clock parts in the named tz. */
 function getDateTimeParts(d: Date, tz: string): DateParts {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
@@ -147,7 +147,7 @@ function getDateTimeParts(d: Date, tz: string): DateParts {
     year: get("year"),
     month: get("month"),
     day: get("day"),
-    hour: get("hour") % 24, // QUIRK: Intl returns "24" at midnight on some platforms
+    hour: get("hour") % 24, // Intl returns "24" at midnight on some platforms
     minute: get("minute"),
     second: get("second"),
   };
@@ -189,14 +189,11 @@ function tzOffsetMs(d: Date, tz: string): number {
  * Compute next fire time, or `null` when the schedule has run out.
  *
  * CONTRACT:
- *   - One-shot (no interval): nextFire = startAt if not yet fired,
- *     else null.
+ *   - One-shot (no interval): startAt if not yet fired, else null.
  *   - Recurring: walk `startAt + k × interval` until strictly after
- *     `lastTriggeredAt ?? -∞` AND `now`. Returns null if the candidate
- *     falls past endAt.
+ *     `lastTriggeredAt ?? -∞` AND `now`. Returns null past endAt.
  *
- * QUIRK: the `now` guard re-arms correctly for rows created in the
- * past — fire on the next interval boundary, not 50 backfills.
+ * The `now` guard prevents backfilling on rows created in the past.
  */
 export function nextFireAt(row: ScheduleEntity, now: Date = new Date()): Date | null {
   const { startAt, endAt, intervalValue, intervalUnit, timezone, lastTriggeredAt } =
@@ -215,8 +212,7 @@ export function nextFireAt(row: ScheduleEntity, now: Date = new Date()): Date | 
     lastTriggeredAt ? lastTriggeredAt.getTime() + 1 : -Infinity,
   );
 
-  // SECURITY: bound the walk so a misconfigured schedule (e.g. endAt
-  // before any startAt fire) never spins forever.
+  // Bound the walk so a misconfigured schedule can't spin forever.
   let candidate = startAt;
   let steps = 0;
   const MAX_STEPS = 100_000;
@@ -263,20 +259,15 @@ function slot(): SchedulerSlot {
   return s;
 }
 
-/** QUIRK: Node clamps very large `setTimeout` values to 1ms; re-arm
- *  in chunks if we're parked >24d ahead. */
+/** Node clamps `setTimeout` to int32; re-arm in chunks past 24d. */
 const MAX_TIMER_MS = 2_147_483_647;
 
 /**
- * Trigger a schedule once (cron tick OR manual "Trigger now"). Updates
- * `lastTriggeredAt` / `lastError` so the panel doesn't have to join
- * entity_run for the status icon; re-registers the row so the next
- * timer reflects the new lastTriggeredAt (also covers end-of-window
- * auto-disable).
- *
- * The per-schedule run history is reachable via `entity_run.schedule_id`
- * (NOT denormalised onto the schedule row) — see the migration note
- * on `entity_run` and the `RecentRuns` side panel in ScheduleEditor.
+ * Trigger a schedule once (timer tick OR manual "Trigger now").
+ * Updates `lastTriggeredAt` / `lastError`, then re-registers so the
+ * next timer reflects new state (also handles end-of-window
+ * auto-disable). Per-schedule run history lives on
+ * `entity_run.schedule_id`.
  */
 export async function triggerSchedule(scheduleId: string): Promise<void> {
   const [row] = await db
@@ -306,14 +297,11 @@ export async function triggerSchedule(scheduleId: string): Promise<void> {
     runResult = await runner.start({
       entityId: row.entityId,
       credentialId: row.credentialId ?? undefined,
-      // SECURITY: kind snapshotted at create time — no entity-catalog
-      // round-trip on the fire path.
+      // Kind snapshotted at create time — no entity-catalog round-trip on fire.
       entityKind: row.entityKind as EntityKind,
       task: row.task,
       mode: "async",
       initiator: "schedule",
-      // Stamp the resulting entity_run row so the RecentRuns panel
-      // can paginate this schedule's history.
       scheduleId: row.id,
       ownerId: row.ownerId,
       createdBy: row.createdBy,
@@ -338,11 +326,9 @@ export async function triggerSchedule(scheduleId: string): Promise<void> {
     );
   }
 
-  // Bookkeeping update split from runner.start() so a DB failure here
-  // never overwrites a successful run with lastError.
-  // We only refresh the lightweight summary fields here — the full
-  // run row already carries `schedule_id` via the runner.start path,
-  // so the history list reads from entity_run directly.
+  // Split from runner.start() so a DB failure here never overwrites
+  // a successful run with lastError. Only refreshes summary fields;
+  // full history reads from entity_run via schedule_id.
   if (runResult) {
     try {
       [updated] = await db
@@ -366,17 +352,15 @@ export async function triggerSchedule(scheduleId: string): Promise<void> {
     );
   }
 
-  // Fallback: if the run succeeded but the DB bookkeeping update
-  // failed, construct an in-memory snapshot so the schedule still
-  // re-arms. Next boot will replay from DB state.
+  // If bookkeeping failed, synthesise a snapshot so re-arm still
+  // works; next boot replays from DB state anyway.
   if (!updated && runResult) {
     updated = { ...row, lastTriggeredAt: new Date(), lastError: null };
   }
 
   if (updated) {
-    // QUIRK: auto-disable one-shots after their single fire so the
-    // row stays as a "completed" record but doesn't sit in the
-    // timer map forever.
+    // Auto-disable one-shots — keep the row as a completed record
+    // but evict from the timer map.
     if (updated.intervalValue === null) {
       await db
         .update(ScheduleTable)
@@ -385,8 +369,7 @@ export async function triggerSchedule(scheduleId: string): Promise<void> {
       unregisterSchedule(scheduleId);
       return;
     }
-    // Recurring — rearm; registerSchedule auto-disables if next
-    // fire falls past endAt.
+    // Recurring — rearm; registerSchedule auto-disables past endAt.
     registerSchedule(updated);
   }
 }
@@ -412,7 +395,7 @@ export function registerSchedule(row: ScheduleEntity): void {
 
   const next = nextFireAt(row);
   if (!next) {
-    // Fire-and-forget: disable so the panel reflects exhausted state.
+    // Exhausted — disable so the panel reflects state.
     void db
       .update(ScheduleTable)
       .set({ enabled: false, updatedAt: sql`CURRENT_TIMESTAMP` })
@@ -423,7 +406,6 @@ export function registerSchedule(row: ScheduleEntity): void {
 
   const armWith = (delayMs: number): ReturnType<typeof setTimeout> => {
     if (delayMs > MAX_TIMER_MS) {
-      // Chunk re-arm until we're inside the platform clamp.
       return setTimeout(
         () => registerSchedule(row),
         MAX_TIMER_MS,

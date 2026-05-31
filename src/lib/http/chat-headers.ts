@@ -1,17 +1,5 @@
 /**
- * Centralised chat-path HTTP header names.
- *
- * Why these are headers (not body fields):
- *   - They are routing metadata, not business data — same category as
- *     `Content-Type`, `Accept`, `X-Tenant-Id`.
- *   - They must be readable in `withSession`-style middleware before
- *     the body is parsed, so route handlers can fail-fast on a missing
- *     credential or unknown mode without consuming the request stream.
- *   - Putting them in the AG-UI `RunAgentInput` body would either
- *     pollute the AG-UI schema or require a `HttpAgent` subclass on
- *     the client to inject custom body fields.
- *
- * @see docs/orchestrator.md "Custom HTTP Headers" for the full rationale.
+ * Centralised chat-path HTTP header names. See docs/orchestrator.md.
  */
 
 /**
@@ -26,13 +14,10 @@ export const CREDENTIAL_ID_HEADER = "X-Credential-Id" as const;
 
 /**
  * SECURITY: exact 36-char UUID v4 lock — credential rows are
- * `uuid().defaultRandom()`. Prevents arbitrarily long hex strings
- * from passing validation (DOS surface via giant ids on hot paths).
- *
- * Used to validate both the `X-Credential-Id` HTTP header value and
- * the `credentialIds` query parameter on `/api/entities` — anywhere
- * an untrusted string is interpreted as a credential row id before
- * the DB lookup.
+ * `uuid().defaultRandom()`. Use anywhere an untrusted string is
+ * interpreted as a credential row id (X-Credential-Id header,
+ * /api/entities credentialIds query param) so a giant hex string
+ * can't reach the DB lookup.
  */
 export const CREDENTIAL_ID_PATTERN: RegExp = /^[a-f0-9-]{36}$/;
 

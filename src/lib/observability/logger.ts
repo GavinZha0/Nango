@@ -13,8 +13,10 @@ function parseBool(v: string | undefined, fallback: boolean): boolean {
 }
 
 const enabled = parseBool(process.env.NANGO_LOG_ENABLED, true);
-const isProd = process.env.NODE_ENV === "production";
-const pretty = parseBool(process.env.NANGO_LOG_PRETTY, !isProd);
+// Default JSON-only so container log shippers (Loki, Datadog,
+// CloudWatch) work out of the box. Set NANGO_LOG_PRETTY=true in
+// dev `.env` for human-readable colourised output.
+const pretty = parseBool(process.env.NANGO_LOG_PRETTY, false);
 const level = enabled
   ? (process.env.NANGO_LOG_LEVEL ?? "info")
   : "silent";
@@ -52,8 +54,10 @@ export const logger: PinoLogger = pino({
     remove: false,
   },
   timestamp: pino.stdTimeFunctions.isoTime,
-  // QUIRK: pretty transport runs in a worker thread; only enable in
-  // dev. In Next.js production `pretty` resolves to false (no-op).
+  // pino-pretty runs in a worker thread loaded via dynamic require().
+  // Next.js standalone needs `outputFileTracingIncludes` to ship the
+  // module (see next.config.ts) — without that the worker fails to
+  // resolve the transport at startup.
   ...(pretty
     ? {
         transport: {

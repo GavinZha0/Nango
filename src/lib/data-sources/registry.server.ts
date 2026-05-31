@@ -1,5 +1,5 @@
 /**
- * Server-only data-source registry.
+ * Server-only data-source registry. See docs/data-sources.md.
  */
 
 import "server-only";

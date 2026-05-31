@@ -21,31 +21,11 @@ import {
 } from "@/lib/outcomes/replay-rebuilders";
 
 /**
- * GET /api/threads/[id]/outcomes — replay the current thread's
- * outcome-producing tool history into the polymorphic Outcome list
- * used by the `/outcomes` panel.
- *
- * See `docs/data-visualization.md` §6.10.
- *
- * Authorisation: any authenticated user, but only for threads whose
- * runs they own. Filter is `entity_run.owner_id = session.user.id` —
- * if the thread holds no runs the user owns, the response is
- * `{ outcomes: [] }` (we intentionally do NOT 404, because "empty
- * thread" and "not your thread" are indistinguishable to a non-owner
- * and we'd rather not leak existence).
- *
- * Polymorphic replay shape:
- *  - Pull BOTH `tool_call_chunk` rows whose `toolName` is in the
- *    rebuildable set AND every `tool_call_result` in the thread.
- *    Results have no `toolName` field, so we filter chunks first
- *    then pair by `toolCallId` in memory.
- *  - Order by `(event.ts ASC, event.seq ASC)` so chunks naturally
- *    precede their own results in the dispatch loop.
- *  - Dispatch each chunk to a per-tool rebuilder (lib/outcomes/
- *    replay-rebuilders.ts). The rebuilders are pure functions and
- *    unit-tested in isolation; this route is a thin orchestrator.
- *  - Back-fill `savedArtifactId` from `artifact` where
- *    `(source_thread_id, source_outcome_id)` matches.
+ * GET /api/threads/[id]/outcomes — replay the thread's
+ * outcome-producing tool history. Owner-scoped; threads with no
+ * runs the user owns return `{ outcomes: [] }` (no 404 — "empty"
+ * vs "not yours" are indistinguishable). Dispatches per-tool via
+ * `lib/outcomes/replay-rebuilders.ts`. See docs/data-visualization.md.
  */
 
 const ROUTE = "/api/threads/[threadId]/outcomes" as const;
@@ -67,9 +47,8 @@ export const GET = withSession<{ threadId: string }>(
   ROUTE,
   async ({ params, session, log }) => {
     const threadId: string = params.threadId;
-    // The threadId column on entity_run is `uuid` — Postgres throws
-    // on malformed input. Catch the obvious format mismatch up front
-    // so we return a friendly 400 instead of leaking a DB error.
+    // entity_run.thread_id is `uuid` — pre-validate so we return 400
+    // instead of leaking a Postgres parse error.
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         threadId,
@@ -80,15 +59,9 @@ export const GET = withSession<{ threadId: string }>(
 
     const userId: string = session.user.id;
 
-    // 1. Pull every event we might care about in one query:
-    //    - tool_call_chunk rows whose toolName is in REBUILDABLE_TOOLS
-    //      (filtered server-side via payload->>'toolName' so we don't
-    //      deserialise unrelated tool calls).
-    //    - all tool_call_result rows (results don't carry `toolName`,
-    //      so we keep them all and pair in memory by toolCallId).
-    //
-    //    Ordering by (ts, seq) means chunks naturally precede their
-    //    own results, so the pairing pass always sees the chunk first.
+    // Pull rebuildable chunks (filtered server-side by payload->>'toolName')
+    // + all result rows (no toolName in result payload — paired in memory).
+    // (ts, seq) ordering puts each chunk before its result.
     const rows = await db
       .select({
         runId: EntityRunTable.id,
@@ -175,14 +148,9 @@ export const GET = withSession<{ threadId: string }>(
       }
     }
 
-    // 3. Back-fill savedArtifactId for outcomes the user has saved.
-    //
-    //    Defensive: this query touches `source_thread_id` /
-    //    `source_outcome_id` on `artifact`. If migration 0031 hasn't
-    //    been applied the columns don't exist; we MUST NOT fail the
-    //    whole replay — outcomes are derived from `entity_run_event`
-    //    and remain useful even without the ✓ badge. Log the pg
-    //    cause so the operator sees what to fix.
+    // 3. Back-fill savedArtifactId. Defensive try/catch: missing
+    //    columns ("source_thread_id" / "source_outcome_id") must not
+    //    fail the whole replay — outcomes are still derivable.
     if (outcomes.size > 0) {
       const outcomeIds: string[] = [...outcomes.keys()];
       try {

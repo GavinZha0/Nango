@@ -1,7 +1,6 @@
 /**
  * Mastra chat handler — protocol bridge from Mastra's native SSE → AG-UI.
- *
- * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
+ * See docs/backend-integration.md.
  */
 
 import "server-only";
@@ -21,8 +20,6 @@ import {
   ToolCallFilter,
 } from "../bridge-runtime-kit.server";
 
-// Mastra chunk shapes (only fields we read)
-
 interface MastraChunkBase {
   type: string;
   runId?: string;
@@ -33,7 +30,6 @@ type MastraChunk = MastraChunkBase & {
   payload?: Record<string, unknown>;
 };
 
-// @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
 function sanitiseMessages(messages: Message[]): Message[] {
   return messages.filter(
     (m) =>
@@ -45,10 +41,8 @@ function sanitiseMessages(messages: Message[]): Message[] {
   );
 }
 
-// Bridging Agent
-
 interface BridgeConfig {
-  /** e.g. "http://localhost:4111/api" — already trimmed. */
+  /** Already trimmed of trailing slash, e.g. "http://localhost:4111/api". */
   baseUrl: string;
   apiKey: string;
   agentId: string;
@@ -59,16 +53,13 @@ class MastraBridgeAgent extends AbstractAgent {
     super();
   }
 
-  // Re-attach config after `super.clone()` (same pattern in agno/dify bridges).
   clone(): this {
     return attachBridgeConfig(super.clone() as this, this.cfg);
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
     return createBridgeRunObservable(input, async ({ abortSignal, emit, isCancelled }) => {
-      // Server-trusted: runner injects `forwardedProps.user_id` from
-      // `session.user.id` (chat) or `ownerId` (programmatic dispatch)
-      // before this code is reached. @see lib/runner/inject-user-id.ts
+      // Server-injected upstream by lib/runner/inject-user-id.ts.
       const userId = input.forwardedProps?.user_id as string;
 
       const url = `${this.cfg.baseUrl}/agents/${encodeURIComponent(this.cfg.agentId)}/stream`;
@@ -192,11 +183,9 @@ class MastraBridgeAgent extends AbstractAgent {
             if (!tcId || !tools.isForwarded(tcId)) break;
             const content =
               typeof p.result === "string" ? p.result : JSON.stringify(p.result ?? null);
-            // SCHEMA NOTE: AG-UI requires `messageId` on TOOL_CALL_RESULT
-            // (the assistant message envelope the tool call belongs to).
-            // Pre-fix code omitted it under `as BaseEvent`. Synthesise
-            // a stable id from runId so persistence + replay link the
-            // result back to the same logical turn.
+            // AG-UI REQUIRES `messageId` on TOOL_CALL_RESULT — synthesise
+            // a stable id from runId so persistence + replay link back
+            // to the same logical turn.
             emit({
               type: EventType.TOOL_CALL_RESULT,
               messageId: `msg_${input.runId}`,
@@ -225,16 +214,12 @@ class MastraBridgeAgent extends AbstractAgent {
   }
 }
 
-// Public chat handler
-
 export const mastraChatHandler: IBackendChatHandler = {
   provider: "mastra",
 
   async buildAgent(ctx: ChatContext) {
-    // AG-UI fast-path when the mastra server has registered
-    // CopilotKit-compatible routes via `@ag-ui/mastra`'s
-    // `registerCopilotKit({ path, resourceId })`; falls back to the
-    // chunk-protocol bridge below.
+    // AG-UI fast-path when `@ag-ui/mastra`'s `registerCopilotKit` is
+    // wired upstream; otherwise the chunk-protocol bridge below.
     const passthrough = await buildPassthroughAgentIfConfigured(ctx);
     if (passthrough) return passthrough;
 

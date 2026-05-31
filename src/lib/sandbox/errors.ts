@@ -1,5 +1,7 @@
 /**
  * Structured errors thrown by the sandbox layer.
+ *
+ * See docs/sandbox.md.
  */
 
 export type SandboxErrorCode =

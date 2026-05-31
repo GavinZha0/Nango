@@ -1,5 +1,6 @@
 /**
  * Shared extraction logic for adapters backed by a DuckDB scanner
+ * extension (postgres, mysql). See docs/data-sources.md.
  */
 
 import "server-only";
@@ -18,10 +19,11 @@ export interface ExtractViaDuckdbInput {
   /** Connection string the ATTACH statement consumes (libpq-style). */
   attachString: string;
   /**
-   * Optional `USE src."<schema>"` after ATTACH. Required for MySQL/MariaDB
-   * because DuckDB's MySQL extension exposes databases as schemas under `src`
-   * catalog; ATTACH `database=...` only sets MySQL session default, not DuckDB.
-   * Postgres adapter doesn't set this (schema-qualified names expected).
+   * Optional `USE src."<schema>"` after ATTACH. Required for
+   * MySQL/MariaDB because DuckDB's MySQL extension exposes databases
+   * as schemas under the `src` catalog; ATTACH `database=...` only
+   * sets the upstream session default, not DuckDB's. Postgres adapter
+   * doesn't set this (schema-qualified names expected).
    */
   defaultSchema?: string;
   /** Public extract input from the adapter caller. */
@@ -29,10 +31,11 @@ export interface ExtractViaDuckdbInput {
 }
 
 /**
- * Run extraction: DuckDB in-memory → install extension → ATTACH upstream →
- * COPY query TO ZSTD Parquet → introspect schema.
+ * Run extraction: DuckDB in-memory → install extension → ATTACH
+ * upstream → COPY query TO ZSTD Parquet → introspect schema.
  *
- * CONTRACT: throws on failure. Caller cleans up tmp slot via `abortWriteSlot()`.
+ * CONTRACT: throws on failure. Caller cleans up the tmp slot via
+ * `abortWriteSlot()`.
  */
 export async function extractViaDuckdb(
   args: ExtractViaDuckdbInput,
@@ -61,8 +64,6 @@ export async function extractViaDuckdb(
         await conn.run(`USE src.${quoteIdent(defaultSchema)};`);
       }
 
-      // COPY target path is single-quoted; the path is server-built
-      // (cache layer chose it), so single-quote escaping is enough.
       const copySql =
         `COPY (${input.query}) TO '${escapeSingleQuotes(input.outputPath)}' ` +
         `(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)`;
@@ -124,20 +125,18 @@ export async function testConnectionViaDuckdb(args: {
 
 /**
  * SECURITY: ATTACH connection strings are a SQL string literal, not a
- * shell command. We single-quote the value and escape embedded
- * single quotes. The ATTACH string itself is NOT user-controlled —
- * it is composed by the adapter from credential fields the admin
- * stored — so this is defence-in-depth.
+ * shell command. We single-quote the value and escape embedded single
+ * quotes. The ATTACH string is admin-composed (not user-controlled)
+ * so this is defence-in-depth.
  */
 function escapeSingleQuotes(s: string): string {
   return s.replaceAll("'", "''");
 }
 
 /**
- * Wrap an identifier in double quotes (DuckDB's default) and escape
- * any embedded `"`. The schema name comes from the data_source row
- * (admin-controlled) so this is defence-in-depth, not a primary
- * untrusted-input boundary.
+ * Wrap an identifier in double quotes and escape any embedded `"`.
+ * The schema name comes from an admin-controlled data_source row —
+ * defence-in-depth, not a primary untrusted-input boundary.
  */
 function quoteIdent(s: string): string {
   return `"${s.replaceAll('"', '""')}"`;
@@ -152,10 +151,9 @@ async function raceWithTimeoutAndAbort<T>(
     const timer = setTimeout(() => {
       reject(new Error(`Operation exceeded ${timeoutMs}ms wall-clock budget.`));
     }, timeoutMs);
-    // Distinct from the timeout message above — the AbortSignal is
-    // wired to client cancellation (route forwards `req.signal`), not
-    // to our own timer. If you see this in production it means the
-    // browser closed the connection mid-call.
+    // AbortSignal is wired to client cancellation (route forwards
+    // `req.signal`), not to the timer above; the messages are
+    // intentionally distinct.
     const onAbort = () =>
       reject(new Error("Operation cancelled (request aborted by client)."));
     if (signal.aborted) onAbort();
@@ -178,8 +176,8 @@ async function raceWithTimeoutAndAbort<T>(
 
 /**
  * Read the Parquet file metadata DuckDB just wrote and project it
- * onto our ColumnSchema vocabulary. This is the only place where
- * DuckDB type names cross into our typed surface.
+ * onto our ColumnSchema vocabulary. The only place DuckDB type names
+ * cross into our typed surface.
  */
 async function introspectParquet(
   conn: Awaited<ReturnType<DuckDBInstance["connect"]>>,

@@ -1,7 +1,6 @@
 /**
  * Vertica data-source — server-side `DataSourceModule` aggregator.
- *
- * @see docs/data-sources.md §3.2
+ * See docs/data-sources.md.
  */
 
 import "server-only";

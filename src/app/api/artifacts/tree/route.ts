@@ -10,7 +10,7 @@ import { withSession } from "@/lib/http/route-handlers";
  * nested array of root nodes (system categories at the top, then
  * recursive `children`). Used by the `/artifacts` library page.
  *
- * @see docs/artifact-dashboard-migration.md §4
+ * See docs/artifact-evolution.md.
  */
 
 const ROUTE = "/api/artifacts/tree";

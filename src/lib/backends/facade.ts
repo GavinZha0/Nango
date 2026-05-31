@@ -1,7 +1,6 @@
 /**
  * Backend platform façade — generic fan-out + credential-name tagging.
- * All backend-specific switches live inside the per-platform adapters
- * under `./providers/`. Onboarding: `docs/backend-integration.md` §10.
+ * See docs/backend-integration.md.
  */
 
 import { ADAPTERS } from "./registry";
@@ -32,10 +31,7 @@ export interface BackendCredentialInfo {
   provider: BackendId;
 }
 
-/** 
- * Silently drops unknown providers — they only become known
- * after their adapter is registered. 
- */
+/** Silently drops unknown providers. */
 export function toBackendCredentials(
   configs: { id: string; name: string; provider: string | null }[],
 ): BackendCredentialInfo[] {
@@ -64,23 +60,9 @@ interface EntitiesResponse {
 
 /**
  * Fetch every entity from the given credentials via `GET /api/entities`.
- * Control-plane entry point — the server resolves each credential
- * through `EntityCatalog` (10-min TTL + singleflight) and returns
- * descriptors with `credentialName` already attached. Per-credential
- * errors are surfaced without aborting the whole call.
- *
- * Note: chat dispatch (`/api/copilotkit`) DOES read EntityCatalog —
- * exactly once per request to resolve `entityKind` server-side from
- * `(credentialId, agentId)`. The cache is warmed by the agent picker
- * on UI mount, so hits are sub-ms; the dispatch path never trusts a
- * client-supplied kind. Supervisor and scheduler resolve kind through
- * their own paths (precomputed catalog / `schedule.entity_kind`).
- * See `docs/orchestrator.md` "Custom HTTP Headers" and
- * `docs/backend-integration.md` §3.
- *
- * Errors are joined into one string for `FetchResult` shape
- * compatibility; callers needing per-credential attribution can hit
- * `/api/entities` directly.
+ * Per-credential errors are joined into one string; callers needing
+ * per-credential attribution can hit `/api/entities` directly.
+ * See docs/backend-integration.md.
  */
 export async function getEntities(
   credentials: BackendCredentialInfo[],
@@ -141,9 +123,7 @@ export function getCapabilities(
   return isSupportedBackend(provider) ? ADAPTERS[provider].capabilities : null;
 }
 
-/** True when any credential's adapter can produce `kind`. UI uses this
- *  to decide whether to render a "Teams" / "Workflows" section
- *  without a list call first. */
+/** True when any credential's adapter can produce `kind`. */
 export function hasEntityKind(
   credentials: BackendCredentialInfo[],
   kind: EntityKind,

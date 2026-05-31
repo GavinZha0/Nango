@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible problem in Nango
+title: "fix: <short description>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+
+        Please **search existing issues** before opening a new one.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of the bug.
+      placeholder: When I click X, Y happens, but I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimum steps to reproduce the issue.
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Nango version / commit
+      placeholder: v0.1.0 or git sha
+    validations:
+      required: true
+
+  - type: dropdown
+    id: env
+    attributes:
+      label: How are you running Nango?
+      options:
+        - Docker Compose (production image)
+        - Local dev (pnpm dev)
+        - Custom Docker build
+        - Other (describe in summary)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / screenshots
+      description: Paste console output or attach screenshots. **Redact any secrets.**
+      render: shell

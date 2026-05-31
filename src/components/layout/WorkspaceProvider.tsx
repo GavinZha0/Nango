@@ -31,36 +31,46 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     setUserId(userId);
   }, [userId, setUserId]);
 
-  // Boot the notification subsystem (initial fetch + SSE stream +
-  // BroadcastChannel listener). Once is enough; the hook itself is
-  // idempotent across re-renders.
+  // Auto-detect the user's timezone from the browser ONCE, and only
+  // when the profile has none yet. An existing value (auto-detected
+  // earlier OR set by the user) is NEVER auto-overwritten, so a chosen
+  // timezone sticks across logins and devices. Running on session load
+  // covers sign-up auto-login, manual login, and backend-created users'
+  // first visit alike — no separate hook at the registration step.
+  const tzDetectedRef = useRef(false);
+  const currentTz =
+    (sessionData?.user as { timezone?: string | null } | undefined)?.timezone
+    ?? null;
+  useEffect(() => {
+    if (!userId || currentTz || tzDetectedRef.current) return;
+    const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!browserTz) return;
+    tzDetectedRef.current = true;
+    void authClient
+      .updateUser({ timezone: browserTz })
+      .then((res) => {
+        if (res?.error) {
+          tzDetectedRef.current = false; // allow retry on a later mount
+          console.warn("[workspace] timezone auto-detect failed", res.error);
+        }
+      })
+      .catch((err) => {
+        tzDetectedRef.current = false;
+        console.warn("[workspace] timezone auto-detect error", err);
+      });
+  }, [userId, currentTz]);
+
+  // Boot notifications (initial fetch + SSE + BroadcastChannel).
+  // Idempotent across re-renders.
   useStartNotifications();
 
-  // Outcome panel ↔ thread coupling.
-  //
-  // Subscribe to workspaceStore.runtimeThreadId so the Outcomes panel
-  // tracks the live thread. (We pick runtimeThreadId not explicitThreadId
-  // because outcomes are attribution — they belong to whichever thread
-  // actually ran the chart, regardless of whether the user got here via
-  // fresh chat or history restore.) See docs/chat-flow-audit.md §1.11.
-  //
-  // Clear/load policy (see docs/data-visualization.md §6.7):
-  //
-  //  - null → uuid (FIRST-time capture for this session):
-  //      do NOT clear — render_chart handlers running in-flight
-  //      may have JUST added outcomes whose `threadId` field is
-  //      still null/"unknown" because workspaceStore hadn't seen
-  //      the id yet. Load only if the local list is empty — that
-  //      covers the page-refresh path without blowing away
-  //      just-added charts.
-  //
-  //  - uuid₁ → uuid₂ (real thread switch — new chat, history click,
-  //      handoff): clear and load.
-  //
-  //  - uuid → null (logout, agent switch that resets thread):
-  //      clear; don't load.
-  //
-  //  - equal: no-op.
+  // Outcome panel ↔ runtimeThreadId coupling.
+  //   null → uuid : first capture; back-fill pending threadIds and
+  //                 only load if local list is empty (don't wipe
+  //                 in-flight optimistic outcomes).
+  //   uuid₁ → uuid₂ : real thread switch — clear and load.
+  //   uuid → null : clear, no load.
+  // See docs/data-visualization.md.
   useEffect(() => {
     const unsubscribe = useWorkspaceStore.subscribe((state, prev) => {
       const next = state.runtimeThreadId;
@@ -70,9 +80,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       const store = useOutcomeStore.getState();
 
       if (prior === null && next !== null) {
-        // First capture for this session — preserve any optimistic
-        // outcomes added during the in-flight run. Back-fill their
-        // (still-null) threadId so the Save flow has the real id.
+        // First capture — back-fill optimistic outcomes, load only
+        // when local list is empty (page refresh path).
         store.bindPendingThreadId(next);
         if (store.outcomes.length === 0) {
           void store.loadForThread(next);
@@ -80,7 +89,6 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         return;
       }
 
-      // Either uuid → null or uuid₁ → uuid₂ — both need a clear.
       store.clearForThreadSwitch();
       if (next !== null) {
         void store.loadForThread(next);
@@ -89,11 +97,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     return unsubscribe;
   }, []);
 
-  // Load all three agent sources in parallel exactly once on mount.
-  // Each source updates the store as soon as it arrives. The first source
-  // with available agents auto-selects the default for the chat panel.
-  // `cancelled` only goes true on unmount — NOT when an agent is selected,
-  // so slower sources still get their data merged into the store.
+  // Load all agent sources in parallel exactly once on mount. Each
+  // source merges into the store as it arrives; the first source
+  // with results auto-selects the default chat agent.
   const didLoad = useRef(false);
 
   useEffect(() => {

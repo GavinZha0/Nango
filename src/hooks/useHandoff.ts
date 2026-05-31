@@ -112,7 +112,7 @@ export function useHandoffTools(): void {
  *
  * Caller passes the live per-thread agent in directly — must be the same
  * instance the UI is subscribed to (typically obtained via `useAgent`
- * inside the chatView slot shell). See docs/chat-flow-audit.md §1.10.
+ * inside the chatView slot shell). See docs/chat-flow-audit.md
  *
  * De-duplication relies on `consumeHandoffContext` being an atomic
  * read-and-clear: once the pending text has been consumed, subsequent

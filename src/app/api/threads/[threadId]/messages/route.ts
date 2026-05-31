@@ -10,7 +10,7 @@
  * yourself calling this from product code, you're probably looking
  * for the SSE path instead.
  *
- * @see docs/persisted-agent-runner-migration.md
+ * See docs/persisted-agent-runner-migration.md.
  */
 
 import "server-only";
@@ -144,7 +144,7 @@ export const GET = withSession<RouteParams>(
 /**
  * Convert one run's persisted events into AG-UI messages.
  *
- * @see docs/runner-events.md#44-why-two-rows-per-tool-call
+ * See docs/runner-events.md.
  */
 function transformRunEvents(
   runId: string,
@@ -178,7 +178,6 @@ function transformRunEvents(
         flushAssistant();
         const p = (ev.payload ?? {}) as MessagePayload;
         const messageId = p.messageId ?? `${runId}.msg.${ev.seq}`;
-        // @see docs/runner-events.md#stage-5-replay
         if (p.role === "user") {
           out.push({
             id: messageId,

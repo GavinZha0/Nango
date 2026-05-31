@@ -30,9 +30,12 @@ export class ProviderHttpError extends Error {
 }
 
 /**
- * Thrown by stub providers (Brave currently) that are registered in
- * the catalog but not yet wired to their upstream API. The runtime
- * tool surfaces this as `error: "NOT_IMPLEMENTED"`.
+ * Reserved for providers registered in the catalog but not yet wired
+ * to their upstream API. No provider currently throws this — all
+ * four shipping providers (Exa, Tavily, Brave, Jina) are implemented
+ * — but the class stays exported so a future stub addition does not
+ * need to re-introduce the runtime-tool `error: "NOT_IMPLEMENTED"`
+ * branch from scratch.
  */
 export class NotImplementedError extends Error {
   constructor(readonly provider: WebSearchProviderId) {

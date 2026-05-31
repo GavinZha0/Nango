@@ -1,46 +1,32 @@
 /**
- * Workflow refs — the `@path` pointer syntax used by spec fields
- * to flow data between nodes / workflow inputs / runtime context.
+ * Workflow refs — the `@path` pointer syntax used by spec fields to
+ * flow data between nodes / workflow inputs / runtime context.
  *
- * This module is the **"pointer ABI"** of the workflow subsystem:
- * pure syntax-layer parse / serialize / scan / filter. It does NOT
- * know what nodes exist, what fields a node declares, or what
- * values a ref resolves to at runtime. Those are answered by
- * `validate.ts` (reachability) and `engine/execution-context.ts`
- * (resolution).
+ * Pure syntax-layer parse / serialize / scan / filter. Reachability
+ * checks live in `validate.ts`; runtime resolution lives in
+ * `engine/execution-context.ts`.
  *
- * Three ref kinds (see `docs/workflow-architecture.md §3.4`):
+ * Three ref kinds:
+ *   @nodes.<numeric-id>.<field>  — upstream node output field
+ *   @workflow.<inputKey>         — workflow-level input parameter
+ *   @context.<path...>           — runtime context (user / now / …)
  *
- *   @nodes.<numeric-id>.<field>     — upstream node output field
- *   @workflow.<inputKey>            — workflow-level input parameter
- *   @context.<path...>              — runtime context (user / now / etc.)
- *
- * Two ref forms:
- *
- *   Pure-reference: the WHOLE field value is a ref string
- *                     "data": "@nodes.0.dataset"
- *
+ * Two forms:
+ *   Pure-reference:  the whole field value is a ref string
+ *                      "data": "@nodes.0.dataset"
  *   Embedded:        ref tokens interpolated INTO a larger string
- *                     "sql": "SELECT * FROM o WHERE id = @workflow.id"
- *                     "url": "https://api.com/orgs/@nodes.1.org_id/items"
+ *                      "sql": "SELECT * FROM o WHERE id = @workflow.id"
  *
- * Consumers (V1):
- *   - `validate.ts`           — parseRef each ref; check node/field exists
- *   - `build-from-events.ts`  — D14 Strategy Z+ save-time ref reconstruction:
- *                               isRefCandidate filter + serializeRef writer
- *   - `engine/execution-context.ts` — runtime resolver
- *   - `engine/output-resolver.ts`   — resolve `spec.outputs` map at end of run
+ * See docs/workflow.md.
  */
 
 // ─── Types ────────────────────────────────────────────────────────────
 
 /**
  * Reference to an upstream node's output field. `nodeId` is the
- * numeric `spec.nodes[i].id` value (D29). `field` is a flat
- * top-level key in the producing node's `outputs[]` declaration
- * (D19) — refs do NOT traverse into nested structures (V1 keeps
- * this strict; downstream nodes that want nested access do their
- * own projection).
+ * numeric `spec.nodes[i].id`. `field` is a flat top-level key in the
+ * producing node's `outputs[]` — refs do not traverse nested
+ * structures.
  */
 export interface NodeOutputRef {
   kind: "node";
@@ -48,10 +34,7 @@ export interface NodeOutputRef {
   field: string;
 }
 
-/**
- * Reference to a workflow-level input parameter declared in
- * `spec.input_schema`. `key` is a top-level property name.
- */
+/** Reference to a workflow-level input declared in `spec.input_schema`. */
 export interface WorkflowInputRef {
   kind: "workflow";
   key: string;
@@ -59,9 +42,9 @@ export interface WorkflowInputRef {
 
 /**
  * Reference to runtime context — a structured object the engine
- * injects per-run with user identity, current time, secrets, etc.
- * Unlike node / workflow refs, context refs can have **nested
- * paths** (e.g. `@context.user.id` → `path = ["user", "id"]`).
+ * injects per-run (user identity, current time, secrets, …). Context
+ * refs allow nested paths, e.g. `@context.user.id` →
+ * `path = ["user", "id"]`.
  */
 export interface ContextRef {
   kind: "context";
@@ -72,43 +55,31 @@ export type WorkflowRef = NodeOutputRef | WorkflowInputRef | ContextRef;
 
 // ─── Internal grammar ─────────────────────────────────────────────────
 
-/**
- * Character set allowed for each path segment (between dots).
- * Matches typical identifier syntax: letters, digits, underscore,
- * hyphen. Notably EXCLUDES `.` so the parser is unambiguous.
- */
+/** Path segment alphabet. Notably excludes `.` to keep parsing unambiguous. */
 const SEGMENT_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Regex used by `findEmbeddedRefs` to locate ref tokens inside a
- * larger string. Matches `@<sigil>` followed by one or more
- * dot-separated segments. The trailing segment ends at any
- * character outside the segment char set (whitespace, `,`, `/`,
- * `"`, `)`, etc.).
- *
- * Marked `g` for iterative scan via `regex.exec` (callers must
- * reset `lastIndex` if reusing across calls).
+ * larger string. `g` is for iterative scan via `regex.exec`; callers
+ * recreate the regex per call to keep `lastIndex` local.
  */
 const EMBEDDED_REF_RE = /@(nodes|workflow|context)(?:\.[a-zA-Z0-9_-]+)+/g;
 
 // ─── parseRef ─────────────────────────────────────────────────────────
 
 /**
- * Parse a candidate ref string into its structured form. Returns
- * `null` if the input is NOT a syntactically valid ref — callers
- * should treat null as "this string is a literal, not a ref".
+ * Parse a candidate ref string into structured form. Returns `null`
+ * for any malformed input — callers treat null as "literal, not a
+ * ref".
  *
- * Strict rules (V1):
- *   - Must start with `@` followed by a known sigil.
- *   - Each path segment must match `[a-zA-Z0-9_-]+` (no dots, no
- *     empties).
- *   - `@nodes.<id>.<field>` — EXACTLY two segments; `<id>` must
- *     parse as a non-negative integer.
- *   - `@workflow.<key>` — EXACTLY one segment.
- *   - `@context.<path>(.<path>)*` — one OR MORE segments.
- *
- * Unrecognized sigil, wrong segment count, malformed nodeId, or
- * any non-conformant segment → null.
+ * Rules:
+ *   - starts with `@<sigil>`
+ *   - each segment matches `[a-zA-Z0-9_-]+`
+ *   - `@nodes.<id>.<field>`     — exactly two segments; `<id>` is a
+ *                                  non-negative integer with no
+ *                                  leading zeros (other than "0")
+ *   - `@workflow.<key>`         — exactly one segment
+ *   - `@context.<seg>(.<seg>)*` — one or more segments
  */
 export function parseRef(s: string): WorkflowRef | null {
   if (typeof s !== "string" || s.length < 2 || s[0] !== "@") return null;
@@ -119,7 +90,6 @@ export function parseRef(s: string): WorkflowRef | null {
   const sigil = parts[0];
   const segments = parts.slice(1);
 
-  // Every segment must be non-empty and match the allowed char set.
   for (const seg of segments) {
     if (!SEGMENT_RE.test(seg)) return null;
   }
@@ -127,9 +97,6 @@ export function parseRef(s: string): WorkflowRef | null {
   switch (sigil) {
     case "nodes": {
       if (segments.length !== 2) return null;
-      // Numeric id must be a non-negative integer (D29). Reject
-      // leading zeros (other than the standalone "0") to keep the
-      // round-trip via serializeRef stable.
       const raw = segments[0];
       if (!/^(0|[1-9][0-9]*)$/.test(raw)) return null;
       const nodeId = Number(raw);
@@ -141,7 +108,6 @@ export function parseRef(s: string): WorkflowRef | null {
       return { kind: "workflow", key: segments[0] };
     }
     case "context": {
-      // Context allows any nesting depth.
       return { kind: "context", path: segments };
     }
     default:
@@ -153,8 +119,8 @@ export function parseRef(s: string): WorkflowRef | null {
 
 /**
  * Convert a structured ref back to its canonical string form.
- * Round-trips with {@link parseRef}: `parseRef(serializeRef(r))`
- * yields a deeply equal ref.
+ * Round-trips with `parseRef`: `parseRef(serializeRef(r))` is deeply
+ * equal to `r`.
  */
 export function serializeRef(r: WorkflowRef): string {
   switch (r.kind) {
@@ -170,19 +136,14 @@ export function serializeRef(r: WorkflowRef): string {
 // ─── findEmbeddedRefs ─────────────────────────────────────────────────
 
 /**
- * Scan a string for ALL embedded ref tokens. Used by the engine's
- * runtime resolver when interpolating refs into SQL / Python code /
- * HTTP URLs / prompt strings / etc.
- *
- * Returns refs in the ORDER they appear. Skips any token that
- * matches the embedded-ref shape but fails `parseRef` (e.g.,
- * `@nodes.abc.foo` — non-integer node id).
+ * Scan a string for all embedded ref tokens, in order of appearance.
+ * Used by the runtime resolver when interpolating refs into SQL /
+ * code / URLs / prompts. Tokens that match the shape but fail
+ * `parseRef` (e.g. non-integer node id) are skipped.
  */
 export function findEmbeddedRefs(s: string): WorkflowRef[] {
   if (typeof s !== "string") return [];
   const refs: WorkflowRef[] = [];
-  // Recreate the regex per call to keep lastIndex local — the
-  // module-level constant is a template only.
   const re = new RegExp(EMBEDDED_REF_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(s)) !== null) {
@@ -192,42 +153,21 @@ export function findEmbeddedRefs(s: string): WorkflowRef[] {
   return refs;
 }
 
-// ─── isRefCandidate (D14 Strategy Z+) ─────────────────────────────────
+// ─── isRefCandidate ───────────────────────────────────────────────────
 
 /**
- * D14 §7.10.2 step filter — "does this value LOOK like an upstream
- * ID we should try to rewrite as a ref?".
+ * Save-time filter — "does this value look like an upstream ID we
+ * should try to rewrite as a ref?".
  *
- * Strategy Z+ algorithm walks each node's input recursively. For
- * every string-typed leaf, it calls `isRefCandidate`. Only
- * candidates participate in the value→source index lookup; literal
- * SQL, Python code, Markdown content, etc. are skipped because
- * they contain whitespace.
+ * Used by the value→source index in `build-from-events.ts`. Only
+ * candidates participate in the rewrite; literal SQL, code, prose,
+ * etc. are skipped because they contain whitespace.
  *
- * Rules (must ALL hold):
+ * Rules (all must hold):
  *   - `typeof value === "string"`
- *   - `value.length >= 6` — short strings (column names, status
- *     words like "ok"/"yes", currency codes, etc.) are unlikely
- *     to be IDs and would generate noise in the value→source index
- *   - contains no whitespace — `\s` excludes spaces, tabs, and
- *     newlines, which screens out SQL/code/prose; an ID-shaped
- *     string never contains whitespace
- *
- * V1.1 broadened from the original V1 regex-whitelist
- * ({UUID, nanoid, `prefix_token`} only) to "no whitespace + min
- * length". The whitelist was too narrow — LLM-emitted kebab-case
- * names like `latency-trend-2025-01-27` were rejected, so Strategy
- * Z+ failed to link chart_id ↔ dataset_name lineage in real chats.
- * Loosening is safe because:
- *   - Producer side (`addOutputsToIndex`) registers more upstream
- *     values into the index, but Strategy Z+'s ambiguity branch
- *     (sources.length > 1 → keep literal, record `ambiguous_matches`)
- *     safely degrades on collisions.
- *   - Consumer side (rewriting) only rewrites on unique match;
- *     candidates with no upstream producer pass through unchanged.
- * The residual risk — a downstream literal coincidentally matching
- * a single upstream output of the same value with semantic mismatch
- * — is bounded by the length floor and the no-whitespace rule.
+ *   - `value.length >= 6` — short strings (column names, "ok"/"yes",
+ *     currency codes) are unlikely IDs and would generate noise
+ *   - no whitespace — IDs do not contain spaces / tabs / newlines
  */
 export function isRefCandidate(value: unknown): boolean {
   if (typeof value !== "string") return false;

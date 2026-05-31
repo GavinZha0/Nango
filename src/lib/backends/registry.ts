@@ -1,5 +1,5 @@
 /**
- * Client-safe adapter registry. Components that need only static
+ * Client-safe adapter registry. See docs/backend-integration.md.
  */
 
 import type { IBackendAdapter, BackendId } from "./types";
@@ -18,6 +18,4 @@ export function getAdapter(provider: BackendId): IBackendAdapter {
   return ADAPTERS[provider];
 }
 
-/** All registered providers, in declaration order. Sourced from
- *  `BACKEND_IDS` so onboarding lives in one place. */
 export const SUPPORTED_PROVIDERS: readonly BackendId[] = BACKEND_IDS;

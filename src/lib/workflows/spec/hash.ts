@@ -1,48 +1,23 @@
 /**
  * Deterministic JSON serialization + SHA-256 — the cache-key
- * primitives the engine's two-level workflow cache builds on
- * (`docs/workflow-architecture.md` §7.4).
+ * primitives the engine's workflow cache builds on.
  *
- * Two consumers in V1:
- *
- *   - **Level 1 — per-node cache** (D20, Plan C):
- *       cache_key(node) = sha256(
- *         canonical(node.spec_excluding_runtime_metadata),
- *         canonical(resolved_inputs_for_node),
- *         upstream_outputs_hash(node))
- *     Lets cosmetic edits (description / retries) NOT bust caches,
- *     and constrains invalidation to the changed node + downstream.
- *
- *   - **Level 2 — workflow-output cache** (coalescing layer):
- *       workflow_cache_key = sha256(
- *         canonical(workflow.spec),
- *         canonical(inputs))
- *     Lets concurrent `/api/data/resolve` requests for the same
- *     (workflow, inputs) collapse onto a single execution.
- *
- * This module is *spec-shape-agnostic* — it knows nothing about
- * workflow specs and accepts any JSON-ish value. The engine's
- * cache layer decides what to feed in (e.g. which fields to strip
- * before hashing). Keeping the API narrow avoids coupling cache
- * invariants to spec-shape evolution.
+ * Spec-shape-agnostic: knows nothing about workflow specs and accepts
+ * any JSON-ish value. Callers decide what to feed in.
  *
  * Determinism invariants:
- *   - Object keys are sorted lexicographically before serialization
- *     (JSON.stringify object-key order is implementation-defined).
+ *   - Object keys are sorted lexicographically before serialization.
  *   - `-0` and `0` serialize identically (JSON has no signed zero).
- *   - Strings use `JSON.stringify` quoting → consistent Unicode
+ *   - Strings use `JSON.stringify` quoting for consistent Unicode
  *     escaping across Node versions.
  *
- * Non-canonicalizable inputs throw `WorkflowError` with code
- * `SPEC_SCHEMA_MISMATCH` (workflow-scoped: no `nodeId` since hash
- * has no node context — matches the validate.ts pattern for
- * structural failures with no single node to blame):
+ * Non-canonicalizable inputs throw `WorkflowError(SPEC_SCHEMA_MISMATCH)`
+ * (workflow-scoped — hash has no node context):
  *   - `undefined`, `NaN`, `Infinity`, `-Infinity`
  *   - `BigInt`, `Symbol`, `Function`
  *   - Circular references
  *
- * The original `Error` (if any) is preserved in `WorkflowError.cause`
- * for developer-side stack traces.
+ * See docs/workflow.md.
  */
 
 import { createHash } from "node:crypto";
@@ -53,14 +28,10 @@ import { WorkflowError } from "../error";
 
 /**
  * Serialize an arbitrary JSON-ish value to a deterministic string.
+ * Output is single-line with no whitespace — meant as a hash *input*,
+ * not a human-readable artefact.
  *
- * Output is a single-line stringification with no whitespace —
- * meant as a hash *input*, not a human-readable artefact. Use
- * `JSON.parse(canonicalJson(v))` if you need to round-trip it
- * back; semantics are pure JSON.
- *
- * Throws on any non-JSON value (see file header for the full
- * list).
+ * Throws on any non-JSON value.
  */
 export function canonicalJson(value: unknown): string {
   return serialize(value, new WeakSet<object>());
@@ -83,7 +54,6 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
     if (!Number.isFinite(value as number)) {
       fail(`non-finite number is not JSON-serializable (${String(value)})`);
     }
-    // JSON.stringify renders -0 as "0" → matches JSON semantics.
     return JSON.stringify(value);
   }
   if (t === "undefined") fail("undefined is not JSON-serializable");
@@ -92,7 +62,6 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
     fail(`${t} is not JSON-serializable`);
   }
 
-  // Object or array path.
   const obj = value as object;
   if (seen.has(obj)) fail("circular reference detected");
   seen.add(obj);
@@ -118,8 +87,7 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
 
 /**
  * SHA-256 (lowercase hex) of `canonicalJson(value)`. Stable across
- * Node versions and processes — same input bytes always produce
- * the same 64-char digest.
+ * Node versions and processes.
  */
 export function hashJson(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");

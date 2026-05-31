@@ -3,7 +3,7 @@
 /**
  * /outcomes — main-panel route for the transient Outcomes panel.
  *
- * See `docs/data-visualization.md` §6.4. This page is intentionally
+ * See `docs/data-visualization.md` This page is intentionally
  * trivial: it lazy-loads `OutcomesPanel`, which subscribes to
  * `outcomeStore` and renders the card list (grid or focus view).
  * The bulk of the bundle (echarts core, ~350 KB gzipped) only loads

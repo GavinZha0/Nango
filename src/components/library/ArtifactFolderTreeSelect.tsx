@@ -10,7 +10,7 @@
  * always have a non-null `parentId`, sub-folder always has a non-null
  * parent, so root selection is a manual override for future use).
  *
- * @see docs/artifact-dashboard-migration.md §11.2
+ * See docs/artifact-dashboard-migration.md.
  */
 
 import { ChevronDown, ChevronRight, Folder, FolderOpen, Loader2 } from "lucide-react";

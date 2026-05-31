@@ -24,7 +24,7 @@ import type {
  * and a single line of text (output summary on success, error message
  * on failure). The full run row / event stream stays in
  * `entity_run` / `entity_run_event` and is only reachable from the
- * admin `/admin/run/[id]` view (see AGENTS.md §15).
+ * admin `/admin/run/[id]` view (see AGENTS.md).
  *
  * Owner isolation: we look up the schedule first and bail with 404 if
  * it doesn't belong to the caller, so a probing request can't

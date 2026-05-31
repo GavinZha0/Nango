@@ -1,33 +1,19 @@
 /**
- * SQL-node executor (D36) — bridges to the existing
- * `extract_dataset_by_sql` server-side tool.
+ * SQL-node executor — bridges to the existing `extract_dataset_by_sql`
+ * server-side tool.
  *
  * Per-attempt body (retry loop + event emission lives in
  * `with-retries.ts`):
- *
  *   1. Resolve `@path` refs in `node.query`, `node.dataSourceName`,
- *      `node.name` — these are the three string fields that can
- *      carry refs into the SQL invocation.
- *   2. Look up the `extract_dataset_by_sql` tool handle via the
- *      injected `deps.getTool(...)`. The handle is shared with the
- *      generic tool-node path — no separate engine-side adapter.
- *   3. Compose the tool input from the resolved fields + the
- *      workflow-fixed defaults (`previewRows: 0` — workflow data
- *      flow doesn't consume inline previews; `forceRefresh: false`
- *      — workflow-scoped refresh happens at the artifact level).
- *   4. Call `tool.execute(...)` and inspect the result envelope:
- *        - `{ ok: false, error: { code, message } }` →
- *          translate `error.code` into a `WorkflowErrorCode` and
- *          throw.
- *        - Success → strip the operational fields (cacheHit /
- *          ttlHours / schema / preview) and return just
- *          `{ name, rowCount }` to match `DEFAULT_SQL_NODE_OUTPUTS`.
+ *      `node.name`.
+ *   2. Look up the `extract_dataset_by_sql` tool via `deps.getTool`.
+ *   3. Compose the tool input with workflow-fixed defaults
+ *      (`previewRows: 0`, `forceRefresh: false`).
+ *   4. Translate the tool's failure envelope into the right
+ *      `WorkflowErrorCode`; on success, strip operational fields and
+ *      return just `{ name, rowCount }` per `DEFAULT_SQL_NODE_OUTPUTS`.
  *
- * Failures throw — `withRetries` exhausts attempts before giving
- * up.
- *
- * See `docs/workflow-architecture.md` §17.26 (D36) for the design
- * rationale; the tool itself lives in
+ * See docs/workflow.md. The tool itself lives in
  * `src/lib/data-sources/runtime-tools.ts`.
  */
 
@@ -47,20 +33,17 @@ export type SqlNodeDeps = Pick<
 >;
 
 /**
- * Tool name the engine reaches for to actually run the SQL.
- * Constant here (not configurable) — the SQL node is by
- * definition a wrapper around this specific server tool. If the
+ * Tool name the engine reaches for to actually run the SQL. If the
  * tool isn't in the user catalog, the workflow can't execute SQL
- * nodes (caller's responsibility to make sure the artifact's
- * owner has at least one data source binding so the tool is
- * auto-mounted).
+ * nodes (the artifact's owner needs at least one data source binding
+ * for this tool to be auto-mounted).
  */
 const SQL_TOOL_NAME = "extract_dataset_by_sql";
 
 /**
- * Execute one SQL node. Returns the node's outputs bag on
- * success; throws `WorkflowError` on the final failure after all
- * retries are exhausted.
+ * Execute one SQL node. Returns the node's outputs bag on success;
+ * throws `WorkflowError` on the final failure after all retries are
+ * exhausted.
  */
 export async function executeSqlNode(
   node: CanonicalSqlNode,
@@ -74,9 +57,6 @@ export async function executeSqlNode(
     state,
     deps,
     attemptFn: async () => {
-      // Resolve refs in each ref-bearing string field individually.
-      // resolveRefs returns the resolved value typed as `unknown`,
-      // so we narrow before handing to the tool.
       const dataSourceName = resolveStringField(
         resolveRefs(node.dataSourceName, state),
         node.id,
@@ -115,21 +95,17 @@ export async function executeSqlNode(
           name,
           dataSourceName,
           query,
-          // Workflow data flow doesn't consume inline previews;
-          // skip the read & response payload.
+          // Workflow data flow doesn't consume inline previews.
           previewRows: 0,
-          // Workflow-scoped refresh happens at the artifact level
-          // (via POST /api/artifacts/[id]/refresh's L2 cache
-          // bypass), not per-node.
+          // Refresh happens at the artifact level, not per-node.
           forceRefresh: false,
         },
         abortSignal: state.abortSignal,
         context: state.context,
       });
 
-      // The tool returns either `{ ok: false, error: {...} }` on
-      // failure or the success blob directly (no `ok: true`
-      // wrapper).
+      // Tool returns either `{ ok: false, error: {...} }` on failure
+      // or the success blob directly (no `ok: true` wrapper).
       if (isFailedResult(rawResult)) {
         const errorCode = mapToolErrorCodeToWorkflowCode(rawResult.error.code);
         throw new WorkflowError({
@@ -142,10 +118,8 @@ export async function executeSqlNode(
         });
       }
 
-      // Defensive shape check — the tool's success envelope
-      // should always be an object carrying { name, rowCount, ... }.
-      // A non-object response indicates a tool-side contract
-      // violation that we surface as TOOL_EXECUTION_FAILED.
+      // Defensive shape check — a non-object response indicates a
+      // tool-side contract violation.
       if (
         rawResult === null ||
         typeof rawResult !== "object" ||
@@ -165,13 +139,9 @@ export async function executeSqlNode(
       const outputName = readString(result, "name") ?? name;
       const rowCount = readNumber(result, "rowCount") ?? 0;
 
-      // Strip the tool's operational metadata (cacheHit, ttlHours,
-      // schema, preview) — only `name` + `rowCount` are part of
-      // the SQL node's downstream-referenceable contract. Admin
-      // forensics still has the full tool result via the engine
-      // event log (workflow_node_completed.outputs includes the
-      // raw tool envelope for tool nodes; for SQL it's stripped
-      // here on purpose).
+      // Strip the tool's operational metadata — only `name` +
+      // `rowCount` are part of the SQL node's downstream-referenceable
+      // contract.
       return {
         name: outputName,
         rowCount,
@@ -213,26 +183,14 @@ function isFailedResult(value: unknown): value is FailedToolResult {
 }
 
 /**
- * Translate `extract_dataset_by_sql` error envelope codes to the
- * engine's `WorkflowErrorCode` taxonomy. Unknown codes fall back
- * to TOOL_EXECUTION_FAILED so the engine never throws an unknown
- * error class.
+ * Translate `extract_dataset_by_sql` error codes to the engine's
+ * `WorkflowErrorCode` taxonomy. Unknown codes fall back to
+ * TOOL_EXECUTION_FAILED so the engine never throws an unknown class.
  *
- * The tool's error codes (see `src/lib/data-sources/runtime-tools.ts`
- * + `data-sources/policy.ts` + `data-sources/lookup.ts`):
- *
- *   - INVALID_NAME / QUERY_HASH_MISMATCH  → TOOL_INPUT_SCHEMA_MISMATCH
- *   - DATA_SOURCE_NOT_FOUND / DISABLED    → TOOL_NOT_FOUND
- *   - POLICY_VIOLATION / WRITES_DISALLOWED
- *     / TABLE_DENIED / TABLE_NOT_ALLOWED  → SQL_PERMISSION_DENIED
- *   - PARSE_ERROR / SQL_SYNTAX_ERROR      → SQL_SYNTAX_ERROR
- *   - EXTRACT_FAILED / *                  → TOOL_EXECUTION_FAILED
- *
- * NOTE: `QUERY_HASH_MISMATCH` is no longer emitted at runtime — the
- * tool switched to slot-reassignment semantics (see `data-sources.md`
- * §4.2). The case is kept as defensive code so any legacy persisted
- * workflow event referencing it still maps cleanly instead of falling
- * through to TOOL_EXECUTION_FAILED.
+ * QUERY_HASH_MISMATCH is no longer emitted at runtime (the tool
+ * switched to slot-reassignment semantics — see data-sources.md);
+ * the case is kept as defensive code so legacy persisted events
+ * referencing it still map cleanly.
  */
 function mapToolErrorCodeToWorkflowCode(code: string): WorkflowErrorCode {
   switch (code) {
@@ -256,12 +214,9 @@ function mapToolErrorCodeToWorkflowCode(code: string): WorkflowErrorCode {
 }
 
 /**
- * Narrow a resolved-ref value to a string. The engine guarantees
- * `resolveRefs(<literal-string>, state)` returns the same string
- * when no refs are embedded, and a string when the value is a
- * pure-ref-string-typed @workflow.foo bound to a string. If we
- * ever see a non-string here, the spec is malformed — surface as
- * SPEC_SCHEMA_MISMATCH so the failure is actionable.
+ * Narrow a resolved-ref value to a string. A non-string here means
+ * the spec is malformed — surface as SPEC_SCHEMA_MISMATCH so the
+ * failure is actionable.
  */
 function resolveStringField(
   value: unknown,
@@ -283,10 +238,9 @@ function resolveStringField(
 
 /**
  * Stable fallback dataset slug when the spec omits `node.name`.
- * Format: `wf_<runId-first-8>_n<nodeId>` — deterministic per run
- * so repeat refresh runs hit the same cache slot. Cap length at
- * 64 chars to stay within the dataset-name regex bounds (see
- * `data-sources/cache.ts::validateDatasetName`).
+ * Format: `wf_<runId-first-8>_n<nodeId>` — deterministic per run so
+ * repeat refresh runs hit the same cache slot. Cap length at 64 to
+ * stay within the dataset-name regex bounds.
  */
 function deriveDefaultDatasetName(runId: string, nodeId: number): string {
   const prefix = runId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "run";

@@ -1,5 +1,7 @@
 /**
- * Skills subsystem entry. DB-first design — no filesystem layer.
+ * Skills subsystem entry. DB-first — no filesystem layer at runtime.
+ *
+ * See docs/skills.md.
  */
 
 import "server-only";

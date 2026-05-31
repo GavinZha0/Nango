@@ -7,12 +7,9 @@ import "server-only";
  * every built-in agent (`useOutcomeTools` in RightPanel's
  * ChatProviderHooks) — CopilotKit v2 has no per-agent registry.
  * The supervisor gets a "delegate, don't draw" block; every other
- * non-supervisor agent gets the "encourage" usage rules (see the
- * lesson-learned note on `buildChartPromptBlock` below for why we
- * inject for chat-only agents too).
+ * agent gets the "encourage" usage rules.
  *
- * See `docs/data-visualization.md` §6.2 ("Tool registration scope —
- * global + prompt-block gating") and §6.12 Day 4.
+ * See docs/data-visualization.md.
  */
 
 interface BuildChartPromptInput {
@@ -57,19 +54,15 @@ export const CHART_PROMPT_BLOCKS = {
 /**
  * Pick the right block for an agent's binding configuration.
  *
- * V1 lesson learned: the original gating (`hasDataSource || hasSandbox
- * || isSupervisor`) returned the empty string for a "plain" chat-only
- * agent. But `render_chart` itself is registered **globally** in
- * `useOutcomeTools()` — every built-in agent has the tool whether they
- * have data bindings or not. Leaving chat-only agents un-instructed
- * meant gpt-class models repeatedly mis-used the tool (submitting
- * empty options, pasting JS in chat) because the only guidance they
- * saw was the tool description.
- *
- * V1 (current) policy: ALWAYS inject a block. Supervisors get the
+ * Policy: ALWAYS inject a block. Supervisors get the
  * "delegate, don't draw" directive; everyone else gets the
- * authoring rules. The encourage block is ~300 tokens — small price
- * for consistent tool behaviour.
+ * authoring rules. The encourage block is ~300 tokens — small
+ * price for consistent tool behaviour.
+ *
+ * WHY no binding gating: `render_chart` is registered globally in
+ * `useOutcomeTools()`, so every built-in agent has the tool whether
+ * they have data bindings or not. Without instructions, gpt-class
+ * models mis-use the tool (empty options, pasted JS in chat).
  *
  * If a future agent should genuinely never have `render_chart`
  * available, the fix is at the registration layer (don't call

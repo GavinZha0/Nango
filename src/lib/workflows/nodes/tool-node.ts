@@ -1,20 +1,16 @@
 /**
  * Tool-node executor — pure data in / data out.
  *
- * The retry loop + event emission live in `with-retries.ts`; this
- * file is the per-attempt body. Per the §7.2 design:
+ * Retry loop + event emission live in `with-retries.ts`; this file is
+ * the per-attempt body:
+ *   1. Resolve `@path` refs in `node.input`.
+ *   2. Validate resolved input against `input_schema` (ajv).
+ *   3. Look up the tool handle (DI) — `null` → `TOOL_NOT_FOUND`.
+ *   4. `tool.execute({input, abortSignal, context})`.
+ *   5. Coerce result to `Record<string, unknown>`; validate against
+ *      `output_schema` (ajv).
  *
- *   1. Resolve `@path` refs in `node.input`
- *   2. Look up the tool handle (DI) — `null` ⇒
- *      `WorkflowError(TOOL_NOT_FOUND)`
- *   3. `tool.execute({input, abortSignal, context})`
- *   4. Coerce result to `Record<string, unknown>` — non-object
- *     shape ⇒ defensive `TOOL_EXECUTION_FAILED`
- *
- * Failures throw — the surrounding `withRetries` retries up to
- * `node.retries.attempts` times before giving up.
- *
- * Server-vs-MCP distinction lives in the registry, not here (D27).
+ * Server-vs-MCP distinction lives in the registry, not here.
  */
 
 import { WorkflowError } from "../error";
@@ -33,9 +29,9 @@ export type ToolNodeDeps = Pick<
 >;
 
 /**
- * Execute one tool node. Returns the node's `outputs` bag on
- * success; throws `WorkflowError` on the final failure after all
- * retries are exhausted.
+ * Execute one tool node. Returns the node's `outputs` bag on success;
+ * throws `WorkflowError` on the final failure after all retries are
+ * exhausted.
  */
 export async function executeToolNode(
   node: CanonicalToolNode,
@@ -48,19 +44,17 @@ export async function executeToolNode(
     state,
     deps,
     attemptFn: async () => {
-      // Resolve refs in input. resolveRefs throws REF_UNRESOLVED on
-      // its own — let the WorkflowError bubble up unchanged (the
-      // wrapper's wrapError passes WorkflowError instances through).
+      // resolveRefs throws REF_UNRESOLVED on its own — let the
+      // WorkflowError bubble up unchanged.
       const resolvedInput = resolveRefs(node.input, state) as Record<
         string,
         unknown
       >;
 
-      // Input validation — runs AFTER ref resolution so refs
-      // can carry typed values into the schema check. Save-time
-      // validate.ts already verified required-key presence
-      // (cheap structural check); this catches the full JSON
-      // Schema (types, formats, etc.).
+      // Input validation runs AFTER ref resolution so refs can carry
+      // typed values into the schema check. Save-time validate.ts
+      // already verified required-key presence; this catches the
+      // full JSON Schema (types, formats, etc.).
       if (node.input_schema !== undefined) {
         const result = validateAgainstSchema(node.input_schema, resolvedInput);
         if (!result.ok) {
@@ -75,7 +69,7 @@ export async function executeToolNode(
 
       // Save-time validate.ts already confirmed the tool existed;
       // this guard catches the case where the registry has changed
-      // between save and run (e.g. an MCP server disconnected).
+      // between save and run (e.g. MCP server disconnected).
       const tool = deps.getTool(node.tool);
       if (tool === null) {
         throw new WorkflowError({
@@ -94,16 +88,10 @@ export async function executeToolNode(
         context: state.context,
       });
 
-      // Coerce to object — node outputs are `Record<string, unknown>`
-      // so downstream `@nodes.<id>.<field>` refs have something to
-      // walk into. Defensive only — a well-behaved tool always
-      // returns an object matching its declared `output_schema`.
       const outputs = coerceToOutputs(rawResult, node);
 
-      // Output validation — surface tool-side bugs (returning
-      // wrong shape) as TOOL_EXECUTION_FAILED (per §7.2 — output
-      // mismatch is the tool's contract violation, not a separate
-      // error class for tool nodes).
+      // Output validation — surface tool-side bugs (wrong shape) as
+      // TOOL_EXECUTION_FAILED.
       if (node.output_schema !== undefined) {
         const result = validateAgainstSchema(node.output_schema, outputs);
         if (!result.ok) {

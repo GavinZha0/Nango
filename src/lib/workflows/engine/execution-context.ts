@@ -1,29 +1,19 @@
 /**
  * Engine per-run state + ref resolution.
  *
- * Two responsibilities:
+ *   - `createExecutionState(params)` builds the mutable bag the
+ *     scheduler + node executors mutate during a single run.
+ *   - `resolveRefs(value, state)` walks a JSON-ish value depth-first
+ *     and replaces every `@path` ref with its resolved runtime value.
  *
- *   1. `createExecutionState(params)` — build the mutable bag the
- *      scheduler + node executors mutate during a single run:
- *      completed / failed / skipped sets, per-node `outputs` map,
- *      workflow `input` + `context` (read-only), and `abortSignal`.
+ * Two ref forms (see `spec/refs.ts`):
+ *   - Pure (whole string IS the ref) → the resolved value replaces
+ *     the string (preserves type, supports objects/arrays).
+ *   - Embedded (refs inside a larger string) → each ref's resolved
+ *     value is stringified and substituted in-place.
  *
- *   2. `resolveRefs(value, state)` — walk a JSON-ish value
- *      depth-first and replace every `@path` ref with its resolved
- *      runtime value, in either of the two supported forms
- *      (`spec/refs.ts`):
- *
- *        - **Pure** (whole string IS the ref) → the resolved
- *          *value* replaces the string (preserves type, supports
- *          objects/arrays);
- *        - **Embedded** (refs inside a larger string) → each ref's
- *          resolved value is *stringified* (String() for
- *          primitives, JSON.stringify() for objects/arrays) and
- *          substituted in-place.
- *
- *      Refs that resolve to `undefined` → `WorkflowError`
- *      (REF_UNRESOLVED). This is the §7.10.3 hard-error contract
- *      — V1 does not silently substitute null / empty string.
+ * Refs that resolve to `undefined` throw `WorkflowError(REF_UNRESOLVED)`
+ * — V1 does not silently substitute null / empty string.
  */
 
 import { WorkflowError } from "../error";
@@ -39,23 +29,18 @@ import type { ExecuteParams } from "./index";
 // ─── ExecutionState ────────────────────────────────────────────────────
 
 /**
- * Mutable per-run state. Engine code reads + writes; node
- * executors read input/context, write into `outputs` when
- * completing.
+ * Mutable per-run state. Node executors read input/context; engine
+ * writes into `outputs` when a node completes.
  *
- * Fields:
  *   spec / input / context  — read-only run inputs.
  *   abortSignal             — cancellation source; node executors
  *                             plumb into fetch / SQL / sandbox.
- *   outputs                 — node id → output bag. Written by the
- *                             engine after each node completes.
- *                             Source for `@nodes.<id>.<field>` refs
- *                             of downstream nodes.
+ *   outputs                 — node id → output bag. Source for
+ *                             `@nodes.<id>.<field>` refs of
+ *                             downstream nodes.
  *   completed / failed /    — id sets; scheduler reads to find
  *   skipped                   ready nodes + termination state.
- *   nodeErrors              — node id → WorkflowError for failed
- *                             nodes. Engine reads after the run to
- *                             surface the failure cause.
+ *   nodeErrors              — node id → WorkflowError for failed nodes.
  */
 export interface ExecutionState {
   /** Stable id of the surrounding entity_run row (event correlation). */
@@ -91,11 +76,11 @@ export function createExecutionState(params: ExecuteParams): ExecutionState {
 
 /**
  * Recursively walk `value`, replacing every ref string with its
- * resolved runtime value from `state`. Returns a *new* value tree
- * — never mutates the input.
+ * resolved runtime value from `state`. Returns a *new* value tree —
+ * never mutates the input.
  *
  * Throws `WorkflowError(REF_UNRESOLVED)` if any ref's target is
- * `undefined` at runtime (§7.10.3 hard-error contract).
+ * `undefined` at runtime.
  */
 export function resolveRefs(value: unknown, state: ExecutionState): unknown {
   if (typeof value === "string") return resolveRefsInString(value, state);
@@ -108,17 +93,13 @@ export function resolveRefs(value: unknown, state: ExecutionState): unknown {
     for (const k of Object.keys(obj)) out[k] = resolveRefs(obj[k], state);
     return out;
   }
-  // null / number / boolean → unchanged
   return value;
 }
 
 /**
- * Resolve refs inside a single string. Two forms:
- *
- *   - Pure (whole string IS the ref) — returns the resolved value
- *     directly (may be any JSON type incl. object/array).
- *   - Embedded — substring substitution with stringified values.
- *   - No refs — string returned unchanged.
+ * Resolve refs inside a single string. Pure-form returns the resolved
+ * value directly (may be any JSON type incl. object/array). Embedded
+ * form does substring substitution with stringified values.
  */
 function resolveRefsInString(s: string, state: ExecutionState): unknown {
   const pure = parseRef(s);
@@ -127,10 +108,9 @@ function resolveRefsInString(s: string, state: ExecutionState): unknown {
   const embedded = findEmbeddedRefs(s);
   if (embedded.length === 0) return s;
 
-  // Substitute each embedded ref's stringified value back into
-  // the original string. Sort by length-descending serialization
-  // so longer matches replace before shorter ones (e.g. avoid
-  // replacing `@nodes.1` inside `@nodes.10.foo`).
+  // Sort replacements by length-descending so longer matches replace
+  // before shorter ones (avoid replacing `@nodes.1` inside
+  // `@nodes.10.foo`).
   const replacements = embedded.map((r) => ({
     token: serializeRef(r),
     value: resolveSingleRef(r, state),
@@ -147,7 +127,7 @@ function resolveRefsInString(s: string, state: ExecutionState): unknown {
 
 /**
  * Resolve a single ref. Throws REF_UNRESOLVED if the target is
- * `undefined` (e.g. node hasn't completed, workflow input key not
+ * `undefined` (node hasn't completed, workflow input key not
  * provided, context path doesn't exist).
  */
 function resolveSingleRef(ref: WorkflowRef, state: ExecutionState): unknown {
@@ -206,16 +186,13 @@ function refUnresolved(ref: WorkflowRef, why: string): WorkflowError {
 }
 
 /**
- * Stringify a resolved value for substitution into a larger
- * string. Object/array values JSON-encode; primitives use
- * `String()`; null becomes `"null"`.
- *
- * Throws if the value is `undefined` — caller should have caught
+ * Stringify a resolved value for substitution into a larger string.
+ * Object/array values JSON-encode; primitives use `String()`; null
+ * becomes `"null"`. Undefined throws — caller should have caught
  * that earlier in `resolveSingleRef`.
  */
 function stringifyForEmbedding(value: unknown): string {
   if (value === undefined) {
-    // Defensive — resolveSingleRef should have thrown already.
     throw new WorkflowError({
       errorCode: "REF_UNRESOLVED",
       message: "Embedded ref resolved to undefined.",
@@ -225,15 +202,12 @@ function stringifyForEmbedding(value: unknown): string {
   const t = typeof value;
   if (t === "string") return value as string;
   if (t === "number" || t === "boolean") return String(value);
-  // object / array → JSON-encoded
   return JSON.stringify(value);
 }
 
 /**
  * String#replaceAll polyfill that avoids regex escaping pitfalls
- * (`@nodes.0.foo` contains a `.` which is a regex metachar). The
- * native API exists in Node 16+, but we keep the loop explicit so
- * the substitution behavior is locally readable.
+ * (`@nodes.0.foo` contains `.`, a regex metachar).
  */
 function replaceAll(haystack: string, needle: string, replacement: string): string {
   if (needle.length === 0) return haystack;

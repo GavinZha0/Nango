@@ -1,62 +1,20 @@
 /**
  * Canonical workflow spec validator — semantic invariants the Zod
- * schema can't express plus the structural cross-references that
- * `canonicalize.ts` deferred.
+ * schema can't express plus structural cross-references canonicalize
+ * deferred.
  *
- * Runs *after* `canonicalize(spec, deps)` on the canonical form
- * (`CanonicalWorkflowSpec`). The save pipeline pattern is:
+ * Runs *after* `canonicalize(spec, deps)` on the canonical form. Save
+ * pipeline pattern:
  *
  *   const canonical = canonicalize(llmSpec, deps);
  *   validate(canonical);                  // throws WorkflowError
- *   const hash = specHash(canonical);     // W1.3 hash.ts
+ *   const hash = specHash(canonical);
  *   await persist(canonical, hash);
  *
- * What this layer checks (`docs/workflow-architecture.md` §6.3):
+ * Failure mode: throws the first `WorkflowError` encountered. Spec
+ * save is all-or-nothing per the canonicalize contract.
  *
- *   - Node id uniqueness, self-dependencies, missing depends_on
- *     targets               →  SPEC_SCHEMA_MISMATCH / SPEC_REF_UNKNOWN_NODE
- *                              / SPEC_DAG_CYCLE
- *   - DAG cycle detection (Kahn)
- *                            →  SPEC_DAG_CYCLE
- *   - `@nodes.N.field` refs in node inputs:
- *       * N must exist        → SPEC_REF_UNKNOWN_NODE
- *       * N must be in the    → SPEC_REF_UNREACHABLE
- *         editing node's
- *         transitive
- *         depends_on closure
- *       * field must be in    → SPEC_REF_UNKNOWN_FIELD
- *         target.outputs[]
- *         (when declared)
- *   - `@workflow.key` refs: key must be declared in
- *     spec.input_schema.properties when the schema is present
- *                            →  SPEC_REF_UNKNOWN_FIELD
- *   - `@context.<path>` refs: pass — runtime concern
- *   - spec.outputs:
- *       * non-empty           → SPEC_NO_OUTPUTS
- *       * each value parses   → SPEC_SCHEMA_MISMATCH
- *         as a pure ref
- *       * each target exists  → SPEC_REF_UNKNOWN_NODE / FIELD
- *         (workflow-scoped:
- *          no requireReachable
- *          check)
- *   - Tool nodes: every key in `input_schema.required` is present
- *     in `node.input`        →  TOOL_INPUT_SCHEMA_MISMATCH
- *     (cheap key-presence check; ref-resolved type validation runs
- *     at execute time)
- *
- * Out of scope:
- *   - Deep JSON-Schema validation of node.input post-ref-resolution
- *     → engine performs at execute time
- *   - Agent input schema validation
- *     → no agent input_schema in V1 spec
- *   - Soft caps (50 nodes / 100 edges)
- *     → UI warning concern, not save-blocking
- *   - Condition / nested workflow validation
- *     → V1.1+ / V2 feature; SPEC_FEATURE_UNSUPPORTED handled
- *       structurally upstream
- *
- * Failure mode: throws the first `WorkflowError` encountered.
- * V1 spec save is all-or-nothing per the canonicalize contract.
+ * See docs/workflow.md.
  */
 
 import { WorkflowError } from "../error";
@@ -73,8 +31,8 @@ import type {
 // ─── Public entrypoint ─────────────────────────────────────────────────
 
 /**
- * Validate a canonical workflow spec. Throws `WorkflowError` on
- * the first invariant violation. Returns void on success.
+ * Validate a canonical workflow spec. Throws `WorkflowError` on the
+ * first invariant violation. Returns void on success.
  */
 export function validate(spec: CanonicalWorkflowSpec): void {
   if (spec.nodes.length === 0) {
@@ -86,7 +44,7 @@ export function validate(spec: CanonicalWorkflowSpec): void {
   if (Object.keys(spec.outputs).length === 0) {
     throw new WorkflowError({
       errorCode: "SPEC_NO_OUTPUTS",
-      message: "spec.outputs must contain at least one entry (D28).",
+      message: "spec.outputs must contain at least one entry.",
     });
   }
 
@@ -142,10 +100,7 @@ function buildDependsOnGraph(
   return { nodeById, depsOf };
 }
 
-/**
- * Detect cycles via Kahn's algorithm. Throws SPEC_DAG_CYCLE if the
- * processed-count doesn't equal the node count.
- */
+/** Detect cycles via Kahn's algorithm. */
 function detectCycle(
   nodes: readonly CanonicalNode[],
   depsOf: Map<number, readonly number[]>,
@@ -153,7 +108,6 @@ function detectCycle(
   const indeg = new Map<number, number>();
   for (const n of nodes) indeg.set(n.id, depsOf.get(n.id)!.length);
 
-  // Reverse adjacency: dependents[N] = nodes that have N in depends_on
   const dependents = new Map<number, number[]>();
   for (const n of nodes) dependents.set(n.id, []);
   for (const n of nodes) {
@@ -184,12 +138,9 @@ function detectCycle(
 }
 
 /**
- * Build the transitive `depends_on` closure for every node.
- * `closureOf.get(id)` contains every node id reachable by walking
- * depends_on edges from `id` (excluding `id` itself).
- *
- * Safe only after `detectCycle` — recursion assumes the graph is
- * acyclic. Memoised; each closure computed exactly once.
+ * Build the transitive `depends_on` closure for every node. Safe
+ * only after `detectCycle` — recursion assumes acyclic graph.
+ * Memoised; each closure computed exactly once.
  */
 function buildClosure(
   nodes: readonly CanonicalNode[],
@@ -200,7 +151,7 @@ function buildClosure(
     const cached = memo.get(id);
     if (cached !== undefined) return cached;
     const out = new Set<number>();
-    memo.set(id, out); // defensive tombstone — should be unreachable post-cycle-check
+    memo.set(id, out);
     for (const dep of depsOf.get(id)!) {
       out.add(dep);
       for (const x of closureFor(dep)) out.add(x);
@@ -214,9 +165,8 @@ function buildClosure(
 // ─── Ref scanning ──────────────────────────────────────────────────────
 
 /**
- * Walk a JSON-ish value depth-first and call `visit` on every
- * string leaf. Object KEYS are not visited (refs only appear as
- * values per the spec).
+ * Walk a JSON-ish value depth-first and call `visit` on every string
+ * leaf. Object KEYS are not visited (refs only appear as values).
  */
 function forEachStringLeaf(
   value: unknown,
@@ -235,11 +185,7 @@ function forEachStringLeaf(
   }
 }
 
-/**
- * Extract refs from a single string in either of the two supported
- * forms: pure (whole string IS a ref) or embedded (refs appear
- * inside a larger string).
- */
+/** Extract refs from a single string (pure or embedded form). */
 function refsInString(s: string): WorkflowRef[] {
   const pure = parseRef(s);
   if (pure !== null) return [pure];
@@ -248,9 +194,11 @@ function refsInString(s: string): WorkflowRef[] {
 
 interface RefCheckCtx {
   fromNodeId: number | undefined;
-  closure: Set<number> | undefined; // undefined → skip reachability check
+  /** undefined → skip reachability check (workflow outputs). */
+  closure: Set<number> | undefined;
   nodeById: Map<number, CanonicalNode>;
-  workflowInputKeys: Set<string> | undefined; // undefined → skip key check
+  /** undefined → skip key check (no input_schema declared). */
+  workflowInputKeys: Set<string> | undefined;
 }
 
 function checkRef(ref: WorkflowRef, ctx: RefCheckCtx): void {
@@ -324,22 +272,16 @@ function validateNodeInputs(
       nodeById,
       workflowInputKeys,
     };
-    // Walk every per-type string-bearing field where the engine
-    // resolves refs at runtime. The set of fields differs by
-    // bucket — only carriers the executor actually templates are
-    // checked, otherwise validate.ts would treat a literal
-    // `@nodes.0.foo` *inside* a Python string as a ref and reject
-    // valid code.
+    // Walk only per-type string-bearing fields where the engine
+    // resolves refs at runtime. Otherwise validate.ts would treat a
+    // literal `@nodes.0.foo` *inside* a Python string as a ref and
+    // reject valid code.
     //
-    //   - tool / agent: `input` map (executor calls resolveRefs
-    //                   on node.input verbatim)
-    //   - code:         `input` map only — `node.code` is passed
-    //                   to the sandbox as opaque stdin, NOT
-    //                   templated, so embedded ref-looking tokens
-    //                   are user literals
-    //   - sql:          `query`, `dataSourceName`, `name` —
-    //                   executor templates each of these through
-    //                   resolveRefs before calling
+    //   - tool / agent: `input` map
+    //   - code:         `input` map only — `node.code` is passed to
+    //                   the sandbox as opaque stdin, NOT templated
+    //   - sql:          `query`, `dataSourceName`, `name` — each is
+    //                   templated through resolveRefs before calling
     //                   extract_dataset_by_sql
     const refCarriers: unknown[] = [];
     if (node.type === "tool" || node.type === "agent") {
@@ -372,8 +314,8 @@ function validateWorkflowOutputs(
         message: `spec.outputs['${key}'] is not a valid ref string: ${JSON.stringify(refStr)}`,
       });
     }
-    // Workflow outputs are workflow-scoped: there's no "editing
-    // node" so the reachability check doesn't apply.
+    // Workflow outputs are workflow-scoped: no "editing node", so
+    // the reachability check doesn't apply.
     checkRef(ref, {
       fromNodeId: undefined,
       closure: undefined,
@@ -409,10 +351,8 @@ function validateToolInputCoverage(nodes: readonly CanonicalNode[]): void {
 
 /**
  * Extract the top-level property keys from a JSON Schema. Returns
- * `undefined` (= skip @workflow.* key validation) when the schema
- * is absent or doesn't declare a `properties` object — the LLM may
- * ship a workflow without an explicit input schema, in which case
- * the runtime accepts any input shape.
+ * `undefined` (= skip @workflow.* key validation) when the schema is
+ * absent or doesn't declare a `properties` object.
  */
 function extractInputSchemaKeys(
   schema: Record<string, unknown> | undefined,

@@ -1,7 +1,7 @@
 /**
  * Record one row per Node process boot and cache the result.
  *
- * @see docs/orchestrator.md#11-implementation-details-and-quirks
+ * See docs/orchestrator.md.
  */
 
 import "server-only";

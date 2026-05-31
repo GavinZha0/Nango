@@ -70,7 +70,7 @@ export interface ExtractInput {
 export interface ExtractResult {
   schema: DatasetSchema;
   /** sha256 of the canonicalised query text — used by the cache layer
-   *  to refuse re-using a dataset name with a different query. */
+   *  to detect slot reassignment (same name + different query). */
   queryHash: string;
 }
 
@@ -108,7 +108,7 @@ export interface DataSourcePolicy {
 export interface ResolvedDataSource {
   /** uuid of the data_source row. Stable; UI / API use it. */
   id: string;
-  /** LLM-facing name (`extract_dataset_by_sql.dataSourceId` carries
+  /** LLM-facing name (`extract_dataset_by_sql.dataSourceName` carries
    *  this string, not the uuid). */
   name: string;
   provider: DataSourceId;

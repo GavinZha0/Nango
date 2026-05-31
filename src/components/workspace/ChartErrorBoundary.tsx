@@ -8,7 +8,7 @@
  * `option` would unmount the entire panel. The boundary scopes the
  * failure to its single card so siblings keep rendering.
  *
- * Reset semantics (see `docs/data-visualization.md` §6.8): the
+ * Reset semantics (see `docs/data-visualization.md`): the
  * boundary reaches into its own derived state when the parent passes
  * a fresh `resetKey` (= outcomeId here). Re-rendering the same id with
  * a fixed `option` after a failure should naturally recover; passing

@@ -1,5 +1,7 @@
 /**
  * Process-wide cache of Built-in agent specifications.
+ *
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";
@@ -44,10 +46,10 @@ export class AgentPool {
     this.cache = new LRUCache<string, AgentSpec>({
       max: opts.max ?? getConfigNumber("cache.agent_pool.max", DEFAULT_MAX),
       ttl: opts.ttl ?? getConfigMs("cache.agent_pool.ttl", DEFAULT_TTL_S),
-      // @see docs/builtin-runtime.md#5-implementation-details-and-quirks
       fetchMethod: async (key: string): Promise<AgentSpec | undefined> => {
+        // `lru-cache`'s fetchMethod rejects `null` as a value — null
+        // misses get stored as `undefined` (i.e. cache miss).
         const spec: AgentSpec | null = await this.load(key);
-        // @see docs/builtin-runtime.md#5-implementation-details-and-quirks
         return spec ?? undefined;
       },
     });

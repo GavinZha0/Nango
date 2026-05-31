@@ -18,7 +18,7 @@
  * hook resolves with `true` so the user sees the spinner inside the
  * dialog body, not behind it.
  *
- * @see docs/artifact-dashboard-migration.md §11.2
+ * See docs/artifact-dashboard-migration.md.
  */
 
 import { Loader2, Save } from "lucide-react";

@@ -1,7 +1,7 @@
 /**
  * Boot-time sweep for runs left in `running` after a crash / redeploy.
  *
- * @see docs/orchestrator.md#11-implementation-details-and-quirks
+ * See docs/orchestrator.md.
  */
 
 import "server-only";

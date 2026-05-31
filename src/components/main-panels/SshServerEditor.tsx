@@ -2,7 +2,7 @@
 
 /**
  * SshServerEditor — full-area form for creating / editing one
- * @see docs/ssh.md §3, §5
+ * See docs/ssh.md.,
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -537,15 +537,6 @@ export function SshServerEditor({
               )}
             </div>
           )}
-
-          {/*
-           * Form layout mirrors DataSourceEditor: single-line inputs
-           * sit on one row with a fixed-width label on the left
-           * (`flex items-center gap-3`, `Label className="w-20
-           * shrink-0"`) so every field aligns into a tidy table.
-           * Multi-line textareas keep the stacked block layout
-           * because the input itself wants the full width.
-           */}
 
           {/* ── Identity ─────────────────────────────────────────────── */}
           <section className="space-y-3">

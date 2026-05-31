@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import * as path from "node:path";
+
+const CACHE_ROOT = path.resolve("/data/cache-test");
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({
   getConfig: (key: string, defaultValue: string) => {
-    if (key === "datasource.cache_root") return "/data/cache-test";
+    if (key === "datasource.cache_root") return CACHE_ROOT;
     return defaultValue;
   },
   getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
@@ -95,10 +98,10 @@ describe("LocalDockerAdapter — argv assembly (pure)", () => {
       .filter((m) => m.includes("/work/data/"));
     expect(mounts).toHaveLength(2);
     expect(mounts).toContain(
-      "type=bind,src=/data/cache-test/parquet/sales_q1,dst=/work/data/sales_q1,readonly",
+      `type=bind,src=${path.join(CACHE_ROOT, "parquet", "sales_q1")},dst=/work/data/sales_q1,readonly`,
     );
     expect(mounts).toContain(
-      "type=bind,src=/data/cache-test/parquet/customers,dst=/work/data/customers,readonly",
+      `type=bind,src=${path.join(CACHE_ROOT, "parquet", "customers")},dst=/work/data/customers,readonly`,
     );
   });
 

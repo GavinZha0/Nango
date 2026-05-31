@@ -1,26 +1,18 @@
 /**
- * Code-node executor (D35) — pure data in / data out.
+ * Code-node executor — pure data in / data out.
  *
  * Per-attempt body (retry loop + event emission lives in
  * `with-retries.ts`):
- *
- *   1. Resolve `@path` refs in `node.input` (datasets, env, …)
+ *   1. Resolve `@path` refs in `node.input` (datasets, env, …).
  *   2. Coerce conventional input keys into the sandbox dispatch shape
- *      — `inputs.datasets` (array of strings; may contain rewritten
- *      refs that resolveRefs already turned into literal names) and
- *      `inputs.env` (Record<string, string>).
+ *      — `inputs.datasets` and `inputs.env`.
  *   3. Call `deps.runCode({...})` — DI bridge wired to
- *      `getActiveAdapter().run(...)` in the runner-side adapter.
- *   4. exitCode !== 0 → throw `CODE_EXECUTION_FAILED` carrying the
- *      stderr as the message.
- *   5. With `output_schema` declared: `JSON.parse(stdout)` and
- *      validate; expose parsed object's top-level keys as outputs.
- *      Without declared schema: expose the fixed envelope
- *      `{ stdout, stderr, exitCode, durationMs }`.
- *
- * Failures throw — `withRetries` exhausts attempts before giving up.
- *
- * See `docs/workflow-architecture.md` §5.4 (Code node) and §7.2.
+ *      `getActiveAdapter().run(...)`.
+ *   4. `exitCode !== 0` → throw `CODE_EXECUTION_FAILED` with stderr
+ *      surfaced.
+ *   5. With `output_schema`: `JSON.parse(stdout)`, validate, expose
+ *      parsed object's top-level keys. Without: expose the fixed
+ *      envelope `{ stdout, stderr, exitCode, durationMs }`.
  */
 
 import { WorkflowError } from "../error";
@@ -38,11 +30,12 @@ export type CodeNodeDeps = Pick<
   "runCode" | "emitEvent"
 >;
 
-/** Engine-side default for code-node timeout when the spec omits one.
- *  Mirrors the per-tool default in the sandbox adapter (30s).
- *  Operator-tunable via `workflow.execution.default_timeout` at the
- *  engine layer, NOT at the code-node layer — keep this constant in
- *  sync with `workflow.execution.default_timeout`'s default seed. */
+/**
+ * Engine-side default for code-node timeout when the spec omits one.
+ * Mirrors the per-tool default in the sandbox adapter. Operator-
+ * tunable via `workflow.execution.default_timeout` — keep this
+ * constant in sync with that config key's default seed.
+ */
 const DEFAULT_CODE_TIMEOUT_SECONDS = 30;
 
 /**
@@ -62,10 +55,9 @@ export async function executeCodeNode(
     state,
     deps,
     attemptFn: async () => {
-      // Resolve refs in the entire input record at once — Strategy
-      // Z+'s array recursion (W1.7.6) already rewrote dataset
-      // elements to refs, so resolveRefs walks them per-element
-      // and produces literal string arrays for the sandbox call.
+      // resolveRefs walks arrays per-element so dataset refs
+      // produced by Strategy Z+ become literal strings for the
+      // sandbox call.
       const resolvedInput = resolveRefs(node.input ?? {}, state) as Record<
         string,
         unknown
@@ -84,9 +76,8 @@ export async function executeCodeNode(
         abortSignal: state.abortSignal,
       });
 
-      // Non-zero exitCode = sandbox crashed. Surface stderr in the
-      // error message so admin run forensics shows the Python
-      // traceback without expanding the result blob.
+      // Surface stderr in the error message so admin run forensics
+      // shows the Python traceback without expanding the result blob.
       if (result.exitCode !== 0) {
         const trimmed = result.stderr.trim().slice(0, 4000);
         throw new WorkflowError({
@@ -110,8 +101,6 @@ export async function executeCodeNode(
         };
       }
 
-      // Declared schema → parse stdout as JSON, validate, expose
-      // the parsed object's top-level keys.
       let parsed: unknown;
       try {
         parsed = JSON.parse(result.stdout);
@@ -163,9 +152,8 @@ export async function executeCodeNode(
 
 /**
  * Read `inputs.datasets` as `string[]`. Refs in this array were
- * rewritten as concrete strings by the resolveRefs walk; this
- * helper only enforces the array-of-strings shape and produces a
- * precise diagnostic if the spec drifted.
+ * rewritten as concrete strings by the resolveRefs walk; this helper
+ * only enforces the array-of-strings shape.
  */
 function coerceDatasets(
   input: Record<string, unknown>,
@@ -196,9 +184,8 @@ function coerceDatasets(
 }
 
 /**
- * Read `inputs.env` as `Record<string, string>`. Values that
- * resolved to non-strings (e.g. numbers from a ref) are coerced
- * to strings — env vars are inherently string-typed at the OS
+ * Read `inputs.env` as `Record<string, string>`. Values that resolved
+ * to non-strings are coerced — env vars are string-typed at the OS
  * boundary.
  */
 function coerceEnv(

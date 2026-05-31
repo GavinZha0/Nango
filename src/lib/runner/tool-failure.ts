@@ -1,21 +1,13 @@
 /**
  * Generic tool-execution failure envelope + the wrapper that produces it.
  *
- * Why this exists: when a tool's `execute` function throws, the AI SDK
- * emits a `tool-error` part on its fullStream. CopilotKit 1.56's AISDK
- * converter has no `case "tool-error"` branch — the part is silently
- * dropped and the browser never receives `TOOL_CALL_RESULT`, leaving
- * the React tool-call UI stuck in "loading". See docs/diagrams/tool-lifecycle.html.
+ * When a tool's `execute` throws, the AI SDK emits `tool-error` which
+ * CopilotKit 1.56's AISDK converter drops — the browser never sees
+ * `TOOL_CALL_RESULT` and the UI hangs in "loading". Wrapping converts
+ * throws into a success-shaped `{ isError: true, ... }` payload so the
+ * AI SDK sees `tool-result` and the LLM gets a recoverable signal.
  *
- * Fix: wrap every server-side tool's `execute` in a `try/catch` that
- * converts throws into a structured success-shaped object. The AI SDK
- * sees `tool-result` instead of `tool-error`, CopilotKit forwards
- * `TOOL_CALL_RESULT` to the browser, and the LLM gets a JSON payload
- * with `isError: true` so it can recover gracefully.
- *
- * MCP tools are wrapped at discovery time (see lib/mcp/client-providers.ts);
- * Class B + C server tools are wrapped at dispatch time (see
- * lib/runner/dispatch/builtin.ts).
+ * See docs/runner.md and docs/diagrams/tool-lifecycle.html.
  */
 
 import "server-only";
@@ -23,19 +15,9 @@ import "server-only";
 import type { childLogger } from "@/lib/observability/logger";
 
 /**
- * The shape returned to the LLM when a tool's `execute` throws.
- *
+ * Shape returned to the LLM when a tool's `execute` throws.
  * `isError: true` mirrors MCP's CallToolResult.isError convention so
- * the LLM sees a consistent error signal across MCP and server-side
- * tool failures. `message` is the throwable's `.message` (or stringified
- * value); `toolName` lets the LLM disambiguate which tool failed when
- * the call site doesn't already echo the name.
- *
- * Intentionally flat (no nested `error` object, no `code`): there's
- * currently only one failure mode (uncaught throw) so any taxonomy
- * would be premature. If we later need to distinguish (e.g. timeout vs
- * permission denied), add a discriminator field — `isError: true`
- * stays as the primary signal so older consumers keep working.
+ * MCP and server-side tool failures share one signal.
  */
 export interface ToolExecutionFailure {
   readonly isError: true;
@@ -45,13 +27,9 @@ export interface ToolExecutionFailure {
 
 /**
  * System-prompt block appended whenever an agent has at least one tool
- * wrapped through {@link wrapToolExecute}. Tells the LLM how to react
- * when it sees `isError: true` in a tool result — avoids the default
- * "retry the same call" or "try every similar-looking tool" failure
- * modes we observed in production before this block existed.
- *
- * Single source of truth — both Class B/C dispatch and MCP wrapping
- * rely on it. Update the wording here, never inline at call sites.
+ * wrapped through {@link wrapToolExecute}. Single source of truth —
+ * both Class B/C dispatch and MCP wrapping rely on it. Update wording
+ * here, never inline at call sites.
  */
 export const ERROR_POLICY_BLOCK = `## Tool error handling
 
@@ -69,31 +47,12 @@ interface PossiblyWrapped {
 
 /**
  * Wrap a tool-shaped object so any throw from its `execute` becomes a
- * {@link ToolExecutionFailure} return value.
+ * {@link ToolExecutionFailure} return value. Idempotent. Non-tool
+ * inputs are returned unchanged.
  *
- * Idempotent: a tool already wrapped (carrying `__nangoWrapped`) is
- * returned unchanged so double-wrapping at composition boundaries
- * (MCP discovery + Class B/C dispatch) doesn't compound try/catches.
- *
- * Non-tool inputs (null, primitives, objects without `execute`) are
- * returned unchanged so call sites can blanket-map an array without
- * defensive filtering.
- *
- * ASSUMPTION: `tool` is a POJO (plain object literal). Both `defineTool`
- * from `@copilotkit/runtime/v2` and `dynamicTool` from `ai` return
- * literal objects, which is the only currently-supported shape. The
- * spread `{ ...(tool as object), ... }` is a SHALLOW COPY — if a future
- * caller passes a class instance, the prototype chain (methods, getters,
- * setters) will be silently dropped. If we ever need class-based tools,
- * use `Object.create(Object.getPrototypeOf(tool))` + `Object.assign`
- * instead, or attach the new `execute` via `Reflect.set` to preserve
- * the prototype.
- *
- * @param tool      The tool object (anything with an `execute` async fn)
- * @param toolName  Name surfaced in both the failure envelope and the log warning
- * @param log       Optional pino child logger; if omitted, failures are silent
- * @param logEvent  Log `event` tag — defaults to a generic value, MCP passes a
- *                  more specific one so ops can grep separately
+ * ASSUMPTION: `tool` is a POJO. The spread is a SHALLOW COPY — class
+ * instances would lose their prototype chain. Use `Object.create` +
+ * `Object.assign` if class-based tools are ever introduced.
  */
 export function wrapToolExecute<T>(
   tool: T,

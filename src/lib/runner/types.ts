@@ -1,5 +1,7 @@
 /**
  * Runner — execution kernel types.
+ *
+ * See docs/orchestrator.md.
  */
 
 import "server-only";
@@ -7,16 +9,9 @@ import "server-only";
 import type { EntityRunEventType, EntityRunInitiator, EntityRunMode, EntityRunStatus } from "@/lib/db/schema";
 import type { EntityKind } from "@/lib/backends/types";
 
-/**
- * Common shape across all run-start entry points.
- *
- * @see docs/orchestrator.md#11-implementation-details-and-quirks
- */
+/** Common shape across all run-start entry points. */
 export interface StartRunInput {
-  /**
-   * Entity id within the namespace defined by `credentialId`.
-   * @see docs/orchestrator.md#11-implementation-details-and-quirks
-   */
+  /** Entity id within the namespace defined by `credentialId`. */
   entityId: string;
   /** Backend credential; absent → built-in dispatch. */
   credentialId?: string;
@@ -32,7 +27,6 @@ export interface StartRunInput {
   context?: Record<string, unknown>;
   params?: Record<string, unknown>;
 
-  /** Run lifecycle. P0 only implements `"sync"`. */
   mode: EntityRunMode;
 
   /** Optional run-forest linkage. */
@@ -41,10 +35,8 @@ export interface StartRunInput {
   threadId?: string;
   /**
    * Schedule that triggered this run. Set ONLY when `initiator =
-   * "schedule"` — every other initiator leaves this undefined.
-   * Persisted into `entity_run.schedule_id` so the ScheduleEditor's
-   * RecentRuns panel can paginate by it. Optional so non-scheduler
-   * call sites stay untouched.
+   * "schedule"`. Persisted into `entity_run.schedule_id` so the
+   * ScheduleEditor's RecentRuns panel can paginate by it.
    */
   scheduleId?: string;
 
@@ -66,8 +58,7 @@ export interface RunHandle {
 
 /**
  * Nango-neutral event shape, distinct from AG-UI transport.
- * Persisted into `entity_run_event.payload`.
- * @see docs/runner-events.md#stage-2--coalescing
+ * Persisted into `entity_run_event.payload`. See docs/runner-events.md.
  */
 export type RunEvent =
   | { type: "started";          runId: string; ts: number; payload: { mode: EntityRunMode } }
@@ -115,7 +106,7 @@ export interface Runner {
   /**
    * Programmatic sync start (used by `delegate_to_agent`). CONTRACT:
    * resolves descriptor, builds agent, persists run, drives `agent.run()`,
-   * returns terminal state + text. P0 only ships `mode: "sync"`.
+   * returns terminal state + text.
    */
   start(input: StartRunInput): Promise<ProgrammaticRunResult>;
 }

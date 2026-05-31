@@ -89,7 +89,7 @@ describe("acquireWriteSlot / commitWriteSlot", () => {
   it("returns a fresh tmp dir under cache root", async () => {
     const slot = await acquireWriteSlot("sales");
     expect(slot.tmpDir.startsWith(tmpRoot)).toBe(true);
-    expect(slot.outputPath.endsWith("/part-001.parquet")).toBe(true);
+    expect(slot.outputPath.endsWith("part-001.parquet")).toBe(true);
     const stat = await fs.stat(slot.tmpDir);
     expect(stat.isDirectory()).toBe(true);
   });

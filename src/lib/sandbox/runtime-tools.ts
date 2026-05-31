@@ -1,5 +1,7 @@
 /**
- * Server-side `run_in_sandbox` agent tool.
+ * Server-side `run_code_in_sandbox` agent tool.
+ *
+ * See docs/sandbox.md.
  */
 
 import "server-only";
@@ -38,8 +40,7 @@ const RunInSandboxArgs = z.object({
     ),
   /** Datasets to expose read-only under `./data/<name>/` in the
    *  sandbox's current working directory. The data-source layer
-   *  must already have materialised them; see the `ensure_dataset`
-   *  companion tool (Phase D-2).
+   *  must already have materialised them via `extract_dataset_by_sql`.
    *
    *  Backend mechanism (transparent to the LLM):
    *    subprocess: `<tmpHostDir>/data/<name>` symlink → cache

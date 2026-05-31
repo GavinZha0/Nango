@@ -6,7 +6,7 @@
  *
  * Since the route handler depends on Next.js + DB + auth, we test
  * the ZIP processing logic at a lower level: build a ZIP, parse it,
- * and verify the validation rules match the spec in docs/skills.md §4.2.
+ * and verify the validation rules match the spec in docs/skills.md.
  */
 
 import { describe, expect, it } from "vitest";

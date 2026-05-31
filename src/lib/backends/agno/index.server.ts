@@ -1,5 +1,5 @@
 /**
- * agno provider — single-entry registration.
+ * agno provider — single-entry registration. See docs/backend-integration.md.
  */
 
 import "server-only";

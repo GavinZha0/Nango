@@ -1,7 +1,7 @@
 /**
  * In-process pub/sub for runner-driven events.
  *
- * @see docs/orchestrator.md#11-implementation-details-and-quirks
+ * See docs/runner-events.md.
  */
 
 import "server-only";
@@ -30,8 +30,7 @@ export type RunnerEvent = RunFinalizedEvent | NotificationCreatedEvent;
 
 type Subscriber = (event: RunnerEvent) => void;
 
-// QUIRK: globalThis slot so hot-reload during dev (`next dev` may
-// re-evaluate the module body) doesn't fork the registry.
+// globalThis slot so dev hot-reload doesn't fork the registry.
 const GLOBAL_KEY = Symbol.for("nango.runner.eventBus");
 interface RegistryHolder {
   byOwner: Map<string, Set<Subscriber>>;
@@ -70,8 +69,7 @@ export function publish(ownerId: string, event: RunnerEvent): void {
     try {
       fn(event);
     } catch {
-      // Drop and continue so a single broken handler doesn't starve
-      // the rest of the user's tabs.
+      // One broken handler must not starve the rest.
     }
   }
 }

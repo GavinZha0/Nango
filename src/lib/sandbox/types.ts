@@ -1,17 +1,15 @@
 /**
  * Sandbox integration layer — domain types and adapter interface.
+ *
+ * See docs/sandbox.md.
  */
 
 /**
  * Stable backend ids. Each value doubles as the public `SANDBOX_MODE`
  * env-var slug (1:1 — no alias layer). Backend selection is always
  * explicit: callers pin one of these via SANDBOX_MODE; the registry
- * never auto-probes.
- *
- * Status:
- *   subprocess     ✅ shipped (default when SANDBOX_MODE unset)
- *   local-docker   ✅ shipped
- *   remote-docker  ⏳ planned (Docker daemon over TCP/SSH); null stub
+ * never auto-probes. `remote-docker` is reserved — the registry
+ * carries a null stub for it that rejects with `BackendUnavailableError`.
  */
 export const SANDBOX_BACKENDS = [
   "subprocess",

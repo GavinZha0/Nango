@@ -1,47 +1,8 @@
 /**
  * OAuth 2.0 Client Credentials Grant — access token manager.
- *
- * Manages the lifecycle of access tokens obtained from a `tokenUrl`
- * using a stored `oauth_client` credential row `{clientId, clientSecret,
- * tokenUrl, scope?}`. Behavior:
- *
- *   - **Lazy refresh** (no background timer): tokens are fetched on
- *     first call and refreshed automatically when the cached one is
- *     within `REFRESH_SKEW_MS` of its expiry. No `setInterval` to
- *     leak through Next.js HMR, no traffic to the IdP for unused
- *     credentials.
- *
- *   - **Concurrency dedup**: if N callers ask for the same credential's
- *     token while the token endpoint is being hit, they all await the
- *     same in-flight Promise — exactly ONE network round-trip per
- *     refresh cycle. Avoids thundering-herd on cold start.
- *
- *   - **Cache invalidation hook-up**: subscribes to
- *     `onCredentialCacheInvalidated` so an admin's edit to the
- *     credential row (rotated secret, changed tokenUrl, …) takes
- *     effect on the very next call without restarting the process.
- *
- *   - **Three-tier public API**:
- *       1. `getOAuthAccessToken(id)`           — raw token string
- *       2. `getOAuthAuthorizationHeader(id)`   — `"Bearer <token>"`
- *       3. `withOAuth(id, init)`               — RequestInit wrapper
- *     Most callers want tier 3. Tier 1 is for non-Bearer schemes
- *     (DPoP, custom headers).
- *
- *   - **Manual eviction**: `invalidateOAuthToken(id)` lets a caller
- *     drop a token after receiving a 401 from the downstream API
- *     (token revoked / expired earlier than `expires_in` promised);
- *     next call re-fetches.
- *
- * Out of scope (intentionally):
- *   - `refresh_token`: RFC 6749 §4.4.3 forbids refresh tokens for the
- *     Client Credentials grant — every refresh just re-runs the
- *     `client_credentials` flow with the stored secret.
- *   - mTLS / PEM client certificates: handle that at the TLS layer
- *     (NODE_EXTRA_CA_CERTS for trusting a self-signed CA; a custom
- *     `https.Agent` if per-credential PEM is ever needed).
- *
- * @see docs/cache.md §2.1 (cache TTL philosophy)
+ * Lazy refresh, concurrency-deduped, three-tier API
+ * (`getOAuthAccessToken` / `getOAuthAuthorizationHeader` /
+ * `withOAuth`). See docs/cache.md.
  */
 
 import "server-only";
@@ -106,12 +67,9 @@ const DEFAULT_CACHE_TTL_S = 4 * 60 * 60;
 
 // ─── Internal state ────────────────────────────────────────────────────
 //
-// HMR-survival via globalThis: oauth tokens are expensive to mint
-// (round trip to the IdP), and the in-flight Map is the dedupe gate
-// against thundering-herd. A dev save would otherwise re-mint every
-// token on the next API call. The `credentialSubscribed` flag also
-// has to live here so re-evaluation doesn't push a second subscription
-// into the (pinned) credential-cache invalidation list.
+// HMR-survival via globalThis: tokens are expensive to mint, the
+// in-flight Map is the dedupe gate, and `credentialSubscribed`
+// keeps re-evaluation from registering a duplicate subscription.
 
 interface OAuthTokenHolder {
   tokenCache: LRUCache<string, CachedToken>;
@@ -138,13 +96,9 @@ const tokenCache = oauthHolder.tokenCache;
  *  refresh cycle. */
 const inFlight = oauthHolder.inFlight;
 
-// Subscribe exactly once across all HMR re-evaluations. When the
-// credential cache is cleared (admin edited a credential row), drop
-// all our tokens too so the next call picks up rotated secrets.
-//
-// Note: this is a coarse "clear-all" today. If precision becomes a
-// problem (many OAuth creds, frequent edits to unrelated rows) we can
-// add a per-id invalidation channel to lookup.ts.
+// Drop all tokens when the credential cache is invalidated (admin
+// rotated a secret etc.). Coarse clear-all; a per-id channel can
+// be added if precision becomes a problem.
 if (!oauthHolder.credentialSubscribed) {
   onCredentialCacheInvalidated(() => {
     if (tokenCache.size === 0) return;
@@ -161,16 +115,10 @@ if (!oauthHolder.credentialSubscribed) {
 // ─── Public API ────────────────────────────────────────────────────────
 
 /**
- * Get a valid OAuth 2.0 access token for the given credential.
- *
- * Behavior:
- *   - Returns the cached token if it has more than `REFRESH_SKEW_MS`
- *     of remaining lifetime.
- *   - Otherwise hits the token endpoint (deduped across concurrent
- *     callers) and caches the result.
- *
- * Throws on missing credential, decryption failure, malformed payload,
- * or non-2xx token endpoint response.
+ * Returns a valid token, hitting the token endpoint (deduped) only
+ * when the cached entry is within `REFRESH_SKEW_MS` of expiry.
+ * Throws on missing credential, decrypt failure, malformed payload,
+ * or non-2xx response from the token endpoint.
  */
 export async function getOAuthAccessToken(credentialId: string): Promise<string> {
   const cached: CachedToken | undefined = tokenCache.get(credentialId);
@@ -194,26 +142,15 @@ export async function getOAuthAccessToken(credentialId: string): Promise<string>
   return entry.accessToken;
 }
 
-/**
- * Convenience helper — returns `"Bearer <token>"` for direct use as
- * an HTTP `Authorization` header value. 99% of OAuth callers want
- * this; tier-1 `getOAuthAccessToken` is for DPoP / custom schemes.
- */
+/** Returns `"Bearer <token>"` for direct use as an `Authorization`
+ *  header value. */
 export async function getOAuthAuthorizationHeader(credentialId: string): Promise<string> {
   const token: string = await getOAuthAccessToken(credentialId);
   return `Bearer ${token}`;
 }
 
-/**
- * Highest-level convenience helper — clones a fetch `RequestInit`
- * with an OAuth Bearer `Authorization` header merged in. Lets callers
- * write `fetch(url, await withOAuth(id, { method: "POST" }))` without
- * thinking about token lifecycle.
- *
- * Existing `Authorization` in `init.headers` is OVERWRITTEN — the
- * whole point of this helper is to provide auth, so we treat caller
- * intent as "yes, please replace whatever I had with the OAuth one".
- */
+/** Clone a `RequestInit` with an `Authorization: Bearer …` header
+ *  merged in. Any existing `Authorization` is OVERWRITTEN. */
 export async function withOAuth(
   credentialId: string,
   init: RequestInit = {},
@@ -228,12 +165,8 @@ export async function withOAuth(
   };
 }
 
-/**
- * Force-drop the cached token. Callers should invoke this when the
- * downstream API returns 401 — the IdP may have revoked the token
- * earlier than its advertised `expires_in`, and the next call should
- * re-fetch from the token endpoint.
- */
+/** Force-drop the cached token. Call after a downstream 401 so the
+ *  next call re-fetches from the IdP. */
 export function invalidateOAuthToken(credentialId: string): void {
   const had: boolean = tokenCache.delete(credentialId);
   if (had) {
@@ -261,10 +194,8 @@ async function fetchAndCacheToken(credentialId: string): Promise<CachedToken> {
     body.set("scope", fields.scope);
   }
 
-  // Per RFC 6749 §2.3.1, client_secret_basic (HTTP Basic with
-  // clientId:clientSecret) is the recommended method. Some IdPs also
-  // accept body-style (client_secret_post); we use Basic because it's
-  // universally supported and keeps the secret out of the request body.
+  // RFC 6749 §2.3.1 client_secret_basic — universally supported and
+  // keeps the secret out of the request body.
   const basicAuth: string = Buffer.from(
     `${fields.clientId}:${fields.clientSecret}`,
     "utf8",

@@ -10,20 +10,18 @@ import { createFolder } from "@/lib/artifacts/service";
 /**
  * POST /api/artifacts — create a folder in the per-user artifact tree.
  *
- * Folder-only since W1.7.7. The "create an artifact directly" branch
- * (`kind: "artifact"`) was retired together with the parallel
- * chart-save path through `useSaveOutcome` — the canonical save
- * flow is `POST /api/artifacts/save`, which captures the source
- * outcome's tool chain into a workflow plus an artifact row in
- * one DB transaction (D31 / W1.6.5).
+ * Folder-only. The "create an artifact directly" branch was retired
+ * with the parallel chart-save path; the canonical save flow is
+ * `POST /api/artifacts/save`, which captures the source outcome's
+ * tool chain into a workflow plus an artifact row in one DB
+ * transaction.
  *
  * The `kind: "folder"` body shape is preserved for client compat
- * — `ArtifactPanel.tsx::postFolder` still sends it. The field
- * documents intent at the call site; the discriminated-union
- * machinery is gone because there's only one kind now.
+ * (`ArtifactPanel.tsx::postFolder` still sends it). The field
+ * documents intent; there is no discriminated union to switch on
+ * because only one kind is accepted.
  *
- * @see docs/artifact-dashboard-migration.md §4
- * @see docs/workflow-architecture.md §10.1 (save-from-outcome path)
+ * See docs/artifact-evolution.md and docs/workflow-architecture.md.
  */
 const ROUTE = "/api/artifacts";
 

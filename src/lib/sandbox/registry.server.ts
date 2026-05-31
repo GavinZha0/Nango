@@ -1,5 +1,7 @@
 /**
  * Server-only sandbox-adapter registry + selection.
+ *
+ * See docs/sandbox.md.
  */
 
 import "server-only";

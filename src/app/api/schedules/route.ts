@@ -19,6 +19,7 @@ import { toScheduleResponse } from "@/lib/runner/schedule-dto";
 import { validateScheduleTarget } from "@/lib/runner/schedule-validation";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
+import { getUserTimezone } from "@/lib/time/user-timezone";
 
 /**
  * GET  /api/schedules — caller's schedules, newest first.
@@ -66,7 +67,10 @@ const createBodySchema = z.object({
   /** Positive integer; null for a one-shot schedule. */
   intervalValue: z.number().int().positive().nullable().optional(),
   intervalUnit: intervalUnitSchema.nullable().optional(),
-  timezone: z.string().min(1).default("UTC"),
+  /** IANA name. When absent, the handler defaults to the user's
+   *  profile timezone, then "UTC". Optional so the editor can omit
+   *  it and let the server pick the right default. */
+  timezone: z.string().min(1).optional(),
   name: z.string().optional(),
   enabled: z.boolean().optional(),
 });
@@ -76,7 +80,7 @@ const createBodySchema = z.object({
  * lookups; the validator owns the policy. SECURITY: this is what
  * enforces the "scheduler kind is snapshotted from the catalog at
  * creation" half of the contract for the editor / REST entry point —
- * see `docs/backend-integration.md` §6. The supervisor
+ * see `docs/backend-integration.md` The supervisor
  * `create_schedule` tool reads kind directly from its catalog entry
  * and bypasses this path by construction.
  */
@@ -97,6 +101,13 @@ const scheduleValidationDeps = {
 export const POST = withSession(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createBodySchema);
 
+  // Snapshot the timezone now — the schedule row carries its own tz
+  // (creation-time snapshot), and a later profile change must NOT
+  // shift already-existing schedules. Precedence: client value →
+  // profile tz → UTC.
+  const timezone =
+    body.timezone ?? (await getUserTimezone(session.user.id)) ?? "UTC";
+
   const startAt = new Date(body.startAt);
   const endAt = body.endAt ? new Date(body.endAt) : null;
   const intervalValue = body.intervalValue ?? null;
@@ -107,7 +118,7 @@ export const POST = withSession(ROUTE, async ({ req, session }) => {
     endAt,
     intervalValue,
     intervalUnit,
-    timezone: body.timezone,
+    timezone,
   });
   if (!triggerValidation.ok) {
     throw new ApiError("BAD_REQUEST", 400, triggerValidation.error);
@@ -145,7 +156,7 @@ export const POST = withSession(ROUTE, async ({ req, session }) => {
       endAt,
       intervalValue,
       intervalUnit,
-      timezone: body.timezone,
+      timezone,
       enabled: body.enabled ?? true,
     })
     .returning();

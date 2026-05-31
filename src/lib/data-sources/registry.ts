@@ -1,5 +1,5 @@
 /**
- * Client-safe data-source adapter registry.
+ * Client-safe data-source adapter registry. See docs/data-sources.md.
  */
 
 import type { IDataSourceAdapter } from "./types";

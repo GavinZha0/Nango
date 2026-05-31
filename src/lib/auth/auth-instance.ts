@@ -34,7 +34,7 @@ export async function getIsFirstUser(): Promise<boolean> {
 
 const options = {
   secret: process.env.BETTER_AUTH_SECRET!,
-  baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_BASE_URL,
+  baseURL: process.env.BETTER_AUTH_URL,
 
   plugins: [
     adminPlugin({
@@ -67,6 +67,11 @@ const options = {
         required: false,
         input: true,
       },
+      timezone: {
+        type: "string", // IANA name; client writes it via authClient.updateUser
+        required: false,
+        input: true,
+      },
     },
   },
 
@@ -87,7 +92,7 @@ const options = {
           // artifact tree until `seedArtifactCategoriesForUser` is
           // re-invoked manually (admin tooling) — there is no
           // server-side self-heal on the save path today.
-          // @see docs/artifact-dashboard-migration.md §4.1.2
+          // See docs/artifact-dashboard-migration.md.
           const userId = typeof user.id === "string" ? user.id : null;
           if (!userId) return;
           try {
@@ -139,7 +144,7 @@ export async function getSession() {
     if (!session) return null;
     // Reject soft-deleted users; their cookie may still be valid until
     // cookie cache expiry, but we drop them on every request as a hard
-    // gate. See docs/rbac.md §4.
+    // gate. See docs/rbac.md
     const [row] = await db
       .select({ deletedAt: UserTable.deletedAt })
       .from(UserTable)

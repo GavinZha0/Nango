@@ -1,5 +1,10 @@
 /**
- * Vertica extraction — `vertica-nodejs` query → DuckDB → Parquet.
+ * Vertica extraction — `vertica-nodejs` query → NDJSON → DuckDB → Parquet.
+ *
+ * V1 takes a JSON-intermediate shortcut (buffers full result in heap,
+ * round-trips through NDJSON). Acceptable for one adapter; the future
+ * migration plan onto a shared ODBC backbone lives in
+ * docs/data-sources.md.
  */
 
 import "server-only";
@@ -47,17 +52,15 @@ interface VerticaModule {
 // Connection
 
 async function openClient(resolved: ResolvedDataSource): Promise<VerticaClient> {
-  // Lazy import: keeps `vertica-nodejs` (CommonJS, no types) out of the
-  // hot import graph for processes that never touch a Vertica credential.
+  // Lazy import: keeps `vertica-nodejs` (CommonJS, no types) out of
+  // the hot import graph for processes that never touch Vertica.
   const mod = (await import("vertica-nodejs")) as unknown as { default: VerticaModule };
   const Vertica = mod.default;
-  // tls_mode default: "disable" rather than "prefer" because:
-  //   1. vertica-nodejs's "prefer" attempts TLS first and does NOT
-  //      gracefully fall back if the server lacks TLS — it returns
-  //      "The server does not support TLS connections" instead.
-  //   2. Most dev Vertica clusters don't enable TLS by default.
-  //   3. Admins running a TLS-enabled cluster opt in explicitly via
-  //      params.tls_mode = "require" / "verify-ca" / "verify-full".
+  // tls_mode default "disable": vertica-nodejs's "prefer" attempts
+  // TLS first and does NOT gracefully fall back if the server lacks
+  // TLS — it errors with "The server does not support TLS connections".
+  // Most dev clusters don't enable TLS; admins on a TLS-enabled
+  // cluster set params.tls_mode = "require" / "verify-ca" / "verify-full".
   const client = new Vertica.Client({
     host: resolved.host,
     port: resolved.port,
@@ -106,16 +109,14 @@ export async function extractFromVertica(
           `Vertica returned ${rowCount} rows, exceeds maxRows=${input.maxRows}.`,
         );
       }
-      // Stream-write NDJSON to disk so the DuckDB reader does the
-      // type coercion in its own process (no JS-side type juggling).
       const lines = result.rows.map((r) => JSON.stringify(r)).join("\n");
       await fs.writeFile(tmpJson, lines + (lines.length > 0 ? "\n" : ""));
     })();
     await raceWithTimeoutAndAbort(work, input.timeoutMs, input.signal);
 
     // Convert NDJSON → Parquet via DuckDB. `read_json_auto` infers
-    // column types from the JSON sample; this loses some fidelity
-    // (e.g. dates may end up as VARCHAR) but is sufficient for V1.
+    // column types from the JSON sample; loses some fidelity (dates
+    // may end up as VARCHAR) but is sufficient for V1.
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
     try {

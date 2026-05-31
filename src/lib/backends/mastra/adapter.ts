@@ -1,7 +1,5 @@
 /**
- * Mastra backend adapter — **client-side**.
- *
- * @see docs/backend-integration.md
+ * Mastra backend adapter — client-side. See docs/backend-integration.md.
  */
 
 import type {
@@ -9,14 +7,10 @@ import type {
   IBackendAdapter,
 } from "../types";
 
-// Capabilities
-
 const capabilities: BackendCapabilities = {
   displayName: "Mastra",
   entityKinds: ["agent"],
 };
-
-// IBackendAdapter
 
 export const mastraAdapter: IBackendAdapter = {
   provider: "mastra",

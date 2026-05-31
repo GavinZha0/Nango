@@ -194,7 +194,7 @@ export function rebuildWebSearchOutcome(
   // (`WebSearchInlinePreview`) — every replayed web_search source
   // carries a 1-based `index` and `sourceKind: 'web'` so historical
   // chat threads render numbered cards identically to live ones.
-  // See docs/artifact-evolution.md §3.6.
+  // See docs/artifact-evolution.md
   const cards: CardListItem[] = ok.results.map((r, i) => ({
     index: i + 1,
     sourceKind: "web" as const,

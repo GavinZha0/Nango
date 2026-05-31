@@ -518,23 +518,48 @@ All three phases (D-1, D-2, D-3) are landed.
 - Per-user data isolation flow end-to-end (interface is reserved; no UI yet).
 - Adapter "describe" endpoint for agent-driven schema introspection.
 - Streaming / CDC sources.
-- **Streaming Appender path for non-extension adapters.** §3.2 explains the V1 NDJSON shortcut Vertica takes (full buffer + JSON round-trip + double disk pass). Acceptable for one adapter; **not** acceptable as a copy-paste pattern. **Trigger condition: before adding the second non-DuckDB-extension adapter** (BigQuery / Snowflake / ClickHouse / …), build a shared `createDuckdbStreamingAdapter` factory:
+- **Unify non-DuckDB-extension adapters on `odbc_scanner` (deferred).** §3.2 explains the V1 NDJSON shortcut Vertica takes (full buffer + JSON round-trip + double disk pass + a `vertica-nodejs` direct dependency). Acceptable for one adapter; **not** acceptable as a copy-paste pattern. The plan to fold all such adapters onto a single ODBC backbone is recorded here and **deferred until DuckDB's `odbc_scanner` ships as a core extension**.
+
+  **Why `odbc_scanner` is the right backbone.** DuckDB Labs released `odbc_scanner` (<https://github.com/duckdb/odbc-scanner>) in mid-2025 as a Labs / nightly extension and has publicly stated intent to promote it to a **core extension** in a future DuckDB release. It exposes a `odbc_query(handle, sql)` table function that streams results through DuckDB's pipeline straight into `COPY ... TO ...parquet` — the same code shape the Postgres / MySQL DuckDB extensions already use. With it, every database that ships an ODBC driver (Vertica, Oracle, SQL Server, DB2, Snowflake, Firebird, …) becomes a ~40-line adapter built on a shared factory; no Node-side driver, no V8-heap buffering, no NDJSON round-trip. This **supersedes** the earlier "createDuckdbStreamingAdapter via DuckDB Appender" sketch — same goal, smaller and more uniform footprint.
+
+  **Trigger condition (do not implement before either holds):**
+  1. `odbc_scanner` is promoted to a DuckDB core extension (currently still has to be installed via `INSTALL odbc_scanner FROM core_nightly` and lacks `ATTACH` support — issue duckdb/odbc-scanner#162), **OR**
+  2. A second non-DuckDB-extension adapter is requested (Oracle / MSSQL / Snowflake / ClickHouse) before condition 1 holds — at that point the `core_nightly` channel is acceptable cost to avoid copy-pasting a second 250-line custom client.
+
+  **Design decisions, frozen for the future PR:**
+  - **Provider ids stay specific** (`vertica`, future `oracle`, `mssql`, …) — not a generic `odbc`. Existing `data_source.provider` rows survive zero-migration; UI keeps DB-typed labels; users don't have to know their ODBC driver name. Internally each is a thin wrapper over a shared `createOdbcAdapter` factory.
+  - **New factory, not a `mode` switch on `createDuckdbExtensionAdapter`.** The ATTACH lifecycle (long-lived catalog mapping) and the `odbc_connect` + `odbc_query` lifecycle (per-call handle) differ enough that mixing them in one factory makes `pinDefaultSchema`-style flags semantically wrong. New file: `src/lib/data-sources/odbc-adapter.server.ts`.
+  - **Bound params remain rejected** (same as the ATTACH path) — agents don't use them and `odbc_query` supports them via a separate `params = row(...)` arg the factory can wire up later without changing the public contract.
+  - **First call cost.** `odbc_scanner` is ~5 MB. Hot-load it once at boot in `instrumentation.ts` (mirrors how DuckDB extensions cache locally after first download).
+  - **Driver shipping.** unixODBC into the Dockerfile unconditionally; per-DB drivers gated by build ARGs (`VERTICA_ODBC_TARBALL`, `ORACLE_INSTANTCLIENT_TARBALL`, …) because most are commercial-license tarballs that can't be baked into the OSS image.
+
+  **Per-adapter shape after migration (Vertica is the worked example):**
 
   ```ts
-  // sketch — do NOT implement until the trigger fires
-  createDuckdbStreamingAdapter({
-    fetchRows(resolved): AsyncIterable<Row[]>,    // driver-specific, batched
-    schema(resolved): Promise<DuckDbColumnDef[]>, // driver-specific type map
+  // vertica/extract.server.ts — ~40 lines total
+  const adapter = createOdbcAdapter({
+    driverName: "Vertica",
+    buildOdbcConnString: (r) =>
+      `Driver={Vertica};Server=${r.host};Port=${r.port};Database=${r.database};` +
+      `SSLMode=${r.params.tls_mode ?? "disable"}`,
   });
+  export const { extract: extractFromVertica, testConnection: testVerticaConnection } = adapter;
   ```
 
-  Implementation choice: DuckDB's `Appender` API (zero JSON, zero tmpfile, explicit per-column types) — IF the `@duckdb/node-api` Node binding exposes it (verify before commit; the Python and C++ bindings do, the JS one needs a quick smoke test). Fallback if not exposed: a typed-INSERT prepared-statement path is still strictly better than the JSON round-trip.
+  Adding Oracle / MSSQL / Snowflake post-migration is the same three-file pattern (`adapter.ts` + `extract.server.ts` + `index.server.ts`), no Node-native driver.
 
-  Pre-trigger, the per-driver work the new factory needs:
-  - vertica → DuckDB type map: `INTEGER / BIGINT / DECIMAL(p,s) / VARCHAR / TIMESTAMP / TIMESTAMPTZ / DATE / BOOLEAN / VARBINARY` covers ~95% of real schemas; ~30 lines.
-  - Streaming: vertica-nodejs has a cursor extension; check whether other targets (Snowflake / ClickHouse) expose AsyncIterable / cursor-style APIs at all. If not, the factory still wins on type fidelity even with buffered rows.
+  **Phased plan when the trigger fires** — each phase is a separate PR:
+  1. Spike: confirm `INSTALL odbc_scanner FROM core_nightly` works under the project's locked `@duckdb/node-api` version against a real ODBC endpoint.
+  2. Plumbing: add `odbc-scanner.server.ts` + `odbc-adapter.server.ts`; extract `raceWithTimeoutAndAbort` / `introspectParquet` to a `duckdb-shared.server.ts` for reuse.
+  3. Cut Vertica over to the factory; remove `vertica-nodejs` from `package.json` / `pnpm-lock.yaml` / `next.config.ts:serverExternalPackages` / `vertica/vertica-nodejs.d.ts`.
+  4. Dockerfile: unixODBC + optional Vertica ODBC driver via build ARG.
+  5. Update §3.2 to point at the new factory; add an "Adding an ODBC-backed provider" recipe.
 
-  Why not now: only one adapter currently uses the JSON path. A factory abstracted over n=1 instance is guesswork. The right shape only becomes clear when there are 2 concrete row producers to generalise from.
+  **Acceptance gate:** the same Vertica `SELECT` produces a Parquet whose `SUMMARIZE` (column names, types, row count) is byte-equivalent to the legacy path's output before `vertica-nodejs` is removed.
+
+  **One known compatibility caveat to schedule into Phase 3.** The legacy adapter respects `params.schema` by issuing `SET search_path TO ...` on the connection; the ODBC path can't do this transparently (no equivalent `odbc_set_session_param`). Phase 3 needs to either (a) drop `params.schema` after auditing existing `data_source` rows for usage, or (b) inline the schema as a query prefix at extract time.
+
+  Why not now: `odbc_scanner` is still a Labs-owned nightly extension. Its `ATTACH` support is on the roadmap but not in a stable release. Both make the swap a moving target. Cost of waiting is one custom adapter; cost of moving early is tracking a non-frozen extension API. The decision is reversible — if a second non-extension adapter is requested before the trigger, jump to phase 2 above with `core_nightly` as the install channel and accept the upgrade churn.
 
 ---
 

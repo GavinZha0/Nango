@@ -17,10 +17,9 @@ import { ApiError } from "@/lib/http/route-handlers";
  * tree. `kind` discriminates organisational folders from leaf
  * artifacts. Top-level rows (`parent_id IS NULL`) are system-seeded
  * categories and are immutable to the user. All write paths go
- * through this service so the invariants in
- * `docs/artifact-dashboard-migration.md` §4.1.2 stay enforced.
+ * through this service so the tree invariants stay enforced.
  *
- * @see docs/artifact-dashboard-migration.md §4
+ * See docs/artifact-dashboard-migration.md.
  */
 
 // ───────────────────────────── Types ─────────────────────────────
@@ -53,9 +52,10 @@ export interface UpdateNodeInput {
    * inline HTML / markdown for those artifact kinds. Schema is
    * type-specific and intentionally untyped at the service layer
    * (the artifact page's renderer enforces shape per artifact
-   * type). Per D31 / V1 design, workflow changes go through chat
-   * (modify_workflow), NOT through this field — `content` here
-   * never mutates workflow.spec.
+   * type). Workflow changes go through chat (a fresh save from a
+   * new outcome), NOT through this field — `content` here never
+   * mutates
+   * `workflow.spec`.
    *
    * `null` clears the field; `undefined` leaves it as-is.
    */
@@ -68,9 +68,9 @@ export interface UpdateNodeInput {
  * Insert one folder row per `SEED_CATEGORIES` entry for the given
  * user. Idempotent: skips entries already present at the root.
  *
- * Called from the better-auth `databaseHooks.user.create.after` hook
- * so every freshly registered user has a non-empty tree on first
- * login. Migration 0032 performs the same seed for existing rows.
+ * Called from the better-auth `databaseHooks.user.create.after`
+ * hook so every freshly registered user has a non-empty tree on
+ * first login.
  */
 export async function seedArtifactCategoriesForUser(
   ownerId: string,

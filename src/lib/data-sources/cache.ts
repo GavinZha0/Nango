@@ -1,5 +1,7 @@
 /**
  * Parquet cache layer for the data-source integration.
+ *
+ * See docs/data-sources.md.
  */
 
 import "server-only";
@@ -13,8 +15,7 @@ import { resolveCacheRoot } from "./cache-root";
 
 // Path layout
 
-/** Shared with the sandbox layer's bind-mount source. Single source
- *  of truth for the env var + default lives in `cache-root.ts`. */
+/** Shared with the sandbox layer's bind-mount source. */
 export function getCacheRoot(): string {
   return resolveCacheRoot();
 }
@@ -29,8 +30,7 @@ function metaPath(name: string): string {
   return path.join(getCacheRoot(), "parquet", `${name}.meta.json`);
 }
 
-/** Tmp directory the writer uses before atomic rename. Random uuid
- *  suffix lets two writers race without colliding. */
+/** Tmp staging dir; random suffix lets two writers race without colliding. */
 function tmpDir(name: string): string {
   return path.join(
     getCacheRoot(),
@@ -41,10 +41,6 @@ function tmpDir(name: string): string {
 
 // Naming and validation
 
-/**
- * Cache-key validation. Same shape rules as Skill names: kebab/snake
- * slug, length capped, no path traversal possible by construction.
- */
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 
 export class InvalidCacheKeyError extends Error {
@@ -69,15 +65,11 @@ export interface DatasetMeta {
   name: string;
   /** Adapter id used to materialise this dataset (postgres / mysql / ...). */
   source: string;
-  /** uuid of the `data_source` row that produced this dataset.
-   *  Stored for diagnostics (admin "which source did this come from?")
-   *  and for the cleanup hook that purges cache when a data source
-   *  is deleted. Null is reserved for sources that don't bind to a
-   *  data_source row (e.g. future ad-hoc CLI imports). */
+  /** uuid of the `data_source` row that produced this dataset. Used by
+   *  the cleanup hook when a data source is deleted. Null for sources
+   *  that don't bind to a data_source row. */
   dataSourceId: string | null;
-  /** sha256 of the canonicalised query text. Mismatched hash on a
-   *  same-name refresh request is a hard error: pick a new name or
-   *  invalidate first. */
+  /** sha256 of the canonicalised query text. */
   queryHash: string;
   /** ISO-8601 string. */
   createdAt: string;
@@ -135,12 +127,9 @@ export interface AcquiredSlot {
 }
 
 /**
- * Acquire a tmp slot for writing a fresh extract. Caller is the
- * data-source adapter; it writes a single Parquet file at
- * `slot.outputPath` (currently `<tmpDir>/part-001.parquet`).
- *
- * Atomic-rename on commit means concurrent writers do not see each
- * other's half-written files.
+ * Acquire a tmp slot for writing a fresh extract. The adapter writes
+ * a single Parquet file at `slot.outputPath`; atomic rename on commit
+ * means concurrent writers do not see each other's half-written files.
  */
 export async function acquireWriteSlot(name: string): Promise<AcquiredSlot> {
   validateDatasetName(name);
@@ -162,18 +151,16 @@ export interface CommitInput {
 
 /**
  * Atomically promote a tmp slot to the final dataset directory.
- * Replaces any existing directory of the same name (TTL-driven
- * refresh path). Writes the sidecar after the rename so a partial
- * crash leaves either no meta (= cache miss) or a meta pointing at
- * actual files.
+ * Replaces any existing directory of the same name (slot-reassignment
+ * + TTL refresh share this path). Writes the sidecar AFTER the rename
+ * so a partial crash leaves either no meta (= cache miss) or a meta
+ * pointing at actual files.
  */
 export async function commitWriteSlot(input: CommitInput): Promise<DatasetMeta> {
   validateDatasetName(input.name);
   const final = datasetDir(input.name);
 
-  // Remove any prior version. `rm -rf` semantics; ENOENT is ok.
   await fs.rm(final, { recursive: true, force: true });
-  // Atomic rename of the directory.
   await fs.rename(input.slot.tmpDir, final);
 
   const meta: DatasetMeta = {
@@ -206,13 +193,9 @@ export async function invalidateDataset(name: string): Promise<void> {
 
 /**
  * Drop every cached dataset whose sidecar references the given
- * `data_source.id`. Called by the data source DELETE API path; the
- * data_source row → cache relationship is by file content
- * (sidecar.dataSourceId), not by FK, so cleanup is filesystem-driven.
- *
+ * `data_source.id`. Called by the data source DELETE API path.
  * Idempotent + best-effort: missing parquet root or unreadable
- * sidecars are skipped silently. Returns the list of names that
- * were removed for caller-side logging.
+ * sidecars are skipped. Returns the names that were removed.
  */
 export async function purgeDatasetsForDataSource(
   dataSourceId: string,
@@ -234,8 +217,7 @@ export async function purgeDatasetsForDataSource(
         removed.push(entry);
       }
     } catch {
-      // Skip unparseable / orphan entries; the next sweep will try
-      // again. We don't fail the delete API on a single bad sidecar.
+      // Skip unparseable / orphan entries; do not fail the delete API.
     }
   }
   return removed;
@@ -244,26 +226,10 @@ export async function purgeDatasetsForDataSource(
 /**
  * Drop EVERY cached dataset + sidecar under `<cacheRoot>/parquet/`.
  *
- * Called once on Node boot from `instrumentation.ts` to make the
- * dataset cache lifetime equal the Node process lifetime. Two
- * operational problems disappear together:
- *
- *   1. Disk accumulation — without TTL-driven GC, cache files grew
- *      monotonically across the life of a long-running process /
- *      cluster of restarts.
- *   2. Cross-restart name collisions — `extract_dataset_by_sql`
- *      treats `same-name + different-queryHash` as a hard
- *      `QUERY_HASH_MISMATCH` error to defend against in-session
- *      ambiguity. The same guard backfired after a restart: the LLM
- *      has no memory of names from the prior process, so it would
- *      cheerfully reuse a slug and the runtime would refuse.
- *
- * Idempotent + best-effort: a missing parquet root is fine (first
- * boot), and a half-deleted directory just gets re-deleted on the
- * next call. Returns the number of top-level entries removed for
- * caller-side logging — does NOT block boot on rm failures.
- *
- * @see docs/data-sources.md §"Cache lifecycle"
+ * Called once on Node boot from `instrumentation.ts` to pin cache
+ * lifetime to Node process lifetime — restart Nango and the cache
+ * starts empty. Idempotent + best-effort: a missing parquet root is
+ * fine (first boot), rm failures do not block boot.
  */
 export async function purgeAllDatasets(): Promise<number> {
   const root = path.join(getCacheRoot(), "parquet");
@@ -280,7 +246,6 @@ export async function purgeAllDatasets(): Promise<number> {
       removed += 1;
     } catch {
       // Best-effort: a single failed rm shouldn't stop the sweep.
-      // The next boot tries again.
     }
   }
   return removed;
@@ -289,9 +254,7 @@ export async function purgeAllDatasets(): Promise<number> {
 // Query hash (canonicalised)
 
 /**
- * Stable hash for the SQL text that produced a dataset. Used by the
- * cache to detect "same name, different query" mismatches and force
- * the caller to either reuse-as-is or pick a new name.
+ * Stable hash for the SQL text that produced a dataset.
  *
  * Canonicalisation: collapse runs of whitespace and trim; everything
  * else is byte-identical. Comments / case / quoting are preserved on

@@ -16,7 +16,7 @@ export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
  *    AND user-created sub-folders. Never has `type`/`content`.
  *  - `artifact`: leaf, carries `type` + `content`.
  *
- * @see docs/artifact-dashboard-migration.md §2 decisions 1-2
+ * See docs/artifact-evolution.md.
  */
 export const ARTIFACT_KIND = ["folder", "artifact"] as const;
 
@@ -43,7 +43,7 @@ export type ArtifactKind = (typeof ARTIFACT_KIND)[number];
  * category), (3) write a migration that back-fills the new seed row
  * for every existing user.
  *
- * @see docs/artifact-dashboard-migration.md §4.1.2
+ * See docs/artifact-evolution.md.
  */
 export const SEED_CATEGORIES: readonly {
   readonly name: string;
@@ -57,9 +57,9 @@ export const SEED_CATEGORIES: readonly {
   { name: "PPT", types: ["ppt"] },
   // Note: the legacy `dashboard` artifact type is intentionally NOT
   // seeded a category here. Dashboards proper live in their own
-  // `dashboard` table (M3 milestone); the `dashboard` value on
-  // `artifact.type` is kept in `ARTIFACT_TYPES` only as a defensive
-  // forward-compat slot, but no producer currently emits it.
+  // `dashboard` table; the `dashboard` value on `artifact.type` is
+  // kept in `ARTIFACT_TYPES` only as a defensive forward-compat
+  // slot, but no producer currently emits it.
 ] as const;
 
 /**

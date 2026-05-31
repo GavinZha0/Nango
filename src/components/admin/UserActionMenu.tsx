@@ -79,7 +79,7 @@ export function UserActionMenu({ user, onRefresh }: UserActionMenuProps): ReactN
     setWorking(true);
     try {
       if (pendingAction === "delete") {
-        // Custom soft-delete endpoint (see docs/rbac.md §4) — bypasses
+        // Custom soft-delete endpoint (see docs/rbac.md) — bypasses
         // better-auth's hard removeUser.
         const res = await fetch(`/api/admin/users/${user.id}`, {
           method: "DELETE",

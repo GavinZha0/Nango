@@ -1,5 +1,6 @@
 import { UserRound, Mail, Shield } from "lucide-react";
 import { getSession } from "@/lib/auth/auth-instance";
+import { TimezoneField } from "./TimezoneField";
 
 interface ProfileFieldProps {
   icon: React.ComponentType<{ className?: string }>;
@@ -36,6 +37,11 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
   const userName: string = session?.user?.name ?? "Unknown";
   const userEmail: string = session?.user?.email ?? "";
   const userRole: string = formatRole(session?.user?.role);
+  // better-auth additionalFields are present at runtime but TS doesn't
+  // narrow the session type to include them here; cast locally.
+  const userTimezone: string | null =
+    (session?.user as { timezone?: string | null } | undefined)?.timezone
+    ?? null;
 
   return (
     <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6 p-6 md:p-8">
@@ -50,6 +56,7 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
         <ProfileField icon={UserRound} label="Name" value={userName} />
         <ProfileField icon={Mail} label="Email" value={userEmail || "-"} />
         <ProfileField icon={Shield} label="Role" value={userRole} />
+        <TimezoneField initial={userTimezone} />
       </div>
     </div>
   );

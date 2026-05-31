@@ -1,7 +1,7 @@
 /**
  * Runner — execution kernel implementation.
  *
- * @see docs/orchestrator.md#11-implementation-details-and-quirks
+ * See docs/orchestrator.md and docs/runner-events.md.
  */
 
 import "server-only";
@@ -61,9 +61,8 @@ import type {
 
 const log = childLogger({ component: "runner" });
 
-/** True iff the request is a real run dispatch (not CopilotKit's
- *  `/info` / `/threads/*` bookkeeping). Bookkeeping calls skip the
- *  `entity_run` lifecycle. */
+/** True iff this is a real run dispatch (not `/info` / `/threads/*`
+ *  bookkeeping). Bookkeeping skips the `entity_run` lifecycle. */
 function isRunRequest(request: Request): boolean {
   return (
     request.method === "POST" &&
@@ -71,31 +70,17 @@ function isRunRequest(request: Request): boolean {
   );
 }
 
-/** True iff the request targets the SSE `/connect` endpoint. Connect
- *  is a read-only resume — no `entity_run` row is created — but we
- *  still inject `PersistedAgentRunner` so `.connect()` can replay
- *  events from `entity_run_event` instead of returning an empty
- *  in-memory stream after a server restart. */
+/** True iff the request targets the SSE `/connect` endpoint.
+ *  Connect is a read-only resume (no new run row) but still attaches
+ *  `PersistedAgentRunner` so `.connect()` replays from
+ *  `entity_run_event` after a server restart. */
 function isConnectRequest(request: Request): boolean {
   return /\/agent\/[^/]+\/connect\b/.test(new URL(request.url).pathname);
 }
 
-// `extractRunInput` lives in its own module so the body-parsing
-// rules can be unit-tested in isolation. See
-// `src/lib/runner/extract-run-input.ts`.
-
-/** Persist the user's prompt as a `message` event row on the run
- *  timeline. The row's `messageId` matches the client's local
- *  message id so `/connect` history replay emits a TEXT_MESSAGE_*
- *  triplet the client deduplicates against its own state — avoiding
- *  the duplicate-user-message render described on
- *  `RunInputPeek.userMessageId`.
- *
- *  Returns the next available `seq` after the write so callers can
- *  set `PersistedAgentRunner.startSeq` correctly. The write is
- *  skipped (and the input seq is returned unchanged) when the
- *  caller doesn't have a user prompt at hand (programmatic /
- *  scheduled runs, parse failures). */
+/** Persist the user prompt as a `message` event so history replay
+ *  emits a TEXT_MESSAGE_* the client deduplicates against its own
+ *  state. Returns the next seq. No-op when `task` is empty. */
 async function recordUserMessage(
   runId: string,
   startSeq: number,
@@ -118,8 +103,7 @@ class RunnerImpl implements Runner {
     request: Request,
     input: StartRunInput,
   ): Promise<Response> {
-    // CONTRACT: backend-only entry-point. Built-in chat goes through
-    // `runBuiltinChatRequest`.
+    // CONTRACT: backend only. Built-in chat → `runBuiltinChatRequest`.
     if (!input.credentialId) {
       return NextResponse.json(
         { error: "Runner.runChatRequest: credentialId required (backend chat only)." },
@@ -129,7 +113,7 @@ class RunnerImpl implements Runner {
 
     const credentialId = input.credentialId;
 
-    // SECURITY: missing kind on backend dispatch is a programmer error — fail fast.
+    // Missing kind on backend dispatch is a programmer error.
     if (!input.entityKind) {
       return NextResponse.json(
         {
@@ -159,19 +143,13 @@ class RunnerImpl implements Runner {
 
     const built = await handler.buildAgent(ctx);
     if (built instanceof Response) {
-      // CONTRACT: handler returned credential / config error; do
-      // NOT create a run row.
+      // Credential / config error from the handler — no run row.
       return built;
     }
     const innerAgent: AbstractAgent = built;
 
-    // Bookkeeping paths (/info, /threads/*) skip the run lifecycle
-    // entirely — no entity_run row.
-    //
-    // /connect IS bookkeeping (no new row) but we still attach a
-    // `PersistedAgentRunner` (without runId) so .connect() replays
-    // historic events from `entity_run_event` instead of returning
-    // an empty stream after server restart.
+    // Bookkeeping paths skip the run lifecycle. /connect is one of
+    // them but still attaches PersistedAgentRunner so replay works.
     if (!isRunRequest(request)) {
       if (isConnectRequest(request)) {
         ctx.runner = new PersistedAgentRunner({
@@ -202,7 +180,7 @@ class RunnerImpl implements Runner {
       }
     }
 
-    // CONTRACT: body threadId is the AG-UI source of truth for programmatic or HTTP callers.
+    // CONTRACT: body threadId is the AG-UI source of truth.
     const peek = await extractRunInput(request);
     const task = input.task || peek.task;
     const threadId = input.threadId ?? peek.threadId;
@@ -236,12 +214,9 @@ class RunnerImpl implements Runner {
       "entity_run started",
     );
 
-    // Continuation vs normal chat — see the same dichotomy in
-    // `runBuiltinChatRequest` and `docs/runner-events.md`
-    // §"Continuation runs". Backend agents typically don't use
-    // frontend tools (they have their own session memory) so this
-    // branch is rarely entered, but kept symmetric so a backend
-    // adapter that DID use HITL would behave consistently.
+    // Continuation vs normal chat — same dichotomy as
+    // `runBuiltinChatRequest`. Backend agents rarely use frontend
+    // tools (their backend owns session memory) but kept symmetric.
     let startSeq: number;
     if (peek.triggeringToolResults.length > 0) {
       startSeq = 0;
@@ -258,9 +233,8 @@ class RunnerImpl implements Runner {
       );
     }
 
-    // Inject PersistedAgentRunner via ctx.runner — the runner wraps the
-    // inner agent with PersistingAgent inside its own .run() AND owns
-    // .connect() history replay from entity_run_event.
+    // PersistedAgentRunner wraps the inner agent with PersistingAgent
+    // inside .run() AND owns history replay on .connect().
     ctx.runner = new PersistedAgentRunner({
       runId: run.id,
       ownerId: input.ownerId,
@@ -268,10 +242,6 @@ class RunnerImpl implements Runner {
       log,
     });
 
-    // Overwrite `forwardedProps.user_id` with the session-derived
-    // ownerId before handing the request to CopilotKit. Bridges
-    // (agno / Mastra / Dify) trust this field unconditionally.
-    // @see ./inject-user-id.ts
     const sealed = await injectServerUserId(request, input.ownerId);
 
     try {
@@ -294,15 +264,12 @@ class RunnerImpl implements Runner {
     }
   }
 
-  /** QUIRK: lazy import — `credential-lookup` is server-only and we
-   *  don't want it pulled into the runner-types graph inadvertently. */
+  /** Lazy import — keeps `credential-lookup` off the runner-types graph. */
   private async providerForCredential(credentialId: string): Promise<string | null> {
     const { getCredentialConfigById } = await import("@/lib/credentials/lookup");
     const cfg = await getCredentialConfigById(credentialId);
     return cfg?.provider ?? null;
   }
-
-  // Built-in chat request
 
   async runBuiltinChatRequest(
     request: Request,
@@ -313,7 +280,6 @@ class RunnerImpl implements Runner {
     const start: number = Date.now();
     const classified = classifyBuiltinPath(url.pathname);
 
-    // 1. Authorisation + agent set selection
     let agentIds: string[];
     if (classified) {
       const allowed: boolean = await isAgentVisibleTo(classified.agentId, userId);
@@ -346,9 +312,8 @@ class RunnerImpl implements Runner {
       }
     }
 
-    // Fast path: bookkeeping requests (/info, /threads/*) don't need
-    // the full agent build (MCP borrow, skill resolve, supervisor
-    // catalog). Build a lightweight stub runtime and return early.
+    // Fast path: bookkeeping doesn't need MCP / skills / catalog —
+    // build a stub runtime and return early.
     if (!classified) {
       const stubAgents: Record<string, BuiltInAgent> = {};
       for (const id of agentIds) {
@@ -358,8 +323,7 @@ class RunnerImpl implements Runner {
         return await runWithAgents(request, {
           agents: stubAgents,
           endpoint: "/api/copilotkit/builtin",
-          // No runner — bookkeeping (/info, /threads/*) skips
-          // persistence and history replay.
+          // No runner — bookkeeping skips persistence and replay.
           trimMessages: false,
           entitySource: "builtin",
           diag: { userId },
@@ -374,24 +338,10 @@ class RunnerImpl implements Runner {
       }
     }
 
-    // 2. Persist the run + user-message FIRST, BEFORE any expensive
-    //    build step (MCP discovery, model resolution, supervisor
-    //    catalog composition). Anchoring `entity_run.started_at` at
-    //    HTTP-request-receipt time — not at build completion — means:
-    //
-    //    a. TTFT (= MIN(event.ts) - started_at) reflects the user's
-    //       real wait, including any blocking MCP discovery latency
-    //       (a single unreachable server can add 10-30s before the
-    //       LLM emits its first token).
-    //    b. Admin can see the gap on the timeline: `user_message`
-    //       row sits at T0, `degraded`/`started` rows land at T0+Nsec
-    //       — N is the build phase made visible.
-    //    c. Build-phase failures (specs all null / target missing /
-    //       buildBuiltinAgents throws) leave a `failed` row that
-    //       surfaces in `/admin/thread`, instead of vanishing into
-    //       the request log.
-    //
-    //    @see docs/runner-events.md §"TTFT and event timestamps"
+    // Persist the run + user_message BEFORE the expensive build
+    // step. Anchoring `started_at` at request-receipt time keeps TTFT
+    // honest and makes build-phase failures observable as `failed`
+    // rows. See docs/runner-events.md.
     let runId: string | null = null;
     let threadId: string | undefined;
     let dbRunner: PersistedAgentRunner | undefined;
@@ -411,25 +361,12 @@ class RunnerImpl implements Runner {
         createdBy: userId,
       });
       runId = run.id;
-      // Two mutually-exclusive entry shapes:
-      //
-      // (a) Normal chat turn — `triggeringToolResults` is empty.
-      //     Write a `message` event with the user's prompt at seq 0
-      //     so history replay carries the client-generated message
-      //     id (deduplicates the post-`/connect` re-render).
-      //
-      // (b) Continuation turn — the LLM was paused on a frontend /
-      //     HITL tool call and the user just supplied result(s).
-      //     Write the tool result(s) as `tool_call_result` events
-      //     instead. The pairing `tool_call_chunk` lives on the
-      //     PREVIOUS entity_run (closed when the LLM emitted it);
-      //     this run is the LLM's continuation, so the result is
-      //     its INPUT, not the prior run's output. Linking is by
-      //     `toolCallId`. NO `user_message` event is written —
-      //     repeating the stale prior prompt would confuse admins
-      //     scanning the timeline.
-      //
-      // @see docs/runner-events.md §"Continuation runs"
+      // Normal chat: write `message` at seq 0.
+      // Continuation: write `tool_call_result` events instead. The
+      // matching `tool_call_chunk` lives on the PREVIOUS run — this
+      // run's INPUT, linked by `toolCallId`. NO `user_message` is
+      // emitted (would just duplicate the stale prior prompt).
+      // See docs/runner-events.md.
       if (peek.triggeringToolResults.length > 0) {
         for (const tr of peek.triggeringToolResults) {
           await recordEvent(run.id, preBuildSeq, "tool_call_result", tr);
@@ -457,10 +394,7 @@ class RunnerImpl implements Runner {
       );
     }
 
-    // Helper: ensure a record-failed for any run we already created
-    // before re-throwing a build-time error. Idempotent — the
-    // `finalizeRun` UPDATE filters on `status = 'running'` so a
-    // double-call is a no-op.
+    // Idempotent — `finalizeRun` filters on `status = 'running'`.
     const finalizeIfCreated = async (errorMessage: string): Promise<void> => {
       if (runId === null) return;
       try {
@@ -476,15 +410,8 @@ class RunnerImpl implements Runner {
       }
     };
 
-    // 3. Build agents (resolves specs, borrows MCP, composes prompts).
-    //    Forwards `mode` so supervisor prompts pick up the per-mode
-    //    directive (auto / tool-call). Unknown values fall back to
-    //    the default in `resolveOrchestrationMode`.
-    //
-    //    THIS IS THE EXPENSIVE STEP. MCP discovery happens here and
-    //    can block the request for tens of seconds when a server is
-    //    unreachable. The wait is now visible on the run timeline
-    //    because step 2 already wrote the `message` row.
+    // Expensive step: MCP discovery can block tens of seconds.
+    // Visible on the timeline because we already wrote the message row.
     const mode = resolveOrchestrationMode(
       request.headers.get(ORCHESTRATION_MODE_HEADER),
     ).id;
@@ -502,7 +429,7 @@ class RunnerImpl implements Runner {
     }
 
     if (Object.keys(agents).length === 0) {
-      // QUIRK: rare race — every visible agent had unresolvable specs. Bail out.
+      // Rare race — every visible agent had unresolvable specs.
       releaseBuiltinBorrows(borrowed);
       requestLog.warn(
         { event: "specs_all_null", userId, durationMs: Date.now() - start },
@@ -516,16 +443,12 @@ class RunnerImpl implements Runner {
       );
     }
 
-    // 4. Wire up per-request `PersistedAgentRunner` + supervisor
-    //    holder + degraded rows. The run row already exists; we're
-    //    only attaching the runtime view of it.
+    // Wire up per-request runner + supervisor holder + degraded rows.
     if (classified?.action === "run") {
       const targetId = classified.agentId;
       const targetAgent = agents[targetId];
       if (!targetAgent) {
-        // Agent build failed during buildBuiltinAgents (spec missing,
-        // model resolution error, etc.). Surface explicitly as 503 so
-        // the client gets a clear signal instead of a cryptic 500.
+        // Build failed for this specific agent — surface as 503.
         const degraded = degradations.get(targetId);
         const reason = degraded?.map((d) => d.message).join("; ") ?? "unknown";
         releaseBuiltinBorrows(borrowed);
@@ -540,25 +463,18 @@ class RunnerImpl implements Runner {
           `Agent '${targetId}' is temporarily unavailable: ${reason}`,
         );
       }
-      // CONTRACT: runId is set above whenever classified.action === "run".
+      // CONTRACT: runId is set above whenever action === "run".
       const ensuredRunId = runId!;
-      // QUIRK: Plumb supervisor's run.id AND threadId into the
-      // parent-run holder so `delegate_to_agent` / `delegate_async`
-      // sub-runs link back as children AND stay grouped under the
-      // same admin thread page. @see ParentRunIdHolder.threadId.
+      // Plumb supervisor's run.id + threadId so delegate sub-runs link
+      // back as children AND stay grouped under the same thread.
       const supervisorHolder = supervisorRunHolders.get(targetId);
       if (supervisorHolder) {
         supervisorHolder.current = ensuredRunId;
         supervisorHolder.threadId = threadId;
       }
-      // Persist build-time degradations AFTER user_message (seq 0)
-      // so the admin timeline reads
-      //   user_message → degraded → started → ...
-      // matching the natural "user asked → system noticed these
-      // problems → agent began working" narrative. The `ts` on
-      // each degraded row now reflects post-build time (T0+Nsec),
-      // making MCP discovery latency visible as the gap between
-      // user_message and degraded.
+      // Persist degradations AFTER user_message so the timeline reads
+      // user_message → degraded → started → … (build-phase latency
+      // visible as the gap).
       const degraded = degradations.get(targetId) ?? [];
       const startSeq = await recordCapabilityDegradations(
         ensuredRunId,
@@ -573,21 +489,13 @@ class RunnerImpl implements Runner {
         log: requestLog,
       });
     } else if (classified?.action === "connect") {
-      // /connect resume: no new entity_run row, but we still want
-      // history replay backed by `entity_run_event` instead of the
-      // empty in-process store after a server restart.
+      // /connect: no new run row, but replay events from DB.
       dbRunner = new PersistedAgentRunner({
         ownerId: userId,
         log: requestLog,
       });
     }
 
-    // 5. Overwrite `forwardedProps.user_id` with session userId before
-    // CopilotKit dispatches into the agent's run(). Built-in agents
-    // don't currently consume forwardedProps.user_id directly (they
-    // use the agent spec / supervisor catalog for identity), but any
-    // future tool that reads it expects the server-trusted value.
-    // @see ./inject-user-id.ts
     const sealed = await injectServerUserId(request, userId);
 
     const dispatch = async (): Promise<Response> => {
@@ -596,8 +504,8 @@ class RunnerImpl implements Runner {
           agents,
           endpoint: "/api/copilotkit/builtin",
           runner: dbRunner,
-          // Built-in LLM agents need full history; only external
-          // backends (which own their own session memory) trim.
+          // Built-in LLM agents need full history; backends with
+          // their own session memory trim instead.
           trimMessages: false,
           entitySource: "builtin",
           diag: {
@@ -615,7 +523,7 @@ class RunnerImpl implements Runner {
     };
 
     try {
-      // QUIRK: Bookkeeping endpoints skip Langfuse to avoid drowning out user messages.
+      // Skip Langfuse on bookkeeping so user runs aren't drowned out.
       if (!classified) return await dispatch();
 
       return await withTrace(
@@ -636,13 +544,10 @@ class RunnerImpl implements Runner {
     } finally {
       // CONTRACT: release every borrow exactly once.
       releaseBuiltinBorrows(borrowed);
-
-      // QUIRK: Explicit flush guarantees in-flight Langfuse events ship before recycle.
+      // Flush Langfuse before the Node worker recycles.
       await flushLangfuse();
     }
   }
-
-  // Programmatic start
 
   async start(input: StartRunInput): Promise<ProgrammaticRunResult> {
     if (input.mode === "sync") return this.startSync(input);
@@ -652,18 +557,11 @@ class RunnerImpl implements Runner {
     );
   }
 
-  /** Cheap target classification — pure introspection of `input`,
-   *  no DB or network. Split out from `buildDispatchAgent` so
-   *  `start{Sync,Async}` can `recordRunStart` BEFORE blocking on
-   *  agent build (MCP discovery can add tens of seconds).
-   *
-   *  BORROW LIFECYCLE (returned from `buildDispatchAgent`): the
-   *  ledger is empty for backend dispatches (provider chat handlers
-   *  don't take MCP borrows) and the full per-call list for built-in
-   *  dispatches. The caller MUST pass it to `releaseBuiltinBorrows`
-   *  exactly once — sync runs in `finally`, async runs from the
-   *  subscribe error/complete callbacks (so background work keeps
-   *  the borrow alive until the agent stream actually finishes). */
+  /** Pure-introspection target classification.
+   *  BORROW LIFECYCLE: the ledger from `buildDispatchAgent` MUST be
+   *  released exactly once. Sync releases in `finally`; async releases
+   *  from the subscribe error/complete callbacks so background work
+   *  keeps the borrow alive until the stream finishes. */
   private classifyDispatchTarget(input: StartRunInput): {
     isBackend: boolean;
     entitySource: "backend" | "builtin";
@@ -671,7 +569,7 @@ class RunnerImpl implements Runner {
   } {
     const isBackend = input.credentialId !== undefined;
     const entitySource: "backend" | "builtin" = isBackend ? "backend" : "builtin";
-    // CONTRACT: built-in entities are always "agent".
+    // Built-in entities are always "agent".
     if (isBackend && !input.entityKind) {
       throw new Error(
         "Runner.start: entityKind is required for backend dispatch.",
@@ -681,12 +579,10 @@ class RunnerImpl implements Runner {
     return { isBackend, entitySource, kind };
   }
 
-  /** Build the inner agent + borrow ledger + degradations. The
-   *  expensive step (MCP discovery, model resolution, supervisor
-   *  catalog composition) lives here so that `start{Sync,Async}`
-   *  can record the run row first and surface the build wait on
-   *  the admin timeline as the gap between `message` (T0) and
-   *  the subsequent `degraded` / `started` rows. */
+  /** Build inner agent + borrow ledger + degradations. The expensive
+   *  step (MCP discovery / model resolve / supervisor catalog) lives
+   *  here, after `recordRunStart`, so the build wait is visible on
+   *  the timeline. */
   private async buildDispatchAgent(
     input: StartRunInput,
     kind: EntityKind,
@@ -700,9 +596,8 @@ class RunnerImpl implements Runner {
     return { innerAgent, borrowed, degradations };
   }
 
-  /** Synthesised `RunAgentInput` for `.run()`. CONTRACT: every
-   *  bridge reads the user message from `messages` and `user_id`
-   *  from `forwardedProps`. */
+  /** Synthesised `RunAgentInput`. CONTRACT: bridges read the user
+   *  message from `messages` and `user_id` from `forwardedProps`. */
   private buildSyntheticRunInput(
     runId: string,
     input: StartRunInput,
@@ -724,24 +619,15 @@ class RunnerImpl implements Runner {
     };
   }
 
-  /** Synchronous in-process dispatch. CONTRACT: caller awaits the
-   *  terminal state; final summary is the joined `TEXT_MESSAGE_*`
-   *  deltas. Used by the supervisor's `delegate_to_agent` tool.
-   *
-   *  STAGE ORDER (matches `runBuiltinChatRequest` for TTFT parity):
-   *    1. classify (cheap)
-   *    2. recordRunStart (started_at = NOW, BEFORE build)
-   *    3. buildDispatchAgent (MCP discovery, may block) — finalize
-   *       on error
-   *    4. record degradations (ts reflects post-build time)
-   *    5. PersistingAgent.run → subscribe loop
-   *
-   *  @see docs/runner-events.md §"TTFT and event timestamps"
-   */
+  /** Synchronous in-process dispatch (used by `delegate_to_agent`).
+   *  Returns terminal state + joined TEXT_MESSAGE_* deltas.
+   *  Stage order mirrors `runBuiltinChatRequest` for TTFT parity:
+   *  classify → recordRunStart → build → degradations → run.
+   *  See docs/runner-events.md. */
   private async startSync(input: StartRunInput): Promise<ProgrammaticRunResult> {
     const { entitySource, kind } = this.classifyDispatchTarget(input);
 
-    // Unify threadId: generate once, reuse in both recordRunStart and buildSyntheticRunInput.
+    // One threadId reused by recordRunStart and the synthetic input.
     const threadId = input.threadId ?? randomUUID();
 
     const run = await recordRunStart({
@@ -787,8 +673,7 @@ class RunnerImpl implements Runner {
         kind,
       ));
     } catch (err) {
-      // Build failed AFTER recordRunStart — surface as a failed run
-      // row so admins can see it on `/admin/thread`.
+      // Build failed AFTER recordRunStart — surface as a failed row.
       const message = err instanceof Error ? err.message : String(err);
       try {
         await finalizeRun(run.id, "failed", {
@@ -806,11 +691,9 @@ class RunnerImpl implements Runner {
       throw err;
     }
 
-    // Single try/finally spans subscribe-resolved → borrow release.
     try {
-      // Programmatic dispatch has no user-message event (the task
-      // lives in `entity_run.input_task`, not in the event stream),
-      // so degradations start at seq 0.
+      // Programmatic dispatch has no user-message event (task lives
+      // on `entity_run.input_task`), so degradations start at seq 0.
       const startSeq = await recordCapabilityDegradations(
         run.id,
         degradations,
@@ -826,8 +709,7 @@ class RunnerImpl implements Runner {
 
       const syncTimeoutMs = getConfigMs("runner.sync_timeout", 300);
 
-      // Hold the subscription so the timeout path can cancel the
-      // agent stream and release MCP connections / memory immediately.
+      // Hold the subscription so the timeout path can cancel immediately.
       let subscription: { unsubscribe(): void } | undefined;
 
       const agentPromise = new Promise<ProgrammaticRunResult>((resolve) => {
@@ -836,9 +718,8 @@ class RunnerImpl implements Runner {
 
         subscription = persistedAgent.run(runAgentInput).subscribe({
           next: (rawEvent: BaseEvent) => {
-            // BOUNDARY CAST — narrow discriminant switch to AgUiEvent.
             const event = rawEvent as AgUiEvent;
-            // CopilotKit built-in emits TEXT_MESSAGE_CHUNK; bridges emit TEXT_MESSAGE_CONTENT.
+            // Built-in emits TEXT_MESSAGE_CHUNK; bridges emit TEXT_MESSAGE_CONTENT.
             if (
               event.type === EventType.TEXT_MESSAGE_CONTENT
               || event.type === EventType.TEXT_MESSAGE_CHUNK
@@ -849,7 +730,7 @@ class RunnerImpl implements Runner {
             }
           },
           error: (err: unknown) => {
-            // CONTRACT: PersistingAgent already finalised the row.
+            // PersistingAgent already finalised the row.
             const message = err instanceof Error ? err.message : String(err);
             resolve({
               runId: run.id,
@@ -873,7 +754,7 @@ class RunnerImpl implements Runner {
       const timeoutMsg = `Sync run timed out after ${syncTimeoutMs / 1000}s`;
       const timeoutPromise = new Promise<ProgrammaticRunResult>((resolve) => {
         timer = setTimeout(() => {
-          // Cancel the agent stream to release MCP connections and memory.
+          // Cancel the stream so MCP connections / memory release immediately.
           subscription?.unsubscribe();
           log.warn({ runId: run.id, timeoutMs: syncTimeoutMs }, timeoutMsg);
           finalizeRun(run.id, "failed", { errorMessage: timeoutMsg }).catch(() => {});
@@ -892,23 +773,18 @@ class RunnerImpl implements Runner {
         clearTimeout(timer);
       }
     } finally {
-      // CONTRACT: release every MCP borrow exactly once.
       releaseBuiltinBorrows(borrowed);
     }
   }
 
   /**
-   * Asynchronous in-process dispatch. CONTRACT: returns immediately
-   * with the runId; the agent stream flows in the background and
-   * the user is notified via EventBus + `notification` row on
-   * terminal events.
-   *
-   * @see docs/orchestrator.md#async--recovery
+   * Asynchronous in-process dispatch. Returns immediately with the
+   * runId; the agent streams in the background; the user is notified
+   * via EventBus + `notification` row on terminal events.
    */
   private async startAsync(input: StartRunInput): Promise<ProgrammaticRunResult> {
     const { entitySource, kind } = this.classifyDispatchTarget(input);
 
-    // Unify threadId: generate once, reuse in both recordRunStart and buildSyntheticRunInput.
     const threadId = input.threadId ?? randomUUID();
 
     const run = await recordRunStart({
@@ -954,8 +830,6 @@ class RunnerImpl implements Runner {
         kind,
       ));
     } catch (err) {
-      // Build failed AFTER recordRunStart — surface as a failed run
-      // row so admins can see it on `/admin/thread`.
       const message = err instanceof Error ? err.message : String(err);
       try {
         await finalizeRun(run.id, "failed", {
@@ -973,7 +847,8 @@ class RunnerImpl implements Runner {
       throw err;
     }
 
-    // Borrow lifecycle: release-then-rethrow if we fail before subscribe.
+    // Pre-subscribe failures release-and-rethrow; after subscribe the
+    // error/complete callbacks own release.
     let released = false;
     const releaseBorrows = (): void => {
       if (released) return;
@@ -982,9 +857,7 @@ class RunnerImpl implements Runner {
     };
 
     try {
-      // Programmatic dispatch has no user-message event (the task
-      // lives in `entity_run.input_task`, not in the event stream),
-      // so degradations start at seq 0.
+      // No user_message event for programmatic — task lives on `input_task`.
       const startSeq = await recordCapabilityDegradations(
         run.id,
         degradations,
@@ -998,7 +871,7 @@ class RunnerImpl implements Runner {
       });
       const runAgentInput = this.buildSyntheticRunInput(run.id, { ...input, threadId });
 
-      // PersistingAgent already persists events and finalizes the row. We accumulate preview here.
+      // PersistingAgent persists + finalises; we accumulate preview text.
       let summary = "";
       let errorMessage: string | undefined;
       const ownerId = input.ownerId;
@@ -1007,7 +880,6 @@ class RunnerImpl implements Runner {
 
       persistedAgent.run(runAgentInput).subscribe({
         next: (rawEvent: BaseEvent) => {
-          // Boundary cast (see sync path above for rationale).
           const event = rawEvent as AgUiEvent;
           if (
             event.type === EventType.TEXT_MESSAGE_CONTENT
@@ -1080,24 +952,16 @@ class RunnerImpl implements Runner {
         summary: "",
       };
     } catch (err) {
-      // Pre-subscribe failure. Release orphaned borrows and re-throw.
       releaseBorrows();
       throw err;
     }
   }
 
-  /** Build the in-process agent for a programmatic run. Reuses the
-   *  provider chat handler for backend, or `buildBuiltinAgents` for
-   *  a single built-in.
-   *
-   *  Returns the agent paired with the borrow ledger (empty for
-   *  backend, the full per-call list for built-in) and any build-
-   *  time capability degradations for the targeted agent (also
-   *  empty for backend). The caller owns release + persists
-   *  degradations after recordRunStart.
-   *
-   *  CONTRACT: throws on resolution failure (no HTTP envelope to
-   *  surface 4xx / 5xx through). */
+  /** Build the in-process agent for a programmatic run. Backend goes
+   *  through the provider chat handler; built-in through
+   *  `buildBuiltinAgents`. Returns agent + borrow ledger + per-agent
+   *  degradations; caller owns release + persists degradations after
+   *  recordRunStart. CONTRACT: throws on resolution failure. */
   private async buildAgentForProgrammatic(
     input: StartRunInput,
     kind: EntityKind,
@@ -1129,7 +993,7 @@ class RunnerImpl implements Runner {
           `Runner.start: ${input.entityId} build failed: ${built.status} ${body.slice(0, 200)}`,
         );
       }
-      // Backend dispatches don't take MCP borrows or have degradations.
+      // Backend dispatches don't take borrows or carry degradations.
       return { agent: built, borrowed: [], degradations: [] };
     }
 
@@ -1140,10 +1004,17 @@ class RunnerImpl implements Runner {
     const { agents, borrowed, degradations } = await buildBuiltinAgents(
       [input.entityId],
       programmaticLog,
+      // Pass ownerId so ambient tools (get_current_datetime) resolve
+      // the run owner's profile timezone in headless async / scheduled
+      // runs — otherwise userId is undefined here and the tool falls
+      // back to the server timezone. Safe re: supervisor side-effects:
+      // programmatic targets are catalog-resolved and exclude
+      // is_supervisor agents, so the `isSupervisor && ctx` branch in
+      // buildBuiltinAgents never fires on this path.
+      { userId: input.ownerId },
     );
     const builtinAgent = agents[input.entityId];
     if (!builtinAgent) {
-      // Spec failed to resolve. Release immediately.
       releaseBuiltinBorrows(borrowed);
       throw new Error(
         `Runner.start: built-in agent ${input.entityId} could not be resolved (disabled, missing credential, or unsupported model).`,

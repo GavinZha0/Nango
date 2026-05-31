@@ -1,5 +1,9 @@
 /**
  * Zod schemas for the credential payload shapes that an `ssh_server`
+ * row can bind to (basic_auth + private_key), plus the normalised
+ * shape consumed by the SSH client's connect builder.
+ *
+ * See docs/ssh.md.
  */
 
 import { z } from "zod";

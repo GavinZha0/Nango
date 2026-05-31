@@ -1,5 +1,7 @@
 /**
  * AES-256-GCM encryption / decryption for credential payloads.
+ *
+ * See docs/key-rotation.md.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
@@ -26,9 +28,6 @@ interface Keyring {
 
 let cachedKeyring: Keyring | null = null;
 
-/**
- * @see docs/key-rotation.md#6-implementation-details-and-quirks
- */
 function loadKeyring(): Keyring {
   if (cachedKeyring) return cachedKeyring;
 

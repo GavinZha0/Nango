@@ -24,7 +24,7 @@
  * boundary — see the helper's docstring for the rationale.
  *
  * @see src/lib/copilot/frontend-tool-helpers.tsx — the helpers.
- * @see docs/chat-interactive-ui.md §3
+ * See docs/chat-interactive-ui.md.
  */
 
 import { z } from "zod";

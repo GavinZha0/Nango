@@ -1,5 +1,7 @@
 /**
  * Single source of truth for applying a partial update to a schedule row.
+ *
+ * See docs/orchestrator.md.
  */
 
 import "server-only";
@@ -30,11 +32,9 @@ export interface SchedulePatch {
 }
 
 export interface ApplyScheduleUpdateOptions {
-  /** When true, a `startAt` patch whose value is <= now is rejected.
-   *  The LLM-facing `update_schedule` tool sets this to keep the
-   *  model away from "fire in the past" footguns; REST PATCH leaves
-   *  it off so a power user can legitimately backfill or freeze a
-   *  schedule's `startAt` to the past for testing / audit purposes. */
+  /** Reject `startAt` patches in the past. The LLM-facing
+   *  `update_schedule` tool sets this; REST PATCH leaves it off so
+   *  power users can backfill for testing / audit. */
   requireFutureStartAt?: boolean;
 }
 

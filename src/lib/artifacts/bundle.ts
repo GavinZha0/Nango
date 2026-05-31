@@ -1,31 +1,8 @@
 /**
  * Render-ready artifact bundle assembler — shared by the four
- * artifact-write endpoints (save / get / update / refresh) per the
- * D31 + W1.6 design. One pure function that loads the artifact
- * row, optionally loads its backing workflow, optionally resolves
- * the workflow's data, and emits a consistent bundle shape.
- *
- * Why one shared assembler:
- *   - GET /api/artifacts/[id]      → bundle (open / view)
- *   - POST /api/artifacts/save     → bundle (newly saved)
- *   - PATCH /api/artifacts/[id]    → bundle (after edit)
- *   - POST /api/artifacts/[id]/refresh → bundle (cache-busted)
- *   All four return the SAME shape so frontend state management
- *   stays uniform: `setArtifact(response)` regardless of which
- *   endpoint fired.
- *
- * Dependency-injection-shaped — the DB loaders + workflow-execute
- * adapter are injected so tests can swap stubs. The route handler
- * wires the production deps (`get-artifact.ts`).
- *
- * Data resolution status (W1.6.2):
- *   - The bundle's `data` / `fromCache` / `executedAt` fields are
- *     populated only when `deps.executeWorkflow` returns a non-null
- *     `DataResolution`. The W1.6.2 default implementation returns
- *     null (no engine integration yet). W1.6.x adds the real tool
- *     registry + runner adapter wiring; until then the artifact
- *     page UI must tolerate `data === undefined` (show a
- *     "data not ready, click refresh" placeholder).
+ * artifact endpoints (save / get / update / refresh) so the client
+ * gets the same shape regardless of which one fired. DI-shaped;
+ * production wiring lives in `get-artifact.ts`. See docs/workflow.md.
  */
 
 import "server-only";
@@ -37,8 +14,6 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows";
 // ─── Public types ──────────────────────────────────────────────────────
 
 export interface ArtifactBundle {
-  /** Always present. Existing tree consumers expecting `{ node }`
-   *  keep working — additive shape change. */
   node: ArtifactEntity;
   /** Present only when `node.workflowId` is set AND the workflow
    *  row was found. Folders + standalone artifacts omit this. */
@@ -78,47 +53,35 @@ export interface BundleDeps {
   /** Load workflow row by id. Null = not found. (No ownership check
    *  here — the artifact already established ownership.) */
   getWorkflow(id: string): Promise<WorkflowEntity | null>;
-  /** Resolve the artifact's data via the workflow engine. Return
-   *  null if execution wasn't attempted (e.g. W1.6.2 stub) or
-   *  failed in a way the caller wants to surface as
-   *  "data not available" rather than throw.
-   *
-   *  `forceFresh` (refresh path) bypasses the L2 workflow-output
-   *  cache and forces a fresh execution. GET / save / update omit
-   *  it; the refresh endpoint sets it to true. */
+  /** Resolve the artifact's data via the workflow engine. Returns
+   *  null when execution wasn't attempted or failed in a way the
+   *  caller wants to surface as "data not available" rather than
+   *  throw. `forceFresh: true` is a placeholder today (no L2 cache
+   *  to bust yet) — the wiring is in place for when it lands. */
   executeWorkflow(args: {
     workflowId: string;
     spec: CanonicalWorkflowSpec;
     outputField: string;
     ownerId: string;
     forceFresh?: boolean;
-    /** Human-readable label for forensic recording (D4a). Only the
-     *  `forceFresh: true` path uses this; GET runs skip recording.
-     *  Bundle.ts forwards `workflow.name` so the entity_run row
-     *  surfaces "Refresh workflow: Q4 revenue chart" rather than
-     *  the bare workflow id. */
+    /** Used only on the recorded (`forceFresh: true`) path so the
+     *  entity_run row surfaces "Refresh workflow: <name>". */
     workflowName?: string;
   }): Promise<DataResolution | null>;
 }
 
 export interface BundleOptions {
-  /** Pass-through to `deps.executeWorkflow.forceFresh`. The
-   *  refresh endpoint sets this to true to bust the L2 cache. */
+  /** Pass-through to `deps.executeWorkflow.forceFresh`. */
   forceFresh?: boolean;
 }
 
 // ─── Entry point ───────────────────────────────────────────────────────
 
 /**
- * Build the render-ready bundle for one artifact. Throws `ApiError`
- * on not-found / access denied. Returns a bundle whose shape varies
- * by node kind:
- *
- *   - Folder (kind=folder)              → { node }
- *   - Standalone artifact (no workflow) → { node }
- *   - Workflow-backed artifact          → { node, workflow,
- *                                           [data, fromCache,
- *                                            executedAt] }
+ * Build the render-ready bundle. Throws `ApiError(NOT_FOUND, 404)`
+ * on not-found / access denied. Shape varies by node kind: folders
+ * and standalone artifacts get `{ node }`; workflow-backed artifacts
+ * get `{ node, workflow, [data, fromCache, executedAt] }`.
  */
 export async function buildArtifactBundle(
   artifactId: string,
@@ -135,19 +98,13 @@ export async function buildArtifactBundle(
   }
   const workflow = await deps.getWorkflow(node.workflowId);
   if (workflow === null) {
-    // Defensive: artifact references a workflow that no longer
-    // exists. The `ON DELETE SET NULL` FK would normally have
-    // nulled workflowId, but a partial delete or a race could
-    // leave a dangling reference. Surface as "no workflow" rather
-    // than 500.
+    // Defensive: dangling FK after a partial delete / race.
     return { node };
   }
   const spec = workflow.spec as CanonicalWorkflowSpec;
   const outputField = node.workflowOutputField ?? pickFirstOutputKey(spec);
   if (outputField === null) {
-    // Workflow spec has no outputs — shouldn't happen post-save
-    // (validate.ts requires non-empty outputs). Surface as
-    // "no data" rather than crashing.
+    // Should be unreachable — validate.ts requires non-empty outputs.
     return {
       node,
       workflow: {

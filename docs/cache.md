@@ -216,6 +216,52 @@ The last two are not "caches" in the chat-path sense (they hold a
 single client / a small token map respectively) but follow the same
 rule because their state can't survive HMR otherwise.
 
+### 2.8 OAuth Token Manager
+
+`src/lib/credentials/oauth-token-manager.ts` mints and caches access
+tokens for the OAuth 2.0 Client Credentials grant
+(`oauth_client` credential type with `{clientId, clientSecret,
+tokenUrl, scope?}`).
+
+Behaviour:
+
+- **Lazy refresh, no background timer.** Tokens are fetched on
+  first call and re-fetched automatically when the cached entry is
+  within `REFRESH_SKEW_MS` (60 s) of its `expiresAt`. No
+  `setInterval` to leak through HMR; no traffic to the IdP for
+  unused credentials.
+- **Concurrency dedup.** If N callers ask for the same credential's
+  token while a fetch is in flight, they all await the same
+  Promise. Exactly one network round-trip per refresh cycle.
+- **Cache invalidation hook-up.** Subscribes to
+  `onCredentialCacheInvalidated` so an admin edit (rotated secret,
+  changed `tokenUrl`, …) takes effect on the next call without a
+  process restart.
+- **Three-tier API.**
+  1. `getOAuthAccessToken(id)` returns the raw token string —
+     used for non-Bearer schemes (DPoP, custom headers).
+  2. `getOAuthAuthorizationHeader(id)` returns `"Bearer <token>"`.
+  3. `withOAuth(id, init)` returns a `RequestInit` with
+     `Authorization: Bearer <token>` merged in — what most
+     callers want.
+- **Manual eviction.** `invalidateOAuthToken(id)` drops the cached
+  token; useful after a downstream 401 if the IdP revoked the
+  token earlier than its advertised `expires_in`.
+
+Constants:
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `REFRESH_SKEW_MS` | 60 000 ms | Refresh window before `expiresAt` |
+| `DEFAULT_EXPIRES_IN_S` | 3600 s | Fallback when the IdP omits `expires_in` |
+| `DEFAULT_CACHE_TTL_S` | 4 h | LRU TTL safety net (per-entry `expiresAt` is the real expiry) |
+
+Out of scope: `refresh_token` (RFC 6749 §4.4.3 forbids it for the
+Client Credentials grant — every refresh re-runs the
+`client_credentials` flow with the stored secret) and mTLS / PEM
+client certificates (handle those at the TLS layer:
+`NODE_EXTRA_CA_CERTS` or a custom `https.Agent`).
+
 ---
 
 ## 3. Invalidation

@@ -45,7 +45,7 @@ export function tracingEnabled(target: TracingTarget): boolean {
 
 // Lazy singleton
 //
-// @see docs/observability.md#37
+// @see docs/observability.md
 // three-state cache: undefined = not init; null = no usable credential; Langfuse = ready.
 //
 // HMR-survival via globalThis: the langfuse client opens an HTTP
@@ -114,7 +114,7 @@ async function resolveClient(): Promise<Langfuse | null> {
         publicKey: cred.publicKey,
         secretKey: cred.secretKey,
         ...(cred.host ? { baseUrl: cred.host } : {}),
-        // @see docs/observability.md#37-implementation-details-and-quirks
+        // @see docs/observability.md
         flushAt: 1,
         sdkIntegration: "nango",
       });
@@ -174,7 +174,7 @@ export interface WithTraceOptions {
  *     output, ERROR-level child event attached. Original error
  *     re-thrown.
  *
- * @see docs/observability.md#37-implementation-details-and-quirks
+ * @see docs/observability.md
  *
  * When tracing is disabled (env / missing credential / target not
  * allowed), `fn` runs as-is and `trace` is `null` — callers must

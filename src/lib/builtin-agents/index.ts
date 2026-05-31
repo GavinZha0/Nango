@@ -1,10 +1,11 @@
 /**
  * Process-wide AgentSpec pool singleton.
  *
- * QUIRK: HMR-survival via globalThis — without this, every `next dev`
- * save would forget every cached AgentSpec and re-hit the DB on the
- * next chat turn. The DB row is source-of-truth so correctness is
- * unaffected, but the latency hit on hot reload is jarring.
+ * QUIRK: pinned to globalThis so HMR (`next dev`) does not drop the
+ * cache on every reload. Correctness is unaffected — DB is still
+ * source of truth — but latency would jump without this.
+ *
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";

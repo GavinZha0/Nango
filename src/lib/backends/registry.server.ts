@@ -1,5 +1,5 @@
 /**
- * Backend provider registry — server-only.
+ * Backend provider registry — server-only. See docs/backend-integration.md.
  */
 
 import "server-only";
@@ -24,8 +24,7 @@ export function getBackend(id: BackendId): BackendModule {
   return BACKENDS[id];
 }
 
-/** CONTRACT: returns null on unknown / untrusted input. Same shape
- *  as the legacy `chat-registry.server.ts` export. */
+/** CONTRACT: returns null on unknown / untrusted input. */
 export function getChatHandler(
   provider: string | null | undefined,
 ): IBackendChatHandler | null {

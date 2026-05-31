@@ -1,7 +1,5 @@
 /**
- * Dify backend metadata adapter — **client-side**.
- *
- * @see docs/backend-integration.md
+ * Dify backend metadata adapter — client-side. See docs/backend-integration.md.
  */
 
 import type {

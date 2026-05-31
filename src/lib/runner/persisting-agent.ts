@@ -1,5 +1,8 @@
 /**
  * PersistingAgent — `AbstractAgent` decorator that tees AG-UI events
+ * into `entity_run_event` and finalizes `entity_run` on terminal.
+ *
+ * See docs/runner-events.md.
  */
 
 import "server-only";
@@ -14,34 +17,22 @@ import { recordEvent, finalizeRun } from "./event-store";
 
 const log = childLogger({ component: "persisting-agent" });
 
-/**
- * Maximum time we'll wait for queued `recordEvent` writes + the
- * terminal `entity_run` UPDATE to drain before closing the SSE
- * response. If the DB is hung or unreachable we'd rather close the
- * stream than wedge the client indefinitely; the consequence of
- * timing out is that a subsequent `/connect` on the same thread may
- * see partial events / a still-`running` status row, which manifests
- * as the same blank-chat regression this drain was added to fix.
- * In practice the drain completes within a few ms.
- */
+/** Max wait for queued event writes + terminal `entity_run` UPDATE
+ *  before closing the SSE response — bounds blast radius if the DB
+ *  is hung. Drain normally completes in a few ms. */
 const FINALIZE_DRAIN_TIMEOUT_MS = 5_000;
 
 interface PersistingAgentConfig {
   inner: AbstractAgent;
   runId: string;
-  /** Starting sequence number for events emitted by this agent.
-   *  Default 0. Set this when the dispatch layer has already
-   *  written rows at seq 0..N-1 (e.g. `degraded` build-
-   *  time events) so the agent's stream picks up at seq N without
-   *  PRIMARY KEY collisions. */
+  /** Starting sequence number for events emitted by this agent. Set
+   *  when dispatch has already written rows at seq 0..N-1 so the
+   *  agent picks up at seq N without PRIMARY KEY collisions. */
   startSeq?: number;
 }
 
-/** CONTRACT: `startTs` is captured at the moment we first see the
- *  segment (TEXT_MESSAGE_START / first CHUNK / etc.) so the row's
- *  `entity_run_event.ts` reflects first-token time, not the end of
- *  the streaming window. Critical for accurate TTFT — see
- *  `docs/runner-events.md` §"TTFT and event timestamps". */
+/** CONTRACT: `startTs` is captured at the first event of a segment
+ *  so `entity_run_event.ts` reflects first-token time (accurate TTFT). */
 interface PendingMessage {
   messageId: string;
   role: string;
@@ -55,9 +46,7 @@ interface PendingReasoning {
   startTs: Date;
 }
 
-/** Read a string field defensively — AG-UI events are typed loosely
- *  in the SDK and the bridge layers occasionally hand us nullable
- *  values. Coercing here keeps the persistence path total. */
+/** Coerce loosely-typed AG-UI fields so the persistence path stays total. */
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -67,8 +56,8 @@ export class PersistingAgent extends AbstractAgent {
     super();
   }
 
-  /** QUIRK: re-attach config + clone inner agent so CopilotRuntime's
-   *  per-request clone preserves the wrapping. */
+  /** Re-attach config + clone inner so CopilotRuntime's per-request
+   *  clone preserves the wrapping. */
   clone(): this {
     const cloned = super.clone() as this;
     (cloned as unknown as { cfg: PersistingAgentConfig }).cfg = {
@@ -86,18 +75,10 @@ export class PersistingAgent extends AbstractAgent {
 
     const runId = this.cfg.runId;
 
-    // Coalescing state
-    // CONTRACT: `pendingMessage`, `pendingReasoning`, and
-    // `pendingToolCalls` are the in-memory accumulators. AG-UI's
-    // streaming event triplets (TEXT / REASONING / TOOL_CALL_*)
-    // are buffered here and flushed as one row at the natural
-    // boundary (END / next-segment / run-finalize). Every other
-    // AG-UI event is either persisted immediately (after flushing
-    // pending) or dropped (transport-only framing like
-    // MESSAGES_SNAPSHOT, STATE_*).
+    // Streaming triplets (TEXT / REASONING / TOOL_CALL_*) are
+    // buffered here and flushed as one row at the natural boundary.
     let pendingMessage: PendingMessage | null = null;
     let pendingReasoning: PendingReasoning | null = null;
-    // @see docs/runner-events.md#31-in-memory-accumulators
     interface PendingToolCall {
       toolName: string;
       args: string;
@@ -107,17 +88,9 @@ export class PersistingAgent extends AbstractAgent {
 
     let droppedEvents = 0;
 
-    // CONTRACT: every `recordEvent` write is queued here so we can
-    // await drain at run finalization. Without this, the SSE stream
-    // would close while `recordEvent` rows are still in-flight, and
-    // a client that immediately reconnects (CopilotKit's recursive
-    // `runAgent` continuation after a frontend tool call does
-    // exactly this) would call `reconstructFromDb` against an
-    // inconsistent timeline — missing events, or a row whose
-    // `entity_run.status` is still 'running'. The terminal
-    // `entity_run` UPDATE is also awaited inside `drainAndFinalize`
-    // so the status flip to 'succeeded'/'failed' is visible before
-    // we close the stream. @see docs/runner-events.md
+    // Every `recordEvent` write is queued so finalize can await
+    // drain — required so a synchronous reconnect doesn't see a
+    // still-`running` row or a partial timeline.
     const pendingWrites: Promise<void>[] = [];
 
     const persist = (
@@ -165,19 +138,12 @@ export class PersistingAgent extends AbstractAgent {
     };
 
     /**
-     * CONTRACT: idempotent terminal write — first caller wins. We
-     * ALWAYS drain pending buffers before writing the terminal row
-     * so partial text from cancelled runs survives.
-     *
-     * Awaits queued `recordEvent` writes and the terminal
-     * `finalizeRun` UPDATE so that callers (the new-Observable
-     * subscriber below) can sequence `subscriber.complete()` AFTER
-     * the DB is consistent. We use `Promise.allSettled` (not `all`)
-     * because individual `recordEvent` failures are already logged
-     * by `persist` and shouldn't block the terminal write.
-     *
-     * Capped by `FINALIZE_DRAIN_TIMEOUT_MS` so a hung DB doesn't
-     * make the SSE stream hang open forever.
+     * CONTRACT: idempotent terminal write — first caller wins.
+     * Always flushes pending buffers first so partial text on
+     * cancelled runs survives. Awaits queued event writes and the
+     * `finalizeRun` UPDATE; `Promise.allSettled` so a single event
+     * failure doesn't block the terminal write. Capped by
+     * {@link FINALIZE_DRAIN_TIMEOUT_MS}.
      */
     const finalizeOnce = async (
       status: EntityRunStatus,
@@ -224,17 +190,10 @@ export class PersistingAgent extends AbstractAgent {
 
     return new Observable<BaseEvent>((subscriber) => {
       const handleEvent = (rawEv: BaseEvent): void => {
-          // BOUNDARY CAST: `inner.run()` returns `Observable<BaseEvent>`
-          // per the upstream `AbstractAgent` contract, but in practice
-          // every event we receive is one of the concrete variants in
-          // {@link AgUiEvent}. Cast once at the boundary so the switch
-          // below narrows on `ev.type` (an `EventType` enum value)
-          // without per-case `as BaseEvent & {...}` casts. Niche events
-          // outside `AgUiEvent` (e.g. STATE_SNAPSHOT) hit the default
-          // arm and are dropped harmlessly.
-          // @see docs/runner-events.md §11
+          // Boundary cast: `inner.run()` is typed as BaseEvent but
+          // every event we care about is in `AgUiEvent`. Niche events
+          // hit `default` and are dropped harmlessly.
           const ev = rawEv as AgUiEvent;
-          // @see docs/runner-events.md#stage-2--coalescing
           switch (ev.type) {
             case EventType.RUN_STARTED: {
               flushPending();
@@ -243,7 +202,6 @@ export class PersistingAgent extends AbstractAgent {
             }
 
             case EventType.TEXT_MESSAGE_START: {
-              // @see docs/runner-events.md#32-boundary-semantics
               flushMessage();
               pendingMessage = {
                 messageId: ev.messageId,
@@ -261,8 +219,8 @@ export class PersistingAgent extends AbstractAgent {
               if (pendingMessage && pendingMessage.messageId === messageId) {
                 pendingMessage.text += delta;
               } else {
-                // Different (or no prior) messageId → flush old, start new.
-                // CHUNK events have optional `role`; fall back to assistant.
+                // New messageId → flush old, start new. CHUNK events
+                // have optional `role`; fall back to assistant.
                 flushMessage();
                 const role: string =
                   ev.type === EventType.TEXT_MESSAGE_CHUNK
@@ -317,14 +275,8 @@ export class PersistingAgent extends AbstractAgent {
               break;
             }
 
-            // @see docs/runner-events.md#44-why-two-rows-per-tool-call
             case EventType.TOOL_CALL_START: {
-              // Don't write yet — the chunk row is composed at END
-              // once we have name + full args together. flushPending
-              // is also deferred so any pre-tool assistant text
-              // remains coalesced through the call boundary, which
-              // is harmless because nothing else can interleave a
-              // tool-call's own START / ARGS / END.
+              // Compose the chunk row at END — name + full args.
               pendingToolCalls.set(ev.toolCallId, {
                 toolName: ev.toolCallName,
                 args: "",
@@ -335,8 +287,8 @@ export class PersistingAgent extends AbstractAgent {
 
             case EventType.TOOL_CALL_ARGS: {
               const entry = pendingToolCalls.get(ev.toolCallId);
-              // CONTRACT: only accumulate if we saw a START — drop
-              // orphaned ARGS to avoid an entry with no toolName.
+              // Only accumulate if we saw a START — orphaned ARGS
+              // would create an entry with no toolName.
               if (entry !== undefined) {
                 entry.args += ev.delta;
               }
@@ -361,14 +313,8 @@ export class PersistingAgent extends AbstractAgent {
               break;
             }
 
-            // TODO: when an upstream provider eventually emits AG-UI
-            // `TOOL_CALL_CHUNK` (the OpenAI-streaming-style single-
-            // event variant), accumulate it into the same
-            // pendingToolCalls map and flush at the next boundary
-            // (next non-chunk event with a different toolCallId, the
-            // matching TOOL_CALL_RESULT, or RUN_FINISHED). Today
-            // none of agno / Mastra / Dify emit it, so dropping is
-            // safe; revisit when the test fails.
+            // TODO: handle AG-UI `TOOL_CALL_CHUNK` (single-event
+            // OpenAI-streaming variant) when an upstream emits it.
 
             case EventType.TOOL_CALL_RESULT: {
               flushPending();
@@ -392,21 +338,15 @@ export class PersistingAgent extends AbstractAgent {
               break;
             }
 
-            // @see docs/runner-events.md
             default:
               return;
           }
       };
 
-      // CONTRACT: we use a manual subscription (rather than the
-      // pipe(tap, finalize) combo this used to use) so that we can
-      // sequence `subscriber.complete()` AFTER `finalizeOnce()`
-      // resolves. The terminal `entity_run.status` UPDATE must be
-      // visible BEFORE the SSE stream closes — otherwise a client
-      // that reconnects synchronously (CopilotKit's recursive
-      // `runAgent` after a frontend tool call) hits a still-
-      // `running` row and `reconstructFromDb` filters it out,
-      // surfacing as a blank chat. @see docs/runner-events.md
+      // CONTRACT: manual subscription so `subscriber.complete()` is
+      // sequenced AFTER `finalizeOnce()` — the terminal status flip
+      // must be visible before the SSE stream closes, otherwise a
+      // synchronous reconnect surfaces as a blank chat.
       const innerSub = this.cfg.inner.run(input).subscribe({
         next: (rawEv: BaseEvent) => {
           handleEvent(rawEv);
@@ -427,13 +367,8 @@ export class PersistingAgent extends AbstractAgent {
         },
       });
 
-      // @see docs/runner-events.md#33-subscriber-teardown
-      // Unsubscribe path (client `Stop`, request abort, parent
-      // subscription teardown). RxJS teardown is synchronous, so
-      // unlike the complete/error paths we CANNOT await the drain
-      // here — we just kick it off and let it run. Acceptable
-      // because aborted runs aren't immediately reconnected; the
-      // user sees the `cancelled` status whenever they next refresh.
+      // Unsubscribe path (Stop, abort, teardown). RxJS teardown is
+      // synchronous so we can't await the drain — fire-and-forget.
       return () => {
         innerSub.unsubscribe();
         if (finalized) return;

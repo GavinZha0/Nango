@@ -3,8 +3,8 @@
  * `invalidateFor*` functions. API write routes call exactly ONE
  * function per write; no separate `invalidateCredentialCache()` needed.
  *
- * @see docs/cache.md §3
- * @see docs/builtin-runtime.md §4
+ * See docs/cache.md.
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";

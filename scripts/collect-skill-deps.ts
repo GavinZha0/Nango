@@ -23,7 +23,7 @@
  * are NOT scanned — their declarations are advisory until they're
  * promoted to builtin via PR.
  *
- * @see docs/skills.md §9.x for the full design rationale.
+ * See docs/skills.md.x for the full design rationale.
  */
 
 import * as fs from "node:fs/promises";

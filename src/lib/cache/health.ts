@@ -1,6 +1,6 @@
 /**
  * Cache health aggregation for the admin endpoint.
- * @see docs/cache.md §7
+ * See docs/cache.md.
  */
 
 import "server-only";

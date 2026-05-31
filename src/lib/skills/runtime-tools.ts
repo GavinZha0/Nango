@@ -1,5 +1,8 @@
 /**
- * Per-agent server-side skill tools.
+ * Per-agent server-side skill tools: `get_skill`, `get_skill_file`,
+ * `run_skill_script`.
+ *
+ * See docs/skills.md.
  */
 
 import "server-only";
@@ -146,24 +149,12 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
     },
   });
 
-  // SECURITY MODEL:
-  //   run_code_in_sandbox = LLM-authored arbitrary code. Wide blast
-  //     radius; admin must explicitly tick it in Built-in Tools.
-  //   run_skill_script    = pre-vetted, admin-curated script bytes
-  //     stored in `skill_file`. Narrower blast radius; auto-mounted
-  //     alongside get_skill / get_skill_file when the agent binds a
-  //     skill, NOT exposed in the user-tickable Built-in Tools list.
-  // Both share the SAME sandbox plumbing (`getActiveAdapter().run`)
-  // so seccomp / cgroup / network-none / rootfs guarantees are
-  // bit-identical — this tool is a façade over the same enforcement,
-  // not a parallel path.
-  //
-  // V1 supported interpreters: .py (python3), .sh (bash). The script
-  // bytes are fed via stdin (`python3 -` / `bash -`), which avoids
-  // shell-quoting headaches and mirrors run_code_in_sandbox's
-  // recommended pattern. Stdin is intentionally NOT exposed as a
-  // tool parameter — script source must not be bypassable; feed
-  // data into the script via the `datasets` mounts instead.
+  // SECURITY: `run_skill_script` runs pre-vetted bytes from
+  // `skill_file`; `run_code_in_sandbox` runs LLM-authored code. Both
+  // share the same sandbox plumbing (`getActiveAdapter().run`) —
+  // this tool is a façade, not a parallel path. Script bytes are
+  // fed via stdin (`python3 -` / `bash -`); stdin is NOT exposed as
+  // a parameter so script source cannot be substituted by the LLM.
   const runSkillScript = defineTool({
     name: "run_skill_script",
     description:

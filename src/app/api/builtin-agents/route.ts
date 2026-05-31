@@ -14,7 +14,7 @@ import {
   parseBody,
   uuidString,
 } from "@/lib/http/validation";
-import { SUPERVISOR_PROMPT } from "@/lib/constants/supervisor";
+import { SUPERVISOR_PERSONA_SEED } from "@/lib/constants/supervisor";
 import { SUPERVISOR_TOOL_NAMES } from "@/lib/runner/supervisor-tools.server";
 
 const ROUTE = "/api/builtin-agents";
@@ -117,7 +117,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
 
   // Seed the default Nango prompt only when promoting at creation time.
   const seededPrompt =
-    isSupervisor && !body.prompt ? SUPERVISOR_PROMPT : body.prompt ?? null;
+    isSupervisor && !body.prompt ? SUPERVISOR_PERSONA_SEED : body.prompt ?? null;
 
   try {
     const row = await db.transaction(async (tx) => {

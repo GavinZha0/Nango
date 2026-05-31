@@ -1,5 +1,10 @@
 /**
  * Decrypt + parse the auth blob from a credential row that an
+ * `ssh_server` is bound to. Returns null on any failure path so a
+ * malformed credential degrades into a clean "no auth" rather than
+ * crashing the agent run.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";

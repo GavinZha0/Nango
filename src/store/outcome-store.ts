@@ -2,48 +2,21 @@
 
 /**
  * outcomeStore — transient, thread-scoped panel of agent-produced
- * artifacts, modelled as a list of blocks per outcome.
+ * artifacts. Backs `/outcomes`; the `artifact` DB table backs
+ * `/artifact`. Save button bridges the two via POST /api/artifacts
+ * (writes `savedArtifactId` back into the in-memory outcome).
  *
- * Two surfaces NOT to confuse (see `docs/data-visualization.md` §6.7):
- *  - This store backs `/outcomes` (current chat's transient panel).
- *  - The `artifact` DB table backs the `/artifact` library
- *    (permanent, user-managed). The bridge is the Save button which
- *    calls POST `/api/artifacts` and writes back `savedArtifactId`.
- *
- * BLOCK MODEL (since Phase 2):
- *
- * Every outcome carries a `blocks: OutcomeBlock[]` body composed of
- * visual primitives. New producers (search, chart, future "report"
- * agents) target the same `ReportOutcome` shape — they just emit a
- * different blocks array. The renderer (`BlockList` →
- * `<TextBlock> / <CardListBlock> / <ChartBlock>`) dispatches by
- * `block.kind`, so adding a new producer never touches the outcome
- * UI shell. Editing / composition of saved outcomes happens on the
- * `/artifact` page, NOT here.
- *
- * State lifecycle:
- *  - Frontend tool handler (`render_chart`)             → `addOutcome`
- *  - Server tool renderer side-effect (`web_search`)    → `addOutcome`
- *  - Save button                                         → POST → `markSaved`
- *  - Card collapse click                                 → `toggleCollapse`
- *  - workspaceStore.runtimeThreadId change → `clearForThreadSwitch` + `loadForThread`
- *  - `/outcomes` page mount on cold       → `loadForThread(currentThreadId)`
- *
- * @see docs/data-visualization.md §6.7
+ * See docs/data-visualization.md.
  */
 
 import { create } from "zustand";
 
 // blocks
 
-/**
- * Visual primitives a Report can be composed of. Each entry has a
- * dedicated React renderer under `components/workspace/blocks/`.
- *
- * Adding a new block: append a discriminant here + add a
- * `<KindBlock>` component + wire it in `BlockList`. The outcome
- * shell, replay layer, and save/load paths are agnostic.
- */
+/** Visual primitives a Report can be composed of. Each entry has a
+ *  dedicated renderer under `components/workspace/blocks/`. Adding a
+ *  new block: append the discriminant + a `<KindBlock>` component +
+ *  wire it in `BlockList`. */
 export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock;
 
 export interface TextBlock {
@@ -52,42 +25,21 @@ export interface TextBlock {
   markdown: string;
 }
 
-/**
- * Discriminator for the kind of source a {@link CardListItem}
- * represents. Drives type-specific decoration in the renderer
- * (domain icon for web, doc icon for kb, etc.) and is part of the
- * citation contract: the agent emits `[N]` references in chat text
- * that correspond to a card's {@link CardListItem.index}.
- *
- * Optional for backwards compatibility with existing card_list
- * producers that don't yet carry citation semantics; new producers
- * (web_search, future kb_retrieve, etc.) MUST set it.
- *
- * @see docs/artifact-evolution.md §3.6 (citation-driven artifacts)
- */
+/** Source-kind discriminator for citation-aware card-list rows
+ *  (drives icon chrome and is paired with {@link CardListItem.index}
+ *  in the `[N]` chat citation contract). New citation-aware
+ *  producers MUST set it; legacy card lists may omit. See
+ *  docs/artifact-evolution.md. */
 export type CardListSourceKind = "web" | "kb" | "sql" | "file";
 
-/**
- * One row in a {@link CardListBlock}. Designed as a generic
- * "clickable card with thumbnail" — web search results today;
- * future producers (artifact lists, GitHub repo lists, paper feeds,
- * KB retrieval, SQL rows, file lookups) reuse the same shape.
- *
- * CITATION CONTRACT (since P1g): items emitted by evidence-driven
- * tools (web_search, kb_retrieve, etc.) carry {@link index} +
- * {@link sourceKind}. The agent is then instructed (via the tool's
- * description) to reference these in chat text as `[1]`, `[2]`, …
- * matching the index. The user visually cross-references between
- * `[N]` markers in chat and the numbered cards rendered here.
- * Interactive `[N]` (click → popover / scroll / highlight) is V2;
- * V1 ships static numbered display only.
- */
+/** Generic "clickable card with thumbnail" — web-search results
+ *  today, also suitable for kb retrieval, sql rows, file lookups. */
 export interface CardListItem {
   /** 1-based citation number. Producers that don't participate in
    *  the `[N]` citation contract may omit it; renderers fall back to
    *  list position when absent. New citation-aware producers (web_search,
    *  kb_retrieve, etc.) MUST set it monotonically starting at 1.
-   *  @see docs/artifact-evolution.md §3.6 */
+   *  See docs/artifact-evolution.md. */
   index?: number;
   /** What kind of evidence this card represents. Drives card chrome
    *  (domain favicon for web, doc icon for kb, table-row icon for
@@ -133,13 +85,8 @@ export interface ChartBlock {
 
 // outcome
 
-/**
- * Outcome kind discriminator. Single value today — the block model
- * makes every outcome a "report" composed of blocks; the union is
- * preserved as a `type` (rather than collapsing to a constant) so
- * future kinds that ARE NOT block lists (e.g. an arbitrary HTML
- * payload) can land without restructuring callers.
- */
+/** Single value today; kept as a union so future non-block-list
+ *  outcome kinds can land without restructuring callers. */
 export type OutcomeKind = "report";
 
 interface BaseOutcome {
@@ -152,15 +99,13 @@ interface BaseOutcome {
   description?: string;
 
   agentId: string;
-  /** Null when the handler ran before lazy-capture wrote ABC into
-   *  `workspaceStore.runtimeThreadId` (see
-   *  docs/threadid-lifecycle.md). The WorkspaceProvider subscriber
-   *  back-fills it as soon as the real id arrives. Server replay
-   *  always supplies the real id. */
+  /** Null until lazy-capture writes the real id; the
+   *  WorkspaceProvider subscriber back-fills via `bindPendingThreadId`.
+   *  Server replay always supplies the real id. See
+   *  docs/threadid-lifecycle.md. */
   threadId: string | null;
-  /** `entity_run.id` of the producing run. Handler can't see it
-   *  client-side; the replay endpoint fills it from
-   *  `entity_run_event.run_id`. Stored but not consumed in V1. */
+  /** `entity_run.id` from the producing run. Filled by replay; client-
+   *  side handlers leave it null. Stored but not yet consumed. */
   runId: string | null;
   createdAt: number;
 
@@ -173,14 +118,10 @@ interface BaseOutcome {
   savedArtifactId: string | null;
 }
 
-/**
- * The only outcome shape today. `blocks` is rendered in order by
- * `BlockList`. Producers compose:
- *
- *   - `render_chart`  → `[{kind:"chart", option, datasetName?}]`
- *   - `web_search`    → `[{kind:"card_list", cards: [...]}]`
- *   - future "report" → e.g. `[text, chart, text, card_list]`
- */
+/** The only outcome shape today. `blocks` renders in order via
+ *  `BlockList`. Producers like `render_chart` emit a single-element
+ *  `[chart]`; `web_search` emits `[card_list]`; future composite
+ *  reports can emit any ordered mix. */
 export interface ReportOutcome extends BaseOutcome {
   kind: "report";
   blocks: OutcomeBlock[];
@@ -198,14 +139,9 @@ interface OutcomeState {
   /** "loading" while replay is in flight; UI shows skeleton. */
   status: OutcomeStatus;
 
-  /**
-   * Upsert by `outcomeId`. CONTRACT: if an existing outcome has
-   * `savedArtifactId` set, the new entry inherits it (overwriting
-   * an already-saved outcome does NOT un-save the library copy —
-   * see §6.7 overwrite-after-save contract). User-toggled
-   * `collapsed` is also preserved across upserts so a regenerate
-   * doesn't undo "I collapsed this".
-   */
+  /** Upsert by `outcomeId`. Preserves `savedArtifactId` and
+   *  user-toggled `collapsed` across upserts so a regenerate
+   *  doesn't unsave the library copy or undo a collapse. */
   addOutcome: (outcome: Outcome) => void;
   removeOutcome: (outcomeId: string) => void;
   toggleCollapse: (outcomeId: string) => void;
@@ -225,17 +161,10 @@ interface OutcomeState {
 // store
 
 export const useOutcomeStore = create<OutcomeState>((set, get) => {
-  /**
-   * Tracks the active `loadForThread` request so concurrent thread
-   * switches (rapid clicks) only persist the LATEST result. Earlier
-   * fetches that resolve out of order are dropped.
-   *
-   * Lives inside `create()`'s closure rather than at module scope —
-   * in Next.js HMR a module-level `let` can survive a hot reload
-   * and leave a stale token behind, leading to dropped legitimate
-   * responses in development. Each fresh store instance gets a
-   * fresh counter.
-   */
+  // Token guard: only the LATEST loadForThread result is persisted;
+  // earlier rapid-switch fetches that resolve out of order are
+  // dropped. Lives in the closure (not module scope) so HMR can't
+  // leave a stale token behind in dev.
   let activeLoadToken: number = 0;
 
   return {
@@ -249,11 +178,8 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
           (o) => o.outcomeId === outcome.outcomeId,
         );
         if (idx === -1) return { outcomes: [...state.outcomes, outcome] };
-        // Preserve user-visible UI state (savedArtifactId, collapsed)
-        // when a producer overwrites with the same outcomeId. Without
-        // `collapsed` carry-over the user's "I collapsed this" is
-        // silently undone every time the producer re-emits the same
-        // id (see §6.7 overwrite-after-save contract).
+        // Carry savedArtifactId + collapsed across re-emits so a
+        // producer regenerate doesn't unsave or expand the card.
         const prior: Outcome = state.outcomes[idx];
         const merged: Outcome = {
           ...outcome,
@@ -309,14 +235,9 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
         const body: { outcomes: Outcome[] } = await res.json();
         // Drop late responses for older thread switches.
         if (myToken !== activeLoadToken) return;
-        // Merge instead of replace: outcomes added locally between the
-        // fetch's start and finish (e.g. user types `make a chart`
-        // immediately after switching threads, agent fires render_chart,
-        // handler calls addOutcome before our fetch returns) would be
-        // wiped out by a naive `set({ outcomes: body.outcomes })`.
-        // Server's copy wins for any overlapping outcomeId — it carries
-        // the canonical runId / threadId, and a local addOutcome over
-        // the same id is itself an upsert of the same outcome.
+        // Merge instead of replace so local outcomes added during
+        // the fetch survive. Server wins on any overlapping id —
+        // it carries the canonical runId / threadId.
         set((state) => {
           const serverIds: Set<string> = new Set(
             body.outcomes.map((o) => o.outcomeId),

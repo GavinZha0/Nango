@@ -1,7 +1,7 @@
 /**
  * Process-wide LRU of resolved {@link SkillSpec}s, keyed by skillId.
  *
- * @see docs/skills.md#9-implementation-details-and-quirks
+ * See docs/skills.md.
  */
 
 import "server-only";
@@ -108,9 +108,9 @@ export class SkillPool {
   }
 }
 
-// QUIRK: `defaultLoadSkillSpec` MUST be declared above the `skillPool`
-// singleton so the constructor's default-arg lookup doesn't hit TDZ in
-// the bundled production build (dev hoists differently).
+// QUIRK: `defaultLoadSkillSpec` MUST stay declared above the
+// `skillPool` singleton — the constructor's default-arg lookup hits
+// a TDZ in the bundled production build otherwise.
 
 /** Reads the row + SKILL.md from DB. Pure DB read — no filesystem. */
 export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
@@ -160,13 +160,10 @@ export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
   };
 };
 
-// QUIRK: keep this last — `new SkillPool()` reads `defaultLoadSkillSpec`
-// via the constructor's default arg.
-//
-// HMR-survival via globalThis: `next dev` save would otherwise drop
-// every cached SkillSpec and re-read the bytea blob on the next
-// `get_skill` call. DB row is source-of-truth so correctness is
-// preserved either way; the guard avoids the dev-only latency spike.
+// HMR-survival via globalThis — without this, every `next dev` save
+// would drop the cache and re-read the bytea blob on the next
+// `get_skill` call. Correctness is unaffected (DB is source of truth);
+// the pin just avoids a dev-only latency spike.
 declare global {
   var __nangoSkillPool: SkillPool | undefined;
 }

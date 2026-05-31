@@ -31,12 +31,11 @@ import type {
 
 /**
  * Subset of `render_chart` args we project into the content blocks.
- * Mirrors `renderChartSchema` in `docs/data-visualization.md` §6.3.
+ * Mirrors `renderChartSchema` in `docs/data-visualization.md`
  *
- * Wire shape: the LLM sends `optionJson` (JSON string of the
- * full ECharts option). Older rows persisted under V1.0–V1.2
- * carry `option` (already an object); `coerceChartOption` handles
- * both for back-compat.
+ * Wire shape: the LLM sends `optionJson` (JSON string of the full
+ * ECharts option). Some legacy rows carry `option` (already an
+ * object) instead; `coerceChartOption` handles both for back-compat.
  */
 export interface RenderChartArgs {
   chartId: string;
@@ -48,9 +47,10 @@ export interface RenderChartArgs {
 }
 
 /**
- * Parse the LLM-supplied ECharts option from either `option` (V1.0
- * legacy) or `optionJson` (V1.3+ wire). Returns `null` if neither
- * yields a usable object — caller decides what to do.
+ * Parse the LLM-supplied ECharts option from either `option`
+ * (legacy object payload) or `optionJson` (current string payload).
+ * Returns `null` if neither yields a usable object — caller decides
+ * what to do.
  */
 export function coerceChartOption(
   args: RenderChartArgs,

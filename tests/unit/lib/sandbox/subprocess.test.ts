@@ -15,7 +15,7 @@ describe("SubprocessAdapter — real spawn", () => {
 
   it("captures stdout from a simple echo", async () => {
     const out = await adapter.run({
-      command: ["sh", "-c", "echo hello"],
+      command: ["node", "-e", "console.log('hello')"],
       timeoutMs: 5000,
     });
     expect(out.exitCode).toBe(0);
@@ -27,7 +27,7 @@ describe("SubprocessAdapter — real spawn", () => {
 
   it("forwards stdin to the child", async () => {
     const out = await adapter.run({
-      command: ["sh", "-c", "cat"],
+      command: ["node", "-e", "process.stdout.write(require('fs').readFileSync(0, 'utf-8'))"],
       stdin: "ping",
       timeoutMs: 5000,
     });
@@ -37,7 +37,7 @@ describe("SubprocessAdapter — real spawn", () => {
 
   it("propagates non-zero exit codes", async () => {
     const out = await adapter.run({
-      command: ["sh", "-c", "exit 7"],
+      command: ["node", "-e", "process.exit(7)"],
       timeoutMs: 5000,
     });
     expect(out.exitCode).toBe(7);
@@ -55,7 +55,7 @@ describe("SubprocessAdapter — real spawn", () => {
 
   it("kills on timeout and reports termination + exit 124", async () => {
     const out = await adapter.run({
-      command: ["sh", "-c", "sleep 5"],
+      command: ["node", "-e", "setTimeout(() => {}, 5000)"],
       timeoutMs: 200,
     });
     expect(out.termination).toBe("timeout");
@@ -67,7 +67,7 @@ describe("SubprocessAdapter — real spawn", () => {
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), 100);
     const out = await adapter.run({
-      command: ["sh", "-c", "sleep 5"],
+      command: ["node", "-e", "setTimeout(() => {}, 5000)"],
       timeoutMs: 5000,
       signal: ctrl.signal,
     });
@@ -85,7 +85,7 @@ describe("SubprocessAdapter — real spawn", () => {
     const fakeRss = vi.fn().mockResolvedValue(500 * 1024 * 1024); // 500MB
     const a = new SubprocessAdapter(fakeRss);
     const out = await a.run({
-      command: ["sh", "-c", "sleep 5"],
+      command: ["node", "-e", "setTimeout(() => {}, 5000)"],
       maxMemoryMb: 100,
       timeoutMs: 5000,
     });
@@ -95,7 +95,7 @@ describe("SubprocessAdapter — real spawn", () => {
 
   it("materializes inputFiles into the work dir", async () => {
     const out = await adapter.run({
-      command: ["sh", "-c", "cat data.txt"],
+      command: ["node", "-e", "process.stdout.write(require('fs').readFileSync('data.txt', 'utf-8'))"],
       inputFiles: { "data.txt": Buffer.from("from-input") },
       timeoutMs: 5000,
     });
@@ -120,7 +120,7 @@ describe("SubprocessAdapter — env allowlist (secret scrubbing)", () => {
   /** Spawn `env` in the child and parse `KEY=VALUE` lines into a map. */
   async function readChildEnv(): Promise<Record<string, string>> {
     const out = await adapter.run({
-      command: ["env"],
+      command: ["node", "-e", "for (let k in process.env) console.log(k + '=' + process.env[k])"],
       timeoutMs: 5000,
     });
     expect(out.exitCode).toBe(0);

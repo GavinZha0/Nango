@@ -6,30 +6,15 @@ import "server-only";
 
 /**
  * Overwrite (or add) `forwardedProps.user_id` on a CopilotKit AG-UI
- * `/run` POST request with a server-trusted value.
+ * `/run` POST body with a server-trusted value. Bridges (agno, Mastra,
+ * Dify) trust `user_id` unconditionally for memory / session scoping;
+ * without this helper it would come from the browser provider.
  *
- * Why: AG-UI bridge agents (agno, Mastra, Dify) read `user_id` from
- * `RunAgentInput.forwardedProps` to scope memory / session / threads
- * on the external backend. Without this helper that value comes from
- * the browser's `<CopilotKitProvider properties={...}>` — i.e.
- * client-supplied and spoofable via devtools. Programmatic dispatches
- * (`runner.start`) already pass `forwardedProps: { user_id: ownerId }`
- * built from server-side state (`StartRunInput.ownerId`); this helper
- * brings chat dispatches to the same trust level so every
- * `forwardedProps.user_id` reaching a bridge agent is server-trusted.
+ * CONTRACT: `userId` MUST be resolved from the session, not from the
+ * request body. Only POST `/agent/<id>/run` is rewritten; other verbs
+ * and CopilotKit routes pass through unchanged.
  *
- * Contract: `userId` must be the value resolved from the session
- * (`withSession` → `session.user.id`), not anything derived from the
- * request body. Bridges trust this field unconditionally; there is no
- * tertiary defence layer below this point.
- *
- * Guard: only POST `/agent/<id>/run` carries `forwardedProps`. Other
- * verbs and other CopilotKit routes (`/connect`, `/info`, `/threads/*`,
- * `/transcribe`, etc.) pass through unmodified so we don't pointlessly
- * re-serialise bookkeeping requests.
- *
- * @see docs/orchestrator.md "CopilotKit's Role: Protocol Adapter,
- *      Not Dispatch Engine"
+ * See docs/orchestrator.md.
  */
 export async function injectServerUserId(
   request: Request,

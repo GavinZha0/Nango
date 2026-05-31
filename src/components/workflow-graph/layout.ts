@@ -13,7 +13,7 @@
  * Layout constants:
  *
  *   NODE_WIDTH  — 240px, fixed.
- *   NODE_HEIGHT — 100px, fixed (per W1.8 design decision).
+ *   NODE_HEIGHT — 100px, fixed.
  *   NODESEP     — 40px gap between sibling nodes within a rank.
  *   RANKSEP     — 80px gap between successive ranks (long enough
  *                 that bezier edges have room to curve without
@@ -71,8 +71,8 @@ export interface LaidOutGraph {
  * `Y → this`. dagre treats `setEdge(src, dst)` as a directed edge,
  * which matches.
  *
- * V1 renders no edge labels — ref payloads (which key of `X` this
- * node consumes) live in the inspector drawer (W1.8.4) instead.
+ * Edges carry no labels — ref payloads (which key of `X` this
+ * node consumes) live in the inspector drawer instead.
  */
 export function layoutWorkflow(spec: CanonicalWorkflowSpec): LaidOutGraph {
   const g = new dagre.graphlib.Graph();
@@ -116,7 +116,8 @@ export function layoutWorkflow(spec: CanonicalWorkflowSpec): LaidOutGraph {
       },
       data: { spec: n },
       // `type` matches the key registered in `WorkflowGraph`'s
-      // `nodeTypes` prop — one renderer per D27/D35 bucket.
+      // `nodeTypes` prop — one renderer per node bucket
+      // (tool / agent / code / sql).
       type: n.type,
     };
   });

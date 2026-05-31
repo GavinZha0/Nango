@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Custom ReactFlow node renderers for the workflow graph (W1.8.3).
+ * Custom ReactFlow node renderers for the workflow graph.
  *
- * One renderer per node bucket (D27 / D35 / D36):
+ * One renderer per node bucket:
  *
  *   - `ToolNodeCard`  (amber)   — tool nodes  (`type: "tool"`)
  *   - `AgentNodeCard` (purple)  — agent nodes (`type: "agent"`)

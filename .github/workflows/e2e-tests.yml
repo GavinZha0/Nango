@@ -1,0 +1,111 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # ── Database ─────────────────────────────────────────────────────
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: nango
+      POSTGRES_PASSWORD: nango
+      POSTGRES_DB: nango
+
+      # ── Auth ─────────────────────────────────────────────────────────
+      BETTER_AUTH_SECRET: test-secret-key-for-ci-only-not-for-production-use-32chars
+      BETTER_AUTH_URL: http://localhost:9300
+      NO_HTTPS: "1"
+
+      # ── Credential encryption (CI-only key, NOT for production) ─────
+      CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID: k1
+      CREDENTIAL_ENCRYPTION_KEYRING: k1=0000000000000000000000000000000000000000000000000000000000000001
+
+      # ── Observability silenced in CI ─────────────────────────────────
+      NANGO_LOG_ENABLED: "false"
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: nango
+          POSTGRES_PASSWORD: nango
+          POSTGRES_DB: nango
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Apply database migrations
+        run: pnpm db:migrate
+
+      - name: Build application
+        run: pnpm build
+
+      # Start the app bypassing the `prestart` hook so we don't trigger
+      # the local Python-sandbox image build (not needed for the core
+      # auth + credential specs we run in CI).
+      - name: Start application
+        run: |
+          pnpm exec next start -p 9300 > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for application to be ready
+        run: |
+          timeout 90 bash -c 'until curl -sf http://localhost:9300 > /dev/null; do sleep 2; done'
+
+      - name: Run E2E tests (core)
+        run: pnpm test:e2e
+
+      - name: Stop application
+        if: always()
+        run: kill "$(cat server.pid)" 2>/dev/null || true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server.log
+          retention-days: 7

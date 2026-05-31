@@ -1,5 +1,7 @@
 /**
  * System-level resource bounds for the SSH execution path.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";

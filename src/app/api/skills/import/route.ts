@@ -7,7 +7,7 @@
  * - Path traversal impossible (skill_file.path is a string column, not fs)
  * - Zip-bomb mitigation via per-entry uncompressed size tracking
  *
- * @see docs/skills.md §4.2
+ * See docs/skills.md.
  */
 
 import "server-only";

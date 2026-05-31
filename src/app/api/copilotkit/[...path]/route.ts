@@ -1,17 +1,8 @@
 /**
  * CopilotKit Runtime API route — backend-agnostic AG-UI chat channel.
- *
- * Inputs:
- *   - `agentId`  — parsed from URL path `/agent/<id>/<run|connect|stop>`
- *                  (CopilotKit's convention; matches `fetch-router.mjs`)
- *   - `credentialId` — from `X-Credential-Id` header (the one piece
- *                  of identity that cannot be server-derived; see
- *                  docs/orchestrator.md "Custom HTTP Headers")
- *   - `entityKind` — looked up server-side via `EntityCatalog`,
- *                  not trusted from the client
- *
- * See docs/orchestrator.md "Custom HTTP Headers" for the rationale
- * behind which fields are server-derived vs client-supplied.
+ * `agentId` comes from the URL path, `credentialId` from the header,
+ * `entityKind` is server-resolved via `EntityCatalog`. See
+ * docs/orchestrator.md.
  */
 
 import { NextRequest } from "next/server";
@@ -28,47 +19,19 @@ export const dynamic = "force-dynamic";
 
 type RouteParams = { path: string[] };
 
-/**
- * SECURITY: backend agent ids are developer-defined identifiers
- * (snake_case / kebab-case / camelCase, optional `.` for namespace
- * or version). Narrow alphabet rejects:
- *   - control chars / whitespace (header injection / CRLF / proxy mangling)
- *   - URL-boundary chars `? # & =` (id ends up in upstream path)
- *   - quoting / brackets (log unambiguity)
- *   - `:` `/` `@` `+` (these belong to modelId namespaces — Bedrock
- *     `:0` suffixes, HuggingFace `meta-llama/Llama-3`, npm
- *     `@scope/pkg` — used inside provider BridgeConfig, not here).
- *
- * 128-char ceiling is a DOS guard; real ids are well under 32.
- * Defence in depth: bridge-runtime-kit + chat handlers still URL-encode
- * the id when interpolating into upstream paths.
- */
+/** SECURITY: narrow alphabet for backend agent ids — rejects
+ *  control chars, URL-boundary chars (`?`, `#`, `&`, `=`), and the
+ *  `:` `/` `@` `+` belonging to modelId namespaces. 128-char ceiling
+ *  is a DOS guard. */
 const AGENT_ID_PATTERN: RegExp = /^[A-Za-z0-9._\-]{1,128}$/;
 
-/** CopilotKit URL patterns that target a specific agent. Bookkeeping
- *  paths (`/info`, `/threads/*`, `/transcribe`) are stubbed (see
- *  BOOKKEEPING_PATH_PATTERN below) — Nango doesn't host remote
- *  agents/actions on this route, the BridgeAgent is registered
- *  client-side. @see CopilotKit `fetch-router.mjs`. */
+/** CopilotKit per-agent URLs (see `fetch-router.mjs`). */
 const AGENT_PATH_PATTERN: RegExp = /\/agent\/([^/]+)\/(?:run|connect|stop)(?:\/[^/]+)?$/;
 
-/**
- * CopilotKit client probes the runtime URL on init to discover
- * capabilities (`/info`), thread bookkeeping (`/threads/*`), and
- * audio transcription (`/transcribe`). Our backend chat route is a
- * hand-rolled REST→AG-UI bridge that doesn't host any of those —
- * the BridgeAgent is registered client-side, capabilities flow
- * through the agent instance, and we have no upstream audio path.
- *
- * Rather than 404 these (which makes the CopilotKit client log
- * `Failed to load runtime info` in the browser and emits two server
- * WARN lines per page mount), we respond with an empty descriptor.
- * The pattern also matches the bare base URL (`/api/copilotkit`)
- * which CopilotKit hits as part of its transport auto-detect probe.
- *
- * SECURITY: stubbing these is safe because the response is a static
- * literal — no DB or upstream call, no user data, no echoed input.
- */
+/** CopilotKit bookkeeping probes (/info, /threads/*, /transcribe).
+ *  We don't host remote agents/actions here — the BridgeAgent is
+ *  client-side. Stubbed with an empty descriptor so the browser
+ *  doesn't log "Failed to load runtime info" on every page mount. */
 const BOOKKEEPING_PATH_PATTERN: RegExp =
   /^\/api\/copilotkit\/?(?:info|threads(?:\/.*)?|transcribe)?$/;
 
@@ -79,9 +42,7 @@ const ROUTE = "/api/copilotkit/[...path]";
 async function handler(req: NextRequest, userId: string, log: Logger): Promise<Response> {
   const pathname = new URL(req.url).pathname;
 
-  // Bookkeeping endpoints — respond with an empty descriptor. No log
-  // (these fire on every page mount; logging them would dominate the
-  // chat route's signal). See BOOKKEEPING_PATH_PATTERN comment above.
+  // No log — these fire on every page mount.
   if (BOOKKEEPING_PATH_PATTERN.test(pathname)) {
     return Response.json(EMPTY_RUNTIME_INFO);
   }
@@ -114,8 +75,7 @@ async function handler(req: NextRequest, userId: string, log: Logger): Promise<R
     throw new ApiError("BAD_REQUEST", 400, `${CREDENTIAL_ID_HEADER} contains invalid characters`);
   }
 
-  // SECURITY: strict guard — null on missing / disabled / wrong
-  // serviceType / unregistered provider.
+  // SECURITY: strict — null on missing / disabled / wrong type.
   const cfg = await getAgentCredentialConfigById(credentialId);
   if (!cfg) {
     log.warn(
@@ -125,9 +85,7 @@ async function handler(req: NextRequest, userId: string, log: Logger): Promise<R
     throw new ApiError("NOT_FOUND", 404, "Credential not found or disabled.");
   }
 
-  // Resolve entityKind from EntityCatalog (server-side authority).
-  // Cache is warmed by WorkspaceProvider on UI mount; cold lookups
-  // cost one backend `/info` round-trip per credential per 10 min.
+  // entityKind from server-side EntityCatalog (cached 10 min).
   const entities = await EntityCatalog.list(credentialId);
   const entity = entities?.find((e) => e.id === agentId);
   if (!entity) {

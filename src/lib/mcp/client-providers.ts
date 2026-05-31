@@ -1,21 +1,17 @@
 /**
  * Graceful MCP client providers for Built-in agents.
  *
- * Uses the official `@modelcontextprotocol/sdk` Client (same as the
- * admin-side discovery / call-tool routes) and wraps each discovered
- * MCP tool as a Vercel AI SDK `dynamicTool` so CopilotKit's
- * `mcpClients` integration can spread them into `streamText.tools`.
+ * Wraps each discovered MCP tool as a Vercel AI SDK `dynamicTool` so
+ * CopilotKit's `mcpClients` integration can spread them into
+ * `streamText.tools`.
  *
- * History: `@ai-sdk/mcp` was the original integration but its 1.0.x
- * line and `@modelcontextprotocol/sdk` >= 1.29 are incompatible —
- * `@ai-sdk/mcp` mutates `transport.protocolVersion` directly while
- * the new SDK exposes it as a getter-only property with a separate
- * `setProtocolVersion()` method. Result: every discovery call threw
- * `Cannot set property protocolVersion of #<StreamableHTTPClientTransport>
- * which has only a getter` and `cachedTools` ended up empty. The
- * upstream `@ai-sdk/mcp` 2.0 branch only ships against ai-sdk v4,
- * which we don't use. Rolling our own thin wrapper avoids both
- * compatibility traps and keeps the dependency tree smaller.
+ * WARNING: do not "simplify" by swapping back to `@ai-sdk/mcp`. Its
+ * 1.x line mutates `transport.protocolVersion` directly, which
+ * `@modelcontextprotocol/sdk` >= 1.29 forbids (getter-only); the
+ * 2.x line is ai-sdk-v4 only. The hand-rolled wrapper below sits on
+ * the official MCP SDK and bypasses both traps.
+ *
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";

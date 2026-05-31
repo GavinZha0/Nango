@@ -1,5 +1,7 @@
 /**
- * Server-side `extract_dataset_by_sql` agent tool.
+ * Server-side `extract_dataset_by_sql` agent tool. Auto-mounted
+ * whenever an agent has any data_source binding; not user-selectable
+ * via the built-in tool catalog. See docs/data-sources.md.
  */
 
 import "server-only";
@@ -30,10 +32,9 @@ import { getExtractLimits } from "./limits";
 
 // Caps
 
-/** Hard upper bounds applied to any LLM-supplied previewRows. The
- *  LLM never sees more than these regardless of what it asks for. */
 import { getConfigNumber } from "@/lib/config";
 
+/** Hard server-side caps applied to any LLM-supplied previewRows. */
 const PREVIEW_HARD_CAP_ROWS = (): number => getConfigNumber("datasource.preview.max_rows", 200);
 const PREVIEW_HARD_CAP_BYTES = (): number => getConfigNumber("datasource.preview.max_bytes", 50_000);
 
@@ -41,13 +42,6 @@ const log = childLogger({ component: "extract-dataset-by-sql" });
 
 // Args / result shapes
 
-/**
- * The LLM-facing schema is intentionally minimal — only fields where
- * the agent can plausibly make a value-add decision are exposed.
- * System-level resource bounds (timeoutMs, maxRows, defaultTtlHours)
- * live in env vars and are read via `getExtractLimits()`. See
- * `limits.ts` for the rationale.
- */
 const PREVIEW_ROWS_DEFAULT = (): number => getConfigNumber("datasource.preview.default_rows", 5);
 
 const ExtractDatasetArgs = z.object({
@@ -91,9 +85,8 @@ export interface PreviewBlock {
   /** Column names in the same order as each row in {@link rows}. */
   columns: string[];
   /** Row-major 2D array of cell values. `rows[r][c]` is the cell at
-   *  row `r`, column `columns[c]`. Column-oriented JSON saves
-   *  ~50% tokens vs row-of-objects on small previews while keeping
-   *  full type fidelity (number, boolean, null, nested values). */
+   *  row `r`, column `columns[c]`. Column-oriented saves ~50% tokens
+   *  vs row-of-objects while keeping full type fidelity. */
   rows: unknown[][];
   /** True iff capped by row count or byte budget — agent should
    *  enter the sandbox for the rest. */
@@ -103,19 +96,16 @@ export interface PreviewBlock {
 export interface ExtractDatasetResult {
   cacheHit: boolean;
   name: string;
-  /** Total rows in the materialised dataset; set this to 0 to short-circuit empty queries. */
+  /** Total rows in the materialised dataset; check 0 to short-circuit empty queries. */
   rowCount: number;
   schema: { columns: ColumnSchema[] };
   ttlHours: number;
   preview?: PreviewBlock;
-  /** True when this call REPLACED a different prior snapshot living
-   *  under the same name (different query hash). Always paired with
-   *  cacheHit:false — the prior data is gone and any earlier
-   *  ./data/<name>/ references the agent handed to run_code_in_sandbox
-   *  before this call still resolved to the old bytes via OS
-   *  page-cache / open-file semantics, but new sandbox runs see the
-   *  new snapshot. Set only on hash mismatch; same-query refresh
-   *  (forceRefresh:true with identical query) does NOT set it. */
+  /** Set when this call REPLACED a different prior snapshot under
+   *  the same name (different query hash). Always paired with
+   *  cacheHit:false. In-flight sandbox runs still see the old bytes
+   *  via OS open-FD / page-cache semantics; only new runs see the
+   *  new snapshot. Same-query refresh does NOT set this. */
   replacedPrior?: boolean;
 }
 
@@ -160,9 +150,6 @@ export function buildExtractDatasetTool(): ToolDefinition {
         throw err;
       }
 
-      // Resolve data source (name → row + credential + policy). One
-      // DB read per call; caching of the inner credential lookup
-      // already exists in `getCredentialFieldsById`.
       const lookup = await resolveDataSourceByName(args.dataSourceName);
       if (!lookup.ok) {
         return {
@@ -172,10 +159,10 @@ export function buildExtractDatasetTool(): ToolDefinition {
       }
       const resolved = lookup.resolved;
 
-      // Policy gate (app-layer): parse the SQL and reject before we
-      // even touch the cache so writes / disallowed tables fail fast.
-      // The adapter ALSO wraps the query in a read-only transaction
-      // when policy.readOnly — defence in depth.
+      // Policy gate: parse the SQL and reject before touching the
+      // cache so writes / disallowed tables fail fast. The adapter
+      // ALSO wraps in a read-only transaction when policy.readOnly
+      // — defence in depth.
       const policyCheck = validateSqlAgainstPolicy(
         args.query,
         resolved.provider,
@@ -193,14 +180,10 @@ export function buildExtractDatasetTool(): ToolDefinition {
       const queryHash = hashQuery(args.query);
       const previewRows = args.previewRows;
 
-      // Cache check. We DO NOT re-validate policy on cache hits: the
-      // Parquet snapshot is a historical artefact, and re-checking
-      // would force a re-extract every time the policy tightens
-      // (defeats the cache). Next miss naturally re-applies the new
-      // policy.
-      //
-      // forceRefresh from the agent skips the hit path entirely so
-      // the user can demand fresh data for time-sensitive analysis.
+      // We DO NOT re-validate policy on cache hits: the Parquet
+      // snapshot is a historical artefact, and re-checking would
+      // force a re-extract every time the policy tightens. The next
+      // miss naturally re-applies the new policy.
       const status = await getCacheStatus(args.name);
       if (
         !args.forceRefresh &&
@@ -213,10 +196,9 @@ export function buildExtractDatasetTool(): ToolDefinition {
           cacheHit: true,
           name: args.name,
           rowCount: status.meta.rowCount,
-          // Sidecar persists totals only; columns are not preserved.
-          // Agents that need the column list should use the live
-          // schema (fresh extraction) by picking a different name or
-          // invalidating first.
+          // Sidecar persists totals only; columns are not preserved
+          // on hits. Agents needing the column list must force a
+          // fresh extraction.
           schema: { columns: [] },
           ttlHours: status.meta.ttlHours,
         };
@@ -230,14 +212,10 @@ export function buildExtractDatasetTool(): ToolDefinition {
         return result;
       }
 
-      // Cache miss / stale / forceRefresh / hash-mismatch → extract.
-      //
-      // Name semantics: a `name` is a slot, not an identifier. Same
-      // name + different query is a slot reassignment, not an error.
-      // commitWriteSlot already does `rm -rf <final> && rename(tmp,
-      // final)` so the on-disk replace is atomic at the directory
-      // level. The structured log below preserves observability so
-      // an admin can audit "this name was reassigned during run X".
+      // Slot semantics: same name + different query is a slot
+      // reassignment, not an error. commitWriteSlot does `rm -rf
+      // <final> && rename(tmp, final)` atomically. The log line
+      // preserves observability so an admin can audit reassignments.
       const replacedPrior: boolean =
         status.exists &&
         status.meta != null &&
@@ -319,11 +297,10 @@ export function buildExtractDatasetTool(): ToolDefinition {
 
 /**
  * Read the first `requested` rows from the dataset's Parquet files
- * via DuckDB and return them in column-oriented form ({columns, rows}).
- * Drops rows from the tail until the JSON serialisation fits in
- * {@link PREVIEW_HARD_CAP_BYTES}; sets `truncated = true` when either
- * the row cap or byte cap engages, or when the dataset has more rows
- * than we returned.
+ * via DuckDB and return them column-oriented. Drops rows from the
+ * tail until the JSON serialisation fits in {@link PREVIEW_HARD_CAP_BYTES};
+ * sets `truncated = true` when either cap engages or when the dataset
+ * has more rows than we returned.
  */
 async function readPreview(
   name: string,
@@ -348,9 +325,8 @@ async function readPreview(
     db.closeSync();
   }
 
-  // Byte budget covers BOTH columns + rows since both are emitted to
-  // the LLM; column names are usually small but pathological wide
-  // schemas need the same protection.
+  // Byte budget covers BOTH columns + rows since both are emitted
+  // to the LLM; pathological wide schemas need the same protection.
   let byteCapped = false;
   while (
     rows.length > 0 &&
@@ -367,10 +343,3 @@ async function readPreview(
 function escapeSingleQuotes(s: string): string {
   return s.replaceAll("'", "''");
 }
-
-// (No runtime barrel here — `buildExtractDatasetTool` is imported
-// directly by `runner/dispatch/builtin.ts` and merged into the
-// per-dispatch tool list when any data source is bound. The prompt
-// block (the "Available data sources" snippet) lives in a separate
-// async module — `prompt-block.server.ts` — so it can do its own
-// DB read independently of the tool factory.)

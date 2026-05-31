@@ -1,24 +1,12 @@
 "use client";
 
 /**
- * EventTimeline — append-only event log renderer.
- *
- * Every event row is click-to-expand to reveal its structured JSON
- * payload — that includes lifecycle rows (`started`) so the admin
- * can verify the upstream AG-UI event shape we persisted. Some
- * rows additionally have a one-line summary in the title row
- * (assistant text preview, tool name, etc.).
- *
- * Tool-call rows pick up an additional success/failure/warning tone
- * computed once for the whole timeline by `computeEventTones`:
- *   - `tool_call_result` rows are classified by the embedded
- *     `payload.content` string (see {@link detectToolResultStatus}).
- *   - `tool_call_chunk` rows whose `toolCallId` never produced a
- *     matching result get tagged "warning" — flags upstream tools
- *     that were invoked but never returned (timeout, agent died,
- *     backend skipped).
- *
- * Rendered inside the `/admin/thread/[id]` right column.
+ * EventTimeline — append-only event log renderer for
+ * `/admin/thread/[id]`. Each row is click-to-expand for the JSON
+ * payload; tool-call rows additionally carry a success / failure /
+ * warning tone from `computeEventTones` (warning includes
+ * orphan-chunk detection — chunks whose toolCallId never produced
+ * a result).
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -38,35 +26,17 @@ export interface EventRowData {
   ts: string;
 }
 
-/** Forensic tone overlaid on top of the type-derived badge colour.
- *  - `success` / `failure`: the row carries a protocol-level
- *    success/failure signal (MCP `isError`, supervisor `ok`).
- *  - `warning`: a structural anomaly — currently used to flag
- *    `tool_call_chunk` rows whose `toolCallId` never produced a
- *    matching `tool_call_result` (the upstream tool was invoked
- *    but never produced output: timeout, agent died, or backend
- *    explicitly skipped the result).
- *  Returning `null` keeps the badge type-only — we deliberately do
- *  NOT keyword-sniff "error" / "exception" out of free-form
- *  content; that's a misreport waiting to happen. */
+/** Forensic tone overlaid on the type-derived badge colour:
+ *  `success` / `failure` are protocol-level signals (MCP `isError`,
+ *  supervisor `ok`); `warning` flags structural anomalies (orphan
+ *  chunks, replay-synthetic results). `null` keeps the badge
+ *  type-only — we deliberately don't keyword-sniff free-form
+ *  content. */
 type EventTone = "success" | "failure" | "warning" | null;
 
-/** Detect the success/failure/warning protocol field embedded in a
- *  `tool_call_result.payload.content` string.
- *
- *  Thin wrapper around the shared detector in
- *  `@/lib/copilot/detect-tool-result-status` — the only admin-specific
- *  bit is unwrapping `payload.content` (event rows carry the result
- *  as a string nested inside the payload object). The string-parsing
- *  + flag-recognition itself is identical to what the chat tool-call
- *  cards use, so admin and chat surfaces agree on classification.
- *
- *  `warning` is now also a possible classification for a
- *  `tool_call_result` row: history-replay synthetic results
- *  (`event-reconstruction.ts`) tag themselves with
- *  `{ isError: true, severity: "warning" }`. The existing orphan-chunk
- *  branch below still tags rows whose chunk never saw a result; both
- *  paths flow into the same `EventTone` "warning" bucket. */
+/** Detect a tool result's status from `payload.content`. Thin wrapper
+ *  around the shared detector in `@/lib/copilot/detect-tool-result-status`;
+ *  the admin-specific bit is just unwrapping `payload.content`. */
 function detectToolResultStatus(payload: unknown): EventTone {
   const p = payload as { content?: unknown } | null;
   if (!p || typeof p.content !== "string") return null;

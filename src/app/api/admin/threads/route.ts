@@ -25,24 +25,10 @@ import { ApiError, withAdmin } from "@/lib/http/route-handlers";
 import { pickWorstStatus } from "@/lib/runner/thread-metrics";
 
 /**
- * GET /api/admin/threads
- *
- * One row per `thread_id`, surfaced to the admin thread list UI.
- *
- * Column-by-column source:
- *   - timestamp      ← first top-level run's `created_at`
- *   - task           ← first top-level run's `input_task`
- *   - entity         ← first top-level run's `entity_*` columns (and joins)
- *   - owner          ← first top-level run's `owner_id` (and join)
- *   - runCount       ← COUNT(top-level runs in thread)
- *   - duration       ← SUM(finished_at - started_at) of top-level runs
- *   - worstStatus    ← highest-priority status across ALL runs (top-level
- *                      + sub-runs), used to tint the task column
- *
- * Status filter is "inclusive": a thread is selected when ANY of its
- * runs (top-level or sub) match a requested status. Mirrors the
- * "one failed → red task" tinting rule so the filter and the colour
- * agree.
+ * GET /api/admin/threads — one row per `thread_id` for the admin
+ * thread list. Aggregates over both top-level and sub-runs so the
+ * status filter agrees with the "one failed → red task" colour
+ * rule. Anchor sort = first top-level run's `created_at` desc.
  */
 
 const ROUTE = "/api/admin/threads";
@@ -73,13 +59,8 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     ? status.split("|").filter(Boolean)
     : [];
 
-  // ------------------------------------------------------------------
-  // Step 1 — pick the candidate thread ids for this page.
-  //
-  // Aggregate over ALL runs per thread so the status filter sees both
-  // top-level and sub-run statuses. Anchor sort = first top-level run's
-  // created_at (desc) so the most-recently-started threads bubble up.
-  // ------------------------------------------------------------------
+  // Step 1 — candidate thread ids. Aggregate over ALL runs per thread
+  // so the status filter sees both top-level and sub-run statuses.
   const havingConds: SQL[] = [];
   if (statusFilter.length > 0) {
     havingConds.push(
@@ -106,14 +87,9 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     .limit(limit)
     .offset(offset);
 
-  // Total threads for pagination — same filter, no anchor/limit. We
-  // wrap the GROUP BY in a sub-select and count its rows.
-  //
-  // QUIRK: `db.execute` returns the pg driver's full result envelope
-  // ({ rows, rowCount, ... }), NOT a plain array — destructuring it
-  // as iterable throws "is not iterable" at runtime. Same pattern as
-  // `src/app/api/threads/route.ts`: cast to { rows: ... } and read
-  // `.rows[0]`.
+  // Total threads for pagination — wrap GROUP BY in a sub-select.
+  // GOTCHA: `db.execute` returns `{ rows, rowCount, ... }`, not an
+  // array — read `.rows[0]`.
   const totalResult = (await db.execute(
     sql<{ totalThreads: number }>`
       SELECT COUNT(*)::int AS "totalThreads"
@@ -143,15 +119,9 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
 
   const threadIds = threadCandidates.map((c) => c.threadId as string);
 
-  // ------------------------------------------------------------------
-  // Step 2 — anchor run details for the candidate threads.
-  //
-  // Fetch every top-level run for the page's threads, ordered so the
-  // first row per thread is the anchor. Dedup to anchor-only in
-  // TypeScript — keeps the SQL simple (no window function) and the
-  // overfetch is bounded (top-level runs per thread are typically <20
-  // and we page by at most 200 threads).
-  // ------------------------------------------------------------------
+  // Step 2 — anchor run per thread. Fetch top-level runs and dedup
+  // to first-per-thread in TS (avoids a window function; overfetch
+  // is bounded — <20 top-level runs × 200 threads).
   const topLevelRuns = await db
     .select({
       threadId: EntityRunTable.threadId,
@@ -192,10 +162,8 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     if (!anchorByThread.has(tid)) anchorByThread.set(tid, r);
   }
 
-  // ------------------------------------------------------------------
-  // Step 3 — per-thread aggregates: count + cumulative duration + the
-  // set of statuses seen across the thread (used to pick worstStatus).
-  // ------------------------------------------------------------------
+  // Step 3 — per-thread aggregates: top-level count, cumulative
+  // duration, distinct status set (drives worstStatus colouring).
   const aggregates = await db
     .select({
       threadId: EntityRunTable.threadId,
@@ -227,16 +195,13 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     aggregates.map((a) => [a.threadId as string, a]),
   );
 
-  // ------------------------------------------------------------------
-  // Stitch in the order of `threadCandidates` (preserves the sort).
-  // ------------------------------------------------------------------
+  // Stitch in candidate order. Defensive flatMap: drop malformed rows
+  // (missing anchor / agg) silently rather than emit a half-filled
+  // object.
   const rows = threadCandidates.flatMap((c) => {
     const tid = c.threadId as string;
     const anchor = anchorByThread.get(tid);
     const agg = aggByThread.get(tid);
-    // Defensive — anchor / agg should always exist for a candidate.
-    // Empty arrays from flatMap silently drop malformed rows rather
-    // than emit a half-filled object.
     if (!anchor || !agg) return [];
     return [
       {

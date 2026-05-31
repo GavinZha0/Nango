@@ -1,0 +1,77 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release-type: node
+          config-file: ./.github/release-please-config.json
+
+      - name: Checkout repository
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Append authors to CHANGELOG and update GitHub Release notes
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          set -e
+
+          echo "Release tag: $RELEASE_TAG"
+          TEMP_CHANGELOG="CHANGELOG.md.new"
+          touch "$TEMP_CHANGELOG"
+
+          if [ -f "CHANGELOG.md" ]; then
+            while IFS= read -r line; do
+              # Skip if already annotated with author
+              if [[ "$line" =~ \)\ by\ @[[:alnum:]_-]+$ ]]; then
+                echo "$line" >> "$TEMP_CHANGELOG"
+                continue
+              fi
+              # Detect commit lines and append author handle
+              if [[ "$line" =~ \*\ (.*)\ \(\[([a-f0-9]{7,40})\]\(.*\)\) ]]; then
+                commit_hash="${BASH_REMATCH[2]}"
+                github_user=$(gh api "repos/${{ github.repository }}/commits/${commit_hash}" | jq -r '.author.login // "unknown"')
+                echo "${line} by @${github_user}" >> "$TEMP_CHANGELOG"
+              else
+                echo "$line" >> "$TEMP_CHANGELOG"
+              fi
+            done < "CHANGELOG.md"
+          fi
+
+          mv "$TEMP_CHANGELOG" "CHANGELOG.md"
+
+          # Extract this release's section and push it to the GH Release notes
+          RELEASE_BODY=$(awk "/^## \\[?${RELEASE_TAG#v}/{flag=1;next} /^## / && flag{exit} flag" CHANGELOG.md)
+          if [ -z "$RELEASE_BODY" ]; then
+            RELEASE_BODY="Release $RELEASE_TAG"
+          fi
+          gh release edit "$RELEASE_TAG" --notes "$RELEASE_BODY"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore(changelog): append authors for $RELEASE_TAG [skip ci]" \
+            || echo "No changes to commit (changelog already annotated)."
+          git push

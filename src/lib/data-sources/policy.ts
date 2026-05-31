@@ -1,5 +1,5 @@
 /**
- * App-layer DataSource policy enforcement.
+ * App-layer DataSource policy enforcement. See docs/data-sources.md.
  */
 
 import { Parser, type AST } from "node-sql-parser";
@@ -8,9 +8,8 @@ import type { DataSourceId, DataSourcePolicy } from "./types";
 
 const parser = new Parser();
 
-/** Map our provider id to node-sql-parser's dialect string.
- *  Vertica uses Postgres-compatible syntax; we aim it at the
- *  PostgreSQL dialect to maximise parse coverage. */
+/** Map our provider id to node-sql-parser's dialect string. Vertica
+ *  speaks Postgres-compatible SQL so it parses under PostgreSQL. */
 function dialectFor(provider: DataSourceId): string {
   switch (provider) {
     case "postgres":
@@ -54,9 +53,6 @@ export function validateSqlAgainstPolicy(
     entries = parser.tableList(sql, { database: dialect });
   } catch (err) {
     // Fail closed: if we can't parse, we can't reason about safety.
-    // The adapter's transaction-level guard is still in place but
-    // surfacing a clear error here is friendlier than waiting for
-    // the DB to refuse mid-execution.
     return {
       ok: false,
       code: "PARSE_ERROR",
@@ -77,8 +73,8 @@ export function validateSqlAgainstPolicy(
     const [type, , table] = entry.split("::");
     if (!table) continue;
 
-    // CTE names appear as fake table refs; skip them — the inner
-    // SELECT body's actual tables are listed separately.
+    // CTE names appear as fake table refs; skip — the inner SELECT
+    // body's actual tables are listed separately.
     if (cteNames.has(table)) continue;
 
     if (policy.readOnly && type !== "select") {
@@ -115,9 +111,9 @@ export function validateSqlAgainstPolicy(
 // Internals
 
 /**
- * Walk the AST's WITH clauses and collect declared CTE names.
- * node-sql-parser returns these as part of `tableList()`, but they
- * are not "real" tables; they only shadow the body's references.
+ * Walk the AST's WITH clauses and collect declared CTE names so they
+ * can be subtracted from the `tableList()` output (which would
+ * otherwise treat them as real tables).
  */
 function collectCteNames(ast: AST[] | AST): Set<string> {
   const out = new Set<string>();

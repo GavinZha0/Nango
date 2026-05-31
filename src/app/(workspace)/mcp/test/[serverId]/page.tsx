@@ -29,16 +29,8 @@ function CustomFieldTemplate(props: FieldTemplateProps): ReactNode {
   const hasError = rawErrors.length > 0;
 
   return (
-    // Label / description sizes:
-    //   - label:       text-sm (14 px) — primary control identifier
-    //   - description: text-xs (12 px) — secondary hint, muted colour
-    // Both use Tailwind preset sizes so the line-height comes from the
-    // preset (20 px and 16 px respectively) rather than being inherited
-    // from the body — previously `text-[11px]` had no matching line-
-    // height token so it would inherit whatever the parent set,
-    // accidentally rendering looser than the 12 px font-medium label
-    // above it and giving the (false) impression that the description
-    // was actually larger than the label.
+    // Tailwind preset sizes (not arbitrary `text-[Npx]`) so each
+    // class's matching line-height applies.
     <div className="flex flex-col gap-1.5">
       {displayLabel && !isCheckbox && (
         <label
@@ -85,14 +77,8 @@ function generateUiSchema(schema: Record<string, unknown>): Record<string, unkno
 
 type InputTab = "form" | "json" | "schema";
 
-/**
- * Page outer — reads the `serverId` route param and hands it to
- * `<ServerView>` via `key={serverId}`. The `key` is what gives us
- * automatic state reset when the user navigates to a different
- * server: React unmounts `<ServerView>` and re-mounts a fresh one,
- * so every useState inside re-initialises. No sentinel patterns,
- * no manual prop-change handling.
- */
+/** `key={serverId}` gives automatic state reset on server switch
+ *  (every `useState` inside `<ServerView>` re-initialises). */
 export default function McpToolTestPage(): ReactNode {
   const { serverId } = useParams<{ serverId: string }>();
   return <ServerView key={serverId} serverId={serverId} />;
@@ -106,32 +92,24 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const [serverName, setServerName] = useState("");
   const [loadingMeta, setLoadingMeta] = useState(true);
 
-  // Tool list search — filters `serverTools` shown in the left column.
   const [toolSearch, setToolSearch] = useState<string>("");
 
-  // Selected tool — component state, NOT URL. When `null`, the picker
-  // (derived `tool` below) falls back to the first tool in
-  // `serverTools`. So a fresh mount / page refresh always lands on
-  // the first tool; the user can pick a different one but it does
-  // not survive a refresh — a deliberate choice for keeping the URL
-  // shape simple (`/mcp/test/<serverId>`).
+  // Selection is component-local (not in the URL) — fresh mount /
+  // refresh always lands on the first tool. Keeps the URL shape
+  // simple at `/mcp/test/<serverId>`.
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
 
-  // Input
   const [activeTab, setActiveTab] = useState<InputTab>("form");
   const [jsonInput, setJsonInput] = useState("{}");
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
 
-  // Execution
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<unknown | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
 
-  // Load server + tools list once. `serverId` is fixed for this
-  // `<ServerView>` instance (the outer `Page` keys on it), so this
-  // useEffect only fires on the initial mount of any given server's
-  // view — no refetch when the user clicks between tools.
+  // Load once: serverId is fixed for this <ServerView> instance
+  // (outer Page keys on it).
   useEffect(() => {
     let cancelled = false;
     async function load(): Promise<void> {
@@ -150,8 +128,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     return () => { cancelled = true; };
   }, [serverId]);
 
-  // Active tool is derived: picked one if any, otherwise the first
-  // tool in the list (or null when no tools).
+  // Active tool: picked one, else first available, else null.
   const tool: McpToolSnapshot | null = useMemo(() => {
     if (selectedToolName !== null) {
       const picked = serverTools.find((t) => t.name === selectedToolName);
@@ -160,8 +137,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     return serverTools[0] ?? null;
   }, [serverTools, selectedToolName]);
 
-  // Search-filtered tools list shown in the left column. Plain
-  // substring match on name + description; case-insensitive.
+  // Case-insensitive substring search on name + description.
   const filteredTools: McpToolSnapshot[] = useMemo(() => {
     const q: string = toolSearch.trim().toLowerCase();
     if (q.length === 0) return serverTools;
@@ -215,11 +191,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const schema = (tool?.input_schema as Record<string, unknown>) ?? {};
   const uiSchema = generateUiSchema(schema);
 
-  /**
-   * Pick a tool: reset all per-tool input/output state so leftovers
-   * from the previous tool don't pollute the new selection. No URL
-   * navigation — selection is component-local state.
-   */
+  /** Reset all per-tool input/output state on pick. */
   function handleSelectTool(name: string): void {
     if (name === activeToolName) return;
     setSelectedToolName(name);
@@ -231,17 +203,11 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     setActiveTab("form");
   }
 
-  // Disable Execute when the current input mode can't produce valid args.
-  // For the JSON tab that means a parse error; the Form tab is validated by
-  // RJSF inline and we just block the click here while executing. Also
-  // disabled when no tool is resolved (server has no tools, or the URL
-  // toolName doesn't match anything in the cached list).
   const executeDisabled: boolean =
     tool === null || (activeTab === "json" && jsonError !== null);
 
-  // Platform-aware Cmd/Ctrl + Enter shortcut. We resolve it via
-  // useSyncExternalStore so SSR / hydration sees a stable "Ctrl" label and
-  // the client swaps in "⌘" only after mount (no hydration mismatch).
+  // useSyncExternalStore gives a stable "Ctrl" label on the server
+  // and swaps to "⌘" only after mount (no hydration mismatch).
   const isMac: boolean = useSyncExternalStore(
     () => () => {},
     () => /Mac|iPhone|iPad/.test(navigator.platform),
@@ -256,9 +222,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     [isMac],
   );
 
-  // Global Cmd/Ctrl + Enter shortcut. Listens on window so the keystroke
-  // fires from anywhere on the page — including while focused inside the
-  // RJSF form or the JSON textarea.
+  // Cmd/Ctrl+Enter shortcut on window so it fires from any focus.
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (e.key !== "Enter") return;
@@ -281,9 +245,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header — single row: back arrow + tool name + description.
-          Matches the left panel's "MCP Servers" h2 size (text-sm font-semibold)
-          so the page header and the panel header sit at the same visual level. */}
+      {/* Header row. */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => router.push("/mcp")} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
@@ -298,12 +260,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         )}
       </div>
 
-      {/* Three-column content (tool list + input + result).
-          Columns share width at 3:3:4 — tool list and input get equal
-          room (~30 % each), result gets the remaining ~40 % since it
-          tends to render the longest JSON trees. The tool list moved
-          here from the McpPanel sidebar so it can be search-filtered
-          and given more room than a nested sidebar list. */}
+      {/* Three-column content (tool list + input + result). */}
       <div className="flex flex-1 min-h-0">
         {/* Tool list — search box on top + scrollable list. */}
         <div className="flex flex-[3] flex-col border-r min-w-0">
@@ -385,9 +342,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
         {/* Input column */}
         <div className="flex flex-[3] flex-col border-r min-w-0">
-          {/* Tabs row — input-mode tabs on the left, Execute on the right.
-              Co-locating Execute with the input column keeps the trigger
-              within easy reach of the parameter editor (Fitts' Law). */}
+          {/* Input-mode tabs + Execute. */}
           <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
             <button
               type="button"

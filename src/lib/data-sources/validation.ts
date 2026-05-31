@@ -8,9 +8,8 @@ import { z } from "zod";
 
 import { DATA_SOURCE_IDS, type DataSourceId } from "./types";
 
-/** Globally-unique LLM-facing name. The same regex is enforced at
- *  the cache layer (validateDatasetName), kept consistent so admins
- *  see one rule. */
+/** Globally-unique LLM-facing name. Kept consistent with the cache
+ *  layer's `validateDatasetName` regex so admins see one rule. */
 export const DATA_SOURCE_NAME_RE = /^[a-z][a-z0-9_-]{0,62}$/;
 
 export const dataSourceName = z
@@ -25,19 +24,13 @@ export const dataSourceProvider = z.enum(
   DATA_SOURCE_IDS as unknown as readonly [DataSourceId, ...DataSourceId[]],
 );
 
-/** URL-style connection params; single-valued only. The `?? {}`
- *  default lives in the route handler so this schema stays usable
- *  in PATCH bodies without injecting an empty object on every parse. */
+/** URL-style connection params; single-valued only. */
 export const dataSourceParams = z.record(z.string().min(1), z.string());
 
 export const tableList = z.array(z.string().min(1));
 
-/** Shared body for POST. */
 export const createDataSourceSchema = z.object({
   name: dataSourceName,
-  // `description` carries the human-friendly blurb (used to live in a
-  // separate `displayName` field, dropped in D-2.5 as redundant —
-  // the `name` regex is already legible enough for the panel label).
   // Accept null so the editor can clear the field with a single shape
   // (Zod 4 `.optional()` does NOT accept null).
   description: z.string().trim().max(1024).nullish(),
@@ -57,17 +50,14 @@ export const createDataSourceSchema = z.object({
   visibility: z.enum(["private", "public"]).optional(),
 });
 
-/** PATCH allows any subset.
- *
- *  `name` is fixed — renaming silently breaks every agent prompt /
- *  schedule that mentions it. Delete + recreate if a rename is
- *  really needed.
- *
- *  `provider` IS mutable. Cached Parquet snapshots are not purged
- *  automatically on provider change (separate admin "purge cache"
- *  action is planned); a stale dataset under the old name will keep
- *  serving the old dialect's data until re-extracted. The runtime
- *  always re-applies the new provider on cache miss. */
+/**
+ * PATCH allows any subset. `name` is fixed — renaming silently breaks
+ * every agent prompt / schedule that mentions it; delete + recreate
+ * if a rename is needed. `provider` IS mutable; cached Parquet under
+ * the old name is NOT purged automatically (admin "purge cache"
+ * action is separate). The runtime re-applies the new provider on
+ * the next cache miss.
+ */
 export const updateDataSourceSchema = z
   .object({
     description: z.string().trim().max(1024).nullable().optional(),

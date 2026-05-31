@@ -1,16 +1,10 @@
 /**
- * `extractRunInput` — best-effort peek into the AG-UI POST body for
- * the chat dispatch paths. Pulls out the user's latest message text
- * + client message id, the threadId, and any trailing tool-result
- * messages that mark a CONTINUATION turn (LLM was paused on a
- * frontend / HITL tool call, user supplied result, CopilotKit
- * re-posted with the result as a new `role: "tool"` message at the
- * tail — there is no new user message in that case).
+ * Best-effort peek into the AG-UI POST body for chat dispatch. Pulls
+ * the user's latest message + clientMessageId, the threadId, and any
+ * trailing `role: "tool"` messages that mark a CONTINUATION turn
+ * (frontend / HITL tool result, no new user message).
  *
- * Lives in its own module so the parsing rules can be unit-tested
- * in isolation without spinning up the full runner stack.
- *
- * @see docs/runner-events.md §"Continuation runs"
+ * See docs/runner-events.md.
  */
 
 import "server-only";
@@ -21,40 +15,22 @@ const log = childLogger({ component: "extract-run-input" });
 
 /** Fields the runner pulls out of the AG-UI POST body. */
 export interface RunInputPeek {
-  /** Triggering input for this run, capped at 1000 chars.
-   *  - Normal chat turn: the user's latest message text.
-   *  - Continuation turn: the first tool result's content. */
+  /** Triggering input for this run, capped at 1000 chars. Latest user
+   *  text on a normal turn; first tool-result content on continuation. */
   task: string;
   threadId: string | undefined;
-  /** The client-generated `id` of the latest user message in the
-   *  request body. Persisted on the user-message event row so that
-   *  history replay emits TEXT_MESSAGE_* events with the SAME id the
-   *  client's local state already has — without that match, the
-   *  client treats the replay as a new message and renders a
-   *  duplicate of the user's prompt after `/connect` fires
-   *  post-`onRunFinalized`.
-   *
-   *  `undefined` in continuation runs (tool-result-triggered) where
-   *  there is no new user message — the caller skips writing a
-   *  user_message event in that case. */
+  /** Client-generated `id` of the latest user message — persisted so
+   *  history replay emits TEXT_MESSAGE_* with the SAME id the client
+   *  already has and the message doesn't duplicate after `/connect`.
+   *  `undefined` on continuation runs (no new user message). */
   userMessageId: string | undefined;
-  /** Tool-result messages at the tail of the request body that are
-   *  effectively the triggering input for this run. Populated when
-   *  the LAST message in the body is `role: "tool"` (frontend / HITL
-   *  tool result) — the LLM was paused, the user picked an option,
-   *  CopilotKit re-posted with the result as a new tool message but
-   *  WITHOUT a new user message. Empty for normal chat turns where
-   *  the tail is a user message.
-   *
-   *  Persisted as `tool_call_result` events on the new run, replacing
-   *  the synthetic `user_message` event that used to duplicate the
-   *  prior user prompt. */
+  /** Trailing block of `role: "tool"` messages that triggered this
+   *  continuation run; empty for normal chat turns. Persisted as
+   *  `tool_call_result` events on the new run. */
   triggeringToolResults: ReadonlyArray<{ toolCallId: string; content: string }>;
 }
 
-/** Coerce arbitrary tool-result content into a UI-safe string.
- *  CopilotKit's frontend-tool handlers can return any JSON-serialisable
- *  value; OpenAI-compatible tool messages already carry strings. */
+/** Coerce arbitrary tool-result content into a UI-safe string. */
 export function stringifyToolContent(value: unknown): string {
   if (typeof value === "string") return value;
   if (value === null || value === undefined) return "";
@@ -65,9 +41,8 @@ export function stringifyToolContent(value: unknown): string {
   }
 }
 
-/** Extract the trailing block of `role: "tool"` messages (in body
- *  order). Returns empty if the tail is something else. Each entry
- *  is `{toolCallId, content}` with `content` already stringified. */
+/** Trailing block of `role: "tool"` messages in body order, with
+ *  `content` already stringified. Empty if the tail isn't a tool. */
 export function extractTrailingToolResults(
   messages: ReadonlyArray<{
     role?: string;
@@ -109,8 +84,7 @@ function readUserMessage(
   return null;
 }
 
-/** Pure-data overload: extract from a pre-parsed body. Useful for
- *  tests; also called by the request-based variant after JSON parse. */
+/** Extract from a pre-parsed body. */
 export function extractRunInputFromBody(body: {
   threadId?: unknown;
   messages?: ReadonlyArray<{
@@ -126,11 +100,8 @@ export function extractRunInputFromBody(body: {
       : undefined;
   const messages = Array.isArray(body.messages) ? body.messages : [];
 
-  // If the request tail is a block of tool messages, this is a
-  // continuation: the LLM was paused on a frontend-tool call, the
-  // user supplied results, CopilotKit re-posted with the same prior
-  // user message + the new tool result(s) appended. Treat the tool
-  // results as the trigger, NOT the (stale) last user message.
+  // Tool-tail = continuation run: trigger is the tool result, not the
+  // (stale) last user message.
   const triggeringToolResults = extractTrailingToolResults(messages);
   if (triggeringToolResults.length > 0) {
     const first = triggeringToolResults[0]!;
@@ -142,7 +113,6 @@ export function extractRunInputFromBody(body: {
     };
   }
 
-  // Normal chat turn — find the last user message.
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m?.role !== "user") continue;
@@ -160,10 +130,8 @@ export function extractRunInputFromBody(body: {
 }
 
 /**
- * Read the body **once** (clone-and-parse) and pull out task /
- * threadId / userMessageId / triggeringToolResults. Best-effort: any
- * parse failure returns empty values so persistence never breaks the
- * chat path.
+ * Clone-and-parse the body once. Best-effort: parse failures return
+ * empty values so persistence never breaks the chat path.
  */
 export async function extractRunInput(request: Request): Promise<RunInputPeek> {
   try {

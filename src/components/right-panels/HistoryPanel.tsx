@@ -134,7 +134,7 @@ function HistoryPanelContent(): ReactNode {
   // differ: handleSelectSession promotes to `explicitThreadId` (forces
   // CopilotChat to enter history-restore mode); handleDelete clears
   // both fields when the active row is removed.
-  // @see docs/chat-flow-audit.md §1.11
+  // See docs/chat-flow-audit.md.
   const threadId = useWorkspaceStore((s) => s.runtimeThreadId);
   const explicitThreadId = useWorkspaceStore((s) => s.explicitThreadId);
   const setRuntimeThreadId = useWorkspaceStore((s) => s.setRuntimeThreadId);

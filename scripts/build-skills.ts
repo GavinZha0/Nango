@@ -6,7 +6,7 @@
  *
  * Run:  pnpm build:skills   (also wired into `prebuild`)
  *
- * @see docs/skills.md §3 — published pipeline
+ * See docs/skills.md. — published pipeline
  */
 
 import { createHash } from "node:crypto";

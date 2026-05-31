@@ -1,5 +1,7 @@
 /**
  * Admin-side MCP client helper.
+ *
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";
@@ -17,36 +19,12 @@ import { logger } from "@/lib/observability/logger";
 import { ApiError } from "@/lib/http/route-handlers";
 
 /**
- * Build the outbound HTTP header map for an MCP server connection.
- *
- * Combines the row's free-form `headers` (typically used for tracing /
- * vendor-specific tags) with a credential-derived auth header when
- * `credentialId` is set.
- *
- * Header NAME is configurable (`server.credentialHeader`, default
- * `Authorization`). Header VALUE depends on credential type:
- *
- *   - `oauth_client`  → `Bearer <access_token>`, where the access
- *                       token is fetched via {@link getOAuthAccessToken}
- *                       (cached + auto-refreshed; see
- *                       `lib/credentials/oauth-token-manager.ts`).
- *   - everything else → legacy extractor (`payload.token ?? key ??
- *                       password`); for `Authorization` we prepend
- *                       `Bearer `, other header names get the raw
- *                       token (matches the most common MCP-server
- *                       convention).
- *
- * If token resolution fails (e.g. OAuth IdP unreachable, credential
- * disabled), we log the failure but still return a header map
- * **without** the auth header — the downstream MCP call will then
- * surface a 401 with a clearer "no auth was sent" signal rather than
- * the whole transport blowing up. The error stack is captured in the
- * logs for ops.
- *
- * Exported so admin endpoints that don't need a full MCP client
- * round-trip (e.g. a future "show me the headers we'd send" debug
- * endpoint) can reuse the auth logic without going through
- * `withMcpAdminClient`.
+ * Outbound header map for an MCP server connection. Header NAME is
+ * `server.credentialHeader` (default `Authorization`); VALUE is
+ * `Bearer <access_token>` for `oauth_client` credentials (cached,
+ * auto-refreshed) or `payload.token ?? key ?? password` otherwise.
+ * Token-resolution failures log and return the headers WITHOUT auth
+ * so the downstream MCP call surfaces a clean 401.
  */
 export async function buildMcpHeaders(
   server: Pick<

@@ -1,5 +1,7 @@
 /**
  * Command allow/deny policy evaluator for ssh_server runtime calls.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";

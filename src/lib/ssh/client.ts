@@ -1,6 +1,13 @@
 /**
  * SSH client wrapper. One call = connect → exec → dispose.
- * Strict host-key verification (no TOFU). @see docs/ssh.md §4
+ *
+ * Host-key handling is **admin-confirmed TOFU**: `verifyConnection`
+ * (the admin "Verify connection" worker) captures whatever the host
+ * presents on first contact and surfaces it for review;
+ * `execOnServer` (runtime path) strictly compares against the pinned
+ * fingerprint and rejects on mismatch.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";
@@ -79,7 +86,7 @@ export interface SshConnectionTarget {
   /** When true, the command is wrapped as `bash -lc '<command>'` so
    *  the host's profile scripts run and the resulting `PATH` / env
    *  match an interactive SSH session. Off the call path for
-   *  `verifyConnection` (no command is executed). @see docs/ssh.md §3.3 */
+   *  `verifyConnection` (no command is executed). */
   loginShell?: boolean;
 }
 

@@ -6,6 +6,13 @@
       "when": 1779931168588,
       "tag": "0000_baseline_v3",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780170813936,
+      "tag": "0001_user_timezone",
+      "breakpoints": true
     }
   ]
 }

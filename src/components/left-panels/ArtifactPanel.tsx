@@ -15,7 +15,7 @@
  * Search box: client-side substring match on `name`. Matches preserve
  * their ancestor chain so the user always sees full path context.
  *
- * @see docs/artifact-dashboard-migration.md §11.2
+ * See docs/artifact-dashboard-migration.md.
  */
 
 import {

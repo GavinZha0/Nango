@@ -1,31 +1,11 @@
 "use client";
 
 /**
- * useOutcomeTools — registers built-in agents' frontend tools for the
- * Outcomes panel.
- *
- * V1 registers a single tool, `render_chart`. Future outcome kinds
- * (table, html, image, dashboard, ...) attach as additional tool
- * registrations in this same hook — see docs/architecture.md
- * §"Adding a new outcome kind" for the extension recipe.
- *
- * Tool uses the **handler / render split** mandated by
- * `docs/data-visualization.md` §6.3:
- *
- *  - `useFrontendTool` registers the handler — pure side-effect into
- *    `outcomeStore.addOutcome`, **no `render` prop**. Render is
- *    registered separately so we can three-state-branch on streaming
- *    args without coupling it to the handler. See
- *    `useInteractiveTools.tsx` for the same pattern.
- *  - `useRenderTool` registers `ChartPreviewCard` — three-state
- *    branching so partial-JSON `option` arguments are never parsed
- *    during streaming.
- *
- * Called once in `ChatProviderHooks` (RightPanel.tsx) so it survives
- * tab switches.
- *
- * @see docs/data-visualization.md §6.3 (tool registration), §6.4
- *      (first-outcome auto-jump), §6.7 (Outcome Store).
+ * useOutcomeTools — registers `render_chart` for the Outcomes
+ * panel using the handler/render split: `useValidatedFrontendTool`
+ * for the side-effect handler, `useRenderTool` for the streaming-
+ * aware preview card. Called once in `ChatProviderHooks` so it
+ * survives tab switches. See docs/data-visualization.md.
  */
 
 import { useCallback } from "react";
@@ -41,23 +21,10 @@ import { useWorkspaceStore } from "@/store/workspace";
 
 /**
  * `render_chart` parameter schema. LLM-facing — every `.describe`
- * string ends up in the model's tool catalog.
- *
- * Design (V1.3): `optionJson` is a JSON **string**, not an object.
- *
- * Earlier iterations declared `option` as a free-form object
- * (`z.record(z.string(), z.unknown())`). The JSON Schema the LLM
- * saw was `{type:"object", additionalProperties:true}` with no
- * required sub-fields, and models repeatedly submitted `option: {}`
- * — a plausible "I don't know what to put here" default for an
- * unconstrained object parameter.
- *
- * Switching to `z.string()` removes the trap: LLMs almost never
- * submit empty strings for required string parameters, and the
- * description's literal JSON examples become copy-and-modify
- * templates instead of abstract guidance. The handler parses the
- * string back into an object before persisting to the outcome
- * store.
+ * string ends up in the model's tool catalog. `optionJson` is a
+ * JSON STRING (not an object): a free-form `option` parameter
+ * caused models to submit empty `{}` defaults; a string with
+ * concrete JSON examples in the description avoids that trap.
  */
 export const renderChartSchema = z.object({
   chartId: z
@@ -102,49 +69,23 @@ export type RenderChartArgs = z.infer<typeof renderChartSchema>;
 
 // caps
 
-/** Hard upper bound on `option` JSON size. See §6.3 oversize-routing. */
+/** Hard upper bound on `option` JSON size. See docs/data-visualization.md
+ *  for the oversize-routing policy. */
 const OPTION_HARD_CAP_BYTES = 64_000;
 
 // hook
 
 export function useOutcomeTools(): void {
-  // NOTE: this hook intentionally does NOT do any navigation.
-  //
-  // Earlier iterations auto-navigated to `/outcomes` on the first
-  // chart of a thread — first directly via `router.push` inside the
-  // handler, then via an `OutcomeAutoJump` effect subscribed to the
-  // outcome store. Both forms triggered a Next.js route transition
-  // that raced with the recursive `runAgent()` CopilotKit fires for
-  // the LLM continuation of a frontend tool call. Observed
-  // user-visible symptom: the first chart's continuation (e.g. a
-  // Python script the user asked for in the same prompt) silently
-  // never reached the chat — only ONE `/run` POST hit the network,
-  // not two. The useEffect form did not fix it because the
-  // transition still happens BEFORE the recursive `runAgent`'s
-  // POST (React's commit / MessageChannel scheduling runs ahead of
-  // CopilotKit's `setTimeout(0)` yield).
-  //
-  // Resolution: drop auto-navigation entirely. `ChartPreviewCard`
-  // already exposes the chart title as a prominent ↗ link into
-  // `/outcomes`; users navigate when they want to. The chart is
-  // immediately visible inline in chat regardless.
-  //
-  // See `docs/data-visualization.md` §6.4 for the full trace.
+  // GOTCHA: do NOT auto-navigate to `/outcomes` from here. Any
+  // route transition during a frontend-tool handler races
+  // CopilotKit's recursive `runAgent()` and silently drops the
+  // LLM's continuation `/run` POST. See docs/data-visualization.md.
 
-  // Stable handler — frontend tool registration must not churn on
-  // every render or active tool calls lose their handler.
-  //
-  // Schema validation runs upstream in `useValidatedFrontendTool`
-  // (CopilotKit v2 doesn't validate args natively; the wrapper
-  // re-runs Zod and short-circuits with a structured error envelope
-  // on failure). This handler only needs to enforce business rules
-  // that Zod can't express:
-  //
-  //   - `OPTION_TOO_LARGE` — hard byte cap on `optionJson`
-  //   - `OPTION_JSON_PARSE_FAILED` — JSON-parse + plain-object check
-  //
-  // Handler returns plain objects (CopilotKit core stringifies
-  // automatically — see frontend-tool-helpers.tsx for the chain).
+  // Stable handler — frontend tool registration must not churn
+  // on every render or active tool calls lose their handler.
+  // Zod validation runs in `useValidatedFrontendTool`; the handler
+  // only enforces what Zod can't (`OPTION_TOO_LARGE`,
+  // `OPTION_JSON_PARSE_FAILED`).
   const handler = useCallback(
     async (args: RenderChartArgs): Promise<object> => {
       // Hard size cap (measured on the raw JSON string the LLM sent).
@@ -182,19 +123,8 @@ export function useOutcomeTools(): void {
         };
       }
 
-      // Capture agentId + threadId from workspaceStore (NOT from
-      // LLM args). runId is NOT available client-side; replay
-      // populates it server-side from entity_run_event.run_id.
-      //
-      // The handler is intentionally pure beyond this store write:
-      // no router.push, no React state mutations. See the long
-      // comment at the top of this hook for why navigation is
-      // user-driven now instead of automatic.
-      //
-      // Block model: a single chart is a Report with one `chart`
-      // block. Multi-block reports (text + chart, etc.) are produced
-      // by other tools / a future "report" agent — never by
-      // render_chart.
+      // agentId / threadId come from workspaceStore, NOT LLM args.
+      // runId is server-side only — replay back-fills it.
       const ws = useWorkspaceStore.getState();
       useOutcomeStore.getState().addOutcome({
         outcomeId: args.chartId,
@@ -209,13 +139,10 @@ export function useOutcomeTools(): void {
           },
         ],
         agentId: ws.activeAgentId,
-        // runtimeThreadId may still be null here — CopilotKit v2's
-        // threadId is captured lazily on `onRunFinalized`. The
-        // WorkspaceProvider subscriber back-fills via
-        // `bindPendingThreadId` once the real id arrives.
-        // @see docs/chat-flow-audit.md §1.11
+        // runtimeThreadId may be null here (CopilotKit captures
+        // it lazily); `bindPendingThreadId` back-fills.
         threadId: ws.runtimeThreadId ?? null,
-        runId: null, // server replay populates; V1 UI doesn't use
+        runId: null,
         createdAt: Date.now(),
         collapsed: false,
         savedArtifactId: null,

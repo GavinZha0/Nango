@@ -337,21 +337,11 @@ export function CredentialFormDialog({
             )}
           </div>
 
-          {/*
-           * Credential Type — aligned with the Base URL / AG-UI URL
-           * inputs above. Those rows live inside a `p-3` bordered
-           * box, so their inputs sit 152 px from the form left edge
-           * (12 box-padding + 128 label `w-32` + 12 gap-3). Reproduce
-           * that left offset here with a 140 px label column + the
-           * same gap-3, since this row has NO outer padding.
-           */}
           <div className="flex items-center gap-3">
             <Label className="w-[140px] shrink-0">Credential Type</Label>
             {!isEdit ? (
-              // Wrap Select in a flex-1 div — Select's root doesn't
-              // render a flex child of its own, so without the
-              // wrapper the trigger would collapse to its content
-              // width inside this flex row.
+              // Select's root isn't a flex child; the wrapper keeps it
+              // from collapsing to content width.
               <div className="flex-1">
                 <Select
                   value={form.type}
@@ -379,14 +369,7 @@ export function CredentialFormDialog({
             )}
           </div>
 
-          {/* Secret Fields — driven by PAYLOAD_FIELDS[form.type].
-              Single-line `flex items-center gap-3` rows for plain
-              text / password / url inputs (api_key, bearer_token,
-              basic_auth, oauth_client, keypair); textarea fields
-              (e.g. private_key's PEM body) keep the stacked
-              block layout because they need vertical room. Label
-              column matches the URL box (`w-32`) so all three
-              bordered sections read as one consistent grid. */}
+          {/* Secret Fields — driven by PAYLOAD_FIELDS[form.type]. */}
           <div className="space-y-3 rounded-md border p-3">
             {isSsh && (
               <p className="text-xs text-muted-foreground">

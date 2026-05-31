@@ -1,17 +1,8 @@
 /**
- * Production `BundleDeps` wiring + thin entrypoint used by the
- * GET /api/artifacts/[id] route handler.
- *
- * The bundle assembler (`bundle.ts`) is dependency-injected; this
- * file fixes those dependencies for the production code path:
- *   - DB-backed artifact + workflow loaders via Drizzle
- *   - `executeWorkflow` STUB returning null until W1.6.x wires the
- *     tool registry + runner adapter (issue tracked in D31
- *     follow-up)
- *
- * Splitting the prod wiring from the assembler keeps `bundle.ts`
- * test-friendly — tests inject their own deps and never touch DB
- * or engine.
+ * Production `BundleDeps` wiring for `GET /api/artifacts/[id]`. The
+ * bundle assembler is dependency-injected so `bundle.ts` stays
+ * test-friendly; this file pins the DB loaders + real
+ * `executeWorkflow` adapter for the production code path.
  */
 
 import "server-only";
@@ -33,10 +24,7 @@ import {
 } from "./bundle";
 import { executeWorkflow } from "./execute-workflow";
 
-/**
- * Production entry — used by the route handler. Wraps
- * `buildArtifactBundle` with DB + (stubbed) engine deps.
- */
+/** Production entry — used by the route handler. */
 export async function getArtifactBundle(
   artifactId: string,
   ownerId: string,
@@ -44,14 +32,9 @@ export async function getArtifactBundle(
   return buildArtifactBundle(artifactId, ownerId, productionDeps);
 }
 
-// ─── Production deps ───────────────────────────────────────────────────
-
 /**
- * Exported so refresh-artifact.ts can reuse the same DB loaders +
- * real executor without duplicating wiring. Refresh passes
- * `{ forceFresh: true }` to `buildArtifactBundle`; the executor
- * itself is the same — L2 cache lookup (when it exists) will
- * branch on `forceFresh`.
+ * Shared production deps — re-used by `refresh-artifact.ts` which
+ * only differs in passing `{ forceFresh: true }` to the assembler.
  */
 export const productionDeps: BundleDeps = {
   getArtifact: loadArtifact,
@@ -81,5 +64,3 @@ async function loadWorkflow(id: string): Promise<WorkflowEntity | null> {
     .limit(1);
   return rows[0] ?? null;
 }
-
-

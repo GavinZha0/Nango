@@ -1,6 +1,7 @@
 /**
  * Re-export shim — canonical definitions moved to `@/lib/cache/invalidation`.
- * @see docs/cache.md §3
+ *
+ * See docs/cache.md.
  */
 export {
   invalidateForCredentialChange,

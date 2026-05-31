@@ -8,10 +8,9 @@ import type { ResolvedDataSource } from "../types";
 import { createDuckdbExtensionAdapter } from "../duckdb-extension-adapter.server";
 
 /**
- * Build a connection string for DuckDB's `mysql` ATTACH from a
- * resolved data source. Exported so the MariaDB adapter can reuse it
- * (MariaDB shares the wire format). `ssl_mode` falls back to
- * "preferred" when admins don't override it via `params.ssl_mode`.
+ * Build a connection string for DuckDB's `mysql` ATTACH. Exported so
+ * the MariaDB adapter can reuse it (MariaDB shares the wire format).
+ * `ssl_mode` defaults to "preferred" when not in `params.ssl_mode`.
  */
 export function buildMysqlAttachString(resolved: ResolvedDataSource): string {
   const sslMode = resolved.params.ssl_mode ?? "preferred";

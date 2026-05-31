@@ -6,20 +6,15 @@ import { z } from "zod";
 
 /**
  * Authentication payload for traditional RDBMS connections (postgres,
- * mysql, mariadb, vertica, …). All four providers use the same shape
- * — driver-specific connection options live on the data_source row,
- * not here.
- *
- * Future categories (object storage with access-key / secret-key,
- * OAuth client / secret, …) get their own base in this file.
- */
-/**
- * Single source of truth: matches the basic_auth payload shape
- * emitted by the admin CredentialFormDialog (`{username, password}`).
- * Each adapter maps `username` → its driver's native parameter name
- * (libpq / mysql / vertica all happen to call it `user`) at the
- * connection-build site, so future drivers with different
+ * mysql, mariadb, vertica). All four providers share this exact shape
+ * — matches the `basic_auth` payload emitted by the admin
+ * `CredentialFormDialog`. Each adapter maps `username` to its driver's
+ * native parameter name (libpq / mysql / vertica all happen to call it
+ * `user`) at connection-build time, so future drivers with different
  * conventions stay self-contained.
+ *
+ * Driver-specific connection options (host, port, sslmode, …) live on
+ * the `data_source` row, not here.
  */
 export const DatabaseConnectionBase = z.object({
   username: z.string().min(1, "username is required"),

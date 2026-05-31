@@ -24,12 +24,15 @@ services:
       - path: .env
         required: false
     ports:
-      - "${APP_PORT:-3000}:3000"
+      - "${APP_PORT:-9300}:9300"
     environment:
       NO_HTTPS: ${NO_HTTPS:-1}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-secret-change-me-32chars}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      # Nested expansion: if BETTER_AUTH_URL isn't set, derive it from APP_PORT
+      # so users only need to change APP_PORT to move the app to a different
+      # port. Override BETTER_AUTH_URL directly when fronting Nango with a
+      # reverse proxy or custom domain.
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${APP_PORT:-9300}}
       CREDENTIAL_ENCRYPTION_KEYRING: ${CREDENTIAL_ENCRYPTION_KEYRING:?Set CREDENTIAL_ENCRYPTION_KEYRING in .env or environment (e.g. k1=<64-hex>)}
       CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID: ${CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID:?Set CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID in .env or environment (e.g. k1)}
       # POSTGRES_HOST is hardcoded to the Docker service name.
@@ -47,7 +50,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "node -e \"http=require('http');req=http.request({host:'127.0.0.1',port:3000,path:'/'},res=>{process.exit(res.statusCode>=200&&res.statusCode<500?0:1)});req.on('error',()=>process.exit(1));req.end()\"",
+          "node -e \"http=require('http');req=http.request({host:'127.0.0.1',port:9300,path:'/'},res=>{process.exit(res.statusCode>=200&&res.statusCode<500?0:1)});req.on('error',()=>process.exit(1));req.end()\"",
         ]
       interval: 10s
       timeout: 5s
@@ -64,7 +67,11 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - nango-db-data:/var/lib/postgresql/data
+      # PG 18+ uses major-version subdirectories under /var/lib/postgresql
+      # (per https://github.com/docker-library/postgres/pull/1259). Mount the
+      # parent directory, NOT /var/lib/postgresql/data — the latter is the
+      # legacy ≤17 layout and the entrypoint rejects it on 18+.
+      - nango-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nango}"]
       interval: 5s

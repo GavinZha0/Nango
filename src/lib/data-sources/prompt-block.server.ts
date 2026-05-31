@@ -1,5 +1,6 @@
 /**
- * Build the "Available data sources" system-prompt block for an
+ * Build the "Available data sources" system-prompt block injected
+ * when an agent has any `data_source` binding. See docs/data-sources.md.
  */
 
 import "server-only";
@@ -10,9 +11,8 @@ import { db } from "@/lib/db";
 import { DataSourceTable } from "@/lib/db/schema";
 
 export interface DataSourcePromptBlock {
-  /** The block itself, ready to concatenate into the system prompt
-   *  with a leading newline; empty string when no usable sources are
-   *  bound (caller should skip the concatenation entirely). */
+  /** Empty when no usable sources are bound (caller skips the
+   *  concatenation entirely). */
   promptBlock: string;
 }
 
@@ -35,10 +35,8 @@ export async function buildDataSourcesPromptBlock(
     .where(
       and(
         inArray(DataSourceTable.id, [...dataSourceIds]),
-        // Honour the enabled flag at injection time — admin can pull
-        // a source out of agent context without breaking other
-        // bindings. Cache invalidation in the credentials hook
-        // refreshes specs when this flips.
+        // Honour the enabled flag at injection time so admin can pull
+        // a source out of agent context without breaking other bindings.
         eq(DataSourceTable.enabled, true),
       ),
     )
@@ -67,5 +65,7 @@ export async function buildDataSourcesPromptBlock(
     "(`<schema>.<table>` for mysql/mariadb, `<schema>.<table>` for postgres) " +
     "exactly as suggested by the error — do NOT include the `src.` ATTACH " +
     "alias prefix.";
-  return { promptBlock: `${intro}\n${lines.join("\n")}` };
+  return {
+    promptBlock: `## Available data sources\n\n${intro}\n${lines.join("\n")}`,
+  };
 }

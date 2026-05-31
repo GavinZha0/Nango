@@ -1,4 +1,2 @@
-/**
- * Module shim for `vertica-nodejs@^1.1`. The upstream package ships
- */
+/** Module shim for `vertica-nodejs` — upstream ships plain JS, no `.d.ts`. */
 declare module "vertica-nodejs";

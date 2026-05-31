@@ -98,12 +98,12 @@ Conventions enforced by the codebase:
 ```env
 NANGO_LOG_ENABLED=true        # master kill switch
 NANGO_LOG_LEVEL=info          # debug | info | warn | error | silent
-# NANGO_LOG_PRETTY=true       # auto: true in dev, false in prod
+# NANGO_LOG_PRETTY=true       # default false — JSON output for log shippers
 ```
 
-Production output is JSON (so Loki / Datadog / CloudWatch ingest it
-verbatim). Development output is colorised by `pino-pretty` for
-readability.
+Default output is JSON (so Loki / Datadog / CloudWatch ingest it
+verbatim). Set `NANGO_LOG_PRETTY=true` in your local `.env` for
+colourised `pino-pretty` output during development.
 
 ### 2.4 Why we did not log every cache hit
 
@@ -332,7 +332,7 @@ Call this from any future observability provider integration.
 ### Done
 
 - [x] `pino` structured logs with redaction, request-id correlation,
-      env switches, JSON-in-prod / pretty-in-dev
+      env switches, JSON by default + opt-in pretty for dev
 - [x] Logs at backend chat route, BuiltIn chat route, AG-UI passthrough,
       credential lookup
 - [x] `keypair` credential type (publicKey + secretKey, both encrypted)

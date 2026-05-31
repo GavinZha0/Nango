@@ -1,5 +1,7 @@
 /**
  * Server-only SshServer lookup — name / id → fully-hydrated row + decrypted auth.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";
@@ -33,7 +35,7 @@ export interface ResolvedSshServer {
   /** Denylist of regex patterns; takes precedence over allow on a
    *  match. */
   commandDeny: string[];
-  /** Wrap commands as `bash -lc '…'` on this host. @see docs/ssh.md §3.3 */
+  /** Wrap commands as `bash -lc '…'` on this host. */
   loginShell: boolean;
   auth: NormalisedSshAuth;
 }

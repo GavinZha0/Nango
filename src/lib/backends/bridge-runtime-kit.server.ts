@@ -1,3 +1,8 @@
+/**
+ * Shared toolkit for REST → AG-UI bridges (agno, Mastra, Dify).
+ * See docs/backend-integration.md.
+ */
+
 import "server-only";
 
 import { NextResponse } from "next/server";
@@ -22,7 +27,6 @@ const DEFAULT_ERROR_BODY_MAX_LEN: number = 200;
 
 export interface BridgeRunContext {
   abortSignal: AbortSignal;
-  /** Emit typed AG-UI event upstream. Discriminated-union validates per-variant fields without casts. */
   emit: (event: AgUiEvent) => void;
   isCancelled: () => boolean;
 }
@@ -44,7 +48,6 @@ export function createBridgeRunObservable(
     const abortController: AbortController = new AbortController();
     let cancelled: boolean = false;
 
-    // `BaseEvent` is the wider contract; `AgUiEvent` writes without cast.
     const emit = (event: AgUiEvent): void => {
       if (!cancelled) {
         subscriber.next(event);
@@ -246,7 +249,6 @@ export async function resolveBridgeCredential(
  * unconfigured; caller falls through to bridge path.
  *
  * SECURITY: `{agentId}` placeholder is replaced with `encodeURIComponent`.
- * @see docs/backend-integration.md §7
  */
 export async function buildPassthroughAgentIfConfigured(
   ctx: ChatContext,
@@ -272,7 +274,6 @@ export async function buildPassthroughAgentIfConfigured(
 /**
  * Tool-call dedupe filter for "Filter mode" bridges (agno, mastra).
  * Dify bypasses via synthesise-result mode.
- * @see docs/backend-integration.md §7
  */
 export class ToolCallFilter {
   private readonly declared: Set<string>;
@@ -297,10 +298,7 @@ export class ToolCallFilter {
   }
 }
 
-/**
- * State machine for AG-UI three-stage text protocol.
- * @see docs/backend-integration.md §7
- */
+/** State machine for AG-UI three-stage text protocol (START / CONTENT / END). */
 export class TextStreamState {
   private open: boolean = false;
 

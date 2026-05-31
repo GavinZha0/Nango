@@ -1,5 +1,10 @@
 /**
- * Sandbox subsystem entry. Pure types + the active-adapter resolver
+ * Sandbox subsystem entry — pure types + error classes. Server-only
+ * pieces (`getActiveAdapter`, adapters) live in `registry.server.ts`
+ * and the per-backend files; import those directly when you need
+ * them.
+ *
+ * See docs/sandbox.md.
  */
 
 export type {

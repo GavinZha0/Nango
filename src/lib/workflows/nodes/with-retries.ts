@@ -1,34 +1,24 @@
 /**
- * Retry-loop wrapper shared by `tool-node.ts` + `agent-node.ts`.
+ * Retry-loop wrapper shared by the node executors.
  *
- * Owns the per-node event emission (`workflow_node_attempt_started`
- * / `_failed` / `_completed`) so per-bucket executors only have to
+ * Owns per-node event emission (`workflow_node_attempt_started` /
+ * `_failed` / `_completed`) so per-bucket executors only have to
  * write the *attempt body* — ref resolution, dispatch, output
- * coercion — and let this wrapper handle attempts, sleeps, and
- * the bookkeeping around them.
+ * coercion.
  *
- * Retry policy lives on the canonical node (`node.retries`,
- * defaults to `{ attempts: 0 }` ⇒ single try). Semantics:
- *
- *   - `attempts = N` → at most N RETRIES after the first failure,
- *     i.e. N+1 total tries (so `attempts: 0` is no-retry; the
- *     pre-W1.4.5 V1 default).
+ * Retry policy lives on the canonical node (`node.retries`, defaults
+ * to `{ attempts: 0 }` ⇒ single try):
+ *   - `attempts = N` → at most N RETRIES after the first failure
+ *     (N+1 total tries).
  *   - `delaySeconds = K` → wait K seconds between attempts.
- *   - `backoff = "exponential"` → wait `K * 2^attempt` seconds
- *     (default: "fixed" — same wait every time).
+ *   - `backoff = "exponential"` → wait `K * 2^attempt` seconds.
  *
- * V1 simplification: every failure (including REF_UNRESOLVED,
- * TOOL_NOT_FOUND, etc.) is retried per the policy. A
- * per-error-code retry filter is a V1.1+ concern — for now we
- * trust the spec author to set `attempts` consciously.
+ * Every failure is retried per the policy — a per-error-code filter
+ * is not currently supported.
  *
- * Abort semantics:
- *   - If `state.abortSignal` is already aborted at any retry
- *     boundary (top of each loop iteration), throw WORKFLOW_TIMEOUT
- *     without dispatching another attempt.
- *   - Sleeps between attempts are abort-aware — they resolve
- *     early on signal fire, and the next iteration's signal check
- *     fails fast.
+ * Abort semantics: if `state.abortSignal` is aborted at any retry
+ * boundary, throw WORKFLOW_TIMEOUT without dispatching another
+ * attempt. Sleeps between attempts are abort-aware.
  */
 
 import { WorkflowError } from "../error";
@@ -45,23 +35,21 @@ export interface WithRetriesParams {
   deps: Pick<WorkflowEngineDependencies, "emitEvent">;
   /**
    * The per-attempt body — pure data in / data out. Throws on
-   * failure (WorkflowError or anything else); the wrapper
-   * translates throwables via `wrapError`.
+   * failure; the wrapper translates throwables via `wrapError`.
    */
   attemptFn: () => Promise<Record<string, unknown>>;
   /**
    * Convert a raw throwable into the bucket-specific WorkflowError
-   * envelope (TOOL_EXECUTION_FAILED for tool nodes,
-   * AGENT_EXECUTION_FAILED for agent nodes). Passing through an
-   * existing WorkflowError is the caller's responsibility.
+   * envelope (TOOL_EXECUTION_FAILED for tool nodes, etc.). Passing
+   * an existing WorkflowError through is the caller's responsibility.
    */
   wrapError: (err: unknown) => WorkflowError;
 }
 
 /**
- * Run `attemptFn` with the node's configured retry policy.
- * Returns the successful attempt's outputs; throws the final
- * `WorkflowError` if all attempts fail.
+ * Run `attemptFn` with the node's configured retry policy. Returns
+ * the successful attempt's outputs; throws the final `WorkflowError`
+ * if all attempts fail.
  */
 export async function withRetries(
   params: WithRetriesParams,
@@ -140,10 +128,9 @@ function computeBackoffMs(
 }
 
 /**
- * Promise-based sleep that resolves early when `signal` fires.
- * The next loop iteration is responsible for re-checking the
- * signal and throwing WORKFLOW_TIMEOUT — this helper deliberately
- * does NOT throw on its own (keeps the call site linear).
+ * Promise-based sleep that resolves early when `signal` fires. The
+ * next loop iteration re-checks the signal and throws
+ * WORKFLOW_TIMEOUT — this helper does NOT throw on its own.
  */
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();

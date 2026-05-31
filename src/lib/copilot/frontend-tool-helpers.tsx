@@ -30,7 +30,7 @@
  * internally call `useFrontendTool` / `useRenderTool` which depend
  * on CopilotKit context.
  *
- * @see docs/chat-interactive-ui.md §3
+ * See docs/chat-interactive-ui.md.
  * @see docs/diagrams/frontend-tool-flow.html
  */
 
@@ -219,7 +219,7 @@ export interface HitlToolConfig<T extends Record<string, unknown>> {
  * sentinel so the LLM sees a structured "declined" result instead of
  * a hung tool call.
  *
- * @see docs/chat-interactive-ui.md §3.0 — why handler/render are
+ * See docs/chat-interactive-ui.md. — why handler/render are
  *      split across two hooks instead of using `useHumanInTheLoop`.
  */
 export function useHitlTool<T extends Record<string, unknown>>(

@@ -1,5 +1,7 @@
 /**
  * Server-side SSH agent tools: `run_ssh_command` and `list_ssh_hosts`.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";
@@ -29,11 +31,10 @@ const RunSshArgs = z.object({
     .describe(
       "Single shell command to execute. Runs as the server's configured user.",
     ),
-  // SECONDS, not milliseconds. The field is named explicitly to keep
-  // the LLM from defaulting to its OpenSSH / setTimeout intuition.
-  // @see docs/ssh.md (project convention: external surfaces are
-  // unitless + seconds; internal vars carry `Ms` suffix; bridged by
-  // getConfigMs).
+  // SECONDS, not milliseconds — the field is named explicitly so the
+  // LLM does not default to its OpenSSH / setTimeout intuition.
+  // Project convention: external surfaces are unitless seconds;
+  // internal vars carry the `Ms` suffix.
   timeoutSeconds: z
     .number()
     .int()
@@ -139,11 +140,10 @@ export function buildRunSshCommandTool(opts: {
           ok: true,
           serverName: server.name,
           host: server.host,
-          // INTENTIONALLY no `username` field. The OS user is part
-          // of the credential payload, and the security posture
-          // (docs/ssh.md §4.1) guarantees credentials never reach
-          // the LLM. If the agent needs to know the identity it
-          // ran as, `whoami` returns it via the same exec channel.
+          // SECURITY: no `username` field on purpose. The OS user is
+          // part of the credential payload, which must not reach the
+          // LLM. If the agent needs to know who it ran as, `whoami`
+          // returns it via the same exec channel.
           ...result,
         };
       } catch (err) {

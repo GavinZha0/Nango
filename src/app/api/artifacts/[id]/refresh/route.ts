@@ -6,21 +6,18 @@ import { refreshArtifact } from "@/lib/artifacts/refresh-artifact";
 import { withSession } from "@/lib/http/route-handlers";
 
 /**
- * POST /api/artifacts/[id]/refresh — re-run the artifact's
- * backing workflow, bypassing the L2 workflow-output cache.
+ * POST /api/artifacts/[id]/refresh — force-fresh re-execute of the
+ * artifact's backing workflow.
  *
  * No request body — refresh is "re-do whatever I'd do on GET, but
- * fresh". Response shape matches GET (the W1.6 render-ready
- * bundle): `{ node, workflow?, data?, fromCache?, executedAt? }`.
+ * fresh". Response shape matches GET:
+ * `{ node, workflow?, data?, fromCache?, executedAt? }`.
  *
- * Per D31: this endpoint is user-facing ("Refresh" button on the
- * artifact page). The workflow concept itself is implementation
- * detail; the user sees "I want fresh data for this chart".
+ * User-facing semantics: this is the "Refresh" button on the artifact
+ * page. The workflow concept stays implementation-internal — the user
+ * sees "give me fresh data for this chart".
  *
- * W1.6.4 status: the underlying executor is still stubbed; the
- * bundle returns without a `data` field. W1.7 integration will
- * wire the real engine + L2 cache + tool registry; the endpoint
- * contract stays unchanged.
+ * See docs/workflow.md.
  */
 const ROUTE = "/api/artifacts/[id]/refresh";
 

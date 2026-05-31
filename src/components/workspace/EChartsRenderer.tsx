@@ -8,7 +8,7 @@
  * on unmount. Bundle cost is paid only when the user navigates to
  * `/outcomes`, which lazy-loads `OutcomesPanel` via `next/dynamic`.
  *
- * Constraints (see `docs/data-visualization.md` §6.8):
+ * Constraints (see `docs/data-visualization.md`):
  *  - Theme: read `next-themes` resolvedTheme; switch ECharts'
  *    built-in `dark` theme. ECharts has no live-swap-theme API, so
  *    a theme change disposes the instance and creates a fresh one;
@@ -48,7 +48,7 @@ interface EChartsRendererProps {
  *    height) container, including when /outcomes navigates back in.
  *  - Dispose on unmount.
  *
- * @see docs/data-visualization.md §6.8
+ * See docs/data-visualization.md.
  */
 export function EChartsRenderer({ option, style }: EChartsRendererProps): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);

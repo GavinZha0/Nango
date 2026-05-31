@@ -1,24 +1,15 @@
 /**
  * Agent-node executor — pure data in / data out.
  *
- * Retry loop + event emission live in `with-retries.ts`. Per-
- * attempt body:
+ * Retry loop + event emission live in `with-retries.ts`. Per-attempt
+ * body:
+ *   1. Resolve `@path` refs in `node.input`.
+ *   2. Call `deps.runAgent({...})` — the DI bridge that the runner-
+ *      side dispatch shim wires to `runner.start({entityKind: 'agent'})`.
+ *   3. Return `result.output` (already structured per `outputSchema`).
  *
- *   1. Resolve `@path` refs in `node.input`
- *   2. Call `deps.runAgent({...})` — DI bridge that the runner-
- *      side dispatch shim wires to `runner.start({kind: 'agent'})`
- *      with `parent_run_id` set for run-tree linkage (D17). The
- *      engine never imports `runner/` directly.
- *   3. Return `result.output` (already structured per
- *      `outputSchema`).
- *
- * D16 (frontend_tool filter): the engine signals intent via
- * `excludeFrontendTools: true`; the runner applies the actual
- * filter before invoking the agent.
- *
- * D30 (default agent output_schema = `{text: string}`): the
- * runner wraps the agent's natural-language reply into
- * `{ text: <reply> }`; the engine just plumbs the schema through.
+ * The engine signals intent via `excludeFrontendTools: true`; the
+ * runner applies the actual filter before invoking the agent.
  */
 
 import { WorkflowError } from "../error";
@@ -37,9 +28,9 @@ export type AgentNodeDeps = Pick<
 >;
 
 /**
- * Execute one agent node. Returns the agent's structured output
- * on success; throws `WorkflowError` on the final failure after
- * all retries are exhausted.
+ * Execute one agent node. Returns the agent's structured output on
+ * success; throws `WorkflowError` on the final failure after all
+ * retries are exhausted.
  */
 export async function executeAgentNode(
   node: CanonicalAgentNode,
@@ -65,13 +56,10 @@ export async function executeAgentNode(
         excludeFrontendTools: true,
       });
 
-      // Output validation — D30's default `{text: string}` schema
-      // (or whatever the spec declared). The runner is expected to
-      // already shape the agent's reply, but defensive runtime
-      // validation surfaces drift between the agent and the spec
-      // as OUTPUT_SCHEMA_MISMATCH (vs TOOL_EXECUTION_FAILED for
-      // tool nodes — agents are non-deterministic so we use a
-      // distinct code).
+      // Defensive runtime validation — the runner is expected to
+      // already shape the agent's reply; this surfaces drift as
+      // OUTPUT_SCHEMA_MISMATCH (distinct from TOOL_EXECUTION_FAILED
+      // because agents are non-deterministic).
       const validation = validateAgainstSchema(
         node.output_schema,
         result.output,

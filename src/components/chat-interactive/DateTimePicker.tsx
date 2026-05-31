@@ -111,13 +111,8 @@ export function DateTimePicker(
 
     return (
       <div className="my-2 rounded-lg border border-border bg-card p-3">
-        {/* Row 1 — prompt (dynamic, LLM-provided). */}
         <p className="mb-3 text-sm font-medium">{args.prompt}</p>
-        {/* Row 2 — input(s) + Confirm button on a single line.
-            `items-end` keeps the Confirm button aligned with the input
-            baseline even when range mode adds a "Start" / "End" label
-            above each input (the labels add extra height to those
-            wrappers but not to the button). */}
+        {/* Input(s) + Confirm. */}
         <div
           className={cn(
             "flex gap-3 items-end",

@@ -50,7 +50,7 @@ export interface UseArtifactTreeReturn {
  * and the detail page's "Move to…" action), and the detail page's
  * breadcrumb.
  *
- * @see docs/artifact-dashboard-migration.md §11.2
+ * See docs/artifact-dashboard-migration.md.
  */
 export function useArtifactTree(): UseArtifactTreeReturn {
   const { data, error, isLoading, mutate } = useSWR<TreeResponse>(

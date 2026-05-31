@@ -27,7 +27,7 @@ export function getExtractLimits(): ExtractLimits {
   };
 }
 
-/** Test seam: no-op now (config service handles caching). */
+/** Test seam: no-op (config service handles caching). */
 export function __resetExtractLimitsCache(): void {
   // Kept for backward compat with existing tests.
 }

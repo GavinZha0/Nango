@@ -1,7 +1,5 @@
 /**
- * agno backend adapter — **client-side**.
- *
- * @see docs/backend-integration.md
+ * agno backend adapter — client-side. See docs/backend-integration.md.
  */
 
 import type {
@@ -9,14 +7,10 @@ import type {
   IBackendAdapter,
 } from "../types";
 
-// Capabilities
-
 const capabilities: BackendCapabilities = {
   displayName: "agno",
   entityKinds: ["agent", "team", "workflow"],
 };
-
-// IBackendAdapter
 
 export const agnoAdapter: IBackendAdapter = {
   provider: "agno",

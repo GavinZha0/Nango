@@ -1,41 +1,24 @@
 /**
  * LLM-emit spec → Canonical stored spec.
  *
- * This step performs the *structural* enrichment that
- * `workflow.spec` JSONB stores:
+ * Per-node enrichment:
+ *   - Tool nodes: hydrate `input_schema` / `output_schema` /
+ *     `outputs[]` from the registry.
+ *   - Agent nodes: resolve `<source> / <name>` display strings to
+ *     UUIDs via EntityCatalog; derive `outputs[]` from
+ *     `output_schema.required`.
+ *   - Code / SQL nodes: derive or default `outputs[]`.
+ *   - Stamp `refReconAlgorithm: "ref_recon_v1"`.
  *
- *   1. Stamp the V1 bucket tag `type: "tool" | "agent"` (D27) so
- *      Zod's discriminated union on the canonical side validates.
- *   2. Resolve agent display strings (`<source> / <name>`, D13)
- *      one-shot via the caller-supplied EntityCatalog adapter
- *      (D27): `agentId` is locked at save time so runtime dispatch
- *      never re-queries the catalog.
- *   3. Hydrate tool nodes with registry-derived schemas
- *      (`input_schema`, `output_schema`, `outputs[]`) so the engine
- *      can validate node inputs and propagate refs without a tool
- *      registry round-trip per node per run.
- *   4. Stamp `refReconAlgorithm: "ref_recon_v1"` (D26) — tracks the
- *      save-time ref reconstruction algorithm version for V2
- *      re-capture compatibility.
+ * Failure mode: every problem throws a `WorkflowError`. The surrounding
+ * save pipeline calls `toResult(we)` at its catch boundary.
  *
- * Out of scope (intentionally):
+ * Out of scope: DAG validation / cycle detection (`validate.ts`),
+ * deterministic spec hash (`hash.ts`), default timeout / retries /
+ * parallelism (engine reads config keys at execute time so workflows
+ * stay live under operator retuning).
  *
- *   - DAG validation, cycle detection, ref reachability  → `validate.ts`
- *   - Deterministic hash of the canonical spec            → `hash.ts`
- *   - Filling default `timeoutSeconds` / `retries` /      → engine reads
- *     `max_parallelism` from config keys                     config at
- *                                                            execute time
- *     The latter is deliberate: storing materialised defaults would
- *     freeze workflows against later operator tuning of the
- *     `workflow.execution.*` and `workflow.node.*` config keys.
- *
- * Failure mode: every problem throws a `WorkflowError`. The
- * surrounding save pipeline (`build-from-events.ts`, W2) calls
- * `toResult(we)` at its catch boundary to emit the standard wire
- * envelope back to the LLM caller (`modify_workflow`).
- *
- * See `docs/workflow-architecture.md` §6.1–§6.3 for the canonical
- * spec shape and §7.9 for the error contract.
+ * See docs/workflow.md.
  */
 
 import { WorkflowError } from "../error";
@@ -59,12 +42,10 @@ import {
 // ─── Dependencies ──────────────────────────────────────────────────────
 
 /**
- * Tool-registry view that canonicalize needs. Returned fields are
- * all optional because some tools (notably MCP tools whose server
- * is offline at save time) ship with only partial metadata; the
- * spec is still storable in that case and the engine surfaces a
- * `TOOL_INPUT_SCHEMA_MISMATCH` at execute time if validation later
- * fails.
+ * Tool-registry view that canonicalize needs. Fields are optional —
+ * MCP tools whose server is offline at save time may ship with only
+ * partial metadata; the engine surfaces `TOOL_INPUT_SCHEMA_MISMATCH`
+ * at execute time if validation later fails.
  */
 export interface ToolMetadata {
   input_schema?: Record<string, unknown>;
@@ -72,45 +53,32 @@ export interface ToolMetadata {
   outputs?: readonly string[];
 }
 
-/**
- * The two lookups canonicalize delegates to its caller. Wiring up
- * the actual tool registry + EntityCatalog adapters happens in
- * `build-from-events.ts` (W2) — the workflow module itself stays
- * decoupled from those subsystems.
- */
+/** Lookups canonicalize delegates to its caller. */
 export interface CanonicalizeDeps {
   /** Returns null if the tool name is unknown to the registry. */
   getToolMetadata(toolName: string): ToolMetadata | null;
   /**
-   * Resolves an `<sourceLabel> / <agentName>` display string
-   * (D13 format) to its UUID. Returns null if the agent no longer
-   * exists in EntityCatalog or has been disabled.
+   * Resolves an `<sourceLabel> / <agentName>` display string to its
+   * UUID. Returns null if the agent no longer exists in EntityCatalog
+   * or has been disabled.
    */
   resolveAgentId(displayString: string): string | null;
 }
 
-/** D26 — current save-time ref reconstruction algorithm version. */
+/** Current save-time ref reconstruction algorithm version. */
 export const REF_RECON_ALGORITHM = "ref_recon_v1" as const;
 
 // ─── Per-node canonicalization ─────────────────────────────────────────
 
 /**
  * Derive a node's `outputs[]` list from a JSON-Schema-shaped
- * `output_schema`. Two modes:
+ * `output_schema`. `required-only` mode (tool / agent nodes) uses
+ * `output_schema.required` as authoritative. `code` mode falls back
+ * to `properties` keys when `required` is absent — code nodes
+ * commonly declare a schema without `required` because the contract
+ * is "stdout prints exactly these keys".
  *
- *   - `required`-only (tool / agent nodes): `output_schema.required`
- *     is THE authoritative source. Missing / empty → no outputs[]
- *     emitted (canonical JSON stays minimal). Mirrors D19 source 2
- *     semantics.
- *   - `properties` fallback (code nodes via `mode: "code"`): when
- *     `required` is absent or empty, fall back to the keys of
- *     `properties`. Code nodes commonly declare a schema without
- *     `required` because the contract is "stdout prints exactly
- *     these keys", not "these keys are required to be non-null".
- *
- * Returns `undefined` when neither source has usable data —
- * caller (canonicalize fallback / engine default unwrapping) is
- * responsible for filling a default.
+ * Returns `undefined` when neither source has usable data.
  */
 function deriveOutputsFromSchema(
   schema: Record<string, unknown> | undefined,
@@ -174,27 +142,16 @@ function canonicalizeAgentNode(
     });
   }
   const canonical: CanonicalAgentNode = { ...n, agentId };
-  // D30 — agent nodes always carry `output_schema` (required by
-  // `LLMAgentNodeSchema`). Surface its `required` list as the
-  // top-level `outputs[]` for downstream ref-target validation.
   const outputs = deriveOutputsFromSchema(n.output_schema);
   if (outputs !== undefined) canonical.outputs = outputs;
   return canonical;
 }
 
 /**
- * Canonicalize a code node (D35).
- *
- *   - When the spec declared `output_schema`, derive `outputs[]`
- *     from `output_schema.properties` (or `required`) so downstream
- *     `@nodes.X.<key>` refs can be ref-validated at save time.
- *   - When `output_schema` is absent, fall back to
- *     `DEFAULT_CODE_NODE_OUTPUTS` (`stdout`, `stderr`, `exitCode`,
- *     `durationMs`) so the engine's default unwrapping path still
- *     exposes typed outputs to downstream refs.
- *
- * No agent / tool catalog lookup — code nodes' identity is
- * self-contained in `language + code`.
+ * Canonicalize a code node. When `output_schema` is declared, derive
+ * `outputs[]` from `properties` (or `required`) so downstream
+ * `@nodes.X.<key>` refs can be ref-validated at save time. Otherwise
+ * fall back to `DEFAULT_CODE_NODE_OUTPUTS`.
  */
 function canonicalizeCodeNode(n: LLMCodeNode): CanonicalCodeNode {
   const canonical: CanonicalCodeNode = { ...n };
@@ -205,20 +162,11 @@ function canonicalizeCodeNode(n: LLMCodeNode): CanonicalCodeNode {
 }
 
 /**
- * Canonicalize a SQL node (D36).
- *
- * Fixed-shape contract: the engine's executor strips the
- * extract_dataset_by_sql tool result down to `{ name, rowCount }`,
- * so the canonical outputs list is always `DEFAULT_SQL_NODE_OUTPUTS`.
- * No tool-registry / EntityCatalog lookup — SQL node identity is
- * self-contained in `dataSourceName + query` (the latter being the
- * "main body" parallel to code's `code` string).
- *
- * The `dataSourceName` slug is NOT resolved against `data_source`
- * at save time — that lookup is deferred to runtime (in
- * `data-sources/lookup.ts`) so a temporarily-disabled data source
- * doesn't block the save. A missing slug surfaces as a runtime
- * error rather than a save-time canonicalize failure.
+ * Canonicalize a SQL node. Fixed-shape contract: outputs are always
+ * `DEFAULT_SQL_NODE_OUTPUTS`. The `dataSourceName` slug is NOT
+ * resolved against `data_source` at save time — that lookup is
+ * deferred to runtime so a temporarily-disabled data source doesn't
+ * block the save.
  */
 function canonicalizeSqlNode(n: LLMSqlNode): CanonicalSqlNode {
   const canonical: CanonicalSqlNode = { ...n };
@@ -246,9 +194,8 @@ function canonicalizeNode(
 
 /**
  * Transform a Zod-validated LLM-emit spec into the canonical form
- * persisted in `workflow.spec`. Throws `WorkflowError` on the
- * first unresolvable node so the save pipeline can fail fast — V1
- * spec save is all-or-nothing.
+ * persisted in `workflow.spec`. Throws `WorkflowError` on the first
+ * unresolvable node — spec save is all-or-nothing.
  */
 export function canonicalize(
   spec: LLMWorkflowSpec,

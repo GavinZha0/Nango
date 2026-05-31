@@ -82,7 +82,7 @@ export const PATCH = withEditor<{ id: string }>(
       createdBy: row.createdBy,
     };
 
-    // Builtin is an absolute write barrier (see docs/rbac.md §2.2).
+    // Builtin is an absolute write barrier (see docs/rbac.md).
     if (rbac.source === "builtin") {
       throw new ApiError(
         "BAD_REQUEST",

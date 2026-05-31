@@ -248,6 +248,6 @@ describe("tryDomain", () => {
   });
 
   it("handles localhost / port URLs", () => {
-    expect(tryDomain("http://localhost:3000/")).toBe("localhost");
+    expect(tryDomain("http://localhost:9300/")).toBe("localhost");
   });
 });

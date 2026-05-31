@@ -1,5 +1,7 @@
 /**
  * LocalDockerAdapter — Docker-container sandbox backend.
+ *
+ * See docs/sandbox.md.
  */
 
 import "server-only";
@@ -145,7 +147,7 @@ export class LocalDockerAdapter implements ISandboxAdapter {
       `/tmp:exec,size=${tmpfsMb}M`,
       "--init", // ensure signals propagate to argv[0]
       // Set the container's working directory to the cwd-relative
-      // contract surface (D38). LLM-generated Python sees
+      // contract surface. LLM-generated Python sees
       // `os.getcwd() == "/work"` and resolves `./data/<name>/...`
       // relative to it. Docker auto-creates `/work` as a mount
       // point when the bind below attaches.

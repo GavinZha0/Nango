@@ -1,7 +1,7 @@
 /**
- * Process-wide MCP provider pool.
+ * Process-wide MCP provider pool — reference-counted, idle-reaped.
  *
- * @see docs/builtin-runtime.md#22-mcp-provider-pool--srclibmcp
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";
@@ -104,10 +104,7 @@ export class McpProviderPool {
         }));
   }
 
-  /**
-   * Idempotent reaper start.
-   * @see docs/builtin-runtime.md#22-mcp-provider-pool--srclibmcp
-   */
+  /** Idempotent reaper start. */
   startReaper(): void {
     if (this.reaperHandle !== null) return;
     this.reaperHandle = setInterval(() => this.runReaper(), this.reaperIntervalMs);
@@ -150,7 +147,6 @@ export class McpProviderPool {
       return existing.provider;
     }
 
-    // @see docs/builtin-runtime.md#22-mcp-provider-pool--srclibmcp
     let pending: Promise<GracefulMcpProvider> | undefined = this.creating.get(serverId);
     if (!pending) {
       pending = this.createProviderForServer(serverId);
@@ -167,7 +163,6 @@ export class McpProviderPool {
 
     const provider: GracefulMcpProvider = await pending;
 
-    // @see docs/builtin-runtime.md#22-mcp-provider-pool--srclibmcp
     let entry: Entry | undefined = this.entries.get(serverId);
     if (!entry || entry.detached) {
       entry = {
@@ -309,7 +304,6 @@ export class McpProviderPool {
   private runReaper(): void {
     if (this.shuttingDown) return;
     const now: number = Date.now();
-    // @see docs/builtin-runtime.md#22-mcp-provider-pool--srclibmcp
     for (const [id, entry] of [...this.entries]) {
       if (
         entry.refs === 0 &&

@@ -7,7 +7,7 @@
  * a warning and exits 0 so dev environments without Docker can still
  * run (LocalDockerAdapter falls back to subprocess at runtime).
  *
- * @see docs/sandbox.md §3.3
+ * See docs/sandbox.md.
  */
 
 import { execFile } from "node:child_process";

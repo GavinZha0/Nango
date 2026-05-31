@@ -194,6 +194,30 @@ outcome. Double-release is tolerated by the pool (the entry's
 keeping the ledger one-shot keeps refcount accounting auditable in
 logs.
 
+### 3.1 User-scoped tool catalog (workflow + chat shared factory)
+
+`src/lib/builtin-tools/build-user-catalog.ts` exports
+`buildUserToolCatalog(ownerId)` — the assembly point for the
+server-side tool set both chat dispatch (per agent run, filtered to
+the agent's bindings) and workflow execution (no agent context,
+flat lookup by `node.tool`) consume. Returning the same
+`defineTool`-produced `ToolDefinition` objects on both paths keeps
+validation, errors, and side effects identical regardless of how a
+tool was invoked.
+
+Current entries:
+
+- All catalog tools from `BUILTIN_TOOLS` (run_code_in_sandbox,
+  web_search) — zero binding required.
+- `extract_dataset_by_sql` — global by design; the data-source slug
+  is a parameter and permission is checked inside `execute`.
+
+Intentionally absent: SSH / Skills / MCP / supervisor tools are
+all agent-binding-scoped today, and workflow scoping of those
+needs a separate decision. The `ownerId` parameter on the factory
+is pre-wired so binding-aware tool builders can join later without
+breaking callers.
+
 ---
 
 ## 4. Invalidation Contract

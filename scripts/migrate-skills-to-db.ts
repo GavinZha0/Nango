@@ -20,7 +20,7 @@
  *   pnpm tsx scripts/migrate-skills-to-db.ts --dry-run   # report only
  *   pnpm tsx scripts/migrate-skills-to-db.ts --owner=<uuid>
  *
- * @see docs/skills.md §3 / §4
+ * See docs/skills.md.
  */
 
 import * as fs from "node:fs/promises";

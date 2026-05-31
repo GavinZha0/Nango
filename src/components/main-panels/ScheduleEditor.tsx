@@ -40,6 +40,7 @@ import {
   RecentRunsPlaceholder,
 } from "@/components/main-panels/RecentRuns";
 import { useWorkspaceStore } from "@/store/workspace";
+import { authClient } from "@/lib/auth/client";
 import {
   scheduleActions,
   type ScheduleIntervalUnit,
@@ -177,12 +178,14 @@ const INTERVAL_UNIT_LABELS: Record<ScheduleIntervalUnit, string> = {
   month: "month(s)",
 };
 
-function emptyForm(): FormState {
+function emptyForm(profileTimezone: string | null): FormState {
   return {
     name: "",
     task: "",
     agentKey: "",
-    timezone: getBrowserTimezone(),
+    // Browser tz is only a fallback for the very first session of a
+    // brand-new user whose profile tz hasn't been detected yet.
+    timezone: profileTimezone || getBrowserTimezone(),
     // Seed with the next round hour (e.g. 14:23 → 15:00).
     startLocal: isoToLocalInputValue(nextRoundHour().toISOString()),
     triggerMode: "one_shot",
@@ -203,6 +206,7 @@ function emptyForm(): FormState {
 function formFromExisting(
   row: ScheduleResponse,
   options: AgentOption[],
+  profileTimezone: string | null,
 ): FormState {
   const matching = options.find(
     (o) => o.entityId === row.entityId
@@ -212,7 +216,9 @@ function formFromExisting(
     name: row.name ?? "",
     task: row.task,
     agentKey: matching ? agentKeyOf(matching) : "",
-    timezone: row.timezone || getBrowserTimezone(),
+    // Edit path: show the row's own snapshot tz; only when it's empty
+    // (legacy rows) do we fall through to profile, then browser.
+    timezone: row.timezone || profileTimezone || getBrowserTimezone(),
     startLocal: isoToLocalInputValue(row.startAt),
     triggerMode: row.intervalValue !== null ? "recurring" : "one_shot",
     intervalValue: row.intervalValue ? String(row.intervalValue) : "1",
@@ -239,10 +245,18 @@ export function ScheduleEditor({
 }: ScheduleEditorProps): ReactNode {
   const options = useAgentOptions();
   const isCreating = !scheduleId;
+  // Profile timezone is the default tz for new schedules; reads from
+  // `useSession` so it stays consistent with whatever the server has.
+  const { data: sessionData } = authClient.useSession();
+  const profileTimezone =
+    (sessionData?.user as { timezone?: string | null } | undefined)?.timezone
+    ?? null;
 
   // The parent page passes `key={row.id}` so the editor remounts on row identity change.
   const [form, setForm] = useState<FormState>(() =>
-    initialRow ? formFromExisting(initialRow, options) : emptyForm(),
+    initialRow
+      ? formFromExisting(initialRow, options, profileTimezone)
+      : emptyForm(profileTimezone),
   );
 
   const [submitting, setSubmitting] = useState(false);
@@ -346,7 +360,7 @@ export function ScheduleEditor({
           form.triggerMode === "recurring" ? Number(form.intervalValue) : null,
         intervalUnit:
           form.triggerMode === "recurring" ? form.intervalUnit : null,
-        timezone: form.timezone || "UTC",
+        timezone: form.timezone || profileTimezone || "UTC",
         name: form.name.trim() || undefined,
       });
       setSubmitting(false);
@@ -366,7 +380,7 @@ export function ScheduleEditor({
         form.triggerMode === "recurring" ? Number(form.intervalValue) : null,
       intervalUnit:
         form.triggerMode === "recurring" ? form.intervalUnit : null,
-      timezone: form.timezone || "UTC",
+      timezone: form.timezone || profileTimezone || "UTC",
       name: form.name.trim() || null,
     });
     setSubmitting(false);
@@ -526,17 +540,6 @@ export function ScheduleEditor({
             />
           </div>
 
-          {/* Timezone */}
-          <div className="grid grid-cols-[88px_1fr] items-center gap-3">
-            <Label htmlFor="schedule-tz">Timezone</Label>
-            <Input
-              id="schedule-tz"
-              placeholder="UTC"
-              value={form.timezone}
-              onChange={(e) => update("timezone", e.target.value)}
-            />
-          </div>
-
           {/* Start time. For one-shot we flag a past value with a red
               outline + inline note so the user notices before Save —
               the server enforces the same rule, this is just earlier
@@ -654,6 +657,37 @@ export function ScheduleEditor({
               </div>
             </>
           )}
+
+          {/* Timezone — Advanced. Lives at the end of the form so the
+              common path (Task / Start / Trigger / Recurring) flows
+              top-down without an interruption; users who care about
+              cross-timezone scheduling expand it explicitly. The
+              active value is echoed in the summary so users see what
+              they'll get without expanding. */}
+          <details className="group rounded-md border border-dashed bg-muted/30 px-3 py-2">
+            <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground">
+              Advanced
+              <span className="ml-2 text-foreground/70">
+                Timezone: {form.timezone || "UTC"}
+              </span>
+            </summary>
+            <div className="mt-3 grid grid-cols-[88px_1fr] items-center gap-3">
+              <Label htmlFor="schedule-tz" className="text-xs">
+                Timezone
+              </Label>
+              <Input
+                id="schedule-tz"
+                placeholder={profileTimezone || "UTC"}
+                value={form.timezone}
+                onChange={(e) => update("timezone", e.target.value)}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Defaults to your profile timezone
+              {profileTimezone ? ` (${profileTimezone})` : " (not set yet)"}.
+              Override only when scheduling for a different region.
+            </p>
+          </details>
 
         </div>
         </ScrollArea>

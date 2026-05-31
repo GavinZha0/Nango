@@ -2,34 +2,12 @@
 
 /**
  * WebSearchInlinePreview — chat-inline preview of a `web_search`
- * tool call.
- *
- * Two responsibilities:
- *
- *  1. Render a small status card in the chat stream (Searching… →
- *     Searched: "<query>" — N results ↗). Click on the title
- *     navigates to `/outcomes` and selects this search's card.
- *
- *  2. As a side-effect, write the result into `outcomeStore` so the
- *     user sees a full `<OutcomeCard>` with the card_list block in
- *     the Outcomes panel. The bridge is a `useEffect` keyed on
- *     `(status, toolCallId, parsed)` so it fires exactly once on
- *     completion, no matter how many times CopilotKit re-renders.
- *
- * Mirrors `ChartPreviewCard`'s three-state pattern so the chat
- * stream UI for search and chart tool calls reads the same.
- *
- * BRIDGE ARCHITECTURE (server tool → outcome store): the LLM calls
- * `web_search` (a SERVER tool). The actual search runs server-side;
- * the result flows back through AG-UI as a TOOL_CALL_RESULT event.
- * CopilotKit, given our `useRenderTool({ name: "web_search" })`
- * registration, invokes this component to render the tool call.
- * The component reads `props.result` (the server tool's JSON
- * return), parses it, and writes a Report outcome via
- * `outcomeStore.addOutcome`. The LLM is NEVER aware of the outcome
- * panel — that is purely a client-side rendering policy. See
- * `docs/data-visualization.md` §"Bridge: server tools → outcomes"
- * for the protocol diagram.
+ * tool call. Renders a small status card AND writes the parsed
+ * result into `outcomeStore` via a useEffect so the full card-list
+ * also appears in the Outcomes panel. The LLM is unaware of this
+ * bridge — it's a pure client-side rendering policy. Mirrors
+ * `ChartPreviewCard`'s three-state shape. See
+ * docs/data-visualization.md.
  */
 
 import { ArrowUpRight, Globe, Loader2, AlertTriangle } from "lucide-react";
@@ -73,21 +51,16 @@ export function WebSearchInlinePreview(
     }
   }, [props.status, props.result]);
 
-  // Side-effect: write the outcome on completion.
-  //
-  // `addOutcome` is upsert-by-id; `outcomeId = toolCallId` makes the
-  // double-fire (StrictMode, history replay both writing) idempotent.
-  // Failed envelopes (`ok: false`) do NOT create an outcome card —
-  // the user sees the failure inline in the chat preview instead.
+  // Idempotent on (toolCallId, parsed) — `addOutcome` is upsert
+  // by id. Failed envelopes (`ok: false`) skip outcome creation;
+  // the failure shows inline in the chat preview instead.
   useEffect(() => {
     if (!parsed || !parsed.ok) return;
     const args = props.parameters as WebSearchArgs;
     const ws = useWorkspaceStore.getState();
-    // Citation contract (P1g): every web_search source carries a
-    // 1-based `index` and `sourceKind: 'web'`. The agent is instructed
-    // (via the tool description) to reference these as `[1]`, `[2]`, …
-    // in chat text; the block renders the matching numbered cards.
-    // See docs/artifact-evolution.md §3.6.
+    // Citation contract: 1-based `index` + `sourceKind: 'web'` so
+    // `[1]`/`[2]` chat citations line up with the numbered cards.
+    // See docs/artifact-evolution.md.
     const cards: CardListItem[] = parsed.results.map((r, i) => ({
       index: i + 1,
       sourceKind: "web",

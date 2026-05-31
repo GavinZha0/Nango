@@ -46,7 +46,8 @@ const PURPLE_GHOST =
 const PURPLE_DISABLED =
   "text-purple-500/40 cursor-not-allowed";
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- shape kept for slot parity
+// `_props` is intentionally unused — the underscore prefix marks it as a
+// shape-parity placeholder for slot consumers that pass props by name.
 export function NangoSlotButton(_props: NangoSlotButtonProps): ReactNode {
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);

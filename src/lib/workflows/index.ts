@@ -1,14 +1,9 @@
 /**
- * Public surface of the workflow subsystem.
+ * Public surface of the workflow subsystem. Importers outside
+ * `src/lib/workflows/` should depend ONLY on what this barrel
+ * re-exports — internal modules are subject to change without notice.
  *
- * See docs/workflow-architecture.md for the full design. Importers
- * outside `src/lib/workflows/` should depend ONLY on what this
- * barrel re-exports — internal modules / types are subject to
- * change without notice.
- *
- * Currently exports the error contract (W1.2). Subsequent W1
- * phases will add spec types, the engine interface, and the
- * save-from-events pure function here.
+ * See docs/workflow.md.
  */
 
 export {

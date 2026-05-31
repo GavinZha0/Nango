@@ -3,17 +3,15 @@ import "server-only";
 import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
 
 /**
- * Validate that a schedule's `(credentialId, entityId, entityKind)` is
+ * Validate that a schedule's `(credentialId, entityId, entityKind)`
+ * is consistent and visible to the user.
  */
 export interface ScheduleTargetValidationDeps {
-  /** Look up an enabled credential row. Returns null when the row is
-   *  missing or `enabled = false`. */
+  /** Enabled credential lookup; null when missing or disabled. */
   getEnabledCredential: (credentialId: string) => Promise<{
     enabled: boolean;
   } | null>;
-  /** Fetch the credential's full entity table. May return null when
-   *  the credential disappeared between the two lookups; the
-   *  validator treats that as "not found in catalog". */
+  /** Credential's entity catalog; null when the credential vanished. */
   listCatalog: (credentialId: string) => Promise<EntityDescriptor[] | null>;
   /** Built-in agent visibility predicate. */
   isBuiltinVisibleTo: (agentId: string, userId: string) => Promise<boolean>;
@@ -68,9 +66,8 @@ export async function validateScheduleTarget(
     return { ok: true };
   }
 
-  // Built-in dispatch — no credentialId, no catalog. The only valid
-  // kind is "agent" (built-in entities are always agents) and the
-  // caller must have visibility.
+  // Built-in dispatch — only "agent" is valid and the caller must
+  // have visibility.
   if (entityKind !== "agent") {
     return {
       ok: false,

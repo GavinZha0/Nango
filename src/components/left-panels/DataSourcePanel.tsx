@@ -2,7 +2,7 @@
 
 /**
  * DataSourcePanel — left-panel surface for the agent-facing
- * @see docs/data-sources.md §3
+ * See docs/data-sources.md.
  */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";

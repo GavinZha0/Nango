@@ -87,7 +87,7 @@ export async function register(): Promise<void> {
   // Built-in skills: seed `dist/builtin-skills.json` into the DB. Cheap on
   // warm starts (per-skill checksum compare), tolerant of a missing bundle
   // (logs and skips, so first-run dev without `pnpm build:skills` still boots).
-  // @see docs/skills.md §3.4
+  // See docs/skills.md.
   const { seedBuiltinSkills } = await import("@/lib/skills/builtin-reconcile");
   try {
     await seedBuiltinSkills();

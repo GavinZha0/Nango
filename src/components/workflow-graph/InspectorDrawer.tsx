@@ -16,14 +16,12 @@
  *     can compare adjacent nodes by clicking through without
  *     overlapping the chart panel above).
  *   - "Copy as JSON" writes the FULL canonical node (including
- *     bucket-specific fields) to the clipboard, preserving the
- *     shape `modify_workflow` would emit. Useful when asking the
- *     LLM to "tweak this node" via chat.
- *   - Code / SQL bodies render as plain `<pre><code>` in V1.8.4 —
- *     syntax highlighting (W1.8.5) layers on without a structural
- *     change.
+ *     bucket-specific fields) to the clipboard. Useful when
+ *     asking the LLM to "tweak this node" via chat.
+ *   - Code / SQL bodies render as plain `<pre><code>` — a future
+ *     highlighter can layer on without a structural change.
  *
- * @see docs/workflow-architecture.md §17 for canonical node shapes
+ * See docs/workflow-architecture.md. for canonical node shapes
  *      and `src/lib/workflows/spec/schema.ts` for the types.
  */
 
@@ -109,9 +107,8 @@ export function InspectorDrawer({
   const title: string = nodeTitle(node);
 
   const handleCopy = useCallback(async (): Promise<void> => {
-    // Copy the canonical node verbatim — the LLM-readable shape
-    // `modify_workflow` would also accept. JSON.stringify with 2-
-    // space indent so paste-in-issue is readable.
+    // Copy the canonical node verbatim. JSON.stringify with 2-space
+    // indent so paste-in-issue is readable.
     try {
       await navigator.clipboard.writeText(JSON.stringify(node, null, 2));
       toast.success("Node copied to clipboard");
@@ -397,19 +394,19 @@ function CodeInline({
 }
 
 interface CodeBlockProps {
-  /** Hint for future syntax highlighting (W1.8.5). Stored as a
-   *  data attribute so the addition of a highlighter doesn't
-   *  require a prop API change. */
+  /** Hint for a future syntax highlighter. Stored as a data
+   *  attribute so the addition of a highlighter doesn't require
+   *  a prop API change. */
   language: string;
   value: string;
 }
 
 /**
- * Monospace code block. V1.8.4 ships as plain `<pre><code>`;
- * W1.8.5 adds syntax highlighting via the existing
- * `rehype-highlight` dependency (already in package.json). The
- * `data-language` attribute is hung on the wrapper so the
- * highlighter has its target to enrich.
+ * Monospace code block. Currently ships as plain `<pre><code>`;
+ * the `rehype-highlight` dependency is already in package.json
+ * for when syntax highlighting is wired. The `data-language`
+ * attribute is hung on the wrapper so the highlighter has its
+ * target to enrich.
  */
 function CodeBlock({ language, value }: CodeBlockProps): ReactElement {
   return (

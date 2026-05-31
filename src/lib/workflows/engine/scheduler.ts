@@ -1,35 +1,22 @@
 /**
- * Topological + parallel-batch scheduler — the engine's "DAG
- * runner" body, separate from the per-node executor (which lives
- * in `nodes/`). Pure orchestration:
+ * Topological + parallel-batch scheduler — the engine's DAG runner
+ * body. Pure orchestration:
  *
  *   - Find nodes whose `depends_on` are all completed → ready
- *   - Dispatch up to `maxParallelism` ready nodes in a Promise.all
- *     batch
- *   - When a node throws, record it as failed (state.failed +
- *     state.nodeErrors); on the chosen `onFailure` policy either
- *     abort the rest of the run ("stop") or mark only that node's
- *     transitive forward closure as skipped ("continue") and keep
- *     dispatching independent paths
- *   - Honor `AbortSignal` at batch boundaries (in-flight executors
- *     are responsible for plumbing the same signal into their IO
- *     primitives)
+ *   - Dispatch up to `maxParallelism` ready nodes in a Promise.all batch
+ *   - When a node throws, record it as failed; on the chosen
+ *     `onFailure` policy either abort the rest of the run ("stop")
+ *     or mark only that node's transitive forward closure as skipped
+ *     ("continue") and keep dispatching independent paths
+ *   - Honour `AbortSignal` at batch boundaries (in-flight executors
+ *     plumb the same signal into their IO primitives)
  *
- * The scheduler does NOT execute nodes itself — it calls a
- * caller-supplied `NodeExecutor` (`(nodeId, state) => Promise<
- * Record<string, unknown>>`). The executor returns the node's
- * outputs on success or throws `WorkflowError` on failure. This
- * keeps the scheduler 100% testable with stubbed executors and
- * decouples it from the tool / agent dispatch surface
- * (`nodes/tool-node.ts`, `nodes/agent-node.ts`).
+ * The scheduler does NOT execute nodes itself — it calls a caller-
+ * supplied `NodeExecutor`. Keeps the scheduler 100% testable with
+ * stubbed executors and decoupled from the tool / agent dispatch
+ * surface.
  *
- * V1 simplifications (D23 — condition nodes deferred):
- *   - No dynamic edges; depends_on is the full edge set.
- *   - No SKIP convergence / needTable. (V1.1 adds these when
- *     condition nodes ship.)
- *
- * See `docs/workflow-architecture.md` §7.1 for the full design
- * (incl. V1.1 dynamic-edge layer).
+ * See docs/workflow.md.
  */
 
 import { WorkflowError } from "../error";
@@ -39,16 +26,10 @@ import type { ExecutionState } from "./execution-context";
 // ─── Public surface ────────────────────────────────────────────────────
 
 /**
- * Per-node executor signature — pure data in / data out.
- *
- * Success path: returns the node's `outputs` object; scheduler
- * stamps it into `state.outputs` and adds the id to
- * `state.completed`.
- *
- * Failure path: throws `WorkflowError` (or anything else — the
- * scheduler wraps non-WorkflowError throwables as `UNKNOWN_ERROR`).
- * The scheduler stamps the id into `state.failed` and the error
- * into `state.nodeErrors`.
+ * Per-node executor signature — pure data in / data out. On success
+ * returns the node's `outputs` object. On failure throws
+ * `WorkflowError` (or anything else — scheduler wraps non-
+ * WorkflowError throwables as `UNKNOWN_ERROR`).
  */
 export type NodeExecutor = (
   nodeId: number,
@@ -58,21 +39,20 @@ export type NodeExecutor = (
 export interface ScheduleParams {
   state: ExecutionState;
   executeNode: NodeExecutor;
-  /** V1 default: 3 (matches §6.4 + `workflow.execution.default_max_parallelism`). */
+  /** V1 default: 3. */
   maxParallelism?: number;
   /** V1 default: "stop". */
   onFailure?: "stop" | "continue";
 }
 
 /**
- * Drive the DAG to terminal state. Returns when:
- *   - every node is completed/failed/skipped, OR
- *   - `state.abortSignal` fires (in-flight batch still completes), OR
- *   - on_failure="stop" and a batch produced any failure
+ * Drive the DAG to terminal state. Returns when every node is
+ * completed/failed/skipped, the abortSignal fires (in-flight batch
+ * still completes), or on_failure="stop" and a batch produced any
+ * failure.
  *
  * Mutates `state` only. Never throws — failures are recorded into
- * `state.nodeErrors` and the caller (engine layer) inspects after
- * return.
+ * `state.nodeErrors` and the caller (engine layer) inspects them.
  */
 export async function runScheduler(params: ScheduleParams): Promise<void> {
   const {
@@ -93,11 +73,10 @@ export async function runScheduler(params: ScheduleParams): Promise<void> {
 
     const ready = findReadyNodes(state);
     if (ready.length === 0) {
-      // No ready nodes and not all done → defensive break. With a
-      // validated DAG this means either (a) all remaining nodes are
-      // blocked behind failed/skipped deps (handled below by post-
-      // batch failure logic) or (b) a validate.ts contract was
-      // violated upstream. Either way, no progress is possible.
+      // Defensive break — no ready nodes and not all done. With a
+      // validated DAG this means remaining nodes are blocked behind
+      // failed/skipped deps (handled below) or a validate.ts
+      // contract was violated upstream. Either way, no progress.
       markAllRemainingSkipped(state);
       return;
     }
@@ -114,8 +93,7 @@ export async function runScheduler(params: ScheduleParams): Promise<void> {
       }
       // on_failure: "continue" — mark only the forward closure of
       // each failed node as skipped so independent paths keep
-      // progressing. Idempotent: re-marking already-skipped nodes
-      // is a no-op (Set semantics).
+      // progressing.
       for (const failedId of state.failed) {
         markForwardClosureSkipped(failedId, graph, state);
       }
@@ -200,8 +178,7 @@ function wrapAsWorkflowError(
   });
 }
 
-/** Surface-friendly identifier per node type for error messages.
- *  Code nodes have no name field; use the language tag as a hint. */
+/** Surface-friendly identifier per node type for error messages. */
 function nodeDisplayName(
   node: ExecutionState["spec"]["nodes"][number] | undefined,
 ): string | undefined {
@@ -220,10 +197,7 @@ function nodeDisplayName(
 
 // ─── Skip-propagation helpers ──────────────────────────────────────────
 
-/**
- * Mark every not-yet-finished node as skipped. Used by the
- * on_failure="stop" branch and the defensive starvation break.
- */
+/** Mark every not-yet-finished node as skipped. */
 function markAllRemainingSkipped(state: ExecutionState): void {
   for (const n of state.spec.nodes) {
     const id = n.id;
@@ -238,10 +212,8 @@ function markAllRemainingSkipped(state: ExecutionState): void {
 }
 
 /**
- * Mark the transitive forward closure of `rootId` as skipped —
- * i.e. every node reachable by walking `dependents` edges starting
- * at the root. Used by on_failure="continue" so independent paths
- * keep running.
+ * Mark the transitive forward closure of `rootId` as skipped — every
+ * node reachable by walking `dependents` edges from the root.
  */
 function markForwardClosureSkipped(
   rootId: number,
@@ -270,7 +242,6 @@ function markForwardClosureSkipped(
 /**
  * V1 default. The hard ceiling lives in the
  * `workflow.execution.default_max_parallelism` config key, read by
- * the engine layer before invoking the scheduler — keeping this
- * file config-free preserves its purity / testability.
+ * the engine layer before invoking the scheduler.
  */
 const DEFAULT_MAX_PARALLELISM = 3;

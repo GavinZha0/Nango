@@ -1,16 +1,12 @@
 /**
  * Workflow engine public surface — interface + DI types only.
  *
- * V1 ships exactly one implementation (`InProcessWorkflowEngine`,
- * `in-process.ts`); the abstract interface exists so V2 can slot in
- * `EventedWorkflowEngine` / `RemoteWorkflowEngine` without rewriting
- * call sites (§3.7.2, §7.8).
- *
- * The interface is **dependency-injection-shaped**: the engine never
- * imports `src/lib/runner/` directly. Instead, the calling shim
+ * The interface is dependency-injection-shaped: the engine never
+ * imports `src/lib/runner/` directly. The calling shim
  * (`src/lib/runner/dispatch/workflow.ts`) supplies the runner's
- * `runAgent` callback through `WorkflowEngineDependencies`, breaking
- * the runner ↔ workflows cycle that would otherwise form (D17).
+ * `runAgent` / `runCode` callbacks via `WorkflowEngineDependencies`.
+ *
+ * See docs/workflow.md.
  */
 
 import type { CanonicalWorkflowSpec } from "../spec/schema";
@@ -20,14 +16,7 @@ export type { WorkflowCache } from "./cache";
 
 // ─── Execution input/output (engine boundary) ──────────────────────────
 
-/**
- * Parameters for one workflow run. Constructed by the runner-side
- * dispatch shim from a `runner.start()` request plus the resolved
- * workflow row.
- *
- * V1 omits the resume/snapshot/initialState fields from the doc's
- * full interface (§7.8) — suspend/resume is deferred to V1.1 (D25).
- */
+/** Parameters for one workflow run. */
 export interface ExecuteParams {
   /** Stable id of the workflow row (FK target). */
   workflowId: string;
@@ -38,15 +27,14 @@ export interface ExecuteParams {
   /** Workflow-level inputs (`@workflow.<key>` refs). */
   input: Record<string, unknown>;
   /**
-   * Execution context for `@context.<path>` refs (e.g. `today`,
-   * `tenant`, `secrets`). Engine treats this as opaque — only the
-   * ref resolver walks into it.
+   * Execution context for `@context.<path>` refs. Engine treats this
+   * as opaque — only the ref resolver walks into it.
    */
   context: Record<string, unknown>;
   /**
-   * Caller-owned cancellation. The engine forwards `abortSignal`
-   * into every node executor; cancellation takes effect at the
-   * next IO checkpoint inside each executor.
+   * Caller-owned cancellation. The engine forwards `abortSignal` into
+   * every node executor; cancellation takes effect at the next IO
+   * checkpoint inside each executor.
    */
   abortController: AbortController;
 }
@@ -58,36 +46,24 @@ export interface ExecuteParams {
 export interface WorkflowResult {
   ok: true;
   runId: string;
-  /**
-   * Resolved `spec.outputs` map (D28). Keys come from the spec's
-   * top-level `outputs` declaration; values are the ref-resolved
-   * upstream node outputs.
-   */
+  /** Resolved `spec.outputs` map. */
   output: Record<string, unknown>;
-  /**
-   * Per-node output bag, keyed by numeric node id (D29). Useful
-   * for cache population, admin forensics, and debug surfaces.
-   */
+  /** Per-node output bag, keyed by numeric node id. */
   nodeOutputs: ReadonlyMap<number, Record<string, unknown>>;
 }
 
 // ─── Dependency injection ──────────────────────────────────────────────
 
 /**
- * Tool-executor handle returned by the engine's tool registry
- * (server tools, MCP, HTTP, template — all unified behind one
- * `execute()` per D6 + D27). Resolved at *dispatch* time from
- * `WorkflowEngineDependencies.getTool(toolName)`; the engine does
- * NOT see server-vs-MCP distinction.
+ * Tool-executor handle returned by the engine's tool registry.
+ * Resolved at dispatch time from `WorkflowEngineDependencies.getTool`;
+ * the engine does NOT see server-vs-MCP distinction.
  */
 export interface ToolHandle {
   /**
-   * Execute the tool. The engine has already:
-   *  - Resolved `@path` refs in `input`
-   *  - Verified `node.input_schema.required` keys at save time
-   *    (`validate.ts`)
-   *
-   * The handle returns the raw result; the engine maps it onto
+   * Execute the tool. The engine has already resolved `@path` refs in
+   * `input` and verified `node.input_schema.required` keys at save
+   * time. The handle returns the raw result; the engine maps it onto
    * `outputs[]` per the canonical node's declared schema.
    */
   execute(args: {
@@ -99,20 +75,16 @@ export interface ToolHandle {
 
 /** Agent-node dispatch request — engine → runner via DI. */
 export interface AgentRunRequest {
-  /** UUID resolved at save time by canonicalize (D27). */
+  /** UUID resolved at save time by canonicalize. */
   agentId: string;
   /** Ref-resolved input (engine resolves before calling). */
   input: Record<string, unknown>;
-  /**
-   * Output schema the agent must conform to (default: D30's
-   * `{ text: string }`). Runner wraps natural-language replies
-   * accordingly.
-   */
+  /** Output schema the agent must conform to. */
   outputSchema: Record<string, unknown>;
   abortSignal: AbortSignal;
-  /** Parent run for `parent_run_id` linkage (AGENTS.md §11). */
+  /** Parent run for `parent_run_id` linkage. */
   parentRunId: string;
-  /** D16 — filter applied by the runner before agent dispatch. */
+  /** Runner applies the frontend-tool filter before agent dispatch. */
   excludeFrontendTools: true;
 }
 
@@ -124,22 +96,20 @@ export interface AgentRunResult {
 }
 
 /**
- * Code-node dispatch request (D35) — engine → sandbox adapter via DI.
+ * Code-node dispatch request — engine → sandbox adapter via DI.
  *
  * The engine resolves refs in `node.input` to the literal values
  * below before calling. `datasets` is the resolved string array of
- * dataset names to expose read-only inside the sandbox cwd; `env`
- * (V1.x — not yet wired) carries scalar inputs as env vars.
+ * dataset names to expose read-only inside the sandbox cwd.
  */
 export interface CodeRunRequest {
   language: "python";
   code: string;
   /** Dataset names to expose read-only at `./data/<name>/` in the sandbox cwd. */
   datasets: string[];
-  /** Optional env-var overlay (V1.x reserved). */
+  /** Optional env-var overlay. */
   env: Record<string, string>;
-  /** Effective timeout in milliseconds — already merged with engine
-   *  defaults so the adapter can use it directly. */
+  /** Effective timeout in milliseconds — already merged with engine defaults. */
   timeoutMs: number;
   abortSignal: AbortSignal;
 }
@@ -149,12 +119,11 @@ export interface CodeRunRequest {
  *
  * The engine inspects `exitCode` to decide success vs failure
  * (`exitCode !== 0` → CODE_EXECUTION_FAILED with `stderr` surfaced
- * in the message). On success, the engine either:
- *   - exposes `{ stdout, stderr, exitCode, durationMs }` as the
- *     node's outputs when no `output_schema` is declared, or
- *   - `JSON.parse(stdout)` + validates against the declared
- *     `output_schema` and exposes the parsed object's top-level
- *     keys.
+ * in the message). On success, the engine either exposes
+ * `{ stdout, stderr, exitCode, durationMs }` as the node's outputs
+ * when no `output_schema` is declared, or `JSON.parse(stdout)` +
+ * validates against the declared `output_schema` and exposes the
+ * parsed object's top-level keys.
  */
 export interface CodeRunResult {
   stdout: string;
@@ -165,14 +134,8 @@ export interface CodeRunResult {
 
 /**
  * Engine emits one event per execution milestone. The runner-side
- * adapter (`dispatch/workflow.ts`) translates these to
- * `entity_run_event` rows; see `docs/runner-events.md` for the
- * AG-UI ↔ EntityRunEventType reference table.
- *
- * V1 emits 4 kinds (per §4.4 + §7.2). `workflow_started` /
- * `workflow_completed` / `workflow_failed` bracket the run;
- * `workflow_node_attempt_started` / `_failed` / `_completed`
- * bracket each node attempt.
+ * adapter translates these to `entity_run_event` rows; see
+ * docs/runner-events.md for the AG-UI ↔ EntityRunEventType table.
  */
 export type WorkflowEngineEvent =
   | { type: "workflow_started"; runId: string }
@@ -197,13 +160,7 @@ export type WorkflowEngineEvent =
       attempt: number;
       durationMs: number;
       outputs: Record<string, unknown>;
-      /**
-       * Whether this node's outputs came from the per-node cache
-       * (D20 Plan C) rather than a fresh executor call. Absent
-       * (= false) for normal completions. Admin run forensics
-       * surfaces this — same node id but `cached: true` vs no flag
-       * tells the operator whether the work was actually done.
-       */
+      /** True when outputs came from the per-node cache (vs a fresh executor call). */
       cached?: boolean;
     }
   | {
@@ -221,34 +178,26 @@ export type WorkflowEngineEvent =
 
 /**
  * Everything the engine needs from the outside world. Injected by
- * the runner-side dispatch shim. The engine module never imports
- * runner/ directly (D17 cycle break).
+ * the runner-side dispatch shim — the engine never imports runner/.
  */
 export interface WorkflowEngineDependencies {
   /**
    * Look up a tool handle by tool name. Returns `null` if the tool
-   * is no longer registered (engine throws `TOOL_NOT_FOUND` for
-   * the node — same code path as canonicalize's save-time check).
+   * is no longer registered (engine throws `TOOL_NOT_FOUND`).
    */
   getTool(toolName: string): ToolHandle | null;
 
   /**
-   * Dispatch an agent invocation. Injected to break the
-   * runner ↔ workflows cycle (D17). Runner-side wires this to
-   * `runner.start({ kind: 'agent', ... })` with `parent_run_id` set
-   * for run-tree linkage.
-   *
-   * The runner is responsible for applying the D16 frontend-tool
-   * filter before invoking the agent — engine signals intent via
-   * `excludeFrontendTools: true`.
+   * Dispatch an agent invocation. Runner-side wires this to
+   * `runner.start({ entityKind: 'agent', ... })` with `parent_run_id`
+   * set for run-tree linkage. Runner is responsible for applying the
+   * frontend-tool filter before invoking the agent.
    */
   runAgent(req: AgentRunRequest): Promise<AgentRunResult>;
 
   /**
-   * Dispatch a sandboxed code execution (D35). Injected so the
-   * engine module stays decoupled from `lib/sandbox/`. The
-   * production adapter wires this to
-   * `getActiveAdapter().run({...})` mapping
+   * Dispatch a sandboxed code execution. Production adapter wires
+   * this to `getActiveAdapter().run({...})` mapping
    * `language → command`. Tests inject stubs.
    */
   runCode(req: CodeRunRequest): Promise<CodeRunResult>;
@@ -260,23 +209,18 @@ export interface WorkflowEngineDependencies {
   emitEvent(event: WorkflowEngineEvent): void;
 
   /**
-   * Optional per-node content-addressable cache (D20 Plan C,
-   * §7.4). When supplied, the engine memoizes successful node
-   * outputs by cache key — same node semantic + same resolved
-   * input hits the cache regardless of which workflow contains
-   * the node. Cache hits emit a synthetic `workflow_node_completed`
-   * event with `cached: true` and `durationMs: 0`.
+   * Optional per-node content-addressable cache. Same node semantic
+   * + same resolved input hits the cache regardless of which
+   * workflow contains the node. Cache hits emit a synthetic
+   * `workflow_node_completed` event with `cached: true` and
+   * `durationMs: 0`. See docs/workflow.md.
    */
   cache?: WorkflowCache;
 }
 
 // ─── Engine interface ──────────────────────────────────────────────────
 
-/**
- * Workflow execution engine — V1 has exactly one implementation
- * (`InProcessWorkflowEngine`); the abstraction exists for V2 swap-
- * out (§7.8).
- */
+/** Workflow execution engine. */
 export interface WorkflowEngine {
   execute(
     params: ExecuteParams,

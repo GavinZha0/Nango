@@ -4,10 +4,9 @@
  * useSaveOutcome — promote a transient Outcome into the permanent
  * Artifact library via POST /api/artifacts/save.
  *
- * See `docs/data-visualization.md` §6.11 and
- * `docs/workflow-architecture.md` §10.1 (D31 endpoint shape).
+ * See docs/data-visualization.md and docs/workflow-architecture.md.
  *
- * Wire shape (W1.6.5):
+ * Wire shape:
  *   request:  { threadId, outcomeId, parentId?, name?, description? }
  *   response: { artifactId, workflowId, workflowOutputField, reused }
  *
@@ -97,7 +96,7 @@ export function useSaveOutcome(): UseSaveOutcomeReturn {
         // Fall back to live runtimeThreadId in case the outcome was
         // created during the run before lazy-capture (its `threadId`
         // field would still be null in that window).
-        // @see docs/chat-flow-audit.md §1.11
+        // See docs/chat-flow-audit.md.
         const liveThreadId: string | null =
           useWorkspaceStore.getState().runtimeThreadId;
         const threadId: string | null = outcome.threadId ?? liveThreadId;

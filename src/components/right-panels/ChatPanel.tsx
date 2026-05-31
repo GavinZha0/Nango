@@ -20,7 +20,7 @@ import { useInjectHandoffContext } from "@/hooks/useHandoff";
 
 /**
  * ChatPanel — v2 CopilotKit chat surface (body only).
- * @see docs/chat-flow-audit.md §1.10 (chatView slot wrapper rationale).
+ * See docs/chat-flow-audit.md.
  */
 
 // Stable references
@@ -38,16 +38,11 @@ const noop = () => {};
 
 // Regeneration logic
 
-/**
- * v2 onRegenerate is a notification slot (does NOT reload messages).
- * Truncates history to the preceding user prompt, then re-runs the agent.
- *
- * Caller passes the live per-thread agent directly — must be the same
- * instance the UI is rendering (typically obtained via `useAgent`
- * inside the chatView slot shell). See docs/chat-flow-audit.md §1.10.
- *
- * Ref-captured for referential stability across memo'd ancestors.
- */
+/** v2 `onRegenerate` is a notification slot — it doesn't reload
+ *  messages. We truncate history to the preceding user prompt and
+ *  re-run the agent ourselves. Caller must pass the live per-thread
+ *  agent (typically via `useAgent` inside the chatView slot).
+ *  Ref-captured for referential stability. */
 function useOnRegenerate(agent: CopilotAgent | undefined) {
   const { copilotkit } = useCopilotKit();
 
@@ -94,15 +89,10 @@ function useOnRegenerate(agent: CopilotAgent | undefined) {
 
 // ChatViewShell — chatView slot wrapper
 
-/**
- * Slot wrapper rendered inside CopilotChat's internal
- * CopilotChatConfigurationProvider. All hooks that need to operate on
- * the live per-thread clone (regenerate, handoff injection) belong here:
- * `useAgent` falls back to chatConfig.threadId so we resolve the same
- * agent instance the chat UI is subscribed to.
- *
- * @see docs/chat-flow-audit.md §1.10
- */
+/** Slot wrapper inside CopilotChat's chatConfig provider. Hooks
+ *  that need the live per-thread clone (regenerate, handoff
+ *  injection) live here so `useAgent` resolves the same agent
+ *  instance the chat UI is subscribed to. */
 function ChatViewShell(slotProps: CopilotChatViewProps): ReactNode {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
   // Defensive: if the active agent vanishes mid-unmount, fall back to the
@@ -126,11 +116,7 @@ function ChatViewShellBody({
   useInjectHandoffContext(agent);
   const onRegenerate = useOnRegenerate(agent);
 
-  // Replace the assistant message slot to wire up onRegenerate and
-  // stub out the un-implemented toolbar buttons (thumbs up/down /
-  // read-aloud). Performance metrics — TTFT, run duration, etc. —
-  // are not surfaced here; see /admin/thread/[id] for the
-  // authoritative server-side timeline.
+  // Wire up onRegenerate; thumbs/read-aloud slots are no-op stubs.
   const AssistantMessageWithRegenerate = useCallback(
     (props: CopilotChatAssistantMessageProps) => (
       <CopilotChatAssistantMessage
@@ -186,18 +172,15 @@ const MemoChat = memo(function MemoChat({
 
 // ChatPanelBody
 
-/** Chat body for the right-panel tab. Returns null if no agent is active (defensive guard). */
+/** Chat body for the right-panel tab. Returns null when no agent
+ *  is active. Only `explicitThreadId` flows into <CopilotChat>;
+ *  fresh-chat mode keeps it null so CopilotKit mints a fresh ABC. */
 export function ChatPanelBody(): ReactNode {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
-  // Only `explicitThreadId` flows into <CopilotChat>. Fresh-chat mode
-  // keeps it `null` so CopilotKit mints its own non-explicit ABC and
-  // shows the welcome screen. History-restore sets it to the picked id.
-  // @see docs/chat-flow-audit.md §1.11
   const explicitThreadId = useWorkspaceStore((s) => s.explicitThreadId);
 
   if (!activeAgentId) return null;
 
-  // Nango entry-point rendered inside CopilotKit's input via NANGO_INPUT_SLOT.
   return (
     <div className="h-full">
       <ChatPanelInner
@@ -220,16 +203,10 @@ function ChatPanelInner({
   agentId: string;
   threadId: string | undefined;
 }): ReactNode {
-  // The `key` is what makes the "New chat" button actually start a
-  // fresh conversation. In fresh-chat mode (`threadId === undefined`)
-  // CopilotKit caches `resolvedThreadId` via
-  // `useMemo(..., [providedThreadId])` and never re-mints while the
-  // prop stays undefined. Bumping `chatEpoch` from
-  // `RightPanel.handleNewChat` changes the key, forcing CopilotChat
-  // to unmount and remount with a freshly-minted internal ABC.
-  // Agent switches are also covered (agentId is in the key), so
-  // they don't need a separate epoch bump.
-  // @see docs/threadid-lifecycle.md §"Lifecycle Events" #5
+  // `key={agentId:chatEpoch}` forces a remount on agent switch
+  // OR `startFreshChat` so CopilotKit mints a fresh internal ABC
+  // (otherwise its useMemo caches the first one). See
+  // docs/threadid-lifecycle.md.
   const chatEpoch = useWorkspaceStore((s) => s.chatEpoch);
   return (
     <MemoChat

@@ -11,13 +11,13 @@
  * page's roomier visual density (bigger thumbnails, no snippet
  * clamp, all card_list cards expanded, taller charts).
  *
- * W1.8 — workflow-backed artifacts get a two-row layout: the
- * familiar chart + metadata stack on top, a node-graph
- * visualization of the backing workflow on the bottom, separated
- * by a draggable handle. Folders and standalone (no-workflow)
- * artifacts keep the legacy single-pane layout.
+ * Workflow-backed artifacts get a two-row layout: the chart +
+ * metadata stack on top, a node-graph visualization of the backing
+ * workflow on the bottom, separated by a draggable handle. Folders
+ * and standalone (no-workflow) artifacts keep the single-pane
+ * layout.
  *
- * @see docs/artifact-dashboard-migration.md §11.2
+ * See docs/artifact-evolution.md.
  */
 
 import {
@@ -89,8 +89,9 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
  * Bundle response shape returned by `GET /api/artifacts/[id]`.
  *
  * `workflow` is present only when the artifact is backed by a
- * stored workflow row (D8 1:N relation). Folders and standalone
- * artifacts have `node` only. See `src/lib/artifacts/bundle.ts`.
+ * stored workflow row (one workflow can back many artifacts).
+ * Folders and standalone artifacts have `node` only.
+ * See `src/lib/artifacts/bundle.ts`.
  */
 interface ArtifactBundleResponse {
   node: ArtifactEntity;
@@ -575,7 +576,7 @@ function FolderBody({
 }
 
 function ArtifactBody({ node }: { node: ArtifactEntity }): ReactElement {
-  // Block-based content. Every artifact saved through the V1.1
+  // Block-based content. Every artifact saved through the current
   // `/api/artifacts/save` pipeline writes `content.blocks`
   // (`OutcomeBlock[]`) via per-tool args→content adapters in
   // `lib/outcomes/args-to-content.ts`. We delegate to <BlockList>

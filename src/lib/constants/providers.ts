@@ -63,7 +63,7 @@ export const PROVIDERS: ProviderEntry[] = [
 
   // Integration providers (MCP, SSH, …)
   // Agent-callable external systems whose tool surface differs per provider.
-  // See docs/ssh.md §3.
+  // See docs/ssh.md
   { value: "mcp",       label: "MCP Server",   service: "integration" },
   { value: "ssh",       label: "SSH Server",   service: "integration" },
 

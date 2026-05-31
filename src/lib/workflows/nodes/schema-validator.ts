@@ -1,27 +1,18 @@
 /**
- * Runtime JSON Schema validator for workflow node `input_schema`
- * + `output_schema` (V1.4.6 polish layer, §7.2).
+ * Runtime JSON Schema validator for workflow node `input_schema` /
+ * `output_schema`.
  *
- * Why ajv (not Zod):
- *   - Tool / agent schemas reach the engine *as JSON Schema*
- *     (Vercel AI SDK `parameters`, MCP `inputSchema`, OpenAPI 3.1
- *     `requestBody`). Validating with the native shape avoids a
- *     lossy JSON-Schema → Zod translation step.
- *   - LLM self-repair (modify_workflow loop, §3.6.3) benefits from
- *     ajv's rich error path / keyword / schemaPath fields when
- *     surfacing failures back to the model.
- *
- * Boundary kept narrow — this module is ONLY for runtime dynamic
- * schemas. The workflow spec layer (`spec/schema.ts`) still uses
- * Zod because the spec shape itself is statically known at design
- * time. See AGENTS.md "Schema validation boundary".
+ * Uses ajv (not Zod): tool / agent schemas reach the engine *as JSON
+ * Schema* (Vercel AI SDK `parameters`, MCP `inputSchema`, OpenAPI 3.1
+ * `requestBody`), and LLM self-repair benefits from ajv's rich error
+ * path / keyword / schemaPath fields. This module is ONLY for runtime
+ * dynamic schemas — the static workflow spec layer uses Zod. See
+ * AGENTS.md "Schema validation boundary".
  *
  * Configuration:
  *   - `strict: false` — registries (especially MCP servers) ship
- *     schemas with vendor extensions / unknown keywords that
- *     ajv's strict mode would reject. We accept them.
- *   - `allErrors: true` — collect every violation, not just the
- *     first one. The LLM self-repair path uses the full list.
+ *     schemas with vendor extensions strict mode would reject.
+ *   - `allErrors: true` — collect every violation for LLM self-repair.
  */
 
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
@@ -46,10 +37,7 @@ export type SchemaValidationResult =
 
 /**
  * Validate `value` against a JSON Schema. Schemas are compiled on
- * each call — for V1 sizes (≤ 50 nodes per workflow), the per-
- * compile cost (~ms) is acceptable. A WeakMap-keyed compile cache
- * is a candidate optimisation for W1.4.7 when the cache layer
- * lands.
+ * each call — fine for V1 sizes (≤ 50 nodes per workflow).
  */
 export function validateAgainstSchema(
   schema: Record<string, unknown>,
@@ -64,8 +52,8 @@ export function validateAgainstSchema(
 
 /**
  * Format a validation-error array as a single-line, LLM-friendly
- * diagnostic string. Joined by "; " — short enough to fit in a
- * WorkflowError message without truncation.
+ * diagnostic string. Short enough to fit in a WorkflowError message
+ * without truncation.
  */
 export function formatValidationErrors(
   errors: readonly SchemaValidationError[],

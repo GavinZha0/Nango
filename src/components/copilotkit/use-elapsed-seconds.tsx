@@ -1,22 +1,10 @@
 "use client";
 
 /**
- * Shared elapsed-time hook for tool-call cards.
- *
- * Extracted from `DelegateToAgentCard` so the wildcard renderer and
- * any future per-tool card can show a consistent "started X ago"
- * indicator that:
- *
- *   - survives the unmount/remount CopilotKit does on
- *     `inProgress → executing → complete` status transitions
- *   - survives re-renders triggered by streaming text narration
- *   - freezes on completion (does not include narration time after
- *     the tool actually returned)
- *
- * The timing cache lives at module scope, keyed by `toolCallId`. Two
- * cards mounted for the same `toolCallId` (theoretically possible if
- * we ever render the same tool in two surfaces) read the same
- * `startedAt`, so the displayed timer agrees.
+ * Shared elapsed-time hook for tool-call cards. The timing cache
+ * is module-scope keyed by `toolCallId`, so the displayed timer
+ * survives CopilotKit's mount churn on status transitions and
+ * freezes on completion (post-tool narration doesn't count).
  */
 
 import { useEffect, useState } from "react";
@@ -44,17 +32,8 @@ function markCompleted(toolCallId: string): number {
   return entry.completedAt;
 }
 
-/**
- * Format elapsed milliseconds as a short human-readable string.
- *
- * Examples:
- *   - 0 → "0s"
- *   - 3000 → "3s"
- *   - 72000 → "1m 12s"
- *   - 60000 → "1m"     (whole minute, omit seconds)
- *   - 3600000 → "60m"  (we intentionally don't go to hours — chat
- *     turns that long indicate a different problem)
- */
+/** Format elapsed seconds as `Ns` / `Nm Ss` / `Nm`. No hours unit —
+ *  chat turns long enough to need one are a different problem. */
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);

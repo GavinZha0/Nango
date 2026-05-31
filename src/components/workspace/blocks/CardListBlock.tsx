@@ -1,55 +1,16 @@
 "use client";
 
 /**
- * CardListBlock — generic "thumbnail + title + url" list.
+ * CardListBlock — generic "thumbnail + title + url" list (visual
+ * primitive, not a search-results component). Two UX invariants:
  *
- * Designed as a visual primitive, not a search-results component —
- * future producers (artifact lists, GitHub repo lists, paper feeds)
- * target the same shape so a new producer never touches this file.
+ *  1. Bounded scroll, no pagination. Compact mode caps height at
+ *     400px (matches the chart card) and scrolls internally; large
+ *     mode lets the host page own the scroll surface.
+ *  2. Broken-image silent drop: `onError` falls back to favicon
+ *     → letter-avatar so cards never disappear.
  *
- * LAYOUT (stable since the move to short search summaries):
- *
- *   ┌──────────────────────────────────────────────────────┐
- *   │ [thumb] Title (1 line, truncated)               ↗   │
- *   │ 64×64   domain · date                                │
- *   │         Snippet line 1                               │
- *   │         Snippet line 2                               │
- *   │         Snippet line 3 (clamped)                     │
- *   └──────────────────────────────────────────────────────┘
- *
- * Two-column flex (thumbnail | text column) with `items-start` so
- * the thumbnail anchors at the top. Snippet uses `line-clamp-3`
- * to give every card a predictable max height (~100px) regardless
- * of how long the upstream snippet runs — short SERP-style blurbs
- * fill less, but card heights stay close enough to read as a tidy
- * vertical list. In compact mode the outer wrapper caps the whole
- * list at the chart card's 400px height and scrolls internally
- * (see rule 1 below); in large mode the body grows to fit all
- * cards because the host page (artifact detail / enlarged outcome)
- * owns the scroll surface.
- *
- * Two UX rules baked in:
- *
- *  1. Bounded scroll, no pagination: multi-result outcomes (web
- *     search can easily return 5–10 cards) would otherwise blow the
- *     outcome card to 800px+ and break the two-column grid below.
- *     In compact mode we cap the body at a fixed height matching
- *     the chart card (400px) and let the list scroll internally —
- *     `overflow-y-auto` shows a native scrollbar when the list
- *     exceeds that height. Pre-W1.8 had a "Default-3 + Show N more"
- *     button instead; that was retired per `docs/artifact-evolution.md`
- *     §6.6 ("never paginate evidence") because users dropped the
- *     citation context every time they had to click to expand, and
- *     it created an asymmetry with chart cards (which were always
- *     fully visible at a fixed height). In large mode (artifact
- *     detail / enlarged outcome) there's no height cap — the host
- *     page already provides the scroll surface.
- *
- *  2. Broken-image silent drop: upstream OG-image URLs go stale all
- *     the time. We attach an `onError` handler that swaps the
- *     thumbnail to the favicon (and on the favicon's own failure,
- *     to a letter-avatar fallback). The card stays visible — only
- *     the visual changes.
+ * See docs/artifact-evolution.md.
  */
 
 import { ExternalLink } from "lucide-react";
@@ -115,7 +76,7 @@ function CardItem({
   /** 1-based number rendered as the `[N]` badge before the title.
    *  Drives the visual cross-reference between `[N]` markers in
    *  agent chat text and the corresponding source card. See
-   *  docs/artifact-evolution.md §3.6 for the citation contract. */
+   *  docs/artifact-evolution.md for the citation contract. */
   displayIndex: number;
 }): ReactElement {
   // Image fallback chain: image → favicon → letter avatar.
@@ -197,8 +158,7 @@ function CardItem({
         )}
       </div>
 
-      {/* Text column. `min-w-0` so long unbroken URLs / titles can
-          truncate inside flex instead of stretching the card. */}
+      {/* `min-w-0` is load-bearing — flex children otherwise refuse to truncate. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-center gap-1.5">
           {/* Citation badge `[N]` — paired with the agent's [N]

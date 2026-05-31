@@ -1,5 +1,8 @@
 /**
  * Server-only DataSource lookup — name / id → fully-hydrated
+ * `ResolvedDataSource` (row + credential payload + policy).
+ *
+ * See docs/data-sources.md.
  */
 
 import "server-only";
@@ -15,11 +18,9 @@ import type { DataSourceId, ResolvedDataSource } from "./types";
 import { isSupportedDataSource } from "./types";
 
 /**
- * Why two errors instead of one: callers (the agent tool, the
- * test-connection endpoint, the admin UI) report distinct messages
- * to the LLM / user — "data source not found" vs "data source
- * disabled" vs "data source has no credential" all surface as
- * different actionable hints.
+ * Distinct error codes (vs one bucket) so the agent tool, the
+ * test-connection endpoint and the admin UI can surface different
+ * actionable hints — "not found" vs "disabled" vs "no credential".
  */
 export type DataSourceLookupError =
   | "NOT_FOUND"
@@ -42,8 +43,7 @@ export type DataSourceLookupResult = DataSourceLookupOk | DataSourceLookupFail;
 
 /**
  * Resolve by LLM-facing name. Honours the `enabled` flag — disabled
- * data sources return `DISABLED` so the caller can produce a
- * targeted error instead of a generic "not found" leak.
+ * rows return `DISABLED` instead of leaking as "not found".
  */
 export async function resolveDataSourceByName(
   name: string,
@@ -56,10 +56,7 @@ export async function resolveDataSourceByName(
   return rowsToResult(rows[0], `Data source "${name}"`);
 }
 
-/**
- * Resolve by uuid id (admin / API path). Same `enabled` enforcement
- * as resolveDataSourceByName.
- */
+/** Resolve by uuid id (admin / API path). Same `enabled` enforcement. */
 export async function resolveDataSourceById(
   id: string,
 ): Promise<DataSourceLookupResult> {
@@ -73,8 +70,8 @@ export async function resolveDataSourceById(
 
 /**
  * Variant of {@link resolveDataSourceById} that *includes* disabled
- * rows. Used by the admin write paths (e.g. PATCH enabled=true) where
- * the caller explicitly wants to act on a disabled source.
+ * rows. Used by the admin write paths (e.g. PATCH enabled=true) that
+ * need to act on a currently-disabled source.
  */
 export async function resolveDataSourceByIdIncludingDisabled(
   id: string,

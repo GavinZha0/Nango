@@ -16,9 +16,27 @@ const eslintConfig = defineConfig([
   {
     // Project-wide rules.
     rules: {
+      // Allow the `_` prefix as an "intentionally unused" marker on
+      // function parameters, destructured vars, and caught errors. This
+      // matches the TypeScript ecosystem convention and lets us keep
+      // signatures aligned with a wider interface (e.g. mock factories,
+      // visitor hooks, callbacks) without triggering noise.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          args: "all",
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrors: "all",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
+
       // Ban `as BaseEvent` and `as BaseEvent & {...}` casts on the
       // AG-UI event surface. Use the typed `AgUiEvent` discriminated
-      // union instead — see `docs/runner-events.md` §11. The two
+      // union instead — see docs/runner-events.md. The two
       // selectors cover the bare cast and the intersection-cast
       // pattern that pre-migration code used to peek at per-event
       // fields.
@@ -28,13 +46,13 @@ const eslintConfig = defineConfig([
           selector:
             "TSAsExpression > TSTypeReference[typeName.name='BaseEvent']",
           message:
-            "Avoid `as BaseEvent`. Type the value as `AgUiEvent` (the discriminated union from @/lib/copilot/index.server) and switch on `event.type` for narrowing. See docs/runner-events.md §11.",
+            "Avoid `as BaseEvent`. Type the value as `AgUiEvent` (the discriminated union from @/lib/copilot/index.server) and switch on `event.type` for narrowing. See docs/runner-events.md.",
         },
         {
           selector:
             "TSAsExpression > TSIntersectionType > TSTypeReference[typeName.name='BaseEvent']",
           message:
-            "Avoid `as BaseEvent & {...}`. Type the value as `AgUiEvent` and switch on `event.type` for per-variant field access. See docs/runner-events.md §11.",
+            "Avoid `as BaseEvent & {...}`. Type the value as `AgUiEvent` and switch on `event.type` for per-variant field access. See docs/runner-events.md.",
         },
       ],
     },

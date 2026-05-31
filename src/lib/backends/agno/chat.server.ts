@@ -1,7 +1,6 @@
 /**
  * agno chat handler — protocol bridge from agno AgentOS SSE → AG-UI.
- *
- * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
+ * See docs/backend-integration.md.
  */
 
 import "server-only";
@@ -26,8 +25,6 @@ import {
 
 type Logger = ReturnType<typeof childLogger>;
 
-// agno event payload shape (only the fields we consume)
-
 /** Subset of `agno.models.response.ToolExecution` that we read. */
 interface AgnoToolExecution {
   tool_call_id?: string;
@@ -39,37 +36,28 @@ interface AgnoToolExecution {
 interface AgnoEvent {
   /** PascalCase discriminator, e.g. "RunContent", "TeamReasoningStep". */
   event: string;
-  /** Text delta for RunContent/TeamRunContent; error message for RunError. */
   content?: unknown;
-  /** Streaming reasoning delta (`ReasoningContentDelta`) or full step text. */
   reasoning_content?: string | null;
-  /** ToolCallStarted payload. */
   tool?: AgnoToolExecution | null;
   [k: string]: unknown;
 }
 
-// Helpers
-
 function endpointFor(kind: EntityKind, id: string): string {
-  // Workflows have no chat-thread concept; route to /agents to keep
-  // the path well-formed (caller already vets `kind` server-side).
+  // Workflows have no chat-thread concept — route to /agents.
   const segment = kind === "team" ? "teams" : "agents";
   return `/${segment}/${encodeURIComponent(id)}/runs`;
 }
 
 interface SseMessage {
-  /** Value of the most recent `event:` line, or `""` if absent. */
   event: string;
-  /** Joined value of all `data:` lines, with single LF separators. */
   data: string;
 }
 
 /**
- * CONTRACT: standards-compliant SSE message stream per WHATWG HTML
- * "Interpreting an event stream" — CR/LF/CRLF separators, blank-line
- * dispatch, `field:value` with optional leading-space trim, multi-line
- * `data:` joined by LF, leading `:` is a comment, empty events skipped.
- * `id` and `retry` are ignored (we don't reconnect).
+ * CONTRACT: WHATWG-compliant SSE parser. CR/LF/CRLF separators,
+ * blank-line dispatch, optional leading-space trim on values,
+ * multi-line `data:` joined by LF, `:` is comment. `id` / `retry`
+ * ignored — we never reconnect.
  */
 async function* readSseMessages(
   body: ReadableStream<Uint8Array>,
@@ -122,8 +110,6 @@ async function* readSseMessages(
   if (tail) yield tail;
 }
 
-// Bridging Agent
-
 interface BridgeConfig {
   baseUrl: string;
   apiKey: string;
@@ -137,7 +123,6 @@ class AgnoBridgeAgent extends AbstractAgent {
     super();
   }
 
-  // @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
   clone(): this {
     return attachBridgeConfig(super.clone() as this, this.cfg);
   }
@@ -146,9 +131,7 @@ class AgnoBridgeAgent extends AbstractAgent {
     return createBridgeRunObservable(
       input,
       async ({ abortSignal, emit, isCancelled }) => {
-        // Server-trusted: runner injects `forwardedProps.user_id` from
-        // `session.user.id` (chat) or `ownerId` (programmatic dispatch)
-        // before this code is reached. @see lib/runner/inject-user-id.ts
+        // Server-injected upstream by lib/runner/inject-user-id.ts.
         const userId = input.forwardedProps?.user_id as string;
         const message = lastUserText(input.messages);
         if (!message) {
@@ -158,16 +141,10 @@ class AgnoBridgeAgent extends AbstractAgent {
         const tools = new ToolCallFilter(input.tools);
         const text = new TextStreamState(emit, randomUUID());
 
-        // Reasoning state — agno-specific, no shared helper yet.
-        // SCHEMA NOTE: AG-UI requires `messageId` on REASONING_START /
-        // REASONING_END (the outer span) AND on the inner MESSAGE_*
-        // events. Pre-fix code passed neither and got away with it
-        // because `as BaseEvent` erased the schema's required-field
-        // checks. Single span id reused for both pairs since they
-        // identify the same logical reasoning turn; the persistence
-        // layer (PersistingAgent) only reads messageId on the inner
-        // MESSAGE_* events anyway. REASONING_MESSAGE_START's required
-        // `role: "reasoning"` literal was also previously missing.
+        // Reasoning span — agno-specific, no shared helper yet.
+        // AG-UI REQUIRES messageId on REASONING_START / END (outer span)
+        // and on the inner MESSAGE_* events. Single span id reused
+        // across both pairs (same logical reasoning turn).
         let reasoningSpanId: string | null = null;
         let reasoningRunOpen = false;
         let reasoningMessageOpen = false;
@@ -207,7 +184,6 @@ class AgnoBridgeAgent extends AbstractAgent {
           reasoningSpanId = null;
         };
 
-        // @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
         const form = new FormData();
         form.set("message", message);
         form.set("stream", "true");
@@ -277,7 +253,7 @@ class AgnoBridgeAgent extends AbstractAgent {
             continue;
           }
           // CONTRACT: SSE `event:` header is authoritative; body's
-          // `event` key is a fallback (never missing in agno 2.6.4).
+          // `event` key is a fallback.
           const agnoEvent = sse.event || chunk.event;
           messageCount += 1;
           this.cfg.log.debug(
@@ -291,7 +267,6 @@ class AgnoBridgeAgent extends AbstractAgent {
               const delta =
                 typeof chunk.content === "string" ? chunk.content : "";
               if (!delta) break;
-              // @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
               if (reasoningRunOpen) closeReasoning();
               text.appendDelta(delta);
               break;
@@ -301,7 +276,6 @@ class AgnoBridgeAgent extends AbstractAgent {
             case "TeamReasoningStarted":
               openReasoning();
               break;
-            // @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
             case "ReasoningContentDelta":
             case "TeamReasoningContentDelta":
             case "ReasoningStep":
@@ -327,8 +301,7 @@ class AgnoBridgeAgent extends AbstractAgent {
               const tcId = tool.tool_call_id ?? "";
               const tcName = tool.tool_name ?? "";
               if (!tools.shouldForwardStart(tcName, tcId)) break;
-              // Close any open assistant text / reasoning so the tool
-              // call doesn't get nested under them.
+              // Close open text / reasoning so the tool call isn't nested.
               text.closeIfOpen();
               if (reasoningRunOpen) closeReasoning();
               emit({
@@ -336,8 +309,6 @@ class AgnoBridgeAgent extends AbstractAgent {
                 toolCallId: tcId,
                 toolCallName: tcName,
               });
-              // CONTRACT: `tool_args` is always Dict[str, Any] in agno;
-              // JSON-stringify for the AG-UI delta.
               emit({
                 type: EventType.TOOL_CALL_ARGS,
                 toolCallId: tcId,
@@ -365,9 +336,8 @@ class AgnoBridgeAgent extends AbstractAgent {
               throw new Error(message);
             }
 
-            // Everything else (RunStarted/Completed/Cancelled, hooks,
-            // memory updates, session summaries, model metrics, …) is
-            // silently dropped — the browser has no rendering for it.
+            // RunStarted/Completed/Cancelled, hooks, memory updates,
+            // session summaries, model metrics, … — silently dropped.
             default:
               droppedEventCount += 1;
               break;
@@ -383,8 +353,6 @@ class AgnoBridgeAgent extends AbstractAgent {
           "agno upstream stream drained",
         );
 
-        // Stream ended cleanly — close any open streams.
-        // createBridgeRunObservable emits RUN_FINISHED on return.
         text.closeIfOpen();
         closeReasoning();
       },
@@ -392,14 +360,11 @@ class AgnoBridgeAgent extends AbstractAgent {
   }
 }
 
-// Handler
-
 export const agnoChatHandler: IBackendChatHandler = {
   provider: "agno",
 
   async buildAgent(ctx: ChatContext) {
-    // AG-UI fast-path when the deployer mounted `AGUI(agent=…)` and
-    // the credential's aguiUrl is set; falls back to bridge below.
+    // AG-UI fast-path when the credential's aguiUrl is set; else bridge.
     const passthrough = await buildPassthroughAgentIfConfigured(ctx);
     if (passthrough) return passthrough;
 

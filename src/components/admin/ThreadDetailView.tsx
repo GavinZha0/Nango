@@ -388,9 +388,7 @@ function RunCard({
         )}
       </button>
 
-      {/* Sub-runs recurse. `space-y-1` keeps them compact under the
-          parent card; the marginLeft above visually attaches them as
-          a subtree. */}
+      {/* Sub-runs recurse. */}
       {subRuns.length > 0 && (
         <div className="mt-1 space-y-1">
           {subRuns.map((sub, i) => (

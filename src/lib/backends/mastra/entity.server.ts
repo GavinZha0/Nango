@@ -1,7 +1,5 @@
 /**
- * Mastra entity discovery — server-only.
- *
- * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
+ * Mastra entity discovery — server-only. See docs/backend-integration.md.
  */
 
 import "server-only";

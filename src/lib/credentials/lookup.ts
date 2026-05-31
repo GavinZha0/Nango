@@ -1,5 +1,7 @@
 /**
  * Server-side credential config lookup with in-memory caching (10-min TTL).
+ *
+ * See docs/cache.md and docs/builtin-runtime.md.
  */
 
 import "server-only";
@@ -78,7 +80,6 @@ function decryptPayloadSafely(encryptedPayload: string): Record<string, unknown>
   try {
     return decrypt(encryptedPayload);
   } catch (err) {
-    // @see docs/builtin-runtime.md#5-implementation-details-and-quirks
     logger.error(
       {
         component: "credential-lookup",
@@ -100,7 +101,6 @@ function extractTokenFromEncryptedPayload(encryptedPayload: string): string | nu
 }
 
 // In-memory cache — all sub-caches use lru-cache for unified TTL management.
-// @see docs/cache.md §2.1
 //
 // HMR-survival via globalThis: credential reads are on the hottest
 // path (every chat turn that resolves a backend or built-in agent
@@ -206,7 +206,8 @@ export function _cacheSizes(): {
 // Public API
 
 /**
- * @see docs/builtin-runtime.md#5-implementation-details-and-quirks
+ * Latest enabled credential row for `provider`. Used by callers that
+ * key by provider slug rather than credential id.
  */
 export async function getProviderConfig(provider: string): Promise<ProviderConfig> {
   const rows = await db

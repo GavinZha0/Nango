@@ -1,5 +1,7 @@
 /**
  * Shared input schemas for the ssh-server REST API.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";
@@ -43,7 +45,7 @@ export const createSshServerSchema = z.object({
   commandAllow: commandList.nullable().optional(),
   commandDeny: commandList.optional(),
 
-  /** Wrap commands in `bash -lc '...'`. Defaults to true server-side. @see docs/ssh.md §3.3 */
+  /** Wrap commands in `bash -lc '...'`. Defaults to true server-side. */
   loginShell: z.boolean().optional(),
 
   enabled: z.boolean().optional(),

@@ -1,5 +1,6 @@
 /**
  * MySQL data-source adapter — client-safe metadata.
+ * See docs/data-sources.md.
  */
 
 import { DatabaseConnectionBase } from "../secrets-base";

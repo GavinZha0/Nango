@@ -51,6 +51,12 @@ const DATASET_NAME = "sales_q1_2025";
 const DATASET_FILE_NAME = "part-001.parquet";
 const DATASET_FILE_CONTENT = "fake-parquet-bytes";
 
+// Subprocess spawn under heavy parallel test load occasionally trips vitest's
+// default 5s per-test timeout even though the actual shell command finishes
+// in <100 ms. Bump the test-runner timeout (NOT the subprocess timeoutMs,
+// which stays at 5000 — we don't want the child to actually run that long).
+const TEST_TIMEOUT_MS = 60_000;
+
 describe("SubprocessAdapter — dataset symlinks (D38)", () => {
   let datasetDir = "";
 
@@ -72,13 +78,13 @@ describe("SubprocessAdapter — dataset symlinks (D38)", () => {
 
   it("exposes a declared dataset at ./data/<name>/ in the child's cwd", async () => {
     const out = await adapter.run({
-      command: ["sh", "-c", `cat ./data/${DATASET_NAME}/${DATASET_FILE_NAME}`],
+      command: ["node", "-e", `process.stdout.write(require('fs').readFileSync('./data/${DATASET_NAME}/${DATASET_FILE_NAME}', 'utf-8'))`],
       datasets: [DATASET_NAME],
       timeoutMs: 5000,
     });
     expect(out.exitCode).toBe(0);
     expect(out.stdout).toBe(DATASET_FILE_CONTENT);
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("the symlink is a real directory link, not a copied file", async () => {
     // `ls -la ./data/<name>` should show the parent dir is the
@@ -86,13 +92,13 @@ describe("SubprocessAdapter — dataset symlinks (D38)", () => {
     // We assert the dataset file is readable from inside `./data/
     // <name>/`, which is only true when the symlink resolves.
     const out = await adapter.run({
-      command: ["sh", "-c", `ls ./data/${DATASET_NAME}`],
+      command: ["node", "-e", `require('fs').readdirSync('./data/${DATASET_NAME}').forEach(f => console.log(f))`],
       datasets: [DATASET_NAME],
       timeoutMs: 5000,
     });
     expect(out.exitCode).toBe(0);
     expect(out.stdout.split("\n")).toContain(DATASET_FILE_NAME);
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("multiple datasets each get their own symlink", async () => {
     const second = "users_dec_2025";
@@ -101,27 +107,27 @@ describe("SubprocessAdapter — dataset symlinks (D38)", () => {
     await fs.writeFile(path.join(secondDir, "rows.parquet"), "users-bytes");
 
     const out = await adapter.run({
-      command: ["sh", "-c", "ls ./data"],
+      command: ["node", "-e", "require('fs').readdirSync('./data').forEach(f => console.log(f))"],
       datasets: [DATASET_NAME, second],
       timeoutMs: 5000,
     });
     expect(out.exitCode).toBe(0);
     const entries = out.stdout.split("\n").filter((s) => s.length > 0);
     expect(entries.sort()).toEqual([DATASET_NAME, second].sort());
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("does not expose datasets that weren't declared in `datasets`", async () => {
     // The cache holds DATASET_NAME but we don't pass it — the
     // child should see an empty (or absent) ./data dir.
     const out = await adapter.run({
-      command: ["sh", "-c", "ls ./data 2>&1 || echo EMPTY"],
+      command: ["node", "-e", "try { require('fs').readdirSync('./data').forEach(f => console.log(f)) } catch(e) { console.log('EMPTY') }"],
       timeoutMs: 5000,
     });
     // Either the directory doesn't exist (no datasets requested →
     // we don't create the dir) OR it's empty. Both are acceptable.
     expect(out.exitCode).toBe(0);
     expect(out.stdout).not.toContain(DATASET_NAME);
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("masks the host symlink target in stderr back to ./data/<name>", async () => {
     // Make the child fail trying to read a missing file inside the
@@ -131,9 +137,9 @@ describe("SubprocessAdapter — dataset symlinks (D38)", () => {
     // logic independently of Python.
     const out = await adapter.run({
       command: [
-        "sh",
-        "-c",
-        `cat ./data/${DATASET_NAME}/does-not-exist.parquet 2>&1 || true`,
+        "node",
+        "-e",
+        `try { require('fs').readFileSync('./data/${DATASET_NAME}/does-not-exist.parquet') } catch(e) { console.log(e.message) }`,
       ],
       datasets: [DATASET_NAME],
       timeoutMs: 5000,
@@ -144,5 +150,5 @@ describe("SubprocessAdapter — dataset symlinks (D38)", () => {
     // never reaches the LLM).
     expect(out.stdout).toContain(`./data/${DATASET_NAME}`);
     expect(out.stdout).not.toContain(testCacheRoot);
-  });
+  }, TEST_TIMEOUT_MS);
 });

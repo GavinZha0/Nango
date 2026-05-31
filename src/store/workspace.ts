@@ -7,14 +7,6 @@ import {
   type OrchestrationModeId,
 } from "@/lib/orchestration/modes";
 
-// NOTE: the legacy `activeArtifact / openArtifact / closeArtifact`
-// fields were removed in V1 of the Outcomes panel (see
-// `docs/data-visualization.md` §6.4). The single-full-screen artifact
-// concept was Phase-3 scaffolding that no chat-side caller ever
-// invoked; it conflicted with the new thread-scoped Outcomes panel
-// at `/outcomes`. V2's per-artifact detail view will live at
-// `/artifact/[id]` and route normally.
-
 interface WorkspaceState {
   // Entity list cache. Grouped for cheap UI rendering.
 
@@ -76,74 +68,36 @@ interface WorkspaceState {
   /** Atomically read-and-clear the pending context. */
   consumeHandoffContext: () => string | null;
 
-  // Session (thread) — split into two fields with disjoint semantics.
-  // @see docs/chat-flow-audit.md §1.11
-  /**
-   * Live thread id captured after CopilotKit's first `onAgentRunStarted`.
-   * Identifies the currently active conversation for history list, URL
-   * sync, GET /api/threads/[id]/messages, outcome attribution, etc.
-   *
-   * NEVER passed to <CopilotChat>. Feeding it back would flip
-   * hasExplicitThreadId false → true and break Inv-2.
-   *
-   * Maps 1:1 to backend session ids:
-   *   agno → session_id, Mastra → memory thread, Dify → conversation_id.
-   */
+  // Session (thread) — two fields with disjoint semantics.
+  // See docs/threadid-lifecycle.md and docs/chat-flow-audit.md.
+  /** Live thread id captured after CopilotKit's first run. Identifies
+   *  the active conversation for history list, URL sync, outcome
+   *  attribution. NEVER passed to <CopilotChat> — feeding it back
+   *  would flip `hasExplicitThreadId` false → true. */
   runtimeThreadId: string | null;
   setRuntimeThreadId: (id: string | null) => void;
-  /**
-   * Only set when the user explicitly picks a stored thread (history
-   * click, URL navigation). The single field that flows into
-   * `<CopilotChat threadId>`; setting it forces remount + /connect.
-   * `null` = fresh chat mode (welcome screen, CopilotKit mints ABC).
-   */
+  /** Set only when the user picks a stored thread (history click, URL
+   *  navigation). Flows into `<CopilotChat threadId>`; `null` = fresh
+   *  chat mode. */
   explicitThreadId: string | null;
   setExplicitThreadId: (id: string | null) => void;
-  /**
-   * Monotonic counter used as part of the React `key` on `<CopilotChat>`
-   * to force a full unmount + remount. This is the only way to make
-   * CopilotKit v2 mint a fresh non-explicit thread id while the
-   * `threadId` prop stays `undefined` — `useMemo(() => providedThreadId
-   * ?? randomUUID(), [providedThreadId])` otherwise caches the first
-   * ABC forever.
-   *
-   * Agent / Nango / handoff switches don't need a bump — `key`
-   * already includes `agentId`, so an agent change is itself a remount.
-   *
-   * Prefer `startFreshChat()` over manual bump+clear; the action
-   * encapsulates the required ordering so callers can't get it wrong.
-   *
-   * @see docs/threadid-lifecycle.md §"Lifecycle Events" #5
-   */
+  /** Monotonic counter used as part of `<CopilotChat>`'s `key` to
+   *  force a remount and mint a fresh ABC — CopilotKit otherwise
+   *  caches the first ABC forever via `useMemo`. */
   chatEpoch: number;
   bumpChatEpoch: () => void;
-  /**
-   * Atomically reset both threadId fields and bump the chat epoch.
-   * Use this for any "start a new conversation" entry point (New Chat
-   * button, deleting the active thread, etc.).
-   *
-   * Why atomic: lazy-capture in `RightPanel.ChatProviderHooks`
-   * guards with `if (!state.runtimeThreadId) return;` — if a caller
-   * bumps the epoch before clearing `runtimeThreadId`, the new
-   * conversation's ABC arrives via `onAgentRunStarted` but the
-   * stale id refuses to be overwritten, silently losing the new
-   * thread's store-side identity (history list won't update,
-   * outcomes attributed to the wrong thread, etc.).
-   */
+  /** Atomically reset both threadId fields and bump the epoch. Use
+   *  for any "start a new conversation" entry point — manual
+   *  bump-then-clear races the lazy-capture guard. */
   startFreshChat: () => void;
 
   // Pinned sessions
   pinnedSessions: Set<string>;
   togglePin: (sessionId: string) => void;
 
-  // Chat error
-  /**
-   * Most recent failure for the active agent, or null. Set by
-   * RightPanel's `onRunFailed` / `onRunErrorEvent`; cleared on new
-   * run, agent switch, or manual dismiss.
-   *
-   * Banner ignores entries whose `agentId` does not match `activeAgentId`.
-   */
+  /** Most recent transport / protocol failure. Cleared on new run,
+   *  agent switch, or manual dismiss. The banner filters entries
+   *  whose `agentId` doesn't match `activeAgentId`. */
   lastChatError: ChatError | null;
   setChatError: (err: ChatError) => void;
   clearChatError: () => void;

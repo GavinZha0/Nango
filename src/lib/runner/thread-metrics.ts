@@ -1,24 +1,16 @@
 /**
  * Thread-/run-level metric helpers shared between the admin thread
- * list and detail endpoints. Kept dependency-free so they remain
- * unit-testable without a database.
+ * list and detail endpoints. Dependency-free so they remain unit-
+ * testable without a database.
  */
 
 /**
- * Run-status priority order from worst to best. Used to choose ONE
- * status to surface for a thread when its runs disagree, e.g. tinting
- * the task column on the thread list or picking the badge for the
- * thread detail summary card.
+ * Run-status priority, worst → best. Used to pick ONE status to
+ * surface when a thread's runs disagree (status column, badge tint).
  *
- * Lower index = wins. "failed" beats "succeeded"; "running" beats
- * "succeeded" (an in-flight thread is more interesting than a finished
- * one); "cancelled" sits below "running"/"paused" because cancellation
- * is a terminal outcome an admin generally wants to surface but is
- * less actionable than active states.
- *
- * Order is mirrored as a runtime const + as the documented colour
- * priority in the client component, so changes here MUST also update
- * the client (otherwise the filter and the colour disagree).
+ * MUST stay in sync with the client component's colour priority —
+ * the filter and the colour use the same order; changes here need a
+ * matching client-side update.
  */
 export const STATUS_PRIORITY: ReadonlyArray<string> = [
   "failed",
@@ -32,8 +24,8 @@ export const STATUS_PRIORITY: ReadonlyArray<string> = [
 
 /**
  * Pick the highest-priority status from a list. Empty / unknown
- * statuses fall through to "succeeded" so the caller never has to
- * handle the empty case.
+ * statuses fall through to "succeeded" so callers never handle the
+ * empty case.
  */
 export function pickWorstStatus(statuses: ReadonlyArray<string>): string {
   for (const s of STATUS_PRIORITY) {
@@ -43,12 +35,9 @@ export function pickWorstStatus(statuses: ReadonlyArray<string>): string {
 }
 
 /**
- * Compute wall-clock duration in milliseconds between two timestamps.
- *
- * Accepts ISO strings or `Date` objects on either side. Returns `null`
- * when either bound is missing, unparseable, or the end is before the
- * start — callers display "—" for that case rather than a negative or
- * NaN number.
+ * Wall-clock duration in milliseconds between two timestamps. Returns
+ * `null` when either bound is missing, unparseable, or the end is
+ * before the start — callers render "—" for that case.
  */
 export function durationMsBetween(
   start: Date | string | null | undefined,

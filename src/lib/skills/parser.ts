@@ -1,36 +1,33 @@
 /**
  * Minimal YAML frontmatter parser for SKILL.md (Claude Skills).
  *
- * @see docs/skills.md#9-implementation-details-and-quirks
+ * See docs/skills.md.
  */
 
-/** Required + optional fields recognized by the v1 runtime. */
+/** Required + optional frontmatter fields. */
 export interface SkillFrontmatter {
   /** Stable machine-readable name; must match the skill directory name. */
   name: string;
   /** What the skill does + when to use it.  Drives trigger matching. */
   description: string;
-  /** Free-form version string from `version:` frontmatter. Defaults to
-   *  `"1.0.0"` when absent. Informational; not consumed at runtime. */
+  /** Free-form version string. Defaults to `"1.0.0"` when absent.
+   *  Informational; not consumed at runtime. */
   version: string;
-  /** Skills 2.0: inline | fork | background.  Parsed but unused in v1. */
+  /** Skills 2.0: inline | fork | background. Parsed but unused at runtime. */
   context?: string;
-  /** Skills 2.0: tool whitelist.  Parsed but unused in v1. */
+  /** Skills 2.0: tool whitelist. Parsed but unused at runtime. */
   allowedTools?: string[];
   /**
-   * PyPI packages required by `scripts/*.py` files in this skill.
-   * Aggregated by `scripts/collect-skill-deps.ts` at sandbox image
-   * build time into `docker/sandbox/requirements.txt`. Authors write
-   * one entry per package, with optional pip-style version specifier
-   * — e.g. `["scikit-learn>=1.3", "scipy"]`. Empty / absent means no
-   * extra deps; the sandbox image always ships `duckdb / pandas /
-   * numpy` regardless.
+   * PyPI packages required by `scripts/*.py` in this skill.
+   * `scripts/collect-skill-deps.ts` aggregates these into
+   * `docker/sandbox/requirements.txt` at sandbox image build time.
+   * Entries are full pip specs with optional version specifier
+   * (e.g. `["scikit-learn>=1.3", "scipy"]`). The sandbox image
+   * always ships `duckdb / pandas / numpy / pyarrow` regardless.
    *
-   * NOTE: only enforced at image build time. User skills (DB / API)
-   * inherit whatever the running image has; their declarations here
-   * are advisory until the skill is promoted to builtin.
-   *
-   * @see docs/skills.md §9.x for the full design and trigger semantics.
+   * NOTE: enforced only at image build time. Custom (local) skills
+   * inherit whatever the running image has — their declarations are
+   * advisory until promoted to builtin.
    */
   dependenciesPython?: string[];
   /** Any other frontmatter key the author included, kept verbatim. */
@@ -157,9 +154,8 @@ export function parseSkillMd(text: string): ParsedSkillMd {
     delete raw.allowedTools;
   }
 
-  // PyPI deps for sandbox image build aggregation
-  // Inline-array syntax only (matches the current parser's parseValue
-  // capability — see docs/skills.md §9.x.4 "flat key" decision).
+  // PyPI deps for sandbox image build aggregation.
+  // Inline-array syntax only (matches `parseValue`'s capability).
   let dependenciesPython: string[] | undefined;
   if ("dependencies-python" in raw) {
     const v: string | string[] = raw["dependencies-python"];

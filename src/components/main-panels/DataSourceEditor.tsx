@@ -2,7 +2,7 @@
 
 /**
  * DataSourceEditor — full-area form for creating / editing one
- * @see docs/data-sources.md §3
+ * See docs/data-sources.md.
  */
 
 import {

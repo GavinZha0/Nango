@@ -1,43 +1,12 @@
 "use client";
 
 /**
- * OutcomeCard — one card per Outcome on the `/outcomes` panel.
- *
- * See `docs/data-visualization.md` §6.8 + `docs/artifact-evolution.md`
- * §6 (Main Panel Display Model, V1 — slimmed). A single card frame
- * renders in one of THREE view states; the parent `OutcomesPanel`
- * decides which by picking the layout (grid vs filmstrip-and-enlarged).
- *
- *   viewState="preview"   (default)
- *     Default 2-col grid card. Content via BlockList(size="compact").
- *     Header shows the title row + collapse chevron + Enlarge (⤢),
- *     Save, Remove buttons.
- *
- *   viewState="thumbnail"
- *     Renders in the 160 px filmstrip while another card is
- *     enlarged. Title (up to 2 lines) + optional description (1
- *     line), no buttons, click anywhere → enlarges this card.
- *     Currently-enlarged thumbnail is outlined.
- *
- *   viewState="enlarged"
- *     Fills the right side of the layout. Content via
- *     BlockList(size="large"). Header replaces the Enlarge button
- *     with a Minimize (⤡) button and keeps Save + Remove.
- *     Title-click collapse is disabled — the user came here to
- *     look at the content.
- *
- * Height is CONTENT-SIZED in preview/enlarged states. The legacy
- * `h-[320px]` hardcode was appropriate when every outcome was an
- * ECharts canvas (which needs a definite parent height) but breaks
- * card_list outcomes that may have anywhere from 1 to 10 cards. Each
- * block renderer owns its own height contract — `ChartBlockRenderer`
- * picks 400 px in compact / 480 px in large; `CardListBlockRenderer`
- * caps at 400 px with internal scroll in compact, content-sized in large.
- *
- * ECharts inside the body auto-resizes via ResizeObserver
- * (`EChartsRenderer`), so changing the parent CSS size when
- * `viewState` toggles is enough — no per-state renderer logic
- * required.
+ * OutcomeCard — one card per Outcome on `/outcomes`. Renders in
+ * three view states (`preview` / `thumbnail` / `enlarged`); the
+ * parent `OutcomesPanel` picks which by choosing the layout.
+ * Height is content-sized — each block renderer owns its own
+ * height contract. See docs/data-visualization.md and
+ * docs/artifact-evolution.md.
  */
 
 import {
@@ -181,10 +150,6 @@ export function OutcomeCard({
           isSelected && "ring-2 ring-primary",
         )}
       >
-        {/* `items-start` keeps action buttons pinned to the title row
-            even when the description wraps to multiple lines. The
-            chevron gets a small top offset to optically baseline-align
-            with the title text. */}
         <CardHeader className="flex flex-row items-start gap-2 px-3 py-2">
           <CollapsibleTrigger
             // The trigger renders as its own `<button>` (no `asChild`).

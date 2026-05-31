@@ -1,7 +1,5 @@
 /**
- * Dify entity discovery — server-only.
- *
- * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
+ * Dify entity discovery — server-only. See docs/backend-integration.md.
  */
 
 import "server-only";
@@ -34,10 +32,8 @@ export async function fetchDifyEntitiesServer(
         { event: "dify_info_failed", status: res.status, credentialId },
         "dify /info returned non-2xx",
       );
-      // Even if /info fails we still surface the app — the user knows it
-      // exists (the credential is configured), they just don't get the
-      // app name. Keep displaying it with a placeholder so the user can
-      // open settings to fix.
+      // Still surface the app under a placeholder name — the credential
+      // is configured, so the user must be able to open settings to fix it.
       return [
         {
           id: DIFY_AGENT_ID,

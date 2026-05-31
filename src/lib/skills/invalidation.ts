@@ -1,5 +1,5 @@
 /**
- * Re-export shim — canonical definition moved to `@/lib/cache/invalidation`.
- * @see docs/cache.md §3
+ * Re-export shim — canonical definition lives in `@/lib/cache/invalidation`.
+ * See docs/cache.md.
  */
 export { invalidateForSkillChange } from "@/lib/cache/invalidation";

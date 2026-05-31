@@ -83,8 +83,7 @@ export const PATCH = withAdmin<{ id: string }>(
 
 // DELETE /api/admin/users/[id]
 // Soft delete: set deleted_at + clear sessions. Email is freed for re-use
-// via the partial unique index. See docs/rbac.md §4.
-
+// via the partial unique index. See docs/rbac.md 
 export const DELETE = withAdmin<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {

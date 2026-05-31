@@ -54,35 +54,15 @@ function readReplayAnchor(req: Request): string | null {
 }
 
 /**
- * GET /api/runs/stream — long-lived SSE feed of runner events
- * scoped to the authenticated user.
+ * GET /api/runs/stream — owner-scoped SSE feed of `RunnerEvent`s
+ * published on the in-process EventBus.
  *
- * Replay (Last-Event-ID)
- * ----------------------
- * On reconnect the browser's EventSource sends `Last-Event-ID` set
- * to the most recent `notification.id` it saw. We resume by querying
- * `notification WHERE owner_id = $u AND id > $lastId ORDER BY id LIMIT
- * REPLAY_LIMIT` — `notification.id` is UUIDv7 (PG18 `uuidv7()`), so
- * the index range scan walks new rows only. Events that arrive on
- * the live event-bus during replay are buffered and replayed in id
- * order after the catch-up; ones whose id ≤ replay's max id are
- * skipped to prevent duplicate emission.
- *
- * Architecture
- * ------------
- * The browser opens an EventSource. We register the connection's
- * sink with the in-process EventBus keyed by the caller's userId,
- * and stream every `RunnerEvent` published for them as a single
- * `data:` line (preceded by `id:` for notifications). Disconnect is
- * detected via `request.signal.aborted` (Next.js wires the request
- * signal to socket close); we unsubscribe and close the writer
- * there to free the entry.
- *
- * Keepalive
- * ---------
- * We push a comment frame (`: ping`) every 25 s so intermediate
- * proxies (Vercel, nginx, fly's edge) don't time the idle connection
- * out. SSE comments are spec-defined no-ops for the client.
+ * On reconnect we honour `Last-Event-ID` (set from
+ * `notification.id`, a UUIDv7) by replaying up to `REPLAY_LIMIT`
+ * rows via `WHERE owner_id = $u AND id > $lastId`. Live events
+ * during replay are buffered and id-deduped so the client sees
+ * each notification exactly once. Keepalive: a `: ping` SSE comment
+ * every 25s so intermediate proxies don't time the idle conn out.
  */
 export const GET = withSession(ROUTE, async ({ req, session }) => {
   const ownerId = session.user.id;

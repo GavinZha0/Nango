@@ -12,6 +12,8 @@
  *   Anyone weakening that allowlist (or restoring `...process.env`)
  *   re-opens the secret-leak channel; please use `local-docker`
  *   instead.
+ *
+ * See docs/sandbox.md.
  */
 
 import "server-only";
@@ -66,8 +68,6 @@ let venvTraceFired = false;
  *  Returns null on any resolution failure (missing python binary at
  *  the inferred location). The caller falls back to system PATH and
  *  emits a one-shot warning.
- *
- *  @see docs/sandbox.md §"Subprocess venv selection"
  */
 export function resolvePythonVenv(
   configured: string,
@@ -153,14 +153,13 @@ export class SubprocessAdapter implements ISandboxAdapter {
       // `./data/<name>/...` resolves through the symlinks to the
       // real Parquet files in the shared cache — matching the
       // in-sandbox contract that the docker adapter realises via
-      // bind mounts (`/work/data/<name>` per S4).
+      // bind mounts at `/work/data/<name>`.
       //
-      // Symlinks are not chown'd / chmod'd read-only — subprocess
-      // mode is "degraded" by design (no filesystem isolation), and
-      // LLM-generated code that writes back through the symlink
-      // would pollute the shared cache. Docs flag this explicitly;
-      // the `local-docker` backend is the only mode that enforces
-      // read-only at the kernel level.
+      // Symlinks are NOT chown'd / chmod'd read-only — subprocess
+      // mode is "degraded" by design (no filesystem isolation), so
+      // LLM-generated code can write back through the symlink and
+      // pollute the shared cache. The `local-docker` backend is the
+      // only mode that enforces read-only at the kernel level.
       if (
         mapping.datasetHostDirs &&
         Object.keys(mapping.datasetHostDirs).length > 0
@@ -279,12 +278,10 @@ export class SubprocessAdapter implements ISandboxAdapter {
     };
 
     const configured = getConfig("sandbox.subprocess.python_path", "").trim();
-    // V1.x diagnostic: one-shot trace of what the resolver decided.
-    // Helps the operator diagnose "I configured a venv but the
-    // sandbox still uses system python" — a one-line summary of
-    // (configured value, resolved binDir, prepended PATH head) is
-    // worth more than the silent-fallback warn. Fires once per
-    // (configured, decision) pair.
+    // One-shot diagnostic: a single-line trace of the resolver's
+    // decision (configured value, resolved binDir, prepended PATH
+    // head) so the operator can diagnose "I configured a venv but
+    // the sandbox still uses system python" without bisecting code.
     if (!venvTraceFired) {
       venvTraceFired = true;
       console.warn(
@@ -332,10 +329,9 @@ export class SubprocessAdapter implements ISandboxAdapter {
 
     env.VIRTUAL_ENV = resolved.venvRoot;
     env.PATH = `${resolved.binDir}${path.delimiter}${env.PATH ?? ""}`;
-    // PYTHONHOME is already absent from the allowlist, so no
-    // explicit delete is needed (kept here as a doc note: the
-    // legacy code path used to `delete env.PYTHONHOME` because it
-    // copied `process.env` first).
+    // PYTHONHOME is intentionally NOT carried over from the parent —
+    // the allowlist above never lets it through, so site-packages
+    // resolution always uses the venv's lib/.
     return env;
   }
 

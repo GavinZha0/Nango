@@ -1,5 +1,7 @@
 /**
  * Build the "Available SSH hosts" system-prompt block for an agent.
+ *
+ * See docs/ssh.md.
  */
 
 import "server-only";
@@ -47,5 +49,7 @@ export async function buildSshHostsPromptBlock(
     "cannot easily roll back. Output is captured (stdout, stderr, " +
     "exitCode) and may be truncated if very large.";
 
-  return { promptBlock: `${intro}\n${lines.join("\n")}` };
+  return {
+    promptBlock: `## Available SSH hosts\n\n${intro}\n${lines.join("\n")}`,
+  };
 }

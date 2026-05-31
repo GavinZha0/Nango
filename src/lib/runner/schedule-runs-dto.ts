@@ -1,10 +1,9 @@
 /**
  * Client-safe wire shapes for `GET /api/schedules/[id]/runs`.
  *
- * Kept out of the route file because that one declares
- * `import "server-only"` — pulling types from it into a client bundle
- * would be a compile-time hazard. This file has no runtime
- * dependencies and is safe to import from React components.
+ * Lives in its own file because the route module is `server-only`;
+ * importing types from there into a client bundle would be a
+ * compile-time hazard.
  */
 
 export interface ScheduleRunSummary {
@@ -18,10 +17,9 @@ export interface ScheduleRunSummary {
   /** ISO; entity_run.created_at, always set. */
   createdAt: string;
   /**
-   * One-line text. On failure we prefer `errorMessage` (the user
-   * wants to know WHY); otherwise the natural-language
-   * `outputSummary`. May be null for runs that finished without
-   * either (rare, but possible during a partial outage).
+   * One-line text. Prefers `errorMessage` on failure, otherwise the
+   * natural-language `outputSummary`. May be null for runs that
+   * finished without either.
    */
   summaryLine: string | null;
 }

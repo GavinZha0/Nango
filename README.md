@@ -22,6 +22,14 @@
   </p>
 
   <p>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml"><img alt="Lint" src="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml/badge.svg?branch=develop" /></a>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml"><img alt="E2E" src="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml/badge.svg?branch=develop" /></a>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/release-please.yml"><img alt="Release" src="https://github.com/GavinZha0/nango/actions/workflows/release-please.yml/badge.svg" /></a>
+    <a href="https://github.com/GavinZha0/nango/pkgs/container/nango"><img alt="GHCR" src="https://img.shields.io/badge/ghcr.io-nango-2496ed?logo=docker&logoColor=white" /></a>
+    <a href="https://github.com/GavinZha0/nango/releases"><img alt="Release version" src="https://img.shields.io/github/v/release/GavinZha0/nango?include_prereleases&sort=semver&color=green" /></a>
+  </p>
+
+  <p>
     <a href="#quick-start-docker"><strong>Quick Start</strong></a> ·
     <a href="#development-setup">Development</a> ·
     <a href="#architecture-overview">Architecture</a> ·
@@ -186,16 +194,27 @@ CREDENTIAL_ENCRYPTION_KEYRING=k1=<the-64-hex-you-just-generated>
 
 # Also set a long random session secret (32+ chars)
 BETTER_AUTH_SECRET=<another-long-random-string>
-BETTER_AUTH_URL=http://localhost:3000
-NEXT_PUBLIC_BASE_URL=http://localhost:3000
 NO_HTTPS=1
 ```
+
+> **Changing the port** — only set `APP_PORT` (default `9300`). The auth
+> URL is derived from it automatically. Override `BETTER_AUTH_URL`
+> directly only when you front Nango with a reverse proxy or custom
+> domain (e.g. `BETTER_AUTH_URL=https://nango.example.com`).
 
 > Why two secrets? `BETTER_AUTH_SECRET` signs user sessions; the keyring
 > encrypts the **third-party credentials** stored in your database. They are
 > intentionally separate so leaking one does not compromise the other.
 
 ### 3. Bring everything up
+
+Pull the published multi-arch image from GitHub Container Registry:
+
+```bash
+NANGO_IMAGE=ghcr.io/gavinzha0/nango:latest docker compose up -d
+```
+
+Or build locally from source:
 
 ```bash
 docker compose up -d --build
@@ -205,10 +224,10 @@ This starts:
 
 | Container | Purpose | Port |
 |---|---|---|
-| `nango-app` | Nango Next.js server (auto-runs DB migrations on boot) | `3000` |
+| `nango-app` | Nango Next.js server (auto-runs DB migrations on boot) | `9300` |
 | `nango-db`  | PostgreSQL 18 | `5433` → `5432` |
 
-Then open **http://localhost:3000**.
+Then open **http://localhost:9300**.
 
 The **first user to sign up becomes the admin** automatically. From the
 admin user-management page, you can promote teammates to `editor`
@@ -252,7 +271,7 @@ cp .env.example .env     # set CREDENTIAL_ENCRYPTION_KEYRING,
 pnpm docker:db           # Postgres 18 on localhost:5433
 pnpm db:migrate          # apply schema
 
-pnpm dev                 # Next.js with Turbopack on http://localhost:3000
+pnpm dev                 # Next.js with Turbopack on http://localhost:9300
 ```
 
 If you point at an existing Postgres instead of the bundled one, set

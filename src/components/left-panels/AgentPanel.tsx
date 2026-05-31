@@ -333,8 +333,10 @@ function BuiltinRow({
               acts as the row's primary visual anchor. */}
           <span
             aria-hidden
-            className="shrink-0 text-xl leading-none"
+            className="flex shrink-0 items-center justify-center rounded-md bg-card dark:bg-white border border-border text-xl leading-none"
             style={{
+              width: "32px",
+              height: "32px",
               fontFamily:
                 '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif',
             }}

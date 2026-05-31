@@ -20,28 +20,11 @@ import {
 import { aggregateToolCalls } from "@/lib/runner/tool-call-aggregator";
 
 /**
- * GET /api/admin/threads/[id]
- *
- * Returns the full structure for the thread detail page:
- *   - `summary`: thread-level aggregates (counts, TTFT avg, total compute)
- *   - `runs`:    every run in the thread (top-level + sub) with per-run
- *               metrics inlined; the client builds the timeline + sub-run
- *               tree by walking `parentRunId`.
- *
- * Per-run metrics:
- *   - `ttftMs`:        first user-visible assistant `message` event timestamp
- *                     minus `startedAt`. `null` when the run produced no
- *                     assistant text (pure tool-only runs, never-started
- *                     runs, etc.).
- *   - `durationMs`:    `finishedAt - startedAt`, `null` while running.
- *   - `toolCalls`:     one entry per distinct `toolCallId`, paired between
- *                     the `tool_call_chunk` start and the matching
- *                     `tool_call_result` end. Classification via
- *                     {@link detectToolResultStatus}.
- *   - `subRunCount`:   computed in TypeScript from the run-list itself.
- *
- * Events are NOT inlined — the right column lazily fetches them via the
- * existing `/api/admin/runs/[id]` endpoint when the admin selects a run.
+ * GET /api/admin/threads/[id] — thread-detail payload for the
+ * admin page. Returns `{ summary, runs[] }` with per-run metrics
+ * (`ttftMs`, `durationMs`, `toolCalls`, `subRunCount`) inlined.
+ * Events are NOT included — the right column lazily fetches them
+ * via `/api/admin/runs/[id]` on selection.
  */
 
 const ROUTE = "/api/admin/threads/[id]";
@@ -161,41 +144,16 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
   const runIds = runs.map((r) => r.id);
 
   // ------------------------------------------------------------------
-  // Step 2 — TTFT per run.
+  // Step 2 — TTFT per run: `MIN(event.ts) - run.started_at` over the
+  // first user-visible LLM event (assistant message, reasoning, or
+  // `tool_call_chunk` — tool-only runs need a meaningful TTFT too).
   //
-  // (first user-visible LLM event ts) − (entity_run.started_at),
-  // computed ENTIRELY IN SQL via `EXTRACT(EPOCH FROM …)` — same idiom
-  // as the cumulative-duration aggregate above.
-  //
-  // "First user-visible LLM event" is the earliest of:
-  //   - `message` with `payload.role = 'assistant'`  (assistant text)
-  //   - `reasoning`                                  (o1/o3-style trace)
-  //   - `tool_call_chunk`                            (LLM decided to call a tool)
-  //
-  // We include tool_call_chunk because from the chat UI's perspective
-  // a tool-call card IS the first visible response — so a run that
-  // only ever calls a tool (no assistant text) still has a meaningful
-  // TTFT. Caveat: PersistingAgent flushes tool_call_chunk rows at
-  // TOOL_CALL_END (after the args have fully streamed), so the TTFT
-  // for tool-only runs is slightly inflated by the args-streaming
-  // window. Accepted trade-off — args streaming is typically << LLM
-  // reasoning time, and "always a number" is more useful than
-  // "exact but often null". A future schema bump could persist
-  // tool_call_start to recover the precision.
-  //
-  // QUIRK: TTFT used to be computed in TypeScript as `new Date(a) -
-  // new Date(b)`, but `entity_run.started_at` and
-  // `entity_run_event.ts` are both `timestamp without time zone`. The
-  // drizzle column reader and the raw-SQL `MIN(ts)` path parse those
-  // bare timestamps through different paths and (depending on the
-  // driver / process timezone) end up at Date objects that disagree
-  // by exactly the session timezone offset — producing the famous
-  // "TTFT shows 4h on every run" symptom. Doing the subtraction
-  // inside Postgres uses pure timestamp arithmetic, so the offset
-  // can't sneak in.
-  //
-  // NULL when the run produced no qualifying event — perfectly valid
-  // for runs that errored before any output.
+  // GOTCHA: arithmetic MUST happen inside Postgres. `entity_run` and
+  // `entity_run_event` both use `timestamp without time zone`; the
+  // drizzle column reader and the raw-SQL aggregate parse those
+  // through different paths and (depending on TZ) disagree by the
+  // session offset, producing the "TTFT shows 4h on every run" bug.
+  // ------------------------------------------------------------------
   const ttftRows = await db
     .select({
       runId: EntityRunEventTable.runId,
@@ -229,24 +187,11 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
   const ttftByRun = new Map(ttftRows.map((r) => [r.runId, r.ttftMs]));
 
   // ------------------------------------------------------------------
-  // Step 3 — Tool call timings, paired across runs by toolCallId.
-  //
-  // chunk and result for the SAME toolCallId may live in different
-  // entity_run rows (frontend / HITL tools: the LLM emits chunk in
-  // run X, user reply arrives as a result event in run X+1; see
-  // `docs/runner-events.md` §4.5). Aggregating across the whole
-  // thread lets us:
-  //
-  //   - render a single tool row per toolCallId on whichever run it
-  //     was DECIDED in (the chunk-bearing run), with a real
-  //     `durationMs` even when the result lives in a continuation
-  //     run.
-  //   - keep `pending` (amber) reserved for actually-unpaired chunks
-  //     (agent died, bridge dropped the result, ...) instead of
-  //     false-flagging every frontend-tool turn.
-  //   - keep continuation runs' RunCards clean — the result event is
-  //     still in the timeline but does NOT spawn a half-empty tool
-  //     row on the continuation card.
+  // Step 3 — Tool-call timings, paired across runs by toolCallId.
+  // chunk and result can live in different runs (frontend / HITL
+  // tools — chunk in run X, user reply in run X+1). Cross-run
+  // aggregation keeps `durationMs` real and reserves "pending" for
+  // actually-orphaned chunks. See docs/runner-events.md.
   // ------------------------------------------------------------------
   const toolEvents = await db
     .select({
@@ -290,9 +235,7 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
       : null;
     const createdAt = new Date(r.createdAt).toISOString();
 
-    // TTFT was computed in SQL (Step 2) so we sidestep the timestamp-
-    // without-time-zone parsing-path discrepancy. Map miss → null,
-    // which is the right signal for runs without any assistant text.
+    // Map miss → null (run produced no qualifying event).
     const ttftRaw = ttftByRun.get(r.id);
     const ttftMs =
       ttftRaw !== undefined && Number.isFinite(ttftRaw) && ttftRaw >= 0
@@ -303,8 +246,7 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     const toolCalls: ToolCallSummary[] = perRunToolCalls.map((tc) => {
       let status: ToolCallSummary["status"];
       if (tc.endedAt === null) {
-        // No result anywhere in the thread — true dangling chunk
-        // (agent crashed, bridge dropped result, ...). amber.
+        // Truly orphaned chunk (no result anywhere) — amber.
         status = "pending";
       } else {
         const detected = detectToolResultStatus(tc.resultContent);
@@ -313,15 +255,11 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
       return {
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
-        // startedAt should always be present once the chunk row
-        // landed; fall back to the result ts for the (rare) case
-        // where only a result row survives.
+        // Fall back to endedAt for the rare "result row only" shape.
         startedAt: tc.startedAt ?? tc.endedAt ?? createdAt,
         endedAt: tc.endedAt,
-        // Duration spans the chunk-emit → result-emit interval. For
-        // a frontend / HITL tool the result lives in the next run
-        // and includes user think time — that's the honest answer
-        // to "how long did this tool take from the LLM's POV".
+        // chunk → result interval — for HITL tools this honestly
+        // includes user think time.
         durationMs: durationMsBetween(tc.startedAt, tc.endedAt),
         status,
       };

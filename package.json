@@ -1,13 +1,13 @@
 {
   "name": "nango",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "packageManager": "pnpm@10.32.1",
+  "packageManager": "pnpm@11.4.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 9300",
     "predev": "pnpm build:skills && pnpm sandbox:image",
     "build:skills": "tsx scripts/build-skills.ts",
     "sandbox:deps": "tsx scripts/collect-skill-deps.ts",
@@ -17,7 +17,7 @@
     "prebuild": "pnpm build:skills",
     "build": "next build",
     "prestart": "pnpm build:skills && pnpm sandbox:image",
-    "start": "next start",
+    "start": "next start -p 9300",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -26,14 +26,16 @@
     "test:e2e:ui": "playwright test --ui",
     "check-types": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node --env-file-if-exists=.env docker/migrate.mjs",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "docker:db": "docker compose up -d nango-db",
     "docker:up": "docker compose up -d",
     "docker:up:build": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f nango-app"
+    "docker:logs": "docker compose logs -f nango-app",
+    "prepare": "husky",
+    "check": "pnpm lint && pnpm check-types && pnpm test"
   },
   "dependencies": {
     "@ag-ui/client": "^0.0.52",
@@ -93,6 +95,8 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.6.0",
+    "@commitlint/config-conventional": "^19.6.0",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/node": "^24.12.2",
@@ -104,16 +108,11 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"
-  },
-  "pnpm": {
-    "overrides": {
-      "@ag-ui/client": "0.0.52",
-      "@ag-ui/core": "0.0.52",
-      "rxjs": "7.8.1"
-    }
   }
 }

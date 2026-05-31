@@ -23,7 +23,7 @@
  * The right panel mirrors the same `*PanelOpen` flag pattern. The
  * right panel has no URL representation by design (chat state is
  * agent-driven, not route-driven; see
- * `docs/copilotkit-provider-lifecycle.md` §6).
+ * `docs/copilotkit-provider-lifecycle.md`).
  */
 
 import { useEffect, useRef, type ReactNode } from "react";

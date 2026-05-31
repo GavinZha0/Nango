@@ -20,7 +20,7 @@ import { parseBody } from "@/lib/http/validation";
  * DELETE refuses to remove a seed category and refuses to remove a
  * non-empty folder. Clients are expected to clear children first.
  *
- * @see docs/artifact-dashboard-migration.md §4
+ * See docs/artifact-evolution.md.
  */
 
 const ROUTE = "/api/artifacts/[id]";
@@ -32,31 +32,14 @@ const patchSchema = z
     parentId: z.string().uuid().optional(),
     displayOrder: z.number().int().nonnegative().optional(),
     visibility: z.enum(["private", "shared"]).optional(),
-    /**
-     * Display config (chart type / colors / inline html / etc.).
-     * Schema is artifact-type-specific; the route layer accepts
-     * any JSON value and lets the artifact-page renderer enforce
-     * type-specific shape. Per D31 / V1, workflow changes do NOT
-     * go through this field — they go through chat
-     * (modify_workflow defineTool).
-     */
+    /** Display config (chart type / colors / inline html / etc.).
+     *  Type-specific shape — the artifact-page renderer enforces
+     *  it. Workflow changes do NOT go through this field. */
     content: z.unknown().optional(),
   })
   .strict();
 
-/**
- * GET returns a render-ready artifact bundle:
- *   - `node`: the artifact entity (existing shape; backward compatible)
- *   - `workflow?`: present when the artifact is backed by a workflow
- *     (D8 1:N relation) — id + name + canonical spec + outputField
- *   - `data?` / `fromCache?` / `executedAt?`: present when workflow
- *     execution produced data for the page to render. W1.6.2 ships
- *     with a stubbed executor (always null); W1.6.x wires the real
- *     tool registry + runner adapter — see `get-artifact.ts`.
- *
- * Folders and standalone artifacts (no workflow) get `{ node }`
- * only — same as the pre-W1.6 shape.
- */
+/** Returns the render-ready bundle (see `lib/artifacts/bundle.ts`). */
 export const GET = withSession<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
@@ -65,16 +48,9 @@ export const GET = withSession<{ id: string }>(
   },
 );
 
-/**
- * PATCH updates artifact metadata (name, description, parent,
- * order, visibility) and/or display config (`content`). Returns
- * the same bundle shape as GET so frontend state-update code is
- * uniform across reads + writes.
- *
- * Workflow changes (filters, SQL edits, etc.) do NOT go through
- * PATCH — they go through chat (`modify_workflow` defineTool). See
- * D31 + the V1 form-mediated-rejection discussion.
- */
+/** PATCH updates metadata and/or display `content`. Returns the
+ *  same bundle shape as GET. Does NOT cover workflow changes —
+ *  those flow through a new save. */
 export const PATCH = withSession<{ id: string }>(
   ROUTE,
   async ({ req, params, session, log }) => {

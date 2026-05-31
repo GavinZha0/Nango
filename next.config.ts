@@ -12,6 +12,22 @@ const nextConfig: NextConfig = {
     authInterrupts: true,
   },
 
+  // pino transports are loaded via worker + dynamic require() — nft
+  // can't trace them, so standalone builds miss `pino-pretty` and
+  // the server crashes when NANGO_LOG_PRETTY=true with
+  // "unable to determine transport target". Promoted from
+  // `experimental` to top-level in Next.js 16.
+  //
+  // NOTE: this only works for direct deps that have a top-level
+  // `node_modules/<pkg>` symlink. Transitive packages buried in
+  // `.pnpm/<hash>/node_modules/<pkg>` are NOT reachable via these
+  // globs — the JS ones are handled by nft's require-tracing, and the
+  // one native dlopen sidecar (duckdb's libduckdb.so) is shipped via an
+  // explicit COPY in docker/Dockerfile.
+  outputFileTracingIncludes: {
+    "/**/*": ["./node_modules/pino-pretty/**/*"],
+  },
+
   // Keep heavy server-only packages out of the Turbopack bundle.
   // @copilotkit/runtime pulls in openai, langchain, etc. which are not
   // installed as direct deps; letting Node resolve them at runtime avoids

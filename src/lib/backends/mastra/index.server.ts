@@ -1,6 +1,5 @@
 /**
- * Mastra provider — single-entry registration. See agno's
- * index.server.ts for the rationale; one BackendModule per platform.
+ * Mastra provider — single-entry registration. See docs/backend-integration.md.
  */
 
 import "server-only";

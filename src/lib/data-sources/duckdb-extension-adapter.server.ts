@@ -1,5 +1,6 @@
 /**
- * Factory that turns per-provider DuckDB-extension wiring into a uniform adapter.
+ * Factory that turns per-provider DuckDB-extension wiring into a
+ * uniform adapter (extract + testConnection).
  */
 
 import "server-only";
@@ -20,17 +21,14 @@ export interface DuckdbExtensionAdapterConfig {
   /** DuckDB scanner extension to install/load. */
   extension: DuckdbExtensionName;
   /** Per-provider connection-string builder. Keeps the libpq vs
-   *  mysql_scanner attach grammar isolated to one helper per provider. */
+   *  mysql_scanner attach grammar isolated per provider. */
   buildAttachString: (resolved: ResolvedDataSource) => string;
   /** Emit `USE src.<resolved.database>` after ATTACH so unqualified
    *  table refs resolve. Required for MySQL / MariaDB; wrong for
-   *  Postgres. See file-header comment for the rationale. */
+   *  Postgres. */
   pinDefaultSchema: boolean;
 }
 
-/** A pair of provider-bound functions matching the data-source
- *  adapter contract: `extract(resolved, input)` materialises Parquet,
- *  `testConnection(resolved, signal)` runs a cheap probe. */
 export interface DuckdbExtensionAdapterFns {
   extract(resolved: ResolvedDataSource, input: ExtractInput): Promise<ExtractResult>;
   testConnection(
@@ -55,10 +53,9 @@ export function createDuckdbExtensionAdapter(
     },
 
     async testConnection(resolved, signal) {
-      // testConnectionViaDuckdb already handles its own try/catch
-      // and returns a ConnectionTestResult; the outer try/catch here
-      // covers the pre-call path (e.g. attach-string builder
-      // throwing on malformed `params`).
+      // testConnectionViaDuckdb has its own try/catch; the outer
+      // try/catch here only covers the pre-call path (e.g.
+      // attach-string builder throwing on malformed `params`).
       try {
         return await testConnectionViaDuckdb({
           extension,

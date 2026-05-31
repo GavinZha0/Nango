@@ -1,5 +1,9 @@
 /**
- * Supervisor server-side tools (`delegate_to_agent`, `delegate_async`,
+ * Supervisor server-side tools: `delegate_to_agent`, `delegate_async`,
+ * `create_schedule`, `list_schedules`, `update_schedule`,
+ * `delete_schedule`.
+ *
+ * See docs/orchestrator.md.
  */
 
 import "server-only";
@@ -13,6 +17,7 @@ import { BuiltinAgentTable, ScheduleTable } from "@/lib/db/schema";
 import { listVisibleAgentIds } from "@/lib/access/agent-visibility";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { runner } from "@/lib/runner";
+import { getUserTimezone } from "@/lib/time/user-timezone";
 import {
   nextFireAt,
   registerSchedule,
@@ -34,20 +39,13 @@ const log = childLogger({ component: "supervisor-tools" });
 const DEFAULT_EXCERPT_CHARS = 300;
 
 /** Mutable holder set by the runner after the supervisor's
- *  entity_run row is created. `delegate_to_agent` / `delegate_async`
- *  read it lazily at tool-execute time so sub-runs link back to the
- *  parent via `parent_run_id` AND stay grouped under the same
- *  `thread_id` (the admin `/admin/thread/[id]` view filters by
- *  threadId — without this a sub-run gets a random new UUID from
- *  `startSync` / `startAsync` and disappears from the parent's
- *  thread page). */
+ *  entity_run row is created. Read lazily at tool-execute time so
+ *  sub-runs link back via `parent_run_id` AND stay grouped under the
+ *  same `thread_id` (admin `/admin/thread/[id]` filters by threadId). */
 export interface ParentRunIdHolder {
   current: string | undefined;
-  /** Inherited by sub-runs so they stay in the same admin thread.
-   *  May be undefined for programmatic / scheduled parents that
-   *  themselves had no threadId (in which case the sub-run gets
-   *  its own randomly-generated threadId — the same behaviour as
-   *  before this field existed). */
+  /** Inherited by sub-runs. May be undefined for programmatic /
+   *  scheduled parents that had no threadId. */
   threadId: string | undefined;
 }
 
@@ -58,9 +56,8 @@ export interface SupervisorRuntimeContext {
   parentRunIdHolder: ParentRunIdHolder;
 }
 
-/** A2A-style agent card the supervisor sees in its prompt. SECURITY:
- *  deliberately narrow — no model choice / tool inventory / internal
- *  ids leak through. */
+/** Agent card the supervisor sees in its prompt. Deliberately narrow
+ *  — no model choice / tool inventory / internal ids leak through. */
 interface AgentCard {
   /** Globally unique within the user's catalog; the routing key. */
   displayName: string;
@@ -72,8 +69,7 @@ interface AgentCard {
   promptExcerpt?: string;
 }
 
-/** Public card + server-only routing keys. Held in `Map<displayName,
- *  CatalogEntry>` so delegate resolves in O(1). */
+/** Public card + server-only routing keys. */
 interface CatalogEntry {
   card: AgentCard;
   source: "backend" | "builtin";
@@ -93,15 +89,13 @@ function excerpt(prompt: string | null | undefined): string | undefined {
     : trimmed;
 }
 
-/** Enumerate every entity the user can delegate to. SECURITY: the
- *  supervisor itself is excluded so the LLM never sees itself in
- *  the catalog. */
+/** Enumerate every entity the user can delegate to. The supervisor
+ *  itself is excluded — the LLM must never see itself listed. */
 async function buildCatalog(
   ctx: SupervisorRuntimeContext,
 ): Promise<CatalogEntry[]> {
   const entries: CatalogEntry[] = [];
 
-  // Backend entities (every enabled agent credential's table)
   const { db: dbInstance } = await import("@/lib/db");
   const { CredentialTable } = await import("@/lib/db/schema");
   const credRows: Array<{ id: string; name: string }> = await dbInstance
@@ -152,7 +146,6 @@ async function buildCatalog(
     }
   }
 
-  // Built-in agents (excluding the supervisor itself)
   const visibleIds = await listVisibleAgentIds(ctx.userId);
   for (const id of visibleIds) {
     if (id === ctx.supervisorAgentId) continue;
@@ -178,8 +171,7 @@ async function buildCatalog(
       .where(eq(BuiltinAgentTable.id, id))
       .limit(1);
     if (rows.length === 0) continue;
-    // SECURITY: defensive — per-user uniqueness already prevents a
-    // second supervisor in the same scope.
+    // Defensive — per-user uniqueness already prevents a second supervisor.
     if (rows[0].isSupervisor) continue;
 
     const isPublicByOthers =
@@ -212,38 +204,42 @@ async function buildCatalog(
 }
 
 /** Render catalog as a markdown block for the supervisor's system
- *  prompt. SECURITY: only routing-bearing fields (kind, description,
- *  role, promptExcerpt) leak; routing keys are server-only. */
+ *  prompt. Only routing-bearing fields leak; routing keys stay server-only. */
 function formatCatalogBlock(entries: CatalogEntry[]): string {
   if (entries.length === 0) {
     return [
-      "## Available specialists",
+      "## Available agents (specialists)",
       "",
-      "_No specialists are currently configured. Answer the user directly_",
-      "_or, if delegation would be needed, tell them which capability is_",
-      "_missing._",
+      "_No agents are currently configured. Answer the user directly_",
+      "_or, if delegation would be needed, tell them which capability_",
+      "_is missing._",
     ].join("\n");
   }
 
   const lines: string[] = [
-    "## Available specialists",
+    "## Available agents (specialists)",
     "",
-    "Route to any of these by passing the heading text below as the",
-    "`agent` argument of `delegate_to_agent` or",
-    "`switch_agent_with_context`. Each entry's `kind` tells you what",
-    "you're delegating to: `agent` (single conversational unit),",
-    "`team` (multi-agent group), or `workflow` (directed graph / one-",
-    "shot run). The catalog is exhaustive — if the right specialist",
-    "is not listed, answer the user directly and tell them which",
+    "This catalog lists agents, teams, and workflows under one banner.",
+    "Pass any heading text below as the `agent` argument of",
+    "`delegate_to_agent` / `delegate_async` / `switch_agent_with_context`;",
+    "each entry's `kind` tells you which protocol it speaks: `agent`",
+    "(single conversational unit), `team` (multi-agent group), or",
+    "`workflow` (directed graph / one-shot run). Call",
+    "`get_agent_details` for an agent's role and prompt excerpt when",
+    "picking between similar options. The catalog is exhaustive — if",
+    "no listed agent fits, answer directly and tell the user what",
     "capability is missing.",
     "",
   ];
+  // Slim listing: name + kind + a one-line description. Role and the
+  // 300-char prompt excerpt move to `get_agent_details` (progressive
+  // disclosure) so the catalog stays cheap when many agents are
+  // configured. Lookup tool reads the same in-memory `catalogByName`
+  // map — zero extra DB cost.
   for (const { card } of entries) {
     lines.push(`### ${card.displayName}`);
     lines.push(`- kind: ${card.kind}`);
     if (card.description) lines.push(`- description: ${card.description}`);
-    if (card.role) lines.push(`- role: ${card.role}`);
-    if (card.promptExcerpt) lines.push(`- about: "${card.promptExcerpt}"`);
     lines.push("");
   }
   return lines.join("\n").trimEnd();
@@ -252,53 +248,55 @@ function formatCatalogBlock(entries: CatalogEntry[]): string {
 export interface SupervisorRuntime {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tools: ReturnType<typeof defineTool<any>>[];
-  /** Markdown block describing the routable catalog, appended to the
-   *  supervisor's system prompt by `dispatch/builtin.ts`. Empty-
-   *  catalog content is included so the supervisor still knows
-   *  "nothing to delegate to". */
+  /** Markdown catalog block appended to the supervisor's system
+   *  prompt. Empty-catalog content is included so the supervisor
+   *  still knows "nothing to delegate to". */
   catalogPromptBlock: string;
 }
 
-/** Build the supervisor tool set + catalog block bound to a specific
- *  user + run context. CONTRACT: catalog is precomputed at build time
- *  so each delegate execute resolves names without an extra DB
- *  round-trip. */
+/** Build the supervisor tool set + catalog block. CONTRACT: catalog
+ *  precomputed so each delegate resolves names without a DB roundtrip. */
 export async function buildSupervisorRuntime(
   ctx: SupervisorRuntimeContext,
 ): Promise<SupervisorRuntime> {
   const entries = await buildCatalog(ctx);
   const catalogByName = new Map(entries.map((e) => [e.card.displayName, e]));
   const catalogPromptBlock = formatCatalogBlock(entries);
+  // Snapshot the user's profile timezone once — captured in
+  // `create_schedule`'s closure so it can default to the user's main
+  // tz when the LLM omits the param. One DB read per supervisor build
+  // rather than one per tool invocation; matches the catalog cache
+  // pattern. Null = no profile tz set → fall back to UTC inside the
+  // tool (preserves prior behaviour for fresh users).
+  const profileTimezone = await getUserTimezone(ctx.userId);
 
-  // delegate_to_agent
-  // LLM passes the displayName; server resolves to the internal
-  // (entityId, credentialId) tuple via the captured catalog map.
+  // LLM passes the displayName; server resolves to (entityId,
+  // credentialId) via the captured catalog map.
   const delegate = defineTool({
     name: "delegate_to_agent",
     description:
-      "Run another specialist with a specific task and get its final reply back as a single string. Pass the specialist's `agent` exactly as listed under 'Available specialists' in this prompt. The dispatched specialist runs to completion before this returns; its full event timeline is persisted as a child run.",
+      "Run another agent with a specific task and get its final reply back as a single string. Pass `agent` exactly as listed under 'Available agents' in this prompt. The dispatched agent runs to completion before this returns; its full event timeline is persisted as a child run.",
     parameters: z.object({
       agent: z
         .string()
         .describe(
-          "Specialist display name as listed under 'Available specialists' (e.g. 'Built-in / FirstAgent').",
+          "Agent display name as listed under 'Available agents' (e.g. 'Built-in / FirstAgent').",
         ),
       task: z
         .string()
         .describe(
-          "Direct instruction for the specialist (e.g. \"Analyze ...\", " +
-          "\"Generate ...\", \"Plan ...\"). Address the specialist as " +
-          "if you were the user — do NOT paraphrase in third person " +
-          "(\"The user is asking ...\"). The specialist treats this " +
-          "as its own input.",
+          "Direct instruction for the agent (e.g. \"Analyze ...\", " +
+          "\"Generate ...\", \"Plan ...\"). See the \"Routing tools\" " +
+          "section of the system prompt for the required phrasing.",
         ),
     }),
     execute: async ({ agent, task }) => {
       const entry = catalogByName.get(agent.trim());
       if (!entry) {
+        const available = [...catalogByName.keys()].join(" | ");
         return {
           ok: false as const,
-          error: `Agent '${agent}' not found in the catalog.`,
+          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
       try {
@@ -310,8 +308,7 @@ export async function buildSupervisorRuntime(
           task,
           mode: "sync",
           parentRunId: ctx.parentRunIdHolder.current,
-          // Inherit parent's threadId so the sub-run lands in the
-          // same `/admin/thread/[id]` view as its parent.
+          // Inherit threadId so the sub-run lands in the same admin thread.
           threadId: ctx.parentRunIdHolder.threadId,
           initiator: "orchestrator",
           ownerId: ctx.userId,
@@ -342,36 +339,33 @@ export async function buildSupervisorRuntime(
     },
   });
 
-  // delegate_async
-  // Sibling of delegate for `async` mode: returns runId immediately
-  // and the supervisor wraps up its turn. User is notified via
-  // EventBus + `notification` row on terminal events.
+  // Async sibling of delegate — returns runId immediately and the
+  // supervisor wraps up its turn. User notified via EventBus on terminal.
   const delegateAsync = defineTool({
     name: "delegate_async",
     description:
-      "Dispatch a specialist task in the background and return immediately. Pass the specialist's `agent` exactly as listed under 'Available specialists'. The tool returns a `runId` right away; the user will be notified when the specialist finishes. Use this when the user has enabled async mode or when a task is expected to take a while.",
+      "Dispatch an agent task in the background and return immediately. Pass `agent` exactly as listed under 'Available agents'. The tool returns a `runId` right away; the user will be notified when the agent finishes. Use this when the user has enabled async mode or when a task is expected to take a while.",
     parameters: z.object({
       agent: z
         .string()
         .describe(
-          "Specialist display name as listed under 'Available specialists' (e.g. 'Built-in / FirstAgent').",
+          "Agent display name as listed under 'Available agents' (e.g. 'Built-in / FirstAgent').",
         ),
       task: z
         .string()
         .describe(
-          "Direct instruction for the specialist (e.g. \"Analyze ...\", " +
-          "\"Generate ...\", \"Plan ...\"). Address the specialist as " +
-          "if you were the user — do NOT paraphrase in third person " +
-          "(\"The user is asking ...\"). The specialist treats this " +
-          "as its own input.",
+          "Direct instruction for the agent (e.g. \"Analyze ...\", " +
+          "\"Generate ...\", \"Plan ...\"). See the \"Routing tools\" " +
+          "section of the system prompt for the required phrasing.",
         ),
     }),
     execute: async ({ agent, task }) => {
       const entry = catalogByName.get(agent.trim());
       if (!entry) {
+        const available = [...catalogByName.keys()].join(" | ");
         return {
           ok: false as const,
-          error: `Agent '${agent}' not found in the catalog.`,
+          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
       try {
@@ -382,7 +376,6 @@ export async function buildSupervisorRuntime(
           task,
           mode: "async",
           parentRunId: ctx.parentRunIdHolder.current,
-          // Inherit parent's threadId — see delegate_to_agent above.
           threadId: ctx.parentRunIdHolder.threadId,
           initiator: "orchestrator",
           ownerId: ctx.userId,
@@ -413,29 +406,65 @@ export async function buildSupervisorRuntime(
     },
   });
 
-  // create_schedule
-  // Persist a one-shot / recurring rule and arm its in-process timer.
-  // Spec: `(startAt, [intervalValue, intervalUnit], [endAt])` — no
-  // cron in the LLM-facing API. One-shots auto-disable after fire;
-  // recurring auto-disable past endAt.
-  const createSchedule = defineTool({
-    name: "create_schedule",
+  // Progressive-disclosure lookup over the same in-memory `catalogByName`
+  // map the routing tools use — zero extra DB roundtrips. The catalog
+  // block deliberately omits role / promptExcerpt to keep the prompt
+  // small; this tool surfaces them on demand when the supervisor needs
+  // to disambiguate between similar-sounding agents.
+  const getAgentDetails = defineTool({
+    name: "get_agent_details",
     description:
-      "Create a one-shot or recurring schedule that fires `task` against the named specialist. Pass the specialist's `agent` exactly as listed under 'Available specialists'. `startAt` (ISO datetime) is required and is the first fire. Add `intervalValue` + `intervalUnit` (one of 'minute' | 'hour' | 'day' | 'week' | 'month') for a recurring schedule. Add `endAt` (ISO datetime) to cap a recurring schedule. Optional `timezone` is an IANA name (e.g. 'America/New_York'); defaults to UTC. Each fire produces a notification when it finishes.",
+      "Look up an agent's role and a short excerpt of its own system " +
+      "prompt by display name. Use this when picking between " +
+      "similar-sounding agents in the catalog — the catalog only " +
+      "shows name + kind + description; this tool reveals the rest.",
     parameters: z.object({
       agent: z
         .string()
         .describe(
-          "Specialist display name as listed under 'Available specialists'.",
+          "Agent display name exactly as listed under 'Available agents' " +
+          "(e.g. 'Built-in / FirstAgent').",
+        ),
+    }),
+    execute: async ({ agent }) => {
+      const entry = catalogByName.get(agent.trim());
+      if (!entry) {
+        const available = [...catalogByName.keys()].join(" | ");
+        return {
+          ok: false as const,
+          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
+        };
+      }
+      return {
+        ok: true as const,
+        displayName: entry.card.displayName,
+        kind: entry.card.kind,
+        description: entry.card.description ?? null,
+        role: entry.card.role ?? null,
+        promptExcerpt: entry.card.promptExcerpt ?? null,
+      };
+    },
+  });
+
+  // Persist a one-shot / recurring rule and arm its in-process timer.
+  // Spec: `(startAt, [intervalValue, intervalUnit], [endAt])` — no
+  // cron. One-shots auto-disable after fire; recurring past endAt.
+  const createSchedule = defineTool({
+    name: "create_schedule",
+    description:
+      "Create a one-shot or recurring schedule that fires `task` against the named agent. Pass `agent` exactly as listed under 'Available agents'. `startAt` (ISO datetime) is required and is the first fire. Add `intervalValue` + `intervalUnit` (one of 'minute' | 'hour' | 'day' | 'week' | 'month') for a recurring schedule. Add `endAt` (ISO datetime) to cap a recurring schedule. Optional `timezone` is an IANA name (e.g. 'America/New_York'); when omitted, defaults to the user's profile timezone. Before computing a relative time like 'tomorrow 9am' or 'in 30 minutes', call `get_current_datetime` first to anchor on the actual wall clock. Each fire produces a notification when it finishes.",
+    parameters: z.object({
+      agent: z
+        .string()
+        .describe(
+          "Agent display name as listed under 'Available agents'.",
         ),
       task: z
         .string()
         .describe(
-          "Direct instruction for the specialist (e.g. \"Analyze ...\", " +
-          "\"Generate ...\", \"Plan ...\"). Address the specialist as " +
-          "if you were the user — do NOT paraphrase in third person " +
-          "(\"The user is asking ...\"). The specialist treats this " +
-          "as its own input.",
+          "Direct instruction for the agent (e.g. \"Analyze ...\", " +
+          "\"Generate ...\", \"Plan ...\"). See the \"Routing tools\" " +
+          "section of the system prompt for the required phrasing.",
         ),
       startAt: z
         .string()
@@ -465,7 +494,10 @@ export async function buildSupervisorRuntime(
       timezone: z
         .string()
         .optional()
-        .describe("IANA timezone, e.g. 'America/New_York'. Defaults to 'UTC'."),
+        .describe(
+          "IANA timezone, e.g. 'America/New_York'. Defaults to the " +
+          "user's profile timezone, then UTC.",
+        ),
       name: z
         .string()
         .optional()
@@ -483,12 +515,13 @@ export async function buildSupervisorRuntime(
     }) => {
       const entry = catalogByName.get(agent.trim());
       if (!entry) {
+        const available = [...catalogByName.keys()].join(" | ");
         return {
           ok: false as const,
-          error: `Agent '${agent}' not found in the catalog.`,
+          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
-      const tz = timezone?.trim() || "UTC";
+      const tz = timezone?.trim() || profileTimezone || "UTC";
       const startDate = new Date(startAt);
       const endDate = endAt ? new Date(endAt) : null;
       const ivValue = intervalValue ?? null;
@@ -549,9 +582,7 @@ export async function buildSupervisorRuntime(
     },
   });
 
-  // list_schedules
-  // SECURITY: only the user's own schedules are visible. Returns the
-  // same fields the panel does so the LLM can describe them.
+  // Only the user's own schedules are visible.
   const listMySchedules = defineTool({
     name: "list_schedules",
     description:
@@ -585,23 +616,15 @@ export async function buildSupervisorRuntime(
     },
   });
 
-  // update_schedule
-  // Partial update over the same fields create_schedule accepts,
-  // plus `enabled` for pause / resume. Re-arms the in-process timer
-  // through the shared mutation helper. The target agent and
-  // credential are intentionally NOT mutable — switching specialists
-  // is semantically a different schedule and should go through
-  // delete + create.
-  //
-  // SECURITY: ownership scoped via `ownerId = ctx.userId` inside the
-  // helper. STRICTER THAN REST: a `startAt` patch in the past is
-  // refused here so the LLM can't accidentally trigger a backfill
-  // by picking a stale timestamp; backfill stays a power-user move
-  // through the REST PATCH route.
+  // Partial update over create_schedule fields plus `enabled`.
+  // Target agent and credential are NOT mutable — switching is a
+  // different schedule (delete + create).
+  // STRICTER THAN REST: past `startAt` is refused so the LLM can't
+  // trigger a backfill; that stays a REST-only power move.
   const updateSchedule = defineTool({
     name: "update_schedule",
     description:
-      "Update fields of an existing schedule by id, returned from `list_schedules`. Only the provided fields change; omit a field to leave it as-is. Pause a schedule by passing `enabled: false`, resume with `enabled: true`. Editing any of (`startAt`, `intervalValue`, `intervalUnit`, `endAt`) re-defines when the schedule fires next and clears its last-run history. To switch the schedule to a different specialist, delete it and create a new one.",
+      "Update fields of an existing schedule by id, returned from `list_schedules`. Only the provided fields change; omit a field to leave it as-is. Pause a schedule by passing `enabled: false`, resume with `enabled: true`. Editing any of (`startAt`, `intervalValue`, `intervalUnit`, `endAt`) re-defines when the schedule fires next and clears its last-run history. To switch the schedule to a different agent, delete it and create a new one.",
     parameters: z.object({
       scheduleId: z
         .string()
@@ -610,7 +633,7 @@ export async function buildSupervisorRuntime(
         .string()
         .min(1)
         .optional()
-        .describe("New natural-language task / prompt for the specialist."),
+        .describe("New natural-language task / prompt for the agent."),
       startAt: z
         .string()
         .optional()
@@ -703,10 +726,7 @@ export async function buildSupervisorRuntime(
     },
   });
 
-  // delete_schedule
-  // Hard-delete: the schedule row and its in-process timer are
-  // removed atomically. To pause without deleting, use
-  // `update_schedule` with `enabled: false`.
+  // Hard-delete: row + in-process timer removed atomically.
   const deleteSchedule = defineTool({
     name: "delete_schedule",
     description:
@@ -745,6 +765,7 @@ export async function buildSupervisorRuntime(
     tools: [
       delegate,
       delegateAsync,
+      getAgentDetails,
       createSchedule,
       listMySchedules,
       updateSchedule,
@@ -754,12 +775,11 @@ export async function buildSupervisorRuntime(
   };
 }
 
-/** Supervisor-only tools auto-bound on promote / removed on demote.
- *  Used by the editor to filter user-facing tool choices and by
- *  migrations to clean stale junction rows. */
+/** Supervisor-only tools auto-bound on promote / removed on demote. */
 export const SUPERVISOR_TOOL_NAMES: readonly string[] = [
   "delegate_to_agent",
   "delegate_async",
+  "get_agent_details",
   "create_schedule",
   "list_schedules",
   "update_schedule",

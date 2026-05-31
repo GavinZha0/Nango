@@ -44,7 +44,7 @@ export type {
 //
 // Re-export every concrete event type the bridges and the runner emit, plus
 // the `EventType` enum, so call sites can stop using the loose `BaseEvent`
-// + `as BaseEvent` cast pattern. See `docs/runner-events.md` §11 for the
+// + `as BaseEvent` cast pattern. See `docs/runner-events.md` for the
 // full plan; the casts are removed file-by-file in subsequent PRs.
 //
 // Two reasons this lives in *this* barrel rather than a new top-level module:
@@ -122,7 +122,7 @@ import type {
  * or persisted by the runner / persisting-agent switch, so widening
  * implies a corresponding handler update.
  *
- * @see docs/runner-events.md §11 (rationale + per-PR migration plan)
+ * See docs/runner-events.md.
  */
 export type AgUiEvent =
   | RunStartedEvent

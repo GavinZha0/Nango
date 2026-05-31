@@ -1,5 +1,7 @@
 /**
- * Server-side notification authoring. The runner calls
+ * Server-side notification authoring.
+ *
+ * See docs/runner.md.
  */
 
 import "server-only";
@@ -88,9 +90,7 @@ export async function recordRunNotification(
     publish(input.ownerId, { kind: "notification", notification: row });
     return row;
   } catch (err) {
-    // QUIRK: drizzle-orm wraps the postgres reason in `.cause` and
-    // only shows "Failed query: …" in `.message` — without the cause
-    // we can't distinguish connection vs constraint failures.
+    // drizzle-orm hides the postgres reason in `.cause`; surface it.
     const cause = (err as { cause?: unknown }).cause;
     log.warn(
       {

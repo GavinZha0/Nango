@@ -1,5 +1,7 @@
 /**
  * stdout / stderr post-processing: truncation + path masking.
+ *
+ * See docs/sandbox.md.
  */
 
 import { maskOutput, type PathMapping } from "./path-mapper";

@@ -1,45 +1,13 @@
 /**
- * Workflow error contract — engine-internal `WorkflowError` class
- * plus the wire-shape `WorkflowErrorResult` and the single
- * boundary-conversion helper `toResult()`.
- *
- * Design — see docs/workflow-architecture.md §7.9 for the full
- * rationale. Briefly:
- *
- * - The class is thrown inside the engine (spec validation /
- *   resolution / node execution). `instanceof WorkflowError` is
- *   checked ONLY inside `src/lib/workflows/` — external consumers
- *   work off the plain-object `WorkflowErrorResult` shape (mirrors
- *   `web-search/errors.ts`'s "no instanceof outside this module"
- *   rule).
- * - At the engine's top-level catch boundary, call `toResult(we)`
- *   ONCE; the resulting plain object flows uniformly to all three
- *   consumers:
- *     1. `defineTool` execute() returns it to the LLM
- *        (modify_workflow / invoke_workflow / etc.)
- *     2. `entity_run.errorDetails` JSONB column persists it for
- *        admin forensics at `/admin/run/[id]`
- *     3. HTTP route handlers return `NextResponse.json(result)`
- *        with status 200 — workflow execution failure is a
- *        business-level outcome, NOT an HTTP-layer error.
- *
- * Field-naming convention reflects defineTool tool-return shape:
- *   `error: <code>` + `message: <text>` (see e.g.
- *   `data-sources/lookup.ts`:
- *      `{ ok: false, error: "NOT_FOUND", message: "..." }`).
- * The class field is named `errorCode` for unambiguous semantics
- * inside engine code; `toResult()` renames to `error` on the wire.
+ * Workflow error contract — engine-internal `WorkflowError` class,
+ * the wire-shape `WorkflowErrorResult`, and the boundary helper
+ * `toResult()` that converts between them. See docs/workflow.md.
  */
 
 /**
- * Closed enum of failure categories — V1 surface. The agent's
- * `modify_workflow` system prompt inlines this list so the LLM can
- * pattern-match on `error` reliably.
- *
- * V1.1+ codes (`CONDITION_EVALUATION_ERROR`, `SUSPEND_TIMEOUT`)
- * are intentionally absent — V1 spec validation rejects condition
- * nodes (D23) and suspend calls (D25) with
- * `SPEC_FEATURE_UNSUPPORTED` instead.
+ * Closed enum of failure categories. The save pipeline and the
+ * future workflow-rewrite chat path both pattern-match on `error`,
+ * so the list must stay stable on the wire.
  */
 export type WorkflowErrorCode =
   // ─── spec validation (statically detected; before any dispatch) ────
@@ -47,43 +15,42 @@ export type WorkflowErrorCode =
   | "SPEC_SCHEMA_MISMATCH"
   | "SPEC_VERSION_MISMATCH"
   | "SPEC_DAG_CYCLE"
-  | "SPEC_NO_OUTPUTS" // spec.outputs missing/empty (D28)
+  | "SPEC_NO_OUTPUTS"
   | "SPEC_REF_UNREACHABLE"
   | "SPEC_REF_UNKNOWN_NODE"
   | "SPEC_REF_UNKNOWN_FIELD"
   | "SPEC_DESCRIPTION_MISSING"
-  | "SPEC_DISCRIMINATOR_AMBIGUOUS" // node has both `tool` AND `agent`
+  | "SPEC_DISCRIMINATOR_AMBIGUOUS"
   | "SPEC_DISCRIMINATOR_MISSING"
-  | "SPEC_FEATURE_UNSUPPORTED" // V1.1+ feature in V1 spec (D23 / D25)
+  | "SPEC_FEATURE_UNSUPPORTED"
   // ─── resolution (lookup / canonicalization) ────────────────────────
-  | "TOOL_NOT_FOUND" // referenced tool no longer in registry
-  | "AGENT_NOT_FOUND" // referenced agent no longer in catalog
-  | "AGENT_SUPERVISOR_NOT_ALLOWED" // is_supervisor=true (D21)
-  | "AGENT_UI_TOOLS_NOT_ALLOWED" // has frontend_tool in tool list (D21)
-  | "TOOL_INPUT_SCHEMA_MISMATCH" // input fails tool.parameters
+  | "TOOL_NOT_FOUND"
+  | "AGENT_NOT_FOUND"
+  | "AGENT_SUPERVISOR_NOT_ALLOWED"
+  | "AGENT_UI_TOOLS_NOT_ALLOWED"
+  | "TOOL_INPUT_SCHEMA_MISMATCH"
   | "AGENT_INPUT_INVALID"
   // ─── execution ─────────────────────────────────────────────────────
   | "TOOL_EXECUTION_FAILED"
   | "AGENT_EXECUTION_FAILED"
-  | "CODE_EXECUTION_FAILED" // sandbox code node non-zero exitCode (D35)
-  | "OUTPUT_SCHEMA_MISMATCH" // agent structured-output failed (§5.2.6)
-  | "REF_UNRESOLVED" // saved ref → undefined at runtime (§7.10.3)
+  | "CODE_EXECUTION_FAILED"
+  | "OUTPUT_SCHEMA_MISMATCH"
+  | "REF_UNRESOLVED"
   | "PYTHON_RUNTIME_ERROR"
   | "SQL_SYNTAX_ERROR"
   | "SQL_PERMISSION_DENIED"
   | "HTTP_REQUEST_FAILED"
   | "NODE_TIMEOUT"
   | "WORKFLOW_TIMEOUT"
-  | "OUTPUT_REF_UNRESOLVED" // spec.outputs entry's ref didn't resolve (D28)
+  | "OUTPUT_REF_UNRESOLVED"
   // ─── workflow-level ────────────────────────────────────────────────
-  | "BUDGET_EXCEEDED" // modify_workflow retry budget (§7.9.5)
-  | "UNKNOWN_ERROR"; // fallback — always populate `message`
+  | "BUDGET_EXCEEDED"
+  | "UNKNOWN_ERROR";
 
 /**
- * Codes that are workflow-scoped — they describe a failure that has
- * no single node to blame. For these, `nodeId` is omitted from the
- * error envelope. For every OTHER code, `nodeId` must be set
- * (contract enforced by code review; ~30 engine throw sites in V1).
+ * Codes that describe a failure with no single node to blame. For
+ * these, `nodeId` is omitted from the error envelope. For every
+ * OTHER code, `nodeId` must be set.
  */
 export const WORKFLOW_SCOPED_ERROR_CODES: readonly WorkflowErrorCode[] = [
   "SPEC_INVALID_JSON",
@@ -97,8 +64,8 @@ export const WORKFLOW_SCOPED_ERROR_CODES: readonly WorkflowErrorCode[] = [
 ] as const;
 
 /**
- * Engine-internal throwable. See top-of-file comment + §7.9 for the
- * full contract.
+ * Engine-internal throwable. See docs/workflow.md for the full
+ * contract.
  *
  * @example
  *   throw new WorkflowError({
@@ -111,18 +78,11 @@ export const WORKFLOW_SCOPED_ERROR_CODES: readonly WorkflowErrorCode[] = [
  */
 export class WorkflowError extends Error {
   readonly errorCode: WorkflowErrorCode;
-  /**
-   * Numeric id of the failing node (D29). Required for node-scoped
-   * codes; omitted for the codes listed in
-   * {@link WORKFLOW_SCOPED_ERROR_CODES}.
-   */
+  /** Required for node-scoped codes; omitted for {@link WORKFLOW_SCOPED_ERROR_CODES}. */
   readonly nodeId?: number;
-  /**
-   * Derived at throw time from `spec.nodes[nodeId].tool` or
-   * `.agent`. Carries readability into `entity_run.errorDetails`
-   * persistence — a stored error remains self-contained even after
-   * later `modify_workflow` turns rewrite the spec.
-   */
+  /** Derived at throw time from `spec.nodes[nodeId].tool` or `.agent`
+   *  so a stored error stays self-contained if the spec is later
+   *  rewritten. */
   readonly nodeName?: string;
 
   constructor(input: {
@@ -132,10 +92,8 @@ export class WorkflowError extends Error {
     nodeName?: string;
     cause?: unknown;
   }) {
-    // ES2022 native `cause` chain. Available on the instance via
-    // `we.cause` for developer logs; intentionally NOT serialized
-    // into the wire envelope by `toResult()` (kept as engine-side
-    // diagnostic only).
+    // ES2022 native `cause` chain — intentionally NOT serialized into
+    // the wire envelope by `toResult()` (engine-side diagnostic only).
     super(input.message, { cause: input.cause });
     this.name = "WorkflowError";
     this.errorCode = input.errorCode;
@@ -145,13 +103,9 @@ export class WorkflowError extends Error {
 }
 
 /**
- * The plain-object shape that all engine error consumers — LLM
- * `defineTool` returns, `entity_run.errorDetails` JSONB, HTTP route
- * bodies — work with. Produced by {@link toResult}.
- *
- * `error` is the wire-field name (matches Nango's defineTool
- * tool-return convention); it carries the same value as the class
- * field `errorCode`.
+ * Plain-object shape consumed by everything outside the engine.
+ * `error` is the wire-field name (defineTool tool-return convention);
+ * value is the same as the class's `errorCode`.
  */
 export interface WorkflowErrorResult {
   ok: false;
@@ -163,11 +117,7 @@ export interface WorkflowErrorResult {
 
 /**
  * Convert an engine-internal `WorkflowError` to the wire shape.
- * Called once at each engine top-level catch boundary
- * (e.g. `engine.execute()`, `engine.validateSpec()`).
- *
- * Conditional inclusion of `nodeId` / `nodeName` keeps the wire
- * envelope minimal for workflow-scoped errors.
+ * Called once at each engine top-level catch boundary.
  */
 export function toResult(we: WorkflowError): WorkflowErrorResult {
   const result: WorkflowErrorResult = {

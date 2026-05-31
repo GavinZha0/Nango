@@ -2,7 +2,7 @@
 
 /**
  * SshServerPanel — left-panel surface for the agent-facing
- * @see docs/ssh.md §3
+ * See docs/ssh.md.
  */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";

@@ -1,7 +1,5 @@
 /**
- * agno entity discovery — server-only.
- *
- * @see docs/backend-integration.md#11-provider-specific-quirks-and-mappings
+ * agno entity discovery — server-only. See docs/backend-integration.md.
  */
 
 import "server-only";
@@ -11,9 +9,7 @@ import type { EntityDescriptor, EntityKind } from "../types";
 
 const log = childLogger({ component: "agno-entity-fetcher" });
 
-// Raw upstream shapes (only the fields we read)
-
-/** Raw agno agent shape. All other fields go into `EntityDescriptor.raw`. */
+/** Raw agno agent shape — only the fields we read. */
 interface AgnoAgentRaw {
   id: string;
   name?: string;
@@ -25,27 +21,17 @@ interface AgnoAgentRaw {
   knowledge?: unknown;
   /** agno embeds the full system prompt here. */
   system_message?: { instructions?: string; markdown?: boolean; [k: string]: unknown };
-  /** Visibility hints — see `isAgnoVisible` below. */
   memory?: { metadata?: { visible?: boolean } } & Record<string, unknown>;
-  /**
-   * Free-form metadata bag. We read `visible` (visibility filter) and
-   * `version` (the upstream agent's version label, surfaced in the UI
-   * via EntityDescriptor.version). `version` is intentionally typed as
-   * `unknown` because the upstream is a Python dict — callers may write
-   * a string ("1.2.0"), a number (1), or omit it entirely; normalization
-   * happens in `projectAgent` below.
-   */
+  /** `version` is `unknown` — upstream Python dict may emit string, number, or omit. */
   metadata?: { visible?: boolean; version?: unknown } & Record<string, unknown>;
   [k: string]: unknown;
 }
 
-/** Raw agno team shape — same fields as agent + a `members` list. */
 interface AgnoTeamRaw extends AgnoAgentRaw {
   members?: unknown[];
 }
 
-/** Raw agno workflow shape. Mirrors the Pydantic
- *  `WorkflowSummaryResponse` model (`agno/os/schema.py`). */
+/** Mirrors agno's `WorkflowSummaryResponse` (`agno/os/schema.py`). */
 interface AgnoWorkflowRaw {
   id: string;
   name?: string;
@@ -59,10 +45,6 @@ interface AgnoWorkflowRaw {
   [k: string]: unknown;
 }
 
-// Projection
-
-/** Project an agno raw agent / team object onto the canonical shape.
- *  Used by both agent and team listings. */
 function projectAgent(
   raw: AgnoAgentRaw,
   credentialId: string,
@@ -72,7 +54,7 @@ function projectAgent(
     raw.model && raw.model.model
       ? {
           id: raw.model.model,
-          // Only set a separate displayName when agno's class label
+          // Only emit a separate displayName when agno's class label
           // (e.g. "OpenAIResponses") differs from the model id.
           displayName:
             raw.model.name && raw.model.name !== raw.model.model
@@ -83,20 +65,14 @@ function projectAgent(
       : undefined;
 
   const toolCount = raw.tools?.tools?.length ?? 0;
-  // agno embeds the full system prompt under `system_message.instructions`.
   const prompt =
     typeof raw.system_message?.instructions === "string"
       ? raw.system_message.instructions
       : undefined;
 
-  // Knowledge bases — agno's `knowledge` shape varies; if it's an
-  // array, count entries; otherwise leave 0.
   const kbCount = Array.isArray(raw.knowledge) ? raw.knowledge.length : 0;
 
-  // Version label from agno-side `metadata.version`. Upstream is a
-  // Python dict so the value type is unknown — accept string or number,
-  // ignore anything else (including empty string). Workflows use a
-  // different field (`current_version`); see `projectWorkflow` below.
+  // Accept string or number from the upstream Python dict.
   const rawVersion: unknown = raw.metadata?.version;
   const version: string | undefined =
     typeof rawVersion === "string" && rawVersion.length > 0
@@ -124,15 +100,11 @@ function projectAgent(
   };
 }
 
-/** Project an agno workflow summary onto the canonical EntityDescriptor. */
 function projectWorkflow(
   raw: AgnoWorkflowRaw,
   credentialId: string,
 ): EntityDescriptor {
-  // agno stores `current_version` as a numeric (e.g. 1, 2) — stringify
-  // so it shares the same canonical `string` type as future semver-style
-  // versions from other backends, and so the UI chip rendering is
-  // uniform across providers.
+  // Stringify so it matches semver-style versions from other backends.
   const version: string | undefined =
     raw.current_version != null ? String(raw.current_version) : undefined;
 
@@ -149,21 +121,16 @@ function projectWorkflow(
   };
 }
 
-/** True iff the agno agent / team is visible. agno hides team members
- *  and other agents via `metadata.visible = false` or
- *  `memory.metadata.visible = false`. */
+/** agno hides team members / other agents via `metadata.visible = false` or `memory.metadata.visible = false`. */
 function isAgnoVisible(a: AgnoAgentRaw): boolean {
   const memVis = a.memory?.metadata?.visible;
   const metaVis = a.metadata?.visible;
   return memVis !== false && metaVis !== false;
 }
 
-// Server-side direct fetcher (the entry-point used by entity-catalog)
-
 /**
- * Fetch agno's `/agents` + `/teams` + `/workflows` directly from the
- * credential's `restUrl` and project to the canonical EntityDescriptor.
- * Sub-failures degrade gracefully.
+ * Fetch agno's `/agents` + `/teams` + `/workflows` directly. Each
+ * sub-failure degrades to an empty list rather than aborting the call.
  */
 export async function fetchAgnoEntitiesServer(
   credentialId: string,

@@ -35,8 +35,7 @@ vi.mock("@/lib/db/schema", () => ({
 
 const buildUserToolCatalog = vi.fn(async () => new Map());
 vi.mock("@/lib/builtin-tools/build-user-catalog", () => ({
-  buildUserToolCatalog: (...args: unknown[]) =>
-    buildUserToolCatalog(...args),
+  buildUserToolCatalog: () => buildUserToolCatalog(),
 }));
 
 const getActiveAdapter = vi.fn(async () => ({
@@ -48,7 +47,7 @@ const getActiveAdapter = vi.fn(async () => ({
   })),
 }));
 vi.mock("@/lib/sandbox/registry.server", () => ({
-  getActiveAdapter: (...args: unknown[]) => getActiveAdapter(...args),
+  getActiveAdapter: () => getActiveAdapter(),
 }));
 
 const runnerStart = vi.fn();
@@ -86,9 +85,11 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 // ─── Fixtures + helpers ────────────────────────────────────────────────
 
 const baseSpec: CanonicalWorkflowSpec = {
-  version: 1,
+  version: "1.0",
+  name: "test-spec",
   nodes: [],
   outputs: { result: "@nodes.0.text" },
+  refReconAlgorithm: "ref_recon_v1",
 };
 
 const agentReq: AgentRunRequest = {

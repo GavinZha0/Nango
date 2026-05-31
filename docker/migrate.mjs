@@ -1,11 +1,16 @@
 /**
- * Lightweight database migration runner for Docker containers.
+ * Lightweight database migration runner — the single migration applier for
+ * BOTH the Docker container (docker/start.sh) and host dev (`pnpm db:migrate`).
  *
  * Maintains a `__migrations` table to track which files have been applied.
  * Only runs new migrations. Each SQL file is split on '--> statement-breakpoint'
  * and executed statement by statement.
  *
  * Uses the `pg` package which is already bundled in the standalone build.
+ * Env on host is loaded via `node --env-file-if-exists=.env` (see package.json);
+ * in the container env comes from docker-compose. No `dotenv` import here on
+ * purpose — `dotenv` is a devDependency and is absent from the standalone
+ * runtime closure, so importing it would crash container startup.
  *
  * Usage: node docker/migrate.mjs
  */
@@ -22,7 +27,7 @@ function getPostgresUrl() {
   const user = process.env.POSTGRES_USER || "nango";
   const password = process.env.POSTGRES_PASSWORD || "nango";
   const host = process.env.POSTGRES_HOST || "localhost";
-  const port = process.env.POSTGRES_PORT || "5432";
+  const port = process.env.POSTGRES_PORT || "5433";
   const db = process.env.POSTGRES_DB || "nango";
   return `postgres://${user}:${password}@${host}:${port}/${db}`;
 }

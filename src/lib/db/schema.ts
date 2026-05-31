@@ -43,7 +43,14 @@ export const UserTable = pgTable(
     // Custom extension fields (registered via additionalFields in auth-instance)
     org: text("org"), // free-text org label
     imAccounts: jsonb("im_accounts"),  // { teams?: string, dingtalk?: string, ... }
-    /** Soft-delete timestamp; null = active. See docs/rbac.md §4. */
+    /** IANA timezone (e.g. "Asia/Shanghai") — the user's primary
+     *  timezone. Null until first detected from the browser on session
+     *  load (WorkspaceProvider); once set it is NEVER auto-overwritten,
+     *  so a user-chosen value sticks across logins and devices. Source
+     *  of truth for the `get_current_datetime` tool and the default
+     *  timezone of newly created schedules. */
+    timezone: text("timezone"),
+    /** Soft-delete timestamp; null = active. See docs/rbac.md. */
     deletedAt: timestamp("deleted_at"),
     deletedBy: uuid("deleted_by").references((): AnyPgColumn => UserTable.id, {
       onDelete: "set null",
@@ -102,11 +109,6 @@ export const VerificationTable = pgTable("verification", {
 
 // Nango domain tables
 
-// MenuItemTable was dropped in migration 0032; the artifact and
-// dashboard libraries each now own their own self-referencing tree
-// (see ArtifactTable / DashboardTable below).
-// @see docs/artifact-dashboard-migration.md §4.4
-
 /**
  * DataSource — agent-facing data-access entity.
  *
@@ -117,10 +119,9 @@ export const VerificationTable = pgTable("verification", {
  * credential can back multiple data sources with different policies
  * (e.g. `prod_pg_readonly` vs `prod_pg_admin` over the same DB).
  *
- * The runtime-facing identifier is `name` (LLM passes this to
- * extract_dataset_by_sql.dataSourceId); see docs/data-sources.md §3.
- *
- * Concept introduced in Phase D-2.1; populated + enforced in D-2.2.
+ * The runtime-facing identifier is `name` (LLM passes this as the
+ * `extract_dataset_by_sql.dataSourceName` parameter). See
+ * docs/data-sources.md.
  */
 export const DataSourceTable = pgTable("data_source", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
@@ -211,7 +212,7 @@ export const DataSourceTable = pgTable("data_source", {
  * `src/lib/artifacts/service.ts`), not by DB constraints, because
  * Drizzle's `CHECK` support is fragile across migrations.
  *
- * @see docs/artifact-dashboard-migration.md §4
+ * See docs/artifact-evolution.md.
  */
 export const ArtifactTable = pgTable(
   "artifact",
@@ -240,27 +241,22 @@ export const ArtifactTable = pgTable(
     displayOrder: integer("display_order").notNull().default(0),
 
     /**
-     * Workflow integration columns (D28; see
-     * docs/workflow-architecture.md §4.5).
+     * Workflow integration columns. Both NULL for artifacts not
+     * backed by a workflow — HTML, PPT, image, code, report, and
+     * standalone charts with inline data. Both non-NULL (enforced
+     * at the service layer per the doc-comment above) for chart
+     * artifacts produced by `save-as-workflow`.
      *
-     * Both NULL for artifacts not backed by a workflow — HTML, PPT,
-     * image, code, report, and standalone charts with inline data.
-     * Both non-NULL (enforced at the service layer per the doc-comment
-     * above) for chart artifacts produced by `save-as-workflow`.
-     *
-     * The FK is intentionally non-unique: a single workflow can power
-     * many artifacts (1:N per D8). Refresh re-executes the workflow,
+     * The FK is intentionally non-unique: a single workflow can
+     * power many artifacts (1:N). Refresh re-executes the workflow,
      * engine resolves `spec.outputs`, and returns
      * `bundle[workflowOutputField]` for the artifact to render.
      */
     workflowId: uuid("workflow_id").references(() => WorkflowTable.id, {
       onDelete: "set null",
     }),
-    /**
-     * Names a key in `workflow.spec.outputs` (D28 — `spec.outputs` is
-     * a top-level `Record<key, RefString>` map; replaced the earlier
-     * draft's `workflow_output_node` + outputData[] form).
-     */
+    /** Names a key in `workflow.spec.outputs` — a top-level
+     *  `Record<key, RefString>` map declared in the workflow spec. */
     workflowOutputField: text("workflow_output_field"),
 
     createdBy: uuid("created_by")
@@ -274,10 +270,10 @@ export const ArtifactTable = pgTable(
     index("artifact_created_by_idx").on(t.createdBy),
     index("artifact_type_idx").on(t.type),
     index("artifact_source_idx").on(t.sourceThreadId, t.sourceOutcomeId),
-    // Workflow reverse lookup: "show me all artifacts using workflow X"
-    // (Stage 2 modify_workflow dependent-artifact discovery + admin
-    // cascade-delete UX). Without this index, deleting a workflow row
-    // forces a sequential scan over artifact to perform the
+    // Workflow reverse lookup: "show me all artifacts using workflow
+    // X" — used for dependent-artifact discovery + admin cascade-
+    // delete UX. Without this index, deleting a workflow row forces
+    // a sequential scan over artifact to perform the
     // `ON DELETE SET NULL` action.
     index("artifact_workflow_id_idx").on(t.workflowId),
     // (created_by, parent_id, name) unique — same owner cannot have two
@@ -299,7 +295,7 @@ export const ArtifactTable = pgTable(
  *    published (`published_at IS NOT NULL`), making it readable by
  *    any authenticated user in the tenant.
  *
- * @see docs/artifact-dashboard-migration.md §4.2
+ * See docs/artifact-evolution.md.
  */
 export const DashboardTable = pgTable(
   "dashboard",
@@ -348,7 +344,7 @@ export const DashboardTable = pgTable(
  *  - Delete artifact while referenced ⇒ RESTRICT. Users must remove
  *    the artifact from every dashboard before deletion.
  *
- * @see docs/artifact-dashboard-migration.md §4.3
+ * See docs/artifact-evolution.md.
  */
 export const DashboardArtifactTable = pgTable(
   "dashboard_artifact",
@@ -383,7 +379,8 @@ export type DataSourceEntity = typeof DataSourceTable.$inferSelect;
 /**
  * SshServer — agent-facing remote-shell entity. Connection metadata + access policy.
  * Auth lives in linked `credential` row. Runtime-facing identifier is `name`.
- * @see docs/ssh.md §3
+ *
+ * See docs/ssh.md.
  */
 export const SshServerTable = pgTable("ssh_server", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
@@ -401,7 +398,8 @@ export const SshServerTable = pgTable("ssh_server", {
     .references(() => CredentialTable.id, { onDelete: "restrict" }),
   host: text("host").notNull(),
   port: integer("port").notNull().default(22),
-  /** Pinned host-key fingerprint (`SHA256:<base64>`). Verified on every connect; no trust-on-first-use. @see docs/ssh.md §4.2 */
+  /** Pinned host-key fingerprint (`SHA256:<base64>`). Verified on every
+   *  connect against the admin-confirmed value. See docs/ssh.md. */
   knownHostFingerprint: text("known_host_fingerprint").notNull(),
 
   // Policy (enforced at runtime by lib/ssh/policy.ts)
@@ -419,7 +417,7 @@ export const SshServerTable = pgTable("ssh_server", {
    *  `/etc/profile.d/*.sh`) are sourced — same PATH / env you get
    *  when SSHing in interactively. Turn off for hosts without bash
    *  (Alpine, busybox, network devices) or when profile output
-   *  pollutes stdout. @see docs/ssh.md §3.3 */
+   *  pollutes stdout. */
   loginShell: boolean("login_shell").notNull().default(true),
 
   // State
@@ -742,7 +740,7 @@ export const SkillTable = pgTable("skill", {
 
 /**
  * SkillFile — helper file (references / scripts / assets / evals) bound
- * to a skill. Stored as a bytea blob in PG; see docs/skills.md §2.2.
+ * to a skill. Stored as a bytea blob in PG. See docs/skills.md.
  *
  * `path` is a logical relative POSIX path (e.g. `references/output.md`),
  * NOT a filesystem path. There is no actual filesystem at runtime, so
@@ -930,11 +928,10 @@ export const BuiltinAgentToolTable = pgTable(
  * Workflow — directed acyclic graph (DAG) of data-producing tool /
  * agent nodes that produces a structured output bundle.
  *
- * V1 ships only one authoring path: the save-as-workflow pipeline
- * captures a chat tool chain into a stored workflow (see
- * docs/workflow-architecture.md §10.1). No standalone editor page;
- * modifications happen via the right-panel chatbot's
- * `modify_workflow` tool (§10.2).
+ * Authoring path: the save-as-workflow pipeline captures a chat
+ * tool chain into a stored workflow. Modifications go back through
+ * chat — there is no standalone editor page, no in-place edit tool;
+ * a new outcome plus the next "Save" extracts a fresh workflow.
  *
  * Schema follows the same ownership / visibility shape as
  * `builtin_agent` and `skill`, so the shared resource-permission
@@ -942,17 +939,17 @@ export const BuiltinAgentToolTable = pgTable(
  * apply uniformly. visibility "public" means any tenant user can
  * view; only the owner edits / deletes.
  *
- * The full spec — nodes, refs, top-level `outputs` map (D28),
- * `refReconAlgorithm` tag (D26), execution config — lives in the
- * `spec` JSONB column. The `workflow_spec_gin_idx` GIN index
- * supports reverse-dependency queries via JSONB path operators
- * (see docs/workflow-architecture.md §4.2).
+ * The full spec — nodes, refs, top-level `outputs` map,
+ * `refReconAlgorithm` tag, execution config — lives in the `spec`
+ * JSONB column. The `workflow_spec_gin_idx` GIN index supports
+ * reverse-dependency queries via JSONB path operators.
  *
- * D26 retired the `source` column (V1 has only one authoring path);
- * V1.1+ can re-add it purely additively if Nango ships builtin
- * workflows. D26 also retired `is_published` (V1 always TRUE).
+ * No `source` column: every workflow today comes from the
+ * save-as-workflow pipeline. Adding a separate column is purely
+ * additive if Nango ever ships built-in workflows. No
+ * `is_published` either — every row is implicitly published.
  *
- * @see docs/workflow-architecture.md §4.1
+ * See docs/workflow-architecture.md.
  */
 export const WorkflowTable = pgTable(
   "workflow",
@@ -964,10 +961,9 @@ export const WorkflowTable = pgTable(
 
     /**
      * Full workflow spec — DAG, refs, outputs map, execution config.
-     * See docs/workflow-architecture.md §6.1 for the canonical shape.
      * Stored untyped at the column level; the workflows subsystem
-     * (`src/lib/workflows/spec/schema.ts`, W1 M1) owns the Zod
-     * validator that gates writes.
+     * (`src/lib/workflows/spec/schema.ts`) owns the Zod validator
+     * that gates writes. See docs/workflow-architecture.md.
      */
     spec: jsonb("spec").notNull(),
 
@@ -995,7 +991,7 @@ export const WorkflowTable = pgTable(
       .where(sql`${t.visibility} = 'public'`),
 
     // GIN index on spec with jsonb_path_ops opclass enables fast
-    // reverse-dependency queries (D26 §4.2):
+    // reverse-dependency queries:
     //   "Which workflows use data source X / MCP tool Y / agent Z?"
     // jsonb_path_ops trades index size for containment-query speed;
     // we don't need the full jsonb_ops operator set.
@@ -1045,7 +1041,7 @@ export type AgentToolType =
 // `entity-catalog` and keeps polymorphism explicit: a row can describe
 // an agent / team / workflow run, not just an agent.
 //
-// Long-form design: docs/orchestrator.md §2.
+// Long-form design: docs/orchestrator.md.
 
 /**
  * One execution of an entity. Status transitions:
@@ -1142,8 +1138,7 @@ export const EntityRunTable = pgTable(
     // RecentRuns list's "newest first" ordering and keeps the
     // index scan one-sided.
     index("entity_run_schedule_idx").on(t.scheduleId, t.createdAt.desc()),
-    // Per D24 (docs/workflow-architecture.md §4.3, §17.14):
-    // V1 workflow runs share `entity_run` via the polymorphic
+    // Workflow runs share `entity_run` via the polymorphic
     // `(entity_kind, entity_source, entity_id)` shape. This partial
     // index covers the two access patterns that local DAG workflows
     // need without bloating the index over the much larger
@@ -1154,7 +1149,7 @@ export const EntityRunTable = pgTable(
     //     intersection; this index narrows the entity-kind dimension)
     // entity_source='builtin' distinguishes local DAG workflows
     // (this codebase's data engine) from backend platform workflows
-    // (agno / Mastra / Dify), per D22.
+    // (agno / Mastra / Dify).
     index("entity_run_workflow_lookup_idx")
       .on(t.entityKind, t.entitySource, t.entityId)
       .where(
@@ -1178,11 +1173,10 @@ export const EntityRunTable = pgTable(
  *   - "finished"         : { summary, output? }
  *   - "error"            : { message, errorType? }
  *
- * @see docs/runner-events.md#stage-2--coalescing
- * `message` / `reasoning` / `tool_call_chunk` rows all hold
- * the FULL assembled text for one continuous segment, not per-token
- * deltas. The browser still sees real-time deltas on the wire —
- * only storage skips them.
+ * Coalescing: `message` / `reasoning` / `tool_call_chunk` rows all
+ * hold the FULL assembled text for one continuous segment, not
+ * per-token deltas. The browser still sees real-time deltas on the
+ * wire — only storage skips them. See docs/runner-events.md.
  * If a tool call splits a single LLM "turn" into pre-tool and
  * post-tool text, that surfaces as TWO `message` rows sharing one
  * `messageId` but different `seq`s; this is intentional and faithful
@@ -1489,7 +1483,7 @@ export type ScheduleIntervalUnit =
  * per-process convMap that was lost on Node restart. Namespaced JSONB so
  * multiple providers share one row. Hot-path cached in-memory (LRU);
  * writes are fire-and-forget. Cleanup via periodic sweep on `updated_at`.
- * @see docs/backend-integration.md §11
+ * See docs/backend-integration.md.
  */
 export const BackendThreadStateTable = pgTable(
   "backend_thread_state",

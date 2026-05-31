@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { getProviderLabel } from "@/lib/constants/providers";
-import { SUPERVISOR_PROMPT } from "@/lib/constants/supervisor";
+import { SUPERVISOR_PERSONA_SEED } from "@/lib/constants/supervisor";
 
 // Shared row type (re-exported for other consumers)
 
@@ -552,7 +552,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 onCheckedChange={(v) => {
                   setIsSupervisor(v);
                   if (v && prompt.trim().length === 0) {
-                    setPrompt(SUPERVISOR_PROMPT);
+                    setPrompt(SUPERVISOR_PERSONA_SEED);
                   }
                 }}
               />
@@ -885,16 +885,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             </Section>
           </div>
 
-          {/* ── RIGHT COLUMN: System Prompt ─────────────────────── */}
-          {/*
-           * `lg:sticky` keeps the prompt visible while the left column
-           * (potentially long: 6 tool sections expanded) scrolls
-           * underneath. The `top-0` anchor is relative to the
-           * ScrollArea's scrolling container. The textarea sizes to
-           * fill the column's height minus the section header so the
-           * full prompt is editable without inner scroll until the
-           * content exceeds the viewport.
-           */}
+          {/* RIGHT COLUMN: System Prompt. `lg:sticky` so it stays
+              visible while the left column scrolls. */}
           <div className="lg:sticky lg:top-0 lg:self-start lg:border-l lg:border-border/40 lg:pl-3">
             <Section
               title="System Prompt"
@@ -905,7 +897,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     variant="ghost"
                     size="sm"
                     className="h-6 gap-1 px-2 text-[11px]"
-                    onClick={() => setPrompt(SUPERVISOR_PROMPT)}
+                    onClick={() => setPrompt(SUPERVISOR_PERSONA_SEED)}
                     title="Replace the prompt with the Nango default."
                   >
                     <RotateCcw className="h-3 w-3" />

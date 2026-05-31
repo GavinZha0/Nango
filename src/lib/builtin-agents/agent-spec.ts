@@ -1,5 +1,7 @@
 /**
  * Domain types for cached Built-in agent configuration.
+ *
+ * See docs/builtin-runtime.md.
  */
 
 /** Tool-choice strategy mirroring `builtin_agent.tool_choice`. */

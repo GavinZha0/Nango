@@ -1,5 +1,7 @@
 /**
  * Persistence layer for `entity_run` + `entity_run_event`.
+ *
+ * See docs/runner-events.md.
  */
 
 import "server-only";
@@ -42,8 +44,8 @@ export interface RunRowSeed {
   deadline?: Date;
 }
 
-/** Maximum recursion depth for parent → child run chains
- *  (orchestrator.md §8.1) — prevents runaway delegation loops. */
+/** Maximum recursion depth for parent → child run chains — prevents
+ *  runaway delegation loops. See docs/orchestrator.md. */
 const MAX_RECURSION_DEPTH = 3;
 
 export class RecursionDepthExceeded extends Error {
@@ -141,14 +143,11 @@ export async function finalizeRun(
     );
 }
 
-/** CONTRACT: caller owns `seq` (monotonic per run from 0). The writer
- *  is lock-free; concurrent appends with a duplicate seq are a caller bug.
- *
- *  `ts` defaults to DB `CURRENT_TIMESTAMP` (statement time). Pass a Node
- *  `Date` when the row represents the START of a coalesced event range
- *  (e.g. TEXT_MESSAGE_START captured at first-token time) so TTFT and
- *  similar metrics aren't polluted by the streaming window. See
- *  `docs/runner-events.md` §"TTFT and event timestamps". */
+/** CONTRACT: caller owns `seq` (monotonic per run from 0); duplicate
+ *  seq is a caller bug. `ts` defaults to DB `CURRENT_TIMESTAMP`; pass a
+ *  Node `Date` when the row represents the START of a coalesced range
+ *  (e.g. first-token time) so TTFT metrics stay accurate.
+ *  See docs/runner-events.md. */
 export async function recordEvent(
   runId: string,
   seq: number,

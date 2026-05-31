@@ -1,5 +1,7 @@
 /**
  * Process-wide MCP provider pool singleton + DB-backed config loader.
+ *
+ * See docs/builtin-runtime.md.
  */
 
 import "server-only";
@@ -21,20 +23,13 @@ import { McpProviderPool, type McpServerConfig } from "./provider-pool";
  * SECURITY: credential decryption happens here (via {@link buildMcpHeaders}),
  * not in the pool, so the pool never sees plaintext tokens.
  *
- * AUTH: shares the same header-resolution function as the admin/test path
- * (`withMcpAdminClient`) — handles `Bearer` for `Authorization`, raw token
- * for custom header names, and the `oauth_client` credential type
- * (calls `getOAuthAccessToken` under the hood). Keeping both transports
- * on the same helper avoids drift where one path supports OAuth and the
- * other silently ships requests without auth.
- *
- * REFRESH NOTE: the headers materialized here are snapshotted into the
- * pool's transport at connect time. The pool's idle reaper closes
- * connections after `cache.mcp_pool.idle_timeout` (default 5 min), which
- * is well below typical OAuth token lifetimes (~1 h), so the next borrow
- * naturally re-runs `loadConfig` and picks up a fresh token. If you tune
- * `idleTimeoutMs` above the token lifetime you'll need to switch to a
- * per-request header builder.
+ * REFRESH: headers are snapshotted into the pool's transport at
+ * connect time. The pool's idle reaper closes connections after
+ * `cache.mcp_pool.idle_timeout` (default 5 min) — well below typical
+ * OAuth token lifetimes (~1 h) — so the next borrow re-runs
+ * `loadConfig` and picks up a fresh token. Tuning `idleTimeoutMs`
+ * above the token lifetime would require switching to a per-request
+ * header builder.
  */
 async function loadMcpServerConfig(
   serverId: string,
@@ -77,14 +72,11 @@ async function loadMcpServerConfig(
   };
 }
 
-// QUIRK: module-init side effects (reaper start) are intentional —
-// this file is only ever imported from server-only paths and Next.js
-// shares the module across requests inside the same Node process.
-//
-// HMR-survival via globalThis: a re-evaluation during `next dev` save
-// would otherwise abandon every refcounted MCP connection AND leave
-// the prior reaper timer alive. The guard ensures both the pool and
-// its reaper start exactly once per Node process boot.
+// HMR-survival via globalThis — without this, `next dev` saves would
+// abandon refcounted MCP connections AND leave the prior reaper timer
+// alive. The guard ensures both the pool and its reaper start exactly
+// once per Node process boot. Module-init side effects (reaper start)
+// are intentional — this file is only imported from server-only paths.
 declare global {
   var __nangoMcpProviderPool: McpProviderPool | undefined;
 }
