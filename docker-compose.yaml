@@ -16,7 +16,8 @@ name: nango
 
 services:
   nango-app:
-    image: ${NANGO_IMAGE:-nango:latest}
+    image: ghcr.io/gavinzha0/nango:latest
+    pull_policy: missing
     build:
       context: .
       dockerfile: docker/Dockerfile

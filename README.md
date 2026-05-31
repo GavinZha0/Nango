@@ -211,13 +211,19 @@ NO_HTTPS=1
 Pull the published multi-arch image from GitHub Container Registry:
 
 ```bash
-NANGO_IMAGE=ghcr.io/gavinzha0/nango:latest docker compose up -d
+docker compose up -d
 ```
 
-Or build locally from source:
+Or build locally from source (developer mode):
 
 ```bash
 docker compose up -d --build
+```
+
+To upgrade to a newer published image:
+
+```bash
+docker compose pull && docker compose up -d
 ```
 
 This starts:
