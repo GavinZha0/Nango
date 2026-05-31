@@ -36,6 +36,26 @@ Nango is an AI-powered agent workspace built with **Next.js 16.2.4**, **React 19
 - **Validation**: Zod 4 (static, design-time schemas — API parsing, spec shape, etc.) · ajv 8 (runtime dynamic JSON Schema validation, scoped to `src/lib/workflows/nodes/` for node `input_schema` / `output_schema` enforcement)
 - **Encryption**: AES-256-GCM for credential storage
 
+## Development Commands
+
+```bash
+pnpm dev          # Dev server (Turbopack, http://localhost:9300)
+pnpm build        # Production build
+pnpm start        # Run the production build
+pnpm lint         # ESLint
+pnpm check-types  # TypeScript no-emit
+pnpm test         # Vitest unit tests
+pnpm test:e2e     # Playwright E2E
+pnpm db:generate  # Drizzle migration from schema diff (commit BOTH .sql + meta/*.json)
+pnpm db:migrate   # Apply pending migrations
+pnpm db:push      # Push schema directly — dev only, never against prod
+pnpm db:studio    # Drizzle Studio
+pnpm docker:db    # Start bundled Postgres 18 on localhost:5433
+pnpm build:skills # Bake builtin skills directory tree → dist/builtin-skills.json
+pnpm sandbox:build  # Aggregate per-skill python deps → docker/sandbox/requirements.txt
+pnpm sandbox:check  # Guard CI against drift between SKILL.md deps and requirements.txt
+```
+
 ## Architecture Rules
 
 1. **Route groups**: `(auth)` for sign-in/sign-up; `(workspace)` for authenticated pages. Server-side guards in layouts enforce session checks.
@@ -179,10 +199,82 @@ src/
                            #   + per-mode prompt directives
       display-name.ts      #   computeSourceLabel / computeDisplayName
                            #   (server + client share)
+    workflows/         # DAG workflow runtime (artifact refresh backbone)
+                       # nodes/ (per-node implementations with input_schema /
+                       # output_schema validated by ajv 8), engine, dto
+    artifacts/         # Artifact service: persist AI outputs into a
+                       # browsable library; pairs each savable artifact
+                       # with a frozen replayable workflow
+    data-sources/      # Agent-facing query subsystem
+                       # lookup.ts, policy.ts (node-sql-parser based
+                       # read-only + allow/deny enforcement),
+                       # prompt-block.server.ts (system-prompt block),
+                       # adapters (pg / mysql / vertica / …)
+    ssh/               # SSH tool subsystem
+                       # auth-loader.ts, client.ts (strict host-key pin),
+                       # policy.ts (command allow/deny), runtime-tools.ts
+                       # (run_ssh_command, list_ssh_hosts)
+    sandbox/           # Code-execution sandbox adapters
+                       # (run_code_in_sandbox + run_skill_script delegate
+                       # to the active adapter; Python image baked from
+                       # docker/sandbox/)
+    builtin-tools/     # User-tickable built-in tools catalog
+                       # (auto-mounted tools — datasource / SSH / skills /
+                       # supervisor — are NOT in this catalog)
+    copilot/           # CopilotKit runtime glue (composed system prompt,
+                       # supervisor catalog injection, mode directives)
+    cache/             # Shared columnar dataset cache (Parquet sidecars
+                       # carrying dataSourceId for purge cascading)
+    web-search/        # web_search built-in tool + provider adapters
+    outcomes/          # Outcome envelope helpers used by tool wrappers
+    observability/     # pino logger + secret redaction
+    config/            # Admin-editable runtime config (Admin → Config)
+    time/              # Time helpers (UUIDv7 epoch math, scheduler windows)
   store/              # Zustand stores (workspace.ts, sidebar.ts,
                       # notifications.ts, schedules.ts, chat-timing.ts)
   types/              # Shared type definitions
 ```
+
+## Frontend Architecture
+
+### Layout
+- **`Header`** (`components/layout/Header`) — top bar: Logo, `NotificationBell` (live SSE-backed bell with unread badge + dropdown of last 6), user menu, chat toggle.
+- **`LeftToolbar`** (`components/layout/LeftToolbar`) — fixed `w-12` vertical icon bar with three permission-driven groups separated by thin dividers: (1) **user group** (everyone): Dashboard, Artifact, Schedules, Notifications; (2) **editor group** (`editor`+): Agent, MCP, Skills, Data Sources, Evaluation, Testing; (3) **admin group** (`admin`): Users, Credentials, Runs. Empty groups hide themselves and their preceding divider. Items declared in `TOOLBAR_ITEMS` (single source of truth); `kind: "panel"` toggles a left side panel via `useSidebarStore`, `kind: "route"` navigates, `kind: "notifications"` is a route variant with an unread-count badge.
+- **`ThreePanelContent`** — three resizable panels: left (side panel), center (route content), right (chat).
+- **`SidePanel`** — left panel container, renders the active panel from `sidebar-panel-registry`.
+- **`RightPanel`** — right panel with Chat / History tabs. Owns `<CopilotKitProvider>` with `key={agentId::source::cred}` that intentionally remounts the chat subtree on every agent switch (clean reset of messages / threadId / in-flight requests / welcome UI). See `docs/copilotkit-provider-lifecycle.md` before changing.
+- **`sidebar-panel-registry`** — maps `LeftPanelId` → component + icon.
+
+### State Management
+- **`useWorkspaceStore`** (Zustand) — agent selection, artifact display, thread/session, pinned sessions.
+- **`useSidebarStore`** (Zustand) — `activeLeftPanel`, right panel open state, right tab (chat / history).
+- Only `pinnedSessions` is persisted to `localStorage`; all other state is transient.
+- `WorkspaceProvider` auto-loads agent list on mount and wraps children in `<CopilotKit>`.
+
+### Frontend Actions (AG-UI)
+- `useAgentActions` hook registers CopilotKit actions: `open_artifact`, `close_artifact`.
+- Artifact types: `code | chart | dashboard | image | html | ppt | report`.
+
+## Database Schema Reference
+
+Tables defined in `src/lib/db/schema.ts`:
+
+| Table | Purpose |
+|---|---|
+| `user`, `session`, `account`, `verification` | better-auth managed |
+| `menu_item` | Dynamic navigation tree |
+| `credential` | Encrypted secret store (`v1:<keyId>:<iv>:<authTag>:<ct>`); admin-only CRUD |
+| `data_source` | Agent-facing data-access entity: provider + connection + policy; references a `credential` |
+| `mcp_server` | MCP server connections with tool snapshots |
+| `skill` / `skill_file` | DB-resident skill row + helper-file bytes (`bytea`) |
+| `builtin_agent` / `builtin_agent_tool` | Built-in agent config (incl. `is_supervisor`) + tool bindings (MCP / skill / datasource / SSH / built-in) |
+| `ssh_server` | SSH host metadata + access policy (`command_allow / command_deny`); references a `credential` |
+| `entity_run` / `entity_run_event` | One row per dispatch + append-only event timeline; `parent_run_id` for run-forest linkage |
+| `notification` | Inbox rows backing the bell + `/notifications`; UUIDv7 PK for monotonic SSE replay |
+| `schedule` | Recurring / one-shot trigger spec `(startAt, [intervalValue, intervalUnit], [endAt])`; fired by the in-process `setTimeout` scheduler |
+| `backend_thread_state` | Per-`(credentialId, threadId)` upstream-session tokens (today: Dify `conversation_id`); LRU-cached |
+| `artifact` | Saved AI-generated outputs (charts, dashboards, code, image, html, ppt, report) |
+| `process_boot` | One row per Node process start; anchors the boot-epoch zombie sweep |
 
 ## Comment Policy
 

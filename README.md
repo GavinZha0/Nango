@@ -22,8 +22,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml"><img alt="Lint" src="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml/badge.svg?branch=develop" /></a>
-    <a href="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml"><img alt="E2E" src="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml/badge.svg?branch=develop" /></a>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml"><img alt="Lint" src="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml/badge.svg?branch=main" /></a>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml"><img alt="E2E" src="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml/badge.svg?branch=main" /></a>
     <a href="https://github.com/GavinZha0/nango/actions/workflows/release-please.yml"><img alt="Release" src="https://github.com/GavinZha0/nango/actions/workflows/release-please.yml/badge.svg" /></a>
     <a href="https://github.com/GavinZha0/nango/pkgs/container/nango"><img alt="GHCR" src="https://img.shields.io/badge/ghcr.io-nango-2496ed?logo=docker&logoColor=white" /></a>
     <a href="https://github.com/GavinZha0/nango/releases"><img alt="Release version" src="https://img.shields.io/github/v/release/GavinZha0/nango?include_prereleases&sort=semver&color=green" /></a>

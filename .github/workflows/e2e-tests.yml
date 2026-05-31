@@ -6,7 +6,7 @@ on:
     # PRs always run e2e — paths-ignore on PR triggers can deadlock
     # required status checks (GitHub keeps the check "expected" forever).
   push:
-    branches: [main, develop]
+    branches: [main]
     # Skip post-merge regression e2e on commits that cannot change
     # runtime behaviour. Mirrors container.yml.
     paths-ignore:

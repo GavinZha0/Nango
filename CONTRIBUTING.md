@@ -32,24 +32,31 @@ duplicate work and saves your time.
 
 ## Branch Model
 
-Nango uses **GitFlow-lite**:
+Nango uses **GitHub Flow** — a single long-lived trunk plus short-lived
+topic branches. There is no `develop` branch.
 
 | Branch | Role | Direct push? |
 |---|---|---|
-| `main` | Protected release branch. Only updated via PR from `develop` (or hotfix). Source of truth for releases and container images. | ❌ |
-| `develop` | Default branch. All feature branches target this. | ❌ |
-| `feat/...` `fix/...` `chore/...` `docs/...` | Short-lived feature branches | ✅ |
+| `main` | Protected trunk. Always green, always releasable. Source of truth for releases and container images. | ❌ |
+| `feat/...` `fix/...` `refactor/...` `docs/...` `chore/...` | Short-lived topic branches, branched from `main`, merged back via squash-merge PR. | ✅ |
 
 Workflow:
 
 ```
-                                ┌── feat/foo ──┐
-develop  ────────────────────────              ──── develop
-                                └── fix/bar ──┘
-                                                   │
-                                                   ▼  (PR with conventional title)
-                                                  main  ──▶ release-please → tag → GHCR image
+          ┌── feat/foo ──┐
+          │              │ squash merge
+main ─────┼──────────────┼─────────────────────────────▶ main
+          │              │                                │
+          └── fix/bar ───┘                                 ▼
+                                              release-please PR ─▶ tag
+                                                                    │
+                                                                    ▼
+                                                          container.yml ─▶ GHCR
 ```
+
+For the full step-by-step contributor workflow (including a worked
+bug-fix example and what happens inside GitHub after you push), see
+[`docs/dev-workflow.md`](docs/dev-workflow.md).
 
 ---
 
@@ -74,11 +81,11 @@ develop  ───────────────────────�
 4. **Create a `.env`** from `.env.example` and fill in the required
    secrets (see the README's *Quick Start* for details).
 
-5. **Create a feature branch** off `develop`:
+5. **Create a topic branch** off `main`:
 
    ```bash
-   git checkout develop
-   git pull
+   git checkout main
+   git pull --ff-only
    git checkout -b feat/your-feature-name
    ```
 
@@ -135,8 +142,10 @@ The PR title is enforced by the `PR Title Check` workflow.
 
 ### Target branch
 
-- Feature / fix PRs → target **`develop`**
-- Release PRs (created automatically by release-please) → target `main`
+All PRs — feature, fix, refactor, docs, chore — target **`main`**.
+The release PR is created and maintained automatically by
+`release-please` and also targets `main`; you only need to review and
+merge it when you want to cut a version.
 
 ### Before opening a PR
 
@@ -167,12 +176,13 @@ Use the template that appears when you open the PR. At minimum, include:
 Releases are fully automated by
 [Release Please](https://github.com/googleapis/release-please):
 
-1. PRs are merged into `develop` over time.
-2. When `develop` is ready for release, you open a PR `develop → main`.
-3. After merge, **release-please** scans the new conventional commits on
-   `main`, opens a `chore(main): release X.Y.Z` PR with the proposed
-   version bump and CHANGELOG entries.
-4. Reviewing and merging that release PR triggers:
+1. Topic-branch PRs are squash-merged into `main` over time.
+2. After every merge, **release-please** scans the new conventional
+   commits on `main` and maintains a long-lived
+   `chore(main): release X.Y.Z` PR with the proposed version bump and
+   CHANGELOG entries.
+3. When you want to cut a version, review and merge that release PR. It
+   triggers:
    - A git tag + GitHub Release with the changelog.
    - The `Publish Container` workflow building multi-arch images
      (`linux/amd64` + `linux/arm64`) and pushing to
