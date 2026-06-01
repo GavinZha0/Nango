@@ -11,8 +11,6 @@ import {
   Users,
   KeyRound,
   Settings,
-  Medal,
-  FlaskConical,
   Bell,
   MessagesSquare,
 } from "lucide-react";
@@ -74,8 +72,8 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   { kind: "panel", id: "skills", role: "editor" },
   { kind: "panel", id: "datasource", role: "editor" },
   { kind: "panel", id: "ssh-server", role: "editor" },
-  { kind: "route", id: "eval", label: "Evaluation", icon: Medal, href: "/admin/eval", role: "editor" },
-  { kind: "route", id: "test", label: "Testing", icon: FlaskConical, href: "/admin/test", role: "editor" },
+  { kind: "panel", id: "verification", role: "editor" },
+  { kind: "panel", id: "evaluation", role: "editor" },
 
   // Admin group
   { kind: "route", id: "user", label: "Users", icon: Users, href: "/admin/user", role: "admin" },

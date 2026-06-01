@@ -26,7 +26,34 @@ export interface NotificationCreatedEvent {
   notification: NotificationEntity;
 }
 
-export type RunnerEvent = RunFinalizedEvent | NotificationCreatedEvent;
+/**
+ * Verification subsystem frames (lifted into the runner bus so the
+ * existing `/api/runs/stream` SSE endpoint can multiplex without a
+ * second per-owner channel registry). Each frame carries its own
+ * `topic: "verification_run"` so the client filters cheaply.
+ *
+ * V1 frames are NOT durable — they exist only as live SSE updates.
+ * The user-facing source of truth for past runs is the
+ * `verification_run` / `verification_case_result` tables, not these
+ * frames. `id:` is intentionally NOT emitted for them by
+ * `/api/runs/stream` so EventSource auto-reconnect treats them as
+ * informational (same convention as `run_finalized`).
+ *
+ * See docs/verification.md.
+ */
+export interface VerificationRunEvent {
+  kind: "verification";
+  ownerId: string;
+  frame: VerificationFrame;
+}
+
+import type { VerificationFrame } from "@/lib/verification/types";
+export type { VerificationFrame };
+
+export type RunnerEvent =
+  | RunFinalizedEvent
+  | NotificationCreatedEvent
+  | VerificationRunEvent;
 
 type Subscriber = (event: RunnerEvent) => void;
 

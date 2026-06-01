@@ -333,10 +333,75 @@ CREATE TABLE "user" (
 	"ban_expires" timestamp,
 	"org" text,
 	"im_accounts" jsonb,
+	"timezone" text,
 	"deleted_at" timestamp,
 	"deleted_by" uuid,
 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "verification_case_result" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "verification_case_result_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"run_id" uuid NOT NULL,
+	"case_id" bigint NOT NULL,
+	"status" text NOT NULL,
+	"entity_run_id" uuid,
+	"input_snapshot" jsonb NOT NULL,
+	"result_payload" jsonb,
+	"result_truncated" boolean DEFAULT false NOT NULL,
+	"assertion_results" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"error" jsonb,
+	"duration_ms" integer,
+	"started_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp
+);
+--> statement-breakpoint
+CREATE TABLE "verification_case" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "verification_case_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"suite_id" uuid NOT NULL,
+	"name" text NOT NULL,
+	"mcp_server_id" uuid,
+	"tool_name" text,
+	"workflow_id" uuid,
+	"input" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"assertions" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	CONSTRAINT "verification_case_target_xor" CHECK ((
+        ("verification_case"."mcp_server_id" IS NOT NULL AND "verification_case"."tool_name" IS NOT NULL AND "verification_case"."workflow_id" IS NULL)
+        OR
+        ("verification_case"."mcp_server_id" IS NULL AND "verification_case"."tool_name" IS NULL AND "verification_case"."workflow_id" IS NOT NULL)
+      ))
+);
+--> statement-breakpoint
+CREATE TABLE "verification_run" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"suite_id" uuid NOT NULL,
+	"status" text NOT NULL,
+	"total_count" integer NOT NULL,
+	"passed_count" integer DEFAULT 0 NOT NULL,
+	"failed_count" integer DEFAULT 0 NOT NULL,
+	"errored_count" integer DEFAULT 0 NOT NULL,
+	"skipped_count" integer DEFAULT 0 NOT NULL,
+	"triggered_by" text NOT NULL,
+	"started_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp
+);
+--> statement-breakpoint
+CREATE TABLE "verification_suite" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"name" text NOT NULL,
+	"description" text,
+	"category" text NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"visibility" text DEFAULT 'private' NOT NULL,
+	"timeout_sec" integer DEFAULT 300 NOT NULL,
+	"created_by" uuid,
+	"updated_by" uuid,
+	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	CONSTRAINT "verification_suite_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint
 CREATE TABLE "verification" (
@@ -362,49 +427,57 @@ CREATE TABLE "workflow" (
 --> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact" ADD CONSTRAINT "artifact_parent_id_artifact_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."artifact"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "artifact" ADD CONSTRAINT "artifact_workflow_id_workflow_id_fk" FOREIGN KEY ("workflow_id") REFERENCES "public"."workflow"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "artifact" ADD CONSTRAINT "artifact_workflow_id_workflow_id_fk" FOREIGN KEY ("workflow_id") REFERENCES "public"."workflow"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact" ADD CONSTRAINT "artifact_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "backend_thread_state" ADD CONSTRAINT "backend_thread_state_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "builtin_agent" ADD CONSTRAINT "builtin_agent_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "builtin_agent" ADD CONSTRAINT "builtin_agent_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "builtin_agent" ADD CONSTRAINT "builtin_agent_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent" ADD CONSTRAINT "builtin_agent_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent" ADD CONSTRAINT "builtin_agent_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_agent_id_builtin_agent_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."builtin_agent"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_skill_id_skill_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."skill"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_data_source_id_data_source_id_fk" FOREIGN KEY ("data_source_id") REFERENCES "public"."data_source"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_ssh_server_id_ssh_server_id_fk" FOREIGN KEY ("ssh_server_id") REFERENCES "public"."ssh_server"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "config" ADD CONSTRAINT "config_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "credential" ADD CONSTRAINT "credential_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "credential" ADD CONSTRAINT "credential_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_skill_id_skill_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."skill"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_data_source_id_data_source_id_fk" FOREIGN KEY ("data_source_id") REFERENCES "public"."data_source"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_ssh_server_id_ssh_server_id_fk" FOREIGN KEY ("ssh_server_id") REFERENCES "public"."ssh_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "config" ADD CONSTRAINT "config_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "credential" ADD CONSTRAINT "credential_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "credential" ADD CONSTRAINT "credential_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dashboard_artifact" ADD CONSTRAINT "dashboard_artifact_dashboard_id_dashboard_id_fk" FOREIGN KEY ("dashboard_id") REFERENCES "public"."dashboard"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dashboard_artifact" ADD CONSTRAINT "dashboard_artifact_artifact_id_artifact_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifact"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dashboard" ADD CONSTRAINT "dashboard_parent_id_dashboard_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."dashboard"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dashboard" ADD CONSTRAINT "dashboard_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "data_source" ADD CONSTRAINT "data_source_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "data_source" ADD CONSTRAINT "data_source_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "data_source" ADD CONSTRAINT "data_source_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "data_source" ADD CONSTRAINT "data_source_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "data_source" ADD CONSTRAINT "data_source_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "entity_run_event" ADD CONSTRAINT "entity_run_event_run_id_entity_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."entity_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification" ADD CONSTRAINT "notification_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notification" ADD CONSTRAINT "notification_run_id_entity_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."entity_run"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification" ADD CONSTRAINT "notification_run_id_entity_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."entity_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "schedule" ADD CONSTRAINT "schedule_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "schedule" ADD CONSTRAINT "schedule_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "schedule" ADD CONSTRAINT "schedule_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "schedule" ADD CONSTRAINT "schedule_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "skill_file" ADD CONSTRAINT "skill_file_skill_id_skill_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."skill"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "skill" ADD CONSTRAINT "skill_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "skill" ADD CONSTRAINT "skill_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "skill" ADD CONSTRAINT "skill_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "skill" ADD CONSTRAINT "skill_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ssh_server" ADD CONSTRAINT "ssh_server_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "ssh_server" ADD CONSTRAINT "ssh_server_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "ssh_server" ADD CONSTRAINT "ssh_server_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user" ADD CONSTRAINT "user_deleted_by_user_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "workflow" ADD CONSTRAINT "workflow_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "workflow" ADD CONSTRAINT "workflow_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ssh_server" ADD CONSTRAINT "ssh_server_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ssh_server" ADD CONSTRAINT "ssh_server_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user" ADD CONSTRAINT "user_deleted_by_user_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_case_result" ADD CONSTRAINT "verification_case_result_run_id_verification_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."verification_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_case_result" ADD CONSTRAINT "verification_case_result_case_id_verification_case_id_fk" FOREIGN KEY ("case_id") REFERENCES "public"."verification_case"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_case_result" ADD CONSTRAINT "verification_case_result_entity_run_id_entity_run_id_fk" FOREIGN KEY ("entity_run_id") REFERENCES "public"."entity_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_case" ADD CONSTRAINT "verification_case_suite_id_verification_suite_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."verification_suite"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_case" ADD CONSTRAINT "verification_case_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_run" ADD CONSTRAINT "verification_run_suite_id_verification_suite_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."verification_suite"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_suite" ADD CONSTRAINT "verification_suite_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_suite" ADD CONSTRAINT "verification_suite_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "workflow" ADD CONSTRAINT "workflow_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "workflow" ADD CONSTRAINT "workflow_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "artifact_parent_idx" ON "artifact" USING btree ("parent_id");--> statement-breakpoint
 CREATE INDEX "artifact_created_by_idx" ON "artifact" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX "artifact_type_idx" ON "artifact" USING btree ("type");--> statement-breakpoint
@@ -443,6 +516,13 @@ CREATE INDEX "skill_file_skill_id_idx" ON "skill_file" USING btree ("skill_id");
 CREATE UNIQUE INDEX "ssh_server_name_unique" ON "ssh_server" USING btree ("name");--> statement-breakpoint
 CREATE INDEX "ssh_server_credential_idx" ON "ssh_server" USING btree ("credential_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "user_email_active_idx" ON "user" USING btree ("email") WHERE "user"."deleted_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "verification_case_result_run_idx" ON "verification_case_result" USING btree ("run_id");--> statement-breakpoint
+CREATE INDEX "verification_case_result_case_started_idx" ON "verification_case_result" USING btree ("case_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE UNIQUE INDEX "verification_case_suite_name_idx" ON "verification_case" USING btree ("suite_id","name");--> statement-breakpoint
+CREATE INDEX "verification_case_suite_idx" ON "verification_case" USING btree ("suite_id");--> statement-breakpoint
+CREATE INDEX "verification_case_mcp_tool_idx" ON "verification_case" USING btree ("mcp_server_id","tool_name");--> statement-breakpoint
+CREATE INDEX "verification_run_suite_started_idx" ON "verification_run" USING btree ("suite_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "verification_run_status_idx" ON "verification_run" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "workflow_created_by_idx" ON "workflow" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX "workflow_visibility_idx" ON "workflow" USING btree ("visibility") WHERE "workflow"."visibility" = 'public';--> statement-breakpoint
 CREATE INDEX "workflow_spec_gin_idx" ON "workflow" USING gin ("spec" jsonb_path_ops);

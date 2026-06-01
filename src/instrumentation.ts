@@ -36,6 +36,17 @@ export async function register(): Promise<void> {
       // Studio, psql) can patch up state in the meantime.
       console.error("[nango] runner recovery failed:", err);
     }
+
+    // Same idea, sibling subsystem: flip stranded verification_run rows
+    // from `running` to `errored`. See docs/verification.md.
+    const { recoverStrandedVerificationRuns } = await import(
+      "@/lib/verification/recovery"
+    );
+    try {
+      await recoverStrandedVerificationRuns(bootStartedAt);
+    } catch (err) {
+      console.error("[nango] verification recovery failed:", err);
+    }
   }
 
   // Application config: seed defaults (insert-if-absent), then load all

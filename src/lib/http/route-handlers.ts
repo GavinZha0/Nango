@@ -29,7 +29,8 @@ export type ApiErrorCode =
   | "TOO_MANY_REQUESTS"
   | "INTERNAL"
   | "BAD_GATEWAY"
-  | "SERVICE_UNAVAILABLE";
+  | "SERVICE_UNAVAILABLE"
+  | "NOT_IMPLEMENTED";
 
 export interface ApiErrorBody {
   ok: false;

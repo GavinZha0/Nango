@@ -26,6 +26,45 @@ export interface ToolExecutionFailure {
 }
 
 /**
+ * Property name (Symbol) under which {@link wrapToolExecute} stashes
+ * classification metadata extracted from the original thrown Error
+ * (HTTP status, Node transport `code`, response `headers`, …). Used
+ * by downstream consumers that need to classify the failure beyond
+ * "isError: true" — e.g. the verification subsystem's
+ * `classifyMcpError`.
+ *
+ * Stored under a Symbol + as a NON-ENUMERABLE property so it is
+ * invisible to `JSON.stringify`, `Object.keys`, and the spread
+ * operator. The LLM-facing payload therefore stays a clean
+ * three-field POJO ({isError, message, toolName}), while in-process
+ * code that knows about this symbol can still read the original
+ * error's classification hints.
+ */
+export const TOOL_FAILURE_CAUSE: unique symbol = Symbol.for(
+  "nango.toolFailureCause",
+);
+
+/**
+ * In-process-only classification metadata copied off the original
+ * thrown Error before it was swallowed by {@link wrapToolExecute}.
+ * Never crosses the LLM boundary (see {@link TOOL_FAILURE_CAUSE}).
+ */
+export interface ToolFailureCause {
+  /** Node `Error.code` — e.g. "ECONNREFUSED", "ETIMEDOUT". */
+  code?: string;
+  /** HTTP status if the error came from an HTTP layer. */
+  httpStatus?: number;
+  /** Response headers — typed loosely so `Headers` / plain record both fit. */
+  headers?: Headers | Record<string, string>;
+  /** Address / port info for transport errors. */
+  address?: string;
+  port?: number;
+  /** Original Error.name + stack for forensics. */
+  name?: string;
+  stack?: string;
+}
+
+/**
  * System-prompt block appended whenever an agent has at least one tool
  * wrapped through {@link wrapToolExecute}. Single source of truth —
  * both Class B/C dispatch and MCP wrapping rely on it. Update wording
@@ -92,6 +131,38 @@ export function wrapToolExecute<T>(
           message,
           toolName,
         };
+        // Stash classification hints from the original Error under a
+        // non-enumerable Symbol-keyed property. Invisible to
+        // JSON.stringify (so the LLM-facing payload stays a clean
+        // three-field POJO) but readable in-process by callers like
+        // the verification subsystem that need to classify the
+        // failure beyond "isError: true".
+        if (err instanceof Error) {
+          const cause: ToolFailureCause = {
+            name: err.name,
+            stack: err.stack,
+          };
+          const rawCode = (err as { code?: unknown }).code;
+          if (typeof rawCode === "string") cause.code = rawCode;
+          const rawStatus =
+            (err as { status?: unknown }).status ??
+            (err as { statusCode?: unknown }).statusCode;
+          if (typeof rawStatus === "number") cause.httpStatus = rawStatus;
+          const rawHeaders = (err as { headers?: unknown }).headers;
+          if (rawHeaders && typeof rawHeaders === "object") {
+            cause.headers = rawHeaders as ToolFailureCause["headers"];
+          }
+          const rawAddr = (err as { address?: unknown }).address;
+          if (typeof rawAddr === "string") cause.address = rawAddr;
+          const rawPort = (err as { port?: unknown }).port;
+          if (typeof rawPort === "number") cause.port = rawPort;
+          Object.defineProperty(failure, TOOL_FAILURE_CAUSE, {
+            value: cause,
+            enumerable: false,
+            writable: false,
+            configurable: false,
+          });
+        }
         return failure;
       }
     },

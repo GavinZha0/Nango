@@ -1,17 +1,26 @@
 {
+  "version": "7",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
       "version": "7",
-      "when": 1779931168588,
-      "tag": "0000_baseline_v3",
+      "when": 1780330761353,
+      "tag": "0000_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1780170813936,
-      "tag": "0001_user_timezone",
+      "when": 1780337705181,
+      "tag": "0001_optimize-verification-run-recovery-index",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780338072191,
+      "tag": "0002_verification-case-result-unique-recovery",
       "breakpoints": true
     }
   ]

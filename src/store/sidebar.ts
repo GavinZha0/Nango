@@ -12,6 +12,8 @@ export const LEFT_PANEL_IDS = [
   "skills",
   "datasource",
   "ssh-server",
+  "verification",
+  "evaluation",
 ] as const;
 
 export type LeftPanelId = (typeof LEFT_PANEL_IDS)[number];

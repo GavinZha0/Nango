@@ -6,11 +6,12 @@
 
 import { useState, useCallback, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Play, Loader2, Search } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Search, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { JsonView } from "@/components/ui/json-view";
+import { SaveAsCaseDialog } from "@/components/main-panels/verification/SaveAsCaseDialog";
 import { cn } from "@/lib/utils";
 
 import { withTheme } from "@rjsf/core";
@@ -107,6 +108,12 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<unknown | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
+  // Args that produced the currently-displayed `result`. Captured at
+  // the moment of a SUCCESSFUL execute so "Save as case" persists the
+  // exact call the user just ran — not whatever the input editor
+  // happens to hold after they kept tweaking it.
+  const [executedArgs, setExecutedArgs] = useState<Record<string, unknown> | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
 
   // Load once: serverId is fixed for this <ServerView> instance
   // (outer Page keys on it).
@@ -155,6 +162,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     setExecuting(true);
     setExecError(null);
     setResult(null);
+    setExecutedArgs(null);
 
     let args: Record<string, unknown>;
     if (activeTab === "json") {
@@ -180,6 +188,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         setExecError(data.error ?? "Execution failed");
       } else {
         setResult(data.result);
+        setExecutedArgs(args);
       }
     } catch (err) {
       setExecError(err instanceof Error ? err.message : "Unexpected error");
@@ -200,6 +209,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     setJsonError(null);
     setResult(null);
     setExecError(null);
+    setExecutedArgs(null);
     setActiveTab("form");
   }
 
@@ -393,7 +403,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 ) : (
                   <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
                 )}
-                Execute
+                Run
                 <kbd className="ml-1 hidden text-[10px] opacity-70 sm:inline">{executeShortcutHint}</kbd>
               </Button>
             </div>
@@ -449,8 +459,31 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
         {/* Right: Result */}
         <div className="flex flex-[4] flex-col min-w-0">
-          <div className="flex items-center justify-center border-b bg-muted/40 px-3">
-            <span className="py-1.5 border-b-2 border-transparent text-xs font-medium text-muted-foreground uppercase tracking-wide">Result</span>
+          <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+            {/* Save-as-case lives here (Result column header) rather than
+                next to Execute, so the visual order matches the workflow:
+                run on the left, then capture on the right. Enabled only
+                after a SUCCESSFUL run — see `executedArgs`. */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 rounded-none px-2.5 text-xs"
+              onClick={() => setSaveDialogOpen(true)}
+              disabled={
+                executing ||
+                result === null ||
+                execError !== null ||
+                executedArgs === null ||
+                activeToolName === null
+              }
+              title="Save this call as a verification case"
+            >
+              <Save className="h-3.5 w-3.5" />
+              Save as case
+            </Button>
+            <span className="ml-auto self-center py-1.5 border-b-2 border-transparent text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Result
+            </span>
           </div>
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3">
@@ -469,6 +502,17 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
           </ScrollArea>
         </div>
       </div>
+
+      {activeToolName !== null && executedArgs !== null && (
+        <SaveAsCaseDialog
+          open={saveDialogOpen}
+          onOpenChange={setSaveDialogOpen}
+          mcpServerId={serverId}
+          serverName={serverName}
+          toolName={activeToolName}
+          input={executedArgs}
+        />
+      )}
     </div>
   );
 }

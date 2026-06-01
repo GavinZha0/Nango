@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   primaryKey,
   customType,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { ArtifactKind, ArtifactType } from "@/lib/domain/artifact";
@@ -53,7 +54,7 @@ export const UserTable = pgTable(
     /** Soft-delete timestamp; null = active. See docs/rbac.md. */
     deletedAt: timestamp("deleted_at"),
     deletedBy: uuid("deleted_by").references((): AnyPgColumn => UserTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -183,10 +184,10 @@ export const DataSourceTable = pgTable("data_source", {
 
   // Audit
   createdBy: uuid("created_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   updatedBy: uuid("updated_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -253,7 +254,7 @@ export const ArtifactTable = pgTable(
      * `bundle[workflowOutputField]` for the artifact to render.
      */
     workflowId: uuid("workflow_id").references(() => WorkflowTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** Names a key in `workflow.spec.outputs` — a top-level
      *  `Record<key, RefString>` map declared in the workflow spec. */
@@ -429,10 +430,10 @@ export const SshServerTable = pgTable("ssh_server", {
 
   // Audit
   createdBy: uuid("created_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   updatedBy: uuid("updated_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -544,11 +545,11 @@ export const CredentialTable = pgTable(
     aguiUrl: text("agui_url"),
 
     createdBy: uuid("created_by").references(() => UserTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** Last user who modified this row (multi-admin deployments). See docs/rbac.md. */
     updatedBy: uuid("updated_by").references(() => UserTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -620,7 +621,7 @@ export const McpServerTable = pgTable("mcp_server", {
   /** Reference to the credential used for authentication.
    *  null means the server requires no authentication. */
   credentialId: uuid("credential_id").references(() => CredentialTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   /** The request header name the credential token is injected into.
    *  Defaults to "Authorization" at runtime when credentialId is set.
@@ -654,11 +655,11 @@ export const McpServerTable = pgTable("mcp_server", {
 
   visibility: text("visibility").notNull().default("private"),
   createdBy: uuid("created_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   /** Last user who modified this row. See docs/rbac.md. */
   updatedBy: uuid("updated_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -728,11 +729,11 @@ export const SkillTable = pgTable("skill", {
   visibility: text("visibility").notNull().default("private"), // "private" | "public"
 
   createdBy: uuid("created_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   /** Last user who modified this row. See docs/rbac.md. */
   updatedBy: uuid("updated_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -843,11 +844,11 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   visibility: text("visibility").notNull().default("private"), // "private" | "public"
 
   createdBy: uuid("created_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   /** Last user who modified this row. See docs/rbac.md. */
   updatedBy: uuid("updated_by").references(() => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -883,7 +884,7 @@ export const BuiltinAgentToolTable = pgTable(
     // MCP
     /** Set for toolType "mcp_server" and "mcp_tool". */
     mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** Set for toolType "mcp_tool" only — matches McpToolSnapshot.name. */
     mcpToolName: text("mcp_tool_name"),
@@ -891,7 +892,7 @@ export const BuiltinAgentToolTable = pgTable(
     // Skill
     /** Set for toolType "skill". */
     skillId: uuid("skill_id").references(() => SkillTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
 
     // Builtin
@@ -901,13 +902,13 @@ export const BuiltinAgentToolTable = pgTable(
     // DataSource
     /** Set for toolType "datasource". SET NULL on delete (same orphan-row pattern as MCP/Skill). */
     dataSourceId: uuid("data_source_id").references(() => DataSourceTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
 
     // SshServer
     /** Set for toolType "ssh_server". Binding any ssh_server auto-mounts run_ssh_command + list_ssh_hosts. SET NULL on delete. */
     sshServerId: uuid("ssh_server_id").references(() => SshServerTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
 
     /** Display / injection order within the agent. Lower values come first. */
@@ -970,11 +971,11 @@ export const WorkflowTable = pgTable(
     visibility: text("visibility").notNull().default("private"), // "private" | "public"
 
     createdBy: uuid("created_by").references(() => UserTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** Last user who modified this row. See docs/rbac.md. */
     updatedBy: uuid("updated_by").references(() => UserTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -1077,7 +1078,7 @@ export const EntityRunTable = pgTable(
      *  on delete so an admin removing a credential doesn't cascade-
      *  destroy historical runs (we keep the forensic trail). */
     credentialId: uuid("credential_id").references(() => CredentialTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
 
     /** Mode of dispatch — also drives how the consumer consumes events. */
@@ -1326,7 +1327,7 @@ export const NotificationTable = pgTable(
     task: text("task"),
     /** Optional FK back to the run that produced the notification. */
     runId: uuid("run_id").references(() => EntityRunTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** Null = unread; set on the first mark-as-read API call. */
     readAt: timestamp("read_at"),
@@ -1400,7 +1401,7 @@ export const ScheduleTable = pgTable(
      *  cascade-destroy historical schedule rows; the scheduler will
      *  refuse to fire a schedule whose credential is gone. */
     credentialId: uuid("credential_id").references(() => CredentialTable.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
 
     /** Display label captured at create time (e.g.
@@ -1522,7 +1523,7 @@ export const ConfigTable = pgTable("config", {
   prevValue: text("prev_value"),
   description: text("description"),
   updatedBy: uuid("updated_by").references((): AnyPgColumn => UserTable.id, {
-    onDelete: "set null",
+    onDelete: "cascade",
   }),
   createdAt: timestamp("created_at")
     .notNull()
@@ -1533,3 +1534,281 @@ export const ConfigTable = pgTable("config", {
 });
 
 export type ConfigEntity = typeof ConfigTable.$inferSelect;
+
+// Verification subsystem — deterministic assert-on-output harness for
+// MCP tools (V1) and Nango internal workflows (V2). See docs/verification.md
+// for the full design. Distinct from the `verification` table above which
+// is the better-auth email-verification token store.
+
+/**
+ * VerificationSuite — a management group of verification cases.
+ * A suite is a pure container; it does NOT bind a specific tool or
+ * workflow — the target lives on each case. `category` decides which
+ * left-panel tab the suite belongs to and which target columns its
+ * cases must populate (enforced by CHECK on `verification_case`).
+ *
+ * visibility: "private" — visible to the creator only;
+ *             "public"  — available to all users.
+ */
+export const VerificationSuiteTable = pgTable("verification_suite", {
+  id: uuid("id").primaryKey().notNull().defaultRandom(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  /** Left-panel tab + case target shape. */
+  category: text("category").notNull(), // "mcp" | "workflow"
+  enabled: boolean("enabled").notNull().default(true),
+  visibility: text("visibility").notNull().default("private"),
+  /** Suite-level wall-clock cap (seconds) for one `Run suite` invocation.
+   *  On expiry the orchestrator marks remaining cases `skipped` and the
+   *  run as `timeout`. Stored as seconds to keep the value human-readable
+   *  in DB inspectors (300 = 5 min); the runner multiplies by 1000 for
+   *  `setTimeout`. */
+  timeoutSec: integer("timeout_sec").notNull().default(300),
+  createdBy: uuid("created_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+  updatedBy: uuid("updated_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+  createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type VerificationSuiteEntity =
+  typeof VerificationSuiteTable.$inferSelect;
+export type VerificationSuiteCategory = "mcp" | "workflow";
+
+/**
+ * VerificationCase — one assert-on-output case bound to either an MCP
+ * tool or a Nango workflow (XOR enforced by CHECK). PK is bigint
+ * identity because cases are parent-owned children, never URL-exposed
+ * (the suite is). See `AGENTS.md` PK tier 1.
+ *
+ * Target columns:
+ *   - mcp suites:      (mcpServerId, toolName) populated; workflowId NULL
+ *   - workflow suites: workflowId populated;       (mcpServerId, toolName) NULL
+ *
+ * `assertions` is a JSON array of `json_schema` | `jsonpath_equals` |
+ * `js_expression` entries. Empty array = smoke test. See
+ * docs/verification.md for the wire shape.
+ */
+export const VerificationCaseTable = pgTable(
+  "verification_case",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+    suiteId: uuid("suite_id")
+      .notNull()
+      .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // --- target (XOR by suite.category) ---
+    /** Set for MCP cases. CASCADE on server delete — removing an MCP
+     *  server removes its verification cases too, keeping the suite
+     *  consistent without orphan rows that violate the XOR CHECK. */
+    mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
+      onDelete: "cascade",
+    }),
+    /** Set for MCP cases — matches a tool name in McpServer.tools. */
+    toolName: text("tool_name"),
+    /** Set for Workflow cases (V2). FK to `workflow.id` deliberately
+     *  NOT added in V1: ON DELETE SET NULL would violate the XOR
+     *  CHECK below; CASCADE vs RESTRICT is a V2 product call when
+     *  the workflow runner lands. V1 never populates this column —
+     *  the CHECK forbids it through the suite-category gate. */
+    workflowId: uuid("workflow_id"),
+    // --- payload ---
+    input: jsonb("input").notNull().default(sql`'{}'::jsonb`),
+    /** Array of assertion specs. See docs/verification.md. */
+    assertions: jsonb("assertions").notNull().default(sql`'[]'::jsonb`),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    // Per-suite name uniqueness (mirrors UI assumption).
+    uniqueIndex("verification_case_suite_name_idx").on(t.suiteId, t.name),
+    // Suite list view ("show all cases in this suite").
+    index("verification_case_suite_idx").on(t.suiteId),
+    // Reverse-lookup: "which cases test tool X on server Y" — used by
+    // the future MCP "Add to verification suite" affordance and by
+    // schedule-driven regressions.
+    index("verification_case_mcp_tool_idx").on(t.mcpServerId, t.toolName),
+    // XOR target: MCP shape OR workflow shape, never both / neither.
+    check(
+      "verification_case_target_xor",
+      sql`(
+        (${t.mcpServerId} IS NOT NULL AND ${t.toolName} IS NOT NULL AND ${t.workflowId} IS NULL)
+        OR
+        (${t.mcpServerId} IS NULL AND ${t.toolName} IS NULL AND ${t.workflowId} IS NOT NULL)
+      )`,
+    ),
+  ],
+);
+
+export type VerificationCaseEntity = typeof VerificationCaseTable.$inferSelect;
+
+/**
+ * VerificationRun — one execution of a verification suite.
+ *
+ * UUIDv4 PK because the id is URL-exposed via the history-view
+ * `?run=<id>` query param (PK tier 3 in AGENTS.md). UUIDv7 was
+ * considered for "time-ordered for free" banner pagination, but the
+ * banner is always suite_id-scoped (so it needs a composite index
+ * either way), and SSE replay flows through `notification.id`, not
+ * through this PK.
+ *
+ * No case-level payload here — that lives in VerificationCaseResult.
+ */
+export const VerificationRunTable = pgTable(
+  "verification_run",
+  {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    suiteId: uuid("suite_id")
+      .notNull()
+      .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
+    /** Lifecycle: running | passed | failed | errored | timeout.
+     *  Precedence on close: timeout > errored > failed > passed. */
+    status: text("status").notNull(),
+    totalCount: integer("total_count").notNull(),
+    passedCount: integer("passed_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    erroredCount: integer("errored_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    /** Trigger origin: 'manual' | 'schedule'. */
+    triggeredBy: text("triggered_by").notNull(),
+    startedAt: timestamp("started_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    finishedAt: timestamp("finished_at"),
+  },
+  (t) => [
+    // Banner pagination — "5 newest / 5 older" runs of a given suite.
+    index("verification_run_suite_started_idx").on(
+      t.suiteId,
+      t.startedAt.desc(),
+    ),
+    // Boot-epoch zombie sweep — find still-`running` rows from a prior
+    // Node process. Partial index because `status` only has 5 enum
+    // values (B-tree selectivity is poor — the planner would usually
+    // ignore a plain `status` index). Filtering by `status='running'`
+    // shrinks the index to ~ 0 rows in steady state (running rows are
+    // ephemeral) and lets recovery's `started_at < bootStartedAt`
+    // predicate drive an index range scan.
+    //
+    // The matching SQL predicate MUST be `status = 'running'`
+    // literal-equal for the planner to pick this partial index — see
+    // `selectStrandedRuns` / `markStrandedAsErrored` in storage.ts.
+    index("verification_run_recovery_idx")
+      .on(t.startedAt)
+      .where(sql`${t.status} = 'running'`),
+  ],
+);
+
+export type VerificationRunEntity = typeof VerificationRunTable.$inferSelect;
+export type VerificationRunStatus =
+  | "running"
+  | "passed"
+  | "failed"
+  | "errored"
+  | "timeout";
+
+/**
+ * VerificationCaseResult — one case execution within one run. PK is
+ * bigint identity (parent-owned, not URL-exposed).
+ *
+ * `inputSnapshot` is frozen at run time so the user can edit the
+ * underlying case freely afterwards without rewriting history. The
+ * history view displays the snapshot, not today's case definition.
+ *
+ * `entityRunId` is non-null ONLY for workflow cases (V2) — those flow
+ * through `runner.start({mode:"async", initiator:"verification"})` so
+ * admin run forensics works. MCP cases call `mcp/provider-pool`
+ * directly (a tool call is not an entity dispatch) and leave it NULL.
+ *
+ * `error` JSON shape: { source, message, details? } where source ∈
+ * { mcphub | upstream | transport | assertion | timeout | internal }.
+ * See docs/verification.md.
+ */
+export const VerificationCaseResultTable = pgTable(
+  "verification_case_result",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => VerificationRunTable.id, { onDelete: "cascade" }),
+    caseId: bigint("case_id", { mode: "number" })
+      .notNull()
+      .references(() => VerificationCaseTable.id, { onDelete: "cascade" }),
+    /** passed | failed | errored | skipped | timeout. */
+    status: text("status").notNull(),
+    /** Workflow cases only. SET NULL keeps the result viewable even
+     *  if an admin later prunes the entity_run forest. */
+    entityRunId: uuid("entity_run_id").references(() => EntityRunTable.id, {
+      onDelete: "cascade",
+    }),
+    /** Frozen input as it was at run time. */
+    inputSnapshot: jsonb("input_snapshot").notNull(),
+    /** Tool/workflow output; >8 KB JSON is truncated and the
+     *  resultTruncated flag is set. Assertions are always evaluated
+     *  against the full payload before truncation. */
+    resultPayload: jsonb("result_payload"),
+    resultTruncated: boolean("result_truncated").notNull().default(false),
+    /** Per-assertion verdicts. See docs/verification.md. */
+    assertionResults: jsonb("assertion_results")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Structured failure envelope. NULL for passed cases. See docs/verification.md. */
+    error: jsonb("error"),
+    durationMs: integer("duration_ms"),
+    startedAt: timestamp("started_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    finishedAt: timestamp("finished_at"),
+  },
+  (t) => [
+    // Drill-down: "all case results in this run" — used by the history-
+    // view modal and the run-detail page.
+    index("verification_case_result_run_idx").on(t.runId),
+    // "Latest status per case" — drives the case-tree status badges.
+    // DESC matches the "newest first" lookup. Pairs with the
+    // run_idx above; combined the two cover all current queries.
+    index("verification_case_result_case_started_idx").on(
+      t.caseId,
+      t.startedAt.desc(),
+    ),
+    // Idempotency guard for the boot-epoch recovery sweep. Orchestrator's
+    // serial loop never writes the same (run, case) twice on the happy
+    // path, but `recoverStrandedVerificationRuns` may re-run if the node
+    // crashes mid-recovery — without this constraint a second pass would
+    // duplicate the `skipped` filler rows it wrote on the first pass.
+    // Pairs with `.onConflictDoNothing()` in `writeSkippedCaseResults`.
+    uniqueIndex("verification_case_result_run_case_idx").on(t.runId, t.caseId),
+  ],
+);
+
+export type VerificationCaseResultEntity =
+  typeof VerificationCaseResultTable.$inferSelect;
+export type VerificationCaseResultStatus =
+  | "passed"
+  | "failed"
+  | "errored"
+  | "skipped"
+  | "timeout";
+export type VerificationErrorSource =
+  /** Process crashed before this case was executed; filler row written
+   *  by the boot-epoch recovery sweep. Distinct from "internal" so the
+   *  UI can label it as an infrastructure event rather than a bug. */
+  | "crashed"
+  | "mcphub"
+  | "upstream"
+  | "transport"
+  | "assertion"
+  | "timeout"
+  | "internal";

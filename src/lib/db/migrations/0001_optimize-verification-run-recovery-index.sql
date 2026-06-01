@@ -1,0 +1,2 @@
+DROP INDEX "verification_run_status_idx";--> statement-breakpoint
+CREATE INDEX "verification_run_recovery_idx" ON "verification_run" USING btree ("started_at") WHERE "verification_run"."status" = 'running';

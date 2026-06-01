@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "verification_case_result_run_case_idx" ON "verification_case_result" USING btree ("run_id","case_id");

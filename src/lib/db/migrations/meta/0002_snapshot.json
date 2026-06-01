@@ -1,6 +1,6 @@
 {
-  "id": "187c4a84-a6a9-4b79-a79b-1ae2f5a616b1",
-  "prevId": "8b0ab545-914f-4ba4-b04c-282af314fefe",
+  "id": "4e0c44c4-12db-4fc1-b9b3-24c5429bcb69",
+  "prevId": "187c4a84-a6a9-4b79-a79b-1ae2f5a616b1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3420,6 +3420,27 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "verification_case_result_run_case_idx": {
+          "name": "verification_case_result_run_case_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

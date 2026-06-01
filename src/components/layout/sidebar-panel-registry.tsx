@@ -14,6 +14,8 @@ import {
   Calendar,
   Database,
   Server,
+  FlaskConical,
+  Medal,
 } from "lucide-react";
 import type { LeftPanelId } from "@/store/sidebar";
 import { LEFT_PANEL_IDS } from "@/store/sidebar";
@@ -26,6 +28,8 @@ import { AgentPanel } from "@/components/left-panels/AgentPanel";
 import { McpPanel } from "@/components/left-panels/McpPanel";
 import { SkillsPanel } from "@/components/left-panels/SkillsPanel";
 import { SchedulesPanel } from "@/components/left-panels/SchedulesPanel";
+import { VerificationPanel } from "@/components/left-panels/VerificationPanel";
+import { EvaluationPanel } from "@/components/left-panels/EvaluationPanel";
 import { DataSourcePanel } from "@/components/left-panels/DataSourcePanel";
 import { SshServerPanel } from "@/components/left-panels/SshServerPanel";
 
@@ -108,6 +112,22 @@ export const SIDEBAR_PANEL_REGISTRY: Record<LeftPanelId, SidebarPanelDefinition>
     icon: BicepsFlexed,
     component: SkillsPanel,
     href: "/skills",
+    requiredRole: "editor",
+  },
+  verification: {
+    id: "verification",
+    label: "Verification",
+    icon: FlaskConical,
+    component: VerificationPanel,
+    href: "/verification",
+    requiredRole: "editor",
+  },
+  evaluation: {
+    id: "evaluation",
+    label: "Evaluation",
+    icon: Medal,
+    component: EvaluationPanel,
+    href: "/evaluation",
     requiredRole: "editor",
   },
   datasource: {
