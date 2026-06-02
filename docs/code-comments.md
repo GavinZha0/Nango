@@ -158,7 +158,14 @@ through `lint-staged` and rejects new violations matching the
 patterns above. Run it locally before opening a PR:
 
 ```bash
-node scripts/check-comment-rules.mjs path/to/file.ts ...
+# A specific file or list of files (same interface lint-staged uses).
+pnpm comments:check path/to/file.ts ...
+
+# Full repo sweep — walks src/ and scripts/.
+pnpm comments:check:all
+
+# Folded into the aggregate check too:
+pnpm check  # = lint + check-types + comments:check:all + test
 ```
 
 ### E — Gotchas, warnings, footguns → KEEP

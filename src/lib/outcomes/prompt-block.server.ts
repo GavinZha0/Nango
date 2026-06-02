@@ -1,21 +1,9 @@
 import "server-only";
 
-/**
- * Prompt-block helper for the Outcomes panel's chart frontend tool.
- *
- * The `render_chart` frontend tool is registered **globally** for
- * every built-in agent (`useOutcomeTools` in RightPanel's
- * ChatProviderHooks) — CopilotKit v2 has no per-agent registry.
- * The supervisor gets a "delegate, don't draw" block; every other
- * agent gets the "encourage" usage rules.
- *
- * See docs/data-visualization.md.
- */
+// Chart prompt block for non-supervisor built-in agents.
+// See docs/data-visualization.md and docs/prompts.md.
 
 interface BuildChartPromptInput {
-  /** `builtin_agent.is_supervisor` — supervisor agents get the
-   *  "delegate, don't draw" block instead of the authoring rules. */
-  isSupervisor: boolean;
   /** Reserved for future block variants that vary by binding (e.g.
    *  mention `run_code_in_sandbox` aggregation only when the
    *  sandbox is bound). Currently unused — V1 always returns the
@@ -26,12 +14,12 @@ interface BuildChartPromptInput {
 }
 
 /**
- * The two canonical block strings. Exported for testing / inspection.
+ * The canonical block string. Exported for testing / inspection.
  *
- * Scope: these blocks state OUR USAGE RULES for `render_chart`. The
+ * Scope: this block states OUR USAGE RULES for `render_chart`. The
  * tool's own description (parameter shapes, JSON examples, ECharts
- * facts) lives in `useOutcomeTools.tsx`'s schema `.describe()` — we do
- * not duplicate it here.
+ * facts) lives in `useOutcomeTools.tsx`'s schema `.describe()` — we
+ * do not duplicate it here.
  */
 export const CHART_PROMPT_BLOCKS = {
   /** For agents that can produce chartable data. */
@@ -42,27 +30,16 @@ export const CHART_PROMPT_BLOCKS = {
     "- Put data in `option.dataset.source`, not in `series[].data`.",
     "- Do not paste chart JSON into your chat reply — the tool IS the rendering.",
   ].join("\n"),
-  /** For supervisor agents — delegate, don't draw. */
-  supervisor: [
-    "## Visualization delegation",
-    "",
-    "If the user asks for a chart, delegate to a specialist agent with data tools.",
-    "Do not call `render_chart` directly.",
-  ].join("\n"),
 } as const;
 
 /**
- * Pick the right block for an agent's binding configuration.
+ * Return the chart prompt block for non-supervisor agents.
  *
- * Policy: ALWAYS inject a block. Supervisors get the
- * "delegate, don't draw" directive; everyone else gets the
- * authoring rules. The encourage block is ~300 tokens — small
- * price for consistent tool behaviour.
- *
- * WHY no binding gating: `render_chart` is registered globally in
- * `useOutcomeTools()`, so every built-in agent has the tool whether
- * they have data bindings or not. Without instructions, gpt-class
- * models mis-use the tool (empty options, pasted JS in chat).
+ * Policy: ALWAYS inject the block. `render_chart` is registered
+ * globally in `useOutcomeTools()`, so every built-in agent has the
+ * tool whether they have data bindings or not. Without instructions,
+ * gpt-class models mis-use the tool (empty options, pasted JS in
+ * chat).
  *
  * If a future agent should genuinely never have `render_chart`
  * available, the fix is at the registration layer (don't call
@@ -73,6 +50,6 @@ export function buildChartPromptBlock(input: BuildChartPromptInput): string {
   // unused — see their docstring on BuildChartPromptInput. Kept on
   // the signature so future binding-aware variants don't break the
   // caller in `runner/dispatch/builtin.ts`.
-  if (input.isSupervisor) return CHART_PROMPT_BLOCKS.supervisor;
+  void input;
   return CHART_PROMPT_BLOCKS.encourage;
 }

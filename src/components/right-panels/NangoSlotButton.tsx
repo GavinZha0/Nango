@@ -59,7 +59,7 @@ export function NangoSlotButton(_props: NangoSlotButtonProps): ReactNode {
   const exitNango = useWorkspaceStore((s) => s.exitNango);
 
   const supervisor = builtinAgents.find(
-    (a) => a.isSupervisor === true && a.enabled,
+    (a) => a.role === "supervisor" && a.enabled,
   );
 
   const isOnNango =

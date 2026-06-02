@@ -1008,9 +1008,8 @@ class RunnerImpl implements Runner {
       // the run owner's profile timezone in headless async / scheduled
       // runs — otherwise userId is undefined here and the tool falls
       // back to the server timezone. Safe re: supervisor side-effects:
-      // programmatic targets are catalog-resolved and exclude
-      // is_supervisor agents, so the `isSupervisor && ctx` branch in
-      // buildBuiltinAgents never fires on this path.
+      // catalog excludes system-role agents, so the supervisor branch
+      // in buildBuiltinAgents never fires on this path.
       { userId: input.ownerId },
     );
     const builtinAgent = agents[input.entityId];

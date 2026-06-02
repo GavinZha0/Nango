@@ -335,8 +335,8 @@ function BuiltinRow({
             aria-hidden
             className="flex shrink-0 items-center justify-center rounded-md bg-card dark:bg-white border border-border text-xl leading-none"
             style={{
-              width: "32px",
-              height: "32px",
+              width: "28px",
+              height: "28px",
               fontFamily:
                 '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif',
             }}
@@ -360,7 +360,7 @@ function BuiltinRow({
 
           {/* Supervisor flag — pinned next to the name so the user's
               main entry point stays visually distinct in the flat list. */}
-          {row.isSupervisor && (
+          {row.role === "supervisor" && (
             <Star
               className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400"
               aria-label="Supervisor (Nango)"
@@ -628,7 +628,7 @@ export function AgentPanel(): ReactNode {
       ...agents.map<BackendEntry>((a) => ({
         id: a.id,
         name: a.name ?? a.id,
-        subtitle: a.role || a.description,
+        subtitle: a.description,
         modelId: a.model?.id,
         toolCount: a.toolCount,
         kind: "agent",
@@ -641,7 +641,7 @@ export function AgentPanel(): ReactNode {
       ...teams.map<BackendEntry>((t) => ({
         id: t.id,
         name: t.name ?? t.id,
-        subtitle: t.role || t.description,
+        subtitle: t.description,
         modelId: t.model?.id,
         toolCount: t.toolCount,
         kind: "team",
@@ -705,8 +705,11 @@ export function AgentPanel(): ReactNode {
   const sortedBuiltinAgents = useMemo(
     () =>
       [...builtinAgents].sort((a, b) => {
-        if (a.isSupervisor && !b.isSupervisor) return -1;
-        if (!a.isSupervisor && b.isSupervisor) return 1;
+        // Supervisor pinned to top; everything else by name.
+        const aIsSup = a.role === "supervisor";
+        const bIsSup = b.role === "supervisor";
+        if (aIsSup && !bIsSup) return -1;
+        if (!aIsSup && bIsSup) return 1;
         return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
       }),
     [builtinAgents]

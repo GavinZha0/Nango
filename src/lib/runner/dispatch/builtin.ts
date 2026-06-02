@@ -38,7 +38,6 @@ import {
   resolveOrchestrationMode,
   type OrchestrationModeId,
 } from "@/lib/orchestration/modes";
-import { SUPERVISOR_CONTRACT } from "@/lib/constants/supervisor";
 import { SAFETY_POLICY_BLOCK } from "@/lib/constants/safety";
 
 /** Classify a CopilotKit URL: `{agentId, action}` for user-perceived
@@ -260,7 +259,7 @@ export async function buildBuiltinAgents(
 
     const supervisorTools: SupervisorRuntime["tools"] = [];
     let supervisorCatalogBlock = "";
-    const isSupervisor = spec.isSupervisor;
+    const isSupervisor: boolean = spec.role === "supervisor";
     if (isSupervisor && ctx) {
       const holder: ParentRunIdHolder = {
         current: undefined,
@@ -299,14 +298,15 @@ export async function buildBuiltinAgents(
     // Binding-implied tools are built directly above, not here.
     const builtinTools: ToolDefinition[] = buildBuiltinTools([...builtinToolNames]);
 
-    // Chart prompt block — gates behavioural enablement of the
-    // globally-registered render_chart frontend tool.
-    // See docs/data-visualization.md.
-    const chartPromptBlock: string = buildChartPromptBlock({
-      hasDataSource: dataSourceIds.length > 0,
-      hasSandbox: builtinToolNames.has("run_code_in_sandbox"),
-      isSupervisor,
-    });
+    // Chart prompt block — gates the globally-registered `render_chart`
+    // frontend tool. Skipped for supervisor (covered inside
+    // SUPERVISOR_PROMPT). See docs/data-visualization.md.
+    const chartPromptBlock: string = isSupervisor
+      ? ""
+      : buildChartPromptBlock({
+          hasDataSource: dataSourceIds.length > 0,
+          hasSandbox: builtinToolNames.has("run_code_in_sandbox"),
+        });
 
     // Always true in practice — `ambientTools` is never empty. Kept as
     // a disjunction so the invariant still holds if ambient tools ever
@@ -321,34 +321,25 @@ export async function buildBuiltinAgents(
       || sshTools.length > 0
       || ambientTools.length > 0;
 
-    // Prompt composition (Markdown-sectioned). Every block self-heads
-    // with its own `##` so we just join with blank lines. Order:
-    //   1. SUPERVISOR_CONTRACT (supervisor only) — forced, immutable
-    //      routing discipline.
-    //   2. SAFETY_POLICY_BLOCK — forced for all agents; the closing
-    //      override-clause raises its precedence over persona / user.
-    //   3. user persona — spec.prompt wrapped in `## Persona`.
-    //   4. supervisor catalog — the "Available agents" listing the
-    //      CONTRACT references (placed after persona per the v3 design
-    //      so identity/tone comes before the routing roster).
-    //   5. capability blocks — skills / ds / ssh / chart.
-    //   6. ERROR_POLICY_BLOCK — only when tools are present.
-    //   7. mode directive (supervisor only) — LAST so the recency-
-    //      weighting effect lands on per-turn routing constraints.
+    // Prompt composition order — see docs/prompts.md.
     const modeSuffix: string =
       isSupervisor && ctx?.mode
         ? resolveOrchestrationMode(ctx.mode).promptDirective
         : "";
     const composedPrompt: string | undefined = (() => {
       const parts: string[] = [];
-      if (isSupervisor) parts.push(SUPERVISOR_CONTRACT);
-      parts.push(SAFETY_POLICY_BLOCK);
-      if (spec.prompt && spec.prompt.trim().length > 0) {
-        parts.push(`## Persona\n\n${spec.prompt.trim()}`);
+
+      if (isSupervisor) {
+        if (spec.prompt && spec.prompt.trim().length > 0) {
+          parts.push(spec.prompt.trim());
+        }
+      } else {
+        parts.push(SAFETY_POLICY_BLOCK);
+        if (spec.prompt && spec.prompt.trim().length > 0) {
+          parts.push(spec.prompt.trim());
+        }
       }
-      if (supervisorCatalogBlock.length > 0) {
-        parts.push(supervisorCatalogBlock);
-      }
+
       if (skillsRuntime.promptBlock.length > 0) {
         parts.push(skillsRuntime.promptBlock);
       }
@@ -359,8 +350,16 @@ export async function buildBuiltinAgents(
         parts.push(sshHostsRuntime.promptBlock);
       }
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
-      if (hasTools) parts.push(ERROR_POLICY_BLOCK);
-      if (modeSuffix.length > 0) parts.push(modeSuffix);
+
+      if (isSupervisor) {
+        if (supervisorCatalogBlock.length > 0) {
+          parts.push(supervisorCatalogBlock);
+        }
+        if (modeSuffix.length > 0) parts.push(modeSuffix);
+      } else if (hasTools) {
+        parts.push(ERROR_POLICY_BLOCK);
+      }
+
       return parts.length === 0 ? undefined : parts.join("\n\n");
     })();
 

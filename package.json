@@ -25,6 +25,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "check-types": "tsc --noEmit",
+    "comments:check": "node scripts/check-comment-rules.mjs",
+    "comments:check:all": "node scripts/check-comment-rules.mjs --all",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=.env docker/migrate.mjs",
     "db:push": "drizzle-kit push",
@@ -35,7 +37,7 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f nango-app",
     "prepare": "husky",
-    "check": "pnpm lint && pnpm check-types && pnpm test"
+    "check": "pnpm lint && pnpm check-types && pnpm comments:check:all && pnpm test && pnpm test:e2e"
   },
   "dependencies": {
     "@ag-ui/client": "^0.0.52",

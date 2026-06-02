@@ -692,7 +692,7 @@ injects one of two blocks:
 
 | Agent role | Prompt block injected | Effect |
 |---|---|---|
-| Supervisor (`is_supervisor=true`) | "Delegate visualization tasks to a specialist; do not call `render_chart` directly." | Discouraged from drawing directly. |
+| Supervisor (`role === 'supervisor'`) | "Delegate visualization tasks to a specialist; do not call `render_chart` directly." | Discouraged from drawing directly. |
 | Everyone else (incl. chat-only) | "render_chart usage" rules — no-data-no-call, dataset over series.data, no JSON in chat. | Tool used correctly when called. |
 
 > **V1 lesson learned**: an earlier design left chat-only agents
@@ -1855,8 +1855,8 @@ builds.
 - [ ] Verify ✓ state, toast, idempotency on re-click.
 - [ ] In `lib/runner/dispatch/builtin.ts`: when agent has bound data
       source / sandbox, append chart-guidance prompt block. When
-      `spec.isSupervisor`, append "delegate, don't draw" prompt
-      block. Place after `dataSourcesRuntime.promptBlock`.
+      `spec.role === "supervisor"`, append "delegate, don't draw"
+      prompt block. Place after `dataSourcesRuntime.promptBlock`.
 
 **Checkpoint**: Save works; LLM behaviour is guided correctly per
 agent kind.
@@ -1984,7 +1984,7 @@ local dev instance:
 | `src/components/layout/RightPanel.tsx` | Replace `useAgentActions()` call with `useOutcomeTools()`. | 3 |
 | `src/hooks/useSaveOutcome.ts` | **New** — POST `/api/artifacts`, on success `markSaved` + `toast.success`; on failure `toast.error`. Guards against double-save. | 4 |
 | `src/app/api/artifacts/route.ts` | **New** — `withSession` POST. Validates `createArtifactSchema`. Idempotency: if `(sourceThreadId, sourceOutcomeId)` already exists for this user, returns the existing row's id. | 4 |
-| `src/lib/runner/dispatch/builtin.ts` | Append chart-guidance prompt block when agent has bound data source / sandbox; append "delegate, don't draw" prompt block when `spec.isSupervisor`. Inserted next to existing `dataSourcesRuntime.promptBlock`. | 4 |
+| `src/lib/runner/dispatch/builtin.ts` | Append chart-guidance prompt block when agent has bound data source / sandbox; append "delegate, don't draw" prompt block when `spec.role === "supervisor"`. Inserted next to existing `dataSourcesRuntime.promptBlock`. | 4 |
 | `src/store/workspace.ts` | **Delete** `activeArtifact` field, `openArtifact`, `closeArtifact`. Remove from the partialize allowlist (already excluded). | 5 |
 | `src/app/(workspace)/page.tsx` | **Delete** the `activeArtifact ? <ArtifactRenderer/> : <Welcome/>` priority branch; revert to plain welcome page. | 5 |
 | `docs/architecture.md` §5.4 | Replace the chart-dashboard paragraph with a one-paragraph description of the Outcomes panel + link to this doc. | 5 |

@@ -6,13 +6,54 @@
  * version markers, and doc section / fragment anchors must not survive
  * in source comments.
  *
- * Invoked by lint-staged with the list of staged files as argv. Exits
- * non-zero with a per-line report when violations are found.
+ * Invocations:
+ *   - lint-staged passes the list of staged files as argv (default).
+ *   - `--all` walks `src/` and `scripts/` for a full repo sweep
+ *     (used by `pnpm comments:check:all`).
+ *
+ * Exits non-zero with a per-line report when violations are found.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
-const files = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const sweepAll = argv.includes("--all");
+
+// Roots scanned by `--all`. Tests and migrations stay out via SKIP_PATHS.
+const SWEEP_ROOTS = ["src", "scripts"];
+// Match what lint-staged scans: same extensions, exclude binaries.
+const SWEEP_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+// Directories we never recurse into during a sweep.
+const SWEEP_SKIP_DIRS = new Set([
+  "node_modules",
+  ".next",
+  "dist",
+  "playwright-report",
+  "test-results",
+]);
+
+function* walk(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (SWEEP_SKIP_DIRS.has(entry.name)) continue;
+      yield* walk(p);
+    } else if (entry.isFile() && SWEEP_EXT.test(entry.name)) {
+      yield p;
+    }
+  }
+}
+
+const files = sweepAll
+  ? SWEEP_ROOTS.flatMap((r) => [...walk(r)])
+  : argv.filter((a) => a !== "--all");
 if (files.length === 0) process.exit(0);
 
 const SKIP_PATHS = [
@@ -35,7 +76,7 @@ const SKIP_PATHS = [
 const PATTERNS = [
   {
     name: "decision id",
-    // D17 / D31 / D200 — word-boundary D followed by 1-3 digits, not
+    // word-boundary D followed by 1-3 digits, not
     // followed by another letter or a dot (D3.js / D2D would fall here).
     re: /\bD\d{1,3}(?![a-zA-Z.])/,
     hint: 'drop the decision id; rewrite the surrounding line in plain prose.',

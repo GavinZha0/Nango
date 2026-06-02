@@ -41,7 +41,6 @@ function projectMastraAgent(raw: MastraAgentRaw, credentialId: string): EntityDe
     kind: "agent",
     name: raw.name,
     description: raw.description,
-    role: undefined,
     prompt,
     provider: "mastra",
     credentialId,

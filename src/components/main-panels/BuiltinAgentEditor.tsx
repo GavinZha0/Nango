@@ -8,11 +8,12 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   startTransition,
   type ReactNode,
   type ChangeEvent,
 } from "react";
-import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,19 +41,19 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { getProviderLabel } from "@/lib/constants/providers";
-import { SUPERVISOR_PERSONA_SEED } from "@/lib/constants/supervisor";
+import {
+  SUPERVISOR_DESCRIPTION,
+  SUPERVISOR_NAME,
+  SUPERVISOR_PROMPT,
+} from "@/lib/constants/supervisor";
+import type { AgentRole } from "@/lib/db/schema";
 
 // Shared row type (re-exported for other consumers)
 
 export interface BuiltinAgentRow {
   id: string;
-  /** True when this agent is the user's Nango. */
-  isSupervisor?: boolean;
-  /**
-   * One-line persona surfaced to the supervisor's `list_agents`.
-   * Optional — null until the user authors one in the editor.
-   */
-  role?: string | null;
+  /** System-agent role mirror. `null` = regular agent. */
+  role?: AgentRole | null;
   /**
    * Optional emoji glyph for visual identification (e.g. "🤖", "📊").
    * Stored as the raw Unicode character. NULL means "use the default
@@ -247,8 +248,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   // Form state
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  /** One-line persona surfaced to the supervisor's `list_agents`. */
-  const [role, setRole] = useState("");
   /** Optional emoji glyph; null = "use the default". */
   const [icon, setIcon] = useState<string | null>(null);
   const [model, setModel] = useState("");
@@ -260,11 +259,19 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   const [temperature, setTemperature] = useState<number>(0.3);
   /** Whether this agent is the user's Nango (supervisor). */
   const [isSupervisor, setIsSupervisor] = useState(false);
-  /**
-   * id of another agent that is already the user's Nango. When set
-   * (and != this agent), the "Set as Nango" checkbox is disabled —
-   * the user must demote that one first.
-   */
+  /** Server-side role at load time. Non-null = role frozen by the
+   *  monotonic rule; the toggle goes readonly. */
+  const [loadedRole, setLoadedRole] = useState<AgentRole | null>(null);
+  /** Snapshot of name/description/prompt taken on "Set as Nango" ON
+   *  so cancelling restores the user's prior input.
+   *  QUIRK: useRef, not useState — pure side-channel, no re-render. */
+  const preSupervisorSnapshot = useRef<{
+    name: string;
+    description: string;
+    prompt: string;
+  } | null>(null);
+  /** id of another agent already holding the supervisor slot for this
+   *  user; disables the toggle until that one is deleted. */
   const [otherSupervisorId, setOtherSupervisorId] = useState<string | null>(null);
   const [selectedMcp, setSelectedMcp] = useState<Set<string>>(new Set());
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
@@ -308,7 +315,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         setAgent(data);
         setName(data.name);
         setDescription(data.description ?? "");
-        setRole(data.role ?? "");
         setIcon(data.icon ?? null);
         setModel(data.model);
         setModelProvider(data.modelProvider);
@@ -317,7 +323,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         setToolChoice(data.toolChoice ?? "auto");
         setMaxSteps(data.maxSteps ?? 5);
         setTemperature(data.temperature != null ? parseFloat(data.temperature) : 0.3);
-        setIsSupervisor(data.isSupervisor === true);
+        setIsSupervisor(data.role === "supervisor");
+        setLoadedRole(data.role ?? null);
         // Initialise selections from bound tools
         const mcp = new Set<string>();
         const sk = new Set<string>();
@@ -372,9 +379,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       }
       if (allAgentsRes.ok) {
         // Find an existing supervisor that is not the current agent to flag the slot as occupied.
-        const all = (await allAgentsRes.json()) as Array<{ id: string; isSupervisor?: boolean; createdBy?: string }>;
+        const all = (await allAgentsRes.json()) as Array<{ id: string; role?: AgentRole | null; createdBy?: string }>;
         const other = all.find(
-          (a) => a.isSupervisor === true && a.id !== (agentId ?? ""),
+          (a) => a.role === "supervisor" && a.id !== (agentId ?? ""),
         );
         setOtherSupervisorId(other?.id ?? null);
       }
@@ -409,10 +416,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     ];
 
     try {
+      const targetRole: AgentRole | null = isSupervisor ? "supervisor" : null;
       const body = {
         name: name.trim() || "New Agent",
         description: description.trim() || null,
-        role: role.trim() || null,
+        role: targetRole,
         icon: icon,
         model,
         modelProvider,
@@ -421,7 +429,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         toolChoice,
         maxSteps,
         temperature,
-        isSupervisor,
         tools,
       };
 
@@ -514,45 +521,57 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     <div className="flex h-full flex-col">
       {/* Header */}
       {(() => {
-        // Same disabled rule as the previous inline block — slot is
-        // "taken" only when another agent already holds the flag.
+        // `roleIsFrozen` — already-saved supervisor: monotonic rule
+        // makes the toggle and locked fields readonly.
+        const roleIsFrozen = loadedRole !== null;
         const supervisorSlotTaken =
-          !isSupervisor && otherSupervisorId !== null && otherSupervisorId !== agentId;
+          !isSupervisor
+          && !roleIsFrozen
+          && otherSupervisorId !== null
+          && otherSupervisorId !== agentId;
         return (
           <div className="flex items-center gap-2 border-b px-3 py-2.5">
             <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={onBack} aria-label="Back to agent list">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <span className="min-w-0 flex-1 truncate text-sm font-semibold">{headerTitle}</span>
-            {/*
-             * Promotion toggle — semantically special (one Nango per
-             * user), so it sits next to Save instead of mixed into the
-             * Basic params. First-time promotion seeds the default
-             * prompt only if the user hasn't authored one; demotion
-             * leaves any edits intact.
-             */}
             <label
               className={cn(
-                // mr-4 widens the gap before Save so the toggle reads
-                // as a distinct, semantically-different control rather
-                // than another button-row item.
                 "mr-4 flex shrink-0 items-center gap-1.5",
-                supervisorSlotTaken ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                roleIsFrozen
+                  ? "cursor-default"
+                  : supervisorSlotTaken
+                    ? "cursor-not-allowed opacity-60"
+                    : "cursor-pointer",
               )}
               title={
-                supervisorSlotTaken
-                  ? "You already have a Nango. Demote it first to designate a new one."
-                  : "Your personal supervisor that can delegate tasks to other agents. Only one Nango per user."
+                roleIsFrozen
+                  ? "This is your Nango (Supervisor). Role is locked once set — delete and recreate to change."
+                  : supervisorSlotTaken
+                    ? "You already have a Nango. Delete it first to designate a new one."
+                    : "Your personal supervisor that can delegate tasks to other agents. Only one Nango per user."
               }
             >
               <span className="text-xs font-medium">Set as Nango</span>
               <Switch
                 checked={isSupervisor}
-                disabled={supervisorSlotTaken}
+                disabled={supervisorSlotTaken || roleIsFrozen}
                 onCheckedChange={(v) => {
+                  if (roleIsFrozen) return;
                   setIsSupervisor(v);
-                  if (v && prompt.trim().length === 0) {
-                    setPrompt(SUPERVISOR_PERSONA_SEED);
+                  if (v) {
+                    preSupervisorSnapshot.current = { name, description, prompt };
+                    setName(SUPERVISOR_NAME);
+                    setDescription(SUPERVISOR_DESCRIPTION);
+                    setPrompt(SUPERVISOR_PROMPT);
+                  } else {
+                    const snap = preSupervisorSnapshot.current;
+                    if (snap) {
+                      setName(snap.name);
+                      setDescription(snap.description);
+                      setPrompt(snap.prompt);
+                      preSupervisorSnapshot.current = null;
+                    }
                   }
                 }}
               />
@@ -664,11 +683,10 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 <Input
                   value={name}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-                  className="h-8 flex-1 text-xs"
+                  readOnly={isSupervisor}
+                  className={cn("h-8 flex-1 text-xs", isSupervisor && "bg-muted text-muted-foreground")}
+                  title={isSupervisor ? "Supervisor name is locked." : undefined}
                 />
-                {/* Emoji picker trails the input — see "icon picker
-                    placement" note: it's a secondary affordance, not
-                    the primary identity control. */}
                 <EmojiPicker
                   value={icon}
                   onChange={setIcon}
@@ -678,26 +696,17 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Label
-                  className="w-24 shrink-0 text-xs"
-                  title="Persona shown to the supervisor when it picks an agent for delegation."
-                >
-                  Role
-                </Label>
-                <Input
-                  value={role}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setRole(e.target.value)}
-                  className="h-8 flex-1 text-xs"
-                  placeholder="e.g. Senior Python developer"
-                />
-              </div>
-              <div className="flex items-center gap-2">
                 <Label className="w-24 shrink-0 text-xs">Description</Label>
                 <Input
                   value={description}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
-                  className="h-8 flex-1 text-xs"
+                  readOnly={isSupervisor}
+                  className={cn(
+                    "h-8 flex-1 text-xs",
+                    isSupervisor && "bg-muted text-muted-foreground",
+                  )}
                   placeholder="What this agent does (one-sentence summary surfaced to the supervisor)"
+                  title={isSupervisor ? "Supervisor description is locked." : undefined}
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -817,7 +826,12 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               title="Built-in Tools"
               defaultOpen={false}
               count={{
-                selected: selectedBuiltinTools.size,
+                // Intersect selection with catalog so supervisor self-
+                // injected tools (absent from /api/builtin-tools) don't
+                // inflate the numerator.
+                selected: [...selectedBuiltinTools].filter((n) =>
+                  builtinToolCatalog.some((t) => t.name === n),
+                ).length,
                 total: builtinToolCatalog.length,
               }}
             >
@@ -888,27 +902,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
           {/* RIGHT COLUMN: System Prompt. `lg:sticky` so it stays
               visible while the left column scrolls. */}
           <div className="lg:sticky lg:top-0 lg:self-start lg:border-l lg:border-border/40 lg:pl-3">
-            <Section
-              title="System Prompt"
-              actions={
-                isSupervisor ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 gap-1 px-2 text-[11px]"
-                    onClick={() => setPrompt(SUPERVISOR_PERSONA_SEED)}
-                    title="Replace the prompt with the Nango default."
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Restore default
-                  </Button>
-                ) : undefined
-              }
-            >
+            <Section title="System Prompt">
               <Textarea
                 value={prompt}
                 onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
+                readOnly={isSupervisor}
                 placeholder="You are a helpful assistant…"
                 // Override `field-sizing-content` (default in the
                 // shadcn Textarea base) so the box keeps a fixed
@@ -919,7 +917,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 // beyond the column and trigger a page-level scroll.
                 // `h-[calc(100vh-12rem)]` reserves room for the page
                 // header + Section title strip on typical viewports.
-                className="!field-sizing-fixed h-[calc(100vh-12rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed"
+                className={cn(
+                  "!field-sizing-fixed h-[calc(100vh-12rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed",
+                  isSupervisor && "bg-muted text-muted-foreground",
+                )}
+                title={isSupervisor ? "Supervisor system prompt is locked." : undefined}
               />
             </Section>
           </div>

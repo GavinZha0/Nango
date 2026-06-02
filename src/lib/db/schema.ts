@@ -451,6 +451,10 @@ export type DashboardArtifactEntity = typeof DashboardArtifactTable.$inferSelect
 export type DashboardKind = "folder" | "dashboard";
 export type VisibilityType = "private" | "shared";
 export type UserRole = "admin" | "user";
+
+/** Built-in agent system-role enum. `null` = regular user-authored
+ *  agent. See AGENTS.md ("Supervisor + agent role enum"). */
+export type AgentRole = "supervisor" | "secretary" | "evaluator";
 export type ImAccounts = { teams?: string; dingtalk?: string; wechat?: string; slack?: string };
 
 // BuiltIn Agent tables
@@ -786,8 +790,9 @@ export type SkillFileEntity = typeof SkillFileTable.$inferSelect;
 export const BuiltinAgentTable = pgTable("builtin_agent", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
 
-  /** Supervisor flag. Each user has at most one (enforced by partial unique index). Auto-binds supervisor tools on promote. */
-  isSupervisor: boolean("is_supervisor").notNull().default(false),
+  /** System-agent role; nullable. DB CHECK pins the enum (see migration
+   *  0003) — TS type narrows in client + server. */
+  role: text("role").$type<AgentRole | null>(),
 
   name: text("name").notNull(),
   description: text("description"),
@@ -806,9 +811,6 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
    * emoji font.
    */
   icon: text("icon"),
-
-  /** One-line persona surfaced to the supervisor for routing. E.g. "Senior Python developer specialising in async." */
-  role: text("role"),
 
   /** LLM model identifier, e.g. "gpt-4o", "claude-3-5-sonnet-20241022". */
   model: text("model").notNull(),
@@ -853,12 +855,14 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
-  // Each user can have at most one supervisor agent (Nango).
-  // (After hard-purge of the creator, createdBy becomes NULL; the index
-  // treats NULLs as distinct, so orphan supervisor rows are tolerated.)
+  // Per-role uniqueness — evaluator intentionally unconstrained.
+  // NULL createdBy (post owner hard-purge) treated as distinct.
   uniqueIndex("builtin_agent_one_supervisor_per_user_idx")
     .on(t.createdBy)
-    .where(sql`${t.isSupervisor} = true`),
+    .where(sql`${t.role} = 'supervisor'`),
+  uniqueIndex("builtin_agent_one_secretary_per_user_idx")
+    .on(t.createdBy)
+    .where(sql`${t.role} = 'secretary'`),
 ]);
 
 /**

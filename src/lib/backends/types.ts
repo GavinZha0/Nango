@@ -62,8 +62,6 @@ export interface EntityDescriptor {
   kind: EntityKind;
   name?: string;
   description?: string;
-  /** Short persona / role tagline, rendered as the agent-list subtitle. */
-  role?: string;
   /** Full system prompt / instructions; not shown in the list view. */
   prompt?: string;
   /**

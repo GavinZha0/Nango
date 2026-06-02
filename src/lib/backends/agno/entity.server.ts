@@ -14,7 +14,6 @@ interface AgnoAgentRaw {
   id: string;
   name?: string;
   description?: string;
-  role?: string;
   db_id?: string;
   model?: { name?: string; model?: string; provider?: string };
   tools?: { tools?: Array<{ name?: string; description?: string }> };
@@ -86,7 +85,6 @@ function projectAgent(
     kind,
     name: raw.name,
     description: raw.description,
-    role: raw.role,
     prompt,
     version,
     provider: "agno",

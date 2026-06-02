@@ -18,6 +18,8 @@ export type AgentToolRef =
   | { kind: "datasource"; dataSourceId: string }
   | { kind: "ssh_server"; sshServerId: string };
 
+import type { AgentRole } from "@/lib/db/schema";
+
 /** Cached projection of one Built-in agent. Replaced wholesale on
  *  invalidation. */
 export interface AgentSpec {
@@ -26,10 +28,9 @@ export interface AgentSpec {
    *  spec so the dispatch / runtime / forensic-degradation paths
    *  can label an agent without re-querying the DB. */
   name: string;
-  /** Enables the supervisor tool set at runtime composition. */
-  isSupervisor: boolean;
-  /** One-line persona / role description; null when unauthored. */
-  role: string | null;
+  /** System-agent role (mirror of `builtin_agent.role`). `null` =
+   *  regular agent. `dispatch/builtin.ts` branches on `=== "supervisor"`. */
+  role: AgentRole | null;
   modelProvider: string;
   model: string;
   prompt: string | null;

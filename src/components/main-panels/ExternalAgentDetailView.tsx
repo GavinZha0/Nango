@@ -9,7 +9,7 @@
  *
  * Fields surfaced (see `docs/a2a-compatibility.md` for the wider
  * mapping):
- *   - Basic:        id, name, description, role, members (team only)
+ *   - Basic:        id, name, description, members (team only)
  *   - Model:        model id / display name / provider
  *   - Capabilities: tool / skill / knowledge counts
  *   - Source:       backend provider + credential
@@ -226,7 +226,6 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
               <FieldRow label="ID" value={<TextValue value={live.id} mono />} />
               <FieldRow label="Name" value={<TextValue value={live.name} />} />
               <FieldRow label="Description" value={<TextValue value={live.description} />} />
-              <FieldRow label="Role" value={<TextValue value={live.role} />} />
               {live.kind === "team" && (
                 <FieldRow label="Members" value={<NumberValue value={live.memberCount} />} />
               )}

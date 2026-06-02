@@ -649,7 +649,7 @@ When to revisit this: the headers approach scales fine up to ~3 routing dimensio
 
 ### Supervisor Tools (`supervisor-tools.server.ts`)
 - **Quirk (Stateful Tool Closures):** `defineTool` `execute()` is a pure function. Per-user / per-run state is captured in the closure built per-request (`userId`, `supervisorAgentId`, and a mutable `parentRunIdHolder` cell that the runner sets after the `entity_run` row is created).
-- **Security (Loop Prevention):** The routing catalog structurally excludes the supervisor itself. Tool execution re-checks `is_supervisor`, and per-user uniqueness prevents cross-supervisor cycles. The `parent_run_id` chain depth limit (configured in `event-store.ts`) acts as the final defense against infinite loops.
+- **Security (Loop Prevention):** The routing catalog structurally excludes any agent with a non-null `role` (supervisor / secretary / evaluator), so system agents can never appear as delegation targets. Per-user uniqueness on supervisor / secretary prevents cross-supervisor cycles. The `parent_run_id` chain depth limit (configured in `event-store.ts`) acts as the final defense against infinite loops.
 
 ### Async & Recovery
 - **Event Bus (`event-bus.ts`):** In-process pub/sub for runner-driven events. Uses an in-process `Map<userId, Set<Subscriber>>`—no Redis/broker needed. Subscribers are tied to live SSE connections, and disconnects MUST call the unsubscribe handle (via the `request.signal`'s abort listener) to prevent memory leaks.

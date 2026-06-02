@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import {
   BuiltinAgentTable,
   BuiltinAgentToolTable,
+  type AgentRole,
   type AgentToolType,
 } from "@/lib/db/schema";
 import { getCredentialConfigById } from "@/lib/credentials/lookup";
@@ -101,8 +102,7 @@ export class AgentPool {
 interface AgentRow {
   id: string;
   name: string;
-  isSupervisor: boolean;
-  role: string | null;
+  role: AgentRole | null;
   modelProvider: string;
   model: string;
   prompt: string | null;
@@ -131,7 +131,6 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
     .select({
       id: BuiltinAgentTable.id,
       name: BuiltinAgentTable.name,
-      isSupervisor: BuiltinAgentTable.isSupervisor,
       role: BuiltinAgentTable.role,
       modelProvider: BuiltinAgentTable.modelProvider,
       model: BuiltinAgentTable.model,
@@ -180,7 +179,6 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
   return {
     agentId: agent.id,
     name: agent.name,
-    isSupervisor: agent.isSupervisor,
     role: agent.role,
     modelProvider: agent.modelProvider,
     model: agent.model,

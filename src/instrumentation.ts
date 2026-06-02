@@ -74,15 +74,9 @@ export async function register(): Promise<void> {
     console.error("[nango] config bootstrap failed:", err);
   }
 
-  // Dataset cache: clear every Parquet snapshot from the previous
-  // process incarnation. Makes cache lifetime equal process lifetime,
-  // which simultaneously bounds disk accumulation (no background GC)
-  // and removes cross-restart `QUERY_HASH_MISMATCH` collisions
-  // (LLM has no memory of prior session's dataset names).
+  // Dataset cache sweep — see docs/data-sources.md.
   // Best-effort: a failed sweep logs and continues so a permission
   // hiccup can never block boot.
-  // @see lib/data-sources/cache.ts#purgeAllDatasets
-  // @see docs/data-sources.md §"Cache lifecycle"
   try {
     const { purgeAllDatasets } = await import("@/lib/data-sources/cache");
     const removed = await purgeAllDatasets();
@@ -104,6 +98,16 @@ export async function register(): Promise<void> {
     await seedBuiltinSkills();
   } catch (err) {
     console.error("[nango] builtin skills reconcile failed:", err);
+  }
+
+  // Supervisor canonicalization — see docs/prompts.md.
+  const { canonicalizeSupervisorAgents } = await import(
+    "@/lib/builtin-agents/canonicalize-supervisor"
+  );
+  try {
+    await canonicalizeSupervisorAgents();
+  } catch (err) {
+    console.error("[nango] supervisor canonicalize failed:", err);
   }
 
   // Schedules: register one Croner job per enabled row. Independent

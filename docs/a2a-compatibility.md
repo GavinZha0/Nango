@@ -85,7 +85,6 @@ Placement of the helper: `src/lib/backends/a2a/skill-projection.ts`
 | Nango field | A2A treatment | Decision |
 |---|---|---|
 | `kind: "agent" \| "team" \| "workflow"` | A2A models everything as `agent` | When emitting cards, map all kinds to `agent` and place the kind in an `extensions["x-nango/kind"]` block. |
-| `role` | no direct slot | Concatenate into `description` end (`"<description> · Role: <role>"`) or stash in `extensions["x-nango/role"]`. |
 | `prompt` | A2A intentionally hides system prompts | **Keep internal.** Never include in an outgoing card. |
 | `credentialId` / `credentialName` | A2A has no multi-credential model | Internal-only. The chosen credential is implicit in *which* Nango deployment is serving the card. |
 | `model: ModelInfo` | A2A hides model implementation details | **Keep internal.** Downstream A2A clients shouldn't depend on which LLM serves the agent. |

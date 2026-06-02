@@ -13,7 +13,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { BuiltinAgentTable, ScheduleTable } from "@/lib/db/schema";
+import { BuiltinAgentTable, ScheduleTable, type AgentRole } from "@/lib/db/schema";
 import { listVisibleAgentIds } from "@/lib/access/agent-visibility";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { runner } from "@/lib/runner";
@@ -65,7 +65,6 @@ interface AgentCard {
   kind: EntityKind;
   name?: string;
   description?: string;
-  role?: string;
   promptExcerpt?: string;
 }
 
@@ -136,7 +135,6 @@ async function buildCatalog(
           kind: e.kind,
           name: e.name,
           description: e.description,
-          role: e.role,
           promptExcerpt: excerpt(e.prompt),
         },
         source: "backend",
@@ -152,9 +150,8 @@ async function buildCatalog(
     const rows: Array<{
       name: string;
       description: string | null;
-      role: string | null;
+      role: AgentRole | null;
       prompt: string | null;
-      isSupervisor: boolean;
       createdBy: string | null;
       visibility: string;
     }> = await db
@@ -163,7 +160,6 @@ async function buildCatalog(
         description: BuiltinAgentTable.description,
         role: BuiltinAgentTable.role,
         prompt: BuiltinAgentTable.prompt,
-        isSupervisor: BuiltinAgentTable.isSupervisor,
         createdBy: BuiltinAgentTable.createdBy,
         visibility: BuiltinAgentTable.visibility,
       })
@@ -171,8 +167,8 @@ async function buildCatalog(
       .where(eq(BuiltinAgentTable.id, id))
       .limit(1);
     if (rows.length === 0) continue;
-    // Defensive — per-user uniqueness already prevents a second supervisor.
-    if (rows[0].isSupervisor) continue;
+    // System agents (role !== null) are NEVER routable from the catalog.
+    if (rows[0].role !== null) continue;
 
     const isPublicByOthers =
       rows[0].visibility === "public" && rows[0].createdBy !== ctx.userId;
@@ -192,7 +188,6 @@ async function buildCatalog(
         kind: "agent",
         name: rows[0].name,
         description: rows[0].description ?? undefined,
-        role: rows[0].role ?? undefined,
         promptExcerpt: excerpt(rows[0].prompt),
       },
       source: "builtin",
@@ -225,14 +220,14 @@ function formatCatalogBlock(entries: CatalogEntry[]): string {
     "each entry's `kind` tells you which protocol it speaks: `agent`",
     "(single conversational unit), `team` (multi-agent group), or",
     "`workflow` (directed graph / one-shot run). Call",
-    "`get_agent_details` for an agent's role and prompt excerpt when",
-    "picking between similar options. The catalog is exhaustive — if",
-    "no listed agent fits, answer directly and tell the user what",
-    "capability is missing.",
+    "`get_agent_details` for an agent's prompt excerpt when picking",
+    "between similar options. The catalog is exhaustive — if no listed",
+    "agent fits, answer directly and tell the user what capability is",
+    "missing.",
     "",
   ];
-  // Slim listing: name + kind + a one-line description. Role and the
-  // 300-char prompt excerpt move to `get_agent_details` (progressive
+  // Slim listing: name + kind + a one-line description. The 300-char
+  // prompt excerpt moves to `get_agent_details` (progressive
   // disclosure) so the catalog stays cheap when many agents are
   // configured. Lookup tool reads the same in-memory `catalogByName`
   // map — zero extra DB cost.
@@ -408,16 +403,16 @@ export async function buildSupervisorRuntime(
 
   // Progressive-disclosure lookup over the same in-memory `catalogByName`
   // map the routing tools use — zero extra DB roundtrips. The catalog
-  // block deliberately omits role / promptExcerpt to keep the prompt
-  // small; this tool surfaces them on demand when the supervisor needs
-  // to disambiguate between similar-sounding agents.
+  // block deliberately omits promptExcerpt to keep the prompt small;
+  // this tool surfaces it on demand when the supervisor needs to
+  // disambiguate between similar-sounding agents.
   const getAgentDetails = defineTool({
     name: "get_agent_details",
     description:
-      "Look up an agent's role and a short excerpt of its own system " +
-      "prompt by display name. Use this when picking between " +
-      "similar-sounding agents in the catalog — the catalog only " +
-      "shows name + kind + description; this tool reveals the rest.",
+      "Look up a short excerpt of an agent's own system prompt by " +
+      "display name. Use this when picking between similar-sounding " +
+      "agents in the catalog — the catalog only shows name + kind + " +
+      "description; this tool reveals the prompt excerpt.",
     parameters: z.object({
       agent: z
         .string()
@@ -440,7 +435,6 @@ export async function buildSupervisorRuntime(
         displayName: entry.card.displayName,
         kind: entry.card.kind,
         description: entry.card.description ?? null,
-        role: entry.card.role ?? null,
         promptExcerpt: entry.card.promptExcerpt ?? null,
       };
     },

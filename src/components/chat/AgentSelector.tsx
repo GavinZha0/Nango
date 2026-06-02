@@ -59,9 +59,10 @@ export function AgentSelector({
   const visibleTeams = teams.filter(
     (t) => !disabledBackend.has(agentKey(t.credentialId, t.id)),
   );
-  // The supervisor is hidden from dropdown items but kept in lookup for active-name resolution.
+  // System-role agents are hidden from the picker but kept in lookup
+  // for active-name resolution.
   const enabledBuiltin = builtinAgents.filter((b) => b.enabled);
-  const visibleBuiltin = enabledBuiltin.filter((b) => b.isSupervisor !== true);
+  const visibleBuiltin = enabledBuiltin.filter((b) => !b.role);
 
   const backendEntries = [
     ...visibleAgents.map((a) => ({
@@ -93,14 +94,15 @@ export function AgentSelector({
 
   const allEntries = [
     ...backendEntries,
-    // Include supervisor for active-name resolution.
+    // System-role agents kept here so the active-agent header still
+    // renders them by name even though the picker hides them.
     ...enabledBuiltin.map((b) => ({
       id: b.id,
       name: b.name,
       type: "agent" as const,
       source: "builtin" as const,
-      credentialName: b.isSupervisor === true ? "Nango" : "BuiltIn",
-      isSupervisor: b.isSupervisor === true,
+      credentialName: b.role === "supervisor" ? "Nango" : "BuiltIn",
+      isSupervisor: b.role === "supervisor",
     })),
   ];
 

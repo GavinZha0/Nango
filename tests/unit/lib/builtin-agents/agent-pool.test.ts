@@ -379,7 +379,6 @@ function fakeSpec(agentId: string): AgentSpec {
   return {
     agentId,
     name: `agent-${agentId}`,
-    isSupervisor: false,
     role: null,
     modelProvider: "openai",
     model: "gpt-4o",

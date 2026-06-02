@@ -27,7 +27,8 @@ function useResolveTarget(): (
       if (!target) return null;
 
       for (const a of builtinAgents) {
-        if (!a.enabled || a.isSupervisor === true) continue;
+        // Handoff targets are routable peers only — skip system roles.
+        if (!a.enabled || a.role !== null) continue;
         const isPublicByOthers =
           a.visibility === "public"
           && userId !== undefined

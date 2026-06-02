@@ -173,7 +173,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           if (unmounted) return;
           mergeBuiltinAgents(rows);
           const supervisor = rows.find(
-            (r) => r.enabled && r.isSupervisor === true,
+            (r) => r.enabled && r.role === "supervisor",
           );
           if (supervisor) {
             // Force-set even if a backend agent already won the race;

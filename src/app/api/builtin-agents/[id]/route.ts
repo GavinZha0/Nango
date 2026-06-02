@@ -10,6 +10,7 @@ import {
   BuiltinAgentToolTable,
   McpServerTable,
   SkillTable,
+  type AgentRole,
 } from "@/lib/db/schema";
 import { invalidateForAgentChange } from "@/lib/cache/invalidation";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
@@ -29,6 +30,11 @@ import {
   SUPERVISOR_TOOL_NAME_SET,
   SUPERVISOR_TOOL_NAMES,
 } from "@/lib/runner/supervisor-tools.server";
+import {
+  SUPERVISOR_DESCRIPTION,
+  SUPERVISOR_NAME,
+  SUPERVISOR_PROMPT,
+} from "@/lib/constants/supervisor";
 
 function isUniqueViolation(err: unknown): boolean {
   return (
@@ -122,8 +128,9 @@ const updateSchema = z
   .object({
     name: nonEmptyString.optional(),
     description: optionalTrimmedString.optional(),
-    /** One-line persona surfaced to the supervisor's `list_agents`. */
-    role: optionalTrimmedString.optional(),
+    /** Monotonic: only `null → system role` is accepted; any other
+     *  transition returns 409. See AGENTS.md ("agent `role` enum"). */
+    role: z.enum(["supervisor", "secretary", "evaluator"]).nullable().optional(),
     /** Optional emoji glyph; pass `null` to clear. */
     icon: z.string().max(8).nullable().optional(),
     model: nonEmptyString.optional(),
@@ -138,8 +145,6 @@ const updateSchema = z
     memoryWindowSize: z.number().int().positive().nullable().optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
-    /** Promote / demote the agent as the user's Nango. */
-    isSupervisor: z.boolean().optional(),
     /** When present, fully replaces all tool/skill bindings for this agent. */
     tools: z.array(boundToolSchema).optional(),
   })
@@ -154,7 +159,13 @@ export const PATCH = withEditor<{ id: string }>(
       .select({
         createdBy: BuiltinAgentTable.createdBy,
         visibility: BuiltinAgentTable.visibility,
-        isSupervisor: BuiltinAgentTable.isSupervisor,
+        role: BuiltinAgentTable.role,
+        // QUIRK: read these so the supervisor-identity lock below
+        // compares actual values, not "field present in body"
+        // (the editor sends them all even when unchanged).
+        name: BuiltinAgentTable.name,
+        description: BuiltinAgentTable.description,
+        prompt: BuiltinAgentTable.prompt,
       })
       .from(BuiltinAgentTable)
       .where(eq(BuiltinAgentTable.id, id))
@@ -165,6 +176,50 @@ export const PATCH = withEditor<{ id: string }>(
     }
 
     const body = await parseBody(req, updateSchema);
+
+    // CONTRACT: `role` is monotonic — only `null → system role` is
+    // accepted. Any other transition → 409 (delete & recreate).
+    let promotedTo: AgentRole | null = null;
+    if (body.role !== undefined && body.role !== existing.role) {
+      if (existing.role !== null) {
+        throw new ApiError(
+          "CONFLICT",
+          409,
+          "Agent role is immutable once set. Delete this agent and recreate to change its role.",
+        );
+      }
+      promotedTo = body.role;
+    }
+
+    // Supervisor identity lock — reject changes to name / description
+    // / prompt on an already-promoted supervisor (the promotion path
+    // below predates this branch because `existing.role` is still null
+    // when promoting).
+    if (existing.role === "supervisor") {
+      const locked: string[] = [];
+      if (body.name !== undefined && body.name !== existing.name) {
+        locked.push("name");
+      }
+      if (
+        body.description !== undefined
+        && (body.description ?? null) !== (existing.description ?? null)
+      ) {
+        locked.push("description");
+      }
+      if (
+        body.prompt !== undefined
+        && (body.prompt ?? null) !== (existing.prompt ?? null)
+      ) {
+        locked.push("prompt");
+      }
+      if (locked.length > 0) {
+        throw new ApiError(
+          "CONFLICT",
+          409,
+          `Supervisor identity is locked — cannot modify: ${locked.join(", ")}.`,
+        );
+      }
+    }
 
     const rbac = {
       source: "local" as const,
@@ -192,17 +247,17 @@ export const PATCH = withEditor<{ id: string }>(
     if (editsContent && !canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this agent.");
     }
-    // Owner-only flips: visibility / enabled / isSupervisor.
+    // Owner-only flips: visibility / enabled / role promotion.
     if (
       (body.visibility !== undefined
         || body.enabled !== undefined
-        || body.isSupervisor !== undefined)
+        || promotedTo !== null)
       && !canChangeVisibility(rbac, session)
     ) {
       throw new ApiError(
         "FORBIDDEN",
         403,
-        "Only the creator or an admin can change visibility / enabled / supervisor flag.",
+        "Only the creator or an admin can change visibility / enabled / role.",
       );
     }
 
@@ -212,7 +267,6 @@ export const PATCH = withEditor<{ id: string }>(
     };
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
-    if (body.role !== undefined) updates.role = body.role;
     if (body.icon !== undefined) updates.icon = body.icon;
     if (body.model !== undefined) updates.model = body.model;
     if (body.modelProvider !== undefined) updates.modelProvider = body.modelProvider;
@@ -226,10 +280,20 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.memoryWindowSize !== undefined) updates.memoryWindowSize = body.memoryWindowSize;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
-    if (body.isSupervisor !== undefined) updates.isSupervisor = body.isSupervisor;
 
-    const finalIsSupervisor: boolean =
-      body.isSupervisor ?? existing.isSupervisor;
+    // Promotion: write the new role; for supervisors, also overwrite
+    // the locked identity fields with their canonical values.
+    if (promotedTo !== null) {
+      updates.role = promotedTo;
+      if (promotedTo === "supervisor") {
+        updates.name = SUPERVISOR_NAME;
+        updates.description = SUPERVISOR_DESCRIPTION;
+        updates.prompt = SUPERVISOR_PROMPT;
+      }
+    }
+
+    const finalRole: AgentRole | null = promotedTo ?? existing.role;
+    const finalIsSupervisor: boolean = finalRole === "supervisor";
 
     // Run agent update + optional tool replacement in a transaction
     let row;
@@ -272,7 +336,8 @@ export const PATCH = withEditor<{ id: string }>(
         }
       }
 
-      // Sync supervisor tool junction rows with the final flag.
+      // Top up any missing supervisor tool rows. Role is monotonic so
+      // there's no demote branch — we never drop these.
       if (finalIsSupervisor) {
         const existingRows: Array<{ name: string | null }> = await tx
           .select({ name: BuiltinAgentToolTable.builtinTool })
@@ -297,30 +362,18 @@ export const PATCH = withEditor<{ id: string }>(
             })),
           );
         }
-      } else {
-        // demote: drop any supervisor tool rows
-        for (const name of SUPERVISOR_TOOL_NAMES) {
-          await tx
-            .delete(BuiltinAgentToolTable)
-            .where(
-              and(
-                eq(BuiltinAgentToolTable.agentId, id),
-                eq(BuiltinAgentToolTable.toolType, "builtin_tool"),
-                eq(BuiltinAgentToolTable.builtinTool, name),
-              ),
-            );
-        }
       }
 
       return updated;
       });
     } catch (err) {
       if (isUniqueViolation(err)) {
-        throw new ApiError(
-          "CONFLICT",
-          409,
-          "You already have a Nango (supervisor agent). Demote it first to designate a new one.",
-        );
+        // Per-role uniqueness — surface a role-aware message.
+        const message: string =
+          promotedTo === "secretary"
+            ? "You already have a Secretary agent. Delete it first to designate a new one."
+            : "You already have a Nango (Supervisor agent). Delete it first to designate a new one.";
+        throw new ApiError("CONFLICT", 409, message);
       }
       throw err;
     }

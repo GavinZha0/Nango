@@ -185,13 +185,13 @@ For each agent ID:
 1. `agentPool.get(id)` → `AgentSpec` (cached, decrypted)
 2. For each `mcp_server` tool ref: `mcpProviderPool.borrow(serverId)`
 3. For each `skill` tool ref: `skillPool.get(skillId)` → inject tools
-4. If `isSupervisor`: inject supervisor tools (delegate, schedule, etc.)
+4. If `role === "supervisor"`: inject supervisor tools (delegate, schedule, etc.)
 5. `resolveModel(spec)` → CopilotKit model config
 6. Return `BuiltInAgent` with composed system prompt
 
 ### 4.6 Supervisor Tools (`supervisor-tools.server.ts`, 719 lines)
 
-Six tools injected when `isSupervisor = true`:
+Six tools injected when `role === "supervisor"`:
 
 | Tool | Mode | Description |
 |---|---|---|
@@ -297,7 +297,7 @@ Browser → POST /api/copilotkit/builtin/agent/nango-supervisor/run
   │     ├─ agentPool.get("nango-supervisor") → AgentSpec
   │     ├─ mcpProviderPool.borrow(mcpServerId) × N
   │     ├─ skillPool.get(skillId) × N
-  │     ├─ isSupervisor=true → inject delegate_to_agent, create_schedule, ...
+  │     ├─ role === "supervisor" → inject delegate_to_agent, create_schedule, ...
   │     ├─ resolveModel(spec) → { model: "gpt-4o", ... }
   │     └─ return { agents, borrowed, degradations }
   │
