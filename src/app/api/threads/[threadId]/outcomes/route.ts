@@ -33,7 +33,7 @@ const ROUTE = "/api/threads/[threadId]/outcomes" as const;
 /** Tool names this replay endpoint knows how to rebuild. Mirrors
  *  the dispatch switch in the loop body — adding a new tool
  *  requires touching both sides (compile-friction is intentional). */
-const REBUILDABLE_TOOLS = ["render_chart", "web_search"] as const;
+const REBUILDABLE_TOOLS = ["generate_echarts_config", "web_search"] as const;
 type RebuildableTool = (typeof REBUILDABLE_TOOLS)[number];
 
 function isRebuildable(name: string | undefined): name is RebuildableTool {
@@ -83,7 +83,7 @@ export const GET = withSession<{ threadId: string }>(
           or(
             and(
               eq(EntityRunEventTable.type, "tool_call_chunk"),
-              sql`${EntityRunEventTable.payload}->>'toolName' IN ('render_chart', 'web_search')`,
+              sql`${EntityRunEventTable.payload}->>'toolName' IN ('generate_echarts_config', 'web_search')`,
             ),
             eq(EntityRunEventTable.type, "tool_call_result"),
           ),
@@ -92,7 +92,7 @@ export const GET = withSession<{ threadId: string }>(
       .orderBy(asc(EntityRunEventTable.ts), asc(EntityRunEventTable.seq));
 
     // 2. Walk events in order; bucket chunks needing pairing, rebuild
-    //    eagerly when no pairing is needed (render_chart).
+    //    eagerly when no pairing is needed (generate_echarts_config).
     interface PendingPair {
       chunk: ToolCallChunkPayload;
       runId: string;
@@ -115,10 +115,11 @@ export const GET = withSession<{ threadId: string }>(
         const chunk = row.payload as ToolCallChunkPayload;
         if (!isRebuildable(chunk.toolName)) continue;
 
-        // render_chart rebuilds from chunk only — the result event
-        // is just `{ok:true,chartId}` (a frontend tool's handler
-        // return value) and useless for replay.
-        if (chunk.toolName === "render_chart") {
+        // generate_echarts_config rebuilds from chunk only — the
+        // result event is a server-side echo of the same payload,
+        // and the chunk already carries everything needed to
+        // reconstruct the outcome.
+        if (chunk.toolName === "generate_echarts_config") {
           const built = rebuildChartOutcome(chunk, {
             threadId,
             runId: row.runId,

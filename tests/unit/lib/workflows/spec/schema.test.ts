@@ -23,7 +23,7 @@ const toolNode: LLMToolNode = {
   depends_on: [],
   type: "tool",
   tool: "fetch_data_table",
-  input: { dataSourceName: "warehouse_prod", sql: "SELECT *" },
+  inputs: { dataSourceName: "warehouse_prod", sql: "SELECT *" },
 };
 
 const agentNode: LLMAgentNode = {
@@ -32,7 +32,7 @@ const agentNode: LLMAgentNode = {
   depends_on: [0],
   type: "agent",
   agent: "Nango Builtin / Data Analyst",
-  input: { data: "@nodes.0.dataset", task: "find anomalies" },
+  inputs: { data: "@nodes.0.dataset", task: "find anomalies" },
   output_schema: DEFAULT_AGENT_OUTPUT_SCHEMA,
 };
 
@@ -43,15 +43,20 @@ const baseLLMSpec: LLMWorkflowSpec = {
   outputs: { summary: "@nodes.1.text" },
 };
 
-const canonicalToolNode: CanonicalToolNode = { ...toolNode, type: "tool" };
+const canonicalToolNode: CanonicalToolNode = {
+  ...toolNode,
+  type: "tool",
+  schema_version: "1",
+};
 const canonicalAgentNode: CanonicalAgentNode = {
   ...agentNode,
   type: "agent",
-  agentId: "550e8400-e29b-41d4-a716-446655440000",
+  schema_version: "1",
+  agent_id: "550e8400-e29b-41d4-a716-446655440000",
 };
 const baseCanonicalSpec: CanonicalWorkflowSpec = {
   ...baseLLMSpec,
-  refReconAlgorithm: "ref_recon_v1",
+  ref_recon_algorithm: "ref_recon_v1",
   nodes: [canonicalToolNode, canonicalAgentNode],
 };
 
@@ -111,7 +116,7 @@ describe("LLMWorkflowSpecSchema", () => {
       description: agentNode.description,
       depends_on: agentNode.depends_on,
       agent: agentNode.agent,
-      input: agentNode.input,
+      inputs: agentNode.inputs,
     };
     expect(() =>
       LLMWorkflowSpecSchema.parse({
@@ -124,11 +129,11 @@ describe("LLMWorkflowSpecSchema", () => {
   it("accepts execution config overrides (all fields optional)", () => {
     const withExec: LLMWorkflowSpec = {
       ...baseLLMSpec,
-      execution: { timeoutSeconds: 120, max_parallelism: 5, on_failure: "continue" },
+      execution: { timeout_seconds: 120, max_parallelism: 5, on_failure: "continue" },
     };
     const parsed = LLMWorkflowSpecSchema.parse(withExec);
     expect(parsed.execution).toEqual({
-      timeoutSeconds: 120,
+      timeout_seconds: 120,
       max_parallelism: 5,
       on_failure: "continue",
     });
@@ -143,11 +148,11 @@ describe("LLMWorkflowSpecSchema", () => {
     ).toThrow();
   });
 
-  it("rejects retries.delaySeconds < 0 (seconds, not ms — D29 unit convention)", () => {
+  it("rejects retries.delay_seconds < 0 (seconds, not ms — D29 unit convention)", () => {
     expect(() =>
       LLMWorkflowSpecSchema.parse({
         ...baseLLMSpec,
-        nodes: [{ ...toolNode, retries: { attempts: 1, delaySeconds: -1 } }],
+        nodes: [{ ...toolNode, retries: { attempts: 1, delay_seconds: -1 } }],
       }),
     ).toThrow();
   });
@@ -156,13 +161,13 @@ describe("LLMWorkflowSpecSchema", () => {
 describe("CanonicalWorkflowSpecSchema", () => {
   it("accepts a minimal valid canonical spec", () => {
     const parsed = CanonicalWorkflowSpecSchema.parse(baseCanonicalSpec);
-    expect(parsed.refReconAlgorithm).toBe("ref_recon_v1");
+    expect(parsed.ref_recon_algorithm).toBe("ref_recon_v1");
     expect(parsed.nodes[0].type).toBe("tool");
     expect(parsed.nodes[1].type).toBe("agent");
   });
 
   it("requires the refReconAlgorithm tag (D26)", () => {
-    const { refReconAlgorithm: _omit, ...withoutTag } = baseCanonicalSpec;
+    const { ref_recon_algorithm: _omit, ...withoutTag } = baseCanonicalSpec;
     void _omit;
     expect(() => CanonicalWorkflowSpecSchema.parse(withoutTag)).toThrow();
   });
@@ -182,7 +187,7 @@ describe("CanonicalWorkflowSpecSchema", () => {
   });
 
   it("requires agent node to carry resolved agentId (D27)", () => {
-    const { agentId: _omit, ...incomplete } = canonicalAgentNode;
+    const { agent_id: _omit, ...incomplete } = canonicalAgentNode;
     void _omit;
     expect(() =>
       CanonicalWorkflowSpecSchema.parse({
@@ -198,7 +203,7 @@ describe("CanonicalWorkflowSpecSchema", () => {
         ...baseCanonicalSpec,
         nodes: [
           canonicalToolNode,
-          { ...canonicalAgentNode, agentId: "not-a-uuid" },
+          { ...canonicalAgentNode, agent_id: "not-a-uuid" },
         ],
       }),
     ).toThrow();
@@ -223,5 +228,116 @@ describe("DEFAULT_AGENT_OUTPUT_SCHEMA (D30)", () => {
     };
     const spec: LLMWorkflowSpec = { ...baseLLMSpec, nodes: [toolNode, node] };
     expect(() => LLMWorkflowSpecSchema.parse(spec)).not.toThrow();
+  });
+});
+
+// ─── Chart node schema ────────────────────────────────────────────────
+
+describe("LLMChartNodeSchema", () => {
+  const baseChartInputs = {
+    renderer: "echarts" as const,
+    config: { series: [{ type: "bar" }] },
+    dataset: "@nodes.0.rows",
+  };
+
+  function chartSpecWith(
+    chartOverride: Partial<{
+      renderer: unknown;
+      config: unknown;
+      dataset: unknown;
+    }>,
+  ): unknown {
+    return {
+      version: "1.0",
+      name: "demo",
+      nodes: [
+        toolNode,
+        {
+          id: 1,
+          description: "chart",
+          depends_on: [0],
+          type: "chart",
+          inputs: {
+            ...baseChartInputs,
+            ...chartOverride,
+          },
+        },
+      ],
+      outputs: { option: "@nodes.1.option" },
+    };
+  }
+
+  it("accepts a well-formed chart node", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(chartSpecWith({})),
+    ).not.toThrow();
+  });
+
+  it("accepts dataset as a non-empty string", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({ dataset: "@nodes.0.rows" }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("accepts dataset as an array of ≥2 refs", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({
+          dataset: ["@nodes.0.rows", "@nodes.0.rows"],
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects dataset as an empty string", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(chartSpecWith({ dataset: "" })),
+    ).toThrow();
+  });
+
+  it("rejects dataset as an array with fewer than 2 entries", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({ dataset: ["@nodes.0.rows"] }),
+      ),
+    ).toThrow();
+  });
+
+  it("rejects renderer outside the enum", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({ renderer: "plotly" }),
+      ),
+    ).toThrow();
+  });
+
+  it("rejects missing renderer", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({ renderer: undefined }),
+      ),
+    ).toThrow();
+  });
+
+  it("rejects missing config", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({ config: undefined }),
+      ),
+    ).toThrow();
+  });
+
+  it("accepts missing dataset (not-refreshable fallback)", () => {
+    // When the save pipeline can't reconstruct a ref for the
+    // chart's data, the chart is preserved with `dataset` absent
+    // and the data baked into `config.dataset.source`. The schema
+    // permits this shape — UI surfaces it as "not refreshable".
+    expect(() =>
+      LLMWorkflowSpecSchema.parse(
+        chartSpecWith({ dataset: undefined }),
+      ),
+    ).not.toThrow();
   });
 });

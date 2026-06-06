@@ -3,7 +3,7 @@
  *
  * Retry loop + event emission live in `with-retries.ts`; this file is
  * the per-attempt body:
- *   1. Resolve `@path` refs in `node.input`.
+ *   1. Resolve `@path` refs in `node.inputs`.
  *   2. Validate resolved input against `input_schema` (ajv).
  *   3. Look up the tool handle (DI) — `null` → `TOOL_NOT_FOUND`.
  *   4. `tool.execute({input, abortSignal, context})`.
@@ -46,7 +46,7 @@ export async function executeToolNode(
     attemptFn: async () => {
       // resolveRefs throws REF_UNRESOLVED on its own — let the
       // WorkflowError bubble up unchanged.
-      const resolvedInput = resolveRefs(node.input, state) as Record<
+      const resolvedInput = resolveRefs(node.inputs, state) as Record<
         string,
         unknown
       >;

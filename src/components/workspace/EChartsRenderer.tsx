@@ -83,7 +83,7 @@ export function EChartsRenderer({ option, style }: EChartsRendererProps): ReactN
   // the deps so a theme flip — which re-creates the instance above
   // — re-runs us with the new (empty) instance and re-applies the
   // current option. Without that, theme switch leaves the chart
-  // blank until the next render_chart call.
+  // blank until the next generate_echarts_config call.
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
       // Print as JSON so verifiers can read / copy the exact payload

@@ -28,12 +28,20 @@
  */
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Bot, Code2, Database, Wrench, type LucideIcon } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  Code2,
+  Database,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReactElement } from "react";
 
 import { cn } from "@/lib/utils";
 import type {
   CanonicalAgentNode,
+  CanonicalChartNode,
   CanonicalCodeNode,
   CanonicalNode,
   CanonicalSqlNode,
@@ -77,6 +85,11 @@ const ACCENTS: Record<CanonicalNode["type"], Accent> = {
     iconFg: "text-sky-700 dark:text-sky-300",
     Icon: Database,
   },
+  chart: {
+    iconBg: "bg-rose-100 dark:bg-rose-900/40",
+    iconFg: "text-rose-700 dark:text-rose-300",
+    Icon: BarChart3,
+  },
 };
 
 // ── Per-type summary lines ───────────────────────────────────────────
@@ -108,12 +121,12 @@ function summarizeInput(
 }
 
 function summarizeTool(node: CanonicalToolNode): NodeSummary {
-  const [line1, line2] = summarizeInput(node.input, 2);
+  const [line1, line2] = summarizeInput(node.inputs, 2);
   return { title: node.tool, line1, line2 };
 }
 
 function summarizeAgent(node: CanonicalAgentNode): NodeSummary {
-  const [line1] = summarizeInput(node.input, 1);
+  const [line1] = summarizeInput(node.inputs, 1);
   const schemaKeys: string[] = Object.keys(node.output_schema ?? {});
   const line2: string | undefined =
     schemaKeys.length > 0
@@ -125,7 +138,7 @@ function summarizeAgent(node: CanonicalAgentNode): NodeSummary {
 function summarizeCode(node: CanonicalCodeNode): NodeSummary {
   // Datasets binding is the most operationally relevant input —
   // it's what the engine bind-mounts into the sandbox.
-  const datasets: unknown = node.input?.datasets;
+  const datasets: unknown = node.inputs?.datasets;
   const datasetList: string[] = Array.isArray(datasets)
     ? datasets.filter((d): d is string => typeof d === "string")
     : [];
@@ -147,12 +160,47 @@ function summarizeCode(node: CanonicalCodeNode): NodeSummary {
   };
 }
 
+function summarizeChart(node: CanonicalChartNode): NodeSummary {
+  const dataset = node.inputs.dataset;
+  let datasetLine: string;
+  if (dataset === undefined) {
+    datasetLine = "data: (literal, not refreshable)";
+  } else if (Array.isArray(dataset)) {
+    datasetLine = `data: ${dataset.length} datasets`;
+  } else {
+    datasetLine = `data: ${dataset}`;
+  }
+  return {
+    title: `${node.inputs.renderer} chart`,
+    // line 1: chart type lifted from the option template if present
+    line1: pickChartTypeLine(node.inputs.config),
+    // line 2: where the data comes from
+    line2: datasetLine,
+  };
+}
+
+/** Read the first `series[*].type` from an ECharts option
+ *  template. Returns `undefined` when no series entry has a
+ *  recognisable `type` field. */
+function pickChartTypeLine(
+  config: Record<string, unknown>,
+): string | undefined {
+  const series = (config as { series?: unknown }).series;
+  if (!Array.isArray(series)) return undefined;
+  for (const entry of series) {
+    if (entry === null || typeof entry !== "object") continue;
+    const t = (entry as { type?: unknown }).type;
+    if (typeof t === "string" && t.length > 0) return `series: ${t}`;
+  }
+  return undefined;
+}
+
 function summarizeSql(node: CanonicalSqlNode): NodeSummary {
   // Title prefers the output dataset name (what downstream code
   // nodes ref via @nodes.X.name) — that's what the workflow
   // actually produces. Fall back to dataSourceName when name is
   // omitted (engine derives a slug at runtime in that case).
-  const title: string = node.name ?? node.dataSourceName;
+  const title: string = node.name ?? node.data_source_name;
 
   // First non-empty line of the SQL — gives a glance-able sense
   // of the query without needing to open the drawer. Strip --
@@ -167,7 +215,7 @@ function summarizeSql(node: CanonicalSqlNode): NodeSummary {
   return {
     title,
     // line 1: data source slug — answers "where does this come from"
-    line1: `source: ${node.dataSourceName}`,
+    line1: `source: ${node.data_source_name}`,
     // line 2: SQL snippet — answers "what's the query"
     line2: firstSqlLine,
   };
@@ -183,6 +231,8 @@ function describeNode(spec: CanonicalNode): NodeSummary {
       return summarizeCode(spec);
     case "sql":
       return summarizeSql(spec);
+    case "chart":
+      return summarizeChart(spec);
   }
 }
 

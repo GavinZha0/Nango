@@ -21,8 +21,8 @@ const bodySchema = z
   .object({
     /** Chat thread the outcome belongs to. */
     threadId: z.string().uuid(),
-    /** Producer-chosen `Outcome.outcomeId` — `chartId` for
-     *  `render_chart`, `toolCallId` for `web_search`. */
+    /** Producer-chosen `Outcome.outcomeId` — `chart_id` for
+     *  `generate_echarts_config`, `toolCallId` for `web_search`. */
     outcomeId: z.string().min(1),
     /** Optional explicit folder. */
     parentId: z.string().uuid().optional(),

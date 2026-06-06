@@ -19,6 +19,7 @@ import { WorkflowError } from "../error";
 import { parseRef } from "../spec/refs";
 import type { CanonicalWorkflowSpec } from "../spec/schema";
 import { executeAgentNode } from "../nodes/agent-node";
+import { executeChartNode } from "../nodes/chart-node";
 import { executeCodeNode } from "../nodes/code-node";
 import { executeSqlNode } from "../nodes/sql-node";
 import { executeToolNode } from "../nodes/tool-node";
@@ -122,6 +123,7 @@ function buildNodeExecutor(deps: WorkflowEngineDependencies): NodeExecutor {
     if (node.type === "agent") return executeAgentNode(node, state, deps);
     if (node.type === "code") return executeCodeNode(node, state, deps);
     if (node.type === "sql") return executeSqlNode(node, state, deps);
+    if (node.type === "chart") return executeChartNode(node, state);
     const _exhaustive: never = node;
     throw new WorkflowError({
       errorCode: "SPEC_SCHEMA_MISMATCH",
@@ -231,7 +233,7 @@ function withCache(
     // error with the proper event lifecycle.
     let resolvedInput: unknown;
     try {
-      resolvedInput = resolveRefs(node.input, state);
+      resolvedInput = resolveRefs(node.inputs, state);
     } catch {
       return baseExecutor(nodeId, state);
     }

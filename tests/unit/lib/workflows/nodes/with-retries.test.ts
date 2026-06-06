@@ -21,11 +21,12 @@ import type {
 function toolNode(retries?: Retries): CanonicalToolNode {
   return {
     type: "tool",
+    schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
     tool: "flaky_tool",
-    input: {},
+    inputs: {},
     ...(retries !== undefined && { retries }),
   };
 }
@@ -37,7 +38,7 @@ function makeState(
   const spec: CanonicalWorkflowSpec = {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
     outputs: { dummy: "@nodes.0.dummy" },
   };
@@ -95,7 +96,7 @@ describe("withRetries — default policy (attempts: 0)", () => {
   });
 
   it("does not retry when attempts is 0 explicitly", async () => {
-    const node = toolNode({ attempts: 0, delaySeconds: 5 });
+    const node = toolNode({ attempts: 0, delay_seconds: 5 });
     const state = makeState(node);
     const harness = failingThenSuccessTool(1, { ok: true });
     await expect(executeToolNode(node, state, harness)).rejects.toBeInstanceOf(
@@ -109,7 +110,7 @@ describe("withRetries — default policy (attempts: 0)", () => {
 
 describe("withRetries — retry until success", () => {
   it("retries up to `attempts` times and succeeds on a later attempt", async () => {
-    const node = toolNode({ attempts: 3, delaySeconds: 0 });
+    const node = toolNode({ attempts: 3, delay_seconds: 0 });
     const state = makeState(node);
     const harness = failingThenSuccessTool(2, { dataset: "p" });
     const result = await executeToolNode(node, state, harness);
@@ -127,7 +128,7 @@ describe("withRetries — retry until success", () => {
   });
 
   it("attempt counter increments correctly across retries", async () => {
-    const node = toolNode({ attempts: 2, delaySeconds: 0 });
+    const node = toolNode({ attempts: 2, delay_seconds: 0 });
     const state = makeState(node);
     const harness = failingThenSuccessTool(2, { ok: true });
     await executeToolNode(node, state, harness);
@@ -150,7 +151,7 @@ describe("withRetries — retry until success", () => {
 
 describe("withRetries — retry exhaustion", () => {
   it("throws the wrapped error after all attempts fail", async () => {
-    const node = toolNode({ attempts: 2, delaySeconds: 0 });
+    const node = toolNode({ attempts: 2, delay_seconds: 0 });
     const state = makeState(node);
     const harness = failingThenSuccessTool(99, { ok: true });
     await expect(executeToolNode(node, state, harness)).rejects.toMatchObject({
@@ -166,7 +167,7 @@ describe("withRetries — retry exhaustion", () => {
 
 describe("withRetries — backoff", () => {
   it("fixed backoff: same delay between every attempt", async () => {
-    const node = toolNode({ attempts: 2, delaySeconds: 1, backoff: "fixed" });
+    const node = toolNode({ attempts: 2, delay_seconds: 1, backoff: "fixed" });
     const state = makeState(node);
     const timestamps: number[] = [];
     const deps = {
@@ -196,7 +197,7 @@ describe("withRetries — backoff", () => {
   it("exponential backoff: 2^attempt * base", async () => {
     const node = toolNode({
       attempts: 2,
-      delaySeconds: 1,
+      delay_seconds: 1,
       backoff: "exponential",
     });
     const state = makeState(node);
@@ -226,7 +227,7 @@ describe("withRetries — backoff", () => {
 
 describe("withRetries — AbortSignal", () => {
   it("throws WORKFLOW_TIMEOUT when aborted before the first attempt", async () => {
-    const node = toolNode({ attempts: 5, delaySeconds: 0 });
+    const node = toolNode({ attempts: 5, delay_seconds: 0 });
     const ac = new AbortController();
     ac.abort();
     const state = makeState(node, ac);
@@ -241,7 +242,7 @@ describe("withRetries — AbortSignal", () => {
   it("stops retrying when aborted during sleep", async () => {
     const node = toolNode({
       attempts: 5,
-      delaySeconds: 10, // long enough to abort during sleep
+      delay_seconds: 10, // long enough to abort during sleep
     });
     const ac = new AbortController();
     const state = makeState(node, ac);
@@ -270,7 +271,7 @@ describe("withRetries — AbortSignal", () => {
   }, 5000);
 
   it("WorkflowError passed through unchanged across retries (no double-wrap)", async () => {
-    const node = toolNode({ attempts: 2, delaySeconds: 0 });
+    const node = toolNode({ attempts: 2, delay_seconds: 0 });
     const state = makeState(node);
     const inner = new WorkflowError({
       errorCode: "SQL_PERMISSION_DENIED",

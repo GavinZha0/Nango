@@ -32,10 +32,6 @@ const patchSchema = z
     parentId: z.string().uuid().optional(),
     displayOrder: z.number().int().nonnegative().optional(),
     visibility: z.enum(["private", "shared"]).optional(),
-    /** Display config (chart type / colors / inline html / etc.).
-     *  Type-specific shape — the artifact-page renderer enforces
-     *  it. Workflow changes do NOT go through this field. */
-    content: z.unknown().optional(),
   })
   .strict();
 
@@ -48,9 +44,9 @@ export const GET = withSession<{ id: string }>(
   },
 );
 
-/** PATCH updates metadata and/or display `content`. Returns the
- *  same bundle shape as GET. Does NOT cover workflow changes —
- *  those flow through a new save. */
+/** PATCH updates tree metadata (name / description / parent /
+ *  display order / visibility). Returns the same bundle shape as
+ *  GET. Workflow changes flow through a new save, not this route. */
 export const PATCH = withSession<{ id: string }>(
   ROUTE,
   async ({ req, params, session, log }) => {

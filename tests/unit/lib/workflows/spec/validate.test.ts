@@ -18,10 +18,11 @@ function toolNode(
 ): CanonicalNode {
   return {
     type: "tool",
+    schema_version: "1",
     description: "n",
     depends_on: [],
     tool: "fetch_data_table",
-    input: { dataSourceId: "x", sql: "select 1" },
+    inputs: { dataSourceId: "x", sql: "select 1" },
     input_schema: {
       type: "object",
       properties: {
@@ -47,11 +48,12 @@ function agentNode(
 ): CanonicalNode {
   return {
     type: "agent",
+    schema_version: "1",
     description: "n",
     depends_on: [],
     agent: "Builtin / DataAnalyst",
-    agentId: AGENT_UUID,
-    input: {},
+    agent_id: AGENT_UUID,
+    inputs: {},
     output_schema: {
       type: "object",
       properties: { summary: { type: "string" } },
@@ -70,7 +72,7 @@ function spec(
   return {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes,
     outputs,
     ...extra,
@@ -112,7 +114,7 @@ describe("validate — happy paths", () => {
           properties: { dataset: { type: "string" } },
           required: ["dataset"],
         },
-        input: { dataset: "@nodes.0.dataset" },
+        inputs: { dataset: "@nodes.0.dataset" },
         outputs: ["result"],
         output_schema: {
           type: "object",
@@ -132,7 +134,7 @@ describe("validate — happy paths", () => {
         depends_on: [0],
         tool: "minimal_tool",
         input_schema: undefined,
-        input: { x: "@nodes.0.dataset" },
+        inputs: { x: "@nodes.0.dataset" },
         outputs: ["a"],
       }),
       toolNode({
@@ -140,7 +142,7 @@ describe("validate — happy paths", () => {
         depends_on: [0],
         tool: "minimal_tool",
         input_schema: undefined,
-        input: { x: "@nodes.0.dataset" },
+        inputs: { x: "@nodes.0.dataset" },
         outputs: ["b"],
       }),
       toolNode({
@@ -148,7 +150,7 @@ describe("validate — happy paths", () => {
         depends_on: [1, 2],
         tool: "minimal_tool",
         input_schema: undefined,
-        input: { x: "@nodes.1.a", y: "@nodes.2.b" },
+        inputs: { x: "@nodes.1.a", y: "@nodes.2.b" },
         outputs: ["final"],
       }),
     ], { final: "@nodes.3.final" });
@@ -160,7 +162,7 @@ describe("validate — happy paths", () => {
       toolNode({
         id: 0,
         tool: "fetch_data_table",
-        input: {
+        inputs: {
           dataSourceId: "orders",
           sql: "SELECT * FROM o WHERE created >= @workflow.date_start",
         },
@@ -178,7 +180,7 @@ describe("validate — happy paths", () => {
     const s = spec([
       toolNode({
         id: 0,
-        input: { dataSourceId: "@context.tenant", sql: "select 1" },
+        inputs: { dataSourceId: "@context.tenant", sql: "select 1" },
       }),
     ]);
     expect(() => validate(s)).not.toThrow();
@@ -190,7 +192,7 @@ describe("validate — happy paths", () => {
       agentNode({
         id: 1,
         depends_on: [0],
-        input: { dataset: "@nodes.0.dataset" },
+        inputs: { dataset: "@nodes.0.dataset" },
       }),
     ], { summary: "@nodes.1.summary" });
     expect(() => validate(s)).not.toThrow();
@@ -204,7 +206,7 @@ describe("validate — happy paths", () => {
         depends_on: [0],
         tool: "minimal_tool",
         input_schema: undefined,
-        input: { anything: "@nodes.0.unknown_field" },
+        inputs: { anything: "@nodes.0.unknown_field" },
         outputs: undefined,
       }),
     ], { x: "@nodes.0.also_unknown" });
@@ -215,7 +217,7 @@ describe("validate — happy paths", () => {
     const s = spec([
       toolNode({
         id: 0,
-        input: { dataSourceId: "@workflow.anything", sql: "select 1" },
+        inputs: { dataSourceId: "@workflow.anything", sql: "select 1" },
       }),
     ]);
     // No input_schema declared → @workflow.* refs are permissive.
@@ -315,7 +317,7 @@ describe("validate — node input refs", () => {
               id: 0,
               tool: "minimal_tool",
               input_schema: undefined,
-              input: { x: "@nodes.99.field" },
+              inputs: { x: "@nodes.99.field" },
               outputs: ["a"],
             }),
           ], { a: "@nodes.0.a" }),
@@ -338,7 +340,7 @@ describe("validate — node input refs", () => {
               depends_on: [], // ← missing dep on 0
               tool: "minimal_tool",
               input_schema: undefined,
-              input: { x: "@nodes.0.dataset" },
+              inputs: { x: "@nodes.0.dataset" },
               outputs: ["a"],
             }),
           ], { a: "@nodes.1.a" }),
@@ -358,7 +360,7 @@ describe("validate — node input refs", () => {
         depends_on: [0],
         tool: "minimal_tool",
         input_schema: undefined,
-        input: { x: "@nodes.0.dataset" },
+        inputs: { x: "@nodes.0.dataset" },
         outputs: ["b"],
       }),
       toolNode({
@@ -366,7 +368,7 @@ describe("validate — node input refs", () => {
         depends_on: [1],
         tool: "minimal_tool",
         input_schema: undefined,
-        input: { y: "@nodes.0.dataset", z: "@nodes.1.b" },
+        inputs: { y: "@nodes.0.dataset", z: "@nodes.1.b" },
         outputs: ["c"],
       }),
     ], { c: "@nodes.2.c" });
@@ -384,7 +386,7 @@ describe("validate — node input refs", () => {
               depends_on: [0],
               tool: "minimal_tool",
               input_schema: undefined,
-              input: { x: "@nodes.0.no_such_field" },
+              inputs: { x: "@nodes.0.no_such_field" },
               outputs: ["a"],
             }),
           ], { a: "@nodes.1.a" }),
@@ -403,7 +405,7 @@ describe("validate — node input refs", () => {
             toolNode({
               id: 0,
               tool: "fetch_data_table",
-              input: {
+              inputs: {
                 dataSourceId: "orders",
                 sql: "SELECT * FROM o WHERE x = @nodes.99.field",
               },
@@ -415,7 +417,7 @@ describe("validate — node input refs", () => {
     expect(e.nodeId).toBe(0);
   });
 
-  it("detects refs nested inside arrays/objects of node.input", () => {
+  it("detects refs nested inside arrays/objects of node.inputs", () => {
     expectError(
       () =>
         validate(
@@ -424,7 +426,7 @@ describe("validate — node input refs", () => {
               id: 0,
               tool: "minimal_tool",
               input_schema: undefined,
-              input: {
+              inputs: {
                 deep: {
                   items: ["@nodes.99.bad"],
                 },
@@ -449,7 +451,7 @@ describe("validate — workflow input refs", () => {
             toolNode({
               id: 0,
               tool: "fetch_data_table",
-              input: {
+              inputs: {
                 dataSourceId: "@workflow.missing_key",
                 sql: "select 1",
               },
@@ -472,7 +474,7 @@ describe("validate — workflow input refs", () => {
       toolNode({
         id: 0,
         tool: "fetch_data_table",
-        input: {
+        inputs: {
           dataSourceId: "@workflow.tenant",
           sql: "select 1",
         },
@@ -557,7 +559,7 @@ describe("validate — tool input coverage (cheap key check)", () => {
           spec([
             toolNode({
               id: 0,
-              input: { dataSourceId: "x" /* sql missing */ },
+              inputs: { dataSourceId: "x" /* sql missing */ },
             }),
           ]),
         ),
@@ -572,7 +574,7 @@ describe("validate — tool input coverage (cheap key check)", () => {
     const s = spec([
       toolNode({
         id: 0,
-        input: {
+        inputs: {
           dataSourceId: "@workflow.tenant",
           sql: "@workflow.sql_template",
         },
@@ -595,7 +597,7 @@ describe("validate — tool input coverage (cheap key check)", () => {
         id: 0,
         tool: "minimal_tool",
         input_schema: undefined,
-        input: {},
+        inputs: {},
         outputs: ["x"],
       }),
     ], { x: "@nodes.0.x" });
@@ -606,7 +608,7 @@ describe("validate — tool input coverage (cheap key check)", () => {
     const s = spec([
       agentNode({
         id: 0,
-        input: {}, // empty agent input — allowed
+        inputs: {}, // empty agent input — allowed
       }),
     ], { summary: "@nodes.0.summary" });
     expect(() => validate(s)).not.toThrow();
@@ -622,9 +624,10 @@ function sqlNode(
 ): CanonicalNode {
   return {
     type: "sql",
+    schema_version: "1",
     description: "extract",
     depends_on: [],
-    dataSourceName: "prod_pg",
+    data_source_name: "prod_pg",
     query: "SELECT 1",
     outputs: ["name", "rowCount"],
     ...overrides,
@@ -662,7 +665,7 @@ describe("validate — SQL node ref carriers (D36)", () => {
                 id: 1,
                 depends_on: [],
                 query: "SELECT * FROM @nodes.0.name",
-                dataSourceName: "src",
+                data_source_name: "src",
               }),
             ],
             { ds: "@nodes.1.name" },
@@ -683,7 +686,7 @@ describe("validate — SQL node ref carriers (D36)", () => {
                 id: 1,
                 depends_on: [0],
                 query: "SELECT * FROM @nodes.0.no_such_field",
-                dataSourceName: "src",
+                data_source_name: "src",
               }),
             ],
             { ds: "@nodes.1.name" },
@@ -701,7 +704,7 @@ describe("validate — SQL node ref carriers (D36)", () => {
             [
               sqlNode({
                 id: 0,
-                dataSourceName: "@workflow.dsKey",
+                data_source_name: "@workflow.dsKey",
               }),
             ],
             { ds: "@nodes.0.name" },
@@ -724,7 +727,7 @@ describe("validate — SQL node ref carriers (D36)", () => {
           [
             sqlNode({
               id: 0,
-              dataSourceName: "@workflow.dsKey",
+              data_source_name: "@workflow.dsKey",
             }),
           ],
           { ds: "@nodes.0.name" },
@@ -767,12 +770,13 @@ describe("validate — SQL node ref carriers (D36)", () => {
     });
     const codeNode: CanonicalNode = {
       type: "code",
+      schema_version: "1",
       id: 1,
       description: "analyse",
       depends_on: [0],
       language: "python",
       code: "import pandas",
-      input: { datasets: ["@nodes.0.name"] },
+      inputs: { datasets: ["@nodes.0.name"] },
       outputs: ["stdout", "stderr", "exitCode", "durationMs"],
     };
     expect(() =>
@@ -784,17 +788,149 @@ describe("validate — SQL node ref carriers (D36)", () => {
     const sqlOut: CanonicalNode = sqlNode({ id: 0, name: "ds_orders" });
     const codeNode: CanonicalNode = {
       type: "code",
+      schema_version: "1",
       id: 1,
       description: "analyse",
       depends_on: [0],
       language: "python",
       code: "import pandas",
-      input: { datasets: ["@nodes.0.schema"] }, // schema isn't a SQL node output
+      inputs: { datasets: ["@nodes.0.schema"] }, // schema isn't a SQL node output
       outputs: ["stdout"],
     };
     expectError(
       () => validate(spec([sqlOut, codeNode], { ds: "@nodes.1.stdout" })),
       "SPEC_REF_UNKNOWN_FIELD",
     );
+  });
+});
+
+// ─── Chart node ref carriers ──────────────────────────────────────────
+
+describe("validate — chart node ref carriers", () => {
+  /** Helper: produce a SQL upstream + a chart node referencing it. */
+  function chartTwoNodes(
+    chartInputs: {
+      renderer: "echarts";
+      config: Record<string, unknown>;
+      dataset: string | string[];
+    },
+  ): CanonicalNode[] {
+    return [
+      {
+        type: "sql",
+        schema_version: "1",
+        id: 0,
+        description: "upstream",
+        depends_on: [],
+        data_source_name: "src",
+        query: "SELECT * FROM orders",
+        outputs: ["name", "row_count", "rows"],
+      },
+      {
+        type: "chart",
+        schema_version: "1",
+        id: 1,
+        description: "bar chart",
+        depends_on: [0],
+        inputs: chartInputs,
+        outputs: ["option"],
+      },
+    ];
+  }
+
+  it("accepts a single @path ref to an upstream output field", () => {
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: { series: [{ type: "bar" }] },
+      dataset: "@nodes.0.rows",
+    });
+    expect(() =>
+      validate(spec(nodes, { option: "@nodes.1.option" })),
+    ).not.toThrow();
+  });
+
+  it("accepts an array of @path refs (multi-dataset)", () => {
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: { series: [{ type: "line" }] },
+      dataset: ["@nodes.0.rows", "@nodes.0.rows"],
+    });
+    expect(() =>
+      validate(spec(nodes, { option: "@nodes.1.option" })),
+    ).not.toThrow();
+  });
+
+  it("rejects @path ref to a non-existent upstream node", () => {
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: { series: [{ type: "bar" }] },
+      dataset: "@nodes.99.rows",
+    });
+    expectError(
+      () => validate(spec(nodes, { option: "@nodes.1.option" })),
+      "SPEC_REF_UNKNOWN_NODE",
+    );
+  });
+
+  it("rejects @path ref to a field the upstream node does not produce", () => {
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: { series: [{ type: "bar" }] },
+      dataset: "@nodes.0.does_not_exist",
+    });
+    expectError(
+      () => validate(spec(nodes, { option: "@nodes.1.option" })),
+      "SPEC_REF_UNKNOWN_FIELD",
+    );
+  });
+
+  it("rejects @path ref to a node outside the closure (forward / sibling ref)", () => {
+    const nodes: CanonicalNode[] = [
+      {
+        type: "chart",
+        schema_version: "1",
+        id: 0,
+        description: "chart with bad forward ref",
+        depends_on: [],
+        inputs: {
+          renderer: "echarts",
+          config: { series: [{ type: "bar" }] },
+          dataset: "@nodes.1.rows",
+        },
+        outputs: ["option"],
+      },
+      {
+        type: "sql",
+        schema_version: "1",
+        id: 1,
+        description: "later sql",
+        depends_on: [],
+        data_source_name: "src",
+        query: "SELECT * FROM orders",
+        outputs: ["name", "row_count", "rows"],
+      },
+    ];
+    expectError(
+      () => validate(spec(nodes, { option: "@nodes.0.option" })),
+      "SPEC_REF_UNREACHABLE",
+    );
+  });
+
+  it("does NOT walk into inputs.config — `@nodes.X.Y` strings buried inside config are ignored", () => {
+    // The chart engine deliberately treats `config` as opaque option
+    // data; only `inputs.dataset` is a ref carrier. Stuffing a
+    // `@nodes.99.bogus` inside `config.title.text` should NOT
+    // surface as a SPEC_REF_UNKNOWN_NODE.
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: {
+        title: { text: "Sales report — last updated @nodes.99.bogus" },
+        series: [{ type: "bar" }],
+      },
+      dataset: "@nodes.0.rows",
+    });
+    expect(() =>
+      validate(spec(nodes, { option: "@nodes.1.option" })),
+    ).not.toThrow();
   });
 });

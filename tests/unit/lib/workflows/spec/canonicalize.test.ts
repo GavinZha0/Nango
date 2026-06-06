@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { WorkflowError } from "@/lib/workflows/error";
 import {
+  NODE_SCHEMA_VERSIONS,
   REF_RECON_ALGORITHM,
   canonicalize,
   type CanonicalizeDeps,
   type ToolMetadata,
 } from "@/lib/workflows/spec/canonicalize";
 import {
+  CanonicalNodeSchema,
   CanonicalWorkflowSpecSchema,
   type LLMWorkflowSpec,
 } from "@/lib/workflows/spec/schema";
@@ -74,7 +76,7 @@ function baseSpec(
         depends_on: [],
         type: "tool",
         tool: "fetch_data_table",
-        input: { dataSourceId: "orders_pg", sql: "select 1" },
+        inputs: { dataSourceId: "orders_pg", sql: "select 1" },
       },
     ],
     outputs: outputsOverride ?? { dataset: "@nodes.0.dataset" },
@@ -86,7 +88,7 @@ function baseSpec(
 describe("canonicalize — tool nodes", () => {
   it("stamps type='tool' and hydrates registry metadata", () => {
     const out = canonicalize(baseSpec(), makeDeps());
-    expect(out.refReconAlgorithm).toBe(REF_RECON_ALGORITHM);
+    expect(out.ref_recon_algorithm).toBe(REF_RECON_ALGORITHM);
     expect(out.nodes).toHaveLength(1);
     const node = out.nodes[0];
     if (node.type !== "tool") throw new Error("expected tool node");
@@ -108,7 +110,7 @@ describe("canonicalize — tool nodes", () => {
         depends_on: [],
         type: "tool",
         tool: "legacy_tool",
-        input: {},
+        inputs: {},
       },
     ], { result: "@nodes.0.result" });
     const out = canonicalize(spec, makeDeps());
@@ -125,7 +127,7 @@ describe("canonicalize — tool nodes", () => {
         depends_on: [],
         type: "tool",
         tool: "minimal_tool",
-        input: {},
+        inputs: {},
       },
     ], { x: "@nodes.0.anything" });
     const out = canonicalize(spec, makeDeps());
@@ -144,9 +146,9 @@ describe("canonicalize — tool nodes", () => {
         depends_on: [3, 5],
         type: "tool",
         tool: "fetch_data_table",
-        input: { dataSourceId: "x", sql: "select 1" },
-        timeoutSeconds: 120,
-        retries: { attempts: 2, delaySeconds: 30 },
+        inputs: { dataSourceId: "x", sql: "select 1" },
+        timeout_seconds: 120,
+        retries: { attempts: 2, delay_seconds: 30 },
       },
     ], { dataset: "@nodes.7.dataset" });
     const out = canonicalize(spec, makeDeps());
@@ -154,10 +156,10 @@ describe("canonicalize — tool nodes", () => {
     expect(node.id).toBe(7);
     expect(node.description).toBe("Custom desc");
     expect(node.depends_on).toEqual([3, 5]);
-    expect(node.timeoutSeconds).toBe(120);
-    expect(node.retries).toEqual({ attempts: 2, delaySeconds: 30 });
+    expect(node.timeout_seconds).toBe(120);
+    expect(node.retries).toEqual({ attempts: 2, delay_seconds: 30 });
     if (node.type !== "tool") throw new Error("expected tool node");
-    expect(node.input).toEqual({ dataSourceId: "x", sql: "select 1" });
+    expect(node.inputs).toEqual({ dataSourceId: "x", sql: "select 1" });
   });
 });
 
@@ -170,7 +172,7 @@ describe("canonicalize — agent nodes", () => {
         depends_on: [],
         type: "agent",
         agent: "Builtin / DataAnalyst",
-        input: { dataset: "@workflow.dataset" },
+        inputs: { dataset: "@workflow.dataset" },
         output_schema: {
           type: "object",
           properties: { summary: { type: "string" } },
@@ -182,7 +184,7 @@ describe("canonicalize — agent nodes", () => {
     const node = out.nodes[0];
     if (node.type !== "agent") throw new Error("expected agent node");
     expect(node.agent).toBe("Builtin / DataAnalyst");
-    expect(node.agentId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(node.agent_id).toBe("11111111-1111-4111-8111-111111111111");
     expect(node.output_schema).toEqual({
       type: "object",
       properties: { summary: { type: "string" } },
@@ -199,7 +201,7 @@ describe("canonicalize — agent nodes", () => {
         depends_on: [],
         type: "agent",
         agent: "Builtin / DataAnalyst",
-        input: {},
+        inputs: {},
         output_schema: {
           type: "object",
           properties: { x: { type: "string" } },
@@ -233,7 +235,7 @@ describe("canonicalize — code nodes (D35)", () => {
     const out = canonicalize(spec, makeDeps());
     const node = out.nodes[0];
     if (node.type !== "code") throw new Error("expected code node");
-    expect(node.outputs).toEqual(["stdout", "stderr", "exitCode", "durationMs"]);
+    expect(node.outputs).toEqual(["stdout", "stderr", "exit_code", "duration_ms"]);
   });
 
   it("derives outputs[] from output_schema.required when declared", () => {
@@ -300,9 +302,9 @@ describe("canonicalize — code nodes (D35)", () => {
           depends_on: [0],
           language: "python",
           code: "x = 1\nprint(x)",
-          input: { datasets: ["ds_xxxxxx"] },
-          timeoutSeconds: 60,
-          retries: { attempts: 1, delaySeconds: 5 },
+          inputs: { datasets: ["ds_xxxxxx"] },
+          timeout_seconds: 60,
+          retries: { attempts: 1, delay_seconds: 5 },
         },
       ],
       { x: "@nodes.3.stdout" },
@@ -313,10 +315,10 @@ describe("canonicalize — code nodes (D35)", () => {
     expect(node.id).toBe(3);
     expect(node.language).toBe("python");
     expect(node.code).toBe("x = 1\nprint(x)");
-    expect(node.input).toEqual({ datasets: ["ds_xxxxxx"] });
+    expect(node.inputs).toEqual({ datasets: ["ds_xxxxxx"] });
     expect(node.depends_on).toEqual([0]);
-    expect(node.timeoutSeconds).toBe(60);
-    expect(node.retries).toEqual({ attempts: 1, delaySeconds: 5 });
+    expect(node.timeout_seconds).toBe(60);
+    expect(node.retries).toEqual({ attempts: 1, delay_seconds: 5 });
   });
 
   it("does NOT consult getToolMetadata or resolveAgentId for code nodes", () => {
@@ -353,7 +355,7 @@ describe("canonicalize — code nodes (D35)", () => {
 describe("canonicalize — workflow-level enrichment", () => {
   it("stamps refReconAlgorithm at the workflow root", () => {
     const out = canonicalize(baseSpec(), makeDeps());
-    expect(out.refReconAlgorithm).toBe("ref_recon_v1");
+    expect(out.ref_recon_algorithm).toBe("ref_recon_v1");
   });
 
   it("preserves top-level outputs / description / input_schema / execution", () => {
@@ -362,7 +364,7 @@ describe("canonicalize — workflow-level enrichment", () => {
       name: "demo",
       description: "Top-level description",
       input_schema: { type: "object", properties: { x: { type: "string" } } },
-      execution: { max_parallelism: 4, timeoutSeconds: 300, on_failure: "continue" },
+      execution: { max_parallelism: 4, timeout_seconds: 300, on_failure: "continue" },
       nodes: [
         {
           id: 0,
@@ -370,7 +372,7 @@ describe("canonicalize — workflow-level enrichment", () => {
           depends_on: [],
           type: "tool",
           tool: "minimal_tool",
-          input: {},
+          inputs: {},
         },
       ],
       outputs: { final: "@nodes.0.anything" },
@@ -383,7 +385,7 @@ describe("canonicalize — workflow-level enrichment", () => {
     });
     expect(out.execution).toEqual({
       max_parallelism: 4,
-      timeoutSeconds: 300,
+      timeout_seconds: 300,
       on_failure: "continue",
     });
     expect(out.outputs).toEqual({ final: "@nodes.0.anything" });
@@ -407,7 +409,7 @@ describe("canonicalize — TOOL_NOT_FOUND", () => {
         depends_on: [],
         type: "tool",
         tool: "no_such_tool",
-        input: {},
+        inputs: {},
       },
     ], { x: "@nodes.0.x" });
     expect(() => canonicalize(spec, makeDeps())).toThrow(WorkflowError);
@@ -432,7 +434,7 @@ describe("canonicalize — AGENT_NOT_FOUND", () => {
         depends_on: [],
         type: "agent",
         agent: "Builtin / Ghost",
-        input: {},
+        inputs: {},
         output_schema: {
           type: "object",
           properties: { x: { type: "string" } },
@@ -482,7 +484,7 @@ describe("canonicalize — fail-fast on first node error", () => {
         depends_on: [],
         type: "tool",
         tool: "minimal_tool",
-        input: {},
+        inputs: {},
       },
       {
         id: 1,
@@ -490,7 +492,7 @@ describe("canonicalize — fail-fast on first node error", () => {
         depends_on: [0],
         type: "tool",
         tool: "no_such_tool",
-        input: {},
+        inputs: {},
       },
       {
         id: 2,
@@ -498,7 +500,7 @@ describe("canonicalize — fail-fast on first node error", () => {
         depends_on: [1],
         type: "tool",
         tool: "minimal_tool",
-        input: {},
+        inputs: {},
       },
     ], { x: "@nodes.0.anything" });
     expect(() => canonicalize(spec, deps)).toThrow(WorkflowError);
@@ -522,7 +524,7 @@ describe("canonicalize — SQL node (D36)", () => {
         description: "extract orders",
         depends_on: [],
         type: "sql",
-        dataSourceName: "prod_pg",
+        data_source_name: "prod_pg",
         query: "SELECT id, total FROM orders",
         name: "ds_orders",
       },
@@ -530,10 +532,10 @@ describe("canonicalize — SQL node (D36)", () => {
     const canonical = canonicalize(spec, noopDeps);
     const node = canonical.nodes[0]!;
     if (node.type !== "sql") throw new Error("expected sql node");
-    expect(node.dataSourceName).toBe("prod_pg");
+    expect(node.data_source_name).toBe("prod_pg");
     expect(node.query).toBe("SELECT id, total FROM orders");
     expect(node.name).toBe("ds_orders");
-    expect(node.outputs).toEqual(["name", "rowCount"]);
+    expect(node.outputs).toEqual(["name", "row_count", "rows"]);
   });
 
   it("does NOT consult getToolMetadata or resolveAgentId for SQL nodes", () => {
@@ -554,7 +556,7 @@ describe("canonicalize — SQL node (D36)", () => {
         description: "extract",
         depends_on: [],
         type: "sql",
-        dataSourceName: "any_slug",
+        data_source_name: "any_slug",
         query: "SELECT 1",
       },
     ], { result: "@nodes.0.name" });
@@ -569,7 +571,7 @@ describe("canonicalize — SQL node (D36)", () => {
         description: "extract",
         depends_on: [],
         type: "sql",
-        dataSourceName: "src",
+        data_source_name: "src",
         query: "SELECT 1",
       },
     ], { result: "@nodes.0.name" });
@@ -586,7 +588,7 @@ describe("canonicalize — SQL node (D36)", () => {
         description: "extract",
         depends_on: [],
         type: "sql",
-        dataSourceName: "src",
+        data_source_name: "src",
         query: "SELECT 1",
         name: "ds_x",
       },
@@ -603,11 +605,264 @@ describe("canonicalize — SQL node (D36)", () => {
         description: "extract",
         depends_on: [],
         type: "sql",
-        dataSourceName: "src",
+        data_source_name: "src",
         query: "SELECT 1",
       },
     ], { result: "@nodes.0.name" });
     const canonical = canonicalize(spec, noopDeps);
-    expect(canonical.refReconAlgorithm).toBe(REF_RECON_ALGORITHM);
+    expect(canonical.ref_recon_algorithm).toBe(REF_RECON_ALGORITHM);
+  });
+});
+
+// ─── schema_version stamping + backward compat ────────────────────────
+
+describe("canonicalize — per-node schema_version", () => {
+  it("exposes a NODE_SCHEMA_VERSIONS entry for every NodeType", () => {
+    // Whenever a new node type lands in `NodeTypeSchema`, this guard
+    // forces an explicit `NODE_SCHEMA_VERSIONS[type] = "1"` decision
+    // rather than silently shipping unstamped nodes.
+    expect(Object.keys(NODE_SCHEMA_VERSIONS).sort()).toEqual(
+      ["agent", "chart", "code", "sql", "tool"],
+    );
+    for (const v of Object.values(NODE_SCHEMA_VERSIONS)) {
+      expect(v).toBe("1");
+    }
+  });
+
+  it("stamps schema_version='1' on a tool node", () => {
+    const canonical = canonicalize(baseSpec(), makeDeps());
+    expect(canonical.nodes[0]!.schema_version).toBe("1");
+  });
+
+  it("stamps schema_version='1' on an agent node", () => {
+    const spec = baseSpec([
+      {
+        id: 0,
+        description: "summarise",
+        depends_on: [],
+        type: "agent",
+        agent: "Builtin / DataAnalyst",
+        inputs: { text: "hi" },
+        output_schema: {
+          type: "object",
+          properties: { text: { type: "string" } },
+          required: ["text"],
+        },
+      },
+    ], { result: "@nodes.0.text" });
+    const canonical = canonicalize(spec, makeDeps());
+    expect(canonical.nodes[0]!.schema_version).toBe("1");
+  });
+
+  it("stamps schema_version='1' on a code node", () => {
+    const spec = baseSpec([
+      {
+        id: 0,
+        description: "compute",
+        depends_on: [],
+        type: "code",
+        language: "python",
+        code: "print(1)",
+      },
+    ], { result: "@nodes.0.stdout" });
+    const canonical = canonicalize(spec, makeDeps());
+    expect(canonical.nodes[0]!.schema_version).toBe("1");
+  });
+
+  it("stamps schema_version='1' on a SQL node", () => {
+    const spec = baseSpec([
+      {
+        id: 0,
+        description: "extract",
+        depends_on: [],
+        type: "sql",
+        data_source_name: "src",
+        query: "SELECT 1",
+      },
+    ], { result: "@nodes.0.name" });
+    const canonical = canonicalize(spec, makeDeps());
+    expect(canonical.nodes[0]!.schema_version).toBe("1");
+  });
+
+  it("defaults schema_version to '1' when absent (backward compat for pre-versioning DB rows)", () => {
+    // Old workflow rows persisted before this field existed parse as
+    // if they had `schema_version: "1"` — no migration required.
+    const rawOldNode = {
+      type: "tool",
+      id: 0,
+      description: "legacy",
+      depends_on: [],
+      tool: "fetch_data_table",
+      inputs: {},
+    };
+    const parsed = CanonicalNodeSchema.parse(rawOldNode);
+    expect(parsed.schema_version).toBe("1");
+  });
+
+  it("rejects an unknown schema_version (future v2 spec parsed by a v1 build)", () => {
+    const rawFutureNode = {
+      type: "tool",
+      schema_version: "2",
+      id: 0,
+      description: "future",
+      depends_on: [],
+      tool: "fetch_data_table",
+      inputs: {},
+    };
+    expect(() => CanonicalNodeSchema.parse(rawFutureNode)).toThrow();
+  });
+});
+
+// ─── Chart node canonicalization ──────────────────────────────────────
+
+describe("canonicalize — chart node", () => {
+  const noopDeps: CanonicalizeDeps = {
+    getToolMetadata: () => null,
+    resolveAgentId: () => null,
+  };
+
+  function chartSpec(): LLMWorkflowSpec {
+    return {
+      version: "1.0",
+      name: "demo",
+      nodes: [
+        {
+          id: 0,
+          description: "extract",
+          depends_on: [],
+          type: "sql",
+          data_source_name: "src",
+          query: "SELECT month, sales FROM orders",
+          name: "monthly_sales",
+        },
+        {
+          id: 1,
+          description: "bar chart of monthly sales",
+          depends_on: [0],
+          type: "chart",
+          inputs: {
+            renderer: "echarts",
+            config: {
+              xAxis: { type: "category" },
+              yAxis: { type: "value" },
+              series: [
+                {
+                  type: "bar",
+                  encode: { x: "month", y: "sales" },
+                },
+              ],
+            },
+            dataset: "@nodes.0.rows",
+          },
+        },
+      ],
+      outputs: { option: "@nodes.1.option" },
+    };
+  }
+
+  it("preserves inputs.{renderer,config,dataset} verbatim", () => {
+    const canonical = canonicalize(chartSpec(), noopDeps);
+    const node = canonical.nodes[1]!;
+    if (node.type !== "chart") throw new Error("expected chart node");
+    expect(node.inputs.renderer).toBe("echarts");
+    expect(node.inputs.config).toMatchObject({
+      xAxis: { type: "category" },
+      series: [{ type: "bar", encode: { x: "month", y: "sales" } }],
+    });
+    expect(node.inputs.dataset).toBe("@nodes.0.rows");
+  });
+
+  it("stamps outputs[] = ['option']", () => {
+    const canonical = canonicalize(chartSpec(), noopDeps);
+    const node = canonical.nodes[1]!;
+    if (node.type !== "chart") throw new Error("expected chart node");
+    expect(node.outputs).toEqual(["option"]);
+  });
+
+  it("stamps output_schema with `option` as the only required key", () => {
+    const canonical = canonicalize(chartSpec(), noopDeps);
+    const node = canonical.nodes[1]!;
+    if (node.type !== "chart") throw new Error("expected chart node");
+    expect(node.output_schema).toMatchObject({
+      type: "object",
+      required: ["option"],
+    });
+    expect(node.output_schema?.properties).toMatchObject({
+      option: { type: "object" },
+    });
+  });
+
+  it("const-pins input_schema.properties.renderer to the chosen value", () => {
+    const canonical = canonicalize(chartSpec(), noopDeps);
+    const node = canonical.nodes[1]!;
+    if (node.type !== "chart") throw new Error("expected chart node");
+    const props = node.input_schema?.properties as Record<string, unknown>;
+    expect(props?.renderer).toEqual({ const: "echarts" });
+    expect(node.input_schema?.required).toEqual([
+      "renderer",
+      "config",
+    ]);
+    // `dataset` is documented as optional — when the save pipeline
+    // can't reconstruct a ref, the chart is the not-refreshable
+    // fallback (data baked into config). The Zod / JSON schema
+    // honours that by keeping `dataset` out of `required` while
+    // still describing its expected shape under `properties`.
+    expect(props?.dataset).toBeDefined();
+  });
+
+  it("does NOT consult getToolMetadata or resolveAgentId for chart nodes", () => {
+    const callLog: string[] = [];
+    const deps: CanonicalizeDeps = {
+      getToolMetadata: (name) => {
+        callLog.push(`tool:${name}`);
+        return null;
+      },
+      resolveAgentId: (display) => {
+        callLog.push(`agent:${display}`);
+        return null;
+      },
+    };
+    const spec = chartSpec();
+    // strip the sql node so only the chart node runs through canonicalize
+    spec.nodes = [
+      {
+        ...spec.nodes[1]!,
+        id: 0,
+        depends_on: [],
+      },
+    ];
+    spec.outputs = { option: "@nodes.0.option" };
+    canonicalize(spec, deps);
+    expect(callLog).toEqual([]);
+  });
+
+  it("supports multi-dataset (array of refs) — passes Zod min(2)", () => {
+    const spec = chartSpec();
+    if (spec.nodes[1]!.type !== "chart") throw new Error();
+    spec.nodes[1] = {
+      ...spec.nodes[1]!,
+      inputs: {
+        ...spec.nodes[1]!.inputs,
+        dataset: ["@nodes.0.rows", "@nodes.0.rows"],
+      },
+    };
+    const canonical = canonicalize(spec, noopDeps);
+    const node = canonical.nodes[1]!;
+    if (node.type !== "chart") throw new Error("expected chart node");
+    expect(node.inputs.dataset).toEqual([
+      "@nodes.0.rows",
+      "@nodes.0.rows",
+    ]);
+  });
+
+  it("stamps schema_version='1' on a chart node", () => {
+    const canonical = canonicalize(chartSpec(), noopDeps);
+    expect(canonical.nodes[1]!.schema_version).toBe("1");
+  });
+
+  it("canonical chart node round-trips through CanonicalWorkflowSpecSchema", () => {
+    const canonical = canonicalize(chartSpec(), noopDeps);
+    const parsed = CanonicalWorkflowSpecSchema.safeParse(canonical);
+    expect(parsed.success).toBe(true);
   });
 });

@@ -2,13 +2,14 @@
 
 > ✅ **CONCLUDED.** Workflow V1 is built. This file no longer
 > describes the running system — read [`workflow.md`](./workflow.md)
-> for that. What remains here is the decision log (D1 → D38, plus
+> for that. What remains here is the decision log (D1 → D39, plus
 > what was considered and rejected) and the open backlog.
 >
 > No new architectural discussion lands in this doc. New decisions
-> go into `workflow.md` §7 (open questions) → §8 (status). When
-> §7's chart-data-flow question is resolved, the resulting D-numbered
-> decision gets appended to §2 below.
+> go into `workflow.md` §7 (open questions) → §8 (status). The
+> chart-data-flow question raised in `workflow.md` §7 was resolved
+> as **D39** (§2 below); refresh / data-binding / cache items
+> previously blocked on it are now actionable.
 
 ---
 
@@ -19,18 +20,17 @@
   `/admin/run` UI ❌ (D4b backlog).
 - **Stage 2 modify pipeline**: designed (D5, §10 of the historical
   long-form), not built.
-- **Chart data flow on refresh**: undecided — see `workflow.md` §7
-  for routes A / B / C. Every refresh-button / scheduled-refresh /
-  L2-cache item in §4 below depends on this.
+- **Chart data flow on refresh**: ✅ **resolved as D39** (chart node
+  promoted to a first-class workflow node, frontend renders from
+  `bundle.data`). Implementation in progress.
 
-This subsystem is paused pending §7's resolution. The codebase is
-in a coherent state: GET/POST artifact endpoints work, refresh
-re-runs the workflow and records to `entity_run`, the frontend just
-doesn't yet consume the fresh `bundle.data`.
+This subsystem is back under active work. The clean-slate refactor
+toward D39 explicitly **does not** preserve pre-refactor workflow /
+artifact rows — old data is wiped, no migration code is written.
 
 ---
 
-## 2. Decisions (D1 → D38)
+## 2. Decisions (D1 → D39)
 
 Compact one-liners. Each decision is in effect unless marked
 SUPERSEDED. Cross-reference `workflow.md` for current behaviour;
@@ -89,6 +89,29 @@ this log answers "why", not "what".
 - **D37** SQL node `name` is a **slot** (last-write-wins). Re-running with the same name + a different query replaces the cached dataset; no `QUERY_HASH_MISMATCH`. The tool description teaches the LLM "name is a slot, not a content hash". Structured log event: `dataset_replaced`. (See `data-sources.md` §4.2.)
 - **D38** Sandbox path contract redesign. Datasets mount at `./data/<name>/data.parquet` relative to the sandbox cwd — no more `/mnt/cache` magic paths. Sweep on Node boot via `purgeAllDatasets()` (cache lifetime = process lifetime). Module-level caches pinned to `globalThis` for HMR safety (C1).
 
+### Chart refactor (D39)
+
+- **D39** Chart refactor — supersedes `workflow.md` §7 (routes A / B / C). Resolves the "chart data flow on refresh" question. Four sub-points:
+  - **D39.A** **Chart-as-node.** The chat-time chart tool (renamed from `render_chart` to `generate_echarts_config`, see D39.E) is no longer stripped at save; it is reconstructed as a first-class `type: "chart"` workflow node. The node stores an ECharts option **template** (no data) under `inputs.config` and a `@path` ref to upstream data under `inputs.dataset`. At execute time the engine merges them and returns `{ option }` — rendering still happens in the browser. Decouples the **data engine** (DAG produces data) from the **renderer** (browser draws); workflow becomes self-contained for refresh. Picks Route A from §7.2, but explicitly **NOT** server-side rendering — only server-side config storage.
+  - **D39.B** **Single injection point.** Chart node v1 supports only `option.dataset.source` as the data-binding target (ECharts dataset API). `series[*].data` literals are NOT auto-reconstructed into refs — keeps the LLM contract narrow and the validator straightforward. Charts that don't fit fall back to D39.C. Future `chart:2` may extend.
+  - **D39.C** **Literal fallback on reconstruction miss.** When `build-from-events` Strategy Z+ cannot match a `generate_echarts_config` call's data points to any upstream tool output, the chart is still saved — but as a `chart` node with literal `config` (data baked in) and empty `inputs.dataset`. UI surfaces "not refreshable" indicator. Hybrid of "save anyway" + "be honest about it".
+  - **D39.D** **`artifact.content.blocks` retired.** The field had two consumers — chart option snapshot (now in `workflow.spec`'s chart node) and pre-refactor static save. Both are gone after D39.A. Drop the column in Phase 5 of the refactor (when frontend stops reading it); not Phase 0, because today's `ArtifactDetail` still reads it.
+  - **D39.E** **Rename `render_chart` (frontend tool) → `generate_echarts_config` (server tool).** Three benefits stack: (1) **uniformity** — `render_chart` was Nango's only significant frontend tool; promoting it to a server tool eliminates the entire "frontend tool" special case from the dispatch / build-from-events / agent-tool-filter paths. (2) **AG-UI run lifecycle** — frontend tool calls interrupt the current AG-UI `run` and start a new one (CopilotKit convention); server tools complete within the same run, removing one source of stream disruption. (3) **Symmetric naming for future libraries** — `generate_<lib>_config` becomes the convention; `build-from-events` derives the chart node's `inputs.renderer` value from the tool-name suffix (`_echarts_config` → `"echarts"`, future `_plotly_config` → `"plotly"`). The frontend `useRenderTool` continues to provide streaming-arg preview unchanged; a frontend side-effect hook handles the post-result Outcomes-store update that used to live in the frontend handler.
+
+  No backward-compat migration: pre-D39 `workflow` / `artifact` rows are wiped at refactor start; users re-save charts. The `render_chart` frontend tool registration is fully removed in Phase 1.
+
+  **D39 cross-cutting structural sub-conclusions** (binding for the entire refactor; see `workflow-spec.md` for prescriptive form):
+
+  - **8 universal top-level fields per node** (`id`, `type`, `schema_version`, `description`, `depends_on`, `inputs`, `input_schema`, `output_schema`) plus 2 optional (`retries`, `timeout_seconds`). All type-specific parameters (tool name, language, SQL text, renderer, …) live one level down inside `inputs`. No third location.
+  - **`inputs` ↔ `outputs` naming symmetry**: `inputs` is the **static parameter bag in spec** (may contain `@path` refs); `outputs` is the **runtime output bag in `entity_run_event`** payloads. The spec no longer carries an `outputs[]` field-name array — recoverable from `output_schema.properties`.
+  - **snake_case for all spec keys** (`data_source_id`, `total_rows`, `agent_id`, `timeout_seconds`, …). The pre-refactor mix of camel + snake is retired.
+  - **`input_schema` and `output_schema` are both canonical-required**, always filled by `canonicalize` from per-type rules (registry for tool, constants for sql/chart, LLM-emit for agent/code).
+  - **Tool node aligns with OpenAI / MCP standard**: `inputs = { name, arguments }`. `name` is `const`-pinned in canonical `input_schema`. Promoted tools (`generate_echarts_config`, `run_code_in_sandbox`, `extract_dataset_by_sql`) are rejected as `type: "tool"` and must use their dedicated node types.
+  - **SQL node**: inputs = `{ data_source_id, sql_text, dataset_id? }`; runtime outputs = `{ dataset_id, total_rows, returned_rows, rows, row_schema }`. No `return_mode` field — engine policy via two config keys (`sql.inline_max_rows` default 100000, `sql.inline_max_bytes_mb` default 20). `returned_rows` is exposed as a number so the LLM doesn't have to count rows (LLMs miscount arrays at scale). `row_schema` is populated even for 0-row results.
+  - **Code node**: inputs = `{ language, code_text|code_file, datasets?, params? }`; `code_text` XOR `code_file` (validator-enforced); v1 languages `python` + `javascript`; JS rejected if `datasets` is non-empty (no parquet reader); default output `{ stdout, stderr, exit_code, duration_ms }` snake_case; LLM MAY override with custom `output_schema` that merges into the default as non-required additions.
+  - **Agent node**: inputs = `{ name, task, context? }` — flat fields; no `args` wrapper; output is canonical-fixed `{ result: string }`. **This supersedes D30** (LLM no longer writes `output_schema`). Only `role IS NULL` agents are eligible; supervisor / secretary / evaluator rejected with `AGENT_ROLE_NOT_ROUTABLE`. String-interpolation refs not supported in v1.
+  - **Chart node is static**: chart node holds a config template (no data) + a `@path` ref to upstream rows; engine merges at execute time. The chart node is NOT a dynamic agent — no LLM call at execute time. Two LLM-authoring contexts coexist: chat-time `generate_echarts_config` (server tool post-D39.E, writes data inline for immediate render) and modify-time `modify_workflow` (server tool, writes the template form). `build-from-events` bridges chat-time → template at save. Rationale: cost (every refresh = LLM call would be expensive), determinism (saved chart should look the same across refreshes), industry precedent (all mature BI tools ship static-config + dynamic-data), and the "LLM lacks data" worry is moot — chat-time LLM has SQL preview in context.
+
 ### Pinned implementation corrections
 
 - **Correction 1**: `modify_artifact_display` lives in `src/lib/artifacts/` (NOT `src/lib/workflows/`).
@@ -121,22 +144,41 @@ this log answers "why", not "what".
 
 ---
 
-## 4. Backlog (paused)
+## 4. Backlog
 
-Items are listed in priority order within each tier. None is being
-worked. The **blocked** items in §4.0 will not start until the §7
-decision in `workflow.md` is made.
+Items are listed in priority order within each tier.
 
-### 4.0 Blocked on chart data flow architecture (workflow.md §7)
+### 4.0 D39 chart refactor (landed)
 
-- **Refresh button + chart data binding** (V1.x).
-  Routes A (render_chart-as-node) / B (template + data binding) /
-  C (regenerate-via-chat) documented; no choice made.
-- **Scheduled refresh** (cron-style "refresh this artifact weekly").
-  `schedule` table exists; no `entityKind='workflow'` dispatch path —
-  not meaningful until refresh shows the user something.
-- **L2 workflow-output cache** (`forceFresh: true` actually does
-  something). Currently a no-op.
+Chart-as-node is end-to-end live: chat-saved charts become
+first-class `type: "chart"` workflow nodes, refresh re-executes
+the bound workflow, and the artifact page renders from the
+resolved option. See `docs/D39-implementation-log.md` for the
+phase-by-phase commit map and the "shipped vs prescriptive"
+delta against the rest of this spec.
+
+- ✅ **snake_case spec keys + per-node `schema_version` stamping** (Phase 1.0).
+- ✅ **Chart node Zod schema + canonicalize + validate + executor + engine dispatch** (Phase 1.1).
+- ✅ **`build-from-events` reconstructs chart nodes** with Strategy Z+ array matching + D39.C literal fallback (Phase 1.4).
+- ✅ **SQL node exposes `rows` so chart refs can validate** (Phase 1.4-A).
+- ✅ **Frontend renders from `bundle.data`** (`<EChartsRenderer option={bundle.data}>` in `ArtifactDetail`) (Phase 1.5).
+- ✅ **Refresh button + UX** — POST refresh → SWR mutate (Phase 1.6).
+- ✅ **`artifact.content` column dropped** (Phase 5, D39.D).
+
+Still on the backlog (deferred — not on the chart-refactor
+critical path):
+
+- **L2 workflow-output cache** — only if profiling demands; the
+  current GET → executeWorkflow round-trip is cheap in single-node
+  setups.
+- **Scheduled refresh** (`entityKind='workflow'` dispatch path).
+  Reachable now that the synchronous refresh works end-to-end.
+- **Other artifact types as workflow nodes** — `render_html` /
+  `render_markdown` still take the legacy strip-to-content path
+  (the column is gone but the args still feed metadata derivation
+  only); they show the "no renderer yet" placeholder. Promoting
+  them follows the same pattern as chart (server-tool rename
+  + node type + assembler branch).
 
 ### 4.1 Unblocked V1.x polish
 

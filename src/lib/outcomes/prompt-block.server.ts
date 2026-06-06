@@ -6,7 +6,7 @@ import "server-only";
 interface BuildChartPromptInput {
   /** Reserved for future block variants that vary by binding (e.g.
    *  mention `run_code_in_sandbox` aggregation only when the
-   *  sandbox is bound). Currently unused — V1 always returns the
+   *  sandbox is bound). Currently unused — always returns the
    *  same block for non-supervisor agents. */
   hasDataSource: boolean;
   /** See {@link BuildChartPromptInput.hasDataSource}. */
@@ -16,34 +16,38 @@ interface BuildChartPromptInput {
 /**
  * The canonical block string. Exported for testing / inspection.
  *
- * Scope: this block states OUR USAGE RULES for `render_chart`. The
- * tool's own description (parameter shapes, JSON examples, ECharts
- * facts) lives in `useOutcomeTools.tsx`'s schema `.describe()` — we
- * do not duplicate it here.
+ * Scope: this block states OUR USAGE RULES for
+ * `generate_echarts_config`. The tool's own description (parameter
+ * shapes, JSON examples, ECharts facts) lives in the server tool
+ * factory at `lib/outcomes/runtime-tools.ts` — we do not duplicate
+ * it here.
  */
 export const CHART_PROMPT_BLOCKS = {
   /** For agents that can produce chartable data. */
   encourage: [
-    "## render_chart usage",
+    "## generate_echarts_config usage",
     "",
-    "- If you have no concrete data, do NOT call `render_chart`. Reply in text instead.",
-    "- Put data in `option.dataset.source`, not in `series[].data`.",
+    "- If you have no concrete data, do NOT call `generate_echarts_config`. Reply in text instead.",
+    "- Put data in `option.dataset.source` (array of row objects), NOT in `series[].data`.",
+    "- Bind columns via `series[*].encode = { x: 'col_name', y: 'col_name' }`.",
     "- Do not paste chart JSON into your chat reply — the tool IS the rendering.",
+    "- If the data came from `extract_dataset_by_sql`, pass that dataset's id as `dataset_id` so the saved chart can refresh later.",
   ].join("\n"),
 } as const;
 
 /**
  * Return the chart prompt block for non-supervisor agents.
  *
- * Policy: ALWAYS inject the block. `render_chart` is registered
- * globally in `useOutcomeTools()`, so every built-in agent has the
- * tool whether they have data bindings or not. Without instructions,
- * gpt-class models mis-use the tool (empty options, pasted JS in
- * chat).
+ * Policy: ALWAYS inject the block for non-supervisor agents.
+ * `generate_echarts_config` is mounted as an ambient tool on every
+ * non-supervisor built-in agent in `runner/dispatch/builtin.ts`,
+ * so every such agent has the tool whether they have data
+ * bindings or not. Without instructions, gpt-class models mis-use
+ * the tool (empty options, pasted JSON in chat).
  *
- * If a future agent should genuinely never have `render_chart`
- * available, the fix is at the registration layer (don't call
- * `useOutcomeTools()`), not here.
+ * Supervisor agents do NOT receive this block; they also do not
+ * receive the ambient tool — see the dispatch site for that
+ * exclusion logic.
  */
 export function buildChartPromptBlock(input: BuildChartPromptInput): string {
   // `hasDataSource` / `hasSandbox` are accepted but currently

@@ -3,7 +3,7 @@
  *
  * Retry loop + event emission live in `with-retries.ts`. Per-attempt
  * body:
- *   1. Resolve `@path` refs in `node.input`.
+ *   1. Resolve `@path` refs in `node.inputs`.
  *   2. Call `deps.runAgent({...})` — the DI bridge that the runner-
  *      side dispatch shim wires to `runner.start({entityKind: 'agent'})`.
  *   3. Return `result.output` (already structured per `outputSchema`).
@@ -43,12 +43,12 @@ export async function executeAgentNode(
     state,
     deps,
     attemptFn: async () => {
-      const resolvedInput = resolveRefs(node.input, state) as Record<
+      const resolvedInput = resolveRefs(node.inputs, state) as Record<
         string,
         unknown
       >;
       const result = await deps.runAgent({
-        agentId: node.agentId,
+        agentId: node.agent_id,
         input: resolvedInput,
         outputSchema: node.output_schema,
         abortSignal: state.abortSignal,

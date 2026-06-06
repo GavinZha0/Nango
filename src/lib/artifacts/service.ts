@@ -46,20 +46,6 @@ export interface UpdateNodeInput {
   parentId?: string | null;
   displayOrder?: number;
   visibility?: "private" | "shared";
-  /**
-   * Display-config payload for leaf artifacts. The frontend tool's
-   * settings — chart type / colors / title / etc. for charts;
-   * inline HTML / markdown for those artifact kinds. Schema is
-   * type-specific and intentionally untyped at the service layer
-   * (the artifact page's renderer enforces shape per artifact
-   * type). Workflow changes go through chat (a fresh save from a
-   * new outcome), NOT through this field — `content` here never
-   * mutates
-   * `workflow.spec`.
-   *
-   * `null` clears the field; `undefined` leaves it as-is.
-   */
-  content?: unknown;
 }
 
 // ──────────────────────────── Seeding ────────────────────────────
@@ -249,11 +235,6 @@ export async function updateNode(
     }
   }
 
-  // `content` is intentionally explicit-undefined-aware: writing
-  // `undefined` to drizzle's `.set()` leaves the column alone,
-  // which is the desired no-op semantic for "patch doesn't touch
-  // this field". Passing `null` is a legitimate clear-the-field
-  // intent that we want to honour.
   const [row] = await db
     .update(ArtifactTable)
     .set({
@@ -262,7 +243,6 @@ export async function updateNode(
       parentId: patch.parentId ?? current.parentId,
       displayOrder: patch.displayOrder ?? current.displayOrder,
       visibility: patch.visibility ?? current.visibility,
-      ...(patch.content !== undefined && { content: patch.content }),
       updatedAt: new Date(),
     })
     .where(eq(ArtifactTable.id, id))

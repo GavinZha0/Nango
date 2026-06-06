@@ -14,15 +14,16 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 const MINIMAL_SPEC: CanonicalWorkflowSpec = {
   version: "1.0",
   name: "demo",
-  refReconAlgorithm: "ref_recon_v1",
+  ref_recon_algorithm: "ref_recon_v1",
   nodes: [
     {
       type: "tool",
+      schema_version: "1",
       id: 0,
       description: "n",
       depends_on: [],
       tool: "minimal",
-      input: {},
+      inputs: {},
     },
   ],
   outputs: { x: "@nodes.0.x" },
@@ -129,11 +130,11 @@ describe("resolveRefs — pure refs", () => {
   it("@nodes.N.field → node output value (preserves type)", () => {
     const state = makeState({
       outputs: new Map([
-        [0, { dataset: "path.parquet", rowCount: 1234 }],
+        [0, { dataset: "path.parquet", row_count: 1234 }],
       ]),
     });
     expect(resolveRefs("@nodes.0.dataset", state)).toBe("path.parquet");
-    expect(resolveRefs("@nodes.0.rowCount", state)).toBe(1234);
+    expect(resolveRefs("@nodes.0.row_count", state)).toBe(1234);
   });
 
   it("preserves object values when target is an object (pure ref)", () => {

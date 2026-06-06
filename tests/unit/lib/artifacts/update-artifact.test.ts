@@ -29,7 +29,6 @@ function artifactRow(
     type: "chart",
     name: "Q4 Orders",
     description: null,
-    content: { type: "bar" },
     config: null,
     sourceThreadId: null,
     sourceOutcomeId: null,
@@ -110,15 +109,15 @@ describe("updateArtifact — write-then-bundle", () => {
     expect(bundle.node.name).toBe("Renamed");
   });
 
-  it("returns a bundle with the updated `content` field", async () => {
-    const before = artifactRow({ content: { type: "bar" } });
-    const after = artifactRow({ content: { type: "line", color: "blue" } });
+  it("returns a bundle with the updated description metadata", async () => {
+    const before = artifactRow({ description: "old" });
+    const after = artifactRow({ description: "new" });
     const { bundle } = await callUpdate(
-      { content: { type: "line", color: "blue" } },
+      { description: "new" },
       before,
       after,
     );
-    expect(bundle.node.content).toEqual({ type: "line", color: "blue" });
+    expect(bundle.node.description).toBe("new");
   });
 
   it("returns a bundle with workflow metadata when artifact is workflow-backed", async () => {
@@ -130,7 +129,6 @@ describe("updateArtifact — write-then-bundle", () => {
     const after = artifactRow({
       workflowId,
       workflowOutputField: "data",
-      content: { type: "line" },
     });
     const deps = makeDeps(before, after);
     deps.getWorkflow = async () =>
@@ -141,15 +139,16 @@ describe("updateArtifact — write-then-bundle", () => {
         spec: {
           version: "1.0",
           name: "demo",
-          refReconAlgorithm: "ref_recon_v1",
+          ref_recon_algorithm: "ref_recon_v1",
           nodes: [
             {
               type: "tool",
+              schema_version: "1",
               id: 0,
               description: "n",
               depends_on: [],
               tool: "x",
-              input: {},
+              inputs: {},
             },
           ],
           outputs: { data: "@nodes.0.x" },
@@ -162,7 +161,7 @@ describe("updateArtifact — write-then-bundle", () => {
       }) as WorkflowEntity;
     const bundle = await updateArtifactWithDeps(
       ARTIFACT_ID,
-      { content: { type: "line" } },
+      { description: "tweak" },
       OWNER,
       deps.performUpdate,
       deps,

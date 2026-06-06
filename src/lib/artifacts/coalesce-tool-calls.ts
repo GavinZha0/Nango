@@ -78,7 +78,7 @@ export function coalesceToolCalls(
   // See `isFailedEnvelope` below.
   const invocations: ToolInvocation[] = [];
   for (const bucket of buckets.values()) {
-    const input = parseArgs(bucket.argsParts);
+    const inputs = parseArgs(bucket.argsParts);
     let result: Record<string, unknown> | null = null;
     let ok = false;
     if (bucket.rawResult !== undefined) {
@@ -92,7 +92,7 @@ export function coalesceToolCalls(
       callId: bucket.callId,
       seq: bucket.seq,
       toolName: bucket.toolName,
-      input,
+      inputs,
       result,
       ok,
     });

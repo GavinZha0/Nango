@@ -15,18 +15,18 @@ import { z } from "zod";
 /** Per-node retry configuration. All time units in seconds. */
 export const RetriesSchema = z.object({
   attempts: z.number().int().nonnegative(),
-  delaySeconds: z.number().int().nonnegative(),
+  delay_seconds: z.number().int().nonnegative(),
   backoff: z.enum(["fixed", "exponential"]).optional(),
 });
 
 /**
  * Workflow-level execution overrides. Missing values are filled from
  * the `workflow.execution.*` config keys at canonicalize time.
- * `timeoutSeconds` is capped at the hard limit by `validate.ts`.
+ * `timeout_seconds` is capped at the hard limit by `validate.ts`.
  */
 export const ExecutionConfigSchema = z.object({
   max_parallelism: z.number().int().positive().optional(),
-  timeoutSeconds: z.number().int().positive().optional(),
+  timeout_seconds: z.number().int().positive().optional(),
   on_failure: z.enum(["stop", "continue"]).optional(),
 });
 
@@ -53,11 +53,20 @@ const NodeBaseSchema = z.object({
   description: z.string().min(1),
   depends_on: z.array(z.number().int().nonnegative()),
   retries: RetriesSchema.optional(),
-  timeoutSeconds: z.number().int().positive().optional(),
+  timeout_seconds: z.number().int().positive().optional(),
 });
 
 /** Node type discriminator. See docs/workflow.md. */
-export const NodeTypeSchema = z.enum(["tool", "agent", "code", "sql"]);
+export const NodeTypeSchema = z.enum(["tool", "agent", "code", "sql", "chart"]);
+
+/**
+ * Chart renderer libraries supported by the chart node. The enum
+ * value is mirrored verbatim into ECharts / Plotly / Vega-flavoured
+ * config injection on the frontend; only `"echarts"` ships today.
+ * Future entries (`"plotly"`, `"vega"`, …) pair with their own
+ * `generate_<lib>_config` server tools.
+ */
+export const ChartRendererSchema = z.enum(["echarts"]);
 
 /**
  * Tool node — LLM-emit form. Covers server tools, MCP tools, HTTP,
@@ -70,7 +79,7 @@ export const NodeTypeSchema = z.enum(["tool", "agent", "code", "sql"]);
 export const LLMToolNodeSchema = NodeBaseSchema.extend({
   type: z.literal("tool"),
   tool: z.string().min(1),
-  input: z.record(z.string(), z.unknown()),
+  inputs: z.record(z.string(), z.unknown()),
 });
 
 /**
@@ -83,7 +92,7 @@ export const LLMToolNodeSchema = NodeBaseSchema.extend({
 export const LLMAgentNodeSchema = NodeBaseSchema.extend({
   type: z.literal("agent"),
   agent: z.string().min(1),
-  input: z.record(z.string(), z.unknown()),
+  inputs: z.record(z.string(), z.unknown()),
   output_schema: z.record(z.string(), z.unknown()),
 });
 
@@ -101,7 +110,7 @@ export const CodeLanguageSchema = z.enum(["python"]);
  *
  *  - `code`           snippet piped to the sandbox stdin (non-empty)
  *  - `language`       picks the interpreter
- *  - `input`          same shape as tool/agent's `input`. Conventional
+ *  - `inputs`         same shape as tool/agent's `inputs`. Conventional
  *                     keys the engine consumes:
  *                       `datasets`: string[] of dataset names (or
  *                         `@nodes.X.Y` refs) to expose read-only at
@@ -119,32 +128,80 @@ export const LLMCodeNodeSchema = NodeBaseSchema.extend({
   type: z.literal("code"),
   language: CodeLanguageSchema,
   code: z.string().min(1),
-  input: z.record(z.string(), z.unknown()).optional(),
+  inputs: z.record(z.string(), z.unknown()).optional(),
   output_schema: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
  * SQL node — LLM-emit form. A data-extraction step.
  *
- *  - `dataSourceName`  the `data_source.name` slug
- *  - `query`           SQL text run against the data source; the
- *                      engine routes through `data-sources/policy.ts`
- *                      which rejects writes / disallowed tables
- *                      before touching the cache
- *  - `name`            OPTIONAL output dataset slug (Parquet cache
- *                      key). When omitted, the engine derives a
- *                      deterministic slug from `(workflowId, nodeId)`.
- *                      Downstream code nodes reference via
- *                      `@nodes.<id>.name`.
+ *  - `data_source_name`  the `data_source.name` slug
+ *  - `query`             SQL text run against the data source; the
+ *                        engine routes through `data-sources/policy.ts`
+ *                        which rejects writes / disallowed tables
+ *                        before touching the cache
+ *  - `name`              OPTIONAL output dataset slug (Parquet cache
+ *                        key). When omitted, the engine derives a
+ *                        deterministic slug from `(workflowId, nodeId)`.
+ *                        Downstream code nodes reference via
+ *                        `@nodes.<id>.name`.
  *
  * Tool-level affordances (previewRows / forceRefresh) are NOT
  * exposed — refresh is the artifact-level concern.
  */
 export const LLMSqlNodeSchema = NodeBaseSchema.extend({
   type: z.literal("sql"),
-  dataSourceName: z.string().min(1),
+  data_source_name: z.string().min(1),
   query: z.string().min(1),
   name: z.string().min(1).optional(),
+});
+
+/**
+ * Chart node `inputs.dataset` — either a single `@path` ref (or
+ * literal string carrying inline rows from the not-refreshable
+ * fallback) or an array of ≥2 refs for a multi-dataset chart.
+ *
+ * Validation of "is this string actually a `@path` ref?" lives in
+ * `validate.ts`; the Zod layer only enforces shape + non-empty.
+ */
+export const ChartDatasetRefSchema = z.union([
+  z.string().min(1),
+  z.array(z.string().min(1)).min(2),
+]);
+
+/**
+ * Chart node — LLM-emit form. Produces a complete ECharts (or
+ * future Plotly / Vega) option JSON for `<EChartsRenderer />` on
+ * the frontend. The node stores a config TEMPLATE — data is
+ * normally injected at execute time from an upstream node via
+ * `inputs.dataset`. The frontend never sees the template form;
+ * it always receives a merged option in `outputs.option`.
+ *
+ *  - `inputs.renderer`  the chart library; `"echarts"` v1
+ *  - `inputs.config`    Renderer option template. The data-binding
+ *                       slot (`option.dataset.source` for ECharts)
+ *                       is normally absent; the engine fills it
+ *                       from `inputs.dataset`.
+ *  - `inputs.dataset`   `@path` ref (or refs[]) into upstream rows.
+ *                       OPTIONAL — when omitted, the chart is the
+ *                       not-refreshable fallback: the data is
+ *                       already baked into `inputs.config` (e.g.
+ *                       literal `dataset.source` rows the save
+ *                       pipeline couldn't match to any upstream
+ *                       output). The engine passes `config`
+ *                       through unchanged in that case.
+ *
+ * The chart node has no LLM-emit `output_schema` — it is
+ * canonical-fixed to `{ option: <merged option> }` (see
+ * `CHART_NODE_OUTPUT_SCHEMA`).
+ */
+export const LLMChartNodeSchema = NodeBaseSchema.extend({
+  type: z.literal("chart"),
+  inputs: z.object({
+    renderer: ChartRendererSchema,
+    config: z.record(z.string(), z.unknown()),
+    dataset: ChartDatasetRefSchema.optional(),
+  }),
 });
 
 /** LLM-emit node — discriminated union on `type`. */
@@ -153,6 +210,7 @@ export const LLMNodeSchema = z.discriminatedUnion("type", [
   LLMAgentNodeSchema,
   LLMCodeNodeSchema,
   LLMSqlNodeSchema,
+  LLMChartNodeSchema,
 ]);
 
 /** Workflow spec — LLM-emit form. */
@@ -181,13 +239,27 @@ export const LLMWorkflowSpecSchema = z.object({
 // ─── Canonical (stored) shapes ─────────────────────────────────────────
 
 /**
+ * Per-node schema version. Stamped by `canonicalize.ts` based on the
+ * `NODE_SCHEMA_VERSIONS` table; LLM-emit form never carries this
+ * field. The literal version is bumped when a node type changes a
+ * required field; the engine dispatches executors by `(type, version)`
+ * so old persisted workflows keep running. Defaulting to `"1"` makes
+ * pre-versioning rows parse cleanly without a data migration.
+ *
+ * See docs/workflow-spec.md.
+ */
+export const NodeSchemaVersionV1Schema = z.literal("1").default("1");
+
+/**
  * Canonical tool node — adds engine-derived fields:
- *  - `input_schema`  derived from the tool registry's `parameters`
- *  - `outputs[]`     derived via the declared / observed / inferred
- *                    priority chain
- *  - `output_schema` structural form of the same
+ *  - `schema_version` per-node type version (always `"1"` today)
+ *  - `input_schema`   derived from the tool registry's `parameters`
+ *  - `outputs[]`      derived via the declared / observed / inferred
+ *                     priority chain
+ *  - `output_schema`  structural form of the same
  */
 export const CanonicalToolNodeSchema = LLMToolNodeSchema.extend({
+  schema_version: NodeSchemaVersionV1Schema,
   input_schema: z.record(z.string(), z.unknown()).optional(),
   outputs: z.array(z.string()).optional(),
   output_schema: z.record(z.string(), z.unknown()).optional(),
@@ -195,12 +267,14 @@ export const CanonicalToolNodeSchema = LLMToolNodeSchema.extend({
 
 /**
  * Canonical agent node — adds:
- *  - `agentId`   UUID resolved from `agent` via EntityCatalog at save
- *                time; runtime dispatches via this UUID
- *  - `outputs[]` derived from `output_schema.required`
+ *  - `schema_version` per-node type version (always `"1"` today)
+ *  - `agent_id`       UUID resolved from `agent` via EntityCatalog at
+ *                     save time; runtime dispatches via this UUID
+ *  - `outputs[]`      derived from `output_schema.required`
  */
 export const CanonicalAgentNodeSchema = LLMAgentNodeSchema.extend({
-  agentId: z.string().uuid(),
+  schema_version: NodeSchemaVersionV1Schema,
+  agent_id: z.string().uuid(),
   outputs: z.array(z.string()).optional(),
 });
 
@@ -212,16 +286,18 @@ export const CanonicalAgentNodeSchema = LLMAgentNodeSchema.extend({
 export const DEFAULT_CODE_NODE_OUTPUTS: readonly string[] = [
   "stdout",
   "stderr",
-  "exitCode",
-  "durationMs",
+  "exit_code",
+  "duration_ms",
 ] as const;
 
 /**
- * Canonical code node — `outputs[]` is either derived from the
- * declared `output_schema.properties` keys, or filled with
- * `DEFAULT_CODE_NODE_OUTPUTS`.
+ * Canonical code node — adds:
+ *  - `schema_version` per-node type version (always `"1"` today)
+ *  - `outputs[]`      derived from declared `output_schema.properties`
+ *                     keys, or filled with `DEFAULT_CODE_NODE_OUTPUTS`
  */
 export const CanonicalCodeNodeSchema = LLMCodeNodeSchema.extend({
+  schema_version: NodeSchemaVersionV1Schema,
   outputs: z.array(z.string()).optional(),
 });
 
@@ -229,19 +305,115 @@ export const CanonicalCodeNodeSchema = LLMCodeNodeSchema.extend({
  * Default outputs[] for a SQL node — the slim subset of the
  * `extract_dataset_by_sql` envelope that is meaningful for workflow
  * data flow:
- *  - `name`      Parquet dataset slug; code nodes bind-mount by this
- *  - `rowCount`  row count, for empty-result short-circuits
+ *  - `name`       Parquet dataset slug; code nodes bind-mount by this
+ *  - `row_count`  row count, for empty-result short-circuits
+ *  - `rows`       array of row objects (top `sql.preview_rows` rows
+ *                 from the cached parquet). Chart nodes consume this
+ *                 via `inputs.dataset: "@nodes.X.rows"`; code nodes
+ *                 typically stick with parquet-handle access (faster
+ *                 for large data sets) and ignore this field.
  *
- * Operational fields (cacheHit / ttlHours / schema / preview) are
- * intentionally not exposed.
+ * Operational fields (cacheHit / ttlHours / schema) are intentionally
+ * not exposed.
  */
 export const DEFAULT_SQL_NODE_OUTPUTS: readonly string[] = [
   "name",
-  "rowCount",
+  "row_count",
+  "rows",
 ] as const;
 
-/** Canonical SQL node — `outputs[]` is always filled with `DEFAULT_SQL_NODE_OUTPUTS`. */
+/**
+ * Canonical SQL node — adds:
+ *  - `schema_version` per-node type version (always `"1"` today)
+ *  - `outputs[]`      always filled with `DEFAULT_SQL_NODE_OUTPUTS`
+ */
 export const CanonicalSqlNodeSchema = LLMSqlNodeSchema.extend({
+  schema_version: NodeSchemaVersionV1Schema,
+  outputs: z.array(z.string()).optional(),
+});
+
+/**
+ * Fixed outputs[] for a chart node — exactly one field, `option`,
+ * carrying the merged ECharts option JSON ready for
+ * `<EChartsRenderer />`. The engine deep-clones `inputs.config`,
+ * injects upstream rows into `option.dataset.source`, and stamps
+ * the result here.
+ */
+export const CHART_NODE_OUTPUTS: readonly string[] = ["option"] as const;
+
+/**
+ * Canonical-fixed `output_schema` stamped onto every chart node by
+ * canonicalize. LLMs do NOT supply this (the chart node's output
+ * contract is the same for every chart).
+ */
+export const CHART_NODE_OUTPUT_SCHEMA: Readonly<Record<string, unknown>> = {
+  type: "object",
+  properties: {
+    option: {
+      type: "object",
+      description:
+        "Merged renderer-specific option (ECharts today). Frontend " +
+        "passes this verbatim to `<EChartsRenderer />`.",
+    },
+  },
+  required: ["option"],
+  additionalProperties: false,
+} as const;
+
+/**
+ * Canonical-fixed `input_schema` stamped onto every chart node by
+ * canonicalize. The shape mirrors `LLMChartNodeSchema.inputs`; the
+ * `renderer` field is `const`-pinned to the LLM's chosen value at
+ * stamp time. LLMs do NOT write this themselves.
+ */
+export function buildCanonicalChartInputSchema(
+  renderer: ChartRenderer,
+): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      renderer: { const: renderer },
+      config: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "Renderer option template. Engine fills the data-binding " +
+          "slot (`option.dataset.source` for ECharts) at execute " +
+          "time from `inputs.dataset`.",
+      },
+      dataset: {
+        oneOf: [
+          {
+            type: "string",
+            description:
+              "Single `@path` ref to an upstream array of rows.",
+          },
+          {
+            type: "array",
+            items: { type: "string" },
+            minItems: 2,
+            description:
+              "Multi-dataset chart — array of `@path` refs.",
+          },
+        ],
+      },
+    },
+    required: ["renderer", "config"],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Canonical chart node — adds:
+ *  - `schema_version` per-node type version (always `"1"` today)
+ *  - `input_schema`   built from `buildCanonicalChartInputSchema`
+ *  - `output_schema`  always `CHART_NODE_OUTPUT_SCHEMA`
+ *  - `outputs[]`      always `CHART_NODE_OUTPUTS`
+ */
+export const CanonicalChartNodeSchema = LLMChartNodeSchema.extend({
+  schema_version: NodeSchemaVersionV1Schema,
+  input_schema: z.record(z.string(), z.unknown()).optional(),
+  output_schema: z.record(z.string(), z.unknown()).optional(),
   outputs: z.array(z.string()).optional(),
 });
 
@@ -251,19 +423,20 @@ export const CanonicalNodeSchema = z.discriminatedUnion("type", [
   CanonicalAgentNodeSchema,
   CanonicalCodeNodeSchema,
   CanonicalSqlNodeSchema,
+  CanonicalChartNodeSchema,
 ]);
 
 /**
  * Canonical workflow spec — what `workflow.spec` JSONB holds.
  *
  * Extends LLM-emit form with canonical `nodes`, derived
- * `output_schema`, and the `refReconAlgorithm` tag (tracks the
+ * `output_schema`, and the `ref_recon_algorithm` tag (tracks the
  * save-time ref reconstruction algorithm version).
  */
 export const CanonicalWorkflowSpecSchema = LLMWorkflowSpecSchema.extend({
   nodes: z.array(CanonicalNodeSchema).min(1),
   output_schema: z.record(z.string(), z.unknown()).optional(),
-  refReconAlgorithm: z.literal("ref_recon_v1"),
+  ref_recon_algorithm: z.literal("ref_recon_v1"),
 });
 
 // ─── Inferred TypeScript types ─────────────────────────────────────────
@@ -275,14 +448,18 @@ export type LLMToolNode = z.infer<typeof LLMToolNodeSchema>;
 export type LLMAgentNode = z.infer<typeof LLMAgentNodeSchema>;
 export type LLMCodeNode = z.infer<typeof LLMCodeNodeSchema>;
 export type LLMSqlNode = z.infer<typeof LLMSqlNodeSchema>;
+export type LLMChartNode = z.infer<typeof LLMChartNodeSchema>;
 export type LLMNode = z.infer<typeof LLMNodeSchema>;
 export type LLMWorkflowSpec = z.infer<typeof LLMWorkflowSpecSchema>;
 export type CodeLanguage = z.infer<typeof CodeLanguageSchema>;
+export type ChartRenderer = z.infer<typeof ChartRendererSchema>;
+export type ChartDatasetRef = z.infer<typeof ChartDatasetRefSchema>;
 
 export type CanonicalToolNode = z.infer<typeof CanonicalToolNodeSchema>;
 export type CanonicalAgentNode = z.infer<typeof CanonicalAgentNodeSchema>;
 export type CanonicalCodeNode = z.infer<typeof CanonicalCodeNodeSchema>;
 export type CanonicalSqlNode = z.infer<typeof CanonicalSqlNodeSchema>;
+export type CanonicalChartNode = z.infer<typeof CanonicalChartNodeSchema>;
 export type CanonicalNode = z.infer<typeof CanonicalNodeSchema>;
 export type CanonicalWorkflowSpec = z.infer<typeof CanonicalWorkflowSpecSchema>;
 

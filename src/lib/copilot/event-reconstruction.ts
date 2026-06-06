@@ -354,9 +354,10 @@ function* eventRowToAgUi(
  *
  * **When to add a per-tool case here**: only when the tool's result
  * envelope carries an identifier the LLM references in subsequent
- * turns (e.g. render_chart's chartId — "update the sales-pie chart").
- * The vast majority of frontend tools are "fire-and-forget" from the
- * LLM's perspective and the generic warning envelope is enough.
+ * turns (e.g. generate_echarts_config's chart_id — "update the
+ * sales-pie chart"). The vast majority of tools are "fire-and-forget"
+ * from the LLM's perspective and the generic warning envelope is
+ * enough.
  *
  * For non-succeeded runs we always synthesize a failure envelope so
  * the LLM sees the call as "completed but failed", not "still
@@ -383,11 +384,11 @@ export function synthesizeToolCallResult(
   // only one today: lets the LLM say "update the sales-pie chart"
   // on a follow-up turn without re-deriving the id from history.
   let extra: Record<string, unknown> = {};
-  if (payload.toolName === "render_chart") {
+  if (payload.toolName === "generate_echarts_config") {
     try {
-      const args = JSON.parse(payload.args) as { chartId?: unknown };
-      if (typeof args.chartId === "string" && args.chartId.length > 0) {
-        extra = { chartId: args.chartId };
+      const args = JSON.parse(payload.args) as { chart_id?: unknown };
+      if (typeof args.chart_id === "string" && args.chart_id.length > 0) {
+        extra = { chart_id: args.chart_id };
       }
     } catch {
       /* fall through with empty extra */

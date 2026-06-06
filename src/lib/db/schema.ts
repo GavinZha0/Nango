@@ -205,9 +205,11 @@ export const DataSourceTable = pgTable("data_source", {
  *    one per `ArtifactType` (e.g. "Charts" for `type='chart'`).
  *    Immutable: API rejects update / delete / reparent.
  *  - User-created rows MUST have a non-null `parent_id` (a folder).
- *  - `kind = 'folder'` rows have `type / content / config` all NULL;
- *    they're organisational nodes.
- *  - `kind = 'artifact'` rows are leaves and carry `type` + `content`.
+ *  - `kind = 'folder'` rows have `type / config` NULL; they're
+ *    organisational nodes.
+ *  - `kind = 'artifact'` rows are leaves: their renderable payload
+ *    is computed on-demand from the bound workflow's output (see
+ *    `lib/artifacts/bundle.ts`), NOT stored on the row.
  *
  * Invariants enforced at the service layer (see
  * `src/lib/artifacts/service.ts`), not by DB constraints, because
@@ -231,8 +233,6 @@ export const ArtifactTable = pgTable(
     type: text("type").$type<ArtifactType>(),
     name: text("name").notNull(),
     description: text("description"),
-    // Only meaningful when kind = 'artifact'. NULL on folders.
-    content: jsonb("content"),
     config: jsonb("config"),
     // Origin tracking for the Save-from-Outcomes flow (idempotency).
     sourceThreadId: text("source_thread_id"),

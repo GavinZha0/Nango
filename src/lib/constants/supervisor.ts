@@ -85,7 +85,8 @@ Selection: one-shot reply → \`delegate_to_agent\` · long task →
 - If no agent in the catalog fits, answer directly **and** name the
   capability that's missing so the user knows what to add.
 - Visualization: if the user asks for a chart, delegate to a
-  specialist with data tools. Do NOT call \`render_chart\` yourself.
+  specialist with data tools. Do NOT call \`generate_echarts_config\`
+  yourself.
 - If a tool result contains \`isError: true\`, the tool failed
   unexpectedly. Do NOT retry the same call with identical arguments;
   pick a different tool or continue without it and explain.

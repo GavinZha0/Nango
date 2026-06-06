@@ -1,0 +1,1 @@
+ALTER TABLE "artifact" DROP COLUMN "content";

@@ -30,7 +30,7 @@ function spec(
   return {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes,
     outputs,
     ...extra,
@@ -41,31 +41,33 @@ function tool(
   id: number,
   toolName: string,
   depends_on: number[] = [],
-  input: Record<string, unknown> = {},
+  inputs: Record<string, unknown> = {},
 ): CanonicalNode {
   return {
     type: "tool",
+    schema_version: "1",
     id,
     description: `n${id}`,
     depends_on,
     tool: toolName,
-    input,
+    inputs,
   };
 }
 
 function agent(
   id: number,
   depends_on: number[] = [],
-  input: Record<string, unknown> = {},
+  inputs: Record<string, unknown> = {},
 ): CanonicalNode {
   return {
     type: "agent",
+    schema_version: "1",
     id,
     description: `agent-${id}`,
     depends_on,
     agent: "Builtin / DataAnalyst",
-    agentId: AGENT_UUID,
-    input,
+    agent_id: AGENT_UUID,
+    inputs,
     output_schema: {
       type: "object",
       properties: { summary: { type: "string" } },
@@ -78,7 +80,7 @@ interface StubBuilderArgs {
   tools?: Record<
     string,
     (
-      input: Record<string, unknown>,
+      inputs: Record<string, unknown>,
       ctx: Readonly<Record<string, unknown>>,
     ) => Promise<unknown> | unknown
   >;

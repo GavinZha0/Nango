@@ -4,7 +4,7 @@
  * Mirrors the per-attempt body documented in
  * `src/lib/workflows/nodes/code-node.ts`:
  *
- *   1. Refs in `node.input` resolve before `runCode` is called.
+ *   1. Refs in `node.inputs` resolve before `runCode` is called.
  *   2. `inputs.datasets` is coerced to `string[]` and passed through.
  *   3. `inputs.env` is coerced to `Record<string, string>`.
  *   4. exitCode === 0 → outputs = either fixed envelope OR
@@ -43,6 +43,7 @@ function codeNode(
 ): CanonicalCodeNode {
   return {
     type: "code",
+    schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
@@ -63,7 +64,7 @@ function makeState(
   const spec: CanonicalWorkflowSpec = {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
     outputs: { dummy: "@nodes.0.stdout" },
   };
@@ -124,7 +125,7 @@ describe("executeCodeNode — success without declared schema", () => {
     const node = codeNode({
       language: "python",
       code: "print(1+1)",
-      input: { datasets: ["ds_orders_q4"] },
+      inputs: { datasets: ["ds_orders_q4"] },
     });
     const deps = makeDeps({
       stdout: "2\n",
@@ -144,7 +145,7 @@ describe("executeCodeNode — success without declared schema", () => {
   it("resolves @nodes.X.Y refs inside input.datasets before runCode", async () => {
     const node = codeNode({
       depends_on: [1],
-      input: { datasets: ["@nodes.1.name"] },
+      inputs: { datasets: ["@nodes.1.name"] },
     });
     const state = makeState(node, {
       outputs: new Map([[1, { name: "resolved-dataset-name" }]]),
@@ -161,7 +162,7 @@ describe("executeCodeNode — success without declared schema", () => {
 
   it("coerces env values to strings (non-string refs get String()'d)", async () => {
     const node = codeNode({
-      input: { env: { THRESHOLD: "@nodes.1.value", LABEL: "static" } },
+      inputs: { env: { THRESHOLD: "@nodes.1.value", LABEL: "static" } },
       depends_on: [1],
     });
     const state = makeState(node, {
@@ -190,7 +191,7 @@ describe("executeCodeNode — success without declared schema", () => {
   });
 
   it("forwards per-node timeoutSeconds (in milliseconds)", async () => {
-    const node = codeNode({ timeoutSeconds: 90 });
+    const node = codeNode({ timeout_seconds: 90 });
     const deps = makeDeps({
       stdout: "",
       stderr: "",
@@ -337,7 +338,7 @@ describe("executeCodeNode — process failures", () => {
 
   it("SPEC_SCHEMA_MISMATCH when input.datasets isn't an array", async () => {
     const node = codeNode({
-      input: { datasets: "not-an-array" as unknown as string[] },
+      inputs: { datasets: "not-an-array" as unknown as string[] },
     });
     const deps = makeDeps({
       stdout: "",
@@ -357,7 +358,7 @@ describe("executeCodeNode — process failures", () => {
 
   it("SPEC_SCHEMA_MISMATCH when input.datasets contains non-strings", async () => {
     const node = codeNode({
-      input: { datasets: ["ok", 42 as unknown as string] },
+      inputs: { datasets: ["ok", 42 as unknown as string] },
     });
     const deps = makeDeps({
       stdout: "",
@@ -377,7 +378,7 @@ describe("executeCodeNode — process failures", () => {
 
   it("wraps non-WorkflowError throws as CODE_EXECUTION_FAILED", async () => {
     const node = codeNode({
-      retries: { attempts: 0, delaySeconds: 0 },
+      retries: { attempts: 0, delay_seconds: 0 },
     });
     const state = makeState(node);
     const deps: CodeNodeDeps = {

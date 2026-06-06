@@ -119,9 +119,9 @@ interface BaseOutcome {
 }
 
 /** The only outcome shape today. `blocks` renders in order via
- *  `BlockList`. Producers like `render_chart` emit a single-element
- *  `[chart]`; `web_search` emits `[card_list]`; future composite
- *  reports can emit any ordered mix. */
+ *  `BlockList`. Producers like `generate_echarts_config` emit a
+ *  single-element `[chart]`; `web_search` emits `[card_list]`;
+ *  future composite reports can emit any ordered mix. */
 export interface ReportOutcome extends BaseOutcome {
   kind: "report";
   blocks: OutcomeBlock[];

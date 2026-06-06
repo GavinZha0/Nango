@@ -22,18 +22,18 @@ function ctxFixture(): RebuildContext {
 }
 
 describe("rebuildChartOutcome", () => {
-  it("rebuilds a Report with a single chart block (V1.3 optionJson shape)", () => {
+  it("rebuilds a Report with a single chart block from generate_echarts_config args", () => {
     const chunk: ToolCallChunkPayload = {
       toolCallId: "call-1",
-      toolName: "render_chart",
+      toolName: "generate_echarts_config",
       args: JSON.stringify({
-        chartId: "sales-pie",
+        chart_id: "sales-pie",
         title: "Q1 Sales",
         description: "Top regions",
-        optionJson: JSON.stringify({
+        option: {
           series: [{ type: "pie", data: [{ name: "A", value: 1 }] }],
-        }),
-        datasetName: "sales_q1",
+        },
+        dataset_id: "sales_q1",
       }),
     };
     const built = rebuildChartOutcome(chunk, ctxFixture());
@@ -53,51 +53,62 @@ describe("rebuildChartOutcome", () => {
     expect(built!.outcome.collapsed).toBe(false);
   });
 
-  it("rebuilds from legacy V1.0–V1.2 object `option` shape", () => {
+  it("rebuilds without dataset_id when none supplied", () => {
     const chunk: ToolCallChunkPayload = {
-      toolCallId: "call-legacy",
-      toolName: "render_chart",
+      toolCallId: "call-2",
+      toolName: "generate_echarts_config",
       args: JSON.stringify({
-        chartId: "legacy-bar",
-        title: "Legacy",
+        chart_id: "no-dataset-bar",
+        title: "No-dataset Bar",
         option: { series: [{ type: "bar" }] },
       }),
     };
     const built = rebuildChartOutcome(chunk, ctxFixture());
     expect(built).not.toBeNull();
-    expect(
-      built!.outcome.blocks[0].kind === "chart" && built!.outcome.blocks[0].option,
-    ).toEqual({ series: [{ type: "bar" }] });
+    expect(built!.outcome.blocks[0].kind).toBe("chart");
+    if (built!.outcome.blocks[0].kind === "chart") {
+      expect(built!.outcome.blocks[0].datasetName).toBeUndefined();
+      expect(built!.outcome.blocks[0].option).toEqual({
+        series: [{ type: "bar" }],
+      });
+    }
   });
 
   it("returns null and warns on unparseable args JSON", () => {
     const ctx = ctxFixture();
     const built = rebuildChartOutcome(
-      { toolCallId: "x", toolName: "render_chart", args: "{ this is not json" },
+      {
+        toolCallId: "x",
+        toolName: "generate_echarts_config",
+        args: "{ this is not json",
+      },
       ctx,
     );
     expect(built).toBeNull();
     expect(ctx.log.warn).toHaveBeenCalled();
   });
 
-  it("returns null when option is missing / unparseable", () => {
+  it("returns null when option is missing", () => {
     const built = rebuildChartOutcome(
       {
         toolCallId: "x",
-        toolName: "render_chart",
-        args: JSON.stringify({ chartId: "c", title: "t" }),
+        toolName: "generate_echarts_config",
+        args: JSON.stringify({ chart_id: "c", title: "t" }),
       },
       ctxFixture(),
     );
     expect(built).toBeNull();
   });
 
-  it("skips silently when chartId or title missing (defensive)", () => {
+  it("skips silently when chart_id or title missing (defensive)", () => {
     const noChartId = rebuildChartOutcome(
       {
         toolCallId: "x",
-        toolName: "render_chart",
-        args: JSON.stringify({ title: "t", option: { series: [] } }),
+        toolName: "generate_echarts_config",
+        args: JSON.stringify({
+          title: "t",
+          option: { series: [{ type: "bar" }] },
+        }),
       },
       ctxFixture(),
     );
@@ -106,8 +117,11 @@ describe("rebuildChartOutcome", () => {
     const noTitle = rebuildChartOutcome(
       {
         toolCallId: "x",
-        toolName: "render_chart",
-        args: JSON.stringify({ chartId: "c", option: { series: [] } }),
+        toolName: "generate_echarts_config",
+        args: JSON.stringify({
+          chart_id: "c",
+          option: { series: [{ type: "bar" }] },
+        }),
       },
       ctxFixture(),
     );

@@ -4,7 +4,7 @@
  *
  * Per-attempt body (retry loop + event emission lives in
  * `with-retries.ts`):
- *   1. Resolve `@path` refs in `node.query`, `node.dataSourceName`,
+ *   1. Resolve `@path` refs in `node.query`, `node.data_source_name`,
  *      `node.name`.
  *   2. Look up the `extract_dataset_by_sql` tool via `deps.getTool`.
  *   3. Compose the tool input with workflow-fixed defaults
@@ -41,6 +41,18 @@ export type SqlNodeDeps = Pick<
 const SQL_TOOL_NAME = "extract_dataset_by_sql";
 
 /**
+ * Number of top rows the SQL node materialises into the spec
+ * output `rows`. Chart nodes consume this via
+ * `inputs.dataset: "@nodes.X.rows"`. Tuned for typical chat-saved
+ * chart use (time series / categorical breakdowns); larger
+ * datasets are loaded from the parquet handle inside a code node.
+ *
+ * Future: replace with the inline-vs-cached engine policy
+ * described in docs/workflow-spec.md (per-workflow byte/row caps).
+ */
+const SQL_WORKFLOW_PREVIEW_ROWS = 100;
+
+/**
  * Execute one SQL node. Returns the node's outputs bag on success;
  * throws `WorkflowError` on the final failure after all retries are
  * exhausted.
@@ -50,7 +62,7 @@ export async function executeSqlNode(
   state: ExecutionState,
   deps: SqlNodeDeps,
 ): Promise<Record<string, unknown>> {
-  const displayName = `sql:${node.dataSourceName}`;
+  const displayName = `sql:${node.data_source_name}`;
   return withRetries({
     node,
     nodeName: displayName,
@@ -58,7 +70,7 @@ export async function executeSqlNode(
     deps,
     attemptFn: async () => {
       const dataSourceName = resolveStringField(
-        resolveRefs(node.dataSourceName, state),
+        resolveRefs(node.data_source_name, state),
         node.id,
         "dataSourceName",
       );
@@ -95,8 +107,11 @@ export async function executeSqlNode(
           name,
           dataSourceName,
           query,
-          // Workflow data flow doesn't consume inline previews.
-          previewRows: 0,
+          // Surface the top N rows so chart nodes can ref
+          // `@nodes.X.rows`. Pinned to a reasonable default; future
+          // engine policy may switch to inline-vs-cached based on
+          // total bytes. See docs/workflow-spec.md (SQL node).
+          previewRows: SQL_WORKFLOW_PREVIEW_ROWS,
           // Refresh happens at the artifact level, not per-node.
           forceRefresh: false,
         },
@@ -138,13 +153,16 @@ export async function executeSqlNode(
       const result = rawResult as Record<string, unknown>;
       const outputName = readString(result, "name") ?? name;
       const rowCount = readNumber(result, "rowCount") ?? 0;
+      const rows = readArray(result, "preview") ?? [];
 
-      // Strip the tool's operational metadata — only `name` +
-      // `rowCount` are part of the SQL node's downstream-referenceable
-      // contract.
+      // Strip the tool's operational metadata — only the fields in
+      // `DEFAULT_SQL_NODE_OUTPUTS` are part of the SQL node's
+      // downstream-referenceable contract. The tool's `preview`
+      // field is projected onto the snake_case spec name `rows`.
       return {
         name: outputName,
-        rowCount,
+        row_count: rowCount,
+        rows,
       };
     },
     wrapError: (err) => {
@@ -261,4 +279,12 @@ function readNumber(
 ): number | undefined {
   const v = obj[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function readArray(
+  obj: Record<string, unknown>,
+  key: string,
+): unknown[] | undefined {
+  const v = obj[key];
+  return Array.isArray(v) ? v : undefined;
 }

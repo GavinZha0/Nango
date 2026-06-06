@@ -1,18 +1,18 @@
 /**
- * Shared "frontend-tool args → renderable content" adapters.
+ * Shared "tool args → renderable content" adapters.
  *
  * The artifact rendering pipeline (`ArtifactDetail.tsx → BlockList`)
  * expects `artifact.content = { blocks: OutcomeBlock[] }` — the same
  * block model the in-chat OutcomeCard renders. The save-from-chat
- * flow captures the frontend tool's raw args (`strippedFrontendConfig`
- * in `build-from-events.ts`); those args need to be transformed
- * into the block shape before they hit the DB. Live replay
- * (`/api/threads/[id]/outcomes`) needs the same transformation —
- * sharing the helpers here keeps the two surfaces aligned.
+ * flow captures the artifact-creating tool's raw args; those args
+ * need to be transformed into the block shape before they hit the
+ * DB. Live replay (`/api/threads/[id]/outcomes`) needs the same
+ * transformation — sharing the helpers here keeps the two surfaces
+ * aligned.
  *
- * V1 covers only `render_chart`. Adding `render_html` /
- * `render_markdown` is a matter of a new `xxxArgsToContent`
- * function plus a dispatch branch in
+ * Today this covers `generate_echarts_config` only. Adding
+ * `render_html` / `render_markdown` is a matter of a new
+ * `xxxArgsToContent` function plus a dispatch branch in
  * `lib/artifacts/save-artifact.ts::artifactCreatorArgsToContent`.
  *
  * Pure — no DB, no I/O. Throws nothing; ill-formed input maps to
@@ -27,99 +27,78 @@ import type {
   OutcomeBlock,
 } from "@/store/outcome-store";
 
-// ─── render_chart ──────────────────────────────────────────────────────
+// ─── generate_echarts_config ───────────────────────────────────────────
 
 /**
- * Subset of `render_chart` args we project into the content blocks.
- * Mirrors `renderChartSchema` in `docs/data-visualization.md`
+ * Subset of `generate_echarts_config` args we project into the
+ * content blocks. Mirrors `generateEchartsConfigSchema` in
+ * `lib/outcomes/schema.ts`.
  *
- * Wire shape: the LLM sends `optionJson` (JSON string of the full
- * ECharts option). Some legacy rows carry `option` (already an
- * object) instead; `coerceChartOption` handles both for back-compat.
+ * `option` is always a plain JSON object — the historical
+ * `optionJson` string-wrapped form is gone with the frontend tool.
  */
-export interface RenderChartArgs {
-  chartId: string;
+export interface GenerateEchartsConfigArtifactArgs {
+  chart_id: string;
   title: string;
   description?: string;
-  optionJson?: string;
-  option?: Record<string, unknown>;
-  datasetName?: string;
+  option: Record<string, unknown>;
+  dataset_id?: string;
 }
 
 /**
- * Parse the LLM-supplied ECharts option from either `option`
- * (legacy object payload) or `optionJson` (current string payload).
- * Returns `null` if neither yields a usable object — caller decides
- * what to do.
- */
-export function coerceChartOption(
-  args: RenderChartArgs,
-): Record<string, unknown> | null {
-  if (
-    args.option &&
-    typeof args.option === "object" &&
-    !Array.isArray(args.option)
-  ) {
-    return args.option;
-  }
-  if (typeof args.optionJson === "string" && args.optionJson.length > 0) {
-    try {
-      const decoded: unknown = JSON.parse(args.optionJson);
-      if (
-        decoded !== null &&
-        typeof decoded === "object" &&
-        !Array.isArray(decoded)
-      ) {
-        return decoded as Record<string, unknown>;
-      }
-    } catch {
-      // Fall through — caller decides what to do with a null result.
-    }
-  }
-  return null;
-}
-
-/**
- * Build the renderable content payload for a `render_chart` artifact.
- * Returns `null` when the args don't carry a usable ECharts option;
- * the save flow surfaces that as a hard error, the replay flow
- * skips the row.
+ * Build the renderable content payload for a `generate_echarts_config`
+ * artifact. Returns `null` when the args don't carry a usable
+ * ECharts option; the save flow surfaces that as a hard error, the
+ * replay flow skips the row.
  */
 export function chartArgsToContent(
-  args: RenderChartArgs,
+  args: GenerateEchartsConfigArtifactArgs,
 ): { blocks: OutcomeBlock[] } | null {
-  const option = coerceChartOption(args);
-  if (option === null) return null;
+  if (
+    args.option === null ||
+    typeof args.option !== "object" ||
+    Array.isArray(args.option)
+  ) {
+    return null;
+  }
   const block: ChartBlock = {
     kind: "chart",
-    option,
-    ...(args.datasetName ? { datasetName: args.datasetName } : {}),
+    option: args.option,
+    ...(args.dataset_id !== undefined && { datasetName: args.dataset_id }),
   };
   return { blocks: [block] };
 }
 
 /**
- * Defensive read of an arbitrary args object into `RenderChartArgs`
- * shape. Returns `null` when the required fields aren't strings —
- * the caller treats that as "this isn't a render_chart payload".
+ * Defensive read of an arbitrary args object into
+ * `GenerateEchartsConfigArtifactArgs` shape. Returns `null` when
+ * the required fields aren't present in the expected shape — the
+ * caller treats that as "this isn't a generate_echarts_config payload".
  */
-export function readRenderChartArgs(
+export function readGenerateEchartsConfigArgs(
   args: Record<string, unknown>,
-): RenderChartArgs | null {
-  const chartId = args.chartId;
+): GenerateEchartsConfigArtifactArgs | null {
+  const chart_id = args.chart_id;
   const title = args.title;
-  if (typeof chartId !== "string" || chartId.length === 0) return null;
+  if (typeof chart_id !== "string" || chart_id.length === 0) return null;
   if (typeof title !== "string" || title.length === 0) return null;
-  const out: RenderChartArgs = { chartId, title };
-  if (typeof args.description === "string") out.description = args.description;
-  if (typeof args.optionJson === "string") out.optionJson = args.optionJson;
   if (
-    args.option !== null &&
-    typeof args.option === "object" &&
-    !Array.isArray(args.option)
+    args.option === null ||
+    typeof args.option !== "object" ||
+    Array.isArray(args.option)
   ) {
-    out.option = args.option as Record<string, unknown>;
+    return null;
   }
-  if (typeof args.datasetName === "string") out.datasetName = args.datasetName;
+  const out: GenerateEchartsConfigArtifactArgs = {
+    chart_id,
+    title,
+    option: args.option as Record<string, unknown>,
+  };
+  if (typeof args.description === "string") {
+    out.description = args.description;
+  }
+  if (typeof args.dataset_id === "string") {
+    out.dataset_id = args.dataset_id;
+  }
   return out;
 }

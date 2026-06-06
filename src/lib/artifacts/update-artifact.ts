@@ -1,7 +1,8 @@
 /**
  * PATCH /api/artifacts/[id] handler core. Wraps `service.updateNode`
- * (tree metadata + display `content`) and re-assembles the
- * render-ready bundle so the response matches GET / save / refresh.
+ * (tree metadata only — name / description / parent / order /
+ * visibility) and re-assembles the render-ready bundle so the
+ * response matches GET / save / refresh.
  *
  * PATCH does NOT cover workflow changes — those go through a fresh
  * save from a new chat outcome. See docs/workflow.md.

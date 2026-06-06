@@ -191,7 +191,7 @@ function nodeDisplayName(
     case "code":
       return `code:${node.language}`;
     case "sql":
-      return `sql:${node.dataSourceName}`;
+      return `sql:${node.data_source_name}`;
   }
 }
 

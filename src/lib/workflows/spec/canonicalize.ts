@@ -8,7 +8,7 @@
  *     UUIDs via EntityCatalog; derive `outputs[]` from
  *     `output_schema.required`.
  *   - Code / SQL nodes: derive or default `outputs[]`.
- *   - Stamp `refReconAlgorithm: "ref_recon_v1"`.
+ *   - Stamp `ref_recon_algorithm: "ref_recon_v1"`.
  *
  * Failure mode: every problem throws a `WorkflowError`. The surrounding
  * save pipeline calls `toResult(we)` at its catch boundary.
@@ -23,21 +23,48 @@
 
 import { WorkflowError } from "../error";
 import {
+  buildCanonicalChartInputSchema,
   type CanonicalAgentNode,
+  type CanonicalChartNode,
   type CanonicalCodeNode,
   type CanonicalNode,
   type CanonicalSqlNode,
   type CanonicalToolNode,
   type CanonicalWorkflowSpec,
+  CHART_NODE_OUTPUT_SCHEMA,
+  CHART_NODE_OUTPUTS,
   DEFAULT_CODE_NODE_OUTPUTS,
   DEFAULT_SQL_NODE_OUTPUTS,
   type LLMAgentNode,
+  type LLMChartNode,
   type LLMCodeNode,
   type LLMNode,
   type LLMSqlNode,
   type LLMToolNode,
   type LLMWorkflowSpec,
+  type NodeType,
 } from "./schema";
+
+// ─── Per-node schema version registry ──────────────────────────────────
+
+/**
+ * Current `schema_version` for each node type. Stamped onto every
+ * canonical node by the per-type canonicalizers below. Bump a single
+ * entry when introducing a breaking change to that node's schema; the
+ * old `<type>:<oldVersion>` executor must stay registered in the
+ * engine so persisted workflows continue to run.
+ *
+ * Definition lives in code (not the database) because the version
+ * is bound to the Zod schema + executor pair that ships together —
+ * see docs/workflow-spec.md.
+ */
+export const NODE_SCHEMA_VERSIONS = {
+  tool: "1",
+  agent: "1",
+  code: "1",
+  sql: "1",
+  chart: "1",
+} as const satisfies Record<NodeType, string>;
 
 // ─── Dependencies ──────────────────────────────────────────────────────
 
@@ -117,7 +144,10 @@ function canonicalizeToolNode(
       nodeName: n.tool,
     });
   }
-  const canonical: CanonicalToolNode = { ...n };
+  const canonical: CanonicalToolNode = {
+    ...n,
+    schema_version: NODE_SCHEMA_VERSIONS.tool,
+  };
   if (meta.input_schema !== undefined) canonical.input_schema = meta.input_schema;
   if (meta.output_schema !== undefined) canonical.output_schema = meta.output_schema;
   const outputs =
@@ -141,7 +171,11 @@ function canonicalizeAgentNode(
       nodeName: n.agent,
     });
   }
-  const canonical: CanonicalAgentNode = { ...n, agentId };
+  const canonical: CanonicalAgentNode = {
+    ...n,
+    schema_version: NODE_SCHEMA_VERSIONS.agent,
+    agent_id: agentId,
+  };
   const outputs = deriveOutputsFromSchema(n.output_schema);
   if (outputs !== undefined) canonical.outputs = outputs;
   return canonical;
@@ -154,7 +188,10 @@ function canonicalizeAgentNode(
  * fall back to `DEFAULT_CODE_NODE_OUTPUTS`.
  */
 function canonicalizeCodeNode(n: LLMCodeNode): CanonicalCodeNode {
-  const canonical: CanonicalCodeNode = { ...n };
+  const canonical: CanonicalCodeNode = {
+    ...n,
+    schema_version: NODE_SCHEMA_VERSIONS.code,
+  };
   const declared = deriveOutputsFromSchema(n.output_schema, "code");
   canonical.outputs =
     declared !== undefined ? declared : [...DEFAULT_CODE_NODE_OUTPUTS];
@@ -169,8 +206,29 @@ function canonicalizeCodeNode(n: LLMCodeNode): CanonicalCodeNode {
  * block the save.
  */
 function canonicalizeSqlNode(n: LLMSqlNode): CanonicalSqlNode {
-  const canonical: CanonicalSqlNode = { ...n };
+  const canonical: CanonicalSqlNode = {
+    ...n,
+    schema_version: NODE_SCHEMA_VERSIONS.sql,
+  };
   canonical.outputs = [...DEFAULT_SQL_NODE_OUTPUTS];
+  return canonical;
+}
+
+/**
+ * Canonicalize a chart node. Fixed-shape contract — LLMs only emit
+ * `inputs.{renderer,config,dataset}`; canonicalize stamps the
+ * derived schemas and outputs[]. The `renderer` value is mirrored
+ * into `input_schema.properties.renderer.const` so the saved spec
+ * is self-describing.
+ */
+function canonicalizeChartNode(n: LLMChartNode): CanonicalChartNode {
+  const canonical: CanonicalChartNode = {
+    ...n,
+    schema_version: NODE_SCHEMA_VERSIONS.chart,
+    input_schema: buildCanonicalChartInputSchema(n.inputs.renderer),
+    output_schema: { ...CHART_NODE_OUTPUT_SCHEMA },
+    outputs: [...CHART_NODE_OUTPUTS],
+  };
   return canonical;
 }
 
@@ -187,6 +245,8 @@ function canonicalizeNode(
       return canonicalizeCodeNode(n);
     case "sql":
       return canonicalizeSqlNode(n);
+    case "chart":
+      return canonicalizeChartNode(n);
   }
 }
 
@@ -205,6 +265,6 @@ export function canonicalize(
   return {
     ...spec,
     nodes,
-    refReconAlgorithm: REF_RECON_ALGORITHM,
+    ref_recon_algorithm: REF_RECON_ALGORITHM,
   };
 }

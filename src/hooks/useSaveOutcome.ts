@@ -13,9 +13,9 @@
  * The server resolves `(threadId, outcomeId)` to the underlying
  * `(runId, toolCallId)` by scanning the thread's `tool_call_chunk`
  * events (see `resolveOutcomeToCall` in `save-artifact.ts`) — the
- * client only knows the producer-chosen outcome id (chartId for
- * render_chart, toolCallId for web_search) and need not care about
- * OpenAI tool call ids or run ids.
+ * client only knows the producer-chosen outcome id (chart_id for
+ * generate_echarts_config, toolCallId for web_search) and need not
+ * care about OpenAI tool call ids or run ids.
  *
  * Contract:
  *  - Returns `{ save, isSaving }`. `save(outcome)` is idempotent at

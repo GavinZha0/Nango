@@ -13,8 +13,10 @@
 
 import { isRefCandidate } from "./spec/refs";
 import {
+  type ChartRenderer,
   DEFAULT_AGENT_OUTPUT_SCHEMA,
   type LLMAgentNode,
+  type LLMChartNode,
   type LLMCodeNode,
   type LLMNode,
   type LLMSqlNode,
@@ -44,9 +46,9 @@ export interface ToolInvocation {
   toolName: string;
   /**
    * Parsed input dict. For `delegate_to_agent`, the agent's input is
-   * nested at `input.input`.
+   * nested at `inputs.inputs`.
    */
-  input: Record<string, unknown>;
+  inputs: Record<string, unknown>;
   /** Parsed result dict on success; `null` on failure. */
   result: Record<string, unknown> | null;
   /** Whether the invocation completed successfully. */
@@ -63,13 +65,16 @@ export interface BuildFromEventsOutput {
   /** LLM-emit form — canonicalize / validate run NEXT. */
   spec: LLMWorkflowSpec;
   /**
-   * The artifact-creator tool's raw args — kept as-is (not
-   * pre-projected) so the save orchestrator can dispatch by tool
-   * name to the right per-tool adapter
-   * (`lib/outcomes/args-to-content.ts::chartArgsToContent` etc.).
+   * The artifact-creator tool's raw args — kept as-is so the save
+   * orchestrator can derive metadata (`name`, `description`) and
+   * downstream callers can inspect the original payload for
+   * forensic / debugging purposes. NOT used to compute the
+   * artifact's renderable body — that happens at view time via
+   * `bundle.data`.
    */
   strippedFrontendConfig: Record<string, unknown>;
-  /** Tool name of the artifact creator (`render_chart`, `render_html`, …). */
+  /** Tool name of the artifact creator (`generate_echarts_config`,
+   *  `render_html`, …). */
   artifactCreatorToolName: string;
   /** Strategy Z+ telemetry — persisted as one `save_lineage_emitted` event. */
   lineageReport: SaveLineageReport;
@@ -112,7 +117,7 @@ export interface SaveLineageReport {
 /**
  * The agent-delegation tool name. When `toolName` matches this, the
  * invocation is an agent node — the agent's display string lives at
- * `input.agent` and the agent's input at `input.input` (per the
+ * `input.agent` and the agent's input at `input.inputs` (per the
  * supervisor's `delegate_to_agent` shape).
  */
 const AGENT_DELEGATION_TOOL = "delegate_to_agent";
@@ -132,6 +137,76 @@ const CODE_EXECUTION_TOOL = "run_code_in_sandbox";
  * use only.
  */
 const SQL_EXTRACTION_TOOL = "extract_dataset_by_sql";
+
+/**
+ * Pattern matching every chart-producing server tool. The chart
+ * library is encoded in the tool-name suffix: `generate_<lib>_config`
+ * (today only `generate_echarts_config` ships; future
+ * `generate_plotly_config` / `generate_vega_config` plug in by
+ * registering a new entry here).
+ *
+ * The save pipeline rewrites a captured chart tool invocation to a
+ * `type: "chart"` workflow node with `inputs.renderer = <lib>`.
+ */
+const CHART_TOOL_NAME_PATTERN = /^generate_([a-z][a-z0-9]*)_config$/;
+
+/**
+ * The set of chart renderer libraries the save pipeline knows how
+ * to bind. New entries here MUST also extend
+ * `ChartRendererSchema` in `spec/schema.ts`.
+ */
+const SUPPORTED_CHART_RENDERERS = new Set<ChartRenderer>(["echarts"]);
+
+/**
+ * Derive the chart node's `inputs.renderer` from a captured tool
+ * name. Returns `null` when the name is not a chart tool or names
+ * a renderer the spec schema does not recognise.
+ */
+function chartRendererFromToolName(toolName: string): ChartRenderer | null {
+  const match = CHART_TOOL_NAME_PATTERN.exec(toolName);
+  if (match === null) return null;
+  const candidate = match[1] as ChartRenderer;
+  return SUPPORTED_CHART_RENDERERS.has(candidate) ? candidate : null;
+}
+
+/** True when this invocation should become a `type: "chart"` node. */
+function isChartInvocation(inv: ToolInvocation): boolean {
+  return chartRendererFromToolName(inv.toolName) !== null;
+}
+
+/**
+ * Map an upstream invocation's captured RESULT field name to the
+ * canonical spec output field name. Strategy Z+ indexes upstream
+ * outputs by their SPEC names so the produced `@nodes.X.<field>`
+ * refs validate against the canonical node's declared `outputs[]`.
+ *
+ * Returns `null` to skip indexing for that field — e.g., SQL's
+ * `schema` / `cacheHit` / `ttlHours` are operational metadata that
+ * never enter the spec contract.
+ *
+ * For tools without a known per-field projection (the default),
+ * the captured name passes through unchanged.
+ */
+function projectResultFieldName(
+  inv: ToolInvocation,
+  eventField: string,
+): string | null {
+  if (inv.toolName === SQL_EXTRACTION_TOOL) {
+    switch (eventField) {
+      case "name":
+        return "name";
+      case "rowCount":
+        return "row_count";
+      case "preview":
+        return "rows";
+      default:
+        // schema / cacheHit / ttlHours / replacedPrior / … are not
+        // exposed in the SQL node's spec contract.
+        return null;
+    }
+  }
+  return eventField;
+}
 
 // ─── Entry point ───────────────────────────────────────────────────────
 
@@ -165,13 +240,20 @@ export function buildWorkflowSpecFromRunEvents(
   // nodes. `i.ok` reflects the Nango tool envelope's success bit.
   const successful = upToArtifact.filter((i) => i.ok);
 
-  // Strip the artifact creator — its input becomes
-  // `strippedFrontendConfig` (→ artifact.content). Every OTHER call
-  // in the successful chain becomes a workflow node.
-  const strippedFrontendConfig = { ...artifactCreator.input };
-  const dataInvocations = successful.filter(
-    (i) => i.callId !== artifactCreatingCallId,
-  );
+  // strippedFrontendConfig carries the artifact creator's raw args
+  // so the save pipeline can still write `artifact.content` (legacy
+  // shape, retired in a later phase).
+  const strippedFrontendConfig = { ...artifactCreator.inputs };
+
+  // Chart tools become first-class workflow nodes in the spec —
+  // their invocations stay in `dataInvocations`. Every other
+  // artifact creator (`render_html`, `render_markdown`, …) is
+  // stripped: its args only feed `artifact.content`, not the
+  // workflow graph.
+  const artifactCreatorIsChart = isChartInvocation(artifactCreator);
+  const dataInvocations = artifactCreatorIsChart
+    ? successful
+    : successful.filter((i) => i.callId !== artifactCreatingCallId);
 
   let nextId = 0;
   const literalNodes: LLMNode[] = dataInvocations.map((inv) => {
@@ -189,11 +271,18 @@ export function buildWorkflowSpecFromRunEvents(
   // entries Strategy Z+ successfully rewrote to a real @nodes ref
   // make it in — static literals (title, description, …) live in
   // `strippedFrontendConfig` and have no place in spec.outputs.
-  const outputs = buildOutputsMap(
-    reconciled.rewrittenArtifactInput,
-    reconciled.nodes,
-    dataInvocations,
-  );
+  //
+  // Special-case: when the artifact creator is a chart tool, the
+  // spec's output is the chart node's merged option — there is no
+  // freeform args-to-outputs mapping. We pin spec.outputs to
+  // `{ option: "@nodes.<chartNodeId>.option" }`.
+  const outputs = artifactCreatorIsChart
+    ? buildChartOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
+    : buildOutputsMap(
+        reconciled.rewrittenArtifactInput,
+        reconciled.nodes,
+        dataInvocations,
+      );
 
   const spec: LLMWorkflowSpec = {
     version: "1.0",
@@ -224,6 +313,9 @@ function assembleNode(invocation: ToolInvocation, id: number): LLMNode {
   if (invocation.toolName === SQL_EXTRACTION_TOOL) {
     return assembleSqlNode(invocation, id);
   }
+  if (isChartInvocation(invocation)) {
+    return assembleChartNode(invocation, id);
+  }
   return assembleToolNode(invocation, id);
 }
 
@@ -234,7 +326,7 @@ function assembleToolNode(invocation: ToolInvocation, id: number): LLMToolNode {
     description: deriveDescription(invocation),
     depends_on: [],
     tool: invocation.toolName,
-    input: invocation.input,
+    inputs: invocation.inputs,
   };
 }
 
@@ -242,8 +334,8 @@ function assembleAgentNode(
   invocation: ToolInvocation,
   id: number,
 ): LLMAgentNode {
-  const agentDisplay = readStringField(invocation.input, "agent");
-  const agentInput = readObjectField(invocation.input, "input");
+  const agentDisplay = readStringField(invocation.inputs, "agent");
+  const agentInput = readObjectField(invocation.inputs, "input");
   if (agentDisplay === undefined) {
     throw new Error(
       `buildWorkflowSpecFromRunEvents: agent invocation ${invocation.callId} has no 'agent' field in input.`,
@@ -255,7 +347,7 @@ function assembleAgentNode(
     description: deriveDescription(invocation),
     depends_on: [],
     agent: agentDisplay,
-    input: agentInput ?? {},
+    inputs: agentInput ?? {},
     // Runner wraps the agent's natural reply as `{ text: <reply> }`
     // at runtime; carry the matching default schema here.
     output_schema: { ...DEFAULT_AGENT_OUTPUT_SCHEMA },
@@ -272,7 +364,7 @@ function assembleAgentNode(
  *   - `input.datasets`        → `input.datasets` (verbatim;
  *                                Strategy Z+ array recursion rewrites
  *                                ref elements)
- *   - `input.timeoutSeconds`  → `timeoutSeconds` (lifted to base)
+ *   - `input.timeout_seconds`  → `timeoutSeconds` (lifted to base)
  *
  * The literal `command` + `stdin` keys are NOT preserved on the code
  * node's `input` — they're modeling artefacts of the sandbox tool's
@@ -282,17 +374,17 @@ function assembleCodeNode(
   invocation: ToolInvocation,
   id: number,
 ): LLMCodeNode {
-  const stdin = readStringField(invocation.input, "stdin");
+  const stdin = readStringField(invocation.inputs, "stdin");
   if (stdin === undefined || stdin.length === 0) {
     throw new Error(
       `buildWorkflowSpecFromRunEvents: code invocation ${invocation.callId} has no usable 'stdin' field.`,
     );
   }
-  const language = inferCodeLanguage(invocation.input);
+  const language = inferCodeLanguage(invocation.inputs);
   // Preserve non-modelling keys (datasets, env, …); drop keys
   // promoted to first-class fields.
   const passthroughInput: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(invocation.input)) {
+  for (const [k, v] of Object.entries(invocation.inputs)) {
     if (k === "stdin" || k === "command") continue;
     if (k === "timeoutSeconds") continue;
     passthroughInput[k] = v;
@@ -306,10 +398,10 @@ function assembleCodeNode(
     code: stdin,
   };
   if (Object.keys(passthroughInput).length > 0) {
-    node.input = passthroughInput;
+    node.inputs = passthroughInput;
   }
-  const t = readNumberField(invocation.input, "timeoutSeconds");
-  if (t !== undefined) node.timeoutSeconds = t;
+  const t = readNumberField(invocation.inputs, "timeoutSeconds");
+  if (t !== undefined) node.timeout_seconds = t;
   return node;
 }
 
@@ -318,7 +410,7 @@ function assembleCodeNode(
  * `extract_dataset_by_sql` invocation.
  *
  * Wire mapping:
- *   - `input.dataSourceName` → `dataSourceName`
+ *   - `input.data_source_name` → `dataSourceName`
  *   - `input.query`          → `query`
  *   - `input.name`           → `name` (output dataset slug)
  *   - `input.previewRows`    → DROPPED (chat affordance only;
@@ -327,8 +419,8 @@ function assembleCodeNode(
  *                              artifact level)
  */
 function assembleSqlNode(invocation: ToolInvocation, id: number): LLMSqlNode {
-  const dataSourceName = readStringField(invocation.input, "dataSourceName");
-  const query = readStringField(invocation.input, "query");
+  const dataSourceName = readStringField(invocation.inputs, "dataSourceName");
+  const query = readStringField(invocation.inputs, "query");
   if (dataSourceName === undefined || dataSourceName.length === 0) {
     throw new Error(
       `buildWorkflowSpecFromRunEvents: sql invocation ${invocation.callId} has no 'dataSourceName' field.`,
@@ -344,12 +436,67 @@ function assembleSqlNode(invocation: ToolInvocation, id: number): LLMSqlNode {
     type: "sql",
     description: deriveDescription(invocation),
     depends_on: [],
-    dataSourceName,
+    data_source_name: dataSourceName,
     query,
   };
-  const name = readStringField(invocation.input, "name");
+  const name = readStringField(invocation.inputs, "name");
   if (name !== undefined && name.length > 0) node.name = name;
   return node;
+}
+
+/**
+ * Build a `type: "chart"` LLM-emit node from a captured chart-tool
+ * invocation (today: `generate_echarts_config`; future:
+ * `generate_plotly_config` / `generate_vega_config`, …).
+ *
+ * Wire mapping:
+ *   - tool name suffix    → `inputs.renderer` (echarts / plotly / …)
+ *   - `inputs.option`     → `inputs.config` (verbatim — Strategy Z+
+ *                           later strips `dataset.source` when it
+ *                           successfully rewrites it to a ref)
+ *   - `inputs.dataset`    starts UNSET. The ref reconstruction step
+ *                         populates it when an upstream node's array
+ *                         output matches the option's data; otherwise
+ *                         the chart is saved as not-refreshable
+ *                         (literal data baked into `config`).
+ *
+ * Other captured args (`chart_id`, `title`, `description`,
+ * `dataset_id`) are intentionally NOT carried onto the chart node —
+ * they live on `artifact.content` and never feed workflow execution.
+ */
+function assembleChartNode(
+  invocation: ToolInvocation,
+  id: number,
+): LLMChartNode {
+  const renderer = chartRendererFromToolName(invocation.toolName);
+  if (renderer === null) {
+    // The dispatcher checks `isChartInvocation` first; reaching here
+    // is a programmer error in this module.
+    throw new Error(
+      `buildWorkflowSpecFromRunEvents: chart invocation ${invocation.callId} has unsupported tool '${invocation.toolName}'.`,
+    );
+  }
+  const option = readObjectField(invocation.inputs, "option");
+  if (option === undefined) {
+    throw new Error(
+      `buildWorkflowSpecFromRunEvents: chart invocation ${invocation.callId} has no 'option' object field.`,
+    );
+  }
+  // Deep-clone so downstream ref rewriting can mutate freely
+  // without surprising the caller's invocation list.
+  const config = structuredClone(option) as Record<string, unknown>;
+  return {
+    id,
+    type: "chart",
+    description: deriveDescription(invocation),
+    depends_on: [],
+    inputs: {
+      renderer,
+      config,
+      // `dataset` left unset — Strategy Z+ fills it when a unique
+      // upstream array match exists.
+    },
+  };
 }
 
 /**
@@ -378,7 +525,7 @@ function readNumberField(
 }
 
 function deriveDescription(invocation: ToolInvocation): string {
-  const sample = describeInputSnippet(invocation.input);
+  const sample = describeInputSnippet(invocation.inputs);
   return sample.length > 0
     ? `${invocation.toolName} — ${sample}`
     : invocation.toolName;
@@ -435,10 +582,18 @@ interface SourceEntry {
  * `depends_on` is derived from the set of upstream node ids
  * referenced by the rewritten input, sorted ascending for stable
  * output / cache key.
+ *
+ * Chart nodes get a separate matcher (`reconcileChartNode`) that
+ * compares the captured option's `dataset.source` array against
+ * upstream array-valued result fields. Match → produce a
+ * `@path` ref + strip `dataset.source` from `config`. Miss →
+ * leave the literal data in `config` and omit `inputs.dataset`
+ * (the not-refreshable fallback).
  */
 function reconstructRefs(input: ReconstructInput): ReconstructResult {
   const { nodes: literalNodes, dataInvocations, artifactInput } = input;
   const index: Map<string, SourceEntry[]> = new Map();
+  const arrayIndex: Map<string, SourceEntry[]> = new Map();
   const lineage = newLineageAccumulator();
   const rewrittenNodes: LLMNode[] = [];
 
@@ -454,11 +609,13 @@ function reconstructRefs(input: ReconstructInput): ReconstructResult {
     // `datasets: [<name>]` get rewritten to `@nodes.X.name`.
     if (node.type === "sql") {
       rewrittenNodes.push(node);
+    } else if (node.type === "chart") {
+      rewrittenNodes.push(reconcileChartNode(node, arrayIndex, lineage));
     } else {
       // Code nodes' `input` is optional. Treat absent input as
       // empty record for the walker; `withRewrittenInputAndDeps`
       // restores the optional shape on the way out.
-      const inputMap = node.input ?? {};
+      const inputMap = node.inputs ?? {};
       const { rewrittenInput, deps } = rewriteInputViaIndex(
         inputMap,
         index,
@@ -471,7 +628,8 @@ function reconstructRefs(input: ReconstructInput): ReconstructResult {
     }
 
     if (invocation.result !== null) {
-      addOutputsToIndex(invocation.result, node.id, index);
+      addOutputsToIndex(invocation, node.id, index);
+      addArrayOutputsToIndex(invocation, node.id, arrayIndex);
     }
   }
 
@@ -616,15 +774,19 @@ function rewriteValueRecursive(args: {
 }
 
 function addOutputsToIndex(
-  result: Record<string, unknown>,
+  invocation: ToolInvocation,
   producingNodeId: number,
   index: Map<string, SourceEntry[]>,
 ): void {
+  const result = invocation.result;
+  if (result === null) return;
   for (const [key, value] of Object.entries(result)) {
     if (typeof value !== "string") continue;
     if (!isRefCandidate(value)) continue;
+    const fieldPath = projectResultFieldName(invocation, key);
+    if (fieldPath === null) continue;
     const entries = index.get(value);
-    const entry: SourceEntry = { nodeId: producingNodeId, fieldPath: key };
+    const entry: SourceEntry = { nodeId: producingNodeId, fieldPath };
     if (entries === undefined) {
       index.set(value, [entry]);
     } else {
@@ -633,29 +795,185 @@ function addOutputsToIndex(
   }
 }
 
+/**
+ * Stuffs every top-level ARRAY-valued field of an upstream
+ * invocation's result into a separate index keyed by the canonical
+ * JSON serialization of the array. The chart save matcher uses this
+ * to recognise that the option's `dataset.source` came from a
+ * specific upstream output (e.g. a SQL node's `rows` field, the
+ * spec-side projection of the tool's `preview`).
+ *
+ * Empty arrays and arrays that serialize larger than
+ * `ARRAY_INDEX_MAX_SERIALIZED_LEN` are skipped: empty matches are
+ * spurious, and huge serialisations cost more than the match is
+ * worth (and inflate the lineage report).
+ */
+function addArrayOutputsToIndex(
+  invocation: ToolInvocation,
+  producingNodeId: number,
+  arrayIndex: Map<string, SourceEntry[]>,
+): void {
+  const result = invocation.result;
+  if (result === null) return;
+  for (const [key, value] of Object.entries(result)) {
+    const serialized = canonicalArrayKey(value);
+    if (serialized === null) continue;
+    const fieldPath = projectResultFieldName(invocation, key);
+    if (fieldPath === null) continue;
+    const entries = arrayIndex.get(serialized);
+    const entry: SourceEntry = { nodeId: producingNodeId, fieldPath };
+    if (entries === undefined) {
+      arrayIndex.set(serialized, [entry]);
+    } else {
+      entries.push(entry);
+    }
+  }
+}
+
+/** Hard cap on indexed array serialization length. ~1 MB JSON. */
+const ARRAY_INDEX_MAX_SERIALIZED_LEN = 1_000_000;
+
+/**
+ * Canonical JSON key for a candidate array — used as the
+ * `arrayIndex` map key. Returns `null` for values that should NOT be
+ * indexed (non-arrays, empty arrays, oversize serializations,
+ * un-serializable values).
+ */
+function canonicalArrayKey(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  try {
+    const s = JSON.stringify(value);
+    if (s.length > ARRAY_INDEX_MAX_SERIALIZED_LEN) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reconcile a chart node against the upstream array-output index.
+ *
+ * The captured option carries inline data in `config.dataset.source`
+ * (today the only ECharts data-binding slot the save pipeline knows
+ * how to reconnect — see `mergeEchartsConfig` for the symmetric
+ * runtime side). If `dataset.source` deep-equals a single upstream
+ * array output, the chart becomes refreshable: `dataset.source` is
+ * stripped from `config`, and `inputs.dataset = "@nodes.X.<field>"`.
+ *
+ * Otherwise (no match, ambiguous match, or no `dataset.source` at
+ * all), the chart is preserved as-is — the engine will pass the
+ * config through with whatever data the LLM baked in. UI surfaces
+ * a "not refreshable" indicator on saved charts whose
+ * `inputs.dataset` is absent.
+ */
+function reconcileChartNode(
+  node: LLMChartNode,
+  arrayIndex: Map<string, SourceEntry[]>,
+  lineage: SaveLineageReport,
+): LLMChartNode {
+  // Only ECharts is recognised today; future renderers (Plotly /
+  // Vega) extend this switch.
+  if (node.inputs.renderer !== "echarts") return node;
+
+  const dataset = node.inputs.config.dataset;
+  if (
+    dataset === null ||
+    typeof dataset !== "object" ||
+    Array.isArray(dataset)
+  ) {
+    return node;
+  }
+  const source = (dataset as Record<string, unknown>).source;
+  const key = canonicalArrayKey(source);
+  if (key === null) return node;
+
+  const sources = arrayIndex.get(key) ?? [];
+  if (sources.length === 0) {
+    (lineage.candidate_values_no_match as Array<{
+      nodeId: number;
+      field: string;
+      value: string;
+    }>).push({
+      nodeId: node.id,
+      field: "inputs.config.dataset.source",
+      value: `<array length=${(source as unknown[]).length}>`,
+    });
+    return node;
+  }
+  if (sources.length > 1) {
+    (lineage.ambiguous_matches as Array<{
+      nodeId: number;
+      field: string;
+      value: string;
+      possible_sources: ReadonlyArray<{ nodeId: number; fieldPath: string }>;
+    }>).push({
+      nodeId: node.id,
+      field: "inputs.config.dataset.source",
+      value: `<array length=${(source as unknown[]).length}>`,
+      possible_sources: sources.slice(),
+    });
+    return node;
+  }
+
+  // Unique match — strip the inline data from config.dataset.source
+  // and bind `inputs.dataset` to the upstream ref.
+  const match = sources[0]!;
+  const ref = `@nodes.${match.nodeId}.${match.fieldPath}`;
+  (lineage.resolved_refs as Array<{
+    nodeId: number;
+    field: string;
+    resolved_to: string;
+    confidence: "unique-match";
+  }>).push({
+    nodeId: node.id,
+    field: "inputs.config.dataset.source",
+    resolved_to: ref,
+    confidence: "unique-match",
+  });
+
+  const strippedDataset = { ...(dataset as Record<string, unknown>) };
+  delete strippedDataset.source;
+  const strippedConfig = { ...node.inputs.config, dataset: strippedDataset };
+  return {
+    ...node,
+    inputs: {
+      ...node.inputs,
+      config: strippedConfig,
+      dataset: ref,
+    },
+    depends_on: [match.nodeId],
+  };
+}
+
 function withRewrittenInputAndDeps(
   node: LLMNode,
   rewrittenInput: Record<string, unknown>,
   depends_on: number[],
 ): LLMNode {
-  // SQL nodes have NO `input` field — their refs live in the
-  // first-class `query` / `dataSourceName` / `name` slots, not a
-  // generic input map. Writing `input: {}` onto a SQL node would
-  // corrupt the schema.
+  // SQL nodes have NO generic `inputs` field — their refs live in
+  // the first-class `query` / `data_source_name` / `name` slots.
+  // Writing `inputs: {}` onto a SQL node would corrupt the schema.
   if (node.type === "sql") {
     return { ...node, depends_on };
   }
-  // Code nodes' `input` is optional. If the original node had no
-  // input AND no rewriting produced any keys, omit `input` to keep
-  // the canonical spec minimal.
+  // Chart nodes have a STRUCTURED `inputs` shape
+  // ({ renderer, config, dataset }) — they are not built from
+  // captured events in the current pipeline (Phase 1.4 wires this
+  // up). Pass through depends_on only.
+  if (node.type === "chart") {
+    return { ...node, depends_on };
+  }
+  // Code nodes' `inputs` is optional. If the original node had no
+  // inputs AND no rewriting produced any keys, omit `inputs` to
+  // keep the canonical spec minimal.
   if (
     node.type === "code" &&
-    node.input === undefined &&
+    node.inputs === undefined &&
     Object.keys(rewrittenInput).length === 0
   ) {
     return { ...node, depends_on };
   }
-  return { ...node, input: rewrittenInput, depends_on };
+  return { ...node, inputs: rewrittenInput, depends_on };
 }
 
 function sortedDeps(deps: Set<number>): number[] {
@@ -717,6 +1035,33 @@ function pickFirstObservedResultKey(
   return keys.length > 0 ? keys[0] : undefined;
 }
 
+/**
+ * Build `spec.outputs` for a chart-rooted artifact. The chart node
+ * produces a single `option` field; the workflow's top-level output
+ * is the same merged option. We look up the chart node by callId so
+ * the ref id stays correct even when other data nodes precede it
+ * in the spec.
+ */
+function buildChartOutputsMap(
+  dataInvocations: ReadonlyArray<ToolInvocation>,
+  nodes: ReadonlyArray<LLMNode>,
+  artifactCreatingCallId: string,
+): Record<string, string> {
+  const idx = dataInvocations.findIndex(
+    (inv) => inv.callId === artifactCreatingCallId,
+  );
+  const chartNode = idx >= 0 ? nodes[idx] : undefined;
+  if (chartNode === undefined || chartNode.type !== "chart") {
+    // Defensive — when the artifact creator is a chart invocation
+    // we always produce a chart node at the matching index. Falling
+    // back to a literal sentinel keeps the spec parseable if the
+    // invariant ever breaks (e.g. assembleNode threw and the caller
+    // shimmed in a placeholder).
+    return { option: "@nodes.0.option" };
+  }
+  return { option: `@nodes.${chartNode.id}.option` };
+}
+
 function placeholderNoOpNode(): LLMToolNode {
   // Degenerate spec — frontend_tool called with no data deps. The
   // LLM-emit schema requires nodes.length ≥ 1, so emit a single
@@ -727,7 +1072,7 @@ function placeholderNoOpNode(): LLMToolNode {
     description: "(no upstream data) — placeholder; save again from a richer chat to refine",
     depends_on: [],
     tool: "noop",
-    input: {},
+    inputs: {},
   };
 }
 
@@ -735,8 +1080,8 @@ function placeholderNoOpNode(): LLMToolNode {
 
 function deriveWorkflowName(artifactCreator: ToolInvocation): string {
   const title =
-    readStringField(artifactCreator.input, "title") ??
-    readStringField(artifactCreator.input, "name") ??
+    readStringField(artifactCreator.inputs, "title") ??
+    readStringField(artifactCreator.inputs, "name") ??
     `Workflow from ${artifactCreator.toolName}`;
   return truncate(title, 80);
 }

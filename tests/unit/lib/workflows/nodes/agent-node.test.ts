@@ -29,12 +29,13 @@ function agentNode(
 ): CanonicalAgentNode {
   return {
     type: "agent",
+    schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
     agent: "Builtin / DataAnalyst",
-    agentId: AGENT_UUID,
-    input: { dataset: "x" },
+    agent_id: AGENT_UUID,
+    inputs: { dataset: "x" },
     output_schema: {
       type: "object",
       properties: { summary: { type: "string" } },
@@ -55,7 +56,7 @@ function makeState(
   const spec: CanonicalWorkflowSpec = {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
     outputs: { summary: "@nodes.0.summary" },
   };
@@ -203,7 +204,7 @@ describe("executeAgentNode — happy paths", () => {
 
   it("resolves @path refs in input before dispatch", async () => {
     const node = agentNode({
-      input: { dataset: "@nodes.5.dataset", tenant: "@workflow.tenant" },
+      inputs: { dataset: "@nodes.5.dataset", tenant: "@workflow.tenant" },
     });
     const state = makeState(node, {
       input: { tenant: "acme" },
@@ -272,7 +273,7 @@ describe("executeAgentNode — error paths", () => {
 
   it("propagates REF_UNRESOLVED before invoking runAgent", async () => {
     const node = agentNode({
-      input: { dataset: "@workflow.missing" },
+      inputs: { dataset: "@workflow.missing" },
     });
     const state = makeState(node, { input: {} });
     let runAgentCalled = false;

@@ -16,11 +16,12 @@ function toolNode(
 ): CanonicalToolNode {
   return {
     type: "tool",
+    schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
     tool: "extract",
-    input: { sql: "select 1" },
+    inputs: { sql: "select 1" },
     ...overrides,
   };
 }
@@ -30,12 +31,13 @@ function agentNode(
 ): CanonicalAgentNode {
   return {
     type: "agent",
+    schema_version: "1",
     id: 0,
     description: "a",
     depends_on: [],
     agent: "Builtin / DataAnalyst",
-    agentId: "11111111-1111-4111-8111-111111111111",
-    input: { x: 1 },
+    agent_id: "11111111-1111-4111-8111-111111111111",
+    inputs: { x: 1 },
     output_schema: {
       type: "object",
       properties: { summary: { type: "string" } },
@@ -69,7 +71,7 @@ describe("computeCacheKey — content addressing", () => {
   it("is independent of `retries` config", () => {
     const a = computeCacheKey(toolNode(), { x: 1 });
     const b = computeCacheKey(
-      toolNode({ retries: { attempts: 5, delaySeconds: 10 } }),
+      toolNode({ retries: { attempts: 5, delay_seconds: 10 } }),
       { x: 1 },
     );
     expect(a).toBe(b);
@@ -77,7 +79,7 @@ describe("computeCacheKey — content addressing", () => {
 
   it("is independent of `timeoutSeconds`", () => {
     const a = computeCacheKey(toolNode(), { x: 1 });
-    const b = computeCacheKey(toolNode({ timeoutSeconds: 600 }), { x: 1 });
+    const b = computeCacheKey(toolNode({ timeout_seconds: 600 }), { x: 1 });
     expect(a).toBe(b);
   });
 
@@ -140,8 +142,8 @@ describe("computeCacheKey — sensitivity to semantic changes", () => {
   });
 
   it("changes when agentId changes (D27 — different agent UUID)", () => {
-    const a = agentNode({ agentId: "11111111-1111-4111-8111-111111111111" });
-    const b = agentNode({ agentId: "22222222-2222-4222-8222-222222222222" });
+    const a = agentNode({ agent_id: "11111111-1111-4111-8111-111111111111" });
+    const b = agentNode({ agent_id: "22222222-2222-4222-8222-222222222222" });
     expect(computeCacheKey(a, { x: 1 })).not.toBe(
       computeCacheKey(b, { x: 1 }),
     );

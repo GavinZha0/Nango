@@ -88,7 +88,7 @@ const NON_SEMANTIC_FIELDS = [
   "description",
   "depends_on",
   "retries",
-  "timeoutSeconds",
+  "timeout_seconds",
   "outputs",
 ] as const;
 

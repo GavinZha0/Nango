@@ -21,7 +21,6 @@ function leaf(id: string, parentId: string | null, name: string): ArtifactNode {
     type: "chart",
     name,
     description: null,
-    content: null,
     config: null,
     visibility: "private",
     displayOrder: 0,

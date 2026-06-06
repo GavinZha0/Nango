@@ -29,6 +29,13 @@
       "when": 1780350427163,
       "tag": "0003_agent-role-enum-and-drop-is-supervisor",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780538590390,
+      "tag": "0004_drop_artifact_content_column",
+      "breakpoints": true
     }
   ]
 }

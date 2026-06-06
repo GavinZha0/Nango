@@ -23,28 +23,31 @@ function chainSpec(): CanonicalWorkflowSpec {
   return {
     version: "1.0",
     name: "chain",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     outputs: { result: "@nodes.2.stdout" },
     nodes: [
       {
         id: 0,
         type: "tool",
+        schema_version: "1",
         tool: "extract_dataset_by_sql",
         description: "extract",
         depends_on: [],
-        input: { name: "ds", query: "SELECT 1" },
+        inputs: { name: "ds", query: "SELECT 1" },
       },
       {
         id: 1,
         type: "tool",
+        schema_version: "1",
         tool: "filter",
         description: "filter",
         depends_on: [0],
-        input: {},
+        inputs: {},
       },
       {
         id: 2,
         type: "code",
+        schema_version: "1",
         language: "python",
         code: "print('hi')",
         description: "code",
@@ -116,12 +119,13 @@ describe("layoutWorkflow", () => {
     const spec: CanonicalWorkflowSpec = {
       version: "1.0",
       name: "solo",
-      refReconAlgorithm: "ref_recon_v1",
+      ref_recon_algorithm: "ref_recon_v1",
       outputs: { result: "@nodes.0.stdout" },
       nodes: [
         {
           id: 0,
           type: "code",
+          schema_version: "1",
           language: "python",
           code: "print(1)",
           description: "solo",
@@ -140,24 +144,26 @@ describe("layoutWorkflow", () => {
     const spec: CanonicalWorkflowSpec = {
       version: "1.0",
       name: "parallel",
-      refReconAlgorithm: "ref_recon_v1",
+      ref_recon_algorithm: "ref_recon_v1",
       outputs: { a: "@nodes.0.stdout", b: "@nodes.1.stdout" },
       nodes: [
         {
           id: 0,
           type: "tool",
+          schema_version: "1",
           tool: "a",
           description: "a",
           depends_on: [],
-          input: {},
+          inputs: {},
         },
         {
           id: 1,
           type: "tool",
+          schema_version: "1",
           tool: "b",
           description: "b",
           depends_on: [],
-          input: {},
+          inputs: {},
         },
       ],
     };

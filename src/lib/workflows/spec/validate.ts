@@ -252,7 +252,9 @@ function canonicalNodeDisplayName(node: CanonicalNode): string {
     case "code":
       return `code:${node.language}`;
     case "sql":
-      return `sql:${node.dataSourceName}`;
+      return `sql:${node.data_source_name}`;
+    case "chart":
+      return `chart:${node.inputs.renderer}`;
   }
 }
 
@@ -277,21 +279,34 @@ function validateNodeInputs(
     // literal `@nodes.0.foo` *inside* a Python string as a ref and
     // reject valid code.
     //
-    //   - tool / agent: `input` map
-    //   - code:         `input` map only — `node.code` is passed to
+    //   - tool / agent: `inputs` map
+    //   - code:         `inputs` map only — `node.code` is passed to
     //                   the sandbox as opaque stdin, NOT templated
-    //   - sql:          `query`, `dataSourceName`, `name` — each is
-    //                   templated through resolveRefs before calling
-    //                   extract_dataset_by_sql
+    //   - sql:          `query`, `data_source_name`, `name` — each
+    //                   is templated through resolveRefs before
+    //                   calling extract_dataset_by_sql
+    //   - chart:        `inputs.dataset` is a string OR string[]
+    //                   of `@path` refs to upstream arrays.
+    //                   `inputs.config` is the option TEMPLATE; the
+    //                   engine fills the data-binding slot at
+    //                   execute time so we deliberately do NOT walk
+    //                   into `inputs.config` for refs here.
     const refCarriers: unknown[] = [];
     if (node.type === "tool" || node.type === "agent") {
-      refCarriers.push(node.input);
+      refCarriers.push(node.inputs);
     } else if (node.type === "code") {
-      if (node.input !== undefined) refCarriers.push(node.input);
+      if (node.inputs !== undefined) refCarriers.push(node.inputs);
     } else if (node.type === "sql") {
       refCarriers.push(node.query);
-      refCarriers.push(node.dataSourceName);
+      refCarriers.push(node.data_source_name);
       if (node.name !== undefined) refCarriers.push(node.name);
+    } else if (node.type === "chart") {
+      // `inputs.dataset` is optional — the not-refreshable fallback
+      // omits it and bakes the data into `inputs.config` instead,
+      // so we walk it only when present.
+      if (node.inputs.dataset !== undefined) {
+        refCarriers.push(node.inputs.dataset);
+      }
     }
     for (const carrier of refCarriers) {
       forEachStringLeaf(carrier, (s) => {
@@ -335,7 +350,7 @@ function validateToolInputCoverage(nodes: readonly CanonicalNode[]): void {
     if (!Array.isArray(required)) continue;
     for (const key of required) {
       if (typeof key !== "string") continue;
-      if (!(key in node.input)) {
+      if (!(key in node.inputs)) {
         throw new WorkflowError({
           errorCode: "TOOL_INPUT_SCHEMA_MISMATCH",
           message: `Node ${node.id}: tool '${node.tool}' requires input field '${key}'.`,

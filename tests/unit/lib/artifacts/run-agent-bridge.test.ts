@@ -89,7 +89,7 @@ const baseSpec: CanonicalWorkflowSpec = {
   name: "test-spec",
   nodes: [],
   outputs: { result: "@nodes.0.text" },
-  refReconAlgorithm: "ref_recon_v1",
+  ref_recon_algorithm: "ref_recon_v1",
 };
 
 const agentReq: AgentRunRequest = {
@@ -359,7 +359,7 @@ describe("extractTaskString (probed via runner.start args)", () => {
     });
   });
 
-  async function probeTask(input: Record<string, unknown>): Promise<string> {
+  async function probeTask(inputs: Record<string, unknown>): Promise<string> {
     let capturedRunAgent:
       | WorkflowEngineDependencies["runAgent"]
       | undefined;
@@ -376,7 +376,7 @@ describe("extractTaskString (probed via runner.start args)", () => {
       ownerId: "owner-1",
       forceFresh: true,
     });
-    await capturedRunAgent!({ ...agentReq, input });
+    await capturedRunAgent!({ ...agentReq, input: inputs });
     const call = (runnerStart as unknown as Mock).mock.calls.at(-1)!;
     return (call[0] as { task: string }).task;
   }

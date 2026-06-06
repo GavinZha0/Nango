@@ -20,9 +20,9 @@ artifact's visual snapshot (`artifact.content.blocks`) stays
 side-by-side with the workflow so the user always sees something even
 when a refresh fails.
 
-If you only read one section, read **§7** — that's where the unresolved
-chart data flow question lives, and it gates every other refresh-side
-roadmap item.
+Section **§7** records how the chart-data-flow question got resolved
+(as D39). The implementation that puts the resolution into code lives
+in `workflow-architecture.md` §4.0 (phased refactor).
 
 ---
 
@@ -39,7 +39,9 @@ Nango is two engines that share infrastructure:
 
 A workflow lives entirely on the **data engine** side. UI rendering of
 its result is a separate concern handled by the artifact layer —
-that's the architectural fork §7 is about.
+historically the architectural fork in §7. The D39 chart refactor
+collapses the fork on the data side (chart becomes a workflow node)
+while keeping rendering in the browser.
 
 ### 1.2 What a workflow is (and isn't)
 
@@ -357,8 +359,9 @@ NodeTypeSchema = z.enum(["tool", "agent", "code", "sql"]);
 A built-in or MCP server-side tool. Examples: `web_search`,
 `run_ssh_command`, `get_skill`. NOT `extract_dataset_by_sql`
 (promoted to `sql` node in D36), NOT `run_code_in_sandbox`
-(promoted to `code` in D35), NOT `render_chart` (frontend, never a
-node — see §7).
+(promoted to `code` in D35), NOT `render_chart` (becomes a
+first-class `chart` node post-D39 — see §7; pre-D39 it was a
+frontend tool stripped at save).
 
 ```jsonc
 {
@@ -594,135 +597,33 @@ through their owning artifact.
 
 ---
 
-## 7. Open architecture question — chart data flow
+## 7. Chart data flow — RESOLVED as D39
 
-This is the unresolved blocker for the V1.x "Refresh button + data
-binding" epic. The decision shape:
+> ✅ **Decided.** The earlier "Routes A / B / C" architectural
+> deliberation that lived here has been replaced. See
+> [`workflow-architecture.md` §2 → D39](./workflow-architecture.md)
+> for the binding decision and its four sub-points.
 
-### 7.1 Current state, precisely
+The short version:
 
-```
-chat (LLM)
-   │   LLM calls render_chart({ optionJson, title, datasetName? })
-   │   render_chart is a FRONTEND tool — useCopilotAction handler
-   │   runs in the browser, NEVER reaches the server
-   │
-   ↓
-save dialog → POST /api/artifacts/save
-                          │
-                          ↓
-                build-from-events.ts
-                          │   strips render_chart from the chain
-                          │   (it's a frontend tool — see step 3 of §5.1)
-                          ↓
-                workflow.spec  →  contains SQL / code / agent / tool nodes
-                                  ONLY. NO chart node. NO option.
-                artifact.content.blocks  =  the chart option, end-to-end
-                                  (including the data points it shows)
-```
+- **Chart becomes a first-class workflow node** (`type: "chart"`,
+  `schema_version: "1"`, `renderer: "echarts"`). It stores an ECharts
+  option **template** (no data) under `config` and a `@path` ref to
+  upstream data under `input.dataset`. At execute time the engine
+  merges them and returns `{ option }` — rendering still happens in
+  the browser. (D39.A)
+- **One injection point** in v1: `option.dataset.source`. Charts
+  that drift outside this contract fall back to D39.C. (D39.B)
+- **Literal fallback**: when `build-from-events` cannot match a
+  render_chart's data to any upstream output, the chart is saved as
+  a chart node with literal `config` and empty `input` — UI shows a
+  "not refreshable" indicator. (D39.C)
+- **`artifact.content.blocks` is retired** in Phase 5 of the
+  refactor (when `ArtifactDetail` stops reading it). (D39.D)
 
-Therefore:
-- The saved chart is a **complete static snapshot**. The data points
-  are baked into `series[].data` inside the saved ECharts option.
-- The workflow can re-execute its data nodes, producing fresh
-  `bundle.data` — but **nothing in the system knows how to merge
-  fresh data into the saved chart option**.
-- `<ArtifactDetail>` reads `node.content.blocks` only. `bundle.data`
-  is fetched, returned over the wire, and discarded by the renderer.
-
-This is intentional V1 design (the "frontend tool divorce" — UI
-generation is the UI engine's job, the data engine produces values).
-It works perfectly for what was built. It just doesn't admit a
-"refresh and see updated data" flow without a design choice.
-
-### 7.2 Three routes
-
-#### Route A — `render_chart` as a workflow node
-
-Promote `render_chart` from a frontend tool to a first-class workflow
-node type. Chart generation becomes deterministic + replayable on
-the server.
-
-| Aspect | Detail |
-|---|---|
-| Spec changes | New `type: "chart"` node variant. `input` includes upstream dataset refs + chart kind / encoding. `output` is the ECharts option JSON. |
-| LLM contract | `render_chart` tool description changes: LLM no longer emits final data, only a **chart template** + dataset binding |
-| Save pipeline | `build-from-events.ts` keeps the (now-server) render_chart in the spec instead of stripping it |
-| Refresh | engine.execute returns fresh option in `bundle.data`; renderer reads `data` instead of `content.blocks` |
-| Existing artifacts | All pre-A saved artifacts have no chart node → can't refresh visually. Either degrade gracefully (show snapshot, hide refresh button) or migrate via re-save |
-| Cost estimate | 4-5 days |
-| Pros | Cleanest model. Server-side determinism. Migration-friendly: new artifacts work fully, old ones degrade gracefully |
-| Cons | Forces LLM to learn a new chart-generation contract. ECharts option building moves server-side, which may need ECharts in Node bundle (it's already there for the preview path) |
-
-#### Route B — Template + data binding
-
-Keep `render_chart` as a frontend tool but change its contract: the
-emitted ECharts option is a **template** with placeholder refs at
-the data slots; the renderer resolves placeholders against
-`bundle.data` at draw time.
-
-| Aspect | Detail |
-|---|---|
-| Spec changes | None — chart still leaves the workflow at save time |
-| LLM contract | render_chart emits `series[].data = { $ref: "@workflow.outputs.rows" }` (or similar sentinel) instead of literal arrays. Saved option = template. Tool description teaches the convention |
-| Renderer | Pre-render pass walks `option`, replaces `$ref` with values from `bundle.data` |
-| Save pipeline | Unchanged — `content.blocks` holds the template |
-| Refresh | bundle.data carries fresh rows; renderer re-merges → new chart |
-| Existing artifacts | Saved with literal data, no placeholders → can't refresh. Either re-save or accept they're frozen |
-| Cost estimate | 3-4 days |
-| Pros | Workflow spec stays purely "data engine". Smaller delta in `save-artifact.ts`. Doesn't move ECharts work to server |
-| Cons | LLM has to learn placeholder convention reliably (drift risk). Renderer becomes more complex (ref walker). `$ref` sentinel design needs review for nested arrays / non-trivial encodings |
-
-#### Route C — Limit refresh semantics
-
-Accept that the saved chart is a static snapshot. Replace the
-"refresh button" idea with a "regenerate via chat" affordance —
-clicking it opens chat with a pre-filled prompt that re-invokes
-the chart-producing agent.
-
-| Aspect | Detail |
-|---|---|
-| Spec changes | None |
-| LLM contract | None |
-| Save pipeline | Unchanged |
-| Refresh button | Becomes a "Regenerate in chat" link; clicking it doesn't call the refresh endpoint at all |
-| Existing artifacts | Fully compatible |
-| Cost estimate | 1-2 days |
-| Pros | Honest about the V1 architecture; no migrations; zero LLM contract change |
-| Cons | UX regression — user has to context-switch into chat instead of one-click. The W2 / D4a infrastructure we just built has no user-facing trigger |
-
-### 7.3 Cross-cutting consequences
-
-Any choice that puts a refresh button on the artifact page brings
-these along:
-
-- **`/admin/run` UI value** — D4a writes entity_run rows on every
-  refresh. If refresh is never user-facing (Route C), D4a sees no
-  traffic and the admin run UI is largely empty
-- **W2 (agent dispatch on refresh)** — only matters if (a) workflows
-  with agent nodes are common and (b) the user wants to refresh
-  them. Route C effectively skips W2's user-visible value
-- **`forceFresh` and L2 cache** — currently a no-op. Routes A / B
-  would actually make `forceFresh: true` mean something; Route C
-  removes the need
-- **Schedule integration** — scheduled refresh (cron-like) requires
-  Routes A or B to be meaningful
-
-### 7.4 V1.x decision marker
-
-**Status: undecided.** This page records the three routes verbatim
-so the choice can be made deliberately. The next decision should
-write down:
-
-1. Which route, and why
-2. Migration plan for existing saved artifacts
-3. Whether D4a / W2 stay as built or get rewired to match
-4. Tracking ID (the next available D-number — D39 at time of
-   writing)
-
-Until then, every "refresh-adjacent" todo item depends on this:
-refresh button, chart data binding, L2 cache, scheduled refresh,
-`/admin/run` UI traffic.
+No backward-compat migration: pre-D39 `workflow` / `artifact` rows
+are wiped at refactor start. The implementation is phased — see
+`workflow-architecture.md` §4.0 for the current phase.
 
 ---
 

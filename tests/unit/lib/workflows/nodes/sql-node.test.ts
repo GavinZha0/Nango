@@ -1,16 +1,18 @@
 /**
- * Unit tests for the sql-node executor (D36).
+ * Unit tests for the sql-node executor.
  *
  * Mirrors the per-attempt body documented in
  * `src/lib/workflows/nodes/sql-node.ts`:
  *
- *   1. Refs in `query` / `dataSourceName` / `name` resolve before
+ *   1. Refs in `query` / `data_source_name` / `name` resolve before
  *      the underlying `extract_dataset_by_sql` tool is invoked.
- *   2. `previewRows: 0` + `forceRefresh: false` are ALWAYS passed
- *      — chat-affordances are pinned, not exposed on the SQL node.
- *   3. Success envelope is stripped to `{ name, rowCount }` —
- *      operational fields (cacheHit / ttlHours / schema / preview)
- *      are intentionally NOT downstream-referenceable.
+ *   2. `previewRows: 100` (SQL_WORKFLOW_PREVIEW_ROWS) +
+ *      `forceRefresh: false` are ALWAYS passed — chat-affordances
+ *      are pinned, not exposed on the SQL node.
+ *   3. Success envelope is projected to
+ *      `{ name, row_count, rows }` (snake_case, matches
+ *      DEFAULT_SQL_NODE_OUTPUTS). Operational fields
+ *      (cacheHit / ttlHours / schema) are NOT exposed.
  *   4. Failed-result envelope (`{ ok: false, error: { code, ... } }`)
  *      → translated to precise WorkflowErrorCode values.
  *   5. Tool missing from catalog → TOOL_NOT_FOUND.
@@ -47,13 +49,14 @@ function sqlNode(
 ): CanonicalSqlNode {
   return {
     type: "sql",
+    schema_version: "1",
     id: 0,
     description: "extract orders",
     depends_on: [],
-    dataSourceName: "prod_pg",
+    data_source_name: "prod_pg",
     query: "SELECT id, total FROM orders",
     name: "ds_orders",
-    outputs: ["name", "rowCount"],
+    outputs: ["name", "row_count", "rows"],
     ...overrides,
   };
 }
@@ -69,7 +72,7 @@ function makeState(
   const spec: CanonicalWorkflowSpec = {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes: init?.nodes ?? [node],
     outputs: { dummy: "@nodes.0.name" },
   };
@@ -89,7 +92,7 @@ function makeState(
 }
 
 interface ToolCall {
-  input: Record<string, unknown>;
+  inputs: Record<string, unknown>;
 }
 
 function makeDeps(
@@ -99,7 +102,7 @@ function makeDeps(
   const events: WorkflowEngineEvent[] = [];
   const handle: ToolHandle = {
     execute: async ({ input }) => {
-      calls.push({ input: input as Record<string, unknown> });
+      calls.push({ inputs: input as Record<string, unknown> });
       return toolResult;
     },
   };
@@ -116,7 +119,11 @@ function makeDeps(
 // ─── Happy paths ──────────────────────────────────────────────────────
 
 describe("executeSqlNode — success path", () => {
-  it("strips the tool envelope to { name, rowCount }", async () => {
+  it("projects the tool envelope onto { name, row_count, rows }", async () => {
+    const previewRows = [
+      { id: 1, total: 100 },
+      { id: 2, total: 200 },
+    ];
     const node = sqlNode();
     const deps = makeDeps({
       cacheHit: true,
@@ -124,35 +131,42 @@ describe("executeSqlNode — success path", () => {
       rowCount: 1234,
       schema: { columns: [] },
       ttlHours: 24,
+      preview: previewRows,
     });
     const out = await executeSqlNode(node, makeState(node), deps);
-    expect(out).toEqual({ name: "ds_orders", rowCount: 1234 });
+    expect(out).toEqual({
+      name: "ds_orders",
+      row_count: 1234,
+      rows: previewRows,
+    });
     // No leakage of operational fields into the node output.
     expect(out).not.toHaveProperty("cacheHit");
     expect(out).not.toHaveProperty("ttlHours");
     expect(out).not.toHaveProperty("schema");
+    expect(out).not.toHaveProperty("preview");
+    expect(out).not.toHaveProperty("rowCount");
   });
 
-  it("passes engine-pinned defaults previewRows=0 + forceRefresh=false", async () => {
+  it("requests previewRows=100 + forceRefresh=false from the tool", async () => {
     const node = sqlNode();
     const deps = makeDeps({ name: "ds_orders", rowCount: 0 });
     await executeSqlNode(node, makeState(node), deps);
     expect(deps.calls).toHaveLength(1);
-    expect(deps.calls[0]!.input).toMatchObject({
-      previewRows: 0,
+    expect(deps.calls[0]!.inputs).toMatchObject({
+      previewRows: 100,
       forceRefresh: false,
     });
   });
 
   it("forwards dataSourceName, query, name verbatim when no refs present", async () => {
     const node = sqlNode({
-      dataSourceName: "warehouse",
+      data_source_name: "warehouse",
       query: "SELECT 1",
       name: "ds_one",
     });
     const deps = makeDeps({ name: "ds_one", rowCount: 1 });
     await executeSqlNode(node, makeState(node), deps);
-    expect(deps.calls[0]!.input).toMatchObject({
+    expect(deps.calls[0]!.inputs).toMatchObject({
       name: "ds_one",
       dataSourceName: "warehouse",
       query: "SELECT 1",
@@ -169,11 +183,11 @@ describe("executeSqlNode — success path", () => {
     expect(out.name).toBe("tool_slug");
   });
 
-  it("defaults rowCount to 0 when the tool result omits it", async () => {
+  it("defaults row_count to 0 and rows to [] when the tool result omits them", async () => {
     const node = sqlNode();
     const deps = makeDeps({ name: "ds_orders" });
     const out = await executeSqlNode(node, makeState(node), deps);
-    expect(out).toEqual({ name: "ds_orders", rowCount: 0 });
+    expect(out).toEqual({ name: "ds_orders", row_count: 0, rows: [] });
   });
 });
 
@@ -186,7 +200,7 @@ describe("executeSqlNode — ref resolution", () => {
     });
     const deps = makeDeps({ name: "ds_orders", rowCount: 1 });
     await executeSqlNode(node, makeState(node, { input: { tableName: "orders" } }), deps);
-    expect(deps.calls[0]!.input.query).toBe("SELECT * FROM orders");
+    expect(deps.calls[0]!.inputs.query).toBe("SELECT * FROM orders");
   });
 
   it("resolves embedded @nodes refs in query", async () => {
@@ -194,13 +208,13 @@ describe("executeSqlNode — ref resolution", () => {
       id: 0,
       name: "upstream",
       query: "SELECT *",
-      dataSourceName: "src",
+      data_source_name: "src",
     });
     const downstream = sqlNode({
       id: 1,
       depends_on: [0],
       query: "SELECT * FROM @nodes.0.name",
-      dataSourceName: "src",
+      data_source_name: "src",
       name: "downstream",
     });
     const deps = makeDeps({ name: "downstream", rowCount: 5 });
@@ -209,12 +223,12 @@ describe("executeSqlNode — ref resolution", () => {
       outputs: new Map([[0, { name: "upstream_ds", rowCount: 10 }]]),
     });
     await executeSqlNode(downstream, state, deps);
-    expect(deps.calls[0]!.input.query).toBe("SELECT * FROM upstream_ds");
+    expect(deps.calls[0]!.inputs.query).toBe("SELECT * FROM upstream_ds");
   });
 
   it("resolves a pure-ref dataSourceName field", async () => {
     const node = sqlNode({
-      dataSourceName: "@workflow.dataSourceSlug",
+      data_source_name: "@workflow.dataSourceSlug",
     });
     const deps = makeDeps({ name: "ds_orders", rowCount: 1 });
     await executeSqlNode(
@@ -222,7 +236,7 @@ describe("executeSqlNode — ref resolution", () => {
       makeState(node, { input: { dataSourceSlug: "prod_replica" } }),
       deps,
     );
-    expect(deps.calls[0]!.input.dataSourceName).toBe("prod_replica");
+    expect(deps.calls[0]!.inputs.dataSourceName).toBe("prod_replica");
   });
 
   it("derives a deterministic default name when node.name is omitted", async () => {
@@ -231,7 +245,7 @@ describe("executeSqlNode — ref resolution", () => {
     await executeSqlNode(node, makeState(node), deps);
     // runId "run-abc123-deadbeef" → alphanumerics "runabc123deadbeef"
     // → first 8 = "runabc12" → "wf_runabc12_n0"
-    expect(deps.calls[0]!.input.name).toBe("wf_runabc12_n0");
+    expect(deps.calls[0]!.inputs.name).toBe("wf_runabc12_n0");
   });
 
   it("throws SPEC_SCHEMA_MISMATCH when a ref resolves to a non-string", async () => {

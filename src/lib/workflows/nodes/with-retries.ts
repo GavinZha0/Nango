@@ -100,7 +100,7 @@ export async function withRetries(
       if (attempt >= policy.attempts) throw wfErr;
 
       const delayMs = computeBackoffMs(
-        policy.delaySeconds * 1000,
+        policy.delay_seconds * 1000,
         policy.backoff,
         attempt,
       );
@@ -114,7 +114,7 @@ export async function withRetries(
 
 const FALLBACK_POLICY: Retries = {
   attempts: 0,
-  delaySeconds: 0,
+  delay_seconds: 0,
 };
 
 function computeBackoffMs(

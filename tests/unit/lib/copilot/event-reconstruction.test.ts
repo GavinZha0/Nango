@@ -229,13 +229,13 @@ describe("reconstructFromDb — backend tool with real result", () => {
 });
 
 describe("reconstructFromDb — frontend tool, succeeded run", () => {
-  it("synthesises { ok:true, chartId } for render_chart with parseable args", async () => {
+  it("synthesises { ok:true, chart_id } for generate_echarts_config with parseable args", async () => {
     const run = makeRun();
     const evs = [
       makeEvent(run.id, 0, "tool_call_chunk", {
         toolCallId: "call-r",
-        toolName: "render_chart",
-        args: '{"chartId":"sales-pie","title":"Sales"}',
+        toolName: "generate_echarts_config",
+        args: '{"chart_id":"sales-pie","title":"Sales"}',
       }),
       // No matching tool_call_result row
       makeEvent(run.id, 1, "message", {
@@ -251,14 +251,14 @@ describe("reconstructFromDb — frontend tool, succeeded run", () => {
     const results = out.filter((e) => e.type === EventType.TOOL_CALL_RESULT);
     expect(results).toHaveLength(1);
     const r = results[0]! as unknown as { content: string; messageId: string };
-    // Synthetic warning envelope: { isError, severity, message, chartId }.
-    // Three fields are guaranteed; chartId is the per-render_chart
+    // Synthetic warning envelope: { isError, severity, message, chart_id }.
+    // Three fields are guaranteed; chart_id is the per-generate_echarts_config
     // enrichment for the LLM's downstream "update the chart" turn.
     expect(JSON.parse(r.content)).toEqual({
       isError: true,
       severity: "warning",
       message: "No tool result was recorded — outcome inferred.",
-      chartId: "sales-pie",
+      chart_id: "sales-pie",
     });
     expect(r.messageId.startsWith("synth.")).toBe(true);
 
@@ -281,8 +281,8 @@ describe("reconstructFromDb — frontend tool, non-succeeded run", () => {
     const evs = [
       makeEvent(run.id, 0, "tool_call_chunk", {
         toolCallId: "call-x",
-        toolName: "render_chart",
-        args: '{"chartId":"abc"}',
+        toolName: "generate_echarts_config",
+        args: '{"chart_id":"abc"}',
       }),
     ];
     stageQueries([run], evs);
@@ -293,7 +293,7 @@ describe("reconstructFromDb — frontend tool, non-succeeded run", () => {
     expect(results).toHaveLength(1);
     const r = results[0]! as unknown as { content: string };
     // Non-succeeded run -> error severity (UI shows red badge). Note:
-    // run_aborted has no per-tool chartId enrichment because the
+    // run_aborted has no per-tool chart_id enrichment because the
     // chart was never actually rendered.
     expect(JSON.parse(r.content)).toEqual({
       isError: true,
@@ -330,12 +330,12 @@ describe("reconstructFromDb — generic frontend tool fallback", () => {
     expect(JSON.parse(result!.content)).toEqual(genericWarning);
   });
 
-  it("synthesises a warning envelope for render_chart with malformed args (chartId not recoverable)", async () => {
+  it("synthesises a warning envelope for generate_echarts_config with malformed args (chart_id not recoverable)", async () => {
     const run = makeRun();
     const evs = [
       makeEvent(run.id, 0, "tool_call_chunk", {
         toolCallId: "call-m",
-        toolName: "render_chart",
+        toolName: "generate_echarts_config",
         args: "not-json",
       }),
     ];
@@ -459,8 +459,8 @@ describe("reconstructFromDb — multi-run thread", () => {
       }),
       makeEvent("run-1", 1, "tool_call_chunk", {
         toolCallId: "tc-1",
-        toolName: "render_chart",
-        args: '{"chartId":"x","title":"X","optionJson":"{}"}',
+        toolName: "generate_echarts_config",
+        args: '{"chart_id":"x","title":"X","option":{"series":[]}}',
       }),
       makeEvent("run-2", 0, "message", {
         // SAME id as run-1's user message — persisted by
@@ -679,8 +679,8 @@ describe("reconstructFromDb — tool-call events carry persisted timestamps", ()
     const evs = [
       makeEvent(run.id, 3, "tool_call_chunk", {
         toolCallId: "call-synth",
-        toolName: "render_chart",
-        args: '{"chartId":"x"}',
+        toolName: "generate_echarts_config",
+        args: '{"chart_id":"x"}',
       }),
     ];
     stageQueries([run], evs);
@@ -712,8 +712,8 @@ describe("reconstructFromDb — emitted events pass EventSchemas validation", ()
       }),
       makeEvent(run.id, 1, "tool_call_chunk", {
         toolCallId: "call-1",
-        toolName: "render_chart",
-        args: '{"chartId":"sales-pie"}',
+        toolName: "generate_echarts_config",
+        args: '{"chart_id":"sales-pie"}',
       }),
       // no matching result → triggers synthesis
       makeEvent(run.id, 2, "message", {
@@ -754,7 +754,7 @@ describe("synthesizeToolCallResult", () => {
 
   it("returns an error-severity envelope for non-succeeded runs", () => {
     const result = synthesizeToolCallResult(
-      { toolCallId: "id", toolName: "render_chart", args: '{"chartId":"x"}' },
+      { toolCallId: "id", toolName: "generate_echarts_config", args: '{"chart_id":"x"}' },
       "cancelled",
     );
     expect(JSON.parse(result.content)).toEqual({
@@ -764,22 +764,22 @@ describe("synthesizeToolCallResult", () => {
     });
   });
 
-  it("returns a warning-severity envelope with chartId for render_chart on succeeded runs", () => {
+  it("returns a warning-severity envelope with chart_id for generate_echarts_config on succeeded runs", () => {
     const result = synthesizeToolCallResult(
-      { toolCallId: "id", toolName: "render_chart", args: '{"chartId":"abc"}' },
+      { toolCallId: "id", toolName: "generate_echarts_config", args: '{"chart_id":"abc"}' },
       "succeeded",
     );
     expect(JSON.parse(result.content)).toEqual({
       isError: true,
       severity: "warning",
       message: WARNING_MESSAGE,
-      chartId: "abc",
+      chart_id: "abc",
     });
   });
 
-  it("falls back to a generic warning envelope when render_chart args are malformed", () => {
+  it("falls back to a generic warning envelope when generate_echarts_config args are malformed", () => {
     const result = synthesizeToolCallResult(
-      { toolCallId: "id", toolName: "render_chart", args: "not-json" },
+      { toolCallId: "id", toolName: "generate_echarts_config", args: "not-json" },
       "succeeded",
     );
     expect(JSON.parse(result.content)).toEqual({
@@ -803,7 +803,7 @@ describe("synthesizeToolCallResult", () => {
 
   it("always carries a messageId prefixed with 'synth.'", () => {
     const result = synthesizeToolCallResult(
-      { toolCallId: "tc1", toolName: "render_chart", args: '{"chartId":"y"}' },
+      { toolCallId: "tc1", toolName: "generate_echarts_config", args: '{"chart_id":"y"}' },
       "succeeded",
     );
     expect(result.messageId).toBe("synth.tc1");

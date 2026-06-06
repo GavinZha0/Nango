@@ -26,10 +26,6 @@ import {
   type LLMWorkflowSpec,
 } from "@/lib/workflows";
 import { WorkflowError } from "@/lib/workflows/error";
-import {
-  chartArgsToContent,
-  readRenderChartArgs,
-} from "@/lib/outcomes/args-to-content";
 import type { ArtifactType } from "@/lib/domain/artifact";
 
 import { coalesceToolCalls } from "./coalesce-tool-calls";
@@ -43,7 +39,7 @@ export interface SaveArtifactInput {
    *  and the cross-run event search. */
   threadId: string;
   /** Producer-chosen stable id (`Outcome.outcomeId`). For
-   *  `render_chart` this is the LLM's `chartId`. */
+   *  `generate_echarts_config` this is the LLM's `chart_id`. */
   outcomeId: string;
   /** Optional folder. `saveArtifact` does NOT auto-route to a seed
    *  category when omitted — programmatic callers wanting that
@@ -109,7 +105,7 @@ export async function saveArtifact(
   }
 
   // Resolve outcomeId → (runId, toolCallId). The outcome's id
-  // (frontend's `chartId` for render_chart) is embedded in a
+  // (`chart_id` for generate_echarts_config) is embedded in a
   // `tool_call_chunk` event's args somewhere in the thread; the
   // chunk also carries the OpenAI `toolCallId` we need to identify
   // the artifact creator.
@@ -156,17 +152,10 @@ export async function saveArtifact(
       throw new Error("saveArtifact: workflow row insert returned no id.");
     }
 
-    // Project the artifact creator's raw args into the renderable
-    // block model (`{ blocks: OutcomeBlock[] }`) that
-    // `ArtifactDetail.tsx` + `BlockList` consume. The per-tool
-    // adapters in `lib/outcomes/args-to-content.ts` are shared with
-    // live replay (`/api/threads/[id]/outcomes`) so both surfaces
-    // project the same shape into the renderer.
-    const content = artifactCreatorArgsToContent(
-      built.artifactCreatorToolName,
-      built.strippedFrontendConfig,
-    );
-
+    // The artifact's renderable payload is computed on demand
+    // from the bound workflow's output (see `lib/artifacts/
+    // bundle.ts` + `lib/artifacts/execute-workflow.ts`); we do
+    // NOT persist a pre-rendered copy on the row.
     const [artifactRow] = await tx
       .insert(ArtifactTable)
       .values({
@@ -179,7 +168,6 @@ export async function saveArtifact(
         ...(input.description !== undefined && {
           description: input.description,
         }),
-        content,
         sourceThreadId: input.threadId,
         sourceOutcomeId: input.outcomeId,
         workflowId: workflowRow.id,
@@ -212,10 +200,10 @@ export async function saveArtifact(
 /**
  * Resolve a frontend outcomeId to the originating (runId, toolCallId).
  *
- * `outcomeId` is producer-chosen — render_chart uses the LLM's
- * `chartId` argument; web_search uses the OpenAI callId. Match
- * either the callId directly or any top-level string-valued arg
- * equal to `outcomeId`. First chronological match wins.
+ * `outcomeId` is producer-chosen — generate_echarts_config uses the
+ * LLM's `chart_id` argument; web_search uses the OpenAI callId.
+ * Match either the callId directly or any top-level string-valued
+ * arg equal to `outcomeId`. First chronological match wins.
  *
  * Throws `WorkflowError` (`UNKNOWN_ERROR`) when no match exists.
  */
@@ -270,9 +258,9 @@ async function resolveOutcomeToCall(args: {
         return { runId, toolCallId: inv.callId };
       }
     }
-    // Producer-chosen ids embedded in args (chartId, …). Match any
+    // Producer-chosen ids embedded in args (chart_id, …). Match any
     // top-level string value equal to outcomeId.
-    for (const value of Object.values(inv.input)) {
+    for (const value of Object.values(inv.inputs)) {
       if (typeof value === "string" && value === args.outcomeId) {
         const runId = runIdByCall.get(inv.callId);
         if (runId !== undefined) {
@@ -414,13 +402,14 @@ function pickWorkflowOutputField(spec: LLMWorkflowSpec): string {
   return keys[0]!;
 }
 
-/** Map the artifact-creator's frontend tool name to an
- *  `ArtifactType`. Default falls through to "chart". Adding a new
- *  frontend tool also requires a matching adapter in
- *  `lib/outcomes/args-to-content.ts`. */
+/** Map the artifact-creator tool name to an `ArtifactType`.
+ *  Default falls through to "chart". New artifact-producing tools
+ *  add a case here AND extend `ChartRendererSchema` (or a sibling)
+ *  in `lib/workflows/spec/schema.ts` so the workflow spec recognises
+ *  the corresponding node type. */
 function deriveArtifactType(toolName: string): ArtifactType {
   switch (toolName) {
-    case "render_chart":
+    case "generate_echarts_config":
       return "chart";
     case "render_html":
       return "html";
@@ -429,42 +418,6 @@ function deriveArtifactType(toolName: string): ArtifactType {
     default:
       return "chart";
   }
-}
-
-/**
- * Project the artifact-creator's raw args into the renderable
- * `{ blocks: OutcomeBlock[] }` shape consumed by `<BlockList>`.
- * Only `render_chart` is wired today; unknown tools fall through
- * to `{ __rawArgs, __tool }` so admin forensics can recover the
- * raw payload and the renderer shows "unsupported format".
- */
-function artifactCreatorArgsToContent(
-  toolName: string,
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  if (toolName === "render_chart") {
-    const parsed = readRenderChartArgs(args);
-    if (parsed === null) {
-      throw new WorkflowError({
-        errorCode: "UNKNOWN_ERROR",
-        message:
-          "Artifact creator's args do not satisfy the render_chart shape " +
-          "(chartId + title required).",
-      });
-    }
-    const content = chartArgsToContent(parsed);
-    if (content === null) {
-      throw new WorkflowError({
-        errorCode: "UNKNOWN_ERROR",
-        message:
-          `render_chart args have no usable ECharts option (chartId=${parsed.chartId}).`,
-      });
-    }
-    return content;
-  }
-  // Unknown frontend tool — passthrough so the row exists, but the
-  // renderer will show the "unsupported format" placeholder.
-  return { __rawArgs: args, __tool: toolName };
 }
 
 /**

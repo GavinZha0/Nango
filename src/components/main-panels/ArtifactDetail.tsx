@@ -5,11 +5,10 @@
  *
  * Renders the artifact + the metadata + the action bar (Rename /
  * Move / Delete). Folders use a folder-specific layout: list of
- * direct children with quick navigation. Leaves render their
- * `content.blocks` through `<BlockList size="large">`, sharing the
- * same block schema as the outcome panel but at the artifact
- * page's roomier visual density (bigger thumbnails, no snippet
- * clamp, all card_list cards expanded, taller charts).
+ * direct children with quick navigation. Chart leaves render the
+ * bound workflow's resolved option (the bundle's `data` field) via
+ * `<EChartsRenderer>`; other artifact types show a placeholder
+ * until a workflow-node renderer for them lands.
  *
  * Workflow-backed artifacts get a two-row layout: the chart +
  * metadata stack on top, a node-graph visualization of the backing
@@ -28,6 +27,7 @@ import {
   Loader2,
   Move,
   Pencil,
+  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -40,7 +40,7 @@ import {
   type ReactElement,
 } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 import { useDefaultLayout, type PanelImperativeHandle } from "react-resizable-panels";
 
 import { ArtifactFolderTreeSelect } from "@/components/library/ArtifactFolderTreeSelect";
@@ -73,8 +73,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkflowGraph } from "@/components/workflow-graph/WorkflowGraph";
 import { ChartErrorBoundary } from "@/components/workspace/ChartErrorBoundary";
-import { BlockList } from "@/components/workspace/blocks/BlockList";
-import type { OutcomeBlock } from "@/store/outcome-store";
+import { EChartsRenderer } from "@/components/workspace/EChartsRenderer";
 import {
   useArtifactTree,
   indexById,
@@ -101,6 +100,16 @@ interface ArtifactBundleResponse {
     spec: CanonicalWorkflowSpec;
     outputField: string;
   };
+  /** Resolved workflow output — the renderable payload for the
+   *  artifact's body. For chart artifacts this is the merged
+   *  ECharts option. Present only when the workflow executed
+   *  successfully. */
+  data?: unknown;
+  /** Whether `data` came from a cache hit (L2 caching is not
+   *  wired today; always `false`). */
+  fromCache?: boolean;
+  /** ISO-8601 timestamp of the execution that produced `data`. */
+  executedAt?: string;
 }
 
 /**
@@ -248,9 +257,17 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           tree={tree}
           router={router}
           spec={data.workflow.spec}
+          data={data.data}
+          executedAt={data.executedAt}
         />
       ) : (
-        <ArtifactScrollBody node={node} tree={tree} router={router} />
+        <ArtifactScrollBody
+          node={node}
+          tree={tree}
+          router={router}
+          data={data?.data}
+          executedAt={data?.executedAt}
+        />
       )}
 
       {/* Dialogs */}
@@ -300,6 +317,11 @@ interface ArtifactScrollBodyProps {
   node: ArtifactEntity;
   tree: ArtifactNode[] | undefined;
   router: ReturnType<typeof useRouter>;
+  /** Resolved workflow output. Chart artifacts
+   *  prefer this over `node.content.blocks` so the body always
+   *  reflects the current workflow execution. */
+  data?: unknown;
+  executedAt?: string;
 }
 
 /**
@@ -318,6 +340,8 @@ function ArtifactScrollBody({
   node,
   tree,
   router,
+  data,
+  executedAt,
 }: ArtifactScrollBodyProps): ReactElement {
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -328,7 +352,7 @@ function ArtifactScrollBody({
         {node.kind === "folder" ? (
           <FolderBody node={node} tree={tree} router={router} />
         ) : (
-          <ArtifactBody node={node} />
+          <ArtifactBody node={node} data={data} executedAt={executedAt} />
         )}
         <MetaCard node={node} />
       </div>
@@ -341,6 +365,8 @@ interface WorkflowBackedLayoutProps {
   tree: ArtifactNode[] | undefined;
   router: ReturnType<typeof useRouter>;
   spec: CanonicalWorkflowSpec;
+  data?: unknown;
+  executedAt?: string;
 }
 
 /**
@@ -360,6 +386,8 @@ function WorkflowBackedLayout({
   tree,
   router,
   spec,
+  data,
+  executedAt,
 }: WorkflowBackedLayoutProps): ReactElement {
   const lowerPanelRef = useRef<PanelImperativeHandle | null>(null);
   // Track the lower panel's current size (asPercentage). The
@@ -386,7 +414,13 @@ function WorkflowBackedLayout({
           defaultSize={60}
           minSize={20}
         >
-          <ArtifactScrollBody node={node} tree={tree} router={router} />
+          <ArtifactScrollBody
+            node={node}
+            tree={tree}
+            router={router}
+            data={data}
+            executedAt={executedAt}
+          />
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel
@@ -575,40 +609,136 @@ function FolderBody({
   );
 }
 
-function ArtifactBody({ node }: { node: ArtifactEntity }): ReactElement {
-  // Block-based content. Every artifact saved through the current
-  // `/api/artifacts/save` pipeline writes `content.blocks`
-  // (`OutcomeBlock[]`) via per-tool args→content adapters in
-  // `lib/outcomes/args-to-content.ts`. We delegate to <BlockList>
-  // with size="large" so the artifact detail page gets the
-  // generous full-width layout (~96px thumbnails, no snippet clamp,
-  // all cards expanded, 480px charts).
-  //
-  // No legacy compat for the pre-block-model `{ option }` payload
-  // shape — pre-refactor artifacts will show the "unsupported
-  // format" placeholder and need to be re-saved from a fresh
-  // outcome. (Per project owner: existing data is test data, no
-  // migration required.)
-  const blocks = (node.content as { blocks?: OutcomeBlock[] } | null)?.blocks;
-  if (Array.isArray(blocks) && blocks.length > 0) {
+interface ArtifactBodyProps {
+  node: ArtifactEntity;
+  /** Resolved workflow output. For chart artifacts this is the
+   *  merged ECharts option produced by the workflow's chart node.
+   *  Other artifact types (html / report) have no workflow-node
+   *  renderer yet and show a "not yet supported" placeholder until
+   *  they migrate. */
+  data?: unknown;
+  /** ISO-8601 timestamp from the execution that produced `data` —
+   *  surfaced as a small caption beneath the rendered body. */
+  executedAt?: string;
+}
+
+function ArtifactBody({
+  node,
+  data,
+  executedAt,
+}: ArtifactBodyProps): ReactElement {
+  // Chart artifacts: `bundle.data` is the merged ECharts option
+  // produced by the workflow's chart node. Render it directly so
+  // the body always reflects the latest workflow execution.
+  if (node.type === "chart" && isChartOption(data)) {
     return (
-      <ChartErrorBoundary resetKey={node.id}>
-        <BlockList blocks={blocks} size="large" />
-      </ChartErrorBoundary>
+      <div className="flex flex-col gap-2">
+        <ChartErrorBoundary resetKey={node.id}>
+          <div className="h-[480px] w-full">
+            <EChartsRenderer option={data as Record<string, unknown>} />
+          </div>
+        </ChartErrorBoundary>
+        <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground">
+          {executedAt !== undefined && (
+            <span>Executed at {new Date(executedAt).toLocaleString()}</span>
+          )}
+          <RefreshChartButton artifactId={node.id} />
+        </div>
+      </div>
     );
   }
 
   return (
     <div className="rounded border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">
-      Content is missing or in an unsupported format
+      No renderer for this artifact type yet
       {node.type ? (
         <>
           {" "}(<code className="font-mono text-xs">{node.type}</code>)
         </>
       ) : null}
-      . Re-save the source outcome to refresh this artifact.
+      . The workflow ran, but its output isn&apos;t a chart shape; a
+      type-specific renderer will land in a future release.
     </div>
   );
+}
+
+/**
+ * "Refresh" pill rendered beneath the chart body. POSTs to
+ * `/api/artifacts/[id]/refresh` (which force-executes the
+ * artifact's workflow) and overwrites the SWR cache with the new
+ * bundle so `<EChartsRenderer>` re-mounts with the latest option.
+ *
+ * Failure modes surface as toasts — the chart keeps showing the
+ * previously-rendered option so the user is never left with a
+ * blank panel after a transient refresh error.
+ */
+interface RefreshChartButtonProps {
+  artifactId: string;
+}
+
+function RefreshChartButton({
+  artifactId,
+}: RefreshChartButtonProps): ReactElement {
+  const [pending, setPending] = useState(false);
+  const onClick = useCallback(async (): Promise<void> => {
+    if (pending) return;
+    setPending(true);
+    try {
+      const res = await fetch(
+        `/api/artifacts/${artifactId}/refresh`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { message?: string }
+          | null;
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
+      const bundle = (await res.json()) as ArtifactBundleResponse;
+      await globalMutate(`/api/artifacts/${artifactId}`, bundle, {
+        revalidate: false,
+      });
+      toast.success("Chart refreshed");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Refresh failed: ${message}`);
+    } finally {
+      setPending(false);
+    }
+  }, [artifactId, pending]);
+
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="h-7 gap-1.5 px-2 text-xs"
+      onClick={() => void onClick()}
+      disabled={pending}
+      aria-busy={pending}
+    >
+      {pending ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RefreshCw className="h-3.5 w-3.5" />
+      )}
+      Refresh
+    </Button>
+  );
+}
+
+/**
+ * Cheap structural check — `bundle.data` for a chart artifact is
+ * an ECharts option (a plain JSON object with at minimum a
+ * `series` array). We use this to decide whether to take the
+ * workflow-data render path or fall through to the legacy
+ * `node.content.blocks` payload.
+ */
+function isChartOption(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const series = (value as { series?: unknown }).series;
+  return Array.isArray(series);
 }
 
 function MetaCard({ node }: { node: ArtifactEntity }): ReactElement {

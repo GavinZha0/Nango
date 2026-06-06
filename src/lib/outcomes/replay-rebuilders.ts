@@ -29,7 +29,8 @@ import type {
 } from "@/lib/web-search/schema";
 import {
   chartArgsToContent,
-  type RenderChartArgs,
+  readGenerateEchartsConfigArgs,
+  type GenerateEchartsConfigArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
@@ -63,7 +64,7 @@ export interface RebuildContext {
   log: { warn: (obj: Record<string, unknown>, msg: string) => void };
 }
 
-// render_chart
+// generate_echarts_config
 //
 // The args → content transformation lives in
 // `lib/outcomes/args-to-content.ts`, shared with the
@@ -71,9 +72,10 @@ export interface RebuildContext {
 // project the same shape into the renderer.
 
 /**
- * Rebuild a `render_chart` outcome from its tool_call_chunk payload.
- * `outcomeId` is the LLM-supplied `chartId` (kebab-case slug) —
- * stable, and "same id overwrites" is the V1 semantic.
+ * Rebuild a `generate_echarts_config` outcome from its
+ * tool_call_chunk payload. `outcomeId` is the LLM-supplied
+ * `chart_id` (kebab-case slug) — stable, and "same id overwrites"
+ * is the policy.
  *
  * Returns `null` (with a warn log) on any payload-shape issue so the
  * caller skips the row rather than crashing the whole replay.
@@ -82,38 +84,50 @@ export function rebuildChartOutcome(
   chunk: ToolCallChunkPayload,
   ctx: RebuildContext,
 ): { id: string; outcome: Outcome } | null {
-  let args: RenderChartArgs;
+  let rawArgs: Record<string, unknown>;
   try {
-    args = JSON.parse(chunk.args) as RenderChartArgs;
+    rawArgs = JSON.parse(chunk.args) as Record<string, unknown>;
   } catch (err) {
     ctx.log.warn(
       {
         event: "outcomes_replay_parse_failed",
-        tool: "render_chart",
+        tool: "generate_echarts_config",
         runId: ctx.runId,
         err: err instanceof Error ? err.message : String(err),
       },
-      "skipping unparseable render_chart payload",
+      "skipping unparseable generate_echarts_config payload",
     );
     return null;
   }
-  if (!args.chartId || !args.title) return null;
+  const args: GenerateEchartsConfigArtifactArgs | null =
+    readGenerateEchartsConfigArgs(rawArgs);
+  if (args === null) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_invalid_args",
+        tool: "generate_echarts_config",
+        runId: ctx.runId,
+      },
+      "skipping generate_echarts_config row with invalid args shape",
+    );
+    return null;
+  }
   const content = chartArgsToContent(args);
   if (content === null) {
     ctx.log.warn(
       {
         event: "outcomes_replay_missing_option",
         runId: ctx.runId,
-        chartId: args.chartId,
+        chartId: args.chart_id,
       },
-      "skipping render_chart row with no usable option payload",
+      "skipping generate_echarts_config row with no usable option payload",
     );
     return null;
   }
   return {
-    id: args.chartId,
+    id: args.chart_id,
     outcome: {
-      outcomeId: args.chartId,
+      outcomeId: args.chart_id,
       kind: "report",
       title: args.title,
       description: args.description,

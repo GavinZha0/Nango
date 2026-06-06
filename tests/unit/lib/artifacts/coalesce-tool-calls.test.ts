@@ -42,7 +42,7 @@ describe("coalesceToolCalls — happy paths", () => {
       callId: "call-a",
       seq: 1,
       toolName: "fetch_data_table",
-      input: { sql: "select 1" },
+      inputs: { sql: "select 1" },
       result: { dataset: "ds_orders_q4" },
       ok: true,
     });
@@ -58,7 +58,7 @@ describe("coalesceToolCalls — happy paths", () => {
     ];
     const inv = coalesceToolCalls(events);
     expect(inv).toHaveLength(1);
-    expect(inv[0]!.input).toEqual({
+    expect(inv[0]!.inputs).toEqual({
       sql: "select * from o",
       limit: 100,
     });
@@ -103,7 +103,7 @@ describe("coalesceToolCalls — failure modes", () => {
     expect(inv[0]!.ok).toBe(false);
     expect(inv[0]!.result).toBeNull();
     // The input is still recovered (so debug paths see partial state).
-    expect(inv[0]!.input).toEqual({ foo: "bar" });
+    expect(inv[0]!.inputs).toEqual({ foo: "bar" });
   });
 
   it("ignores a result event with no matching chunk (unknown toolCallId)", () => {
@@ -172,7 +172,7 @@ describe("coalesceToolCalls — failure modes", () => {
     expect(inv[0]!.ok).toBe(false);
     expect(inv[0]!.result).toBeNull();
     // Input is still recovered — useful for save-time forensics.
-    expect(inv[0]!.input).toEqual({ name: "ds_x" });
+    expect(inv[0]!.inputs).toEqual({ name: "ds_x" });
   });
 
   it("treats ok:true envelopes as success (current contract)", () => {
@@ -220,7 +220,7 @@ describe("coalesceToolCalls — failure modes", () => {
     expect(inv).toHaveLength(1);
     expect(inv[0]!.ok).toBe(false);
     expect(inv[0]!.result).toBeNull();
-    expect(inv[0]!.input).toEqual({ command: ["python3", "-"] });
+    expect(inv[0]!.inputs).toEqual({ command: ["python3", "-"] });
   });
 
   it("treats exitCode=0 as success (process-result envelope)", () => {
@@ -255,7 +255,7 @@ describe("coalesceToolCalls — failure modes", () => {
       result(2, "call-a", '{"ok":true}'),
     ];
     const inv = coalesceToolCalls(events);
-    expect(inv[0]!.input).toEqual({});
+    expect(inv[0]!.inputs).toEqual({});
     expect(inv[0]!.ok).toBe(true); // result still parses
   });
 
@@ -322,9 +322,9 @@ describe("coalesceToolCalls — edge cases", () => {
     expect(inv).toHaveLength(2);
     const callA = inv.find((i) => i.callId === "call-a");
     const callB = inv.find((i) => i.callId === "call-b");
-    expect(callA?.input).toEqual({ x: "a-args" });
+    expect(callA?.inputs).toEqual({ x: "a-args" });
     expect(callA?.result).toEqual({ ok: "a" });
-    expect(callB?.input).toEqual({ y: "b-args" });
+    expect(callB?.inputs).toEqual({ y: "b-args" });
     expect(callB?.result).toEqual({ ok: "b" });
   });
 });

@@ -25,7 +25,16 @@
  *      and `src/lib/workflows/spec/schema.ts` for the types.
  */
 
-import { Bot, Code2, Copy, Database, Wrench, X, type LucideIcon } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  Code2,
+  Copy,
+  Database,
+  Wrench,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import {
   useCallback,
   useMemo,
@@ -81,6 +90,11 @@ const ACCENTS: Record<CanonicalNode["type"], Accent> = {
     iconFg: "text-sky-700 dark:text-sky-300",
     Icon: Database,
   },
+  chart: {
+    iconBg: "bg-rose-100 dark:bg-rose-900/40",
+    iconFg: "text-rose-700 dark:text-rose-300",
+    Icon: BarChart3,
+  },
 };
 
 function nodeTitle(node: CanonicalNode): string {
@@ -92,7 +106,9 @@ function nodeTitle(node: CanonicalNode): string {
     case "code":
       return node.language;
     case "sql":
-      return node.name ?? node.dataSourceName;
+      return node.name ?? node.data_source_name;
+    case "chart":
+      return `${node.inputs.renderer} chart`;
   }
 }
 
@@ -184,7 +200,7 @@ export function InspectorDrawer({
               that has them. */}
           {hasInputMap(node) && (
             <Section title="Input">
-              <JsonView data={node.input} defaultExpandDepth={2} />
+              <JsonView data={node.inputs} defaultExpandDepth={2} />
             </Section>
           )}
 
@@ -230,7 +246,7 @@ function AgentBody({ node }: { node: CanonicalAgentNode }): ReactElement {
         <CodeInline value={node.agent} />
       </Section>
       <Section title="Agent ID">
-        <CodeInline value={node.agentId} subtle />
+        <CodeInline value={node.agent_id} subtle />
       </Section>
     </>
   );
@@ -285,7 +301,7 @@ function SqlBody({ node }: { node: CanonicalSqlNode }): ReactElement {
   return (
     <>
       <Section title="Data source">
-        <CodeInline value={node.dataSourceName} />
+        <CodeInline value={node.data_source_name} />
       </Section>
       {node.name && (
         <Section title="Dataset name">
@@ -305,14 +321,14 @@ function RuntimeMetaSection({
   node: CanonicalNode;
 }): ReactElement | null {
   const rows: Array<[string, string]> = [];
-  if (node.timeoutSeconds !== undefined) {
-    rows.push(["Timeout", `${node.timeoutSeconds}s`]);
+  if (node.timeout_seconds !== undefined) {
+    rows.push(["Timeout", `${node.timeout_seconds}s`]);
   }
   if (node.retries !== undefined) {
-    const { attempts, delaySeconds, backoff } = node.retries;
+    const { attempts, delay_seconds, backoff } = node.retries;
     rows.push([
       "Retries",
-      `${attempts} attempt${attempts === 1 ? "" : "s"}, ${delaySeconds}s delay${backoff !== undefined ? ` (${backoff})` : ""}`,
+      `${attempts} attempt${attempts === 1 ? "" : "s"}, ${delay_seconds}s delay${backoff !== undefined ? ` (${backoff})` : ""}`,
     ]);
   }
   if (rows.length === 0) return null;
@@ -340,7 +356,7 @@ function hasInputMap(
   node: CanonicalNode,
 ): node is CanonicalToolNode | CanonicalAgentNode | CanonicalCodeNode {
   if (node.type === "sql") return false;
-  if (node.type === "code") return node.input !== undefined;
+  if (node.type === "code") return node.inputs !== undefined;
   return true;
 }
 

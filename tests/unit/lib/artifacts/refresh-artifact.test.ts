@@ -28,7 +28,6 @@ function artifactRow(
     type: "chart",
     name: "Q4",
     description: null,
-    content: { type: "bar" },
     config: null,
     sourceThreadId: null,
     sourceOutcomeId: null,
@@ -63,15 +62,16 @@ function sampleSpec(): CanonicalWorkflowSpec {
   return {
     version: "1.0",
     name: "demo",
-    refReconAlgorithm: "ref_recon_v1",
+    ref_recon_algorithm: "ref_recon_v1",
     nodes: [
       {
         type: "tool",
+        schema_version: "1",
         id: 0,
         description: "n",
         depends_on: [],
         tool: "x",
-        input: {},
+        inputs: {},
       },
     ],
     outputs: { data: "@nodes.0.x" },
@@ -161,7 +161,7 @@ describe("buildArtifactBundle — forceFresh option", () => {
 
   it("preserves the bundle's other fields when forceFresh: true", async () => {
     const deps = makeDeps(
-      artifactRow({ content: { type: "line" } }),
+      artifactRow({ workflowOutputField: "data" }),
       sampleSpec(),
       null,
     );
@@ -171,7 +171,7 @@ describe("buildArtifactBundle — forceFresh option", () => {
       deps,
       { forceFresh: true },
     );
-    expect(bundle.node.content).toEqual({ type: "line" });
+    expect(bundle.node.id).toBe(ARTIFACT_ID);
     expect(bundle.workflow).toBeDefined();
     expect(bundle.workflow!.outputField).toBe("data");
   });

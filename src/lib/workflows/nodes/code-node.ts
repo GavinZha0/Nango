@@ -3,7 +3,7 @@
  *
  * Per-attempt body (retry loop + event emission lives in
  * `with-retries.ts`):
- *   1. Resolve `@path` refs in `node.input` (datasets, env, …).
+ *   1. Resolve `@path` refs in `node.inputs` (datasets, env, …).
  *   2. Coerce conventional input keys into the sandbox dispatch shape
  *      — `inputs.datasets` and `inputs.env`.
  *   3. Call `deps.runCode({...})` — DI bridge wired to
@@ -58,14 +58,14 @@ export async function executeCodeNode(
       // resolveRefs walks arrays per-element so dataset refs
       // produced by Strategy Z+ become literal strings for the
       // sandbox call.
-      const resolvedInput = resolveRefs(node.input ?? {}, state) as Record<
+      const resolvedInput = resolveRefs(node.inputs ?? {}, state) as Record<
         string,
         unknown
       >;
       const datasets = coerceDatasets(resolvedInput, node.id);
       const env = coerceEnv(resolvedInput, node.id);
 
-      const timeoutSeconds = node.timeoutSeconds ?? DEFAULT_CODE_TIMEOUT_SECONDS;
+      const timeoutSeconds = node.timeout_seconds ?? DEFAULT_CODE_TIMEOUT_SECONDS;
 
       const result = await deps.runCode({
         language: node.language,
