@@ -57,7 +57,7 @@
     "@rjsf/shadcn": "^6.5.2",
     "@rjsf/utils": "^6.5.2",
     "@rjsf/validator-ajv8": "^6.5.2",
-    "@xyflow/react": "^12.10.2",
+    "@xyflow/react": "^12.11.0",
     "ai": "^6.0.193",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
