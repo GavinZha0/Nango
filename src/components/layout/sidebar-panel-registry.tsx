@@ -7,11 +7,11 @@
 import type { ComponentType } from "react";
 import {
   LayoutDashboard,
-  Sparkles,
+  Fan,
   Bot,
   Plug,
   BicepsFlexed,
-  Calendar,
+  Calendar1,
   Database,
   Server,
   FlaskConical,
@@ -77,14 +77,14 @@ export const SIDEBAR_PANEL_REGISTRY: Record<LeftPanelId, SidebarPanelDefinition>
   artifact: {
     id: "artifact",
     label: "Artifacts",
-    icon: Sparkles,
+    icon: Fan,
     component: ArtifactPanel,
     href: "/artifact",
   },
   schedules: {
     id: "schedules",
     label: "Schedules",
-    icon: Calendar,
+    icon: Calendar1,
     component: SchedulesPanel,
     href: "/schedule",
   },

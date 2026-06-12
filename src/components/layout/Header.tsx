@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
-  MessageSquare,
+  MessagesSquare,
   LogOut,
   UserRound,
   Settings,
@@ -189,7 +189,7 @@ function ChatToggleButton(): ReactNode {
         aria-label="Toggle chat panel"
         aria-pressed={rightPanelOpen}
       >
-        <MessageSquare className="h-4 w-4" />
+        <MessagesSquare className="h-4 w-4" />
       </TooltipTrigger>
       <TooltipContent side="bottom">
         <p>{rightPanelOpen ? "Close chat" : "Open chat"}</p>

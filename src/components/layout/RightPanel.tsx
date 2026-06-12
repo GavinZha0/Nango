@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { History, MessageSquare, SquarePen } from "lucide-react";
+import { History, MessagesSquare, SquarePen } from "lucide-react";
 import { z } from "zod";
 import {
   CopilotKitProvider,
@@ -106,7 +106,7 @@ const TAB_SEGMENTS: {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "chat", label: "Chat", icon: MessagesSquare },
   { id: "history", label: "History", icon: History },
 ];
 

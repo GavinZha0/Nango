@@ -11,8 +11,8 @@ import {
   Users,
   KeyRound,
   Settings,
-  Bell,
-  MessagesSquare,
+  BellRing,
+  BoomBox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LeftPanelId } from "@/store/sidebar";
@@ -79,7 +79,7 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   { kind: "route", id: "user", label: "Users", icon: Users, href: "/admin/user", role: "admin" },
   { kind: "route", id: "credential", label: "Credentials", icon: KeyRound, href: "/admin/credential", role: "admin" },
   { kind: "route", id: "config", label: "Config", icon: Settings, href: "/admin/config", role: "admin" },
-  { kind: "route", id: "thread", label: "Threads", icon: MessagesSquare, href: "/admin/thread", role: "admin" },
+  { kind: "route", id: "thread", label: "Threads", icon: BoomBox, href: "/admin/thread", role: "admin" },
 ];
 
 /** Resolve the effective role for an item (default = "user"). */
@@ -238,7 +238,7 @@ function renderNotifications(
         )}
         aria-label="Notifications"
       >
-        <Bell className="h-6 w-6" />
+        <BellRing className="h-6 w-6" />
         {ctx.unreadCount > 0 && (
           <span className="absolute right-0.5 top-0.5 inline-flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white">
             {ctx.unreadCount > 99 ? "99+" : ctx.unreadCount}

@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
-  Bell,
+  BellRing,
   BellOff,
   CheckCheck,
   CheckCircle2,
@@ -145,7 +145,7 @@ export function NotificationBell(): ReactNode {
         }
       >
         {isStreamConnected ? (
-          <Bell className="h-4 w-4" />
+          <BellRing className="h-4 w-4" />
         ) : (
           <BellOff className="h-4 w-4" />
         )}

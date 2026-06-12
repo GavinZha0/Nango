@@ -15,14 +15,14 @@
  * surrounding left panel, not here.
  */
 
-import { LayoutDashboard, MessageSquare, TrendingUp } from "lucide-react";
+import { Crown, LayoutDashboard, MessageSquareMore, TrendingUp } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function WelcomePage(): ReactNode {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 p-8 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-        <LayoutDashboard className="h-8 w-8 text-primary" />
+        <Crown className="h-8 w-8 text-primary" />
       </div>
 
       <div className="max-w-md space-y-2">
@@ -30,27 +30,26 @@ export function WelcomePage(): ReactNode {
           Welcome to Nango
         </h1>
         <p className="text-muted-foreground">
-          Your AI-powered workspace. Connect data sources, generate dashboards,
-          and let agents build artifacts for you — all in one place.
+          Your AI-powered workbench — all in one place.
         </p>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
           {
-            icon: TrendingUp,
-            title: "Data Analysis",
-            desc: "Connect databases and explore data visually",
+            icon: MessageSquareMore,
+            title: "AI Chat",
+            desc: "Chat with AI agents to collaborate on tasks together",
           },
           {
-            icon: MessageSquare,
-            title: "AI Chat",
-            desc: "Ask agents to create charts and dashboards",
+            icon: TrendingUp,
+            title: "Data Analysis",
+            desc: "Connect to data sources and transform data into visual artifacts",
           },
           {
             icon: LayoutDashboard,
-            title: "Outcomes",
-            desc: "Generated charts collected per conversation",
+            title: "Dashboards",
+            desc: "Assemble generated artifacts into dashboards for publishing and sharing",
           },
         ].map(({ icon: Icon, title, desc }) => (
           <div
