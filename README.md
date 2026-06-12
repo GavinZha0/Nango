@@ -40,7 +40,7 @@
 
 ---
 
-## What is Nango?
+## What is Nango (南瓜)?
 
 Nango is a small-team **AI collaboration platform**. Instead of a one-off chatbot,
 it positions an AI agent — also named **Nango** — as a *colleague* who sits in
