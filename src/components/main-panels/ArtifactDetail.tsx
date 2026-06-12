@@ -21,10 +21,14 @@
 
 import {
   ArrowLeft,
+  Camera,
+  ChevronDown,
   ChevronRight as ChevronRightCrumb,
   ChevronUp,
+  Columns2,
   Folder,
   Loader2,
+  MoreHorizontal,
   Move,
   Pencil,
   RefreshCw,
@@ -54,7 +58,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -70,6 +74,15 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkflowGraph } from "@/components/workflow-graph/WorkflowGraph";
 import { ChartErrorBoundary } from "@/components/workspace/ChartErrorBoundary";
@@ -110,6 +123,27 @@ interface ArtifactBundleResponse {
   fromCache?: boolean;
   /** ISO-8601 timestamp of the execution that produced `data`. */
   executedAt?: string;
+  /** True when data came from stored snapshot without workflow execution. */
+  fromSnapshot?: boolean;
+  /** ISO-8601 timestamp of when the snapshot was saved. Present when fromSnapshot=true. */
+  snapshotAt?: string;
+}
+
+interface SnapshotInfo {
+  /** Whether data came from stored snapshot (true) or live execution (false). */
+  fromSnapshot: boolean;
+  /** Pre-formatted timestamp string for display. */
+  timestamp: string;
+}
+
+/** Format an ISO-8601 timestamp for the title-row data timestamp badge. */
+function formatDataTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /**
@@ -205,6 +239,75 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     }
   }, [node, mutateTree, router]);
 
+  // ── Snapshot actions ────────────────────────────────────────────
+  const handleRefresh = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`/api/artifacts/${artifactId}/refresh`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
+      const bundle = (await res.json()) as ArtifactBundleResponse;
+      await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: false });
+      toast.success("Chart refreshed");
+    } catch (err) {
+      toast.error(`Refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [artifactId]);
+
+  const handleSaveSnapshot = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`/api/artifacts/${artifactId}/snapshot`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
+      const bundle = (await res.json()) as ArtifactBundleResponse;
+      await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: false });
+      toast.success("Snapshot saved");
+    } catch (err) {
+      toast.error(`Save snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [artifactId]);
+
+  const handleToggleViewMode = useCallback(async (): Promise<void> => {
+    if (!node) return;
+    const next = node.viewMode === "snapshot" ? "live" : "snapshot";
+    try {
+      const res = await fetch(`/api/artifacts/${artifactId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ view_mode: next }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
+      await mutate();
+      toast.success(`Switched to ${next} mode`);
+    } catch (err) {
+      toast.error(`Mode switch failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [artifactId, node, mutate]);
+
+  // Compute the data timestamp for the title row.
+  const snapshotInfo: SnapshotInfo | undefined = useMemo(() => {
+    if (data?.fromSnapshot === true && data.snapshotAt) {
+      return { fromSnapshot: true, timestamp: formatDataTime(data.snapshotAt) };
+    }
+    if (data?.fromSnapshot === false && data.executedAt) {
+      return { fromSnapshot: false, timestamp: formatDataTime(data.executedAt) };
+    }
+    if (data?.executedAt) {
+      return { fromSnapshot: false, timestamp: formatDataTime(data.executedAt) };
+    }
+    return undefined;
+  }, [data]);
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -237,9 +340,15 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
         onCrumbClick={(id) => {
           if (id !== node.id) router.push(`/artifact/${id}`);
         }}
+        snapshotInfo={snapshotInfo}
         actions={
           isSeedCategory ? null : (
             <ActionBar
+              viewMode={node?.viewMode ?? "snapshot"}
+              fromSnapshot={snapshotInfo?.fromSnapshot ?? true}
+              onRefresh={() => void handleRefresh()}
+              onSaveSnapshot={() => void handleSaveSnapshot()}
+              onToggleViewMode={() => void handleToggleViewMode()}
               onRename={() => setDialog("rename")}
               onMove={() => setDialog("move")}
               onDelete={() => setDialog("delete")}
@@ -258,7 +367,6 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           router={router}
           spec={data.workflow.spec}
           data={data.data}
-          executedAt={data.executedAt}
         />
       ) : (
         <ArtifactScrollBody
@@ -266,7 +374,6 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           tree={tree}
           router={router}
           data={data?.data}
-          executedAt={data?.executedAt}
         />
       )}
 
@@ -321,27 +428,13 @@ interface ArtifactScrollBodyProps {
    *  prefer this over `node.content.blocks` so the body always
    *  reflects the current workflow execution. */
   data?: unknown;
-  executedAt?: string;
 }
 
-/**
- * Single-pane scrollable body — the legacy layout used by folders
- * and standalone (no-workflow) artifacts.
- *
- * `min-h-0` is the critical CSS escape from the flex gotcha: a
- * `flex-1` child's default `min-height: auto` lets the box grow
- * to fit content rather than constrain to the parent's remaining
- * space. Without it, a long card_list artifact pushes the trailing
- * MetaCard past the viewport bottom and the outer `<main>`'s
- * `overflow-hidden` prevents the page itself from scrolling to
- * recover.
- */
 function ArtifactScrollBody({
   node,
   tree,
   router,
   data,
-  executedAt,
 }: ArtifactScrollBodyProps): ReactElement {
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -352,9 +445,8 @@ function ArtifactScrollBody({
         {node.kind === "folder" ? (
           <FolderBody node={node} tree={tree} router={router} />
         ) : (
-          <ArtifactBody node={node} data={data} executedAt={executedAt} />
+          <ArtifactBody node={node} data={data} />
         )}
-        <MetaCard node={node} />
       </div>
     </ScrollArea>
   );
@@ -366,7 +458,6 @@ interface WorkflowBackedLayoutProps {
   router: ReturnType<typeof useRouter>;
   spec: CanonicalWorkflowSpec;
   data?: unknown;
-  executedAt?: string;
 }
 
 /**
@@ -387,7 +478,6 @@ function WorkflowBackedLayout({
   router,
   spec,
   data,
-  executedAt,
 }: WorkflowBackedLayoutProps): ReactElement {
   const lowerPanelRef = useRef<PanelImperativeHandle | null>(null);
   // Track the lower panel's current size (asPercentage). The
@@ -419,7 +509,6 @@ function WorkflowBackedLayout({
             tree={tree}
             router={router}
             data={data}
-            executedAt={executedAt}
           />
         </ResizablePanel>
         <ResizableHandle withHandle />
@@ -469,6 +558,8 @@ interface DetailHeaderProps {
   onBack: () => void;
   onCrumbClick?: (id: string) => void;
   actions?: ReactElement | null;
+  /** Snapshot / live timestamp shown right-aligned in the title row. */
+  snapshotInfo?: SnapshotInfo;
 }
 
 function DetailHeader({
@@ -477,6 +568,7 @@ function DetailHeader({
   onBack,
   onCrumbClick,
   actions,
+  snapshotInfo,
 }: DetailHeaderProps): ReactElement {
   return (
     <header className="flex items-center gap-2 border-b px-4 py-3">
@@ -489,64 +581,158 @@ function DetailHeader({
       >
         <ArrowLeft className="h-4 w-4" />
       </Button>
-      <div className="flex flex-1 min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        {breadcrumb && breadcrumb.length > 0 ? (
-          breadcrumb.map((n, i) => (
-            <span key={n.id} className="flex items-center gap-1">
-              {i > 0 && <ChevronRightCrumb className="h-3 w-3" />}
-              <button
-                type="button"
-                onClick={() => onCrumbClick?.(n.id)}
-                className={cn(
-                  "truncate",
-                  i === breadcrumb.length - 1
-                    ? "font-medium text-foreground"
-                    : "hover:underline",
-                )}
-              >
-                {n.name}
-              </button>
-            </span>
-          ))
-        ) : (
-          <h1 className="truncate text-sm font-semibold text-foreground">
-            {title}
-          </h1>
+      {/* Title area: title text truncates before the timestamp when the row is narrow. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          {breadcrumb && breadcrumb.length > 0 ? (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              {breadcrumb.map((n, i) => (
+                <span key={n.id} className="flex min-w-0 items-center gap-1">
+                  {i > 0 && <ChevronRightCrumb className="h-3 w-3 shrink-0" />}
+                  <button
+                    type="button"
+                    onClick={() => onCrumbClick?.(n.id)}
+                    className={cn(
+                      "min-w-0 truncate",
+                      i === breadcrumb.length - 1
+                        ? "font-medium text-foreground"
+                        : "hover:underline",
+                    )}
+                  >
+                    {n.name}
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <h1 className="truncate text-sm font-semibold text-foreground">
+              {title}
+            </h1>
+          )}
+        </div>
+        {/* Data timestamp — amber for snapshot, muted for live. Shrinks-0 so
+            title text truncates before reaching it. */}
+        {snapshotInfo !== undefined && (
+          <span
+            className={cn(
+              "shrink-0 flex items-center gap-1 text-xs",
+              snapshotInfo.fromSnapshot
+                ? "text-amber-400"
+                : "text-muted-foreground",
+            )}
+          >
+            {snapshotInfo.fromSnapshot ? (
+              <Camera className="h-3 w-3" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            {snapshotInfo.timestamp}
+          </span>
         )}
       </div>
-      {actions && <div className="flex items-center gap-1">{actions}</div>}
+      {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
     </header>
   );
 }
 
 function ActionBar({
+  viewMode,
+  fromSnapshot,
+  onRefresh,
+  onSaveSnapshot,
+  onToggleViewMode,
   onRename,
   onMove,
   onDelete,
 }: {
+  viewMode: "snapshot" | "live";
+  /** True when the currently displayed data came from the stored snapshot.
+   *  Compare is available whenever this is false — the user is looking at
+   *  live data (either live mode or after a manual refresh in snapshot mode). */
+  fromSnapshot: boolean;
+  onRefresh: () => void;
+  onSaveSnapshot: () => void;
+  onToggleViewMode: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
 }): ReactElement {
   return (
     <>
-      <Button size="sm" variant="outline" onClick={onRename} className="h-8 gap-1.5">
-        <Pencil className="h-3.5 w-3.5" />
-        Rename
-      </Button>
-      <Button size="sm" variant="outline" onClick={onMove} className="h-8 gap-1.5">
-        <Move className="h-3.5 w-3.5" />
-        Move
-      </Button>
+      {/* Refresh — standalone, most-used action */}
       <Button
         size="sm"
         variant="outline"
-        onClick={onDelete}
-        className="h-8 gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        onClick={onRefresh}
+        className="h-8 gap-1.5"
+        title="Re-execute workflow and show latest data"
       >
-        <Trash2 className="h-3.5 w-3.5" />
-        Delete
+        <RefreshCw className="h-3.5 w-3.5" />
+        Refresh
       </Button>
+
+      {/* More — everything else in one dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={buttonVariants({ size: "sm", variant: "outline" }) + " h-8 gap-1.5"}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+          More
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+
+          {/* ── Snapshot section ──────────────────────────── */}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+              Snapshot
+            </DropdownMenuLabel>
+            <DropdownMenuItem onClick={onSaveSnapshot}>
+              <Camera className="mr-2 h-3.5 w-3.5" />
+              Save as snapshot
+            </DropdownMenuItem>
+            {/* Compare — enabled whenever live data is shown (not from snapshot).
+                Covers: live mode, or snapshot mode after a manual Refresh. */}
+            <DropdownMenuItem
+              disabled={fromSnapshot}
+              onClick={() => { /* TODO: open compare view */ }}
+            >
+              <Columns2 className="mr-2 h-3.5 w-3.5" />
+              Compare with snapshot
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onToggleViewMode}>
+              {viewMode === "snapshot" ? (
+                <><RefreshCw className="mr-2 h-3.5 w-3.5" />Switch to Live mode</>
+              ) : (
+                <><Camera className="mr-2 h-3.5 w-3.5" />Switch to Snapshot mode</>
+              )}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+
+          {/* ── Management section ────────────────────────── */}
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={onRename}>
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onMove}>
+              <Move className="mr-2 h-3.5 w-3.5" />
+              Move
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem
+            onClick={onDelete}
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 }
@@ -617,15 +803,11 @@ interface ArtifactBodyProps {
    *  renderer yet and show a "not yet supported" placeholder until
    *  they migrate. */
   data?: unknown;
-  /** ISO-8601 timestamp from the execution that produced `data` —
-   *  surfaced as a small caption beneath the rendered body. */
-  executedAt?: string;
 }
 
 function ArtifactBody({
   node,
   data,
-  executedAt,
 }: ArtifactBodyProps): ReactElement {
   // Chart artifacts: `bundle.data` is the merged ECharts option
   // produced by the workflow's chart node. Render it directly so
@@ -638,12 +820,6 @@ function ArtifactBody({
             <EChartsRenderer option={data as Record<string, unknown>} />
           </div>
         </ChartErrorBoundary>
-        <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground">
-          {executedAt !== undefined && (
-            <span>Executed at {new Date(executedAt).toLocaleString()}</span>
-          )}
-          <RefreshChartButton artifactId={node.id} />
-        </div>
       </div>
     );
   }
@@ -663,70 +839,6 @@ function ArtifactBody({
 }
 
 /**
- * "Refresh" pill rendered beneath the chart body. POSTs to
- * `/api/artifacts/[id]/refresh` (which force-executes the
- * artifact's workflow) and overwrites the SWR cache with the new
- * bundle so `<EChartsRenderer>` re-mounts with the latest option.
- *
- * Failure modes surface as toasts — the chart keeps showing the
- * previously-rendered option so the user is never left with a
- * blank panel after a transient refresh error.
- */
-interface RefreshChartButtonProps {
-  artifactId: string;
-}
-
-function RefreshChartButton({
-  artifactId,
-}: RefreshChartButtonProps): ReactElement {
-  const [pending, setPending] = useState(false);
-  const onClick = useCallback(async (): Promise<void> => {
-    if (pending) return;
-    setPending(true);
-    try {
-      const res = await fetch(
-        `/api/artifacts/${artifactId}/refresh`,
-        { method: "POST" },
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
-          | { message?: string }
-          | null;
-        throw new Error(body?.message ?? `HTTP ${res.status}`);
-      }
-      const bundle = (await res.json()) as ArtifactBundleResponse;
-      await globalMutate(`/api/artifacts/${artifactId}`, bundle, {
-        revalidate: false,
-      });
-      toast.success("Chart refreshed");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(`Refresh failed: ${message}`);
-    } finally {
-      setPending(false);
-    }
-  }, [artifactId, pending]);
-
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      className="h-7 gap-1.5 px-2 text-xs"
-      onClick={() => void onClick()}
-      disabled={pending}
-      aria-busy={pending}
-    >
-      {pending ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <RefreshCw className="h-3.5 w-3.5" />
-      )}
-      Refresh
-    </Button>
-  );
-}
-
-/**
  * Cheap structural check — `bundle.data` for a chart artifact is
  * an ECharts option (a plain JSON object with at minimum a
  * `series` array). We use this to decide whether to take the
@@ -739,37 +851,6 @@ function isChartOption(value: unknown): boolean {
   }
   const series = (value as { series?: unknown }).series;
   return Array.isArray(series);
-}
-
-function MetaCard({ node }: { node: ArtifactEntity }): ReactElement {
-  const rows: Array<[string, string]> = [
-    ["Kind", node.kind],
-    ["Type", node.type ?? "—"],
-    ["Visibility", node.visibility],
-    ["Created", new Date(node.createdAt).toLocaleString()],
-    ["Updated", new Date(node.updatedAt).toLocaleString()],
-  ];
-  if (node.sourceThreadId) {
-    rows.push(["Source thread", node.sourceThreadId]);
-  }
-  if (node.sourceOutcomeId) {
-    rows.push(["Source outcome", node.sourceOutcomeId]);
-  }
-  return (
-    <div className="rounded border bg-card text-xs">
-      <div className="border-b px-3 py-1.5 font-medium text-muted-foreground">
-        Metadata
-      </div>
-      <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 px-3 py-2.5">
-        {rows.map(([k, v]) => (
-          <span key={k} className="contents">
-            <dt className="text-muted-foreground">{k}</dt>
-            <dd className="truncate font-mono text-foreground">{v}</dd>
-          </span>
-        ))}
-      </dl>
-    </div>
-  );
 }
 
 // dialogs

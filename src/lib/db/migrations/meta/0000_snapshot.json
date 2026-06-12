@@ -1,5 +1,5 @@
 {
-  "id": "8b0ab545-914f-4ba4-b04c-282af314fefe",
+  "id": "e2ed18c9-abb3-4407-a536-4899a9605d8c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -153,12 +153,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "content": {
-          "name": "content",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "config": {
           "name": "config",
           "type": "jsonb",
@@ -202,6 +196,25 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "snapshot": {
+          "name": "snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "snapshot_at": {
+          "name": "snapshot_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "view_mode": {
+          "name": "view_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'snapshot'"
         },
         "created_by": {
           "name": "created_by",
@@ -270,8 +283,8 @@
           "method": "btree",
           "with": {}
         },
-        "artifact_source_idx": {
-          "name": "artifact_source_idx",
+        "artifact_source_unique_idx": {
+          "name": "artifact_source_unique_idx",
           "columns": [
             {
               "expression": "source_thread_id",
@@ -286,7 +299,8 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
+          "where": "\"artifact\".\"source_thread_id\" IS NOT NULL AND \"artifact\".\"source_outcome_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -441,12 +455,11 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "is_supervisor": {
-          "name": "is_supervisor",
-          "type": "boolean",
+        "role": {
+          "name": "role",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": false
+          "notNull": false
         },
         "name": {
           "name": "name",
@@ -462,12 +475,6 @@
         },
         "icon": {
           "name": "icon",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "role": {
-          "name": "role",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -588,7 +595,23 @@
             }
           ],
           "isUnique": true,
-          "where": "\"builtin_agent\".\"is_supervisor\" = true",
+          "where": "\"builtin_agent\".\"role\" = 'supervisor'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "builtin_agent_one_secretary_per_user_idx": {
+          "name": "builtin_agent_one_secretary_per_user_idx",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"builtin_agent\".\"role\" = 'secretary'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3423,6 +3446,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "verification_case_result_run_case_idx": {
+          "name": "verification_case_result_run_case_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3756,17 +3800,18 @@
           "method": "btree",
           "with": {}
         },
-        "verification_run_status_idx": {
-          "name": "verification_run_status_idx",
+        "verification_run_recovery_idx": {
+          "name": "verification_run_recovery_idx",
           "columns": [
             {
-              "expression": "status",
+              "expression": "started_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
+          "where": "\"verification_run\".\"status\" = 'running'",
           "concurrently": false,
           "method": "btree",
           "with": {}

@@ -4,18 +4,21 @@
  *
  * Per-attempt body (retry loop + event emission lives in
  * `with-retries.ts`):
- *   1. Resolve `@path` refs in `node.query`, `node.data_source_name`,
- *      `node.name`.
+ *   1. Resolve `@path` refs in `inputs.sql_text`,
+ *      `inputs.data_source_name`, `inputs.dataset_name`.
  *   2. Look up the `extract_dataset_by_sql` tool via `deps.getTool`.
- *   3. Compose the tool input with workflow-fixed defaults
- *      (`previewRows: 0`, `forceRefresh: false`).
+ *   3. Compose the tool input with the engine-resolved row cap
+ *      (`sql.inline_max_rows`) and `force_refresh: false` — refresh
+ *      is an artifact-level concern.
  *   4. Translate the tool's failure envelope into the right
- *      `WorkflowErrorCode`; on success, strip operational fields and
- *      return just `{ name, rowCount }` per `DEFAULT_SQL_NODE_OUTPUTS`.
+ *      `WorkflowErrorCode`; on success, project the tool's
+ *      snake_case fields onto the SQL node's spec output envelope.
  *
  * See docs/workflow.md. The tool itself lives in
  * `src/lib/data-sources/runtime-tools.ts`.
  */
+
+import { getConfigNumber } from "@/lib/config";
 
 import { WorkflowError } from "../error";
 import type { WorkflowErrorCode } from "../error";
@@ -41,16 +44,12 @@ export type SqlNodeDeps = Pick<
 const SQL_TOOL_NAME = "extract_dataset_by_sql";
 
 /**
- * Number of top rows the SQL node materialises into the spec
- * output `rows`. Chart nodes consume this via
- * `inputs.dataset: "@nodes.X.rows"`. Tuned for typical chat-saved
- * chart use (time series / categorical breakdowns); larger
- * datasets are loaded from the parquet handle inside a code node.
- *
- * Future: replace with the inline-vs-cached engine policy
- * described in docs/workflow-spec.md (per-workflow byte/row caps).
+ * Default inline-row cap when `sql.inline_max_rows` is not set in
+ * the runtime config. The SQL tool's preview hard cap
+ * (`datasource.preview.max_rows`) is the upper limit at the tool
+ * boundary; the engine policy is bounded by it.
  */
-const SQL_WORKFLOW_PREVIEW_ROWS = 100;
+const DEFAULT_SQL_INLINE_MAX_ROWS = 200;
 
 /**
  * Execute one SQL node. Returns the node's outputs bag on success;
@@ -62,7 +61,7 @@ export async function executeSqlNode(
   state: ExecutionState,
   deps: SqlNodeDeps,
 ): Promise<Record<string, unknown>> {
-  const displayName = `sql:${node.data_source_name}`;
+  const displayName = `sql:${node.inputs.data_source_name}`;
   return withRetries({
     node,
     nodeName: displayName,
@@ -70,21 +69,21 @@ export async function executeSqlNode(
     deps,
     attemptFn: async () => {
       const dataSourceName = resolveStringField(
-        resolveRefs(node.data_source_name, state),
+        resolveRefs(node.inputs.data_source_name, state),
         node.id,
-        "dataSourceName",
+        "data_source_name",
       );
-      const query = resolveStringField(
-        resolveRefs(node.query, state),
+      const sqlText = resolveStringField(
+        resolveRefs(node.inputs.sql_text, state),
         node.id,
-        "query",
+        "sql_text",
       );
-      const name =
-        node.name !== undefined
+      const datasetName =
+        node.inputs.dataset_name !== undefined
           ? resolveStringField(
-              resolveRefs(node.name, state),
+              resolveRefs(node.inputs.dataset_name, state),
               node.id,
-              "name",
+              "dataset_name",
             )
           : deriveDefaultDatasetName(state.runId, node.id);
 
@@ -102,18 +101,24 @@ export async function executeSqlNode(
         });
       }
 
+      // Engine policy decides how many rows the tool should
+      // materialise inline. The tool itself caps this at its own
+      // preview row cap (200 by default); requesting more than
+      // that comes back as a `returned_rows < total_rows`
+      // truncation flag.
+      const inlineMaxRows = getConfigNumber(
+        "sql.inline_max_rows",
+        DEFAULT_SQL_INLINE_MAX_ROWS,
+      );
+
       const rawResult = await tool.execute({
         input: {
-          name,
-          dataSourceName,
-          query,
-          // Surface the top N rows so chart nodes can ref
-          // `@nodes.X.rows`. Pinned to a reasonable default; future
-          // engine policy may switch to inline-vs-cached based on
-          // total bytes. See docs/workflow-spec.md (SQL node).
-          previewRows: SQL_WORKFLOW_PREVIEW_ROWS,
+          dataset_name: datasetName,
+          data_source_name: dataSourceName,
+          sql_text: sqlText,
+          row_limit: inlineMaxRows,
           // Refresh happens at the artifact level, not per-node.
-          forceRefresh: false,
+          force_refresh: false,
         },
         abortSignal: state.abortSignal,
         context: state.context,
@@ -145,24 +150,28 @@ export async function executeSqlNode(
           message:
             `Node ${node.id}: ${SQL_TOOL_NAME} returned a non-object ` +
             `result (got ${typeof rawResult}); expected ` +
-            "{ name, rowCount, ... }.",
+            "{ dataset_name, total_rows, rows, ... }.",
           nodeId: node.id,
           nodeName: displayName,
         });
       }
       const result = rawResult as Record<string, unknown>;
-      const outputName = readString(result, "name") ?? name;
-      const rowCount = readNumber(result, "rowCount") ?? 0;
-      const rows = readArray(result, "preview") ?? [];
+      const outDatasetName = readString(result, "dataset_name") ?? datasetName;
+      const totalRows = readNumber(result, "total_rows") ?? 0;
+      const rows = readArray(result, "rows") ?? [];
+      const returnedRows = readNumber(result, "returned_rows") ?? rows.length;
+      const rowSchema = readObject(result, "row_schema") ?? { columns: [] };
 
-      // Strip the tool's operational metadata — only the fields in
+      // Strip the tool's operational metadata (cache_hit, ttl_hours,
+      // replaced_prior) — only the fields in
       // `DEFAULT_SQL_NODE_OUTPUTS` are part of the SQL node's
-      // downstream-referenceable contract. The tool's `preview`
-      // field is projected onto the snake_case spec name `rows`.
+      // downstream-referenceable contract.
       return {
-        name: outputName,
-        row_count: rowCount,
+        dataset_name: outDatasetName,
+        total_rows: totalRows,
+        returned_rows: returnedRows,
         rows,
+        row_schema: rowSchema,
       };
     },
     wrapError: (err) => {
@@ -204,16 +213,10 @@ function isFailedResult(value: unknown): value is FailedToolResult {
  * Translate `extract_dataset_by_sql` error codes to the engine's
  * `WorkflowErrorCode` taxonomy. Unknown codes fall back to
  * TOOL_EXECUTION_FAILED so the engine never throws an unknown class.
- *
- * QUERY_HASH_MISMATCH is no longer emitted at runtime (the tool
- * switched to slot-reassignment semantics — see data-sources.md);
- * the case is kept as defensive code so legacy persisted events
- * referencing it still map cleanly.
  */
 function mapToolErrorCodeToWorkflowCode(code: string): WorkflowErrorCode {
   switch (code) {
     case "INVALID_NAME":
-    case "QUERY_HASH_MISMATCH":
       return "TOOL_INPUT_SCHEMA_MISMATCH";
     case "DATA_SOURCE_NOT_FOUND":
     case "DATA_SOURCE_DISABLED":
@@ -287,4 +290,14 @@ function readArray(
 ): unknown[] | undefined {
   const v = obj[key];
   return Array.isArray(v) ? v : undefined;
+}
+
+function readObject(
+  obj: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const v = obj[key];
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
 }

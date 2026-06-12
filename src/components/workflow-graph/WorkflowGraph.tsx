@@ -46,6 +46,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -61,12 +62,7 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 
 import { InspectorDrawer } from "./InspectorDrawer";
 import { layoutWorkflow, type WorkflowNodeData } from "./layout";
-import {
-  AgentNodeCard,
-  CodeNodeCard,
-  SqlNodeCard,
-  ToolNodeCard,
-} from "./node-cards";
+import { WorkflowNodeCard } from "./node-cards";
 
 /**
  * Per-type renderers registered with ReactFlow. Keys must match
@@ -77,10 +73,11 @@ import {
  * avoid an internal re-mount warning.
  */
 const nodeTypes: NodeTypes = {
-  tool: ToolNodeCard,
-  agent: AgentNodeCard,
-  code: CodeNodeCard,
-  sql: SqlNodeCard,
+  tool: WorkflowNodeCard,
+  agent: WorkflowNodeCard,
+  code: WorkflowNodeCard,
+  sql: WorkflowNodeCard,
+  chart: WorkflowNodeCard,
 };
 
 /** Edge defaults for every connection. `markerEnd` makes data-
@@ -110,7 +107,7 @@ export interface WorkflowGraphProps {
 function isDegenerateSpec(spec: CanonicalWorkflowSpec): boolean {
   if (spec.nodes.length !== 1) return false;
   const only = spec.nodes[0]!;
-  return only.type === "tool" && only.tool === "noop";
+  return only.type === "tool" && only.inputs.name === "noop";
 }
 
 export function WorkflowGraph({ spec }: WorkflowGraphProps): ReactElement {
@@ -242,6 +239,23 @@ function GraphCanvas({
 }: GraphCanvasProps): ReactElement {
   const [ready, setReady] = useState<boolean>(false);
 
+  // Only mount ReactFlow once the container has non-zero dimensions.
+  // ResizablePanelGroup may briefly report 0-height before settling,
+  // which triggers React Flow warning #004. The ResizeObserver fires
+  // synchronously after layout so the delay is imperceptible.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hasDimensions, setHasDimensions] = useState<boolean>(false);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry?.contentRect ?? { width: 0, height: 0 };
+      setHasDimensions(width > 0 && height > 0);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const handleInit = useCallback(
     (instance: ReactFlowInstance<Node<WorkflowNodeData>>) => {
       requestAnimationFrame(() => {
@@ -254,12 +268,13 @@ function GraphCanvas({
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "h-full w-full transition-opacity duration-150",
         ready ? "opacity-100" : "opacity-0",
       )}
     >
-      <ReactFlow
+      {hasDimensions && <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -277,7 +292,7 @@ function GraphCanvas({
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls showInteractive={false} />
-      </ReactFlow>
+      </ReactFlow>}
     </div>
   );
 }

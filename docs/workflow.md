@@ -1,10 +1,6 @@
 # Workflow — V1 Reference
 
-> **Status**: canonical reference for what `src/lib/workflows/` and
-> `src/lib/artifacts/` actually do today. For the long-form design
-> discussion + decision history (D17–D38), see the legacy
-> [`workflow-architecture.md`](./workflow-architecture.md) (~6 k lines,
-> kept as design archive). New questions land here.
+> **Status**: Reflects the current implementation.
 
 ---
 
@@ -15,14 +11,9 @@ data work an agent did in chat. The save flow captures the tool /
 agent / code / SQL invocations that produced an artifact, freezes them
 into a typed DAG (`workflow.spec` JSONB), and writes one row to the
 `workflow` table. Re-running that DAG against the live data sources
-later is what the `/api/artifacts/[id]/refresh` endpoint does. The
-artifact's visual snapshot (`artifact.content.blocks`) stays
-side-by-side with the workflow so the user always sees something even
-when a refresh fails.
+later is what the `/api/artifacts/[id]/refresh` endpoint does.
 
-Section **§7** records how the chart-data-flow question got resolved
-(as D39). The implementation that puts the resolution into code lives
-in `workflow-architecture.md` §4.0 (phased refactor).
+The chart-data-flow design is documented in `workflow-spec.md`.
 
 ---
 
@@ -38,10 +29,9 @@ Nango is two engines that share infrastructure:
 | **UI engine** | "Agents that produce UI" — chat tools, charts, outcome rendering, artifact pages. Outputs are renderable views. | `src/components/workspace/`, `src/hooks/useOutcomeTools.tsx`, `src/lib/outcomes/` |
 
 A workflow lives entirely on the **data engine** side. UI rendering of
-its result is a separate concern handled by the artifact layer —
-historically the architectural fork in §7. The D39 chart refactor
-collapses the fork on the data side (chart becomes a workflow node)
-while keeping rendering in the browser.
+its result is a separate concern handled by the artifact layer. The
+chart refactor collapses the fork on the data side (chart becomes a
+workflow node) while keeping rendering in the browser.
 
 ### 1.2 What a workflow is (and isn't)
 
@@ -56,9 +46,8 @@ Isn't:
 - An LLM-authored DSL the user edits directly. The LLM never types a
   full workflow spec from scratch; it captures and modifies, never
   composes
-- A general computation engine. V1 supports four node types and a
-  flat-input/output ref system (`@nodes.X.field` / `@inputs.X` /
-  `@workflow.outputs.X`)
+- A general computation engine. V1 supports five node types and a
+  flat-input/output ref system (`@nodes.X.field` / `@inputs.X`)
 - A separate scheduler tier. Workflow refresh shares `entity_run` +
   the existing runner, no new dispatch infra
 
@@ -66,7 +55,6 @@ Isn't:
 
 ```
 artifact (one row in `artifact` table)
-   ├── content.blocks      ← visual snapshot at save time (chart option, etc.)
    ├── workflowId          ← FK to the backing workflow (if any)
    └── workflowOutputField ← which spec.outputs key holds the artifact's data
 
@@ -78,7 +66,7 @@ workflow (one row in `workflow` table)
 entity_run (one row per execution attempt)
    ├── entityKind = "workflow", entitySource = "builtin"
    ├── entityId = workflow.id
-   ├── parent_run_id (for agent sub-runs spawned by an agent node — W2)
+   ├── parent_run_id (for agent sub-runs spawned by an agent node)
    └── status / startedAt / finishedAt / errorMessage
 
 entity_run_event (timeline of one run)
@@ -95,7 +83,7 @@ are dispatched by `runner.start({ entityKind, entityId, ... })`. The
 runner doesn't care whether the entity is a chat agent or a workflow
 — it just creates an `entity_run` row, persists events, and waits
 for terminal status. This is why workflow refresh and chat dispatch
-can share `entity_run` without a separate `workflow_run` table (D24).
+can share `entity_run` without a separate `workflow_run` table.
 
 ---
 
@@ -114,9 +102,9 @@ can share `entity_run` without a separate `workflow_run` table (D24).
 │  Artifact orchestration  (src/lib/artifacts/)                   │
 │    save-artifact.ts      ← coalesce + build-from-events + write │
 │    bundle.ts             ← GET / refresh shared assembly        │
-│    execute-workflow.ts   ← engine adapter; D4a recorder + W2    │
+│    execute-workflow.ts   ← engine adapter; recorder + agent run  │
 │    refresh-artifact.ts   ← thin wrapper that sets forceFresh    │
-│    workflow-run-recorder ← entity_run + event persistence (D4a) │
+│    workflow-run-recorder ← entity_run + event persistence        │
 └──────────────────────────────────┬──────────────────────────────┘
                                    ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -128,10 +116,10 @@ can share `entity_run` without a separate `workflow_run` table (D24).
                                    ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  Engine dependencies  (DI — engine never imports these)         │
-│    runAgent       → runner.start (W2, refresh path only)        │
+│    runAgent       → runner.start (refresh path only)            │
 │    runCode        → sandbox adapter (subprocess / local-docker) │
 │    getTool        → user tool catalog (builtin-tools/...)       │
-│    emitEvent      → recorder.emit or noop (D4a)                 │
+│    emitEvent      → recorder.emit or noop                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -147,31 +135,31 @@ POST /api/artifacts/save
 save-artifact.ts (src/lib/artifacts/)
    │
    ├── 1. fetch the relevant `entity_run_event` rows for threadId
-   │      filtered to the source outcome (W1.6.1)
+   │      filtered to the source outcome
    │
    ├── 2. coalesceToolCalls → ToolInvocation[]
    │      assembles streaming chunks back into whole tool calls
    │
    ├── 3. buildFromEvents(invocations, artifactCreatingCallId)
    │      → { spec, strippedFrontendConfig, lineageReport }
-   │      • strips the frontend tool (render_chart) — only the data
-   │        chain becomes nodes
+   │      • chart tool (generate_echarts_config / generate_<lib>_config)
+   │        becomes a type:"chart" node; other artifact creators are
+   │        stripped (only data-producing invocations become nodes)
    │      • drops failed (ok:false) invocations
-   │      • assigns numeric node ids (D29)
+   │      • assigns numeric node ids
    │      • Strategy Z+ walks args for @path refs into upstream node
-   │        outputs (D33)
+   │        outputs
    │
    ├── 4. canonicalize(spec, deps) → CanonicalWorkflowSpec
-   │      resolves agent display names to UUIDs (D27),
-   │      fills DEFAULT_AGENT_OUTPUT_SCHEMA (D30) /
-   │      DEFAULT_SQL_NODE_OUTPUTS / DEFAULT_CODE_NODE_OUTPUTS
+   │      resolves display names → UUIDs (agent, sql nodes),
+   │      stamps schema_version; input/output schemas served from
+   │      NODE_TYPE_REGISTRY at validate/execute time
    │
    ├── 5. validate(canonical) — last-mile cross-ref checks
    │
    └── 6. ONE DB transaction:
           • INSERT workflow row (with `spec`)
-          • INSERT artifact row (with `content` = blocks +
-            workflowId / workflowOutputField)
+          • INSERT artifact row (workflowId / workflowOutputField)
           • INSERT entity_run_event "artifact_saved" lineage record
 ```
 
@@ -198,7 +186,7 @@ buildArtifactBundle(id, ownerId,        buildArtifactBundle(id, ownerId,
        │     status=running                │
        │   • emitEvent ← recorder.emit     │
        │     (writes entity_run_event)     │
-       │   • runAgent ← W2 real dispatch   │
+       │   • runAgent ← real dispatch      │
        │     via runner.start              │
        │                                   │
        │  forceFresh=false ⇒               │
@@ -216,7 +204,7 @@ buildArtifactBundle(id, ownerId,        buildArtifactBundle(id, ownerId,
                                                 data?, executedAt? }
 ```
 
-### 2.4 Why the engine ↔ runner DI seam (D17)
+### 2.4 Why the engine ↔ runner DI seam
 
 If `workflows/engine/` directly imported `runner/`, we'd have a cycle:
 
@@ -234,7 +222,46 @@ This is also why `execute-workflow.ts` lives under `src/lib/artifacts/`
 — it knows about both engine internals and runner internals, which a
 "pure engine" module shouldn't.
 
-### 2.5 File responsibility table
+### 2.5 Design principles
+
+**Three-stage save pipeline: LLM-emit → canonicalize → validate.**
+The LLM produces a minimal spec (display names, no schemas). Canonicalize
+(async) resolves names to UUIDs via real DB lookups and stamps
+`schema_version`; input/output schemas are served from
+`NODE_TYPE_REGISTRY` at validate/execute time, not stamped per-instance.
+Validate checks DAG invariants and cross-references. Persisted spec is
+always canonical.
+
+**No first-class `/api/workflows` endpoints.**
+Workflows are always accessed through their owning artifact
+(`/api/artifacts/[id]`). Workflow access = artifact access.
+
+**Strategy Z+ ref reconstruction.**
+Save is zero-LLM: `build-from-events.ts` reconstructs `@path` refs
+deterministically by comparing upstream tool result values against
+downstream tool argument values. Ambiguous matches keep literal values.
+
+**Chart nodes: static template + data ref.**
+Chart nodes store an ECharts option template (no inline data) plus a
+`@path` ref to upstream rows under `inputs.dataset`. The engine merges
+them at execute time; the browser renders. The "not-refreshable" fallback
+bakes data into `inputs.config` when Strategy Z+ cannot match the
+chart's dataset to any upstream output.
+
+### 2.6 Known constraints
+
+| Constraint | Detail |
+|---|---|
+| Strategy Z+ scope | Only top-level scalar and array fields are matched for ref reconstruction; nested objects inside tool arguments are not walked |
+| SQL node schemas | SQL nodes carry no per-instance `input_schema` / `output_schema`; their fixed output contract is declared in `NODE_TYPE_REGISTRY["sql:1"]` |
+| System-role agents | supervisor / secretary / evaluator agents cannot be workflow nodes (`AGENT_NOT_FOUND`) |
+| JavaScript datasets | `code` nodes with `language: "javascript"` cannot consume `inputs.datasets` (no Parquet reader in v1 Node.js sandbox) |
+| Chart single binding slot | Only `inputs.dataset` is a ref carrier; `@path` refs inside `inputs.config` are rejected (`CHART_CONFIG_CONTAINS_REF`) |
+| `code_file` for JavaScript | Not supported in v1 (`SPEC_FEATURE_UNSUPPORTED`) |
+| Code node output | Fixed CodeOutputEnvelope; stdout must be valid JSON with "rows" + "message" keys |
+| Condition / loop nodes | Not designed; `SPEC_FEATURE_UNSUPPORTED` if attempted |
+
+### 2.7 File responsibility table
 
 | File | Owns |
 |---|---|
@@ -247,18 +274,20 @@ This is also why `execute-workflow.ts` lives under `src/lib/artifacts/`
 | `src/lib/workflows/engine/execution-context.ts` | Per-run state (node outputs, ref resolution) |
 | `src/lib/workflows/engine/cache.ts` | L1 LRU class + key derivation (not yet wired) |
 | `src/lib/workflows/engine/scheduler.ts` | Topological order, parallelism control |
+| `src/lib/workflows/nodes/registry.ts` | Node type registry: `NodeTypeDescriptor`, `NODE_TYPE_REGISTRY`, `assembleCodeOutput` call chain; provides `getOutputFields()` for validate.ts |
+| `src/lib/sandbox/code-output.ts` | `CodeOutputEnvelope` type + `assembleCodeOutput()` — shared by `run_code_in_sandbox`, `run_skill_script`, and the workflow code-node executor |
 | `src/lib/workflows/nodes/tool-node.ts` | Tool invocation (ref-resolved input → tool.execute → JSON output) |
 | `src/lib/workflows/nodes/agent-node.ts` | Agent invocation via `deps.runAgent` |
-| `src/lib/workflows/nodes/code-node.ts` | Python sandbox via `deps.runCode` (D35) |
-| `src/lib/workflows/nodes/sql-node.ts` | `extract_dataset_by_sql` wrapper, parquet cache key (D36) |
-| `src/lib/workflows/nodes/with-retries.ts` | Per-node retry loop (D20), emits attempt events |
+| `src/lib/workflows/nodes/code-node.ts` | Python sandbox via `deps.runCode` |
+| `src/lib/workflows/nodes/sql-node.ts` | `extract_dataset_by_sql` wrapper, parquet cache key |
+| `src/lib/workflows/nodes/with-retries.ts` | Per-node retry loop, emits attempt events |
 | `src/lib/workflows/nodes/schema-validator.ts` | JSON Schema runtime validation |
 | `src/lib/workflows/build-from-events.ts` | Chat-event → spec build pipeline (Strategy Z+ ref reconstruction) |
 | `src/lib/artifacts/save-artifact.ts` | Save endpoint orchestrator |
 | `src/lib/artifacts/bundle.ts` | GET / refresh shared bundle assembly |
 | `src/lib/artifacts/execute-workflow.ts` | Engine adapter: catalog → deps, recorder, runAgent bridge |
 | `src/lib/artifacts/refresh-artifact.ts` | Thin wrapper: `buildArtifactBundle(..., { forceFresh: true })` |
-| `src/lib/artifacts/workflow-run-recorder.ts` | D4a entity_run + event persistence for refresh runs |
+| `src/lib/artifacts/workflow-run-recorder.ts` | entity_run + event persistence for refresh runs |
 | `src/lib/artifacts/coalesce-tool-calls.ts` | Streamed `tool_call_chunk` → whole `ToolInvocation` |
 
 ---
@@ -284,7 +313,7 @@ workflow (
 Indexes:
 - `workflow_created_by_idx` — "my workflows" listing
 - `workflow_visibility_idx` (partial WHERE visibility='public') — tenant-wide shared
-- `workflow_spec_gin_idx` (GIN with `jsonb_path_ops`) — reverse dependency queries: "which workflows reference data source X / MCP tool Y / agent Z?" (D26)
+- `workflow_spec_gin_idx` (GIN with `jsonb_path_ops`) — reverse dependency queries: "which workflows reference data source X / MCP tool Y / agent Z?"
 
 ### 3.2 Relationships
 
@@ -310,7 +339,9 @@ Indexes:
 
 **FK behaviour**:
 - `artifact.workflow_id` → `workflow.id` `ON DELETE SET NULL` — deleting a workflow leaves the artifact with its content snapshot but no replay path
-- `entity_run.entity_id` is **not** a FK (polymorphic across agent / team / workflow targets; D24) — deleting a workflow leaves orphaned run history rows. Read-only forensics; no integrity risk
+- `entity_run.entity_id` is **not** a FK (polymorphic across agent / team / workflow targets) — deleting a workflow leaves orphaned run history rows. Read-only forensics; no integrity risk
+
+> **Artifact snapshot fields** (added in Stage 3): `snapshot jsonb`, `snapshot_at timestamptz`, `view_mode text DEFAULT 'snapshot'`. GET returns stored snapshot when `view_mode='snapshot'`; POST `/snapshot` saves a new snapshot. See `save-snapshot.ts`.
 
 ### 3.3 `entity_run_event` types for workflows
 
@@ -348,105 +379,144 @@ flow always reads / writes LLM-emit and re-canonicalizes on save.
 
 ### 4.2 Node types
 
-V1 ships **four** node types, each its own Zod variant:
+V1 ships **five** node types, each its own Zod variant:
 
 ```ts
-NodeTypeSchema = z.enum(["tool", "agent", "code", "sql"]);
+NodeTypeSchema = z.enum(["tool", "agent", "code", "sql", "chart"]);
 ```
 
 #### 4.2.1 Tool node
 
 A built-in or MCP server-side tool. Examples: `web_search`,
 `run_ssh_command`, `get_skill`. NOT `extract_dataset_by_sql`
-(promoted to `sql` node in D36), NOT `run_code_in_sandbox`
-(promoted to `code` in D35), NOT `render_chart` (becomes a
-first-class `chart` node post-D39 — see §7; pre-D39 it was a
-frontend tool stripped at save).
+(promoted to `sql` node), NOT `run_code_in_sandbox`
+(promoted to `code` node), NOT `generate_echarts_config` /
+`generate_<lib>_config` (promoted to `chart` node).
+These names are rejected at save time with `PROMOTED_TOOL_AS_NODE`.
 
 ```jsonc
 {
   "id": 0,
   "type": "tool",
-  "tool": "web_search",
   "description": "Find recent regulatory updates",
-  "input": { "query": "EU AI Act 2025" },
+  "inputs": {
+    "name":      "web_search",
+    "arguments": { "query": "EU AI Act 2025" }
+  },
   "depends_on": [],
-  "outputs": ["results"],
-  "output_schema": { "type": "object", "properties": { ... } },
-  "retries": { "max": 2, "backoff": "exponential", "baseMs": 500 },
-  "timeoutSeconds": 30
+  "output_schema": { "type": "object", "properties": { /* registry-provided */ } },
+  "retries": { "attempts": 2, "backoff": "exponential", "delay_seconds": 1 },
+  "timeout_seconds": 30
 }
 ```
 
 #### 4.2.2 Agent node
 
-A built-in agent invocation. Save pipeline always emits the D30
-default `{ text: string }` output schema; runner returns plain text
-(`summary`), `execute-workflow.ts` wraps as `{ text: summary }` on
-the refresh path.
+A built-in agent invocation. The output contract is canonical-fixed:
+`{ result: string }`. The agent output schema is served from
+`NODE_TYPE_REGISTRY["agent:1"]` — not stamped per-instance.
+The runner returns plain text; `execute-workflow.ts` wraps as
+`{ result: summary }` on the refresh path.
 
 ```jsonc
 {
   "id": 1,
   "type": "agent",
-  "agent": "data_analyst",          // LLM-emit: display name
-  "agentId": "<uuid>",              // canonical: resolved by canonicalize
-  "input": { "text": "Summarise the search results in 200 words" },
   "depends_on": [0],
-  "output_schema": { /* DEFAULT_AGENT_OUTPUT_SCHEMA: {text: string} */ }
+  "inputs": {
+    "name":     "data_analyst",
+    "agent_id": "<uuid>",          // canonical: resolved by canonicalize
+    "task":     "Summarise the search results in 200 words",
+    "context":  "@nodes.0.results" // optional; whole-field @path ref
+  }
 }
 ```
 
-#### 4.2.3 Code node (D35)
+#### 4.2.3 Code node
 
-Python script in the sandbox. Default outputs are
-`{ stdout, stderr, exitCode, durationMs }`. Custom `output_schema`
-allowed (D35.B); engine parses JSON from stdout when supplied.
+Python or JavaScript script in the sandbox. Always returns a fixed
+`CodeOutputEnvelope`: `{ ok, duration_ms, rows, row_count, row_schema,
+message, files, error }`. Code must print a JSON object to stdout with
+`rows` (array) and optionally `message`. `row_schema` is auto-inferred
+from `rows[0]`. See `workflow-spec.md §5.4` for the full contract.
 
 ```jsonc
 {
-  "id": 2,
-  "type": "code",
-  "language": "python",
-  "code": "import pandas as pd, json\nrows = pd.read_parquet('./data/sales/data.parquet')...",
-  "depends_on": [1],
-  "input": {
-    "datasets": ["@nodes.1.name"],  // ref to upstream SQL node's dataset name
-    "env": {}                       // V1.x reserved
-  },
-  "outputs": ["stdout", "stderr", "exitCode", "durationMs"],
-  "timeoutSeconds": 30
+  "id": 2, "type": "code", "depends_on": [1],
+  "inputs": {
+    "language":  "python",
+    "code_text": "# aggregate and print json.dumps({'rows': [...], 'message': '...'})",
+    "datasets":  ["@nodes.1.dataset_name"],
+    "params":    { "threshold": 100 }
+  }
 }
 ```
 
-#### 4.2.4 SQL node (D36)
+#### 4.2.4 SQL node
 
 A `data_source` + SQL pair that materialises a Parquet snapshot.
-Outputs are `{ name, rowCount }`; downstream code nodes reference
-`@nodes.<id>.name` to mount the dataset under `./data/<name>/` in
-the sandbox cwd (D38).
+Outputs are `{ dataset_name, total_rows, returned_rows, rows,
+row_schema }`; downstream code nodes reference
+`@nodes.<id>.dataset_name` to mount the dataset under
+`./data/<dataset_name>/` in the sandbox cwd.
 
 ```jsonc
 {
   "id": 0,
   "type": "sql",
-  "dataSourceName": "prod_pg_readonly",
-  "query": "SELECT customer_id, sum(amount) AS total FROM orders GROUP BY 1",
-  "name": "customer_totals_2026",   // LLM-emit optional; canonicalize derives if omitted
   "depends_on": [],
-  "outputs": ["name", "rowCount"]
+  "inputs": {
+    "data_source_name": "prod_pg_readonly", // slug; canonicalize stamps data_source_id (UUID)
+    "sql_text":         "SELECT customer_id, sum(amount) AS total FROM orders GROUP BY 1",
+    "dataset_name":     "customer_totals_2026" // optional; engine derives if omitted
+  }
+}
+```
+
+#### 4.2.5 Chart node
+
+A declarative chart-render step. Stores an ECharts **option template**
+(no data) under `inputs.config` and a `@path` ref to upstream row data
+under `inputs.dataset`. At execute time the engine fills
+`config.dataset.source` with the resolved rows and returns
+`{ option }` — rendering happens in the browser.
+
+When `build-from-events` cannot match a `generate_echarts_config`
+call's inline data to any upstream output, the chart is saved as
+not-refreshable (literal `config`, absent `dataset` ref). The UI
+surfaces a "not refreshable" indicator in that case.
+
+```jsonc
+{
+  "id": 3,
+  "type": "chart",
+  "depends_on": [0],
+  "inputs": {
+    "renderer": "echarts",
+    "config": {
+      "xAxis": { "type": "category" },
+      "yAxis": { "type": "value" },
+      "series": [{ "type": "bar", "encode": { "x": "month", "y": "sales" } }]
+      // dataset.source is absent — engine fills it from inputs.dataset at execute time
+    },
+    "dataset": "@nodes.0.rows"   // OPTIONAL; omitted for not-refreshable charts
+  }
+  // output_schema canonical-fixed to { option: object }
 }
 ```
 
 ### 4.3 `@path` reference grammar
 
-References live in node `input` values (and `spec.outputs`):
+References live in node `inputs` values (and `spec.outputs`):
 
 | Sigil | Resolves to | Example |
 |---|---|---|
-| `@nodes.<id>.<field>` | upstream node's output field | `"@nodes.0.name"` → SQL node 0's dataset slug |
-| `@inputs.<key>` | workflow-level input parameter | `"@inputs.region"` (V1.x reserved; not user-facing yet) |
-| `@workflow.outputs.<key>` | workflow's declared output | for `spec.outputs` declarations only |
+| `@nodes.<id>.<field>` | upstream node's output field | `"@nodes.0.dataset_name"` → SQL node 0's parquet slug |
+| `@inputs.<key>` | workflow-level input parameter | `"@inputs.region"` (declared in `spec.input_schema.properties`) |
+| `@context.<path>` | per-run runtime context | `"@context.user.id"` |
+
+> `@workflow.<key>` is a backward-compat alias for `@inputs.<key>`;
+> new specs should use `@inputs.<key>`.
 
 Resolution is **strictly typed at validate time** (the engine asserts
 the upstream node declares a matching `output` key) and **lazily
@@ -458,8 +528,8 @@ top level:
 ```jsonc
 {
   "outputs": {
-    "result": "@nodes.2.stdout",
-    "rowCount": "@nodes.0.rowCount"
+    "result":     "@nodes.2.stdout",
+    "total_rows": "@nodes.0.total_rows"
   }
 }
 ```
@@ -486,28 +556,31 @@ Steps (all in `save-artifact.ts`):
    toolName, input, output, ok }` records
 3. **Build spec** — `buildFromEvents(invocations,
    artifactCreatingCallId)`:
-   - Strip the artifact-creating frontend tool (e.g. `render_chart`).
-     Its input becomes `strippedFrontendConfig` and goes into
-     `artifact.content.blocks` directly. **This is where chart option
-     leaves the workflow path — see §7.**
+   - If the artifact creator is `generate_echarts_config` (or any
+     `generate_<lib>_config` variant), the tool invocation becomes a
+     `type: "chart"` workflow node; the chart option is the workflow
+     output. For other artifact creators (e.g. `render_html`), the
+     creator is stripped and only data-producing invocations become nodes.
    - Filter envelope-failed (`ok: false`) invocations
-   - Assign numeric ids (D29)
-   - Walk each invocation's args via Strategy Z+ (D33) to find values
+   - Assign numeric ids
+   - Walk each invocation's args via Strategy Z+ to find values
      that match an upstream invocation's output → emit a `@path` ref;
      untouched literals stay literal
-4. **Canonicalize** — `canonicalize(spec, deps)`:
+4. **Canonicalize** — `canonicalize(spec, deps)` (async):
    - Resolve `agent` display names → `agentId` UUIDs (via
      `BuiltinAgentCatalog`)
-   - Fill `output_schema` from registries (D19 source 1):
+   - Fill `output_schema` from registries:
      `DEFAULT_AGENT_OUTPUT_SCHEMA` for agents, tool registry's
      declared schema for tool nodes, default field lists for code /
      sql nodes
+   - Dependencies are real DB-backed resolvers provided by
+     `buildProductionSaveDeps(ownerId)` from `save-deps.server.ts`
 5. **Validate** — `validate(canonical)` ensures refs resolve and
    declared outputs are reachable from `spec.outputs`
 6. **Persist** — one DB transaction:
    - INSERT `workflow` row
-   - INSERT `artifact` row (with `content.blocks` from
-     `strippedFrontendConfig` + `workflowId` + `workflowOutputField`)
+   - INSERT `artifact` row (`workflowId` + `workflowOutputField` +
+     `strippedFrontendConfig` for display metadata)
    - INSERT an `entity_run_event` row tagging the save (lineage)
 
 ### 5.2 Load + execute (GET artifact page)
@@ -527,11 +600,16 @@ Entry: `GET /api/artifacts/[id]`.
 7. return { node, workflow, data, fromCache: false, executedAt }
 ```
 
-GET runs the workflow but **persists nothing** to `entity_run` (D4a
-Strategy B). The bundle is returned to the client; the frontend
-today reads `node.content.blocks` and ignores `data` (see §7).
+`productionDeps` is the shared `BundleDeps` object exported from
+`get-artifact.ts` — it wires `loadArtifact`, `loadWorkflow`, and
+`executeWorkflow` for the production code path. The refresh path
+reuses the same deps, only differing by `{ forceFresh: true }`.
 
-### 5.3 Refresh (POST refresh) — D4a + W2 active
+GET runs the workflow but **persists nothing** to `entity_run`. The bundle
+— including fresh `data` from the executed workflow — is returned to the
+client. The refresh trigger UI and chart data merge are pending (see §8.2 Partial).
+
+### 5.3 Refresh (POST refresh)
 
 Entry: `POST /api/artifacts/[id]/refresh` (no body).
 
@@ -546,7 +624,7 @@ Entry: `POST /api/artifacts/[id]/refresh` (no body).
      → recorder.runId = entity_run.id
 5. wire engine deps:
      emitEvent  ← recorder.emit (writes entity_run_event rows)
-     runAgent   ← buildRealRunAgent(ownerId)  (W2: runner.start dispatch)
+     runAgent   ← buildRealRunAgent(ownerId)  (runner.start dispatch)
      runId      ← recorder.runId
 6. engine.execute({ runId, spec, ... })
      for each agent node:
@@ -554,27 +632,30 @@ Entry: `POST /api/artifacts/[id]/refresh` (no body).
                       initiator: user, ownerId, ... })
        → agent sub-run gets its OWN entity_run row, parent_run_id
          pointing at the workflow run
-7. if success: recorder.succeed() → UPDATE entity_run SET status=succeeded
+7. recorder.flush() — await all in-flight event writes
+8. if success: recorder.succeed() → UPDATE entity_run SET status=succeeded
    if WorkflowError or throw: recorder.fail(err) → status=failed,
      errorMessage=err.message
-8. respond { node, workflow, data?, executedAt? }
+9. respond { node, workflow, data?, executedAt? }
 ```
 
-Today's known gap: **the frontend reads `node.content.blocks` (saved
-snapshot) and never consumes `bundle.data` (fresh execution result)**.
-See §7.
+The recorder calls `flush()` before `finalizeRun` (both `succeed` and
+`fail` paths) to ensure all buffered `entity_run_event` writes have
+settled before the terminal status update.
+
+Known gap: the frontend does not yet expose a refresh trigger button
+or merge `bundle.data` (the fresh execution result) into the rendered
+chart view. Tracked in §8.2 Partial.
 
 ### 5.4 Modify via agent (designed, not built)
 
-The W1 plan calls for a `modify_workflow` MCP tool the right-panel
+The plan calls for a `modify_workflow` MCP tool the right-panel
 chatbot uses to edit a saved spec. The user says "change the date
 range to last 30 days"; the agent reads the spec via `get_workflow`,
 emits a patched LLM-emit version, and the server re-canonicalizes
 and writes it back.
 
-Status: tools designed (§10 of `workflow-architecture.md`), not
-implemented. No code in `src/lib/workflows/` references it. Lives in
-the V1.x backlog.
+Status: designed, not implemented. Lives in the backlog (§8.3).
 
 ---
 
@@ -590,40 +671,16 @@ the V1.x backlog.
 | `/api/artifacts/[id]` | `DELETE` | Hard delete (workflow row stays, FK→NULL) | ✅ |
 | `/api/artifacts/[id]/refresh` | `POST` | Force-fresh re-execute (§5.3) | ✅ backend only |
 | `/api/admin/runs/[id]` | `GET` | Run detail + event timeline (chat + workflow) | ✅ |
-| ~~`/api/workflows`~~ | — | Direct workflow CRUD | 🚫 deliberately not exposed (D24) |
+| ~~`/api/workflows`~~ | — | Direct workflow CRUD | 🚫 deliberately not exposed |
 
 No standalone workflow editor endpoints. Workflows are accessed only
 through their owning artifact.
 
 ---
 
-## 7. Chart data flow — RESOLVED as D39
+## 7. Chart data flow
 
-> ✅ **Decided.** The earlier "Routes A / B / C" architectural
-> deliberation that lived here has been replaced. See
-> [`workflow-architecture.md` §2 → D39](./workflow-architecture.md)
-> for the binding decision and its four sub-points.
-
-The short version:
-
-- **Chart becomes a first-class workflow node** (`type: "chart"`,
-  `schema_version: "1"`, `renderer: "echarts"`). It stores an ECharts
-  option **template** (no data) under `config` and a `@path` ref to
-  upstream data under `input.dataset`. At execute time the engine
-  merges them and returns `{ option }` — rendering still happens in
-  the browser. (D39.A)
-- **One injection point** in v1: `option.dataset.source`. Charts
-  that drift outside this contract fall back to D39.C. (D39.B)
-- **Literal fallback**: when `build-from-events` cannot match a
-  render_chart's data to any upstream output, the chart is saved as
-  a chart node with literal `config` and empty `input` — UI shows a
-  "not refreshable" indicator. (D39.C)
-- **`artifact.content.blocks` is retired** in Phase 5 of the
-  refactor (when `ArtifactDetail` stops reading it). (D39.D)
-
-No backward-compat migration: pre-D39 `workflow` / `artifact` rows
-are wiped at refactor start. The implementation is phased — see
-`workflow-architecture.md` §4.0 for the current phase.
+At execute time the engine resolves `inputs.dataset` refs → injects rows into `config.dataset.source` → returns merged `option`. The frontend passes `option` verbatim to `<EChartsRenderer />`. See `workflow-spec.md §5.5` for the full chart node contract.
 
 ---
 
@@ -631,70 +688,59 @@ are wiped at refactor start. The implementation is phased — see
 
 ### 8.1 Shipped ✅
 
-| Capability | Where | Commit(s) |
-|---|---|---|
-| `workflow` table + indexes (incl. GIN) | `src/lib/db/schema.ts` | W1.1a / W1.1b |
-| Spec schema (Zod) — 4 node types, canonical / LLM-emit split | `src/lib/workflows/spec/` | W1.2 |
-| @path ref system + canonicalize + validate | same | W1.2 / W1.3 |
-| In-process DAG engine (deps DI, retries, event emission) | `src/lib/workflows/engine/` | W1.4.1–W1.4.7 |
-| L1 per-node cache class | `src/lib/workflows/engine/cache.ts` | W1.4.7 (class exists, **not wired**) |
-| build-from-events (Strategy Z+) | `src/lib/workflows/build-from-events.ts` | W1.5.A / W1.5.B |
-| save-artifact orchestrator | `src/lib/artifacts/save-artifact.ts` | W1.6.1 |
-| `GET /api/artifacts/[id]` bundle | `src/lib/artifacts/bundle.ts` | W1.6.2 |
-| `PATCH /api/artifacts/[id]` config | same | W1.6.3 |
-| `POST /api/artifacts/[id]/refresh` (with `forceFresh: true`) | `src/lib/artifacts/refresh-artifact.ts` | W1.6.4 |
-| `POST /api/artifacts/save` endpoint | `src/app/api/artifacts/save/route.ts` | W1.6.5 |
-| Real executor (replaces W1.6.x stub) | `src/lib/artifacts/execute-workflow.ts` | W1.7.1 |
-| OUTPUT_REF_UNRESOLVED fix on artifact open | engine | W1.7.3 |
-| Block-model rendering on artifact page | `src/components/main-panels/ArtifactDetail.tsx` | W1.7.4 |
-| Strategy Z+ array recursion + sandbox envelope fix | build-from-events | W1.7.5–W1.7.6 |
-| Code node (D35) | `src/lib/workflows/nodes/code-node.ts` | W1.7.10 |
-| SQL node (D36) | `src/lib/workflows/nodes/sql-node.ts` | W1.7.12 |
-| Workflow graph visualization (artifact page) | `src/components/workflow-graph/` | W1.8.1–W1.8.4 |
-| **D4a** entity_run + event persistence on refresh | `src/lib/artifacts/workflow-run-recorder.ts` | `5ef5e14` |
-| **W2** agent dispatch via runner.start (refresh path) | `src/lib/artifacts/execute-workflow.ts:buildRealRunAgent` | `fabe151` |
+All V1 capabilities listed below are shipped and live in the codebase.
+This includes: the `workflow` table and indexes (including GIN), the
+spec schema (Zod, 5 node types, canonical / LLM-emit split), the
+`@path` ref system, the in-process DAG engine with DI and retries,
+the `(type:version)` executor dispatch table, the L1 per-node cache
+class (defined but not yet wired), `build-from-events` with Strategy
+Z+, the full `save-artifact` orchestrator, GET / PATCH / refresh
+artifact endpoints, the real executor in `execute-workflow.ts`,
+code-node execution (Python + JavaScript, subprocess mode, `params`
+injection, `code_file` support), SQL-node execution with inline-vs-
+cached engine policy, chart-node template + data merge (single and
+multi-dataset refs), the workflow graph visualization component, run
+recording with `entity_run` + event persistence on refresh, and agent
+dispatch via `runner.start` on the refresh path.
 
 ### 8.2 Partial ⚠️
 
 | Capability | Backend | Frontend |
 |---|---|---|
-| Refresh + visual update | ✅ endpoint works, engine re-runs, D4a records | ❌ no refresh button, no data merge into chart |
-| Admin run forensics | ✅ `/api/admin/runs/[id]` reads everything D4a wrote | ❌ no `/admin/run` UI (D4b — backend ready, frontend missing) |
+| Refresh + visual update | ✅ endpoint works, engine re-runs | ❌ no refresh button, no data merge into chart |
+| Admin run forensics | ✅ `/api/admin/runs/[id]` reads the run history | ❌ no `/admin/run` UI (backend ready, frontend missing) |
 | Capability degradation log | ✅ `degraded` event type exists | ⚠️ no UI surface yet |
 
-### 8.3 Designed, not built ❌
+### 8.3 Backlog
 
-| Item | Reference |
-|---|---|
-| `modify_workflow` agent tool — chat-driven workflow edit | `workflow-architecture.md` §10.2 |
-| `get_workflow` agent tool — read current spec | same |
-| L2 workflow-output cache — makes `forceFresh: true` actually do something | `lib/artifacts/execute-workflow.ts` file header |
-| Scheduled refresh (cron-style "refresh this artifact weekly") | `schedule` table exists, no `entity_kind="workflow"` dispatch path |
-| Workflow visibility = `"public"` sharing UX | flag exists in schema; no UI |
-| Workflow execution timeout (top-level) | `ExecutionConfig` field exists in spec, engine respects it; UI for tuning missing |
+**V1.x — unblocked:**
+- `modify_workflow` + `get_workflow` agent tools — chat-driven spec edits
+- `/admin/run` detail page — backend ready, frontend missing
+- Scheduled refresh — `schedule` table supports `entity_kind='workflow'`; no UI
+- Workflow visibility = `public` sharing UX — flag in schema, no UI
+- Compare view — side-by-side snapshot vs live chart comparison
+- `sql.inline_max_rows` cap increase — requires executor to read Parquet directly
+- Other artifact types as workflow nodes — `render_html` / `render_markdown` follow the chart promotion pattern
 
-### 8.4 V1 out of scope 🚫
-
-- LLM-from-scratch authored workflows (the LLM only captures + modifies)
-- Multi-tenant workflow marketplaces / forking
-- Workflow versioning / history (`updatedAt` is the only checkpoint)
-- Streaming workflow output to the artifact page during execution
-  (SSE events for refresh runs — possible later if D4b lands)
-- Cross-thread workflow reuse from chat (the LLM can't currently
-  "invoke this saved workflow as a tool")
+**V2 / out of scope:**
+- LLM-authored workflows from scratch (V1 only captures + modifies)
+- Multi-tenant workflow marketplace / forking
+- Workflow versioning history (`updatedAt` is the only checkpoint)
+- Streaming execution output to the artifact page
+- Cross-thread workflow reuse (saved workflow as an on-demand tool)
+- Nested `workflow` node (DAG composition)
+- `condition` / `loop` node types
 
 ---
 
 ## 9. Related documents
 
-| Document | What it covers | Status |
-|---|---|---|
-| [`workflow-architecture.md`](./workflow-architecture.md) | Long-form design discussion, D17–D38 decision history, alternate-approach rejections | Archive — read this when you need to know **why** a design choice was made; read the present doc when you need to know **what** is built |
-| [`data-visualization.md`](./data-visualization.md) | Chart-specific UI design (outcomes panel, OutcomeCard, BlockList, frontend tools) | Active |
-| [`artifact-evolution.md`](./artifact-evolution.md) | Artifact library V2 plans (focus mode, multi-type artifacts, etc.) | Active for V2 planning; §6 became the basis for the V1 enlarge / minimize feature |
-| [`architecture.md`](./architecture.md) | Whole-product architecture (frontend, backends, runner kernel) | Active |
-| [`data-sources.md`](./data-sources.md) | Parquet cache, slot semantics, extract_dataset_by_sql | Active |
-| [`sandbox.md`](./sandbox.md) | D35 / D38 sandbox path contract, subprocess vs local-docker | Active |
-| [`runner-events.md`](./runner-events.md) | AG-UI ↔ EntityRunEventType mapping, coalescing rules | Active |
-| [`orchestrator.md`](./orchestrator.md) | Runner kernel design (chat dispatch, supervisor delegation, schedules) | Active |
-| [`AGENTS.md`](../AGENTS.md) | Project-wide rules (cache invariants, runtime boundary, RBAC, etc.) | Active |
+| Document | What it covers |
+|---|---|
+| [`workflow-spec.md`](./workflow-spec.md) | Normative node shape reference for LLM authoring |
+| [`artifact-evolution.md`](./artifact-evolution.md) | Artifact subsystem (UI engine) current state and backlog |
+| [`data-visualization.md`](./data-visualization.md) | Chat-time chart generation (outcomes panel design) |
+| [`data-sources.md`](./data-sources.md) | SQL node's data-source / DuckDB / Parquet contract |
+| [`sandbox.md`](./sandbox.md) | Code node's sandbox path and mount contract |
+| [`runner-events.md`](./runner-events.md) | `workflow_node_*` event types emitted by the engine |
+| [`orchestrator.md`](./orchestrator.md) | Runner kernel (chat dispatch, supervisor delegation, schedules) |

@@ -3,10 +3,12 @@
  *
  * Retry loop + event emission live in `with-retries.ts`; this file is
  * the per-attempt body:
- *   1. Resolve `@path` refs in `node.inputs`.
- *   2. Validate resolved input against `input_schema` (ajv).
+ *   1. Resolve `@path` refs in `node.inputs.arguments`.
+ *      (`inputs.name` is a const-pinned tool identifier — no refs.)
+ *   2. Validate resolved args against the args sub-schema lifted
+ *      from `node.input_schema.properties.arguments` (ajv).
  *   3. Look up the tool handle (DI) — `null` → `TOOL_NOT_FOUND`.
- *   4. `tool.execute({input, abortSignal, context})`.
+ *   4. `tool.execute({input: resolvedArgs, abortSignal, context})`.
  *   5. Coerce result to `Record<string, unknown>`; validate against
  *      `output_schema` (ajv).
  *
@@ -38,15 +40,16 @@ export async function executeToolNode(
   state: ExecutionState,
   deps: ToolNodeDeps,
 ): Promise<Record<string, unknown>> {
+  const toolName = node.inputs.name;
   return withRetries({
     node,
-    nodeName: node.tool,
+    nodeName: toolName,
     state,
     deps,
     attemptFn: async () => {
       // resolveRefs throws REF_UNRESOLVED on its own — let the
       // WorkflowError bubble up unchanged.
-      const resolvedInput = resolveRefs(node.inputs, state) as Record<
+      const resolvedArgs = resolveRefs(node.inputs.arguments, state) as Record<
         string,
         unknown
       >;
@@ -55,14 +58,15 @@ export async function executeToolNode(
       // typed values into the schema check. Save-time validate.ts
       // already verified required-key presence; this catches the
       // full JSON Schema (types, formats, etc.).
-      if (node.input_schema !== undefined) {
-        const result = validateAgainstSchema(node.input_schema, resolvedInput);
+      const argsSchema = extractArgsSchema(node.input_schema);
+      if (argsSchema !== undefined) {
+        const result = validateAgainstSchema(argsSchema, resolvedArgs);
         if (!result.ok) {
           throw new WorkflowError({
             errorCode: "TOOL_INPUT_SCHEMA_MISMATCH",
-            message: `Node ${node.id}: tool '${node.tool}' input failed schema — ${formatValidationErrors(result.errors)}`,
+            message: `Node ${node.id}: tool '${toolName}' input failed schema — ${formatValidationErrors(result.errors)}`,
             nodeId: node.id,
-            nodeName: node.tool,
+            nodeName: toolName,
           });
         }
       }
@@ -70,25 +74,25 @@ export async function executeToolNode(
       // Save-time validate.ts already confirmed the tool existed;
       // this guard catches the case where the registry has changed
       // between save and run (e.g. MCP server disconnected).
-      const tool = deps.getTool(node.tool);
+      const tool = deps.getTool(toolName);
       if (tool === null) {
         throw new WorkflowError({
           errorCode: "TOOL_NOT_FOUND",
-          message: `Tool '${node.tool}' is not registered.`,
+          message: `Tool '${toolName}' is not registered.`,
           nodeId: node.id,
-          nodeName: node.tool,
+          nodeName: toolName,
         });
       }
 
       // The tool implementation is responsible for honouring
       // abortSignal at its internal IO checkpoints.
       const rawResult = await tool.execute({
-        input: resolvedInput,
+        input: resolvedArgs,
         abortSignal: state.abortSignal,
         context: state.context,
       });
 
-      const outputs = coerceToOutputs(rawResult, node);
+      const outputs = coerceToOutputs(rawResult, node, toolName);
 
       // Output validation — surface tool-side bugs (wrong shape) as
       // TOOL_EXECUTION_FAILED.
@@ -97,9 +101,9 @@ export async function executeToolNode(
         if (!result.ok) {
           throw new WorkflowError({
             errorCode: "TOOL_EXECUTION_FAILED",
-            message: `Node ${node.id}: tool '${node.tool}' output failed schema — ${formatValidationErrors(result.errors)}`,
+            message: `Node ${node.id}: tool '${toolName}' output failed schema — ${formatValidationErrors(result.errors)}`,
             nodeId: node.id,
-            nodeName: node.tool,
+            nodeName: toolName,
           });
         }
       }
@@ -112,7 +116,7 @@ export async function executeToolNode(
         errorCode: "TOOL_EXECUTION_FAILED",
         message: err instanceof Error ? err.message : String(err),
         nodeId: node.id,
-        nodeName: node.tool,
+        nodeName: toolName,
         cause: err,
       });
     },
@@ -121,9 +125,35 @@ export async function executeToolNode(
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Pull the `arguments` sub-schema out of the wrapper `input_schema`
+ * canonicalize stamped on the tool node. Returns `undefined` when
+ * the wrapper is malformed or the args slot is missing — caller
+ * skips validation in that case.
+ */
+function extractArgsSchema(
+  inputSchema: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (inputSchema === undefined) return undefined;
+  const properties = (inputSchema as { properties?: unknown }).properties;
+  if (
+    properties === null ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return undefined;
+  }
+  const args = (properties as { arguments?: unknown }).arguments;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    return undefined;
+  }
+  return args as Record<string, unknown>;
+}
+
 function coerceToOutputs(
   result: unknown,
   node: CanonicalToolNode,
+  toolName: string,
 ): Record<string, unknown> {
   if (
     result === null ||
@@ -132,9 +162,9 @@ function coerceToOutputs(
   ) {
     throw new WorkflowError({
       errorCode: "TOOL_EXECUTION_FAILED",
-      message: `Tool '${node.tool}' returned a non-object result (got ${describeShape(result)}); expected an object matching its output_schema.`,
+      message: `Tool '${toolName}' returned a non-object result (got ${describeShape(result)}); expected an object matching its output_schema.`,
       nodeId: node.id,
-      nodeName: node.tool,
+      nodeName: toolName,
     });
   }
   return result as Record<string, unknown>;

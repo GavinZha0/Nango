@@ -34,7 +34,7 @@ import { getExtractLimits } from "./limits";
 
 import { getConfigNumber } from "@/lib/config";
 
-/** Hard server-side caps applied to any LLM-supplied previewRows. */
+/** Hard server-side caps applied to any LLM-supplied row_limit. */
 const PREVIEW_HARD_CAP_ROWS = (): number => getConfigNumber("datasource.preview.max_rows", 200);
 const PREVIEW_HARD_CAP_BYTES = (): number => getConfigNumber("datasource.preview.max_bytes", 50_000);
 
@@ -45,35 +45,35 @@ const log = childLogger({ component: "extract-dataset-by-sql" });
 const PREVIEW_ROWS_DEFAULT = (): number => getConfigNumber("datasource.preview.default_rows", 5);
 
 const ExtractDatasetArgs = z.object({
-  name: z
+  dataset_name: z
     .string()
     .min(1)
     .max(128)
     .describe(
       "Stable cache key for this dataset. Pick a name that clearly identifies the slice (source + scope + time), e.g. 'sales_q1_2025' or 'users_dev'. Reusing the same name + same query is cheap (cache hit). Inside run_code_in_sandbox, the dataset appears at ./data/<name>/ (relative to the sandbox's current working directory).",
     ),
-  dataSourceName: z
+  data_source_name: z
     .string()
     .min(1)
     .describe(
       "Name of the data source to query — exactly the slug shown in the 'Available data sources' block (e.g. 'prod_pg_readonly'). Do NOT pass a uuid. Picks the data_source row whose `name` matches; the runtime applies that source's policy (read-only, table allow/deny lists) before issuing the query.",
     ),
-  query: z
+  sql_text: z
     .string()
     .min(1)
     .describe(
       "SQL query the source executes. Result rows are materialised as Parquet. Bake parameter values into the SQL — bound parameters are not supported in V1.",
     ),
-  previewRows: z
+  row_limit: z
     .number()
     .int()
     .nonnegative()
     .max(PREVIEW_HARD_CAP_ROWS())
     .default(PREVIEW_ROWS_DEFAULT())
     .describe(
-      `Number of rows to return inline so a small dataset can be inspected without entering the sandbox. Default ${PREVIEW_ROWS_DEFAULT()}; pass 0 to skip the preview, or up to ${PREVIEW_HARD_CAP_ROWS()}. Capped server-side at ${PREVIEW_HARD_CAP_ROWS()} rows / ${PREVIEW_HARD_CAP_BYTES()} bytes; oversize previews come back with truncated=true.`,
+      `Number of rows to return inline in 'rows' so a small dataset can be inspected without entering the sandbox. Default ${PREVIEW_ROWS_DEFAULT()}; pass 0 to skip inline rows, or up to ${PREVIEW_HARD_CAP_ROWS()}. Capped server-side at ${PREVIEW_HARD_CAP_ROWS()} rows / ${PREVIEW_HARD_CAP_BYTES()} bytes; oversize previews come back with returned_rows < total_rows.`,
     ),
-  forceRefresh: z
+  force_refresh: z
     .boolean()
     .default(false)
     .describe(
@@ -81,32 +81,30 @@ const ExtractDatasetArgs = z.object({
     ),
 });
 
-export interface PreviewBlock {
-  /** Column names in the same order as each row in {@link rows}. */
-  columns: string[];
-  /** Row-major 2D array of cell values. `rows[r][c]` is the cell at
-   *  row `r`, column `columns[c]`. Column-oriented saves ~50% tokens
-   *  vs row-of-objects while keeping full type fidelity. */
-  rows: unknown[][];
-  /** True iff capped by row count or byte budget — agent should
-   *  enter the sandbox for the rest. */
-  truncated: boolean;
-}
-
 export interface ExtractDatasetResult {
-  cacheHit: boolean;
-  name: string;
+  cache_hit: boolean;
+  dataset_name: string;
   /** Total rows in the materialised dataset; check 0 to short-circuit empty queries. */
-  rowCount: number;
-  schema: { columns: ColumnSchema[] };
-  ttlHours: number;
-  preview?: PreviewBlock;
+  total_rows: number;
+  /** Number of rows actually returned in `rows`. Equal to total_rows
+   *  when the result fit inline; less when capped by row_limit /
+   *  preview byte budget. */
+  returned_rows: number;
+  /** Row-of-objects projection of the top `returned_rows` rows. Each
+   *  entry is `Record<columnName, cellValue>`. Chart nodes consume
+   *  this directly via `inputs.dataset: "@nodes.X.rows"`. */
+  rows: Array<Record<string, unknown>>;
+  /** Per-column type metadata. Populated even for empty results on
+   *  fresh extracts; cache hits return an empty array because the
+   *  cache sidecar does not persist column types. */
+  row_schema: { columns: ColumnSchema[] };
+  ttl_hours: number;
   /** Set when this call REPLACED a different prior snapshot under
    *  the same name (different query hash). Always paired with
-   *  cacheHit:false. In-flight sandbox runs still see the old bytes
+   *  cache_hit:false. In-flight sandbox runs still see the old bytes
    *  via OS open-FD / page-cache semantics; only new runs see the
    *  new snapshot. Same-query refresh does NOT set this. */
-  replacedPrior?: boolean;
+  replaced_prior?: boolean;
 }
 
 // Tool
@@ -117,29 +115,33 @@ export function buildExtractDatasetTool(): ToolDefinition {
     description:
       "Materialise a SQL query result from an external data source as a " +
       "Parquet snapshot in the shared cache. Cache-aware: repeat calls " +
-      "with the same name + query are cheap (cache hit, no source roundtrip); " +
-      "pass forceRefresh=true to bypass the cache when fresh data is required. " +
-      "Returns { cacheHit, name, rowCount, schema, ttlHours, preview?, replacedPrior? } — " +
-      "check `rowCount === 0` to short-circuit empty results without " +
-      "entering the sandbox. The returned `preview` (default 5 rows) is " +
-      "COLUMN-ORIENTED: `preview.columns` lists field names; " +
-      "`preview.rows` is a 2D array where `rows[r][c]` matches " +
-      "`columns[c]` (DataFrame-style, types preserved as JSON values). " +
-      "Set previewRows=0 to skip the preview when you only want metadata, " +
-      "or up to 200 to peek at more rows inline. " +
-      "Name semantics: `name` is a SLOT (think variable name), not an " +
-      "identifier. Re-using the same `name` with a DIFFERENT query " +
-      "REPLACES the prior snapshot under that slot (last-write-wins); " +
-      "the result carries `replacedPrior: true` so you know it happened. " +
-      "Re-using the same `name` with the SAME query returns the cached " +
-      "snapshot (cacheHit: true). " +
-      "To run analysis on the full dataset, pass `name` to " +
+      "with the same dataset_name + sql_text are cheap (cache hit, no " +
+      "source roundtrip); pass force_refresh=true to bypass the cache " +
+      "when fresh data is required. " +
+      "Returns { cache_hit, dataset_name, total_rows, returned_rows, " +
+      "rows, row_schema, ttl_hours, replaced_prior? } — check " +
+      "`total_rows === 0` to short-circuit empty results without " +
+      "entering the sandbox. `rows` is an array of row objects " +
+      "(`Record<columnName, cellValue>`) carrying the top " +
+      "`returned_rows` rows; pass row_limit=0 to skip inline rows " +
+      "when you only want metadata, or up to 200 to peek at more " +
+      "rows inline. When `returned_rows < total_rows` the result was " +
+      "truncated by row_limit / byte budget — read the full dataset " +
+      "from the parquet handle via run_code_in_sandbox.datasets. " +
+      "Name semantics: `dataset_name` is a SLOT (think variable name), " +
+      "not an identifier. Re-using the same name with a DIFFERENT " +
+      "sql_text REPLACES the prior snapshot under that slot " +
+      "(last-write-wins); the result carries `replaced_prior: true` " +
+      "so you know it happened. Re-using the same name with the SAME " +
+      "sql_text returns the cached snapshot (cache_hit: true). " +
+      "To run analysis on the full dataset, pass `dataset_name` to " +
       "run_code_in_sandbox.datasets[]; the Parquet files become " +
-      "readable at ./data/<name>/ in the sandbox's working directory.",
+      "readable at ./data/<dataset_name>/ in the sandbox's working " +
+      "directory.",
     parameters: ExtractDatasetArgs,
     execute: async (args) => {
       try {
-        validateDatasetName(args.name);
+        validateDatasetName(args.dataset_name);
       } catch (err) {
         if (err instanceof InvalidCacheKeyError) {
           return {
@@ -150,7 +152,7 @@ export function buildExtractDatasetTool(): ToolDefinition {
         throw err;
       }
 
-      const lookup = await resolveDataSourceByName(args.dataSourceName);
+      const lookup = await resolveDataSourceByName(args.data_source_name);
       if (!lookup.ok) {
         return {
           ok: false,
@@ -164,7 +166,7 @@ export function buildExtractDatasetTool(): ToolDefinition {
       // ALSO wraps in a read-only transaction when policy.readOnly
       // — defence in depth.
       const policyCheck = validateSqlAgainstPolicy(
-        args.query,
+        args.sql_text,
         resolved.provider,
         resolved.policy,
       );
@@ -177,39 +179,37 @@ export function buildExtractDatasetTool(): ToolDefinition {
 
       const limits = getExtractLimits();
       const ttlHours = limits.defaultTtlHours;
-      const queryHash = hashQuery(args.query);
-      const previewRows = args.previewRows;
+      const queryHash = hashQuery(args.sql_text);
+      const rowLimit = args.row_limit;
 
       // We DO NOT re-validate policy on cache hits: the Parquet
       // snapshot is a historical artefact, and re-checking would
       // force a re-extract every time the policy tightens. The next
       // miss naturally re-applies the new policy.
-      const status = await getCacheStatus(args.name);
+      const status = await getCacheStatus(args.dataset_name);
       if (
-        !args.forceRefresh &&
+        !args.force_refresh &&
         status.exists &&
         status.isFresh &&
         status.meta &&
         status.meta.queryHash === queryHash
       ) {
-        const result: ExtractDatasetResult = {
-          cacheHit: true,
-          name: args.name,
-          rowCount: status.meta.rowCount,
+        const preview =
+          rowLimit > 0 && status.meta.rowCount > 0
+            ? await readPreview(args.dataset_name, rowLimit)
+            : [];
+        return {
+          cache_hit: true,
+          dataset_name: args.dataset_name,
+          total_rows: status.meta.rowCount,
+          returned_rows: preview.length,
+          rows: preview,
           // Sidecar persists totals only; columns are not preserved
           // on hits. Agents needing the column list must force a
           // fresh extraction.
-          schema: { columns: [] },
-          ttlHours: status.meta.ttlHours,
-        };
-        if (previewRows > 0 && status.meta.rowCount > 0) {
-          result.preview = await readPreview(
-            args.name,
-            previewRows,
-            status.meta.rowCount,
-          );
-        }
-        return result;
+          row_schema: { columns: [] },
+          ttl_hours: status.meta.ttlHours,
+        } satisfies ExtractDatasetResult;
       }
 
       // Slot semantics: same name + different query is a slot
@@ -224,26 +224,26 @@ export function buildExtractDatasetTool(): ToolDefinition {
         log.info(
           {
             event: "dataset_replaced",
-            name: args.name,
+            name: args.dataset_name,
             oldQueryHash: status.meta.queryHash,
             newQueryHash: queryHash,
             oldRowCount: status.meta.rowCount,
-            dataSourceName: args.dataSourceName,
+            dataSourceName: args.data_source_name,
           },
-          `dataset "${args.name}" slot reassigned (different query)`,
+          `dataset "${args.dataset_name}" slot reassigned (different query)`,
         );
       }
 
 
       const source = getDataSource(resolved.provider);
-      const slot = await acquireWriteSlot(args.name);
+      const slot = await acquireWriteSlot(args.dataset_name);
       const ac = new AbortController();
 
       let extracted: ExtractResult;
       try {
         extracted = await source.extract(resolved, {
-          datasetName: args.name,
-          query: args.query,
+          datasetName: args.dataset_name,
+          query: args.sql_text,
           outputPath: slot.outputPath,
           timeoutMs: limits.timeoutMs,
           maxRows: limits.maxRows,
@@ -261,7 +261,7 @@ export function buildExtractDatasetTool(): ToolDefinition {
       }
 
       await commitWriteSlot({
-        name: args.name,
+        name: args.dataset_name,
         slot,
         source: resolved.provider,
         dataSourceId: resolved.id,
@@ -271,22 +271,22 @@ export function buildExtractDatasetTool(): ToolDefinition {
         byteSize: extracted.schema.byteSize,
       });
 
+      const preview =
+        rowLimit > 0 && extracted.schema.rowCount > 0
+          ? await readPreview(args.dataset_name, rowLimit)
+          : [];
+
       const result: ExtractDatasetResult = {
-        cacheHit: false,
-        name: args.name,
-        rowCount: extracted.schema.rowCount,
-        schema: { columns: extracted.schema.columns },
-        ttlHours,
+        cache_hit: false,
+        dataset_name: args.dataset_name,
+        total_rows: extracted.schema.rowCount,
+        returned_rows: preview.length,
+        rows: preview,
+        row_schema: { columns: extracted.schema.columns },
+        ttl_hours: ttlHours,
       };
       if (replacedPrior) {
-        result.replacedPrior = true;
-      }
-      if (previewRows > 0 && extracted.schema.rowCount > 0) {
-        result.preview = await readPreview(
-          args.name,
-          previewRows,
-          extracted.schema.rowCount,
-        );
+        result.replaced_prior = true;
       }
       return result;
     },
@@ -297,47 +297,53 @@ export function buildExtractDatasetTool(): ToolDefinition {
 
 /**
  * Read the first `requested` rows from the dataset's Parquet files
- * via DuckDB and return them column-oriented. Drops rows from the
- * tail until the JSON serialisation fits in {@link PREVIEW_HARD_CAP_BYTES};
- * sets `truncated = true` when either cap engages or when the dataset
- * has more rows than we returned.
+ * via DuckDB and return them as a row-of-objects array
+ * (`Record<columnName, cellValue>[]`). Drops rows from the tail
+ * until the JSON serialisation fits in
+ * {@link PREVIEW_HARD_CAP_BYTES}.
  */
 async function readPreview(
   name: string,
   requestedRows: number,
-  totalRowCount: number,
-): Promise<PreviewBlock> {
+): Promise<Array<Record<string, unknown>>> {
   const limit = Math.min(requestedRows, PREVIEW_HARD_CAP_ROWS());
   const glob = path.join(datasetDir(name), "**", "*.parquet");
 
   const db = await DuckDBInstance.create(":memory:");
   const conn = await db.connect();
   let columns: string[];
-  let rows: unknown[][];
+  let rawRows: unknown[][];
   try {
     const result = await conn.runAndReadAll(
       `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}') LIMIT ${limit}`,
     );
     columns = result.columnNames();
-    rows = result.getRowsJson() as unknown[][];
+    rawRows = result.getRowsJson() as unknown[][];
   } finally {
     conn.closeSync();
     db.closeSync();
   }
 
-  // Byte budget covers BOTH columns + rows since both are emitted
-  // to the LLM; pathological wide schemas need the same protection.
-  let byteCapped = false;
+  // Inflate column-oriented (column names + 2D rows) to
+  // row-of-objects so the wire / spec shape is uniform.
+  const rows: Array<Record<string, unknown>> = rawRows.map((row) => {
+    const obj: Record<string, unknown> = {};
+    for (let c = 0; c < columns.length; c++) {
+      obj[columns[c]!] = row[c];
+    }
+    return obj;
+  });
+
+  // Byte budget cap. Pathological wide schemas need the same
+  // protection.
   while (
     rows.length > 0 &&
-    JSON.stringify({ columns, rows }).length > PREVIEW_HARD_CAP_BYTES()
+    JSON.stringify(rows).length > PREVIEW_HARD_CAP_BYTES()
   ) {
     rows.pop();
-    byteCapped = true;
   }
 
-  const rowCapped = totalRowCount > rows.length;
-  return { columns, rows, truncated: byteCapped || rowCapped };
+  return rows;
 }
 
 function escapeSingleQuotes(s: string): string {

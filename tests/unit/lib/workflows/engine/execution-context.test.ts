@@ -12,18 +12,17 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 // ─── Fixtures ─────────────────────────────────────────────────────────
 
 const MINIMAL_SPEC: CanonicalWorkflowSpec = {
-  version: "1.0",
   name: "demo",
-  ref_recon_algorithm: "ref_recon_v1",
   nodes: [
     {
       type: "tool",
       schema_version: "1",
       id: 0,
       description: "n",
-      depends_on: [],
-      tool: "minimal",
-      inputs: {},
+      depends_on: [],      inputs: {
+        name: "minimal",
+        arguments: {},
+      },
     },
   ],
   outputs: { x: "@nodes.0.x" },

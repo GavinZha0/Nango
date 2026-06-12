@@ -16,16 +16,15 @@ export {
 
 export {
   CanonicalAgentNodeSchema,
+  CanonicalChartNodeSchema,
   CanonicalCodeNodeSchema,
   CanonicalNodeSchema,
   CanonicalSqlNodeSchema,
   CanonicalToolNodeSchema,
   CanonicalWorkflowSpecSchema,
-  DEFAULT_AGENT_OUTPUT_SCHEMA,
-  DEFAULT_CODE_NODE_OUTPUTS,
-  DEFAULT_SQL_NODE_OUTPUTS,
   ExecutionConfigSchema,
   LLMAgentNodeSchema,
+  LLMChartNodeSchema,
   LLMCodeNodeSchema,
   LLMNodeSchema,
   LLMSqlNodeSchema,
@@ -33,6 +32,7 @@ export {
   LLMWorkflowSpecSchema,
   RetriesSchema,
   type CanonicalAgentNode,
+  type CanonicalChartNode,
   type CanonicalCodeNode,
   type CanonicalNode,
   type CanonicalSqlNode,
@@ -41,6 +41,7 @@ export {
   type CodeLanguage,
   type ExecutionConfig,
   type LLMAgentNode,
+  type LLMChartNode,
   type LLMCodeNode,
   type LLMNode,
   type LLMSqlNode,
@@ -62,7 +63,6 @@ export {
 } from "./spec/refs";
 
 export {
-  REF_RECON_ALGORITHM,
   canonicalize,
   type CanonicalizeDeps,
   type ToolMetadata,
@@ -83,35 +83,11 @@ export type {
   WorkflowResult,
 } from "./engine";
 
-export {
-  createExecutionState,
-  resolveRefs,
-  type ExecutionState,
-} from "./engine/execution-context";
-
-export {
-  runScheduler,
-  type NodeExecutor,
-  type ScheduleParams,
-} from "./engine/scheduler";
-
-export {
-  executeToolNode,
-  type ToolNodeDeps,
-} from "./nodes/tool-node";
-
-export {
-  executeAgentNode,
-  type AgentNodeDeps,
-} from "./nodes/agent-node";
-
-export { inProcessWorkflowEngine } from "./engine/in-process";
-
-export {
-  InProcessLruCache,
-  computeCacheKey,
-  type WorkflowCache,
-} from "./engine/cache";
+// Engine internals (execution-context, scheduler, per-node executors,
+// in-process engine, cache) are intentionally NOT re-exported from
+// this barrel. External consumers that need them (execute-workflow.ts,
+// tests) import directly from the subpath modules. This keeps the
+// public surface narrow and discourages bypassing the engine boundary.
 
 export {
   buildWorkflowSpecFromRunEvents,

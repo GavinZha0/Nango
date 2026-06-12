@@ -13,7 +13,7 @@
  * All four share the same chrome (`NodeCardShell`) and differ
  * only in icon, accent colour, and the per-type summary lines.
  *
- * Layout: fixed 240×100 (kept in sync with `layout.ts` constants).
+ * Layout: fixed 200×100 (kept in sync with `layout.ts` constants).
  * Three logical rows:
  *
  *   Row 1: small coloured icon block + bold title + #id · type chip
@@ -121,42 +121,57 @@ function summarizeInput(
 }
 
 function summarizeTool(node: CanonicalToolNode): NodeSummary {
-  const [line1, line2] = summarizeInput(node.inputs, 2);
-  return { title: node.tool, line1, line2 };
+  const [line1, line2] = summarizeInput(node.inputs.arguments, 2);
+  return { title: node.inputs.name, line1, line2 };
 }
 
 function summarizeAgent(node: CanonicalAgentNode): NodeSummary {
-  const [line1] = summarizeInput(node.inputs, 1);
-  const schemaKeys: string[] = Object.keys(node.output_schema ?? {});
+  // Show a snippet of the task (first 60 chars). `context` is
+  // operationally interesting but secondary — surface it as line2
+  // only when present.
+  const task = node.inputs.task;
+  const line1 = `task: ${truncateStr(task, 60)}`;
+  const context = node.inputs.context;
   const line2: string | undefined =
-    schemaKeys.length > 0
-      ? `outputs: ${schemaKeys.slice(0, 3).join(", ")}`
+    context !== undefined && context.length > 0
+      ? `context: ${truncateStr(context, 60)}`
       : undefined;
-  return { title: node.agent, line1, line2 };
+  return { title: node.inputs.name, line1, line2 };
+}
+
+function truncateStr(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1)}…`;
 }
 
 function summarizeCode(node: CanonicalCodeNode): NodeSummary {
   // Datasets binding is the most operationally relevant input —
   // it's what the engine bind-mounts into the sandbox.
-  const datasets: unknown = node.inputs?.datasets;
+  const datasets: unknown = node.inputs.datasets;
   const datasetList: string[] = Array.isArray(datasets)
     ? datasets.filter((d): d is string => typeof d === "string")
     : [];
 
   // First non-empty, non-comment line of the snippet — gives a
-  // sense of what the code does at a glance.
-  const firstCodeLine: string | undefined = node.code
-    .split("\n")
-    .map((s) => s.trim())
-    .find((s) => s.length > 0 && !s.startsWith("#"));
+  // sense of what the code does at a glance. `code_file` nodes
+  // surface the file path instead.
+  let snippetLine: string | undefined;
+  if (node.inputs.code_text !== undefined) {
+    snippetLine = node.inputs.code_text
+      .split("\n")
+      .map((s) => s.trim())
+      .find((s) => s.length > 0 && !s.startsWith("#"));
+  } else if (node.inputs.code_file !== undefined) {
+    snippetLine = `code_file: ${node.inputs.code_file}`;
+  }
 
   return {
-    title: node.language,
+    title: node.inputs.language,
     line1:
       datasetList.length > 0
         ? `datasets: ${datasetList.join(", ")}`
         : undefined,
-    line2: firstCodeLine,
+    line2: snippetLine,
   };
 }
 
@@ -196,18 +211,20 @@ function pickChartTypeLine(
 }
 
 function summarizeSql(node: CanonicalSqlNode): NodeSummary {
-  // Title prefers the output dataset name (what downstream code
-  // nodes ref via @nodes.X.name) — that's what the workflow
-  // actually produces. Fall back to dataSourceName when name is
-  // omitted (engine derives a slug at runtime in that case).
-  const title: string = node.name ?? node.data_source_name;
+  // Title prefers the output dataset name (what downstream code /
+  // chart nodes ref via @nodes.X.dataset_name) — that's what the
+  // workflow actually produces. Fall back to data_source_name
+  // when dataset_name is omitted (engine derives a slug at
+  // runtime in that case).
+  const title: string =
+    node.inputs.dataset_name ?? node.inputs.data_source_name;
 
   // First non-empty line of the SQL — gives a glance-able sense
   // of the query without needing to open the drawer. Strip --
   // SQL line comments at the start of a line; in-line comments
   // (mid-line `--`) are kept as-is since trimming them out is
   // unreliable without a real SQL tokenizer.
-  const firstSqlLine: string | undefined = node.query
+  const firstSqlLine: string | undefined = node.inputs.sql_text
     .split("\n")
     .map((s) => s.trim())
     .find((s) => s.length > 0 && !s.startsWith("--"));
@@ -215,7 +232,7 @@ function summarizeSql(node: CanonicalSqlNode): NodeSummary {
   return {
     title,
     // line 1: data source slug — answers "where does this come from"
-    line1: `source: ${node.data_source_name}`,
+    line1: `source: ${node.inputs.data_source_name}`,
     // line 2: SQL snippet — answers "what's the query"
     line2: firstSqlLine,
   };
@@ -321,30 +338,13 @@ function NodeCardShell({ spec, selected }: NodeCardShellProps): ReactElement {
   );
 }
 
-// ── Per-type renderers (registered in WorkflowGraph) ─────────────────
+// ── Per-type renderer (registered in WorkflowGraph) ──────────────────
 
-export function ToolNodeCard({
-  data,
-  selected,
-}: NodeProps<WorkflowNode>): ReactElement {
-  return <NodeCardShell spec={data.spec} selected={selected ?? false} />;
-}
-
-export function AgentNodeCard({
-  data,
-  selected,
-}: NodeProps<WorkflowNode>): ReactElement {
-  return <NodeCardShell spec={data.spec} selected={selected ?? false} />;
-}
-
-export function CodeNodeCard({
-  data,
-  selected,
-}: NodeProps<WorkflowNode>): ReactElement {
-  return <NodeCardShell spec={data.spec} selected={selected ?? false} />;
-}
-
-export function SqlNodeCard({
+/** Single renderer shared by all node types — the visual
+ *  differences (icon, accent) are driven by `spec.type` inside
+ *  `NodeCardShell`. Exported individually so ReactFlow's
+ *  `nodeTypes` map can register each type key. */
+export function WorkflowNodeCard({
   data,
   selected,
 }: NodeProps<WorkflowNode>): ReactElement {

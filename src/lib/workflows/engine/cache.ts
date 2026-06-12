@@ -82,7 +82,11 @@ export class InProcessLruCache implements WorkflowCache {
 
 const DEFAULT_MAX_ENTRIES = 1000;
 
-/** Fields whose changes do NOT affect a node's output. */
+/** Fields whose changes do NOT affect a node's output.
+ *  `schema_version` is a version tag — it selects which executor
+ *  runs but does not change the output for a given (type, inputs)
+ *  pair. Including it here prevents unnecessary cache misses when
+ *  the version bumps without a semantic change. */
 const NON_SEMANTIC_FIELDS = [
   "id",
   "description",
@@ -90,6 +94,7 @@ const NON_SEMANTIC_FIELDS = [
   "retries",
   "timeout_seconds",
   "outputs",
+  "schema_version",
 ] as const;
 
 function extractSemanticFields(node: CanonicalNode): Record<string, unknown> {

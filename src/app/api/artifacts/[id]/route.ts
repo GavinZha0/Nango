@@ -32,6 +32,7 @@ const patchSchema = z
     parentId: z.string().uuid().optional(),
     displayOrder: z.number().int().nonnegative().optional(),
     visibility: z.enum(["private", "shared"]).optional(),
+    view_mode: z.enum(["snapshot", "live"]).optional(),
   })
   .strict();
 
@@ -50,7 +51,10 @@ export const GET = withSession<{ id: string }>(
 export const PATCH = withSession<{ id: string }>(
   ROUTE,
   async ({ req, params, session, log }) => {
-    const patch = await parseBody(req, patchSchema);
+    const raw = await parseBody(req, patchSchema);
+    // Map API snake_case → Drizzle camelCase for viewMode.
+    const { view_mode, ...rest } = raw;
+    const patch = { ...rest, ...(view_mode !== undefined && { viewMode: view_mode }) };
     const bundle = await updateArtifact(params.id, patch, session.user.id);
     log.info(
       {

@@ -14,11 +14,12 @@
  *     entity_run id as `parentRunId`, owner threading, and the
  *     extracted `task` string.
  *   - A `succeeded` runner result wraps `summary` as
- *     `{ text: summary }` (D30 default schema).
+ *     `{ result: summary }` (canonical AGENT_NODE_OUTPUT_SCHEMA).
  *   - Non-"succeeded" status and runner throws both surface as
  *     AGENT_EXECUTION_FAILED.
- *   - `extractTaskString` prefers `input.text`, falls back to JSON
- *     of non-empty objects, and emits a placeholder for `{}`.
+ *   - `extractTaskString` reads `input.task` (+ optional
+ *     `input.context`), falls back to JSON of non-empty objects,
+ *     and emits a placeholder for `{}`.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,20 +86,18 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 // ─── Fixtures + helpers ────────────────────────────────────────────────
 
 const baseSpec: CanonicalWorkflowSpec = {
-  version: "1.0",
   name: "test-spec",
   nodes: [],
-  outputs: { result: "@nodes.0.text" },
-  ref_recon_algorithm: "ref_recon_v1",
+  outputs: { result: "@nodes.0.result" },
 };
 
 const agentReq: AgentRunRequest = {
   agentId: "agent-uuid",
-  input: { text: "summarise sales for Q4" },
+  input: { task: "summarise sales for Q4" },
   outputSchema: {
     type: "object",
-    properties: { text: { type: "string" } },
-    required: ["text"],
+    properties: { result: { type: "string" } },
+    required: ["result"],
   },
   abortSignal: new AbortController().signal,
   parentRunId: "workflow-run-1",
@@ -206,7 +205,9 @@ describe("runAgent on the refresh path (forceFresh: true)", () => {
     expect(runnerStart).toHaveBeenCalledExactlyOnceWith({
       entityId: "agent-uuid",
       task: "summarise sales for Q4",
-      context: agentReq.input,
+      // The bridge passes the full agent input as `context` for
+      // run-tree forensics; the runner doesn't read it back.
+      context: { task: "summarise sales for Q4" },
       mode: "sync",
       initiator: "user",
       ownerId: "owner-1",
@@ -215,7 +216,7 @@ describe("runAgent on the refresh path (forceFresh: true)", () => {
     });
   });
 
-  it("wraps a successful runner result as { text: summary } per D30", async () => {
+  it("wraps a successful runner result as { result: summary } per the canonical schema", async () => {
     runnerStart.mockResolvedValue({
       runId: "sub-run-2",
       status: "succeeded",
@@ -239,7 +240,7 @@ describe("runAgent on the refresh path (forceFresh: true)", () => {
     });
 
     expect(capturedResult).toEqual({
-      output: { text: "Q4 sales summary text" },
+      output: { result: "Q4 sales summary text" },
       childRunId: "sub-run-2",
     });
   });
@@ -381,11 +382,17 @@ describe("extractTaskString (probed via runner.start args)", () => {
     return (call[0] as { task: string }).task;
   }
 
-  it("prefers input.text when present and non-empty", async () => {
-    expect(await probeTask({ text: "hello world" })).toBe("hello world");
+  it("reads input.task when present and non-empty", async () => {
+    expect(await probeTask({ task: "hello world" })).toBe("hello world");
   });
 
-  it("JSON-serialises when text is absent", async () => {
+  it("concatenates task + context with a blank-line separator", async () => {
+    expect(
+      await probeTask({ task: "Summarise", context: "Last 30 days" }),
+    ).toBe("Summarise\n\nContext:\nLast 30 days");
+  });
+
+  it("falls back to JSON when both task and context are absent", async () => {
     expect(await probeTask({ query: "select 1", limit: 10 })).toBe(
       JSON.stringify({ query: "select 1", limit: 10 }),
     );
@@ -395,11 +402,11 @@ describe("extractTaskString (probed via runner.start args)", () => {
     expect(await probeTask({})).toBe("(empty workflow agent input)");
   });
 
-  it("ignores text=\"\" and falls back to JSON", async () => {
-    expect(await probeTask({ text: "" })).toBe(JSON.stringify({ text: "" }));
+  it("ignores task=\"\" and falls back to JSON", async () => {
+    expect(await probeTask({ task: "" })).toBe(JSON.stringify({ task: "" }));
   });
 
-  it("ignores non-string text and falls back to JSON", async () => {
-    expect(await probeTask({ text: 42 })).toBe(JSON.stringify({ text: 42 }));
+  it("ignores non-string task and falls back to JSON", async () => {
+    expect(await probeTask({ task: 42 })).toBe(JSON.stringify({ task: 42 }));
   });
 });

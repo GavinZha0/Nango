@@ -7,11 +7,9 @@
  *   1. Refs in `node.inputs` resolve before `runCode` is called.
  *   2. `inputs.datasets` is coerced to `string[]` and passed through.
  *   3. `inputs.env` is coerced to `Record<string, string>`.
- *   4. exitCode === 0 → outputs = either fixed envelope OR
- *      parsed-stdout per declared `output_schema`.
+ *   4. exitCode === 0 → outputs = fixed CodeOutputEnvelope.
  *   5. exitCode !== 0 → CODE_EXECUTION_FAILED with stderr surfaced.
- *   6. Declared output_schema mismatches → OUTPUT_SCHEMA_MISMATCH.
- *   7. Defensive coercion errors → SPEC_SCHEMA_MISMATCH at the node.
+ *   6. Defensive coercion errors → SPEC_SCHEMA_MISMATCH at the node.
  */
 
 import { describe, expect, it } from "vitest";
@@ -39,18 +37,39 @@ import type {
 // ─── Fixtures ─────────────────────────────────────────────────────────
 
 function codeNode(
-  overrides?: Partial<Omit<CanonicalCodeNode, "type">>,
+  overrides?: Partial<Omit<CanonicalCodeNode, "type" | "inputs">> & {
+    inputs?: Partial<CanonicalCodeNode["inputs"]>;
+  },
 ): CanonicalCodeNode {
+  const { inputs: inputsOverride, ...rest } = overrides ?? {};
   return {
     type: "code",
     schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
-    language: "python",
-    code: "print('hi')",
-    outputs: ["stdout", "stderr", "exitCode", "durationMs"],
-    ...overrides,
+    ...rest,
+    inputs: {
+      language: inputsOverride?.language ?? "python",
+      ...(inputsOverride?.code_text !== undefined && {
+        code_text: inputsOverride.code_text,
+      }),
+      ...(inputsOverride?.code_file !== undefined && {
+        code_file: inputsOverride.code_file,
+      }),
+      ...(inputsOverride?.datasets !== undefined && {
+        datasets: inputsOverride.datasets,
+      }),
+      ...(inputsOverride?.params !== undefined && {
+        params: inputsOverride.params,
+      }),
+      // Default to code_text only when the override doesn't supply
+      // either source. The XOR invariant lives in validate.ts.
+      ...(inputsOverride?.code_text === undefined &&
+        inputsOverride?.code_file === undefined && {
+          code_text: "print('hi')",
+        }),
+    },
   };
 }
 
@@ -62,9 +81,7 @@ function makeState(
   },
 ): ExecutionState {
   const spec: CanonicalWorkflowSpec = {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
     outputs: { dummy: "@nodes.0.stdout" },
   };
@@ -113,19 +130,27 @@ describe("executeCodeNode — success without declared schema", () => {
       durationMs: 12,
     });
     const out = await executeCodeNode(node, makeState(node), deps);
+    // stdout "hello\n" is not valid JSON → assembleCodeOutput uses it as
+    // the message fallback; all data fields are null.
     expect(out).toEqual({
-      stdout: "hello\n",
-      stderr: "",
-      exitCode: 0,
-      durationMs: 12,
+      ok: true,
+      duration_ms: 12,
+      rows: null,
+      row_count: null,
+      row_schema: null,
+      message: "hello\n",
+      files: null,
+      error: null,
     });
   });
 
   it("forwards language + code + datasets to runCode", async () => {
     const node = codeNode({
-      language: "python",
-      code: "print(1+1)",
-      inputs: { datasets: ["ds_orders_q4"] },
+      inputs: {
+        language: "python",
+        code_text: "print(1+1)",
+        datasets: ["ds_orders_q4"],
+      },
     });
     const deps = makeDeps({
       stdout: "2\n",
@@ -160,9 +185,11 @@ describe("executeCodeNode — success without declared schema", () => {
     expect(deps.calls[0]!.datasets).toEqual(["resolved-dataset-name"]);
   });
 
-  it("coerces env values to strings (non-string refs get String()'d)", async () => {
+  it("serializes params as __PARAMS__ JSON env var (preserves number type)", async () => {
     const node = codeNode({
-      inputs: { env: { THRESHOLD: "@nodes.1.value", LABEL: "static" } },
+      inputs: {
+        params: { THRESHOLD: "@nodes.1.value", LABEL: "static" },
+      },
       depends_on: [1],
     });
     const state = makeState(node, {
@@ -175,7 +202,11 @@ describe("executeCodeNode — success without declared schema", () => {
       durationMs: 1,
     });
     await executeCodeNode(node, state, deps);
-    expect(deps.calls[0]!.env).toEqual({ THRESHOLD: "0.5", LABEL: "static" });
+    // Params are serialized as a single JSON string under __PARAMS__,
+    // preserving type fidelity (0.5 stays a number, not "0.5").
+    expect(deps.calls[0]!.env).toEqual({
+      __PARAMS__: JSON.stringify({ THRESHOLD: 0.5, LABEL: "static" }),
+    });
   });
 
   it("uses default timeout when node omits it", async () => {
@@ -203,94 +234,77 @@ describe("executeCodeNode — success without declared schema", () => {
   });
 });
 
-// ─── Success with declared schema ─────────────────────────────────────
+// ─── code_file mode ────────────────────────────────────────────────────
 
-describe("executeCodeNode — success with declared output_schema", () => {
-  it("JSON.parses stdout + returns the parsed object as outputs", async () => {
-    const node = codeNode({
-      output_schema: {
-        type: "object",
-        properties: { mean: { type: "number" }, std: { type: "number" } },
-        required: ["mean", "std"],
-      },
-      outputs: ["mean", "std"],
-    });
+describe("executeCodeNode — code_file mode", () => {
+  it("passes codeFile (not code) to runCode when inputs.code_file is set", async () => {
+    const node = codeNode({ inputs: { code_file: "analysis.py" } });
     const deps = makeDeps({
-      stdout: '{"mean": 5.0, "std": 1.2}',
+      stdout: "ok\n",
       stderr: "",
       exitCode: 0,
-      durationMs: 8,
+      durationMs: 3,
     });
-    const out = await executeCodeNode(node, makeState(node), deps);
-    expect(out).toEqual({ mean: 5.0, std: 1.2 });
+    await executeCodeNode(node, makeState(node), deps);
+    const req = deps.calls[0]!;
+    expect(req.codeFile).toBe("analysis.py");
+    expect(req.code).toBeUndefined();
   });
 
-  it("OUTPUT_SCHEMA_MISMATCH when stdout JSON fails schema", async () => {
+  it("forwards datasets alongside codeFile", async () => {
     const node = codeNode({
-      output_schema: {
-        type: "object",
-        properties: { mean: { type: "number" } },
-        required: ["mean"],
-      },
-      outputs: ["mean"],
+      inputs: { code_file: "main.py", datasets: ["orders_q4"] },
     });
     const deps = makeDeps({
-      stdout: '{"mean": "not-a-number"}',
+      stdout: "ok\n",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 2,
+    });
+    await executeCodeNode(node, makeState(node), deps);
+    expect(deps.calls[0]!.datasets).toEqual(["orders_q4"]);
+  });
+
+  it("throws SPEC_SCHEMA_MISMATCH for absolute code_file path", async () => {
+    const node = codeNode({ inputs: { code_file: "/etc/passwd" } });
+    const deps = makeDeps({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+    });
+    await expect(
+      executeCodeNode(node, makeState(node), deps),
+    ).rejects.toMatchObject({ errorCode: "SPEC_SCHEMA_MISMATCH" });
+    expect(deps.calls).toHaveLength(0); // runCode must not be reached
+  });
+
+  it("throws SPEC_SCHEMA_MISMATCH for path-traversal code_file", async () => {
+    const node = codeNode({ inputs: { code_file: "../../etc/passwd" } });
+    const deps = makeDeps({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+    });
+    await expect(
+      executeCodeNode(node, makeState(node), deps),
+    ).rejects.toMatchObject({ errorCode: "SPEC_SCHEMA_MISMATCH" });
+    expect(deps.calls).toHaveLength(0);
+  });
+
+  it("accepts a subdir/file.py path (no traversal)", async () => {
+    const node = codeNode({ inputs: { code_file: "subdir/main.py" } });
+    const deps = makeDeps({
+      stdout: "ok\n",
       stderr: "",
       exitCode: 0,
       durationMs: 1,
     });
-    await expect(executeCodeNode(node, makeState(node), deps)).rejects.toThrow(
-      WorkflowError,
-    );
-    try {
-      await executeCodeNode(node, makeState(node), deps);
-    } catch (e) {
-      if (!(e instanceof WorkflowError)) throw e;
-      expect(e.errorCode).toBe("OUTPUT_SCHEMA_MISMATCH");
-    }
-  });
-
-  it("OUTPUT_SCHEMA_MISMATCH when stdout isn't valid JSON", async () => {
-    const node = codeNode({
-      output_schema: { type: "object" },
-      outputs: [],
-    });
-    const deps = makeDeps({
-      stdout: "<<not json>>",
-      stderr: "",
-      exitCode: 0,
-      durationMs: 1,
-    });
-    try {
-      await executeCodeNode(node, makeState(node), deps);
-      throw new Error("should have thrown");
-    } catch (e) {
-      if (!(e instanceof WorkflowError)) throw e;
-      expect(e.errorCode).toBe("OUTPUT_SCHEMA_MISMATCH");
-      expect(e.message).toContain("not valid JSON");
-    }
-  });
-
-  it("OUTPUT_SCHEMA_MISMATCH when stdout JSON is an array, not object", async () => {
-    const node = codeNode({
-      output_schema: { type: "object" },
-      outputs: [],
-    });
-    const deps = makeDeps({
-      stdout: "[1,2,3]",
-      stderr: "",
-      exitCode: 0,
-      durationMs: 1,
-    });
-    try {
-      await executeCodeNode(node, makeState(node), deps);
-      throw new Error("should have thrown");
-    } catch (e) {
-      if (!(e instanceof WorkflowError)) throw e;
-      expect(e.errorCode).toBe("OUTPUT_SCHEMA_MISMATCH");
-      expect(e.message).toContain("must be an object");
-    }
+    await expect(
+      executeCodeNode(node, makeState(node), deps),
+    ).resolves.toBeDefined();
+    expect(deps.calls[0]!.codeFile).toBe("subdir/main.py");
   });
 });
 
@@ -312,7 +326,8 @@ describe("executeCodeNode — process failures", () => {
     } catch (e) {
       if (!(e instanceof WorkflowError)) throw e;
       expect(e.errorCode).toBe("CODE_EXECUTION_FAILED");
-      expect(e.message).toContain("exitCode=1");
+      // Error text comes from envelope.error (= stderr trim), not a formatted
+      // "exit_code=N" prefix — assembleCodeOutput surfaces the raw stderr.
       expect(e.message).toContain("ModuleNotFoundError");
       expect(e.nodeId).toBe(0);
     }
@@ -332,13 +347,15 @@ describe("executeCodeNode — process failures", () => {
     } catch (e) {
       if (!(e instanceof WorkflowError)) throw e;
       expect(e.errorCode).toBe("CODE_EXECUTION_FAILED");
-      expect(e.message).toContain("exitCode=137");
+      // When stderr is empty, assembleCodeOutput falls back to the text
+      // "Process exited with code <N>" — no "exit_code=N" token.
+      expect(e.message).toContain("Process exited with code 137");
     }
   });
 
   it("SPEC_SCHEMA_MISMATCH when input.datasets isn't an array", async () => {
     const node = codeNode({
-      inputs: { datasets: "not-an-array" as unknown as string[] },
+      inputs: { datasets: "not-an-array" as unknown as unknown[] },
     });
     const deps = makeDeps({
       stdout: "",
@@ -358,7 +375,7 @@ describe("executeCodeNode — process failures", () => {
 
   it("SPEC_SCHEMA_MISMATCH when input.datasets contains non-strings", async () => {
     const node = codeNode({
-      inputs: { datasets: ["ok", 42 as unknown as string] },
+      inputs: { datasets: ["ok", 42] },
     });
     const deps = makeDeps({
       stdout: "",

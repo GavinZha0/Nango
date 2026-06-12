@@ -25,23 +25,26 @@ import type {
 const AGENT_UUID = "11111111-1111-4111-8111-111111111111";
 
 function agentNode(
-  overrides?: Partial<Omit<CanonicalAgentNode, "type">>,
+  overrides?: Partial<Omit<CanonicalAgentNode, "type" | "inputs">> & {
+    inputs?: Partial<CanonicalAgentNode["inputs"]>;
+  },
 ): CanonicalAgentNode {
+  const { inputs: inputsOverride, ...rest } = overrides ?? {};
   return {
     type: "agent",
     schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
-    agent: "Builtin / DataAnalyst",
-    agent_id: AGENT_UUID,
-    inputs: { dataset: "x" },
-    output_schema: {
-      type: "object",
-      properties: { summary: { type: "string" } },
-      required: ["summary"],
+    ...rest,
+    inputs: {
+      name: inputsOverride?.name ?? "Builtin / DataAnalyst",
+      agent_id: inputsOverride?.agent_id ?? AGENT_UUID,
+      task: inputsOverride?.task ?? "Summarise dataset x",
+      ...(inputsOverride?.context !== undefined && {
+        context: inputsOverride.context,
+      }),
     },
-    ...overrides,
   };
 }
 
@@ -54,11 +57,9 @@ function makeState(
   },
 ): ExecutionState {
   const spec: CanonicalWorkflowSpec = {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
-    outputs: { summary: "@nodes.0.summary" },
+    outputs: { result: ".0.result" },
   };
   const params: ExecuteParams = {
     workflowId: "wf-1",
@@ -127,9 +128,9 @@ describe("executeAgentNode — happy paths", () => {
     const outputs = await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { summary: "all good" } }, captured),
+      makeDeps({ kind: "ok", output: { result: "all good" } }, captured),
     );
-    expect(outputs).toEqual({ summary: "all good" });
+    expect(outputs).toEqual({ result: "all good" });
     expect(captured.events.map((e) => e.type)).toEqual([
       "workflow_node_attempt_started",
       "workflow_node_completed",
@@ -143,26 +144,26 @@ describe("executeAgentNode — happy paths", () => {
     await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { summary: "x" } }, captured),
+      makeDeps({ kind: "ok", output: { result: "x" } }, captured),
     );
     expect(captured.requests[0]!.agentId).toBe(AGENT_UUID);
   });
 
-  it("passes the node's output_schema (D30 default lands here too)", async () => {
-    const customSchema = {
-      type: "object",
-      properties: { tags: { type: "array" } },
-      required: ["tags"],
-    };
-    const node = agentNode({ output_schema: customSchema });
+  it("passes the registry-fixed output_schema to runAgent", async () => {
+    const node = agentNode();
     const state = makeState(node);
     const captured = { requests: [] as AgentRunRequest[] };
     await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { tags: [] } }, captured),
+      makeDeps({ kind: "ok", output: { result: "ok" } }, captured),
     );
-    expect(captured.requests[0]!.outputSchema).toBe(customSchema);
+    // Agent nodes always use the registry's canonical output schema: { result: string }
+    expect(captured.requests[0]!.outputSchema).toMatchObject({
+      type: "object",
+      properties: { result: { type: "string" } },
+      required: ["result"],
+    });
   });
 
   it("sets excludeFrontendTools: true (D16 marker)", async () => {
@@ -172,7 +173,7 @@ describe("executeAgentNode — happy paths", () => {
     await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { summary: "x" } }, captured),
+      makeDeps({ kind: "ok", output: { result: "x" } }, captured),
     );
     expect(captured.requests[0]!.excludeFrontendTools).toBe(true);
   });
@@ -184,7 +185,7 @@ describe("executeAgentNode — happy paths", () => {
     await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { summary: "x" } }, captured),
+      makeDeps({ kind: "ok", output: { result: "x" } }, captured),
     );
     expect(captured.requests[0]!.parentRunId).toBe("run-1");
   });
@@ -197,14 +198,17 @@ describe("executeAgentNode — happy paths", () => {
     await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { summary: "x" } }, captured),
+      makeDeps({ kind: "ok", output: { result: "x" } }, captured),
     );
     expect(captured.requests[0]!.abortSignal).toBe(ac.signal);
   });
 
-  it("resolves @path refs in input before dispatch", async () => {
+  it("resolves @path refs in inputs.task / inputs.context before dispatch", async () => {
     const node = agentNode({
-      inputs: { dataset: "@nodes.5.dataset", tenant: "@workflow.tenant" },
+      inputs: {
+        task: "@nodes.5.dataset",
+        context: "@workflow.tenant",
+      },
     });
     const state = makeState(node, {
       input: { tenant: "acme" },
@@ -214,11 +218,11 @@ describe("executeAgentNode — happy paths", () => {
     await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { summary: "x" } }, captured),
+      makeDeps({ kind: "ok", output: { result: "x" } }, captured),
     );
     expect(captured.requests[0]!.input).toEqual({
-      dataset: "p.parquet",
-      tenant: "acme",
+      task: "p.parquet",
+      context: "acme",
     });
   });
 });
@@ -273,14 +277,14 @@ describe("executeAgentNode — error paths", () => {
 
   it("propagates REF_UNRESOLVED before invoking runAgent", async () => {
     const node = agentNode({
-      inputs: { dataset: "@workflow.missing" },
+      inputs: { task: "@workflow.missing" },
     });
     const state = makeState(node, { input: {} });
     let runAgentCalled = false;
     const deps: AgentNodeDeps = {
       runAgent: async () => {
         runAgentCalled = true;
-        return { output: { summary: "x" }, childRunId: "c" };
+        return { output: { result: "x" }, childRunId: "c" };
       },
       emitEvent: () => {},
     };
@@ -296,63 +300,45 @@ describe("executeAgentNode — error paths", () => {
 
 describe("executeAgentNode — output schema validation", () => {
   it("throws OUTPUT_SCHEMA_MISMATCH when agent output is missing required keys", async () => {
-    const node = agentNode({
-      output_schema: {
-        type: "object",
-        properties: { summary: { type: "string" } },
-        required: ["summary"],
-      },
-    });
+    const node = agentNode();
     const state = makeState(node);
     const e = await expectWfError(
       () =>
         executeAgentNode(
           node,
           state,
-          makeDeps({ kind: "ok", output: {} }), // missing 'summary'
+          makeDeps({ kind: "ok", output: {} }), // missing 'result'
         ),
       "OUTPUT_SCHEMA_MISMATCH",
-      /summary/,
+      /result/,
     );
     expect(e.nodeId).toBe(0);
     expect(e.nodeName).toBe("Builtin / DataAnalyst");
   });
 
   it("throws OUTPUT_SCHEMA_MISMATCH when agent output has wrong type", async () => {
-    const node = agentNode({
-      output_schema: {
-        type: "object",
-        properties: { count: { type: "integer" } },
-        required: ["count"],
-      },
-    });
+    const node = agentNode();
     const state = makeState(node);
     await expectWfError(
       () =>
         executeAgentNode(
           node,
           state,
-          makeDeps({ kind: "ok", output: { count: "five" } }),
+          makeDeps({ kind: "ok", output: { result: 42 } }), // number, not string
         ),
       "OUTPUT_SCHEMA_MISMATCH",
-      /count/,
+      /result/,
     );
   });
 
-  it("uses the D30 default schema { text: string } when that's what the spec carries", async () => {
-    const node = agentNode({
-      output_schema: {
-        type: "object",
-        properties: { text: { type: "string" } },
-        required: ["text"],
-      },
-    });
+  it("accepts the canonical-fixed { result: string } output shape", async () => {
+    const node = agentNode();
     const state = makeState(node);
     const result = await executeAgentNode(
       node,
       state,
-      makeDeps({ kind: "ok", output: { text: "hello world" } }),
+      makeDeps({ kind: "ok", output: { result: "hello world" } }),
     );
-    expect(result).toEqual({ text: "hello world" });
+    expect(result).toEqual({ result: "hello world" });
   });
 });

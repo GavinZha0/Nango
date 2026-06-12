@@ -27,16 +27,13 @@ function toolNode(
     id,
     description: `n${id}`,
     depends_on,
-    tool: `tool_${id}`,
-    inputs: {},
+    inputs: { name: `tool_${id}`, arguments: {} },
   };
 }
 
 function makeSpec(nodes: CanonicalNode[]): CanonicalWorkflowSpec {
   return {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes,
     outputs: { dummy: "@nodes.0.dummy" },
   };

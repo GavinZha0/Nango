@@ -327,35 +327,7 @@ Call this from any future observability provider integration.
 
 ---
 
-## 5. Status snapshot
-
-### Done
-
-- [x] `pino` structured logs with redaction, request-id correlation,
-      env switches, JSON by default + opt-in pretty for dev
-- [x] Logs at backend chat route, BuiltIn chat route, AG-UI passthrough,
-      credential lookup
-- [x] `keypair` credential type (publicKey + secretKey, both encrypted)
-- [x] `observability` service type
-- [x] Admin UI support for the new type / service in
-      `CredentialFormDialog` and `CredentialManagementTable`
-- [x] `getCredentialFieldsById()` and `getEnabledObservabilityCredential()`
-      helpers with their own caches
-- [x] Cache invalidation subscription mechanism so credential rotation
-      transparently rebuilds dependent caches
-- [x] `langfuse` SDK installed (v3.38.x)
-- [x] `langfuse.ts` lazy singleton with `tracingEnabled` /
-      `withTrace` / `flushLangfuse` / `invalidateLangfuseClient`
-- [x] BuiltIn `/agent/<id>/run` and `/agent/<id>/connect` traces with
-      userId, sessionId, tags, metadata, status, durationMs
-- [x] Read `threadId` from the run request body so `sessionId` is
-      populated for `/run` (not just `/connect`)
-- [x] Failed traces marked with `"error"` tag + ERROR child event
-- [x] Credential `enabled` flag is the single master on/off (no env duplicate)
-- [x] `NANGO_OBSERVABILITY_TARGETS` per-target opt-out
-- [x] `.env.example` documents both Phase 1 and Phase 2 env vars
-
-### Not yet done (deliberately deferred)
+## 5. Backlog (deliberately deferred)
 
 #### BuiltIn run content (Phase 2-A)
 
@@ -462,28 +434,7 @@ LLM cost per user) a Prometheus / OTEL-metrics layer is a better fit.
 
 ---
 
-## 6. Reading list
-
-External references that informed these decisions:
-
-- [Langfuse JS SDK reference](https://langfuse.com/docs/sdk/typescript)
-- [Anthropic — Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
-  — argues for separating "session as append-only event log" from
-  "model + harness" and "tools + sandbox", which matches the Nango
-  proxy / runtime / frontend separation
-- [Anthropic — Scaling Managed Agents](https://www.anthropic.com/engineering/managed-agents)
-  — the Phase 2 design borrows the "trace at each architectural
-  boundary, not at every call" rule from this article
-- [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
-  — the field names we use in Langfuse `metadata` (`durationMs`,
-  `error`) align with these where possible
-- `awesome-harness-engineering` —
-  https://github.com/ai-boost/awesome-harness-engineering — broader
-  context on harness patterns
-
----
-
-## 7. Operational runbook
+## 6. Operational runbook
 
 ### How to disable all observability quickly
 
@@ -538,10 +489,9 @@ flags on the credentials is enough — no env change.
 
 ---
 
-### 3.7 Implementation Details and Quirks
+### Implementation details
 
-- **Flush Strategy (`flushAt: 1`)**: Every event ships immediately. The proxy is low-throughput compared to LLM cost, so immediate flush latency is negligible against the agent run itself, and it avoids losing data if the Node process is recycled.
-- **Client Caching**: The Langfuse client is cached via a singleton `_client`. Upon credential update, `invalidateLangfuseClient` drops this cache. The actual next client creation happens lazily on the next `resolveClient` call.
-- **Flush Lifecycle**: `flushLangfuse()` is executed in a `finally` block on every `run`/`connect` request to ensure Langfuse events ship before a Serverless environment can suspend the process.
-- **Enabled State Driven By DB**: Tracing is fully driven by the credential's `enabled` flag. Disabling the row clears the cached client on the next request via `onCredentialCacheInvalidated`—no process restart needed.
-- **Trace Error Flagging**: Langfuse traces don't natively carry a `level` field, only observations do. Therefore, a "trace failed" scenario is modeled via tag (`"error"`) + a child `ERROR` event to provide visual consistency in the Langfuse dashboard.
+- **Flush strategy** (`flushAt: 1`): every event ships immediately; low-throughput relative to LLM cost.
+- **Client caching**: singleton `_client`; `invalidateLangfuseClient` drops cache on credential update; next request rebuilds lazily.
+- **Enabled state**: driven by the credential `enabled` flag in DB, not env vars. Disabling the row clears the client on the next request — no restart.
+- **Error flagging**: Langfuse traces lack a `level` field; failures are modeled via `"error"` tag + child ERROR event.

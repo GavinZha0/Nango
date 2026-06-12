@@ -14,18 +14,45 @@ import type {
 
 // ─── Fixtures ─────────────────────────────────────────────────────────
 
+/**
+ * Wrap a raw args-schema in the wrapper shape canonicalize stamps
+ * onto tool nodes: `{ properties: { name: const, arguments: <args> },
+ * required: [name, arguments] }`. Tests for the executor's input
+ * validation use this to match the production shape.
+ */
+function wrapToolInputSchema(
+  argsSchema: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      arguments: argsSchema,
+    },
+    required: ["name", "arguments"],
+  };
+}
+
 function toolNode(
-  overrides?: Partial<Omit<CanonicalToolNode, "type">>,
+  overrides?: Partial<Omit<CanonicalToolNode, "type" | "inputs">> & {
+    inputs?: Partial<CanonicalToolNode["inputs"]>;
+  },
 ): CanonicalToolNode {
+  const { inputs: inputsOverride, ...rest } = overrides ?? {};
   return {
     type: "tool",
     schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
-    tool: "extract_dataset_by_sql",
-    inputs: { dataSourceId: "x", sql: "select 1" },
-    ...overrides,
+    ...rest,
+    inputs: {
+      name: inputsOverride?.name ?? "extract_dataset_by_sql",
+      arguments: inputsOverride?.arguments ?? {
+        dataSourceId: "x",
+        sql: "select 1",
+      },
+    },
   };
 }
 
@@ -34,9 +61,7 @@ function makeState(
   init?: { input?: Record<string, unknown>; outputs?: Map<number, Record<string, unknown>> },
 ): ExecutionState {
   const spec: CanonicalWorkflowSpec = {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
     outputs: { dummy: "@nodes.0.dummy" },
   };
@@ -100,8 +125,10 @@ describe("executeToolNode — happy paths", () => {
   it("resolves @workflow.* refs in input before calling tool.execute", async () => {
     const node = toolNode({
       inputs: {
-        dataSourceId: "@workflow.tenant",
-        sql: "SELECT * FROM o WHERE x = '@workflow.tenant'",
+        arguments: {
+          dataSourceId: "@workflow.tenant",
+          sql: "SELECT * FROM o WHERE x = '@workflow.tenant'",
+        },
       },
     });
     const state = makeState(node, { input: { tenant: "acme" } });
@@ -125,9 +152,11 @@ describe("executeToolNode — happy paths", () => {
   it("resolves @nodes.<n>.<field> refs from upstream outputs", async () => {
     const node = toolNode({
       id: 1,
-      tool: "downstream_tool",
       depends_on: [0],
-      inputs: { dataset: "@nodes.0.dataset" },
+      inputs: {
+        name: "downstream_tool",
+        arguments: { dataset: "@nodes.0.dataset" },
+      },
     });
     const state = makeState(node, {
       outputs: new Map([[0, { dataset: "p.parquet" }]]),
@@ -150,9 +179,7 @@ describe("executeToolNode — happy paths", () => {
     const node = toolNode();
     const ac = new AbortController();
     const spec: CanonicalWorkflowSpec = {
-      version: "1.0",
       name: "demo",
-      ref_recon_algorithm: "ref_recon_v1",
       nodes: [node],
       outputs: { dummy: "@nodes.0.dummy" },
     };
@@ -288,7 +315,9 @@ describe("executeToolNode — error paths", () => {
 
   it("propagates REF_UNRESOLVED from ref resolution (before tool.execute)", async () => {
     const node = toolNode({
-      inputs: { dataSourceId: "@workflow.missing", sql: "x" },
+      inputs: {
+        arguments: { dataSourceId: "@workflow.missing", sql: "x" },
+      },
     });
     const state = makeState(node, { input: {} });
     const events: WorkflowEngineEvent[] = [];
@@ -361,12 +390,15 @@ describe("executeToolNode — error paths", () => {
 describe("executeToolNode — input schema validation", () => {
   it("throws TOOL_INPUT_SCHEMA_MISMATCH when resolved input is missing required keys", async () => {
     const node = toolNode({
-      input_schema: {
+      // Wrapper schema mirrors what canonicalize stamps: the args
+      // schema lives under properties.arguments. The executor reads
+      // it via extractArgsSchema().
+      input_schema: wrapToolInputSchema({
         type: "object",
         properties: { sql: { type: "string" } },
         required: ["sql"],
-      },
-      inputs: {}, // missing 'sql'
+      }),
+      inputs: { arguments: {} }, // missing 'sql'
     });
     const state = makeState(node);
     let toolCalled = false;
@@ -390,12 +422,12 @@ describe("executeToolNode — input schema validation", () => {
 
   it("throws TOOL_INPUT_SCHEMA_MISMATCH on type mismatch after ref resolution", async () => {
     const node = toolNode({
-      input_schema: {
+      input_schema: wrapToolInputSchema({
         type: "object",
         properties: { count: { type: "integer" } },
         required: ["count"],
-      },
-      inputs: { count: "@workflow.count_str" },
+      }),
+      inputs: { arguments: { count: "@workflow.count_str" } },
     });
     const state = makeState(node, { input: { count_str: "not-a-number" } });
     await expectWfError(
@@ -407,7 +439,9 @@ describe("executeToolNode — input schema validation", () => {
   });
 
   it("passes when input_schema is undefined (back-compat)", async () => {
-    const node = toolNode({ inputs: { anything: "goes" } });
+    const node = toolNode({
+      inputs: { arguments: { anything: "goes" } },
+    });
     const state = makeState(node);
     await expect(
       executeToolNode(

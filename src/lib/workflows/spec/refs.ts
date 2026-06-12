@@ -8,14 +8,16 @@
  *
  * Three ref kinds:
  *   @nodes.<numeric-id>.<field>  — upstream node output field
- *   @workflow.<inputKey>         — workflow-level input parameter
+ *   @inputs.<inputKey>           — workflow-level input parameter
+ *                                  (preferred form; `@workflow.<key>`
+ *                                  is accepted as a backward-compat alias)
  *   @context.<path...>           — runtime context (user / now / …)
  *
  * Two forms:
  *   Pure-reference:  the whole field value is a ref string
  *                      "data": "@nodes.0.dataset"
  *   Embedded:        ref tokens interpolated INTO a larger string
- *                      "sql": "SELECT * FROM o WHERE id = @workflow.id"
+ *                      "sql": "SELECT * FROM o WHERE id = @inputs.id"
  *
  * See docs/workflow.md.
  */
@@ -62,8 +64,12 @@ const SEGMENT_RE = /^[a-zA-Z0-9_-]+$/;
  * Regex used by `findEmbeddedRefs` to locate ref tokens inside a
  * larger string. `g` is for iterative scan via `regex.exec`; callers
  * recreate the regex per call to keep `lastIndex` local.
+ *
+ * Matches `@inputs`, `@nodes`, and `@context`. `@workflow` is kept
+ * as a backward-compat alias for `@inputs`; both are accepted here
+ * so old specs with `@workflow.*` refs continue to resolve.
  */
-const EMBEDDED_REF_RE = /@(nodes|workflow|context)(?:\.[a-zA-Z0-9_-]+)+/g;
+const EMBEDDED_REF_RE = /@(nodes|inputs|workflow|context)(?:\.[a-zA-Z0-9_-]+)+/g;
 
 // ─── parseRef ─────────────────────────────────────────────────────────
 
@@ -78,7 +84,9 @@ const EMBEDDED_REF_RE = /@(nodes|workflow|context)(?:\.[a-zA-Z0-9_-]+)+/g;
  *   - `@nodes.<id>.<field>`     — exactly two segments; `<id>` is a
  *                                  non-negative integer with no
  *                                  leading zeros (other than "0")
- *   - `@workflow.<key>`         — exactly one segment
+ *   - `@inputs.<key>`           — exactly one segment (preferred)
+ *   - `@workflow.<key>`         — exactly one segment (backward-compat
+ *                                  alias for `@inputs`; resolves identically)
  *   - `@context.<seg>(.<seg>)*` — one or more segments
  */
 export function parseRef(s: string): WorkflowRef | null {
@@ -103,9 +111,14 @@ export function parseRef(s: string): WorkflowRef | null {
       if (!Number.isSafeInteger(nodeId) || nodeId < 0) return null;
       return { kind: "node", nodeId, field: segments[1] };
     }
+    case "inputs":
+    // CONTRACT: `@workflow.<key>` is a backward-compat alias for
+    // `@inputs.<key>`. Both parse to the same `kind: "workflow"` ref;
+    // `serializeRef` always emits `@inputs.` (the canonical form).
+    // Old persisted specs that contain `@workflow.*` continue to work.
     case "workflow": {
       if (segments.length !== 1) return null;
-      return { kind: "workflow", key: segments[0] };
+      return { kind: "workflow", key: segments[0]! };
     }
     case "context": {
       return { kind: "context", path: segments };
@@ -127,7 +140,10 @@ export function serializeRef(r: WorkflowRef): string {
     case "node":
       return `@nodes.${r.nodeId}.${r.field}`;
     case "workflow":
-      return `@workflow.${r.key}`;
+      // Always serialize to the canonical `@inputs.` form even when the
+      // original spec used the `@workflow.` alias — this normalizes
+      // round-trips so Strategy Z+ and the validator see a stable string.
+      return `@inputs.${r.key}`;
     case "context":
       return `@context.${r.path.join(".")}`;
   }
@@ -142,15 +158,33 @@ export function serializeRef(r: WorkflowRef): string {
  * `parseRef` (e.g. non-integer node id) are skipped.
  */
 export function findEmbeddedRefs(s: string): WorkflowRef[] {
+  return findEmbeddedRefTokens(s).map(({ ref }) => ref);
+}
+
+/**
+ * Like `findEmbeddedRefs` but also returns the original matched token
+ * text alongside each parsed ref.
+ *
+ * Used by the runtime resolver for text substitution: the `token` is
+ * the substring to replace in the original string (e.g. `"@workflow.id"`
+ * or `"@inputs.id"`), while `serializeRef(ref)` always emits the
+ * canonical `@inputs.*` form. Using the original token as the needle
+ * correctly handles the `@workflow` backward-compat alias.
+ */
+export function findEmbeddedRefTokens(
+  s: string,
+): Array<{ ref: WorkflowRef; token: string }> {
   if (typeof s !== "string") return [];
-  const refs: WorkflowRef[] = [];
-  const re = new RegExp(EMBEDDED_REF_RE.source, "g");
+  const result: Array<{ ref: WorkflowRef; token: string }> = [];
+  // Reuse the module-level regex; reset lastIndex before each scan
+  // so the stateful `g` flag starts fresh.
+  EMBEDDED_REF_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) {
+  while ((m = EMBEDDED_REF_RE.exec(s)) !== null) {
     const parsed = parseRef(m[0]);
-    if (parsed !== null) refs.push(parsed);
+    if (parsed !== null) result.push({ ref: parsed, token: m[0] });
   }
-  return refs;
+  return result;
 }
 
 // ─── isRefCandidate ───────────────────────────────────────────────────

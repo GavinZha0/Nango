@@ -47,6 +47,15 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "datasource.preview.max_bytes", value: "50000", valueType: "number", description: "Preview byte hard cap" },
   { key: "datasource.preview.default_rows", value: "5", valueType: "number", description: "Default preview rows" },
 
+  // ── sql node inline-vs-cached policy ──────────────────────────────
+  // Workflow SQL node decides between INLINE mode (full result
+  // carried in `rows`) and CACHED mode (top-N preview + parquet
+  // handle). Bounded by `datasource.preview.max_rows` upstream
+  // because the SQL tool currently materialises previews through
+  // the same path.
+  { key: "sql.inline_max_rows", value: "200", valueType: "number", description: "Row count cap below which a workflow SQL node returns the full result inline (returned_rows == total_rows). Above this, only the top-N preview is carried in `rows` and downstream nodes must read the parquet handle via `dataset_name`." },
+  { key: "sql.inline_max_bytes_mb", value: "20", valueType: "number", description: "Byte cap (MB) alongside `sql.inline_max_rows`. Reserved for future bytes-aware truncation; not yet enforced." },
+
   // ── ssh ────────────────────────────────────────────────────────────
   { key: "ssh.exec_timeout", value: "30", valueType: "number", description: "Command timeout in seconds" },
   { key: "ssh.connect_timeout", value: "10", valueType: "number", description: "Connection timeout in seconds" },

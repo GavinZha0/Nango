@@ -24,9 +24,10 @@ function toolNode(retries?: Retries): CanonicalToolNode {
     schema_version: "1",
     id: 0,
     description: "n",
-    depends_on: [],
-    tool: "flaky_tool",
-    inputs: {},
+    depends_on: [],    inputs: {
+      name: "flaky_tool",
+      arguments: {},
+    },
     ...(retries !== undefined && { retries }),
   };
 }
@@ -36,9 +37,7 @@ function makeState(
   abortController?: AbortController,
 ): ExecutionState {
   const spec: CanonicalWorkflowSpec = {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes: [node],
     outputs: { dummy: "@nodes.0.dummy" },
   };

@@ -135,10 +135,8 @@ describe("run_skill_script", () => {
       filename: "analyze.py",
       datasets: ["sales_q1"],
     })) as {
-      stdout: string;
-      stderr: string;
-      exitCode: number;
-      durationMs: number;
+      ok: boolean;
+      message: string | null;
       backend: string;
     };
 
@@ -148,8 +146,10 @@ describe("run_skill_script", () => {
       stdin: scriptBody,
       datasets: ["sales_q1"],
     });
-    expect(r.stdout).toBe("hello from skill\n");
-    expect(r.exitCode).toBe(0);
+    // run_skill_script returns { ...assembleCodeOutput(out), backend }.
+    // "hello from skill\n" is not valid JSON → message = raw stdout.
+    expect(r.ok).toBe(true);
+    expect(r.message).toBe("hello from skill\n");
     expect(r.backend).toBe("subprocess");
   });
 

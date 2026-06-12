@@ -21,7 +21,6 @@ CREATE TABLE "artifact" (
 	"type" text,
 	"name" text NOT NULL,
 	"description" text,
-	"content" jsonb,
 	"config" jsonb,
 	"source_thread_id" text,
 	"source_outcome_id" text,
@@ -29,6 +28,9 @@ CREATE TABLE "artifact" (
 	"display_order" integer DEFAULT 0 NOT NULL,
 	"workflow_id" uuid,
 	"workflow_output_field" text,
+	"snapshot" jsonb,
+	"snapshot_at" timestamp,
+	"view_mode" text DEFAULT 'snapshot' NOT NULL,
 	"created_by" uuid NOT NULL,
 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -44,11 +46,10 @@ CREATE TABLE "backend_thread_state" (
 --> statement-breakpoint
 CREATE TABLE "builtin_agent" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"is_supervisor" boolean DEFAULT false NOT NULL,
+	"role" text,
 	"name" text NOT NULL,
 	"description" text,
 	"icon" text,
-	"role" text,
 	"model" text NOT NULL,
 	"model_provider" text NOT NULL,
 	"credential_id" uuid NOT NULL,
@@ -481,10 +482,11 @@ ALTER TABLE "workflow" ADD CONSTRAINT "workflow_updated_by_user_id_fk" FOREIGN K
 CREATE INDEX "artifact_parent_idx" ON "artifact" USING btree ("parent_id");--> statement-breakpoint
 CREATE INDEX "artifact_created_by_idx" ON "artifact" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX "artifact_type_idx" ON "artifact" USING btree ("type");--> statement-breakpoint
-CREATE INDEX "artifact_source_idx" ON "artifact" USING btree ("source_thread_id","source_outcome_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "artifact_source_unique_idx" ON "artifact" USING btree ("source_thread_id","source_outcome_id") WHERE "artifact"."source_thread_id" IS NOT NULL AND "artifact"."source_outcome_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "artifact_workflow_id_idx" ON "artifact" USING btree ("workflow_id");--> statement-breakpoint
 CREATE INDEX "backend_thread_state_updated_at_idx" ON "backend_thread_state" USING btree ("updated_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "builtin_agent_one_supervisor_per_user_idx" ON "builtin_agent" USING btree ("created_by") WHERE "builtin_agent"."is_supervisor" = true;--> statement-breakpoint
+CREATE UNIQUE INDEX "builtin_agent_one_supervisor_per_user_idx" ON "builtin_agent" USING btree ("created_by") WHERE "builtin_agent"."role" = 'supervisor';--> statement-breakpoint
+CREATE UNIQUE INDEX "builtin_agent_one_secretary_per_user_idx" ON "builtin_agent" USING btree ("created_by") WHERE "builtin_agent"."role" = 'secretary';--> statement-breakpoint
 CREATE INDEX "builtin_agent_tool_agent_idx" ON "builtin_agent_tool" USING btree ("agent_id");--> statement-breakpoint
 CREATE INDEX "builtin_agent_tool_mcp_server_idx" ON "builtin_agent_tool" USING btree ("mcp_server_id");--> statement-breakpoint
 CREATE INDEX "builtin_agent_tool_mcp_tool_idx" ON "builtin_agent_tool" USING btree ("mcp_server_id","mcp_tool_name");--> statement-breakpoint
@@ -518,11 +520,12 @@ CREATE INDEX "ssh_server_credential_idx" ON "ssh_server" USING btree ("credentia
 CREATE UNIQUE INDEX "user_email_active_idx" ON "user" USING btree ("email") WHERE "user"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "verification_case_result_run_idx" ON "verification_case_result" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "verification_case_result_case_started_idx" ON "verification_case_result" USING btree ("case_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE UNIQUE INDEX "verification_case_result_run_case_idx" ON "verification_case_result" USING btree ("run_id","case_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "verification_case_suite_name_idx" ON "verification_case" USING btree ("suite_id","name");--> statement-breakpoint
 CREATE INDEX "verification_case_suite_idx" ON "verification_case" USING btree ("suite_id");--> statement-breakpoint
 CREATE INDEX "verification_case_mcp_tool_idx" ON "verification_case" USING btree ("mcp_server_id","tool_name");--> statement-breakpoint
 CREATE INDEX "verification_run_suite_started_idx" ON "verification_run" USING btree ("suite_id","started_at" DESC NULLS LAST);--> statement-breakpoint
-CREATE INDEX "verification_run_status_idx" ON "verification_run" USING btree ("status");--> statement-breakpoint
+CREATE INDEX "verification_run_recovery_idx" ON "verification_run" USING btree ("started_at") WHERE "verification_run"."status" = 'running';--> statement-breakpoint
 CREATE INDEX "workflow_created_by_idx" ON "workflow" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX "workflow_visibility_idx" ON "workflow" USING btree ("visibility") WHERE "workflow"."visibility" = 'public';--> statement-breakpoint
 CREATE INDEX "workflow_spec_gin_idx" ON "workflow" USING gin ("spec" jsonb_path_ops);

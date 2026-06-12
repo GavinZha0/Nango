@@ -3,10 +3,8 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import {
-  productionSaveDeps,
-  saveArtifact,
-} from "@/lib/artifacts/save-artifact";
+import { saveArtifact } from "@/lib/artifacts/save-artifact";
+import { buildProductionSaveDeps } from "@/lib/artifacts/save-deps.server";
 import { withSession } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
 
@@ -42,7 +40,7 @@ export const POST = withSession(ROUTE, async ({ req, session, log }) => {
       ...(body.name !== undefined && { name: body.name }),
       ...(body.description !== undefined && { description: body.description }),
     },
-    productionSaveDeps,
+    buildProductionSaveDeps(session.user.id),
   );
   log.info(
     {

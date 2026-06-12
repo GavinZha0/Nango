@@ -185,13 +185,20 @@ function nodeDisplayName(
   if (node === undefined) return undefined;
   switch (node.type) {
     case "tool":
-      return node.tool;
+      return node.inputs.name;
     case "agent":
-      return node.agent;
+      return node.inputs.name;
     case "code":
-      return `code:${node.language}`;
+      return `code:${node.inputs.language}`;
     case "sql":
-      return `sql:${node.data_source_name}`;
+      return `sql:${node.inputs.data_source_name}`;
+    case "chart":
+      return `chart:${node.inputs.renderer}`;
+    default: {
+      const _exhaustive: never = node;
+      void _exhaustive;
+      return undefined;
+    }
   }
 }
 

@@ -1,10 +1,8 @@
 # Artifact + Dashboard Library — Design & Migration
 
-> Status: M1 landed; M2 in progress
+> Status: **M1 shipped, M2 in progress**
 > Audience: engineers implementing this milestone series; reviewers
-> Related: `docs/data-visualization.md` §6 (the outcome → artifact save
-> flow that lands here), `docs/persisted-agent-runner-migration.md`
-> (structural precedent for this doc)
+> Related: `docs/data-visualization.md` (outcome → artifact save flow)
 
 ## 1. Background
 
@@ -27,10 +25,7 @@ chat ────────────────► outcome ─────
 
 Each layer has a single, narrow purpose; concepts flow one direction
 and never leak backwards. This doc nails down the second-half schema
-(artifact + dashboard) and the migration that gets us there. It
-folds together the discussion captured in
-`docs/persisted-agent-runner-migration.md`-style commit conversations
-held over the previous design sessions.
+(artifact + dashboard) and the migration that gets us there.
 
 ## 2. Decisions (all locked)
 
@@ -269,151 +264,12 @@ Invariants:
 
 ## 5. Migration plan
 
-### 5.1 Drizzle migration (single migration file, e.g. `0032_artifact_dashboard_redesign.sql`)
-
-Generated via `pnpm drizzle-kit generate` after editing `schema.ts`,
-then hand-checked. The SQL roughly:
-
-```sql
-BEGIN;
-
--- 1. New columns on artifact
-ALTER TABLE artifact ADD COLUMN parent_id uuid REFERENCES artifact(id) ON DELETE RESTRICT;
-ALTER TABLE artifact ADD COLUMN kind text NOT NULL DEFAULT 'artifact';
-ALTER TABLE artifact ADD COLUMN display_order int NOT NULL DEFAULT 0;
-ALTER TABLE artifact ALTER COLUMN type DROP NOT NULL;
-ALTER TABLE artifact ALTER COLUMN content DROP NOT NULL;
-
--- 2. Drop legacy menu_item FK + table
-ALTER TABLE artifact DROP COLUMN menu_item_id;
-DROP TABLE menu_item;
-
--- 3. Seed system categories for existing users (per-user, idempotent)
-INSERT INTO artifact (id, parent_id, kind, type, name, content, visibility, created_by, created_at, updated_at)
-SELECT gen_random_uuid(), NULL, 'folder', NULL, cat.name, NULL, 'private', u.id, now(), now()
-FROM users u
-CROSS JOIN (
-  VALUES
-    ('Charts'),
-    ('Reports'),
-    ('Code'),
-    ('Dashboards'),
-    ('Images'),
-    ('HTML'),
-    ('PPT')
-) AS cat(name)
-WHERE NOT EXISTS (
-  SELECT 1 FROM artifact a
-  WHERE a.created_by = u.id AND a.parent_id IS NULL AND a.name = cat.name
-);
-
--- 4. Backfill parent_id for existing artifact rows
---    Map each row's type → its owner's matching category folder.
-UPDATE artifact a
-SET parent_id = (
-  SELECT cat.id FROM artifact cat
-  WHERE cat.created_by = a.created_by
-    AND cat.parent_id IS NULL
-    AND cat.name = CASE a.type
-      WHEN 'chart'     THEN 'Charts'
-      WHEN 'echart'    THEN 'Charts'
-      WHEN 'report'    THEN 'Reports'
-      WHEN 'code'      THEN 'Code'
-      WHEN 'dashboard' THEN 'Dashboards'
-      WHEN 'image'     THEN 'Images'
-      WHEN 'html'      THEN 'HTML'
-      WHEN 'ppt'       THEN 'PPT'
-    END
-)
-WHERE a.kind = 'artifact' AND a.parent_id IS NULL;
-
--- 5. Drop the default we set on kind (it was only there to satisfy
---    NOT NULL during the bulk update). Future inserts must specify.
-ALTER TABLE artifact ALTER COLUMN kind DROP DEFAULT;
-
--- 6. Add unique + standard indexes
-CREATE UNIQUE INDEX artifact_unique_name_per_parent
-  ON artifact (created_by, COALESCE(parent_id::text, ''), name);
-CREATE INDEX artifact_parent_idx ON artifact (parent_id);
-CREATE INDEX artifact_type_idx ON artifact (type) WHERE kind = 'artifact';
--- (created_by, source_thread_id, source_outcome_id indexes already exist
--- from the original ArtifactTable schema)
-
--- 7. New tables: dashboard + dashboard_artifact
-CREATE TABLE dashboard (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  parent_id       uuid REFERENCES dashboard(id) ON DELETE RESTRICT,
-  kind            text NOT NULL,
-  name            text NOT NULL,
-  description     text,
-  slug            text,
-  layout          jsonb,
-  published_at    timestamp,
-  visibility      text NOT NULL DEFAULT 'private',
-  display_order   int  NOT NULL DEFAULT 0,
-  created_by      uuid NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
-  created_at      timestamp NOT NULL DEFAULT now(),
-  updated_at      timestamp NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX dashboard_slug_unique ON dashboard (slug) WHERE slug IS NOT NULL;
-CREATE UNIQUE INDEX dashboard_unique_name_per_parent
-  ON dashboard (created_by, COALESCE(parent_id::text, ''), name);
-CREATE INDEX dashboard_parent_idx ON dashboard (parent_id);
-CREATE INDEX dashboard_created_by_idx ON dashboard (created_by);
-CREATE INDEX dashboard_published_idx ON dashboard (published_at) WHERE published_at IS NOT NULL;
-
-CREATE TABLE dashboard_artifact (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  dashboard_id    uuid NOT NULL REFERENCES dashboard(id) ON DELETE CASCADE,
-  artifact_id     uuid NOT NULL REFERENCES artifact(id) ON DELETE RESTRICT,
-  grid_x          int  NOT NULL,
-  grid_y          int  NOT NULL,
-  grid_w          int  NOT NULL,
-  grid_h          int  NOT NULL,
-  display_order   int  NOT NULL DEFAULT 0,
-  created_at      timestamp NOT NULL DEFAULT now()
-);
-CREATE INDEX dashboard_artifact_dashboard_idx ON dashboard_artifact (dashboard_id);
-CREATE INDEX dashboard_artifact_artifact_idx ON dashboard_artifact (artifact_id);
-
-COMMIT;
-```
-
-Notes:
-- Steps 3-4 are idempotent — re-running the migration in dev is safe.
-- The COALESCE-in-unique-index trick is needed because Postgres
-  treats NULL as distinct in unique constraints by default; we want
-  "two rows under the same NULL parent with the same name" to
-  conflict.
-- Migration is **forward-only**. No down migration. If a rollback
-  becomes necessary we hand-craft it from the state at that point.
-
-### 5.2 Pre-launch posture
-
-Project hasn't launched. We accept that the migration touches existing
-artifact rows in dev DBs but **doesn't preserve any folder
-organization** — old `menu_item.parent_id` chains are not migrated to
-new `artifact.parent_id` folders. Reasons:
-- The `menu_item` tree was never exposed in UI; no user has used it.
-- Each existing artifact lands under its type-matched system category,
-  ungrouped.
-- If anyone has populated `menu_item` rows for tests, those rows are
-  lost on `DROP TABLE`. Document this in the migration commit.
-
-### 5.3 Client-side changes (M1)
-
-- `src/store/outcome-store.ts`: remove `groupId: string | null` from
-  `BaseOutcome`. All references to it (handler, comparators, tests).
-- `/api/threads/[threadId]/outcomes` route: stops returning
-  `groupId`. Updates the response schema accordingly.
-
-### 5.4 better-auth user-creation hook
-
-`src/lib/auth/auth-instance.ts` already uses
-`databaseHooks.user.create.before` (for role assignment). Add an
-`after` hook that calls `seedArtifactCategoriesForUser(user.id)`. The
-seed function lives in `src/lib/artifacts/seed.ts` and is also
-exposed for the migration script's idempotent backfill.
+M1 migration completed and applied. The migration file lives in
+`src/lib/db/migrations/` (generated via `pnpm drizzle-kit generate`,
+hand-reviewed). It adds `parent_id`, `kind`, `display_order` to
+`artifact`; drops `menu_item`; seeds per-user category folders;
+backfills `artifact.parent_id` from legacy `type`; and creates the
+`dashboard` + `dashboard_artifact` tables.
 
 ## 6. API surface (M1 ships these)
 
@@ -523,61 +379,7 @@ one-shot) but only seed data and structure. M3 fills in routes.
   - Every existing user has exactly N category folder rows.
   - `menu_item` table no longer exists.
 
-## 8. Implementation steps (M1)
-
-Roughly 12 ordered steps. Each is a single PR-able unit:
-
-1. **Define new constants**: `src/lib/domain/artifact.ts` adds
-   `SEED_CATEGORIES` (name + matching types) + `ARTIFACT_KIND`.
-2. **Schema edit**: `src/lib/db/schema.ts` — modify `ArtifactTable`
-   (new columns, drop FK), drop `MenuItemTable`, add `DashboardTable`
-   + `DashboardArtifactTable`.
-3. **Generate migration**: `pnpm drizzle-kit generate` (or hand-write)
-   producing `0032_artifact_dashboard_redesign.sql`. Hand-review +
-   adjust for the seed and backfill blocks shown in §5.1.
-4. **Service module**: `src/lib/artifacts/service.ts` —
-   `seedArtifactCategoriesForUser`, `validateArtifactRow`,
-   `assembleTree`, plus helpers for folder/artifact CRUD with
-   invariant checks. All DB calls live here, no DB in route handlers.
-5. **Wire seed into user creation**: extend
-   `databaseHooks.user.create` in `src/lib/auth/auth-instance.ts`
-   with an `after` callback that calls
-   `seedArtifactCategoriesForUser`.
-6. **Rewrite `POST /api/artifacts`** to handle `kind` discriminator
-   and delegate to the service. Preserve the existing idempotency
-   contract for `source_thread_id+source_outcome_id`.
-7. **New routes**: `GET /api/artifacts/tree`,
-   `GET/PATCH/DELETE /api/artifacts/[id]`.
-8. **Client store cleanup**: drop `groupId` from `ChartOutcome`,
-   remove from `addOutcome` payloads in `useOutcomeTools`, fix tests.
-9. **Outcomes replay route**: stop including `groupId` in
-   `/api/threads/[threadId]/outcomes` response.
-10. **Unit + integration tests** for §7.
-11. **Manual smoke**: run dev server, log in as a fresh user, generate
-    a chart, click Save (existing button — UI dialog comes in M2),
-    confirm DB has the row under the correct category folder. Hit
-    `GET /api/artifacts/tree`, eyeball JSON.
-12. **Commit + doc update**: this file's §13 "Final state" gets the
-    M1 commit ledger.
-
-## 9. Risks & open items
-
-### Risks
-
-- **Drizzle's NULL-in-unique-index handling**: the `COALESCE` trick
-  is Postgres-specific; if we ever switch DB we lose name uniqueness
-  enforcement at the folder root level. Mitigation: service-layer
-  also checks before insert.
-- **Seed timing**: if `databaseHooks.user.create.after` does not exist
-  in our better-auth version, fall back to a lazy approach — on first
-  call to `GET /api/artifacts/tree`, check whether the user has any
-  category folders, seed if missing. Less elegant but bulletproof.
-- **Existing artifact rows without a matching type→category map**:
-  e.g. some old row has `type = 'pivot'` which is not in the seed
-  list. Migration places it under no folder (NULL parent_id post-update)
-  → service-layer would reject it. Mitigation: the migration aborts
-  if any row has an unmapped type; surface the count + types so the
-  fix is a single ALTER (extend the seed list, re-run).
+## 8. Risks & open items
 
 ### Open items for later milestones
 
@@ -593,57 +395,11 @@ Roughly 12 ordered steps. Each is a single PR-able unit:
 - **Cross-user sharing** beyond "publish" (e.g. invite specific
   users to a private dashboard) — not in V1.
 
-## 10. Final state (post-M1)
-
-| Commit | Scope |
-|---|---|
-| _this commit_ | Steps 1-9 — domain constants, schema, migration 0032, service layer, auth seed hook, POST kind-discriminator, GET tree + [id] PATCH/DELETE, drop client `groupId` |
-
-Smoke verified (Step 11):
-
-- migration apply on dev DB drops `menu_item`, adds `parent_id` /
-  `kind` / `display_order` to `artifact`, creates `dashboard` +
-  `dashboard_artifact`, seeds 6 root categories per user, backfills
-  existing `artifact.parent_id` from the legacy `type` value.
-- `GET /api/artifacts/tree` returns the seeded categories with the
-  pre-existing chart rows nested under Charts.
-- `POST /api/artifacts {kind:"artifact", type:"chart"}` lands the
-  new row under the user's Charts folder without an explicit
-  `parentId`.
-- `POST /api/artifacts` is idempotent on
-  `(sourceThreadId, sourceOutcomeId)`: second call returns the same
-  id with `alreadySaved=true`.
-- `POST /api/artifacts {kind:"folder", parentId}` creates a
-  sub-folder.
-- `DELETE /api/artifacts/<seed-category>` is rejected with 403
-  (`FORBIDDEN — System categories cannot be modified or deleted`).
-- `DELETE /api/artifacts/<non-empty-folder>` is rejected with 409
-  (`CONFLICT — Folder is not empty`).
-- `PATCH /api/artifacts/<id> {parentId: <self>}` is rejected with
-  400; `{parentId: null}` likewise.
-- `PATCH /api/artifacts/<non-existent>` returns 404.
-
-Step 10 — vitest coverage at `tests/unit/lib/artifacts/service.test.ts`:
-the suite exercises `assembleTree` shape + orphan filtering,
-`seedArtifactCategoriesForUser` idempotency, `updateNode`
-seed/cycle/root-move rejections, `deleteNode` seed + non-empty
-checks, and `createFolder` parent validation. Route-level coverage
-intentionally deferred — the wrappers are thin, the §11 smoke
-ledger already exercises them end-to-end.
-
-> Historical note: the original M2 design also shipped a
-> `createArtifact` service function with server-side category
-> auto-routing + missing-seed self-heal. Both were retired with the
-> M2 save flow consolidation (W1.7.7); `saveArtifact` requires the
-> caller to pre-resolve `parentId` via the save dialog, and the
-> seed-failure recovery path is no longer wired (see comment in
-> `auth-instance.ts`).
-
-## 11. M2 design — Save dialog, library panel, detail page
+## 9. M2 design — Save dialog, library panel, detail page
 
 > Status: design locked; implementation in progress.
 
-### 11.1 Scope (locked)
+### 9.1 Scope (locked)
 
 | # | Decision | Rationale |
 |---|---|---|
@@ -652,7 +408,7 @@ ledger already exercises them end-to-end.
 | 3 | **Folder ops live in a hover-revealed three-dot menu on the row.** | Right-click ruled out (non-discoverable on web). A panel-level toolbar acting on a "current selection" rejected (extra mode). The dropdown opens on click of the `⋯` icon. Seed categories show the same `⋯` button but only the `New sub-folder` entry — `Rename` / `Delete` are absent because the service rejects them. |
 | 4 | **Detail page (`/artifact/[id]`) is in M2.** | Renders the chart, the metadata (parent path, type, source thread/outcome, dates), and exposes inline `Rename` / `Move to…` / `Delete` actions. |
 
-### 11.2 Components
+### 9.2 Components
 
 - `hooks/useArtifactTree.ts` — SWR-backed reader for `GET /api/artifacts/tree`. Single source of truth for both the left panel and the folder-picker dialogs. `mutate()` after every write so the tree stays consistent without manual refresh.
 - `components/library/ArtifactFolderTreeSelect.tsx` — shared folder picker. Renders the tree (folders only — leaves are hidden), supports expand/collapse, selects a single folder id. Disables top-level-root selection unless `allowRoot=false` (always `false` in M2).
@@ -660,11 +416,11 @@ ledger already exercises them end-to-end.
 - `components/left-panels/ArtifactPanel.tsx` — rewritten. Tree view, search filter, "+ New folder under root-…" disabled because the root level is system-managed, "+ Refresh" calls `mutate()`. Hover row → `⋯` button with `New sub-folder` / `Rename` / `Delete` (leaves: `Rename` / `Delete`, no New sub-folder). Each leaf row clicks through to `/artifact/<id>`.
 - `app/(workspace)/artifact/[id]/page.tsx` — detail page. Server component fetches the artifact, asserts ownership, renders metadata + the live chart via `EChartsRenderer`. Inline actions (`Rename`, `Move to`, `Delete`) are client components powered by the shared dialogs / PATCH / DELETE calls.
 
-### 11.3 API additions
+### 9.3 API additions
 
 None required. `GET /api/artifacts/[id]` currently returns the row only — the parent path / breadcrumb is reconstructed client-side from the tree returned by `GET /api/artifacts/tree` (which we already load for the panel). This avoids a server-side recursive CTE.
 
-### 11.4 Out of scope (defers to later milestones)
+### 9.4 Out of scope (defers to later milestones)
 
 - Search across the tree (M2 ships a flat client-side filter; full-text search is M4+).
 - Drag-and-drop reorder / reparent (PATCH `displayOrder` / `parentId` exists, but no DnD UI in M2).

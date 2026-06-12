@@ -209,7 +209,7 @@ export class SubprocessAdapter implements ISandboxAdapter {
       // Strict allowlist — see `buildSpawnEnv`. Cast through unknown
       // because the project augments `NodeJS.ProcessEnv` to require
       // `NODE_ENV`, which we deliberately omit from the child env.
-      env: this.buildSpawnEnv(tmpHostDir) as unknown as NodeJS.ProcessEnv,
+      env: this.buildSpawnEnv(tmpHostDir, input.env) as unknown as NodeJS.ProcessEnv,
     };
     const child = spawn(cmd, args, spawnOpts);
     if (input.stdin !== undefined && child.stdin) {
@@ -248,7 +248,10 @@ export class SubprocessAdapter implements ISandboxAdapter {
    *  On venv misconfiguration we fall back to system PATH and log
    *  once per (path, process) pair so the agent surface stays
    *  usable rather than hard-failing every call. */
-  private buildSpawnEnv(tmpHostDir: string): Record<string, string> {
+  private buildSpawnEnv(
+    tmpHostDir: string,
+    inputEnv?: Record<string, string>,
+  ): Record<string, string> {
     // Base allowlist — none of these carry secrets.
     // (Typed as a plain string record because NodeJS.ProcessEnv has
     // a project-augmented `NODE_ENV` requirement we deliberately
@@ -303,7 +306,7 @@ export class SubprocessAdapter implements ISandboxAdapter {
             "server started, restart `pnpm dev` to pick it up.",
         );
       }
-      return env;
+      return mergeInputEnv(env, inputEnv);
     }
 
     const resolved = resolvePythonVenv(configured);
@@ -316,7 +319,7 @@ export class SubprocessAdapter implements ISandboxAdapter {
             "location; falling back to system PATH.",
         );
       }
-      return env;
+      return mergeInputEnv(env, inputEnv);
     }
 
     if (!venvWarnedFor.has(`ok:${configured}`)) {
@@ -332,7 +335,7 @@ export class SubprocessAdapter implements ISandboxAdapter {
     // PYTHONHOME is intentionally NOT carried over from the parent —
     // the allowlist above never lets it through, so site-packages
     // resolution always uses the venv's lib/.
-    return env;
+    return mergeInputEnv(env, inputEnv);
   }
 
   private async driveChild(
@@ -417,4 +420,23 @@ interface DriveResult {
   rawStderr: string;
   exitCode: number;
   termination: SandboxOutput["termination"];
+}
+
+/**
+ * Merge caller-supplied env vars into the security allowlist.
+ * The allowlist ALWAYS wins — callers cannot override PATH, HOME,
+ * TMPDIR, NANGO_*, VIRTUAL_ENV, or any other key already present.
+ * This prevents LLM-generated `env` values from hijacking the venv
+ * or leaking secrets through env-var overrides.
+ */
+function mergeInputEnv(
+  allowlist: Record<string, string>,
+  inputEnv: Record<string, string> | undefined,
+): Record<string, string> {
+  if (inputEnv === undefined) return allowlist;
+  const merged = { ...allowlist };
+  for (const [k, v] of Object.entries(inputEnv)) {
+    if (!(k in merged)) merged[k] = v;
+  }
+  return merged;
 }

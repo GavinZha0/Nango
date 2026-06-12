@@ -549,17 +549,16 @@ Do **not** register raw LLM endpoints as agent backend platforms. Instead:
 - `docs/observability.md` — logging and tracing in depth
 - `docs/builtin-runtime.md` — Built-in runtime pools, invalidation contract, operator guide
 - `docs/key-rotation.md` — credential encryption keyring & rotation procedure
-- `docs/memory.md` — memory / conversation semantics
+- `docs/memory-architecture.md` — agent memory system design (not yet implemented)
 - `docs/threadid-lifecycle.md` — CopilotKit v2 threadId lifecycle
 - `docs/orchestrator.md` — Runner kernel, supervisor, async, schedules, run forensics
 - `docs/runner-events.md` — event pipeline (reception → coalescing → persistence → replay → admin display) + AG-UI ↔ `EntityRunEventType` reference table
 - `docs/runner.md` — runner kernel implementation: dispatch paths, request flow, file layout
 - `docs/cache.md` — six process-wide caches: invalidation, HMR `globalThis` pinning (§2.7), observability
-- `docs/workflow.md` — workflow V1 reference: spec format (4 node types), save / refresh flows, the open chart-data-flow question (§7)
-- `docs/workflow-architecture.md` — workflow decision log (D1 → D38, considered / rejected, paused backlog)
+- `docs/workflow.md` — workflow V1 reference: architecture, spec format (5 node types), save / refresh flows, design principles, constraints, backlog
 - `docs/skills.md` — DB-resident Skills runtime: build pipeline, boot reconcile, runtime tool surface
 - `docs/data-sources.md` — `IDataSourceAdapter` contract, Parquet cache strategy, per-source adapter onboarding
-- `docs/sandbox.md` — `ISandboxAdapter` contract, three local backends (Subprocess / Nsjail / LocalDocker), `./data/<name>/data.parquet` path contract (D38), agent-tool surface
+- `docs/sandbox.md` — `ISandboxAdapter` contract, three local backends (Subprocess / Nsjail / LocalDocker), `./data/<name>/data.parquet` path contract, agent-tool surface
 - `docs/data-visualization.md` — outcomes panel + chart UI, `render_chart` frontend tool
 - `docs/artifact-evolution.md` — artifact library V2 plans (enlarge / minimize, multi-type artifacts)
 

@@ -137,18 +137,17 @@ describe("updateArtifact — write-then-bundle", () => {
         name: "wf",
         description: null,
         spec: {
-          version: "1.0",
           name: "demo",
-          ref_recon_algorithm: "ref_recon_v1",
           nodes: [
             {
               type: "tool",
               schema_version: "1",
               id: 0,
               description: "n",
-              depends_on: [],
-              tool: "x",
-              inputs: {},
+              depends_on: [],              inputs: {
+                name: "x",
+                arguments: {},
+              },
             },
           ],
           outputs: { data: "@nodes.0.x" },

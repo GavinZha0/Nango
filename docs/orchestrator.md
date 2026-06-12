@@ -491,7 +491,7 @@ remaining backlog.
 - **Run replay** — re-render an `entity_run` from its
   `entity_run_event` timeline (debug + audit).
 - **Working memory across runs** — Nango remembering prior
-  delegations. Tracked separately in `docs/memory.md`; deferred
+  delegations. See `docs/memory-architecture.md`; deferred
   pending product signal.
 
 ---

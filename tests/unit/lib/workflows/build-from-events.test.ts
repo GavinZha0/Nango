@@ -58,7 +58,7 @@ describe("buildWorkflowSpecFromRunEvents — chain filtering", () => {
     // → placeholder no-op node fills the spec.
     expect(out.strippedFrontendConfig).toEqual({ sql: "select 1" });
     expect(out.spec.nodes).toHaveLength(1);
-    expect((out.spec.nodes[0] as { tool: string }).tool).toBe("noop");
+    expect((out.spec.nodes[0] as { inputs: { name: string } }).inputs.name).toBe("noop");
   });
 
   it("prunes failed invocations", () => {
@@ -89,7 +89,7 @@ describe("buildWorkflowSpecFromRunEvents — chain filtering", () => {
     });
     // Only one data node — the failed transform is excluded.
     expect(out.spec.nodes).toHaveLength(1);
-    expect((out.spec.nodes[0] as { tool: string }).tool).toBe(
+    expect((out.spec.nodes[0] as { inputs: { name: string } }).inputs.name).toBe(
       "fetch_data_table",
     );
   });
@@ -148,7 +148,7 @@ describe("buildWorkflowSpecFromRunEvents — frontend_tool stripping", () => {
     // Only c3 (the artifact creator) is stripped; c1 + c2 BOTH
     // become workflow nodes.
     expect(out.spec.nodes).toHaveLength(2);
-    expect(out.spec.nodes.map((n) => (n as { tool: string }).tool)).toEqual([
+    expect(out.spec.nodes.map((n) => (n as { inputs: { name: string } }).inputs.name)).toEqual([
       "fetch_data_table",
       "render_markdown",
     ]);
@@ -163,7 +163,7 @@ describe("buildWorkflowSpecFromRunEvents — frontend_tool stripping", () => {
     });
     // Spec requires ≥ 1 node; placeholder is the fallback.
     expect(out.spec.nodes).toHaveLength(1);
-    expect((out.spec.nodes[0] as { tool: string }).tool).toBe("noop");
+    expect((out.spec.nodes[0] as { inputs: { name: string } }).inputs.name).toBe("noop");
   });
 });
 
@@ -196,9 +196,9 @@ describe("buildWorkflowSpecFromRunEvents — node bucket + ids", () => {
       artifactCreatingCallId: "c2",
     });
     const node = out.spec.nodes[0]!;
-    if (!("tool" in node)) throw new Error("expected tool node");
-    expect(node.tool).toBe("fetch_data_table");
-    expect(node.inputs).toEqual({ sql: "select 1" });
+    if (node.type !== "tool") throw new Error("expected tool node");
+    expect(node.inputs.name).toBe("fetch_data_table");
+    expect(node.inputs.arguments).toEqual({ sql: "select 1" });
   });
 
   it("emits an agent node for delegate_to_agent invocations", () => {
@@ -210,7 +210,7 @@ describe("buildWorkflowSpecFromRunEvents — node bucket + ids", () => {
           seq: 1,
           inputs: {
             agent: "Builtin / DataAnalyst",
-            input: { dataset: "ds_xyz" },
+            task: "Summarise the dataset",
           },
           result: { summary: "5 rows" },
         }),
@@ -219,14 +219,13 @@ describe("buildWorkflowSpecFromRunEvents — node bucket + ids", () => {
       artifactCreatingCallId: "c2",
     });
     const node = out.spec.nodes[0]!;
-    if (!("agent" in node)) throw new Error("expected agent node");
-    expect(node.agent).toBe("Builtin / DataAnalyst");
-    expect(node.inputs).toEqual({ dataset: "ds_xyz" });
-    expect(node.output_schema).toEqual({
-      type: "object",
-      properties: { text: { type: "string" } },
-      required: ["text"],
-    });
+    if (node.type !== "agent") throw new Error("expected agent node");
+    expect(node.inputs.name).toBe("Builtin / DataAnalyst");
+    expect(node.inputs.task).toBe("Summarise the dataset");
+    // LLM-emit agent nodes do NOT carry `output_schema`; the
+    // canonical wrapper stamps it. Verify the field is absent
+    // pre-canonicalize.
+    expect("output_schema" in node).toBe(false);
   });
 
   it("throws when an agent invocation is missing the 'agent' field", () => {
@@ -445,7 +444,7 @@ describe("buildWorkflowSpecFromRunEvents — output passes LLMWorkflowSpecSchema
           seq: 2,
           inputs: {
             agent: "Builtin / DataAnalyst",
-            input: { dataset: "ds_abc" },
+            task: "Summarise the dataset",
           },
           result: { summary: "5 rows" },
         }),
@@ -461,7 +460,7 @@ describe("buildWorkflowSpecFromRunEvents — output passes LLMWorkflowSpecSchema
     const parsed = LLMWorkflowSpecSchema.safeParse(out.spec);
     expect(parsed.success).toBe(true);
     expect(out.spec.nodes).toHaveLength(2);
-    expect("agent" in out.spec.nodes[1]!).toBe(true);
+    expect(out.spec.nodes[1]!.type).toBe("agent");
   });
 });
 
@@ -494,9 +493,9 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ unique-match", () => {
       ],
       artifactCreatingCallId: "c3",
     });
-    const node1 = out.spec.nodes[1] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(node1.inputs.source_dataset).toBe("@nodes.0.dataset");
-    expect(node1.inputs.code).toBe("df.head()"); // not ref-candidate; preserved
+    const node1 = out.spec.nodes[1] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(node1.inputs.arguments.source_dataset).toBe("@nodes.0.dataset");
+    expect(node1.inputs.arguments.code).toBe("df.head()"); // not ref-candidate; preserved
     expect(node1.depends_on).toEqual([0]);
   });
 
@@ -534,10 +533,10 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ unique-match", () => {
       ],
       artifactCreatingCallId: "c4",
     });
-    const node3 = out.spec.nodes[2] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(node3.inputs.left).toBe("@nodes.0.dataset");
-    expect(node3.inputs.right).toBe("@nodes.1.dataset");
-    expect(node3.inputs.report).toBe("@nodes.0.reportId");
+    const node3 = out.spec.nodes[2] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(node3.inputs.arguments.left).toBe("@nodes.0.dataset");
+    expect(node3.inputs.arguments.right).toBe("@nodes.1.dataset");
+    expect(node3.inputs.arguments.report).toBe("@nodes.0.reportId");
     expect(node3.depends_on).toEqual([0, 1]); // sorted, deduplicated
   });
 
@@ -557,7 +556,8 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ unique-match", () => {
           seq: 2,
           inputs: {
             agent: "Builtin / DataAnalyst",
-            input: { dataset: "ds_orders_q4" },
+            // Whole-field ref into upstream dataset string.
+            task: "ds_orders_q4",
           },
           result: { summary: "5 rows" },
         }),
@@ -566,16 +566,15 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ unique-match", () => {
       artifactCreatingCallId: "c3",
     });
     const agentNode = out.spec.nodes[1];
-    if (!("agent" in agentNode!)) throw new Error("expected agent node");
-    expect(agentNode.agent).toBe("Builtin / DataAnalyst");
-    expect(agentNode.inputs).toEqual({ dataset: "@nodes.0.dataset" });
+    if (agentNode!.type !== "agent") throw new Error("expected agent node");
+    expect(agentNode.inputs.name).toBe("Builtin / DataAnalyst");
+    // Strategy Z+ promotes the `task` literal into the matching
+    // upstream ref.
+    expect(agentNode.inputs.task).toBe("@nodes.0.dataset");
     expect(agentNode.depends_on).toEqual([0]);
-    // D30 output_schema still present:
-    expect(agentNode.output_schema).toEqual({
-      type: "object",
-      properties: { text: { type: "string" } },
-      required: ["text"],
-    });
+    // Output schema is canonical-fixed; LLM-emit nodes do not
+    // carry it.
+    expect("output_schema" in agentNode).toBe(false);
   });
 
   it("populates lineageReport.resolved_refs with the unique match", () => {
@@ -637,10 +636,10 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ ambiguous-match", () =>
       artifactCreatingCallId: "c4",
     });
     const node3 = out.spec.nodes[2] as {
-      inputs: Record<string, unknown>;
+      inputs: { arguments: Record<string, unknown> };
       depends_on: number[];
     };
-    expect(node3.inputs.from).toBe("ds_shared_id"); // kept literal
+    expect(node3.inputs.arguments.from).toBe("ds_shared_id"); // kept literal
     expect(node3.depends_on).toEqual([]); // no deps added
     expect(out.lineageReport.ambiguous_matches).toHaveLength(1);
     expect(out.lineageReport.ambiguous_matches[0]!.value).toBe("ds_shared_id");
@@ -667,8 +666,8 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ candidate_values_no_mat
       ],
       artifactCreatingCallId: "c2",
     });
-    const node0 = out.spec.nodes[0] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(node0.inputs.dataset).toBe("ds_unknown_99"); // literal preserved
+    const node0 = out.spec.nodes[0] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(node0.inputs.arguments.dataset).toBe("ds_unknown_99"); // literal preserved
     expect(node0.depends_on).toEqual([]);
     expect(out.lineageReport.candidate_values_no_match).toHaveLength(1);
     expect(out.lineageReport.candidate_values_no_match[0]).toEqual({
@@ -707,13 +706,145 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ non-candidate values", 
       ],
       artifactCreatingCallId: "c3",
     });
-    const node1 = out.spec.nodes[1] as { inputs: Record<string, unknown> };
-    expect(node1.inputs.sql).toBe("another sql");
-    expect(node1.inputs.tag).toBe("US");
-    expect(node1.inputs.short_id).toBe("ds_xy"); // fails namespaced regex
-    expect(node1.inputs.n).toBe(42);
-    expect(node1.inputs.flag).toBe(true);
-    expect(node1.inputs.dataset).toBe("@nodes.0.dataset");
+    const node1 = out.spec.nodes[1] as { inputs: { arguments: Record<string, unknown> } };
+    expect(node1.inputs.arguments.sql).toBe("another sql");
+    expect(node1.inputs.arguments.tag).toBe("US");
+    expect(node1.inputs.arguments.short_id).toBe("ds_xy"); // fails namespaced regex
+    expect(node1.inputs.arguments.n).toBe(42);
+    expect(node1.inputs.arguments.flag).toBe(true);
+    expect(node1.inputs.arguments.dataset).toBe("@nodes.0.dataset");
+  });
+});
+
+describe("buildWorkflowSpecFromRunEvents — Strategy Z+ nested object (M1)", () => {
+  it("rewrites a long value inside a one-level-deep nested object", () => {
+    // Customer ID comes from an upstream SQL result and is passed as a
+    // nested argument: tool.inputs.filter.customer_id = "<upstream value>".
+    // Strategy Z+ should recurse into `filter` and produce a ref.
+    const customerId = "cust_abc_xyz_123_q1_2026"; // 24 chars — passes nested threshold
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0",
+          toolName: "extract_customers",
+          seq: 1,
+          inputs: { sql: "SELECT id FROM customers LIMIT 1" },
+          result: { customer_id: customerId },
+        }),
+        inv({
+          callId: "c1",
+          toolName: "run_report",
+          seq: 2,
+          inputs: {
+            filter: { customer_id: customerId },
+            format: "json",
+          },
+        }),
+        inv({ callId: "c2", toolName: "chart_renderer", seq: 3 }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const node1 = out.spec.nodes[1] as unknown as {
+      inputs: { arguments: { filter: Record<string, unknown>; format: string } };
+      depends_on: number[];
+    };
+    // Nested value was rewritten to a ref
+    expect(node1.inputs.arguments.filter.customer_id).toBe("@nodes.0.customer_id");
+    // Non-candidate short value is untouched
+    expect(node1.inputs.arguments.format).toBe("json");
+    // depends_on includes the upstream node
+    expect(node1.depends_on).toContain(0);
+  });
+
+  it("does NOT rewrite nested values shorter than 12 chars (stricter threshold)", () => {
+    const shortId = "cust_abc"; // 8 chars — below nested threshold but above top-level
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0",
+          toolName: "extract",
+          seq: 1,
+          inputs: { sql: "SELECT 1" },
+          result: { id: shortId },
+        }),
+        inv({
+          callId: "c1",
+          toolName: "consumer",
+          seq: 2,
+          inputs: { filter: { id: shortId } },
+        }),
+        inv({ callId: "c2", toolName: "chart_renderer", seq: 3 }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const node1 = out.spec.nodes[1] as unknown as {
+      inputs: { arguments: { filter: Record<string, unknown> } };
+    };
+    // 8 chars: above top-level threshold but below nested threshold → NOT rewritten
+    expect(node1.inputs.arguments.filter.id).toBe(shortId);
+  });
+
+  it("does NOT recurse into objects at depth 2 (only one level deep)", () => {
+    const deepId = "cust_abc_xyz_deep_123456"; // 23 chars — would match if walked
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0",
+          toolName: "extract",
+          seq: 1,
+          inputs: { sql: "x" },
+          result: { customer_id: deepId },
+        }),
+        inv({
+          callId: "c1",
+          toolName: "consumer",
+          seq: 2,
+          inputs: {
+            // depth 0: a → object at depth 1
+            //           b → object at depth 2 — must NOT be recursed
+            a: { b: { id: deepId } },
+          },
+        }),
+        inv({ callId: "c2", toolName: "chart_renderer", seq: 3 }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const node1 = out.spec.nodes[1] as unknown as {
+      inputs: { arguments: { a: { b: { id: string } } } };
+    };
+    // depth 2 is not walked → value stays literal
+    expect(node1.inputs.arguments.a.b.id).toBe(deepId);
+  });
+
+  it("still rewrites top-level values normally when the same input also has a nested object", () => {
+    const topId = "top_level_id_xyz_2026"; // 21 chars — top-level, threshold 6
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0",
+          toolName: "extract",
+          seq: 1,
+          inputs: { sql: "x" },
+          result: { report_id: topId },
+        }),
+        inv({
+          callId: "c1",
+          toolName: "consumer",
+          seq: 2,
+          inputs: {
+            report_id: topId,              // top-level: rewritten
+            options: { format: "json" },   // nested object: format is short, not rewritten
+          },
+        }),
+        inv({ callId: "c2", toolName: "chart_renderer", seq: 3 }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const node1 = out.spec.nodes[1] as unknown as {
+      inputs: { arguments: { report_id: unknown; options: { format: unknown } } };
+    };
+    expect(node1.inputs.arguments.report_id).toBe("@nodes.0.report_id");
+    expect(node1.inputs.arguments.options.format).toBe("json");
   });
 });
 
@@ -791,9 +922,9 @@ describe("buildWorkflowSpecFromRunEvents — temporal ordering invariant", () =>
       ],
       artifactCreatingCallId: "c2",
     });
-    const node0 = out.spec.nodes[0] as { inputs: Record<string, unknown>; depends_on: number[] };
+    const node0 = out.spec.nodes[0] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
     // The input scan happened BEFORE the output was indexed → no match
-    expect(node0.inputs.dataset).toBe("ds_x_initial");
+    expect(node0.inputs.arguments.dataset).toBe("ds_x_initial");
     expect(node0.depends_on).toEqual([]);
     // No resolved_refs for this — temporal invariant holds.
     expect(out.lineageReport.resolved_refs).toHaveLength(0);
@@ -829,11 +960,11 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c3",
     });
-    const sandboxNode = out.spec.nodes[1] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(sandboxNode.inputs.datasets).toEqual(["@nodes.0.name"]);
+    const sandboxNode = out.spec.nodes[1] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(sandboxNode.inputs.arguments.datasets).toEqual(["@nodes.0.name"]);
     // `command` is also an array but its elements aren't ref-candidates
     // ("python3" < 6 chars after stripping; "-" too short) → array passes through unchanged.
-    expect(sandboxNode.inputs.command).toEqual(["python3", "-"]);
+    expect(sandboxNode.inputs.arguments.command).toEqual(["python3", "-"]);
     expect(sandboxNode.depends_on).toEqual([0]);
   });
 
@@ -870,8 +1001,8 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c4",
     });
-    const node = out.spec.nodes[2] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(node.inputs.datasets).toEqual([
+    const node = out.spec.nodes[2] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(node.inputs.arguments.datasets).toEqual([
       "@nodes.0.name",
       "static-literal-bar", // not in index → stays literal
       "@nodes.1.name",
@@ -899,8 +1030,8 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c3",
     });
-    const node = out.spec.nodes[1] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(node.inputs.groups).toEqual([["@nodes.0.name"], ["unrelated"]]);
+    const node = out.spec.nodes[1] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(node.inputs.arguments.groups).toEqual([["@nodes.0.name"], ["unrelated"]]);
     expect(node.depends_on).toEqual([0]);
   });
 
@@ -959,9 +1090,9 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c4",
     });
-    const node = out.spec.nodes[2] as { inputs: Record<string, unknown>; depends_on: number[] };
+    const node = out.spec.nodes[2] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
     // Multi-source → stay literal, depends_on unchanged
-    expect(node.inputs.datasets).toEqual(["shared-dataset-id"]);
+    expect(node.inputs.arguments.datasets).toEqual(["shared-dataset-id"]);
     expect(node.depends_on).toEqual([]);
     expect(out.lineageReport.ambiguous_matches).toContainEqual({
       nodeId: 2,
@@ -989,9 +1120,9 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c3",
     });
-    const node = out.spec.nodes[1] as { inputs: Record<string, unknown> };
-    expect(node.inputs.weights).toEqual([0.5, 1.5, 2.5]);
-    expect(node.inputs.flags).toEqual([true, false]);
+    const node = out.spec.nodes[1] as { inputs: { arguments: Record<string, unknown> } };
+    expect(node.inputs.arguments.weights).toEqual([0.5, 1.5, 2.5]);
+    expect(node.inputs.arguments.flags).toEqual([true, false]);
   });
 
   it("multiple ref-candidates in one array contribute multiple deps", () => {
@@ -1021,8 +1152,8 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c4",
     });
-    const node = out.spec.nodes[2] as { inputs: Record<string, unknown>; depends_on: number[] };
-    expect(node.inputs.datasets).toEqual(["@nodes.0.name", "@nodes.1.name"]);
+    const node = out.spec.nodes[2] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    expect(node.inputs.arguments.datasets).toEqual(["@nodes.0.name", "@nodes.1.name"]);
     expect(node.depends_on).toEqual([0, 1]);
   });
 
@@ -1076,10 +1207,10 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
           toolName: "run_code_in_sandbox",
           seq: 1,
           inputs: {
-            command: ["python3", "-"],
-            stdin: "import pandas as pd\nprint(pd.__version__)",
+            language: "python",
+            code_text: "import pandas as pd\nprint(pd.__version__)",
             datasets: [],
-            timeoutSeconds: 30,
+            timeout_seconds: 30,
           },
           result: { stdout: "1.4.2\n", exitCode: 0 },
         }),
@@ -1091,15 +1222,13 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
     const node = out.spec.nodes[0]!;
     expect(node.type).toBe("code");
     if (node.type !== "code") return; // narrow
-    expect(node.language).toBe("python");
-    expect(node.code).toContain("import pandas");
+    expect(node.inputs.language).toBe("python");
+    expect(node.inputs.code_text).toContain("import pandas");
     expect(node.timeout_seconds).toBe(30);
-    // `command` + `stdin` keys do NOT survive on the canonical
-    // node — they're modeling artefacts. Other passthrough keys
-    // (including empty arrays like `datasets: []`) stay verbatim
-    // — filtering empty containers would be magic that surprises
-    // the engine's "if datasets present, mount it" code path.
-    expect(node.inputs).toEqual({ datasets: [] });
+    // Empty `datasets` is dropped — assembleCodeNode only carries
+    // forward non-empty arrays.
+    expect(node.inputs.datasets).toBeUndefined();
+    expect(node.inputs.params).toBeUndefined();
   });
 
   it("preserves datasets in `input.datasets` for Strategy Z+", () => {
@@ -1121,8 +1250,8 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
           toolName: "run_code_in_sandbox",
           seq: 2,
           inputs: {
-            command: ["python3", "-"],
-            stdin: "import glob; print(glob.glob('./data/*'))",
+            language: "python",
+            code_text: "import glob; print(glob.glob('./data/*'))",
             datasets: ["latency-trend-20250127"],
           },
           result: { stdout: "[...]", exitCode: 0 },
@@ -1137,36 +1266,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
     expect(codeNode.depends_on).toEqual([0]);
   });
 
-  it("strips command + stdin from input (promoted to language + code)", () => {
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        inv({
-          callId: "c1",
-          toolName: "run_code_in_sandbox",
-          seq: 1,
-          inputs: {
-            command: ["python3", "-"],
-            stdin: "print(1+1)",
-            datasets: ["ds_xxxxxx"],
-            timeoutSeconds: 60,
-          },
-          result: { stdout: "2\n", exitCode: 0 },
-        }),
-        inv({ callId: "c2", toolName: "render_chart", seq: 2 }),
-      ],
-      artifactCreatingCallId: "c2",
-    });
-    const node = out.spec.nodes[0]!;
-    if (node.type !== "code") throw new Error("expected code node");
-    expect(node.inputs).toBeDefined();
-    expect(node.inputs).not.toHaveProperty("command");
-    expect(node.inputs).not.toHaveProperty("stdin");
-    expect(node.inputs).not.toHaveProperty("timeoutSeconds");
-    // datasets stays
-    expect(node.inputs?.datasets).toEqual(["ds_xxxxxx"]);
-  });
-
-  it("throws when stdin is missing or empty (no usable code body)", () => {
+  it("throws when code_text is missing", () => {
     expect(() =>
       buildWorkflowSpecFromRunEvents({
         invocations: [
@@ -1174,47 +1274,13 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
             callId: "c1",
             toolName: "run_code_in_sandbox",
             seq: 1,
-            inputs: { command: ["python3", "-"], datasets: [] },
+            inputs: { language: "python", datasets: [] },
           }),
           inv({ callId: "c2", toolName: "render_chart", seq: 2 }),
         ],
         artifactCreatingCallId: "c2",
       }),
-    ).toThrow(/no usable 'stdin'/);
-  });
-
-  it("non-modelling extra keys pass through on input", () => {
-    // Future-proof: any non-stdin/command/timeoutSeconds key the
-    // LLM supplies (env, files, …) lands on the canonical
-    // `input` record verbatim. Strategy Z+ + the engine read
-    // those by convention.
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        inv({
-          callId: "c1",
-          toolName: "run_code_in_sandbox",
-          seq: 1,
-          inputs: {
-            command: ["python3", "-"],
-            stdin: "print('hi')",
-            datasets: [],
-            // Hypothetical extras — LLM might emit these even
-            // though V1 sandbox tool schema doesn't ack them.
-            env: { THRESHOLD: "0.5" },
-            customKey: "custom-value",
-          },
-          result: { stdout: "hi\n", exitCode: 0 },
-        }),
-        inv({ callId: "c2", toolName: "render_chart", seq: 2 }),
-      ],
-      artifactCreatingCallId: "c2",
-    });
-    const node = out.spec.nodes[0]!;
-    if (node.type !== "code") throw new Error("expected code node");
-    expect(node.inputs).toMatchObject({
-      env: { THRESHOLD: "0.5" },
-      customKey: "custom-value",
-    });
+    ).toThrow(/no 'code_text' field/);
   });
 
   it("envelope failure (exitCode != 0) is filtered out of workflow", () => {
@@ -1229,10 +1295,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
           callId: "c1",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: {
-            command: ["python3", "-"],
-            stdin: "import duckdb",
-          },
+          inputs: { language: "python", code_text: "import duckdb" },
           ok: false,
           result: null,
         }),
@@ -1241,8 +1304,8 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
           toolName: "run_code_in_sandbox",
           seq: 2,
           inputs: {
-            command: ["python3", "-"],
-            stdin: "print('ok')",
+            language: "python",
+            code_text: "print('ok')",
             datasets: [],
           },
           result: { stdout: "ok\n", exitCode: 0 },
@@ -1256,7 +1319,54 @@ describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (D35)", () => {
     expect(out.spec.nodes).toHaveLength(1);
     const node = out.spec.nodes[0]!;
     if (node.type !== "code") throw new Error("expected code node");
-    expect(node.code).toContain("print('ok')");
+    expect(node.inputs.code_text).toContain("print('ok')");
+  });
+});
+
+// ─── JavaScript code node ─────────────────────────────────────────────
+
+describe("buildWorkflowSpecFromRunEvents — assembleCodeNode (JavaScript)", () => {
+  it("infers language='javascript' from tool arg", () => {
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c1",
+          toolName: "run_code_in_sandbox",
+          seq: 1,
+          inputs: {
+            language: "javascript",
+            code_text: "const x = 1; console.log(JSON.stringify({x}));",
+          },
+          result: { stdout: '{"x":1}\n', exitCode: 0 },
+        }),
+        inv({ callId: "c2", toolName: "render_chart", seq: 2 }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const node = out.spec.nodes[0]!;
+    expect(node.type).toBe("code");
+    if (node.type !== "code") return;
+    expect(node.inputs.language).toBe("javascript");
+    expect(node.inputs.code_text).toContain("console.log");
+  });
+
+  it("defaults to python when language field is absent", () => {
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c1",
+          toolName: "run_code_in_sandbox",
+          seq: 1,
+          inputs: { code_text: "print('hi')" },
+          result: { stdout: "hi\n", exitCode: 0 },
+        }),
+        inv({ callId: "c2", toolName: "render_chart", seq: 2 }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const node = out.spec.nodes[0]!;
+    if (node.type !== "code") return;
+    expect(node.inputs.language).toBe("python");
   });
 });
 
@@ -1271,13 +1381,13 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           toolName: "extract_dataset_by_sql",
           seq: 1,
           inputs: {
-            name: "ds_orders",
-            dataSourceName: "prod_pg",
-            query: "SELECT id, total FROM orders",
-            previewRows: 5,
-            forceRefresh: false,
+            dataset_name: "ds_orders",
+            data_source_name: "prod_pg",
+            sql_text: "SELECT id, total FROM orders",
+            row_limit: 200,
+            force_refresh: false,
           },
-          result: { cacheHit: false, name: "ds_orders", rowCount: 1234 },
+          result: { cache_hit: false, dataset_name: "ds_orders", total_rows: 1234 },
         }),
         inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
       ],
@@ -1286,12 +1396,12 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     expect(out.spec.nodes).toHaveLength(1);
     const node = out.spec.nodes[0]!;
     if (node.type !== "sql") throw new Error("expected sql node");
-    expect(node.data_source_name).toBe("prod_pg");
-    expect(node.query).toBe("SELECT id, total FROM orders");
-    expect(node.name).toBe("ds_orders");
+    expect(node.inputs.data_source_name).toBe("prod_pg");
+    expect(node.inputs.sql_text).toBe("SELECT id, total FROM orders");
+    expect(node.inputs.dataset_name).toBe("ds_orders");
   });
 
-  it("drops previewRows + forceRefresh — chat-affordances not workflow-relevant", () => {
+  it("drops row_limit + force_refresh — chat-affordances not workflow-relevant", () => {
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({
@@ -1299,13 +1409,13 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           toolName: "extract_dataset_by_sql",
           seq: 1,
           inputs: {
-            name: "ds_x",
-            dataSourceName: "src",
-            query: "SELECT 1",
-            previewRows: 200,
-            forceRefresh: true,
+            dataset_name: "ds_x",
+            data_source_name: "src",
+            sql_text: "SELECT 1",
+            row_limit: 200,
+            force_refresh: true,
           },
-          result: { name: "ds_x", rowCount: 1 },
+          result: { dataset_name: "ds_x", total_rows: 1 },
         }),
         inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
       ],
@@ -1315,22 +1425,24 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     if (node.type !== "sql") throw new Error("expected sql node");
     // The discriminated union ensures these aren't valid keys on
     // the SQL node — the test just confirms the shape stays
-    // closed by asserting type discrimination + the only
-    // surviving keys.
+    // closed by asserting the only surviving keys.
     expect(Object.keys(node).sort()).toEqual(
-      ["data_source_name", "depends_on", "description", "id", "name", "query", "type"].sort(),
+      ["depends_on", "description", "id", "inputs", "type"].sort(),
+    );
+    expect(Object.keys(node.inputs).sort()).toEqual(
+      ["data_source_name", "dataset_name", "sql_text"].sort(),
     );
   });
 
-  it("omits node.name when invocation has no name field", () => {
+  it("omits inputs.dataset_name when invocation has no dataset_name field", () => {
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({
           callId: "c1",
           toolName: "extract_dataset_by_sql",
           seq: 1,
-          inputs: { dataSourceName: "src", query: "SELECT 1" },
-          result: { name: "auto", rowCount: 0 },
+          inputs: { data_source_name: "src", sql_text: "SELECT 1" },
+          result: { dataset_name: "auto", total_rows: 0 },
         }),
         inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
       ],
@@ -1338,10 +1450,10 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     });
     const node = out.spec.nodes[0]!;
     if (node.type !== "sql") throw new Error("expected sql node");
-    expect(node.name).toBeUndefined();
+    expect(node.inputs.dataset_name).toBeUndefined();
   });
 
-  it("throws when invocation lacks dataSourceName", () => {
+  it("throws when invocation lacks data_source_name", () => {
     expect(() =>
       buildWorkflowSpecFromRunEvents({
         invocations: [
@@ -1349,16 +1461,16 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
             callId: "c1",
             toolName: "extract_dataset_by_sql",
             seq: 1,
-            inputs: { query: "SELECT 1" },
+            inputs: { sql_text: "SELECT 1" },
           }),
           inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
         ],
         artifactCreatingCallId: "c2",
       }),
-    ).toThrow(/no 'dataSourceName' field/);
+    ).toThrow(/no 'data_source_name' field/);
   });
 
-  it("throws when invocation lacks query", () => {
+  it("throws when invocation lacks sql_text", () => {
     expect(() =>
       buildWorkflowSpecFromRunEvents({
         invocations: [
@@ -1366,19 +1478,19 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
             callId: "c1",
             toolName: "extract_dataset_by_sql",
             seq: 1,
-            inputs: { dataSourceName: "src" },
+            inputs: { data_source_name: "src" },
           }),
           inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
         ],
         artifactCreatingCallId: "c2",
       }),
-    ).toThrow(/no 'query' field/);
+    ).toThrow(/no 'sql_text' field/);
   });
 
-  it("threads result.name into the value-source index for downstream datasets ref rewrite", () => {
+  it("threads result.dataset_name into the value-source index for downstream datasets ref rewrite", () => {
     // SQL produces a dataset; downstream code consumes it via
-    // `datasets: [<name>]`. Strategy Z+ should rewrite the
-    // literal name to `@nodes.0.name` AND set depends_on.
+    // `inputs.datasets: [<name>]`. Strategy Z+ rewrites the
+    // literal name to `@nodes.0.dataset_name` AND sets depends_on.
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({
@@ -1386,22 +1498,22 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           toolName: "extract_dataset_by_sql",
           seq: 1,
           inputs: {
-            name: "orders_q4",
-            dataSourceName: "prod",
-            query: "SELECT * FROM orders",
+            dataset_name: "orders_q4",
+            data_source_name: "prod",
+            sql_text: "SELECT * FROM orders",
           },
-          result: { name: "orders_q4", rowCount: 1000 },
+          result: { dataset_name: "orders_q4", total_rows: 1000 },
         }),
         inv({
           callId: "c2",
           toolName: "run_code_in_sandbox",
           seq: 2,
           inputs: {
-            command: ["python3", "-"],
-            stdin: "import pandas",
+            language: "python",
+            code_text: "import pandas",
             datasets: ["orders_q4"],
           },
-          result: { stdout: "ok", exitCode: 0 },
+          result: { stdout: "ok", exit_code: 0 },
         }),
         inv({ callId: "c3", toolName: "chart_renderer", seq: 3 }),
       ],
@@ -1411,7 +1523,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     const codeNode = out.spec.nodes[1]!;
     if (codeNode.type !== "code") throw new Error("expected code node");
     expect(codeNode.depends_on).toEqual([0]);
-    expect(codeNode.inputs?.datasets).toEqual(["@nodes.0.name"]);
+    expect(codeNode.inputs.datasets).toEqual(["@nodes.0.dataset_name"]);
   });
 
   it("envelope failure (ok: false) is filtered before node assembly", () => {
@@ -1423,7 +1535,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           callId: "c1",
           toolName: "extract_dataset_by_sql",
           seq: 1,
-          inputs: { dataSourceName: "src", query: "SELECT 1" },
+          inputs: { data_source_name: "src", sql_text: "SELECT 1" },
           ok: false,
           result: null,
         }),
@@ -1432,11 +1544,11 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           toolName: "extract_dataset_by_sql",
           seq: 2,
           inputs: {
-            name: "ok_ds",
-            dataSourceName: "src",
-            query: "SELECT 2",
+            dataset_name: "ok_ds",
+            data_source_name: "src",
+            sql_text: "SELECT 2",
           },
-          result: { name: "ok_ds", rowCount: 1 },
+          result: { dataset_name: "ok_ds", total_rows: 1 },
         }),
         inv({ callId: "c3", toolName: "chart_renderer", seq: 3 }),
       ],
@@ -1445,7 +1557,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     expect(out.spec.nodes).toHaveLength(1);
     const node = out.spec.nodes[0]!;
     if (node.type !== "sql") throw new Error("expected sql node");
-    expect(node.query).toBe("SELECT 2");
+    expect(node.inputs.sql_text).toBe("SELECT 2");
   });
 
   it("SQL node description includes the tool name + input snippet", () => {
@@ -1456,11 +1568,11 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           toolName: "extract_dataset_by_sql",
           seq: 1,
           inputs: {
-            name: "ds_x",
-            dataSourceName: "src",
-            query: "SELECT 1",
+            dataset_name: "ds_x",
+            data_source_name: "src",
+            sql_text: "SELECT 1",
           },
-          result: { name: "ds_x", rowCount: 1 },
+          result: { dataset_name: "ds_x", total_rows: 1 },
         }),
         inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
       ],
@@ -1478,11 +1590,11 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
           toolName: "extract_dataset_by_sql",
           seq: 1,
           inputs: {
-            name: "ds_x",
-            dataSourceName: "src",
-            query: "SELECT 1",
+            dataset_name: "ds_x",
+            data_source_name: "src",
+            sql_text: "SELECT 1",
           },
-          result: { name: "ds_x", rowCount: 1 },
+          result: { dataset_name: "ds_x", total_rows: 1 },
         }),
         inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
       ],
@@ -1541,7 +1653,7 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           callId: "c0",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: { command: ["python3", "-"], stdin: "print('hi')" },
+          inputs: { language: "python", code_text: "print('hi')" },
           result: { stdout: '{"rows":[...]}\n', rows: ROWS },
         }),
         chartInvocation({ callId: "c1", seq: 2, source: ROWS }),
@@ -1563,7 +1675,7 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           callId: "c0",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: { command: ["python3", "-"], stdin: "p" },
+          inputs: { language: "python", code_text: "p" },
           result: { stdout: "ok", rows: ROWS },
         }),
         chartInvocation({ callId: "c1", seq: 2, source: ROWS }),
@@ -1583,7 +1695,7 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           callId: "c0",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: { command: ["python3", "-"], stdin: "p" },
+          inputs: { language: "python", code_text: "p" },
           result: { stdout: "ok", rows: ROWS },
         }),
         chartInvocation({ callId: "c1", seq: 2, source: ROWS }),
@@ -1632,14 +1744,14 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           callId: "c0",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: { command: ["python3", "-"], stdin: "p1" },
+          inputs: { language: "python", code_text: "p1" },
           result: { stdout: "ok", rows: ROWS },
         }),
         inv({
           callId: "c1",
           toolName: "run_code_in_sandbox",
           seq: 2,
-          inputs: { command: ["python3", "-"], stdin: "p2" },
+          inputs: { language: "python", code_text: "p2" },
           result: { stdout: "ok", rows: ROWS },
         }),
         chartInvocation({ callId: "c2", seq: 3, source: ROWS }),
@@ -1659,7 +1771,7 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           callId: "c0",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: { command: ["python3", "-"], stdin: "p" },
+          inputs: { language: "python", code_text: "p" },
           result: { stdout: "ok", rows: ROWS },
         }),
         chartInvocation({ callId: "c1", seq: 2, source: ROWS }),
@@ -1712,7 +1824,7 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           callId: "c0",
           toolName: "run_code_in_sandbox",
           seq: 1,
-          inputs: { command: ["python3", "-"], stdin: "p" },
+          inputs: { language: "python", code_text: "p" },
           result: { stdout: "ok", rows: ROWS },
         }),
         chartInvocation({ callId: "c1", seq: 2, source: ROWS }),
@@ -1734,12 +1846,14 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
     expect(parsed.success).toBe(true);
   });
 
-  it("Strategy Z+ projects SQL `preview` → spec `rows` and produces @nodes.X.rows ref", () => {
-    // Real-world chat shape:
-    //   extract_dataset_by_sql.result.preview = [<rows>]
+  it("Strategy Z+ matches the SQL tool's `rows` field directly", () => {
+    // Real-world chat shape (after D40.D — the tool returns
+    // `rows` directly as a row-of-objects array, no more
+    // `preview` column-oriented block):
+    //   extract_dataset_by_sql.result.rows = [<rows>]
     //   generate_echarts_config.option.dataset.source = <same rows>
-    // The save pipeline must recognise the captured `preview` as
-    // the spec's `rows` field and produce a validating ref.
+    // The save pipeline matches the captured `rows` against the
+    // chart's data binding and produces an `@nodes.X.rows` ref.
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({
@@ -1747,17 +1861,18 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
           toolName: "extract_dataset_by_sql",
           seq: 1,
           inputs: {
-            name: "monthly_sales",
-            dataSourceName: "prod_pg",
-            query: "SELECT month, sales FROM orders GROUP BY 1",
+            dataset_name: "monthly_sales",
+            data_source_name: "prod_pg",
+            sql_text: "SELECT month, sales FROM orders GROUP BY 1",
           },
           result: {
-            cacheHit: false,
-            name: "monthly_sales",
-            rowCount: 2,
-            ttlHours: 24,
-            schema: { columns: [] },
-            preview: ROWS,
+            cache_hit: false,
+            dataset_name: "monthly_sales",
+            total_rows: 2,
+            returned_rows: 2,
+            ttl_hours: 24,
+            row_schema: { columns: [] },
+            rows: ROWS,
           },
         }),
         chartInvocation({ callId: "c1", seq: 2, source: ROWS }),
@@ -1766,8 +1881,6 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
     });
     const chart = out.spec.nodes.find((n) => n.type === "chart")!;
     if (chart.type !== "chart") throw new Error();
-    // Critical: the ref uses the SPEC field name `rows`, NOT the
-    // captured tool field name `preview`.
     expect(chart.inputs.dataset).toBe("@nodes.0.rows");
     expect(chart.depends_on).toEqual([0]);
     expect(out.lineageReport.resolved_refs).toContainEqual(
@@ -1778,5 +1891,184 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
         confidence: "unique-match",
       }),
     );
+  });
+
+  // ── Multi-dataset reconciliation (H1) ─────────────────────────────
+
+  /** Build a chart invocation with option.dataset as an ARRAY (multi-dataset). */
+  function multiChartInvocation(opts: {
+    callId: string;
+    seq: number;
+    sources: unknown[][];
+    extraDatasetKeys?: Record<string, unknown>[];
+  }): ToolInvocation {
+    const datasetArray = opts.sources.map((source, i) => ({
+      ...(opts.extraDatasetKeys?.[i] ?? {}),
+      source,
+    }));
+    return inv({
+      callId: opts.callId,
+      toolName: "generate_echarts_config",
+      seq: opts.seq,
+      inputs: {
+        option: {
+          series: [
+            { type: "line", datasetIndex: 0 },
+            { type: "line", datasetIndex: 1 },
+          ],
+          dataset: datasetArray,
+        },
+      },
+      result: { ok: true },
+    });
+  }
+
+  const ROWS_A = [
+    { month: "2026-01", sales: 12500 },
+    { month: "2026-02", sales: 13200 },
+  ];
+  const ROWS_B = [
+    { month: "2026-01", profit: 4200 },
+    { month: "2026-02", profit: 5100 },
+  ];
+
+  it("multi-dataset: all elements match → inputs.dataset is array of refs, config.dataset stripped", () => {
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0",
+          toolName: "extract_dataset_by_sql",
+          seq: 1,
+          inputs: { data_source_name: "pg", sql_text: "SELECT …", dataset_name: "sales_ds" },
+          result: { dataset_name: "sales_ds", total_rows: 2, returned_rows: 2, rows: ROWS_A, row_schema: {} },
+        }),
+        inv({
+          callId: "c1",
+          toolName: "extract_dataset_by_sql",
+          seq: 2,
+          inputs: { data_source_name: "pg", sql_text: "SELECT …", dataset_name: "profit_ds" },
+          result: { dataset_name: "profit_ds", total_rows: 2, returned_rows: 2, rows: ROWS_B, row_schema: {} },
+        }),
+        multiChartInvocation({ callId: "c2", seq: 3, sources: [ROWS_A, ROWS_B] }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const chart = out.spec.nodes.find((n) => n.type === "chart")!;
+    if (chart.type !== "chart") throw new Error();
+
+    // Both datasets matched → array of refs
+    expect(chart.inputs.dataset).toEqual([
+      "@nodes.0.rows",
+      "@nodes.1.rows",
+    ]);
+    // depends_on covers both upstream nodes
+    expect(chart.depends_on).toEqual([0, 1]);
+    // source is stripped from config.dataset entries
+    const configDataset = chart.inputs.config.dataset as Array<Record<string, unknown>>;
+    expect(Array.isArray(configDataset)).toBe(true);
+    expect(configDataset[0]!.source).toBeUndefined();
+    expect(configDataset[1]!.source).toBeUndefined();
+  });
+
+  it("multi-dataset: preserves extra dataset keys (dimensions, …) after stripping source", () => {
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0", toolName: "run_code_in_sandbox", seq: 1,
+          inputs: { language: "python", code_text: "p" },
+          result: { stdout: "ok", rows: ROWS_A },
+        }),
+        inv({
+          callId: "c1", toolName: "run_code_in_sandbox", seq: 2,
+          inputs: { language: "python", code_text: "p2" },
+          result: { stdout: "ok", rows: ROWS_B },
+        }),
+        multiChartInvocation({
+          callId: "c2", seq: 3,
+          sources: [ROWS_A, ROWS_B],
+          extraDatasetKeys: [
+            { dimensions: ["month", "sales"] },
+            { dimensions: ["month", "profit"] },
+          ],
+        }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const chart = out.spec.nodes.find((n) => n.type === "chart")!;
+    if (chart.type !== "chart") throw new Error();
+
+    const configDataset = chart.inputs.config.dataset as Array<Record<string, unknown>>;
+    expect(configDataset[0]!.dimensions).toEqual(["month", "sales"]);
+    expect(configDataset[0]!.source).toBeUndefined();
+    expect(configDataset[1]!.dimensions).toEqual(["month", "profit"]);
+    expect(configDataset[1]!.source).toBeUndefined();
+  });
+
+  it("multi-dataset: both datasets match the SAME upstream node → depends_on deduplicated", () => {
+    // A chart where two series use the same data source with different
+    // ECharts transforms — both datasets reference @nodes.0.rows.
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0", toolName: "run_code_in_sandbox", seq: 1,
+          inputs: { language: "python", code_text: "p" },
+          result: { stdout: "ok", rows: ROWS_A },
+        }),
+        multiChartInvocation({ callId: "c1", seq: 2, sources: [ROWS_A, ROWS_A] }),
+      ],
+      artifactCreatingCallId: "c1",
+    });
+    const chart = out.spec.nodes.find((n) => n.type === "chart")!;
+    if (chart.type !== "chart") throw new Error();
+
+    expect(chart.inputs.dataset).toEqual(["@nodes.0.rows", "@nodes.0.rows"]);
+    // depends_on deduplicated — only one node referenced
+    expect(chart.depends_on).toEqual([0]);
+  });
+
+  it("multi-dataset: partial match (one element has no upstream) → falls back to not-refreshable", () => {
+    const UNMATCHED = [{ x: 999 }];
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0", toolName: "run_code_in_sandbox", seq: 1,
+          inputs: { language: "python", code_text: "p" },
+          result: { stdout: "ok", rows: ROWS_A },
+        }),
+        multiChartInvocation({ callId: "c1", seq: 2, sources: [ROWS_A, UNMATCHED] }),
+      ],
+      artifactCreatingCallId: "c1",
+    });
+    const chart = out.spec.nodes.find((n) => n.type === "chart")!;
+    if (chart.type !== "chart") throw new Error();
+
+    // Second element has no upstream match → entire chart is not-refreshable
+    expect(chart.inputs.dataset).toBeUndefined();
+    expect(chart.depends_on).toEqual([]);
+    // Lineage records the miss
+    expect(out.lineageReport.candidate_values_no_match.some(
+      (m) => m.field.includes("dataset[1]"),
+    )).toBe(true);
+  });
+
+  it("multi-dataset: output passes LLMWorkflowSpecSchema (refreshable)", () => {
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c0", toolName: "run_code_in_sandbox", seq: 1,
+          inputs: { language: "python", code_text: "p" },
+          result: { stdout: "ok", rows: ROWS_A },
+        }),
+        inv({
+          callId: "c1", toolName: "run_code_in_sandbox", seq: 2,
+          inputs: { language: "python", code_text: "p2" },
+          result: { stdout: "ok", rows: ROWS_B },
+        }),
+        multiChartInvocation({ callId: "c2", seq: 3, sources: [ROWS_A, ROWS_B] }),
+      ],
+      artifactCreatingCallId: "c2",
+    });
+    const parsed = LLMWorkflowSpecSchema.safeParse(out.spec);
+    expect(parsed.success).toBe(true);
   });
 });

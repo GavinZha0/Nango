@@ -142,18 +142,21 @@ function arrangeSuccessfulExtract(
 describe("extract_dataset_by_sql tool — argument validation", () => {
   const tool = buildExtractDatasetTool();
   const baseArgs = {
-    name: "users_dev",
-    dataSourceName: "users_dev",
-    query: "SELECT * FROM users LIMIT 100",
+    dataset_name: "users_dev",
+    data_source_name: "users_dev",
+    sql_text: "SELECT * FROM users LIMIT 100",
   };
 
-  it("declares the renamed name + dataSourceName parameter", () => {
+  it("declares the renamed name + data_source_name parameter", () => {
     expect(tool.name).toBe("extract_dataset_by_sql");
     expect(typeof tool.description).toBe("string");
   });
 
   it("returns INVALID_NAME for malformed cache keys", async () => {
-    const result = (await tool.execute({ ...baseArgs, name: "../escape" })) as {
+    const result = (await tool.execute({
+      ...baseArgs,
+      dataset_name: "../escape",
+    })) as {
       ok: false;
       error: { code: string };
     };
@@ -193,60 +196,71 @@ describe("extract_dataset_by_sql tool — argument validation", () => {
 describe("extract_dataset_by_sql tool — extraction path", () => {
   const tool = buildExtractDatasetTool();
   const baseArgs = {
-    name: "users_dev",
-    dataSourceName: "users_dev",
-    query: "SELECT * FROM users LIMIT 100",
+    dataset_name: "users_dev",
+    data_source_name: "users_dev",
+    sql_text: "SELECT * FROM users LIMIT 100",
   };
 
-  it("on cache miss, returns top-level rowCount + schema", async () => {
+  it("on cache miss, returns top-level total_rows + row_schema", async () => {
     arrangeSuccessfulExtract([
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
     ]);
-    const result = (await tool.execute(baseArgs)) as {
-      cacheHit: boolean;
-      name: string;
-      rowCount: number;
-      schema: { columns: Array<{ name: string }> };
-      ttlHours: number;
-      preview?: unknown;
+    // Test invokes `tool.execute` directly (bypassing the zod
+    // parser), so `row_limit` is undefined and the tool returns
+    // `rows: []`. The test focuses on metadata + schema.
+    const result = (await tool.execute({ ...baseArgs, row_limit: 5 })) as {
+      cache_hit: boolean;
+      dataset_name: string;
+      total_rows: number;
+      returned_rows: number;
+      rows: Array<Record<string, unknown>>;
+      row_schema: { columns: Array<{ name: string }> };
+      ttl_hours: number;
     };
-    expect(result.cacheHit).toBe(false);
-    expect(result.name).toBe("users_dev");
-    expect(result.rowCount).toBe(2);
-    expect(result.schema.columns.map((c) => c.name)).toEqual(["id", "name"]);
-    expect(result.ttlHours).toBe(24);
-    expect(result.preview).toBeUndefined();
+    expect(result.cache_hit).toBe(false);
+    expect(result.dataset_name).toBe("users_dev");
+    expect(result.total_rows).toBe(2);
+    expect(result.row_schema.columns.map((c) => c.name)).toEqual([
+      "id",
+      "name",
+    ]);
+    expect(result.ttl_hours).toBe(24);
+    expect(result.returned_rows).toBe(2);
+    expect(result.rows).toEqual([
+      { id: 1, name: "alice" },
+      { id: 2, name: "bob" },
+    ]);
   });
 
-  it("returns cacheHit on the second call with the same name + query", async () => {
+  it("returns cache_hit on the second call with the same name + query", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     await tool.execute(baseArgs);
     mockExtract.mockClear();
     const second = (await tool.execute(baseArgs)) as {
-      cacheHit: boolean;
-      rowCount: number;
+      cache_hit: boolean;
+      total_rows: number;
     };
-    expect(second.cacheHit).toBe(true);
-    expect(second.rowCount).toBe(1);
+    expect(second.cache_hit).toBe(true);
+    expect(second.total_rows).toBe(1);
     // Cache hit short-circuits before any extract call.
     expect(mockExtract).not.toHaveBeenCalled();
   });
 
-  it("on same-name + different-query, replaces the prior snapshot and sets replacedPrior:true", async () => {
+  it("on same-name + different-query, replaces the prior snapshot and sets replaced_prior:true", async () => {
     // First call seeds "users_dev" with the 100-row query.
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     const first = (await tool.execute(baseArgs)) as {
-      cacheHit: boolean;
-      replacedPrior?: boolean;
-      rowCount: number;
+      cache_hit: boolean;
+      replaced_prior?: boolean;
+      total_rows: number;
     };
-    expect(first.cacheHit).toBe(false);
-    expect(first.replacedPrior).toBeUndefined();
-    expect(first.rowCount).toBe(1);
+    expect(first.cache_hit).toBe(false);
+    expect(first.replaced_prior).toBeUndefined();
+    expect(first.total_rows).toBe(1);
 
     // Second call with a different query under the SAME name: the
-    // slot is reassigned, prior bytes are gone, replacedPrior:true.
+    // slot is reassigned, prior bytes are gone, replaced_prior:true.
     arrangeSuccessfulExtract([
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
@@ -254,15 +268,15 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
     ]);
     const second = (await tool.execute({
       ...baseArgs,
-      query: "SELECT * FROM users LIMIT 200",
+      sql_text: "SELECT * FROM users LIMIT 200",
     })) as {
-      cacheHit: boolean;
-      replacedPrior?: boolean;
-      rowCount: number;
+      cache_hit: boolean;
+      replaced_prior?: boolean;
+      total_rows: number;
     };
-    expect(second.cacheHit).toBe(false);
-    expect(second.replacedPrior).toBe(true);
-    expect(second.rowCount).toBe(3);
+    expect(second.cache_hit).toBe(false);
+    expect(second.replaced_prior).toBe(true);
+    expect(second.total_rows).toBe(3);
 
     // Sidecar now reflects the new query — a third call with the
     // SAME new query hits cache, a call with the ORIGINAL query
@@ -270,36 +284,36 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
     mockExtract.mockClear();
     const third = (await tool.execute({
       ...baseArgs,
-      query: "SELECT * FROM users LIMIT 200",
-    })) as { cacheHit: boolean; replacedPrior?: boolean };
-    expect(third.cacheHit).toBe(true);
-    expect(third.replacedPrior).toBeUndefined();
+      sql_text: "SELECT * FROM users LIMIT 200",
+    })) as { cache_hit: boolean; replaced_prior?: boolean };
+    expect(third.cache_hit).toBe(true);
+    expect(third.replaced_prior).toBeUndefined();
     expect(mockExtract).not.toHaveBeenCalled();
   });
 
-  it("does NOT set replacedPrior on forceRefresh of an identical query", async () => {
+  it("does NOT set replaced_prior on force_refresh of an identical query", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     await tool.execute(baseArgs);
 
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     const refresh = (await tool.execute({
       ...baseArgs,
-      forceRefresh: true,
-    })) as { cacheHit: boolean; replacedPrior?: boolean };
-    expect(refresh.cacheHit).toBe(false);
-    // Same query → not a slot reassignment, no replacedPrior signal.
-    expect(refresh.replacedPrior).toBeUndefined();
+      force_refresh: true,
+    })) as { cache_hit: boolean; replaced_prior?: boolean };
+    expect(refresh.cache_hit).toBe(false);
+    // Same query → not a slot reassignment, no replaced_prior signal.
+    expect(refresh.replaced_prior).toBeUndefined();
   });
 
-  it("does NOT set replacedPrior on first-ever extract (no prior to replace)", async () => {
+  it("does NOT set replaced_prior on first-ever extract (no prior to replace)", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     const result = (await tool.execute({
       ...baseArgs,
-      name: "fresh_slot",
-      dataSourceName: "fresh_slot",
-    })) as { cacheHit: boolean; replacedPrior?: boolean };
-    expect(result.cacheHit).toBe(false);
-    expect(result.replacedPrior).toBeUndefined();
+      dataset_name: "fresh_slot",
+      data_source_name: "fresh_slot",
+    })) as { cache_hit: boolean; replaced_prior?: boolean };
+    expect(result.cache_hit).toBe(false);
+    expect(result.replaced_prior).toBeUndefined();
   });
 
   it("on adapter failure, returns EXTRACT_FAILED and aborts the slot", async () => {
@@ -326,9 +340,9 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
       }),
     });
     const result = (await tool.execute({
-      name: "audit_writes",
-      dataSourceName: "users_dev",
-      query: "INSERT INTO users (id) VALUES (1)",
+      dataset_name: "audit_writes",
+      data_source_name: "users_dev",
+      sql_text: "INSERT INTO users (id) VALUES (1)",
     })) as { ok: false; error: { code: string } };
     expect(result.error.code).toBe("WRITE_NOT_ALLOWED");
     expect(mockExtract).not.toHaveBeenCalled();
@@ -346,9 +360,9 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
       }),
     });
     const result = (await tool.execute({
-      name: "pii_grab",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users_pii",
+      dataset_name: "pii_grab",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users_pii",
     })) as { ok: false; error: { code: string } };
     expect(result.error.code).toBe("TABLE_DENIED");
     expect(mockExtract).not.toHaveBeenCalled();
@@ -366,9 +380,9 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
       }),
     });
     const result = (await tool.execute({
-      name: "secret_grab",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM secrets",
+      dataset_name: "secret_grab",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM secrets",
     })) as { ok: false; error: { code: string } };
     expect(result.error.code).toBe("TABLE_NOT_ALLOWED");
   });
@@ -385,42 +399,44 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
       },
     );
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-    })) as { cacheHit: boolean; rowCount: number };
-    expect(result.cacheHit).toBe(false);
-    expect(result.rowCount).toBe(1);
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+    })) as { cache_hit: boolean; total_rows: number };
+    expect(result.cache_hit).toBe(false);
+    expect(result.total_rows).toBe(1);
   });
 
   it("invalid SQL surfaces PARSE_ERROR", async () => {
     mockResolveByName.mockResolvedValue({ ok: true, resolved: fakeResolved() });
     const result = (await tool.execute({
-      name: "bad_sql",
-      dataSourceName: "users_dev",
-      query: "SELEKT garble FRUM nowhere",
+      dataset_name: "bad_sql",
+      data_source_name: "users_dev",
+      sql_text: "SELEKT garble FRUM nowhere",
     })) as { ok: false; error: { code: string } };
     expect(result.error.code).toBe("PARSE_ERROR");
   });
 });
 
-describe("extract_dataset_by_sql — previewRows", () => {
+describe("extract_dataset_by_sql — row_limit", () => {
   const tool = buildExtractDatasetTool();
 
-  it("omits preview when previewRows is 0 / unset", async () => {
+  it("returns [] rows when row_limit is 0", async () => {
     arrangeSuccessfulExtract([
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
     ]);
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-    })) as { preview?: unknown };
-    expect(result.preview).toBeUndefined();
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+      row_limit: 0,
+    })) as { rows: unknown[]; returned_rows: number };
+    expect(result.rows).toEqual([]);
+    expect(result.returned_rows).toBe(0);
   });
 
-  it("returns preview rows when previewRows > 0 (subset of total)", async () => {
+  it("returns top-N rows when row_limit > 0 (subset of total)", async () => {
     const rows = [
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
@@ -430,86 +446,100 @@ describe("extract_dataset_by_sql — previewRows", () => {
     ];
     arrangeSuccessfulExtract(rows);
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-      previewRows: 2,
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+      row_limit: 2,
     })) as {
-      rowCount: number;
-      preview: { columns: string[]; rows: unknown[][]; truncated: boolean };
+      total_rows: number;
+      returned_rows: number;
+      rows: Array<Record<string, unknown>>;
     };
-    expect(result.rowCount).toBe(5);
-    expect(result.preview.columns).toEqual(["id", "name"]);
-    expect(result.preview.rows).toHaveLength(2);
-    const [firstId, firstName] = result.preview.rows[0];
-    expect(firstId).toBe(1);
-    expect(firstName).toBe("alice");
-    expect(result.preview.truncated).toBe(true);
+    expect(result.total_rows).toBe(5);
+    expect(result.returned_rows).toBe(2);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]).toMatchObject({ id: 1, name: "alice" });
   });
 
-  it("preview NOT truncated when previewRows >= rowCount", async () => {
+  it("returned_rows == total_rows when row_limit >= total_rows", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-      previewRows: 50,
-    })) as { preview: { rows: unknown[]; truncated: boolean } };
-    expect(result.preview.rows).toHaveLength(1);
-    expect(result.preview.truncated).toBe(false);
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+      row_limit: 50,
+    })) as {
+      rows: unknown[];
+      returned_rows: number;
+      total_rows: number;
+    };
+    expect(result.rows).toHaveLength(1);
+    expect(result.returned_rows).toBe(1);
+    expect(result.total_rows).toBe(1);
   });
 
-  it("preview is omitted on empty datasets even when previewRows is set", async () => {
+  it("returns empty rows on empty datasets even when row_limit is set", async () => {
     arrangeSuccessfulExtract([]);
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-      previewRows: 10,
-    })) as { rowCount: number; preview?: unknown };
-    expect(result.rowCount).toBe(0);
-    expect(result.preview).toBeUndefined();
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+      row_limit: 10,
+    })) as {
+      total_rows: number;
+      returned_rows: number;
+      rows: unknown[];
+    };
+    expect(result.total_rows).toBe(0);
+    expect(result.returned_rows).toBe(0);
+    expect(result.rows).toEqual([]);
   });
 
-  it("clamps previewRows to PREVIEW_HARD_CAP_ROWS (200) regardless of input", async () => {
+  it("clamps row_limit to PREVIEW_HARD_CAP_ROWS (200) regardless of input", async () => {
     const rows = Array.from({ length: 250 }, (_, i) => ({
       id: i + 1,
       name: `u${i}`,
     }));
     arrangeSuccessfulExtract(rows);
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-      previewRows: 10_000,
-    })) as { preview: { rows: unknown[]; truncated: boolean } };
-    expect(result.preview.rows.length).toBeLessThanOrEqual(200);
-    expect(result.preview.truncated).toBe(true);
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+      row_limit: 10_000,
+    })) as {
+      rows: unknown[];
+      returned_rows: number;
+      total_rows: number;
+    };
+    expect(result.rows.length).toBeLessThanOrEqual(200);
+    expect(result.returned_rows).toBeLessThanOrEqual(200);
+    expect(result.total_rows).toBe(250);
   });
 
-  it("preview also works on cache-hit path", async () => {
+  it("rows are returned on cache-hit path too", async () => {
     arrangeSuccessfulExtract([
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
     ]);
     await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
     });
     mockExtract.mockClear();
     const result = (await tool.execute({
-      name: "users_dev",
-      dataSourceName: "users_dev",
-      query: "SELECT * FROM users",
-      previewRows: 5,
+      dataset_name: "users_dev",
+      data_source_name: "users_dev",
+      sql_text: "SELECT * FROM users",
+      row_limit: 5,
     })) as {
-      cacheHit: boolean;
-      preview: { rows: unknown[]; truncated: boolean };
+      cache_hit: boolean;
+      rows: unknown[];
+      returned_rows: number;
     };
-    expect(result.cacheHit).toBe(true);
-    expect(result.preview.rows).toHaveLength(2);
-    expect(result.preview.truncated).toBe(false);
+    expect(result.cache_hit).toBe(true);
+    expect(result.rows).toHaveLength(2);
+    expect(result.returned_rows).toBe(2);
     expect(mockExtract).not.toHaveBeenCalled();
   });
 });

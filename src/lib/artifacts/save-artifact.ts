@@ -10,6 +10,8 @@ import "server-only";
 
 import { and, asc, eq, sql } from "drizzle-orm";
 
+import { logger as observabilityLogger } from "@/lib/observability/logger";
+
 import { db } from "@/lib/db";
 import {
   ArtifactTable,
@@ -29,6 +31,7 @@ import { WorkflowError } from "@/lib/workflows/error";
 import type { ArtifactType } from "@/lib/domain/artifact";
 
 import { coalesceToolCalls } from "./coalesce-tool-calls";
+import { executeWorkflow } from "./execute-workflow";
 
 // ─── Public surface ────────────────────────────────────────────────────
 
@@ -56,6 +59,8 @@ export interface SaveArtifactDeps {
   getToolMetadata: CanonicalizeDeps["getToolMetadata"];
   /** EntityCatalog view; passed through to canonicalize. */
   resolveAgentId: CanonicalizeDeps["resolveAgentId"];
+  /** Data-source catalog view; passed through to canonicalize. */
+  resolveDataSourceId: CanonicalizeDeps["resolveDataSourceId"];
 }
 
 export interface SaveArtifactResult {
@@ -67,14 +72,16 @@ export interface SaveArtifactResult {
 }
 
 /**
- * Production wiring. Both lookups are stubbed today: `getToolMetadata`
- * returns empty (canonicalize falls through to default sources);
- * `resolveAgentId` returns null (specs with agents fail with
- * `AGENT_NOT_FOUND`, but tool-only chats save fine).
+ * Stub wiring for development / tool-only workflows. Agent and
+ * SQL node resolution always fails; tool metadata is empty.
+ *
+ * @deprecated Use `buildProductionSaveDeps(ownerId)` from
+ * `./save-deps.server.ts` for real DB-backed resolution.
  */
-export const productionSaveDeps: SaveArtifactDeps = {
-  getToolMetadata: () => ({}),
-  resolveAgentId: () => null,
+export const stubSaveDeps: SaveArtifactDeps = {
+  getToolMetadata: async () => ({}),
+  resolveAgentId: async () => null,
+  resolveDataSourceId: async () => null,
 };
 
 // ─── Entry point ───────────────────────────────────────────────────────
@@ -88,8 +95,11 @@ export async function saveArtifact(
   input: SaveArtifactInput,
   deps: SaveArtifactDeps,
 ): Promise<SaveArtifactResult> {
-  // Idempotency check first — if a matching artifact already
-  // exists for this user, return its ids without re-walking events.
+  // Fast-path idempotency check — avoids the heavy event-walk +
+  // canonicalize pipeline for the common "user double-clicked save"
+  // case. The authoritative guard is the unique index on
+  // (source_thread_id, source_outcome_id) enforced inside the
+  // transaction below.
   const existing = await findExistingArtifact({
     ownerId: input.ownerId,
     sourceThreadId: input.threadId,
@@ -129,63 +139,143 @@ export async function saveArtifact(
   });
 
   // Canonicalize (fills `type` tag, agentId, registry schemas).
-  const canonical = canonicalize(built.spec, deps);
+  const canonical = await canonicalize(built.spec, deps);
 
   // Validate (DAG, cycles, ref reachability, top-level outputs).
   validate(canonical);
 
-  // Atomic persistence.
+  // Atomic persistence with idempotency guard inside the
+  // transaction. If a concurrent request inserted the same
+  // (source_thread_id, source_outcome_id) between our fast-path
+  // check and this point, the unique index causes a conflict.
+  // We catch it and return the winner's row.
   const workflowName = canonical.name;
   const workflowOutputField = pickWorkflowOutputField(built.spec);
-  const result = await db.transaction(async (tx) => {
-    const [workflowRow] = await tx
-      .insert(WorkflowTable)
-      .values({
-        name: workflowName,
-        spec: canonical,
-        visibility: "private",
-        createdBy: input.ownerId,
-        updatedBy: input.ownerId,
-      })
-      .returning({ id: WorkflowTable.id });
-    if (workflowRow === undefined) {
-      throw new Error("saveArtifact: workflow row insert returned no id.");
-    }
 
-    // The artifact's renderable payload is computed on demand
-    // from the bound workflow's output (see `lib/artifacts/
-    // bundle.ts` + `lib/artifacts/execute-workflow.ts`); we do
-    // NOT persist a pre-rendered copy on the row.
-    const [artifactRow] = await tx
-      .insert(ArtifactTable)
-      .values({
-        kind: "artifact",
-        type: deriveArtifactType(built.artifactCreatorToolName),
-        name:
-          input.name?.trim()?.length
-            ? input.name.trim().slice(0, 200)
-            : deriveArtifactName(built.spec, built.strippedFrontendConfig),
-        ...(input.description !== undefined && {
-          description: input.description,
-        }),
+  let result: { artifactId: string; workflowId: string; reused: boolean };
+  try {
+    const inserted = await db.transaction(async (tx) => {
+      // Re-check inside the transaction — narrows the race window
+      // to the DB serialization level. The unique index is the
+      // ultimate backstop.
+      const dup = await findExistingArtifactTx(tx, {
+        ownerId: input.ownerId,
         sourceThreadId: input.threadId,
         sourceOutcomeId: input.outcomeId,
+      });
+      if (dup !== null) return { ...dup, reused: true as const };
+
+      const [workflowRow] = await tx
+        .insert(WorkflowTable)
+        .values({
+          name: workflowName,
+          spec: canonical,
+          visibility: "private",
+          createdBy: input.ownerId,
+          updatedBy: input.ownerId,
+        })
+        .returning({ id: WorkflowTable.id });
+      if (workflowRow === undefined) {
+        throw new Error("saveArtifact: workflow row insert returned no id.");
+      }
+
+      const [artifactRow] = await tx
+        .insert(ArtifactTable)
+        .values({
+          kind: "artifact",
+          type: deriveArtifactType(built.artifactCreatorToolName),
+          name:
+            input.name?.trim()?.length
+              ? input.name.trim().slice(0, 200)
+              : deriveArtifactName(built.spec, built.strippedFrontendConfig),
+          ...(input.description !== undefined && {
+            description: input.description,
+          }),
+          sourceThreadId: input.threadId,
+          sourceOutcomeId: input.outcomeId,
+          workflowId: workflowRow.id,
+          workflowOutputField,
+          ...(input.parentId !== undefined && { parentId: input.parentId }),
+          createdBy: input.ownerId,
+        })
+        .returning({ id: ArtifactTable.id });
+      if (artifactRow === undefined) {
+        throw new Error("saveArtifact: artifact row insert returned no id.");
+      }
+
+      // Lineage telemetry — single event, source-of-truth for admin
+      // run forensics.
+      await insertLineageEvent(tx, resolution.runId, built.lineageReport);
+
+      return {
+        artifactId: artifactRow.id,
         workflowId: workflowRow.id,
-        workflowOutputField,
-        ...(input.parentId !== undefined && { parentId: input.parentId }),
-        createdBy: input.ownerId,
-      })
-      .returning({ id: ArtifactTable.id });
-    if (artifactRow === undefined) {
-      throw new Error("saveArtifact: artifact row insert returned no id.");
+        reused: false as const,
+      };
+    });
+    result = inserted;
+  } catch (err) {
+    // Unique-index violation from a concurrent insert — the other
+    // request won the race. Re-query and return the winner's row.
+    if (isUniqueViolation(err)) {
+      const winner = await findExistingArtifact({
+        ownerId: input.ownerId,
+        sourceThreadId: input.threadId,
+        sourceOutcomeId: input.outcomeId,
+      });
+      if (winner !== null) {
+        return {
+          artifactId: winner.artifactId,
+          workflowId: winner.workflowId,
+          workflowOutputField: winner.workflowOutputField,
+          reused: true,
+        };
+      }
     }
+    throw err;
+  }
 
-    // Lineage telemetry — single event, source-of-truth for admin
-    // run forensics.
-    await insertLineageEvent(tx, resolution.runId, built.lineageReport);
+  if (result.reused) {
+    return {
+      artifactId: result.artifactId,
+      workflowId: result.workflowId,
+      workflowOutputField,
+      reused: true,
+    };
+  }
 
-    return { artifactId: artifactRow.id, workflowId: workflowRow.id };
-  });
+  // Create initial snapshot — execute the workflow once (uses SQL
+  // Parquet cache; fast) and persist the output as the first snapshot
+  // so the artifact is immediately useful when opened in snapshot mode.
+  // Non-fatal: a failure here does not fail the save; the user can
+  // trigger a manual snapshot later.
+  try {
+    const resolution = await executeWorkflow({
+      workflowId: result.workflowId,
+      spec: canonical,
+      outputField: workflowOutputField,
+      ownerId: input.ownerId,
+      forceFresh: false,
+    });
+    if (resolution !== null && resolution.data !== undefined) {
+      await db
+        .update(ArtifactTable)
+        .set({
+          snapshot: resolution.data as Record<string, unknown>,
+          snapshotAt: resolution.executedAt,
+        })
+        .where(eq(ArtifactTable.id, result.artifactId));
+    }
+  } catch (snapshotErr) {
+    observabilityLogger.warn(
+      {
+        err: snapshotErr,
+        artifactId: result.artifactId,
+        workflowId: result.workflowId,
+      },
+      "initial snapshot creation failed (non-fatal)",
+    );
+  }
 
   return {
     artifactId: result.artifactId,
@@ -322,12 +412,31 @@ interface ExistingArtifactRef {
   workflowOutputField: string;
 }
 
+type TxHandle = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Idempotency lookup — works with the ambient `db` connection. */
 async function findExistingArtifact(args: {
   ownerId: string;
   sourceThreadId: string;
   sourceOutcomeId: string;
 }): Promise<ExistingArtifactRef | null> {
-  const rows = await db
+  return findExistingArtifactIn(db, args);
+}
+
+/** Idempotency lookup — works inside an open transaction. */
+async function findExistingArtifactTx(
+  tx: TxHandle,
+  args: { ownerId: string; sourceThreadId: string; sourceOutcomeId: string },
+): Promise<ExistingArtifactRef | null> {
+  return findExistingArtifactIn(tx, args);
+}
+
+/** Shared implementation for both ambient and transactional lookups. */
+async function findExistingArtifactIn(
+  conn: typeof db | TxHandle,
+  args: { ownerId: string; sourceThreadId: string; sourceOutcomeId: string },
+): Promise<ExistingArtifactRef | null> {
+  const rows = await conn
     .select({
       id: ArtifactTable.id,
       workflowId: ArtifactTable.workflowId,
@@ -345,9 +454,6 @@ async function findExistingArtifact(args: {
   const row = rows[0];
   if (row === undefined) return null;
   if (row.workflowId === null || row.workflowOutputField === null) {
-    // Existing artifact wasn't created via save-as-workflow. Treat
-    // as "no idempotent match" — the user is re-saving from a
-    // different outcome but the chat happened to overlap.
     return null;
   }
   return {
@@ -357,8 +463,23 @@ async function findExistingArtifact(args: {
   };
 }
 
+/**
+ * Detect PostgreSQL unique-constraint violation (error code 23505).
+ * Works with both `pg` driver errors and Drizzle-wrapped errors.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (err === null || typeof err !== "object") return false;
+  const e = err as Record<string, unknown>;
+  if (e.code === "23505") return true;
+  // Drizzle may wrap the driver error as `cause`.
+  if (e.cause !== null && typeof e.cause === "object") {
+    return (e.cause as Record<string, unknown>).code === "23505";
+  }
+  return false;
+}
+
 async function insertLineageEvent(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: TxHandle,
   runId: string,
   report: SaveLineageReport,
 ): Promise<void> {
@@ -372,7 +493,7 @@ async function insertLineageEvent(
 }
 
 async function pickNextEventSeq(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: TxHandle,
   runId: string,
 ): Promise<number> {
   // Pull MAX(seq) inside the transaction to avoid concurrent

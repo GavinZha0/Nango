@@ -60,18 +60,17 @@ function workflowRow(
 
 function sampleSpec(): CanonicalWorkflowSpec {
   return {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes: [
       {
         type: "tool",
         schema_version: "1",
         id: 0,
         description: "n",
-        depends_on: [],
-        tool: "extract_dataset_by_sql",
-        inputs: { sql: "select 1" },
+        depends_on: [],        inputs: {
+          name: "extract_dataset_by_sql",
+          arguments: { sql: "select 1" },
+        },
       },
     ],
     outputs: { data: "@nodes.0.dataset" },
@@ -185,7 +184,6 @@ describe("buildArtifactBundle — workflow-backed artifact", () => {
     expect(bundle.workflow!.id).toBe(WORKFLOW_ID);
     expect(bundle.workflow!.name).toBe("Workflow from chart_renderer");
     expect(bundle.workflow!.outputField).toBe("data");
-    expect(bundle.workflow!.spec.ref_recon_algorithm).toBe("ref_recon_v1");
     expect(deps.workflowCalls).toEqual([{ id: WORKFLOW_ID }]);
   });
 

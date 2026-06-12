@@ -591,120 +591,31 @@ hand-inserted `drizzle.__drizzle_migrations` row is now vestigial
 
 ---
 
-## 7. Case study: shrinking the 2.7 GB image (and the traps on the way)
+## 7. Image size: 2.7 GB → 1.3 GB
 
-A long, expensive debugging session. Recorded here in full because the
-problem is *typical* for a pnpm + Next.js standalone + native-addon
-stack, the symptoms are misleading, and every "obvious" shortcut we
-tried failed for an instructive reason. §6.5 has the final mechanism;
-this section is the **journey and the dead ends** so the next person
-(human or AI) reaches the answer in minutes.
+**Root cause**: `dependencies` in `package.json` ≠ runtime needs.
+Next.js bundles client libraries into `.next` at build time, but
+they remain in `node_modules` (~1.4 GB of dead weight). The true
+runtime closure is ~275 packages / ~420 MB.
 
-### The problem
+**Solution**: fixpoint repair in the Dockerfile builder stage (§6.5).
+Seed from nft's traced package set, then loop `cp -Rn` + follow
+dependency symlinks until no new `.pnpm/<dep>` dir appears.
 
-`docker compose build` produced a **2.69 GB** image for an app whose
-server code is a few MB. The bloat was entirely `node_modules`:
-~1.86 GB of it, shipped into the runner.
+**Result**: 2.69 GB → 1.32 GB (~51% smaller).
 
-### Why it was so big (the key insight)
+| Approach tried | Why it failed |
+|---|---|
+| `pnpm install --prod` | Wrong axis — waste is bundled prod deps, not devDeps |
+| `nodeLinker: hoisted` | Turbopack hashes `.pnpm` layout; different layout → runtime crash |
+| `outputFileTracingIncludes` globs | Only resolves top-level symlinks, not deep `.pnpm` paths |
+| One-shot `cp -R` | Can't overwrite dir with symlink (`cp` fails) |
+| Single `cp -Rn` | Misses untraced transitive deps; need iterative walk |
 
-`dependencies` in `package.json` ≠ what the server needs **at runtime**.
-Next.js bundles all the client/UI libraries into `.next` at build time,
-yet they still sit in `node_modules` as ordinary `dependencies`.
-Measured breakdown of the 1.86 GB prod tree:
-
-| Bucket | Size | Needed at runtime? |
-|---|---|---|
-| `@react-icons/all-files` | ~214 MB | No — bundled into `.next` |
-| `lucide-react` (4–5 versions) | ~165 MB | No — bundled |
-| `mermaid` + `echarts` + `node-sql-parser` | ~220 MB | No — bundled |
-| `next` + `@next/swc-*` | ~280 MB | swc is build-time only |
-| CopilotKit + OpenAI + LangChain | ~200 MB | **Yes** (serverExternalPackages) |
-| `@duckdb/node-bindings-*` | ~107 MB | **Yes** |
-| everything else | rest | mixed |
-
-So ~1.4 GB of the prod tree is dead weight in the runner. The *true*
-runtime closure (what `server.js` actually `require`s) is only
-**~275 packages / ~420 MB** — exactly the set Next.js's `nft` tracer
-puts in the standalone output. The whole job was: **ship the standalone
-node_modules, not the prod node_modules.**
-
-### Dead ends (in the order we hit them) — and why each failed
-
-1. **`pnpm install --prod` in a separate stage** (commit `adb90df`).
-   Removes devDeps only. Saved ~10–40 MB because devDeps mostly share
-   transitive deps with prod deps, and the heavy stuff (react-icons,
-   lucide, mermaid) is *prod*. Net result still 2.69 GB. **Lesson:
-   `--prod` is the wrong axis; the waste is bundled-but-unused prod
-   deps, not devDeps.**
-
-2. **`nodeLinker: hoisted`** to flatten node_modules.
-   Build succeeded, runtime crashed: `Cannot find module
-   'pino-2e79642258e38174'`. Turbopack's `externalRequire` bakes package
-   identifiers as **hashes computed against the build-time `.pnpm`
-   layout**; a different runtime layout cannot resolve them. **Lesson:
-   the runtime node_modules MUST keep the same isolated `.pnpm` layout
-   as the build.**
-
-3. **`outputFileTracingIncludes` globs** (e.g.
-   `./node_modules/.pnpm/**/node_modules/<pkg>/**/*`) to "force-include"
-   the missing packages. Silently matched nothing — the include
-   mechanism only resolves *top-level* `node_modules/<pkg>` symlinks,
-   not deep `.pnpm` store paths. **Lesson: `outputFileTracingIncludes`
-   cannot patch transitive `.pnpm` gaps.**
-
-4. **One-shot `cp` of the whole traced `.pnpm` store from the builder.**
-   Failed: `cp: cannot overwrite directory … pino-pretty with
-   non-directory` — nft inlines some pnpm symlinks as **real dirs**,
-   while the store has them as **symlinks**, and `cp -R` can't replace a
-   dir with a symlink. **Lesson: use `cp -Rn` (no-clobber) — only add
-   what's missing, never overwrite nft's structure.**
-
-5. **`cp -Rn` once.** Fixed the dropped *entry files* (readable.js) but
-   then crashed on `process-nextick-args` — a **dependency of a
-   truncated package that nft never traced at all**, so its
-   `.pnpm/<dep>@<ver>` dir didn't exist to copy into. **Lesson: a single
-   pass isn't enough; completing one package reveals its untraced deps.
-   You need a transitive walk.**
-
-### The fix (§6.5 has the code)
-
-A **fixpoint repair in the builder**: seed from nft's package set (the
-true ~420 MB closure that already *excludes* the bundled client libs),
-then loop — (1) `cp -Rn` to fill files nft dropped, (2) follow each
-package's dependency symlinks to pull in missing `.pnpm/<dep>@<ver>`
-dirs — until no new dir appears. Bounded to **real dependency edges
-only** (never the `.pnpm/node_modules` hoist table of all ~941
-packages), so it can't drag the bundled client libs back in.
-
-Native `dlopen` sidecars (DuckDB's `libduckdb.so`) come along for free:
-the binding dir is in the seed, so `cp -Rn` restores the `.so` that nft
-omitted (it follows JS `require`, not C-level `dlopen`).
-
-### Outcome
-
-**2.69 GB → 1.32 GB** (~51% smaller), build ~125 s, all 6 smoke checks
-pass (CopilotKit chat, DuckDB SQL, pg/vertica, ssh, MCP, pretty logs).
-
-### If you ever revisit this
-
-- **Don't** chase size via `--prod` / dedupe / `nodeLinker`. The lever
-  is "runtime closure vs prod closure", and standalone already computes
-  it.
-- **Do** verify the standalone closure with
-  `docker run --rm --entrypoint sh nango:latest -c 'du -sh /app/node_modules; find /app/node_modules/.pnpm -mindepth 1 -maxdepth 1 | wc -l'`.
-- **`@react-icons/all-files` (~215 MB) and the `lucide-react` version
-  sprawl (4 versions, ~167 MB) are NOT in the shipped image** — they are
-  bundled into `.next` and excluded from the runtime closure (verified:
-  neither appears in `/app/node_modules/.pnpm`; `.next` is only ~75 MB
-  total). They are *builder-stage* weight only (install disk / CI cache),
-  which the runner discards. Deduping `lucide-react` (via an
-  `overrides: { lucide-react: "<ver>" }`) would save builder disk but
-  risks breaking copilotkit / streamdown / @rjsf/shadcn, which are built
-  against `lucide-react@0.5xx` while our direct dep is `1.16.0` — a major
-  boundary. Not worth it for zero image gain. `@react-icons/all-files`
-  has no clean removal short of replacing the `@rjsf/shadcn` theme.
-- The remaining ~1.3 GB is genuine: node base image, the ~420 MB runtime
-  closure (of which DuckDB's `libduckdb.so` alone is 107 MB), and `.next`.
-  Getting below ~1 GB would mean trimming the *runtime* closure or the
-  base image — not the bundled client libs above.
+**If revisiting**: don't chase `--prod` / dedupe / `nodeLinker`. The
+lever is "runtime closure vs prod closure" — standalone already
+computes it. Verify with:
+```
+docker run --rm --entrypoint sh nango:latest -c \
+  'du -sh /app/node_modules; find /app/node_modules/.pnpm -mindepth 1 -maxdepth 1 | wc -l'
+```

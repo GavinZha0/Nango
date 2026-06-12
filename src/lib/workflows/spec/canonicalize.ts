@@ -3,12 +3,14 @@
  *
  * Per-node enrichment:
  *   - Tool nodes: hydrate `input_schema` / `output_schema` /
- *     `outputs[]` from the registry.
+ *     `outputs[]` from the tool registry (per-instance snapshot,
+ *     protects against tool contract changes between save and refresh).
  *   - Agent nodes: resolve `<source> / <name>` display strings to
- *     UUIDs via EntityCatalog; derive `outputs[]` from
- *     `output_schema.required`.
- *   - Code / SQL nodes: derive or default `outputs[]`.
- *   - Stamp `ref_recon_algorithm: "ref_recon_v1"`.
+ *     UUIDs via EntityCatalog.
+ *   - Code / SQL / Chart nodes: stamp `schema_version` and resolve
+ *     UUID fields. Input/output schemas and output field lists are
+ *     type-level data stored in `../nodes/registry.ts`, not in each
+ *     node instance.
  *
  * Failure mode: every problem throws a `WorkflowError`. The surrounding
  * save pipeline calls `toResult(we)` at its catch boundary.
@@ -23,7 +25,6 @@
 
 import { WorkflowError } from "../error";
 import {
-  buildCanonicalChartInputSchema,
   type CanonicalAgentNode,
   type CanonicalChartNode,
   type CanonicalCodeNode,
@@ -31,10 +32,6 @@ import {
   type CanonicalSqlNode,
   type CanonicalToolNode,
   type CanonicalWorkflowSpec,
-  CHART_NODE_OUTPUT_SCHEMA,
-  CHART_NODE_OUTPUTS,
-  DEFAULT_CODE_NODE_OUTPUTS,
-  DEFAULT_SQL_NODE_OUTPUTS,
   type LLMAgentNode,
   type LLMChartNode,
   type LLMCodeNode,
@@ -66,6 +63,26 @@ export const NODE_SCHEMA_VERSIONS = {
   chart: "1",
 } as const satisfies Record<NodeType, string>;
 
+/**
+ * All `"<type>:<version>"` executor keys this build supports.
+ * Always includes every current version from `NODE_SCHEMA_VERSIONS`.
+ * When a node type gets a breaking change (version bump from "1" → "2"):
+ *   1. Update `NODE_SCHEMA_VERSIONS.<type>` to "2".
+ *   2. Add `"<type>:1"` to the legacy list below so persisted v1
+ *      specs keep running.
+ *   3. Register `"<type>:2"` in `engine/in-process.ts`
+ *      `NODE_EXECUTOR_TABLE` and keep the `"<type>:1"` entry.
+ *
+ * `validate.ts` imports this set to reject specs whose nodes reference
+ * an unsupported version at save time rather than failing at refresh.
+ */
+export const SUPPORTED_EXECUTOR_KEYS: ReadonlySet<string> = new Set<string>([
+  // Current versions — always included.
+  ...Object.entries(NODE_SCHEMA_VERSIONS).map(([t, v]) => `${t}:${v}`),
+  // Legacy versions kept alive for persisted workflows:
+  // (none yet — add here when the first breaking schema change lands)
+]);
+
 // ─── Dependencies ──────────────────────────────────────────────────────
 
 /**
@@ -80,162 +97,202 @@ export interface ToolMetadata {
   outputs?: readonly string[];
 }
 
-/** Lookups canonicalize delegates to its caller. */
+/**
+ * Lookups canonicalize delegates to its caller. All methods are
+ * async because the underlying operations are I/O (DB queries,
+ * external HTTP calls to agent platforms, tool-catalog builds).
+ * canonicalize awaits each per-node resolution on demand — no
+ * pre-hydration step required.
+ */
 export interface CanonicalizeDeps {
   /** Returns null if the tool name is unknown to the registry. */
-  getToolMetadata(toolName: string): ToolMetadata | null;
+  getToolMetadata(toolName: string): Promise<ToolMetadata | null>;
   /**
    * Resolves an `<sourceLabel> / <agentName>` display string to its
    * UUID. Returns null if the agent no longer exists in EntityCatalog
    * or has been disabled.
    */
-  resolveAgentId(displayString: string): string | null;
+  resolveAgentId(displayString: string): Promise<string | null>;
+  /**
+   * Resolves a `data_source.name` slug to its UUID. Returns null if
+   * no data source with that name exists or it is disabled.
+   */
+  resolveDataSourceId(name: string): Promise<string | null>;
 }
-
-/** Current save-time ref reconstruction algorithm version. */
-export const REF_RECON_ALGORITHM = "ref_recon_v1" as const;
 
 // ─── Per-node canonicalization ─────────────────────────────────────────
 
 /**
- * Derive a node's `outputs[]` list from a JSON-Schema-shaped
- * `output_schema`. `required-only` mode (tool / agent nodes) uses
- * `output_schema.required` as authoritative. `code` mode falls back
- * to `properties` keys when `required` is absent — code nodes
- * commonly declare a schema without `required` because the contract
- * is "stdout prints exactly these keys".
+ * Derive a tool node's `outputs[]` list from its tool-registry
+ * `output_schema`. Used only for `tool` nodes — all other node types
+ * get their output field lists from `../nodes/registry.ts` at
+ * validate / execute time.
  *
  * Returns `undefined` when neither source has usable data.
  */
-function deriveOutputsFromSchema(
-  schema: Record<string, unknown> | undefined,
-  mode: "required-only" | "code" = "required-only",
+function deriveToolOutputs(
+  meta: ToolMetadata,
 ): string[] | undefined {
+  if (meta.outputs !== undefined && meta.outputs.length > 0) {
+    return [...meta.outputs];
+  }
+  const schema = meta.output_schema;
   if (schema === undefined) return undefined;
   const required = (schema as { required?: unknown }).required;
   if (Array.isArray(required)) {
     const fields = required.filter((s): s is string => typeof s === "string");
     if (fields.length > 0) return fields;
   }
-  if (mode === "code") {
-    const properties = (schema as { properties?: unknown }).properties;
-    if (
-      properties !== null &&
-      typeof properties === "object" &&
-      !Array.isArray(properties)
-    ) {
-      const keys = Object.keys(properties as Record<string, unknown>);
-      if (keys.length > 0) return keys;
-    }
+  const properties = (schema as { properties?: unknown }).properties;
+  if (
+    properties !== null &&
+    typeof properties === "object" &&
+    !Array.isArray(properties)
+  ) {
+    const keys = Object.keys(properties as Record<string, unknown>);
+    if (keys.length > 0) return keys;
   }
   return undefined;
 }
 
-function canonicalizeToolNode(
+async function canonicalizeToolNode(
   n: LLMToolNode,
   deps: CanonicalizeDeps,
-): CanonicalToolNode {
-  const meta = deps.getToolMetadata(n.tool);
+): Promise<CanonicalToolNode> {
+  const toolName = n.inputs.name;
+  const meta = await deps.getToolMetadata(toolName);
   if (meta === null) {
     throw new WorkflowError({
       errorCode: "TOOL_NOT_FOUND",
-      message: `Node ${n.id}: tool '${n.tool}' is not registered.`,
+      message: `Node ${n.id}: tool '${toolName}' is not registered.`,
       nodeId: n.id,
-      nodeName: n.tool,
+      nodeName: toolName,
     });
   }
   const canonical: CanonicalToolNode = {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.tool,
   };
-  if (meta.input_schema !== undefined) canonical.input_schema = meta.input_schema;
+  // Build input_schema describing the wrapper shape:
+  //   { name: const, arguments: <registry-provided args schema> }
+  canonical.input_schema = buildToolInputSchema(toolName, meta.input_schema);
   if (meta.output_schema !== undefined) canonical.output_schema = meta.output_schema;
-  const outputs =
-    meta.outputs !== undefined && meta.outputs.length > 0
-      ? [...meta.outputs]
-      : deriveOutputsFromSchema(meta.output_schema);
+  const outputs = deriveToolOutputs(meta);
   if (outputs !== undefined) canonical.outputs = outputs;
   return canonical;
 }
 
-function canonicalizeAgentNode(
+/**
+ * Build the canonical `input_schema` for a tool node from the
+ * tool name (const-pinned) and the registry-provided args schema.
+ */
+function buildToolInputSchema(
+  toolName: string,
+  argsSchema: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      name: { const: toolName },
+      arguments: argsSchema ?? {
+        type: "object",
+        additionalProperties: true,
+      },
+    },
+    required: ["name", "arguments"],
+    additionalProperties: false,
+  };
+}
+
+async function canonicalizeAgentNode(
   n: LLMAgentNode,
   deps: CanonicalizeDeps,
-): CanonicalAgentNode {
-  const agentId = deps.resolveAgentId(n.agent);
+): Promise<CanonicalAgentNode> {
+  const agentDisplayName = n.inputs.name;
+  const agentId = await deps.resolveAgentId(agentDisplayName);
   if (agentId === null) {
     throw new WorkflowError({
       errorCode: "AGENT_NOT_FOUND",
-      message: `Node ${n.id}: agent '${n.agent}' could not be resolved to a known catalog entry.`,
+      message: `Node ${n.id}: agent '${agentDisplayName}' could not be resolved to a known catalog entry.`,
       nodeId: n.id,
-      nodeName: n.agent,
+      nodeName: agentDisplayName,
     });
   }
-  const canonical: CanonicalAgentNode = {
+  return {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.agent,
-    agent_id: agentId,
+    inputs: {
+      ...n.inputs,
+      agent_id: agentId,
+    },
+    // input_schema / output_schema / outputs[] no longer stamped per-instance.
+    // They are type-level data served from NODE_TYPE_REGISTRY["agent:1"].
   };
-  const outputs = deriveOutputsFromSchema(n.output_schema);
-  if (outputs !== undefined) canonical.outputs = outputs;
-  return canonical;
 }
 
 /**
- * Canonicalize a code node. When `output_schema` is declared, derive
- * `outputs[]` from `properties` (or `required`) so downstream
- * `@nodes.X.<key>` refs can be ref-validated at save time. Otherwise
- * fall back to `DEFAULT_CODE_NODE_OUTPUTS`.
+ * Canonicalize a code node. Only stamps `schema_version`.
+ * Output fields are served from the type registry at validate / execute
+ * time; if a custom `output_schema` is declared by the LLM it is
+ * preserved as an instance field and takes precedence over the
+ * registry default during ref validation.
  */
 function canonicalizeCodeNode(n: LLMCodeNode): CanonicalCodeNode {
-  const canonical: CanonicalCodeNode = {
+  return {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.code,
   };
-  const declared = deriveOutputsFromSchema(n.output_schema, "code");
-  canonical.outputs =
-    declared !== undefined ? declared : [...DEFAULT_CODE_NODE_OUTPUTS];
-  return canonical;
 }
 
 /**
- * Canonicalize a SQL node. Fixed-shape contract: outputs are always
- * `DEFAULT_SQL_NODE_OUTPUTS`. The `dataSourceName` slug is NOT
- * resolved against `data_source` at save time — that lookup is
- * deferred to runtime so a temporarily-disabled data source doesn't
- * block the save.
+ * Canonicalize a SQL node. Stamps `schema_version` and resolves
+ * `data_source_name` → `data_source_id` (UUID).
  */
-function canonicalizeSqlNode(n: LLMSqlNode): CanonicalSqlNode {
-  const canonical: CanonicalSqlNode = {
+async function canonicalizeSqlNode(
+  n: LLMSqlNode,
+  deps: CanonicalizeDeps,
+): Promise<CanonicalSqlNode> {
+  const dataSourceName = n.inputs.data_source_name;
+  const dataSourceId = await deps.resolveDataSourceId(dataSourceName);
+  if (dataSourceId === null) {
+    throw new WorkflowError({
+      errorCode: "DATA_SOURCE_NOT_FOUND",
+      message:
+        `Node ${n.id}: data source '${dataSourceName}' could not be ` +
+        "resolved to a known catalog entry. Check the slug or enable " +
+        "the data source.",
+      nodeId: n.id,
+      nodeName: `sql:${dataSourceName}`,
+    });
+  }
+  return {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.sql,
+    inputs: {
+      ...n.inputs,
+      data_source_id: dataSourceId,
+    },
+    // outputs[] no longer stamped per-instance.
+    // Served from NODE_TYPE_REGISTRY["sql:1"] at validate / execute time.
   };
-  canonical.outputs = [...DEFAULT_SQL_NODE_OUTPUTS];
-  return canonical;
 }
 
 /**
- * Canonicalize a chart node. Fixed-shape contract — LLMs only emit
- * `inputs.{renderer,config,dataset}`; canonicalize stamps the
- * derived schemas and outputs[]. The `renderer` value is mirrored
- * into `input_schema.properties.renderer.const` so the saved spec
- * is self-describing.
+ * Canonicalize a chart node. Only stamps `schema_version`.
+ * input_schema / output_schema / outputs[] served from
+ * NODE_TYPE_REGISTRY["chart:1"].
  */
 function canonicalizeChartNode(n: LLMChartNode): CanonicalChartNode {
-  const canonical: CanonicalChartNode = {
+  return {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.chart,
-    input_schema: buildCanonicalChartInputSchema(n.inputs.renderer),
-    output_schema: { ...CHART_NODE_OUTPUT_SCHEMA },
-    outputs: [...CHART_NODE_OUTPUTS],
   };
-  return canonical;
 }
 
-function canonicalizeNode(
+async function canonicalizeNode(
   n: LLMNode,
   deps: CanonicalizeDeps,
-): CanonicalNode {
+): Promise<CanonicalNode> {
   switch (n.type) {
     case "tool":
       return canonicalizeToolNode(n, deps);
@@ -244,7 +301,7 @@ function canonicalizeNode(
     case "code":
       return canonicalizeCodeNode(n);
     case "sql":
-      return canonicalizeSqlNode(n);
+      return canonicalizeSqlNode(n, deps);
     case "chart":
       return canonicalizeChartNode(n);
   }
@@ -254,17 +311,21 @@ function canonicalizeNode(
 
 /**
  * Transform a Zod-validated LLM-emit spec into the canonical form
- * persisted in `workflow.spec`. Throws `WorkflowError` on the first
- * unresolvable node — spec save is all-or-nothing.
+ * persisted in `workflow.spec`. Async because per-node resolution
+ * (tool metadata, agent UUID, data-source UUID) requires I/O.
+ * Throws `WorkflowError` on the first unresolvable node — spec save
+ * is all-or-nothing.
  */
-export function canonicalize(
+export async function canonicalize(
   spec: LLMWorkflowSpec,
   deps: CanonicalizeDeps,
-): CanonicalWorkflowSpec {
-  const nodes = spec.nodes.map((n) => canonicalizeNode(n, deps));
+): Promise<CanonicalWorkflowSpec> {
+  const nodes: CanonicalNode[] = [];
+  for (const n of spec.nodes) {
+    nodes.push(await canonicalizeNode(n, deps));
+  }
   return {
     ...spec,
     nodes,
-    ref_recon_algorithm: REF_RECON_ALGORITHM,
   };
 }

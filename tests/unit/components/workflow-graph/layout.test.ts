@@ -21,37 +21,41 @@ import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 
 function chainSpec(): CanonicalWorkflowSpec {
   return {
-    version: "1.0",
     name: "chain",
-    ref_recon_algorithm: "ref_recon_v1",
     outputs: { result: "@nodes.2.stdout" },
     nodes: [
       {
         id: 0,
         type: "tool",
         schema_version: "1",
-        tool: "extract_dataset_by_sql",
         description: "extract",
         depends_on: [],
-        inputs: { name: "ds", query: "SELECT 1" },
+        inputs: {
+          name: "extract_dataset_by_sql",
+          arguments: { name: "ds", query: "SELECT 1" },
+        },
       },
       {
         id: 1,
         type: "tool",
         schema_version: "1",
-        tool: "filter",
         description: "filter",
         depends_on: [0],
-        inputs: {},
+        inputs: {
+          name: "filter",
+          arguments: {},
+        },
       },
       {
         id: 2,
         type: "code",
         schema_version: "1",
-        language: "python",
-        code: "print('hi')",
         description: "code",
         depends_on: [1],
+        inputs: {
+          language: "python",
+          code_text: "print('hi')",
+        },
       },
     ],
   };
@@ -80,7 +84,7 @@ describe("layoutWorkflow", () => {
     const codeNode = nodes.find((n) => n.id === "2");
     expect(codeNode?.data.spec.type).toBe("code");
     if (codeNode?.data.spec.type === "code") {
-      expect(codeNode.data.spec.language).toBe("python");
+      expect(codeNode.data.spec.inputs.language).toBe("python");
     }
   });
 
@@ -117,19 +121,19 @@ describe("layoutWorkflow", () => {
 
   it("handles a single-node spec without edges", () => {
     const spec: CanonicalWorkflowSpec = {
-      version: "1.0",
       name: "solo",
-      ref_recon_algorithm: "ref_recon_v1",
       outputs: { result: "@nodes.0.stdout" },
       nodes: [
         {
           id: 0,
           type: "code",
           schema_version: "1",
-          language: "python",
-          code: "print(1)",
           description: "solo",
           depends_on: [],
+          inputs: {
+            language: "python",
+            code_text: "print(1)",
+          },
         },
       ],
     };
@@ -142,28 +146,30 @@ describe("layoutWorkflow", () => {
     // Two roots, neither depends on the other — dagre places them
     // in the same rank.
     const spec: CanonicalWorkflowSpec = {
-      version: "1.0",
       name: "parallel",
-      ref_recon_algorithm: "ref_recon_v1",
       outputs: { a: "@nodes.0.stdout", b: "@nodes.1.stdout" },
       nodes: [
         {
           id: 0,
           type: "tool",
           schema_version: "1",
-          tool: "a",
-          description: "a",
+        description: "a",
           depends_on: [],
-          inputs: {},
+          inputs: {
+            name: "a",
+            arguments: {},
+          },
         },
         {
           id: 1,
           type: "tool",
           schema_version: "1",
-          tool: "b",
-          description: "b",
+        description: "b",
           depends_on: [],
-          inputs: {},
+          inputs: {
+            name: "b",
+            arguments: {},
+          },
         },
       ],
     };

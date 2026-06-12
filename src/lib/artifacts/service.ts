@@ -46,6 +46,8 @@ export interface UpdateNodeInput {
   parentId?: string | null;
   displayOrder?: number;
   visibility?: "private" | "shared";
+  /** Switch between snapshot and live data modes. */
+  viewMode?: "snapshot" | "live";
 }
 
 // ──────────────────────────── Seeding ────────────────────────────
@@ -243,6 +245,7 @@ export async function updateNode(
       parentId: patch.parentId ?? current.parentId,
       displayOrder: patch.displayOrder ?? current.displayOrder,
       visibility: patch.visibility ?? current.visibility,
+      ...(patch.viewMode !== undefined && { viewMode: patch.viewMode }),
       updatedAt: new Date(),
     })
     .where(eq(ArtifactTable.id, id))

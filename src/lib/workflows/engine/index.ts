@@ -101,10 +101,27 @@ export interface AgentRunResult {
  * The engine resolves refs in `node.input` to the literal values
  * below before calling. `datasets` is the resolved string array of
  * dataset names to expose read-only inside the sandbox cwd.
+ *
+ * Exactly one of `code` / `codeFile` must be set (XOR — mirrors the
+ * spec's `inputs.code_text` / `inputs.code_file` contract):
+ *
+ *  - `code`     inline source text; piped to the interpreter via stdin.
+ *  - `codeFile` path relative to `./code/` inside the sandbox cwd.
+ *               The bridge executes the file via a preamble+exec-wrapper
+ *               piped to stdin, keeping preamble vars (datasets, params)
+ *               visible to the file's code. The file must already exist
+ *               in the sandbox (pre-mounted or uploaded via a future tool).
  */
 export interface CodeRunRequest {
-  language: "python";
-  code: string;
+  language: "python" | "javascript";
+  /** Inline source — mutually exclusive with codeFile. */
+  code?: string;
+  /**
+   * Sandbox-relative file path (relative to `./code/`).
+   * Mutually exclusive with code. Must be a relative path with no `..`
+   * segments (validated by the executor before dispatch).
+   */
+  codeFile?: string;
   /** Dataset names to expose read-only at `./data/<name>/` in the sandbox cwd. */
   datasets: string[];
   /** Optional env-var overlay. */
@@ -115,20 +132,16 @@ export interface CodeRunRequest {
 }
 
 /**
- * Code-node dispatch result — the raw `SandboxOutput` envelope.
+ * Code-node dispatch result — the raw sandbox execution output.
  *
- * The engine inspects `exitCode` to decide success vs failure
- * (`exitCode !== 0` → CODE_EXECUTION_FAILED with `stderr` surfaced
- * in the message). On success, the engine either exposes
- * `{ stdout, stderr, exitCode, durationMs }` as the node's outputs
- * when no `output_schema` is declared, or `JSON.parse(stdout)` +
- * validates against the declared `output_schema` and exposes the
- * parsed object's top-level keys.
+ * The executor calls assembleCodeOutput(result) to build a
+ * CodeOutputEnvelope (rows, row_count, row_schema, message, files,
+ * ok, error). See sandbox/code-output.ts.
  */
 export interface CodeRunResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
+  stdout:     string;
+  stderr:     string;
+  exitCode:   number;
   durationMs: number;
 }
 

@@ -18,6 +18,7 @@
  */
 
 import { WorkflowError } from "../error";
+import { SUPPORTED_EXECUTOR_KEYS } from "./canonicalize";
 import {
   findEmbeddedRefs,
   parseRef,
@@ -27,6 +28,10 @@ import type {
   CanonicalNode,
   CanonicalWorkflowSpec,
 } from "./schema";
+import {
+  getNodeTypeDescriptor,
+  getOutputFields,
+} from "../nodes/registry";
 
 // ─── Public entrypoint ─────────────────────────────────────────────────
 
@@ -48,12 +53,172 @@ export function validate(spec: CanonicalWorkflowSpec): void {
     });
   }
 
+  validateExecutorKeys(spec.nodes);
+  validatePromotedToolNodes(spec.nodes);
   const { nodeById, depsOf } = buildDependsOnGraph(spec.nodes);
   detectCycle(spec.nodes, depsOf);
   const closureOf = buildClosure(spec.nodes, depsOf);
   validateNodeInputs(spec, nodeById, closureOf);
   validateWorkflowOutputs(spec, nodeById);
   validateToolInputCoverage(spec.nodes);
+  validateCodeNodeSourceXor(spec.nodes);
+  validateJsConstraints(spec.nodes);
+  validateChartConfigNoRefs(spec.nodes);
+  validateChartConfigSize(spec.nodes);
+}
+
+// ─── Executor key validation ────────────────────────────────────────────
+
+/**
+ * Verify every node's `"<type>:<schema_version>"` key is registered
+ * in `SUPPORTED_EXECUTOR_KEYS`. Catches specs that reference a node
+ * version this build's engine cannot run — surfaces as a save-time
+ * error (`SCHEMA_VERSION_UNKNOWN`) rather than a silent refresh failure.
+ *
+ * All keys are "1" today, so this guard is a no-op for current specs.
+ * It becomes load-bearing when the first breaking schema change bumps a
+ * version: any spec persisted with the old version stays valid; any spec
+ * authored against a future version that this older build doesn't know
+ * about is rejected immediately.
+ */
+function validateExecutorKeys(nodes: readonly CanonicalNode[]): void {
+  for (const node of nodes) {
+    const key = `${node.type}:${node.schema_version}`;
+    if (!SUPPORTED_EXECUTOR_KEYS.has(key)) {
+      throw new WorkflowError({
+        errorCode: "SCHEMA_VERSION_UNKNOWN",
+        message:
+          `Node ${node.id} (${node.type}): schema_version "${node.schema_version}" ` +
+          `is not supported by this build. ` +
+          `Supported: ${[...SUPPORTED_EXECUTOR_KEYS].filter((k) => k.startsWith(`${node.type}:`)).join(", ")}.`,
+        nodeId: node.id,
+        nodeName: `${node.type}:${node.schema_version}`,
+      });
+    }
+  }
+}
+
+// ─── Promoted-tool-as-node guard ───────────────────────────────────────
+
+/**
+ * Tools that have been promoted to first-class node types must NOT
+ * appear as `type: "tool"` nodes — they have dedicated executors and
+ * canonical output shapes that a generic tool node cannot provide.
+ *
+ * Rejected names and their correct node types:
+ *   - `run_code_in_sandbox`        → `type: "code"`
+ *   - `extract_dataset_by_sql`     → `type: "sql"`
+ *   - `generate_<lib>_config`      → `type: "chart"`
+ *
+ * Surface area: save time only — if this is caught here, the LLM
+ * (or a hand-authored spec) gets an actionable error code instead
+ * of a silent wrong-output failure at refresh time.
+ */
+const PROMOTED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "run_code_in_sandbox",
+  "extract_dataset_by_sql",
+]);
+
+/** Matches `generate_<lib>_config` — the chart-tool naming convention. */
+const CHART_TOOL_NAME_RE = /^generate_[a-z][a-z0-9]*_config$/;
+
+function validatePromotedToolNodes(nodes: readonly CanonicalNode[]): void {
+  for (const node of nodes) {
+    if (node.type !== "tool") continue;
+    const name = node.inputs.name;
+    if (PROMOTED_TOOL_NAMES.has(name) || CHART_TOOL_NAME_RE.test(name)) {
+      const hint = PROMOTED_TOOL_NAMES.has(name)
+        ? name === "run_code_in_sandbox"
+          ? `Use type: "code" instead.`
+          : `Use type: "sql" instead.`
+        : `Use type: "chart" instead.`;
+      throw new WorkflowError({
+        errorCode: "PROMOTED_TOOL_AS_NODE",
+        message:
+          `Node ${node.id}: tool '${name}' has a dedicated node type ` +
+          `and cannot be used as a generic tool node. ${hint}`,
+        nodeId: node.id,
+        nodeName: name,
+      });
+    }
+  }
+}
+
+// ─── JavaScript-specific constraints ───────────────────────────────────
+
+/**
+ * v1 JavaScript support has two restrictions:
+ *
+ *  1. `inputs.datasets` is NOT allowed — the Node.js runtime has no
+ *     Parquet reader pre-installed. Pass small data via `inputs.params`
+ *     instead (upstream SQL/code node emits inline rows → ref'd into
+ *     the JS node's params).
+ *
+ *  2. `inputs.code_file` is NOT supported — the preamble+exec-wrapper
+ *     pattern used for Python's code_file mode has no equivalent in
+ *     Node.js CommonJS. Support requires a dedicated File-mode runner.
+ *     See docs/workflow-spec.md for the future roadmap.
+ *
+ * Both restrictions are save-time errors so the user gets immediate
+ * actionable feedback rather than a runtime failure on refresh.
+ */
+function validateJsConstraints(nodes: readonly CanonicalNode[]): void {
+  for (const node of nodes) {
+    if (node.type !== "code" || node.inputs.language !== "javascript") continue;
+
+    if (node.inputs.datasets !== undefined && node.inputs.datasets.length > 0) {
+      throw new WorkflowError({
+        errorCode: "JS_DATASETS_NOT_SUPPORTED",
+        message:
+          `Node ${node.id}: language="javascript" cannot consume datasets. ` +
+          "v1 Node.js runtime has no Parquet reader. Pass data via " +
+          "inputs.params (ref small inline rows from an upstream node) " +
+          "or switch to language=\"python\".",
+        nodeId: node.id,
+        nodeName: "code:javascript",
+      });
+    }
+
+    if (node.inputs.code_file !== undefined) {
+      throw new WorkflowError({
+        errorCode: "SPEC_FEATURE_UNSUPPORTED",
+        message:
+          `Node ${node.id}: inputs.code_file is not yet supported for ` +
+          "language=\"javascript\". Use inputs.code_text or switch to " +
+          "language=\"python\" for file-based execution.",
+        nodeId: node.id,
+        nodeName: "code:javascript",
+      });
+    }
+  }
+}
+
+// ─── Code node `code_text` XOR `code_file` ─────────────────────────────
+
+function validateCodeNodeSourceXor(nodes: readonly CanonicalNode[]): void {
+  for (const node of nodes) {
+    if (node.type !== "code") continue;
+    const hasText =
+      node.inputs.code_text !== undefined && node.inputs.code_text.length > 0;
+    const hasFile =
+      node.inputs.code_file !== undefined && node.inputs.code_file.length > 0;
+    if (hasText && hasFile) {
+      throw new WorkflowError({
+        errorCode: "SPEC_SCHEMA_MISMATCH",
+        message: `Node ${node.id}: code node may declare 'inputs.code_text' OR 'inputs.code_file', not both.`,
+        nodeId: node.id,
+        nodeName: `code:${node.inputs.language}`,
+      });
+    }
+    if (!hasText && !hasFile) {
+      throw new WorkflowError({
+        errorCode: "SPEC_SCHEMA_MISMATCH",
+        message: `Node ${node.id}: code node must declare exactly one of 'inputs.code_text' or 'inputs.code_file'.`,
+        nodeId: node.id,
+        nodeName: `code:${node.inputs.language}`,
+      });
+    }
+  }
 }
 
 // ─── Graph construction ────────────────────────────────────────────────
@@ -192,6 +357,24 @@ function refsInString(s: string): WorkflowRef[] {
   return findEmbeddedRefs(s);
 }
 
+/**
+ * Resolve the output field names a node declares, for @nodes.X.field
+ * ref validation.
+ *
+ * - Tool nodes: per-instance `outputs[]` snapshot (stamped by canonicalize;
+ *   tool schemas are dynamic per-tool).
+ * - All other nodes (agent/code/sql/chart): fixed contract from NODE_TYPE_REGISTRY.
+ *
+ * Returns `undefined` when no declaration exists — ref check skipped.
+ */
+function resolveNodeOutputFields(
+  node: CanonicalNode,
+): ReadonlyArray<string> | undefined {
+  if (node.type === "tool") return node.outputs;
+  const descriptor = getNodeTypeDescriptor(node.type, node.schema_version ?? "1");
+  return descriptor !== undefined ? getOutputFields(descriptor) : undefined;
+}
+
 interface RefCheckCtx {
   fromNodeId: number | undefined;
   /** undefined → skip reachability check (workflow outputs). */
@@ -232,7 +415,8 @@ function checkRef(ref: WorkflowRef, ctx: RefCheckCtx): void {
       nodeId: ctx.fromNodeId,
     });
   }
-  if (target.outputs !== undefined && !target.outputs.includes(ref.field)) {
+  const targetOutputFields = resolveNodeOutputFields(target);
+  if (targetOutputFields !== undefined && !targetOutputFields.includes(ref.field)) {
     const targetName = canonicalNodeDisplayName(target);
     throw new WorkflowError({
       errorCode: "SPEC_REF_UNKNOWN_FIELD",
@@ -246,13 +430,13 @@ function checkRef(ref: WorkflowRef, ctx: RefCheckCtx): void {
 function canonicalNodeDisplayName(node: CanonicalNode): string {
   switch (node.type) {
     case "tool":
-      return node.tool;
+      return node.inputs.name;
     case "agent":
-      return node.agent;
+      return node.inputs.name;
     case "code":
-      return `code:${node.language}`;
+      return `code:${node.inputs.language}`;
     case "sql":
-      return `sql:${node.data_source_name}`;
+      return `sql:${node.inputs.data_source_name}`;
     case "chart":
       return `chart:${node.inputs.renderer}`;
   }
@@ -279,27 +463,47 @@ function validateNodeInputs(
     // literal `@nodes.0.foo` *inside* a Python string as a ref and
     // reject valid code.
     //
-    //   - tool / agent: `inputs` map
-    //   - code:         `inputs` map only — `node.code` is passed to
-    //                   the sandbox as opaque stdin, NOT templated
-    //   - sql:          `query`, `data_source_name`, `name` — each
-    //                   is templated through resolveRefs before
-    //                   calling extract_dataset_by_sql
-    //   - chart:        `inputs.dataset` is a string OR string[]
-    //                   of `@path` refs to upstream arrays.
-    //                   `inputs.config` is the option TEMPLATE; the
-    //                   engine fills the data-binding slot at
-    //                   execute time so we deliberately do NOT walk
-    //                   into `inputs.config` for refs here.
+    //   - tool:  `inputs.arguments` (refs live in the args bag, not
+    //            in the const-pinned `inputs.name`)
+    //   - agent: `inputs.task` + `inputs.context` (the only
+    //            ref-bearing string fields; `inputs.name` and
+    //            `inputs.agent_id` are static identifiers)
+    //   - code:  `inputs.datasets` + `inputs.params` — `inputs.code_text`
+    //            is passed to the sandbox as opaque stdin, NOT
+    //            templated. `inputs.code_file` is a placeholder
+    //            (CODE_FILE_NOT_SUPPORTED at runtime).
+    //   - sql:   `inputs.sql_text`, `inputs.data_source_name`,
+    //            `inputs.dataset_name` — each is templated through
+    //            resolveRefs before calling extract_dataset_by_sql
+    //   - chart: `inputs.dataset` is a string OR string[] of
+    //            `@path` refs to upstream arrays (walked here).
+    //            `inputs.config` is the option TEMPLATE — refs
+    //            embedded there are NOT resolved by the engine
+    //            (only `inputs.dataset` is a ref-bearing slot). A
+    //            dedicated `validateChartConfigNoRefs` pass rejects any
+    //            @path strings found inside config so they never
+    //            reach the renderer as literal strings.
     const refCarriers: unknown[] = [];
-    if (node.type === "tool" || node.type === "agent") {
-      refCarriers.push(node.inputs);
+    if (node.type === "tool") {
+      refCarriers.push(node.inputs.arguments);
+    } else if (node.type === "agent") {
+      refCarriers.push(node.inputs.task);
+      if (node.inputs.context !== undefined) {
+        refCarriers.push(node.inputs.context);
+      }
     } else if (node.type === "code") {
-      if (node.inputs !== undefined) refCarriers.push(node.inputs);
+      if (node.inputs.datasets !== undefined) {
+        refCarriers.push(node.inputs.datasets);
+      }
+      if (node.inputs.params !== undefined) {
+        refCarriers.push(node.inputs.params);
+      }
     } else if (node.type === "sql") {
-      refCarriers.push(node.query);
-      refCarriers.push(node.data_source_name);
-      if (node.name !== undefined) refCarriers.push(node.name);
+      refCarriers.push(node.inputs.sql_text);
+      refCarriers.push(node.inputs.data_source_name);
+      if (node.inputs.dataset_name !== undefined) {
+        refCarriers.push(node.inputs.dataset_name);
+      }
     } else if (node.type === "chart") {
       // `inputs.dataset` is optional — the not-refreshable fallback
       // omits it and bakes the data into `inputs.config` instead,
@@ -346,16 +550,25 @@ function validateToolInputCoverage(nodes: readonly CanonicalNode[]): void {
   for (const node of nodes) {
     if (node.type !== "tool") continue;
     if (node.input_schema === undefined) continue;
-    const required = (node.input_schema as { required?: unknown }).required;
+    // Tool wrapper schema is always
+    //   { name: const, arguments: { properties, required } }
+    // — the required keys we want to check live one level deeper,
+    // under `input_schema.properties.arguments.required`.
+    const properties = (node.input_schema as { properties?: unknown })
+      .properties;
+    if (properties === null || typeof properties !== "object") continue;
+    const argsSchema = (properties as { arguments?: unknown }).arguments;
+    if (argsSchema === null || typeof argsSchema !== "object") continue;
+    const required = (argsSchema as { required?: unknown }).required;
     if (!Array.isArray(required)) continue;
     for (const key of required) {
       if (typeof key !== "string") continue;
-      if (!(key in node.inputs)) {
+      if (!(key in node.inputs.arguments)) {
         throw new WorkflowError({
           errorCode: "TOOL_INPUT_SCHEMA_MISMATCH",
-          message: `Node ${node.id}: tool '${node.tool}' requires input field '${key}'.`,
+          message: `Node ${node.id}: tool '${node.inputs.name}' requires argument '${key}'.`,
           nodeId: node.id,
-          nodeName: node.tool,
+          nodeName: node.inputs.name,
         });
       }
     }
@@ -376,4 +589,96 @@ function extractInputSchemaKeys(
   const properties = (schema as { properties?: unknown }).properties;
   if (properties === null || typeof properties !== "object") return undefined;
   return new Set(Object.keys(properties as Record<string, unknown>));
+}
+
+// ─── Chart config size guard ───────────────────────────────────────────
+
+/**
+ * Maximum UTF-8 byte size for a chart node's `inputs.config`.
+ * Matches the `ECHARTS_OPTION_HARD_CAP_BYTES` limit enforced at the
+ * tool layer (`src/lib/outcomes/schema.ts`) so the two caps are
+ * consistent. For refreshable charts the config stores only the
+ * option TEMPLATE (no inline data), so this limit is rarely reached.
+ * For charts saved without a refreshable upstream ref, the full
+ * dataset is baked into `config.dataset.source`; those charts are
+ * the primary risk.
+ */
+const CHART_CONFIG_MAX_BYTES = 64_000;
+
+/**
+ * Reject chart nodes whose `inputs.config` serializes to more than
+ * `CHART_CONFIG_MAX_BYTES` (UTF-8). Oversized configs bloat the
+ * `workflow.spec` JSONB column and inflate every GET bundle payload.
+ *
+ * Correct fix for an oversized not-refreshable chart: connect the
+ * chart to an upstream SQL node via `inputs.dataset` so the row data
+ * lives in a Parquet file rather than inline in the spec.
+ */
+function validateChartConfigSize(nodes: readonly CanonicalNode[]): void {
+  for (const node of nodes) {
+    if (node.type !== "chart") continue;
+    let size: number;
+    try {
+      size = Buffer.byteLength(JSON.stringify(node.inputs.config), "utf8");
+    } catch {
+      // Un-serializable config — will fail at runtime. Skip here and
+      // let the engine surface the error with full context.
+      continue;
+    }
+    if (size > CHART_CONFIG_MAX_BYTES) {
+      throw new WorkflowError({
+        errorCode: "CHART_CONFIG_TOO_LARGE",
+        message:
+          `Node ${node.id} (chart): inputs.config is ${size.toLocaleString()} bytes ` +
+          `(limit: ${CHART_CONFIG_MAX_BYTES.toLocaleString()} bytes). ` +
+          `Large inline datasets in not-refreshable charts inflate the workflow spec. ` +
+          `To make this chart refreshable, connect it to an upstream SQL node via ` +
+          `inputs.dataset so the row data is stored in a Parquet file instead.`,
+        nodeId: node.id,
+        nodeName: `chart:${node.inputs.renderer}`,
+      });
+    }
+  }
+}
+
+// ─── Chart config ref guard ────────────────────────────────────────────
+
+/**
+ * Walk every string leaf in a chart node's `inputs.config` and reject
+ * any that contain `@path` ref syntax.
+ *
+ * Why this matters: `inputs.config` is an opaque ECharts option
+ * TEMPLATE — the engine never calls `resolveRefs` on it;
+ * `inputs.dataset` is the only data-binding slot. A ref string
+ * embedded anywhere else in config (e.g. `config.title.text:
+ * "@nodes.0.category"`) would be returned verbatim to the browser
+ * and displayed as a literal string rather than the intended value.
+ *
+ * Rejected at save time rather than silently misbehaving at render
+ * time. Correct pattern: bind upstream data to `inputs.dataset` and
+ * let the engine inject it into `option.dataset.source`.
+ */
+function validateChartConfigNoRefs(nodes: readonly CanonicalNode[]): void {
+  for (const node of nodes) {
+    if (node.type !== "chart") continue;
+    // We only scan config — inputs.dataset is intentionally a ref
+    // carrier and is validated by the main validateNodeInputs pass.
+    let firstOffending: string | undefined;
+    forEachStringLeaf(node.inputs.config, (s) => {
+      if (firstOffending !== undefined) return;
+      if (refsInString(s).length > 0) firstOffending = s;
+    });
+    if (firstOffending !== undefined) {
+      throw new WorkflowError({
+        errorCode: "CHART_CONFIG_CONTAINS_REF",
+        message:
+          `Node ${node.id} (chart): inputs.config contains a @path ref ` +
+          `(${JSON.stringify(firstOffending)}). ` +
+          `Refs inside inputs.config are not resolved at execute time — ` +
+          `use inputs.dataset to bind upstream array data instead.`,
+        nodeId: node.id,
+        nodeName: `chart:${node.inputs.renderer}`,
+      });
+    }
+  }
 }

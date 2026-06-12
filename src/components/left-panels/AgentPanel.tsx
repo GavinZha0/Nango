@@ -335,8 +335,8 @@ function BuiltinRow({
             aria-hidden
             className="flex shrink-0 items-center justify-center rounded-md bg-card dark:bg-white border border-border text-xl leading-none"
             style={{
-              width: "28px",
-              height: "28px",
+              width: "32px",
+              height: "32px",
               fontFamily:
                 '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif',
             }}

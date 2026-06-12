@@ -12,38 +12,47 @@ import type {
 // ─── Fixtures ─────────────────────────────────────────────────────────
 
 function toolNode(
-  overrides?: Partial<Omit<CanonicalToolNode, "type">>,
+  overrides?: Partial<Omit<CanonicalToolNode, "type" | "inputs">> & {
+    inputs?: Partial<CanonicalToolNode["inputs"]>;
+  },
 ): CanonicalToolNode {
+  const { inputs: inputsOverride, ...rest } = overrides ?? {};
   return {
     type: "tool",
     schema_version: "1",
     id: 0,
     description: "n",
     depends_on: [],
-    tool: "extract",
-    inputs: { sql: "select 1" },
-    ...overrides,
+    ...rest,
+    inputs: {
+      name: inputsOverride?.name ?? "extract",
+      arguments: inputsOverride?.arguments ?? { sql: "select 1" },
+    },
   };
 }
 
 function agentNode(
-  overrides?: Partial<Omit<CanonicalAgentNode, "type">>,
+  overrides?: Partial<Omit<CanonicalAgentNode, "type" | "inputs">> & {
+    inputs?: Partial<CanonicalAgentNode["inputs"]>;
+  },
 ): CanonicalAgentNode {
+  const { inputs: inputsOverride, ...rest } = overrides ?? {};
   return {
     type: "agent",
     schema_version: "1",
     id: 0,
     description: "a",
     depends_on: [],
-    agent: "Builtin / DataAnalyst",
-    agent_id: "11111111-1111-4111-8111-111111111111",
-    inputs: { x: 1 },
-    output_schema: {
-      type: "object",
-      properties: { summary: { type: "string" } },
-      required: ["summary"],
+    ...rest,
+    inputs: {
+      name: inputsOverride?.name ?? "Builtin / DataAnalyst",
+      agent_id:
+        inputsOverride?.agent_id ?? "11111111-1111-4111-8111-111111111111",
+      task: inputsOverride?.task ?? "summarise",
+      ...(inputsOverride?.context !== undefined && {
+        context: inputsOverride.context,
+      }),
     },
-    ...overrides,
   };
 }
 
@@ -92,8 +101,8 @@ describe("computeCacheKey — content addressing", () => {
 
 describe("computeCacheKey — sensitivity to semantic changes", () => {
   it("changes when tool name changes", () => {
-    expect(computeCacheKey(toolNode({ tool: "extract" }), { x: 1 })).not.toBe(
-      computeCacheKey(toolNode({ tool: "transform" }), { x: 1 }),
+    expect(computeCacheKey(toolNode({ inputs: { name: "extract" } }), { x: 1 })).not.toBe(
+      computeCacheKey(toolNode({ inputs: { name: "transform" } }), { x: 1 }),
     );
   });
 
@@ -136,14 +145,18 @@ describe("computeCacheKey — sensitivity to semantic changes", () => {
   });
 
   it("changes between tool and agent buckets even with same name", () => {
-    const t = toolNode({ tool: "x" });
-    const a = agentNode({ agent: "x" });
+    const t = toolNode({ inputs: { name: "x" } });
+    const a = agentNode({ inputs: { name: "x" } });
     expect(computeCacheKey(t, {})).not.toBe(computeCacheKey(a, {}));
   });
 
-  it("changes when agentId changes (D27 — different agent UUID)", () => {
-    const a = agentNode({ agent_id: "11111111-1111-4111-8111-111111111111" });
-    const b = agentNode({ agent_id: "22222222-2222-4222-8222-222222222222" });
+  it("changes when agentId changes (different agent UUID)", () => {
+    const a = agentNode({
+      inputs: { agent_id: "11111111-1111-4111-8111-111111111111" },
+    });
+    const b = agentNode({
+      inputs: { agent_id: "22222222-2222-4222-8222-222222222222" },
+    });
     expect(computeCacheKey(a, { x: 1 })).not.toBe(
       computeCacheKey(b, { x: 1 }),
     );

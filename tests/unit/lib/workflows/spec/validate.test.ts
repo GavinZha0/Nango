@@ -12,24 +12,34 @@ import type {
 const AGENT_UUID = "11111111-1111-4111-8111-111111111111";
 
 function toolNode(
-  overrides: Partial<Omit<Extract<CanonicalNode, { type: "tool" }>, "type">> & {
+  overrides: Partial<
+    Omit<Extract<CanonicalNode, { type: "tool" }>, "type" | "inputs">
+  > & {
     id: number;
+    inputs?: Partial<Extract<CanonicalNode, { type: "tool" }>["inputs"]>;
   },
 ): CanonicalNode {
+  const { inputs: inputsOverride, ...rest } = overrides;
   return {
     type: "tool",
     schema_version: "1",
     description: "n",
     depends_on: [],
-    tool: "fetch_data_table",
-    inputs: { dataSourceId: "x", sql: "select 1" },
     input_schema: {
+      // Wrapper schema mirrors what canonicalize stamps in production.
       type: "object",
       properties: {
-        dataSourceId: { type: "string" },
-        sql: { type: "string" },
+        name: { const: "fetch_data_table" },
+        arguments: {
+          type: "object",
+          properties: {
+            dataSourceId: { type: "string" },
+            sql: { type: "string" },
+          },
+          required: ["dataSourceId", "sql"],
+        },
       },
-      required: ["dataSourceId", "sql"],
+      required: ["name", "arguments"],
     },
     outputs: ["dataset", "rowCount"],
     output_schema: {
@@ -37,30 +47,40 @@ function toolNode(
       properties: { dataset: { type: "string" }, rowCount: { type: "number" } },
       required: ["dataset", "rowCount"],
     },
-    ...overrides,
+    ...rest,
+    inputs: {
+      name: inputsOverride?.name ?? "fetch_data_table",
+      arguments: inputsOverride?.arguments ?? {
+        dataSourceId: "x",
+        sql: "select 1",
+      },
+    },
   };
 }
 
 function agentNode(
-  overrides: Partial<Omit<Extract<CanonicalNode, { type: "agent" }>, "type">> & {
+  overrides: Partial<
+    Omit<Extract<CanonicalNode, { type: "agent" }>, "type" | "inputs">
+  > & {
     id: number;
+    inputs?: Partial<Extract<CanonicalNode, { type: "agent" }>["inputs"]>;
   },
 ): CanonicalNode {
+  const { inputs: inputsOverride, ...rest } = overrides;
   return {
     type: "agent",
     schema_version: "1",
     description: "n",
     depends_on: [],
-    agent: "Builtin / DataAnalyst",
-    agent_id: AGENT_UUID,
-    inputs: {},
-    output_schema: {
-      type: "object",
-      properties: { summary: { type: "string" } },
-      required: ["summary"],
+    ...rest,
+    inputs: {
+      name: inputsOverride?.name ?? "Builtin / DataAnalyst",
+      agent_id: inputsOverride?.agent_id ?? AGENT_UUID,
+      task: inputsOverride?.task ?? "summarise",
+      ...(inputsOverride?.context !== undefined && {
+        context: inputsOverride.context,
+      }),
     },
-    outputs: ["summary"],
-    ...overrides,
   };
 }
 
@@ -70,9 +90,7 @@ function spec(
   extra?: Partial<CanonicalWorkflowSpec>,
 ): CanonicalWorkflowSpec {
   return {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes,
     outputs,
     ...extra,
@@ -108,13 +126,15 @@ describe("validate — happy paths", () => {
       toolNode({
         id: 1,
         depends_on: [0],
-        tool: "run_code_in_sandbox",
         input_schema: {
           type: "object",
           properties: { dataset: { type: "string" } },
           required: ["dataset"],
         },
-        inputs: { dataset: "@nodes.0.dataset" },
+        inputs: {
+          name: "process_data",
+          arguments: { dataset: "@nodes.0.dataset" },
+        },
         outputs: ["result"],
         output_schema: {
           type: "object",
@@ -131,26 +151,29 @@ describe("validate — happy paths", () => {
       toolNode({ id: 0 }),
       toolNode({
         id: 1,
-        depends_on: [0],
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: { x: "@nodes.0.dataset" },
+        depends_on: [0],        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: { x: "@nodes.0.dataset" },
+        },
         outputs: ["a"],
       }),
       toolNode({
         id: 2,
-        depends_on: [0],
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: { x: "@nodes.0.dataset" },
+        depends_on: [0],        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: { x: "@nodes.0.dataset" },
+        },
         outputs: ["b"],
       }),
       toolNode({
         id: 3,
-        depends_on: [1, 2],
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: { x: "@nodes.1.a", y: "@nodes.2.b" },
+        depends_on: [1, 2],        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: { x: "@nodes.1.a", y: "@nodes.2.b" },
+        },
         outputs: ["final"],
       }),
     ], { final: "@nodes.3.final" });
@@ -160,11 +183,12 @@ describe("validate — happy paths", () => {
   it("accepts embedded refs in SQL strings", () => {
     const s = spec([
       toolNode({
-        id: 0,
-        tool: "fetch_data_table",
-        inputs: {
+        id: 0,        inputs: {
+          name: "fetch_data_table",
+          arguments: {
           dataSourceId: "orders",
           sql: "SELECT * FROM o WHERE created >= @workflow.date_start",
+        },
         },
       }),
     ], { dataset: "@nodes.0.dataset" }, {
@@ -180,8 +204,7 @@ describe("validate — happy paths", () => {
     const s = spec([
       toolNode({
         id: 0,
-        inputs: { dataSourceId: "@context.tenant", sql: "select 1" },
-      }),
+        inputs: { arguments: { dataSourceId: "@context.tenant", sql: "select 1" } },      }),
     ]);
     expect(() => validate(s)).not.toThrow();
   });
@@ -192,9 +215,9 @@ describe("validate — happy paths", () => {
       agentNode({
         id: 1,
         depends_on: [0],
-        inputs: { dataset: "@nodes.0.dataset" },
+        inputs: { task: "@nodes.0.dataset" },
       }),
-    ], { summary: "@nodes.1.summary" });
+    ], { result: "@nodes.1.result" });
     expect(() => validate(s)).not.toThrow();
   });
 
@@ -203,10 +226,11 @@ describe("validate — happy paths", () => {
       toolNode({ id: 0, outputs: undefined, output_schema: undefined }),
       toolNode({
         id: 1,
-        depends_on: [0],
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: { anything: "@nodes.0.unknown_field" },
+        depends_on: [0],        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: { anything: "@nodes.0.unknown_field" },
+        },
         outputs: undefined,
       }),
     ], { x: "@nodes.0.also_unknown" });
@@ -217,8 +241,7 @@ describe("validate — happy paths", () => {
     const s = spec([
       toolNode({
         id: 0,
-        inputs: { dataSourceId: "@workflow.anything", sql: "select 1" },
-      }),
+        inputs: { arguments: { dataSourceId: "@workflow.anything", sql: "select 1" } },      }),
     ]);
     // No input_schema declared → @workflow.* refs are permissive.
     expect(() => validate(s)).not.toThrow();
@@ -314,10 +337,11 @@ describe("validate — node input refs", () => {
         validate(
           spec([
             toolNode({
-              id: 0,
-              tool: "minimal_tool",
-              input_schema: undefined,
-              inputs: { x: "@nodes.99.field" },
+              id: 0,              input_schema: undefined,
+              inputs: {
+                name: "minimal_tool",
+                arguments: { x: "@nodes.99.field" },
+              },
               outputs: ["a"],
             }),
           ], { a: "@nodes.0.a" }),
@@ -337,10 +361,11 @@ describe("validate — node input refs", () => {
             toolNode({ id: 0, outputs: ["dataset"] }),
             toolNode({
               id: 1,
-              depends_on: [], // ← missing dep on 0
-              tool: "minimal_tool",
-              input_schema: undefined,
-              inputs: { x: "@nodes.0.dataset" },
+              depends_on: [], // ← missing dep on 0              input_schema: undefined,
+              inputs: {
+                name: "minimal_tool",
+                arguments: { x: "@nodes.0.dataset" },
+              },
               outputs: ["a"],
             }),
           ], { a: "@nodes.1.a" }),
@@ -357,18 +382,20 @@ describe("validate — node input refs", () => {
       toolNode({ id: 0 }),
       toolNode({
         id: 1,
-        depends_on: [0],
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: { x: "@nodes.0.dataset" },
+        depends_on: [0],        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: { x: "@nodes.0.dataset" },
+        },
         outputs: ["b"],
       }),
       toolNode({
         id: 2,
-        depends_on: [1],
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: { y: "@nodes.0.dataset", z: "@nodes.1.b" },
+        depends_on: [1],        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: { y: "@nodes.0.dataset", z: "@nodes.1.b" },
+        },
         outputs: ["c"],
       }),
     ], { c: "@nodes.2.c" });
@@ -383,10 +410,11 @@ describe("validate — node input refs", () => {
             toolNode({ id: 0, outputs: ["dataset"] }),
             toolNode({
               id: 1,
-              depends_on: [0],
-              tool: "minimal_tool",
-              input_schema: undefined,
-              inputs: { x: "@nodes.0.no_such_field" },
+              depends_on: [0],              input_schema: undefined,
+              inputs: {
+                name: "minimal_tool",
+                arguments: { x: "@nodes.0.no_such_field" },
+              },
               outputs: ["a"],
             }),
           ], { a: "@nodes.1.a" }),
@@ -403,11 +431,12 @@ describe("validate — node input refs", () => {
         validate(
           spec([
             toolNode({
-              id: 0,
-              tool: "fetch_data_table",
-              inputs: {
+              id: 0,              inputs: {
+                name: "fetch_data_table",
+                arguments: {
                 dataSourceId: "orders",
                 sql: "SELECT * FROM o WHERE x = @nodes.99.field",
+              },
               },
             }),
           ]),
@@ -423,13 +452,14 @@ describe("validate — node input refs", () => {
         validate(
           spec([
             toolNode({
-              id: 0,
-              tool: "minimal_tool",
-              input_schema: undefined,
+              id: 0,              input_schema: undefined,
               inputs: {
+                name: "minimal_tool",
+                arguments: {
                 deep: {
                   items: ["@nodes.99.bad"],
                 },
+              },
               },
               outputs: ["x"],
             }),
@@ -449,11 +479,12 @@ describe("validate — workflow input refs", () => {
         validate(
           spec([
             toolNode({
-              id: 0,
-              tool: "fetch_data_table",
-              inputs: {
+              id: 0,              inputs: {
+                name: "fetch_data_table",
+                arguments: {
                 dataSourceId: "@workflow.missing_key",
                 sql: "select 1",
+              },
               },
             }),
           ], { dataset: "@nodes.0.dataset" }, {
@@ -472,11 +503,12 @@ describe("validate — workflow input refs", () => {
   it("accepts @workflow.key when it's declared in input_schema.properties", () => {
     const s = spec([
       toolNode({
-        id: 0,
-        tool: "fetch_data_table",
-        inputs: {
+        id: 0,        inputs: {
+          name: "fetch_data_table",
+          arguments: {
           dataSourceId: "@workflow.tenant",
           sql: "select 1",
+        },
         },
       }),
     ], { dataset: "@nodes.0.dataset" }, {
@@ -540,7 +572,7 @@ describe("validate — workflow-level outputs", () => {
       toolNode({
         id: 1,
         // independent path
-        tool: "minimal_tool",
+        inputs: { name: "minimal_tool" },
         input_schema: undefined,
         outputs: ["x"],
       }),
@@ -559,12 +591,12 @@ describe("validate — tool input coverage (cheap key check)", () => {
           spec([
             toolNode({
               id: 0,
-              inputs: { dataSourceId: "x" /* sql missing */ },
+              inputs: { arguments: { dataSourceId: "x" /* sql missing */ } },
             }),
           ]),
         ),
       "TOOL_INPUT_SCHEMA_MISMATCH",
-      /requires input field 'sql'/,
+      /requires argument 'sql'/,
     );
     expect(e.nodeId).toBe(0);
     expect(e.nodeName).toBe("fetch_data_table");
@@ -575,8 +607,10 @@ describe("validate — tool input coverage (cheap key check)", () => {
       toolNode({
         id: 0,
         inputs: {
-          dataSourceId: "@workflow.tenant",
-          sql: "@workflow.sql_template",
+          arguments: {
+            dataSourceId: "@workflow.tenant",
+            sql: "@workflow.sql_template",
+          },
         },
       }),
     ], { dataset: "@nodes.0.dataset" }, {
@@ -594,10 +628,11 @@ describe("validate — tool input coverage (cheap key check)", () => {
   it("skips coverage check when input_schema is absent", () => {
     const s = spec([
       toolNode({
-        id: 0,
-        tool: "minimal_tool",
-        input_schema: undefined,
-        inputs: {},
+        id: 0,        input_schema: undefined,
+        inputs: {
+          name: "minimal_tool",
+          arguments: {},
+        },
         outputs: ["x"],
       }),
     ], { x: "@nodes.0.x" });
@@ -605,98 +640,60 @@ describe("validate — tool input coverage (cheap key check)", () => {
   });
 
   it("does NOT enforce required-key check on agent nodes", () => {
+    // Tool-coverage check applies to `type: "tool"` only. Agent
+    // nodes carry their own structured inputs (`name`, `agent_id`,
+    // `task`, optional `context`) which the Zod layer already
+    // enforces — the validator simply doesn't second-guess them.
     const s = spec([
       agentNode({
         id: 0,
-        inputs: {}, // empty agent input — allowed
+        inputs: { task: "Summarise" },
       }),
-    ], { summary: "@nodes.0.summary" });
+    ], { result: "@nodes.0.result" });
     expect(() => validate(s)).not.toThrow();
   });
 });
 
 // ─── D36: SQL node ref validation ─────────────────────────────────────
 
+const SQL_STUB_DS_ID = "11111111-1111-4111-8111-111111111111";
+
 function sqlNode(
-  overrides: Partial<Omit<Extract<CanonicalNode, { type: "sql" }>, "type">> & {
+  overrides: Partial<
+    Omit<Extract<CanonicalNode, { type: "sql" }>, "type" | "inputs">
+  > & {
     id: number;
+    inputs?: Partial<Extract<CanonicalNode, { type: "sql" }>["inputs"]>;
   },
 ): CanonicalNode {
+  const { inputs: inputsOverride, ...rest } = overrides;
   return {
     type: "sql",
     schema_version: "1",
     description: "extract",
     depends_on: [],
-    data_source_name: "prod_pg",
-    query: "SELECT 1",
-    outputs: ["name", "rowCount"],
-    ...overrides,
+    ...rest,
+    inputs: {
+      data_source_name: inputsOverride?.data_source_name ?? "prod_pg",
+      data_source_id: inputsOverride?.data_source_id ?? SQL_STUB_DS_ID,
+      sql_text: inputsOverride?.sql_text ?? "SELECT 1",
+      ...(inputsOverride?.dataset_name !== undefined && {
+        dataset_name: inputsOverride.dataset_name,
+      }),
+    },
   };
 }
 
 describe("validate — SQL node ref carriers (D36)", () => {
   it("accepts a SQL node with no refs in its string fields", () => {
-    expect(() => validate(spec([sqlNode({ id: 0 })], { ds: "@nodes.0.name" }))).not.toThrow();
+    expect(() =>
+      validate(
+        spec([sqlNode({ id: 0 })], { ds: "@nodes.0.dataset_name" }),
+      ),
+    ).not.toThrow();
   });
 
-  it("walks query for embedded @nodes refs and rejects unknown node id", () => {
-    expectError(
-      () =>
-        validate(
-          spec(
-            [sqlNode({ id: 0, query: "SELECT * FROM @nodes.99.name" })],
-            { ds: "@nodes.0.name" },
-          ),
-        ),
-      "SPEC_REF_UNKNOWN_NODE",
-    );
-  });
-
-  it("walks query for embedded @nodes refs and rejects unreachable target", () => {
-    // Two independent nodes; node 1's query refers to node 0 but
-    // depends_on is empty → unreachable.
-    expectError(
-      () =>
-        validate(
-          spec(
-            [
-              sqlNode({ id: 0, name: "upstream" }),
-              sqlNode({
-                id: 1,
-                depends_on: [],
-                query: "SELECT * FROM @nodes.0.name",
-                data_source_name: "src",
-              }),
-            ],
-            { ds: "@nodes.1.name" },
-          ),
-        ),
-      "SPEC_REF_UNREACHABLE",
-    );
-  });
-
-  it("walks query and rejects refs to fields not in target.outputs", () => {
-    expectError(
-      () =>
-        validate(
-          spec(
-            [
-              sqlNode({ id: 0, name: "upstream" }),
-              sqlNode({
-                id: 1,
-                depends_on: [0],
-                query: "SELECT * FROM @nodes.0.no_such_field",
-                data_source_name: "src",
-              }),
-            ],
-            { ds: "@nodes.1.name" },
-          ),
-        ),
-      "SPEC_REF_UNKNOWN_FIELD",
-    );
-  });
-
-  it("walks dataSourceName for refs and rejects unknown workflow input key", () => {
+  it("walks sql_text for embedded @nodes refs and rejects unknown node id", () => {
     expectError(
       () =>
         validate(
@@ -704,10 +701,82 @@ describe("validate — SQL node ref carriers (D36)", () => {
             [
               sqlNode({
                 id: 0,
-                data_source_name: "@workflow.dsKey",
+                inputs: { sql_text: "SELECT * FROM @nodes.99.dataset_name" },
               }),
             ],
-            { ds: "@nodes.0.name" },
+            { ds: "@nodes.0.dataset_name" },
+          ),
+        ),
+      "SPEC_REF_UNKNOWN_NODE",
+    );
+  });
+
+  it("walks sql_text for embedded @nodes refs and rejects unreachable target", () => {
+    // Two independent nodes; node 1's sql_text refers to node 0
+    // but depends_on is empty → unreachable.
+    expectError(
+      () =>
+        validate(
+          spec(
+            [
+              sqlNode({
+                id: 0,
+                inputs: { dataset_name: "upstream" },
+              }),
+              sqlNode({
+                id: 1,
+                depends_on: [],
+                inputs: {
+                  data_source_name: "src",
+                  sql_text: "SELECT * FROM @nodes.0.dataset_name",
+                },
+              }),
+            ],
+            { ds: "@nodes.1.dataset_name" },
+          ),
+        ),
+      "SPEC_REF_UNREACHABLE",
+    );
+  });
+
+  it("walks sql_text and rejects refs to fields not in target.outputs", () => {
+    expectError(
+      () =>
+        validate(
+          spec(
+            [
+              sqlNode({
+                id: 0,
+                inputs: { dataset_name: "upstream" },
+              }),
+              sqlNode({
+                id: 1,
+                depends_on: [0],
+                inputs: {
+                  data_source_name: "src",
+                  sql_text: "SELECT * FROM @nodes.0.no_such_field",
+                },
+              }),
+            ],
+            { ds: "@nodes.1.dataset_name" },
+          ),
+        ),
+      "SPEC_REF_UNKNOWN_FIELD",
+    );
+  });
+
+  it("walks data_source_name for refs and rejects unknown workflow input key", () => {
+    expectError(
+      () =>
+        validate(
+          spec(
+            [
+              sqlNode({
+                id: 0,
+                inputs: { data_source_name: "@workflow.dsKey" },
+              }),
+            ],
+            { ds: "@nodes.0.dataset_name" },
             {
               input_schema: {
                 type: "object",
@@ -727,10 +796,10 @@ describe("validate — SQL node ref carriers (D36)", () => {
           [
             sqlNode({
               id: 0,
-              data_source_name: "@workflow.dsKey",
+              inputs: { data_source_name: "@workflow.dsKey" },
             }),
           ],
-          { ds: "@nodes.0.name" },
+          { ds: "@nodes.0.dataset_name" },
           {
             input_schema: {
               type: "object",
@@ -742,7 +811,7 @@ describe("validate — SQL node ref carriers (D36)", () => {
     ).not.toThrow();
   });
 
-  it("walks the optional name field for refs", () => {
+  it("walks the optional dataset_name field for refs", () => {
     expectError(
       () =>
         validate(
@@ -750,23 +819,24 @@ describe("validate — SQL node ref carriers (D36)", () => {
             [
               sqlNode({
                 id: 0,
-                name: "@nodes.99.name",
+                inputs: { dataset_name: "@nodes.99.dataset_name" },
               }),
             ],
-            { ds: "@nodes.0.name" },
+            { ds: "@nodes.0.dataset_name" },
           ),
         ),
       "SPEC_REF_UNKNOWN_NODE",
     );
   });
 
-  it("allows downstream code node to ref the SQL node's name output", () => {
-    // The canonical SQL node declares outputs ["name", "rowCount"];
-    // a code node downstream consuming @nodes.0.name should be
+  it("allows downstream code node to ref the SQL node's dataset_name output", () => {
+    // The canonical SQL node declares outputs ["dataset_name",
+    // "total_rows", "returned_rows", "rows", "row_schema"]; a code
+    // node downstream consuming @nodes.0.dataset_name should be
     // accepted.
     const sqlOut: CanonicalNode = sqlNode({
       id: 0,
-      name: "ds_orders",
+      inputs: { dataset_name: "ds_orders" },
     });
     const codeNode: CanonicalNode = {
       type: "code",
@@ -774,31 +844,37 @@ describe("validate — SQL node ref carriers (D36)", () => {
       id: 1,
       description: "analyse",
       depends_on: [0],
-      language: "python",
-      code: "import pandas",
-      inputs: { datasets: ["@nodes.0.name"] },
-      outputs: ["stdout", "stderr", "exitCode", "durationMs"],
+      inputs: {
+        language: "python",
+        code_text: "import pandas",
+        datasets: ["@nodes.0.dataset_name"],
+      },
     };
     expect(() =>
-      validate(spec([sqlOut, codeNode], { ds: "@nodes.1.stdout" })),
+      validate(spec([sqlOut, codeNode], { ds: "@nodes.1.ok" })),
     ).not.toThrow();
   });
 
   it("rejects downstream ref to a non-existent SQL output field", () => {
-    const sqlOut: CanonicalNode = sqlNode({ id: 0, name: "ds_orders" });
+    const sqlOut: CanonicalNode = sqlNode({
+      id: 0,
+      inputs: { dataset_name: "ds_orders" },
+    });
     const codeNode: CanonicalNode = {
       type: "code",
       schema_version: "1",
       id: 1,
       description: "analyse",
       depends_on: [0],
-      language: "python",
-      code: "import pandas",
-      inputs: { datasets: ["@nodes.0.schema"] }, // schema isn't a SQL node output
-      outputs: ["stdout"],
+      inputs: {
+        language: "python",
+        code_text: "import pandas",
+        // `schema` isn't a SQL-node output (replaced by row_schema).
+        datasets: ["@nodes.0.schema"],
+      },
     };
     expectError(
-      () => validate(spec([sqlOut, codeNode], { ds: "@nodes.1.stdout" })),
+      () => validate(spec([sqlOut, codeNode], { ds: "@nodes.1.ok" })),
       "SPEC_REF_UNKNOWN_FIELD",
     );
   });
@@ -822,9 +898,11 @@ describe("validate — chart node ref carriers", () => {
         id: 0,
         description: "upstream",
         depends_on: [],
-        data_source_name: "src",
-        query: "SELECT * FROM orders",
-        outputs: ["name", "row_count", "rows"],
+        inputs: {
+          data_source_name: "src",
+          data_source_id: SQL_STUB_DS_ID,
+          sql_text: "SELECT * FROM orders",
+        },
       },
       {
         type: "chart",
@@ -833,7 +911,6 @@ describe("validate — chart node ref carriers", () => {
         description: "bar chart",
         depends_on: [0],
         inputs: chartInputs,
-        outputs: ["option"],
       },
     ];
   }
@@ -897,7 +974,6 @@ describe("validate — chart node ref carriers", () => {
           config: { series: [{ type: "bar" }] },
           dataset: "@nodes.1.rows",
         },
-        outputs: ["option"],
       },
       {
         type: "sql",
@@ -905,9 +981,11 @@ describe("validate — chart node ref carriers", () => {
         id: 1,
         description: "later sql",
         depends_on: [],
-        data_source_name: "src",
-        query: "SELECT * FROM orders",
-        outputs: ["name", "row_count", "rows"],
+        inputs: {
+          data_source_name: "src",
+          data_source_id: SQL_STUB_DS_ID,
+          sql_text: "SELECT * FROM orders",
+        },
       },
     ];
     expectError(
@@ -916,21 +994,274 @@ describe("validate — chart node ref carriers", () => {
     );
   });
 
-  it("does NOT walk into inputs.config — `@nodes.X.Y` strings buried inside config are ignored", () => {
-    // The chart engine deliberately treats `config` as opaque option
-    // data; only `inputs.dataset` is a ref carrier. Stuffing a
-    // `@nodes.99.bogus` inside `config.title.text` should NOT
-    // surface as a SPEC_REF_UNKNOWN_NODE.
+  it("rejects @path refs buried inside inputs.config → CHART_CONFIG_CONTAINS_REF", () => {
+    // The chart engine treats config as an opaque option template and
+    // never resolves refs inside it (D39.B). Embedding a ref in config
+    // would be silently returned as a literal string to the browser.
+    // validateChartConfigNoRefs catches this at save time.
     const nodes = chartTwoNodes({
       renderer: "echarts",
       config: {
-        title: { text: "Sales report — last updated @nodes.99.bogus" },
+        title: { text: "Sales report — last updated @nodes.0.category" },
         series: [{ type: "bar" }],
+      },
+      dataset: "@nodes.0.rows",
+    });
+    expectError(
+      () => validate(spec(nodes, { option: "@nodes.1.option" })),
+      "CHART_CONFIG_CONTAINS_REF",
+    );
+  });
+
+  it("rejects embedded @inputs.* ref inside inputs.config", () => {
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: {
+        title: { text: "Region: @inputs.region" },
+        series: [{ type: "bar" }],
+      },
+      dataset: "@nodes.0.rows",
+    });
+    expectError(
+      () =>
+        validate(
+          spec(nodes, { option: "@nodes.1.option" }, {
+            input_schema: {
+              type: "object",
+              properties: { region: { type: "string" } },
+            },
+          }),
+        ),
+      "CHART_CONFIG_CONTAINS_REF",
+    );
+  });
+
+  it("accepts config that contains '@' signs not matching ref grammar (e.g. email, ECharts @symbol)", () => {
+    // '@' in non-ref contexts (email addresses, ECharts series symbol
+    // names like '@circle') must NOT be rejected.
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: {
+        title: { text: "Contact admin@example.com" },
+        series: [{ type: "scatter", symbol: "@circle" }],
       },
       dataset: "@nodes.0.rows",
     });
     expect(() =>
       validate(spec(nodes, { option: "@nodes.1.option" })),
     ).not.toThrow();
+  });
+
+  it("rejects inputs.config exceeding 64 KB → CHART_CONFIG_TOO_LARGE", () => {
+    // Simulates a not-refreshable chart (D39.C) where a large dataset
+    // is baked directly into config.dataset.source.
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: {
+        series: [{ type: "bar" }],
+        // Pad past the 64 000-byte limit to trigger the guard.
+        _pad: "x".repeat(65_000),
+      },
+      dataset: "@nodes.0.rows",
+    });
+    expectError(
+      () => validate(spec(nodes, { option: "@nodes.1.option" })),
+      "CHART_CONFIG_TOO_LARGE",
+    );
+  });
+
+  it("accepts inputs.config that is exactly at the byte limit", () => {
+    // Config at exactly 64 000 bytes should NOT be rejected.
+    const nodes = chartTwoNodes({
+      renderer: "echarts",
+      config: {
+        series: [{ type: "bar" }],
+        // The JSON wrapper adds ~50 bytes; adjust pad to stay at limit.
+        _pad: "x".repeat(63_940),
+      },
+      dataset: "@nodes.0.rows",
+    });
+    expect(() =>
+      validate(spec(nodes, { option: "@nodes.1.option" })),
+    ).not.toThrow();
+  });
+});
+
+// ─── JavaScript constraints ────────────────────────────────────────────
+
+describe("validate — JavaScript code node constraints", () => {
+  function jsCodeNode(
+    inputs: Partial<Extract<CanonicalNode, { type: "code" }>["inputs"]>,
+  ): CanonicalNode {
+    return {
+      type: "code",
+      schema_version: "1",
+      id: 0,
+      description: "js node",
+      depends_on: [],
+      inputs: {
+        language: "javascript",
+        code_text: "console.log('hi')",
+        ...inputs,
+      },
+    };
+  }
+
+  it("accepts a valid JavaScript code_text node", () => {
+    const node = jsCodeNode({});
+    expect(() =>
+      validate(spec([node], { result: "@nodes.0.ok" })),
+    ).not.toThrow();
+  });
+
+  it("rejects JavaScript + non-empty datasets → JS_DATASETS_NOT_SUPPORTED", () => {
+    const node = jsCodeNode({ datasets: ["orders_q4"] });
+    expectError(
+      () => validate(spec([node], { result: "@nodes.0.ok" })),
+      "JS_DATASETS_NOT_SUPPORTED",
+    );
+  });
+
+  it("accepts JavaScript with empty datasets array (treated as absent)", () => {
+    // Empty array is allowed — the restriction is on non-empty arrays.
+    const node = jsCodeNode({ datasets: [] });
+    expect(() =>
+      validate(spec([node], { result: "@nodes.0.ok" })),
+    ).not.toThrow();
+  });
+
+  it("rejects JavaScript + code_file → SPEC_FEATURE_UNSUPPORTED", () => {
+    const node: CanonicalNode = {
+      type: "code",
+      schema_version: "1",
+      id: 0,
+      description: "js file node",
+      depends_on: [],
+      inputs: {
+        language: "javascript",
+        code_file: "main.js",
+      },
+    };
+    expectError(
+      () => validate(spec([node], { result: "@nodes.0.ok" })),
+      "SPEC_FEATURE_UNSUPPORTED",
+    );
+  });
+
+  it("Python + datasets is still allowed (JS restriction does not affect Python)", () => {
+    const node: CanonicalNode = {
+      type: "code",
+      schema_version: "1",
+      id: 0,
+      description: "python node",
+      depends_on: [],
+      inputs: {
+        language: "python",
+        code_text: "import pandas",
+        datasets: ["orders_q4"],
+      },
+    };
+    expect(() =>
+      validate(spec([node], { result: "@nodes.0.ok" })),
+    ).not.toThrow();
+  });
+});
+
+// ─── Promoted-tool-as-node guard (C3) ─────────────────────────────────
+
+describe("validate — PROMOTED_TOOL_AS_NODE guard", () => {
+  /** Minimal tool node using a promoted tool name. */
+  function promotedToolNode(toolName: string): CanonicalNode {
+    return {
+      type: "tool",
+      schema_version: "1",
+      id: 0,
+      description: "should be rejected",
+      depends_on: [],
+      inputs: {
+        name: toolName,
+        arguments: {},
+      },
+    };
+  }
+
+  it("rejects run_code_in_sandbox as a tool node → PROMOTED_TOOL_AS_NODE", () => {
+    expectError(
+      () =>
+        validate(
+          spec([promotedToolNode("run_code_in_sandbox")], {
+            result: "@nodes.0.stdout",
+          }),
+        ),
+      "PROMOTED_TOOL_AS_NODE",
+    );
+  });
+
+  it("rejects extract_dataset_by_sql as a tool node → PROMOTED_TOOL_AS_NODE", () => {
+    expectError(
+      () =>
+        validate(
+          spec([promotedToolNode("extract_dataset_by_sql")], {
+            result: "@nodes.0.dataset_name",
+          }),
+        ),
+      "PROMOTED_TOOL_AS_NODE",
+    );
+  });
+
+  it("rejects generate_echarts_config as a tool node → PROMOTED_TOOL_AS_NODE", () => {
+    expectError(
+      () =>
+        validate(
+          spec([promotedToolNode("generate_echarts_config")], {
+            result: "@nodes.0.option",
+          }),
+        ),
+      "PROMOTED_TOOL_AS_NODE",
+    );
+  });
+
+  it("rejects any generate_<lib>_config pattern → PROMOTED_TOOL_AS_NODE", () => {
+    expectError(
+      () =>
+        validate(
+          spec([promotedToolNode("generate_plotly_config")], {
+            result: "@nodes.0.option",
+          }),
+        ),
+      "PROMOTED_TOOL_AS_NODE",
+    );
+  });
+
+  it("accepts a regular tool node that does not match any promoted name", () => {
+    // Use a bare tool node without input_schema so validateToolInputCoverage
+    // doesn't fire — this test is only checking the promoted-name guard.
+    const regularTool: CanonicalNode = {
+      type: "tool",
+      schema_version: "1",
+      id: 0,
+      description: "plain search",
+      depends_on: [],
+      inputs: { name: "web_search", arguments: { query: "test" } },
+      outputs: ["results"],
+    };
+    expect(() =>
+      validate(spec([regularTool], { result: "@nodes.0.results" })),
+    ).not.toThrow();
+  });
+
+  it("error message includes actionable hint pointing at the correct node type", () => {
+    let caught: Error | undefined;
+    try {
+      validate(
+        spec([promotedToolNode("run_code_in_sandbox")], {
+          result: "@nodes.0.stdout",
+        }),
+      );
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeInstanceOf(WorkflowError);
+    expect((caught as WorkflowError).message).toContain('type: "code"');
   });
 });

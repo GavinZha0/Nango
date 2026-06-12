@@ -11,32 +11,30 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { z } from "zod";
 
 import { getActiveAdapter } from "./registry.server";
-import type { SandboxOutput } from "./types";
+import { assembleCodeOutput } from "./code-output";
 
 const RunInSandboxArgs = z.object({
-  /** argv array. argv[0] must be a runtime present in the rootfs. */
-  command: z
-    .array(z.string().min(1))
+  /** Interpreter to execute `code_text` in. Maps to a fixed
+   *  argv internally (python → `["python3","-"]`); the LLM never
+   *  picks the argv directly. */
+  language: z
+    .enum(["python"])
+    .describe(
+      "Interpreter to run `code_text` in. Currently 'python' only " +
+        "(python3, read from stdin). More entries land as new " +
+        "runtimes ship.",
+    ),
+  /** Source body piped to the interpreter's stdin. */
+  code_text: z
+    .string()
     .min(1)
     .describe(
-      "Command and arguments as an array (Unix exec style). " +
-      "PREFERRED idiom: put the script body in `stdin` and use " +
-      "['python3','-'] / ['bash','-'] — this avoids quoting hell. " +
-      "Examples: " +
-      "['python3','-'] (read Python from stdin, recommended); " +
-      "['duckdb','-c','SELECT 1'] (one-shot SQL); " +
-      "['bash','-c','python3 - | jq .'] (pipe with stdin code).",
-    ),
-  /** Content piped to the command's stdin. */
-  stdin: z
-    .string()
-    .optional()
-    .describe(
-      "Content piped to the command's stdin. Two common uses: " +
-      "(1) the SCRIPT BODY itself, paired with command=['python3','-'] " +
-      "or ['bash','-'] — preferred over command=['python3','-c','...'] " +
-      "for anything beyond a one-liner; " +
-      "(2) input DATA the script reads from sys.stdin (CSV / JSON / …).",
+      "Source body to execute. Passed verbatim on the interpreter's " +
+        "stdin — no quoting / escaping required. For Python this is " +
+        "the script body; the runtime reads it via `python3 -`. " +
+        "Data the script needs at runtime should go through " +
+        "`params` (env vars) or the dataset files exposed under " +
+        "./data/<name>/.",
     ),
   /** Datasets to expose read-only under `./data/<name>/` in the
    *  sandbox's current working directory. The data-source layer
@@ -52,11 +50,24 @@ const RunInSandboxArgs = z.object({
     .describe(
       "Cached dataset names to expose read-only at ./data/<name>/ (relative to the sandbox's current working directory). Materialise them first with extract_dataset_by_sql.",
     ),
+  /** Free-form parameters serialised into the sandbox process'
+   *  env vars. Use for small typed inputs the code reads via
+   *  `os.environ['THRESHOLD']`. Non-string values are stringified
+   *  at the boundary. Keep secrets out — env vars are visible to
+   *  any subprocess the code spawns. */
+  params: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      "Parameters serialised into the sandbox process env. Read " +
+        "with `os.environ['<KEY>']`. Non-string values are coerced " +
+        "to strings. Do NOT put secrets here.",
+    ),
   // SECONDS, not milliseconds. The field is named explicitly to keep
   // the LLM from defaulting to its setTimeout intuition.
   // Project convention: external surfaces are unitless + seconds;
   // internal vars carry `Ms` suffix; bridged by getConfigMs.
-  timeoutSeconds: z
+  timeout_seconds: z
     .number()
     .int()
     .min(1)
@@ -67,6 +78,11 @@ const RunInSandboxArgs = z.object({
         "Default is 30 seconds.",
     ),
 });
+
+/** Per-language argv table the sandbox adapter executes. */
+const LANGUAGE_COMMAND: Record<"python", readonly string[]> = {
+  python: ["python3", "-"],
+} as const;
 
 /**
  * Build the `run_in_sandbox` tool definition.
@@ -79,46 +95,49 @@ export function buildRunInSandboxTool(): ToolDefinition {
   return defineTool({
     name: "run_code_in_sandbox",
     description:
-      "Execute a command in a sandboxed environment. The sandbox has " +
-      "no network access, a read-only rootfs, a writable /tmp, and " +
-      "strict memory/CPU/timeout limits. The rootfs ships with " +
+      "Execute source code in a sandboxed environment. The sandbox " +
+      "has no network access, a read-only rootfs, a writable /tmp, " +
+      "and strict memory/CPU/timeout limits. The rootfs ships with " +
       "python3, duckdb, pandas, numpy. Use this for ad-hoc data " +
-      "analysis on cached Parquet files. Optional `timeoutSeconds` " +
-      "is in SECONDS (NOT milliseconds), integer 1-300, default 30. " +
-      "RECOMMENDED CALLING PATTERN — pass the script body via `stdin` " +
-      "and run with `command: ['python3','-']` (the `-` makes python " +
-      "read source from stdin). This avoids the quoting headaches of " +
-      "`python3 -c '...'` and works the same way for `bash`, `duckdb`, " +
-      "and other interpreters that accept `-` as stdin. " +
-      "Each name passed in `datasets` appears read-only at " +
-      "`./data/<name>/` in the sandbox's current working directory — " +
-      "construct paths in your script as " +
+      "analysis on cached Parquet files. Pick the interpreter via " +
+      "`language` and pass the script body via `code_text` — the " +
+      "tool handles the argv internally (python → `python3 -`). " +
+      "Optional `timeout_seconds` is in SECONDS (NOT milliseconds), " +
+      "integer 1-300, default 30. Pass typed runtime parameters via " +
+      "`params` (env vars; read with `os.environ['<KEY>']`); do not " +
+      "embed secrets there. Each name passed in `datasets` appears " +
+      "read-only at `./data/<name>/` in the sandbox's current " +
+      "working directory — construct paths in your script as " +
       "`./data/<name>/**/*.parquet` and read with " +
-      "duckdb.read_parquet(...). The cwd is also writable, so " +
+      "`duckdb.read_parquet(...)`. The cwd is also writable, so " +
       "intermediate files (plots, intermediate Parquets, etc.) can " +
       "be saved next to the data with `./output.png`, " +
-      "`./scratch.parquet`, etc. Returns " +
-      "{ stdout, stderr, exitCode, durationMs, termination }.",
+      "`./scratch.parquet`, etc. " +
+      "Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: RunInSandboxArgs,
     execute: async (args) => {
       const adapter = await getActiveAdapter();
-      const out: SandboxOutput = await adapter.run({
-        command: args.command,
-        stdin: args.stdin,
+      const command = LANGUAGE_COMMAND[args.language];
+      // QUIRK: `params` is accepted at the tool boundary but not
+      // yet plumbed into the sandbox env — the SandboxInput
+      // adapter contract has no per-call env overlay (only the
+      // operator-tuned allowlist). The workflow code-node
+      // executor has the same limitation. Wiring lands when the
+      // sandbox adapters grow an `env?: Record<string, string>`
+      // slot.
+      const out = await adapter.run({
+        command: [...command],
+        stdin: args.code_text,
         datasets: args.datasets,
         // Convert seconds → ms at the boundary; internals stay
         // millisecond-typed throughout (project convention).
         timeoutMs:
-          args.timeoutSeconds != null
-            ? args.timeoutSeconds * 1000
+          args.timeout_seconds != null
+            ? args.timeout_seconds * 1000
             : undefined,
       });
       return {
-        stdout: out.stdout,
-        stderr: out.stderr,
-        exitCode: out.exitCode,
-        durationMs: out.durationMs,
-        ...(out.termination ? { termination: out.termination } : {}),
+        ...assembleCodeOutput(out),
         backend: adapter.backend,
       };
     },

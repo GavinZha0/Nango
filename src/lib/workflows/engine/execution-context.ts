@@ -10,7 +10,8 @@
  *   - Pure (whole string IS the ref) → the resolved value replaces
  *     the string (preserves type, supports objects/arrays).
  *   - Embedded (refs inside a larger string) → each ref's resolved
- *     value is stringified and substituted in-place.
+ *     value is stringified and substituted in-place (e.g.
+ *     `"SELECT … WHERE id = @inputs.order_id"`).
  *
  * Refs that resolve to `undefined` throw `WorkflowError(REF_UNRESOLVED)`
  * — V1 does not silently substitute null / empty string.
@@ -18,7 +19,7 @@
 
 import { WorkflowError } from "../error";
 import {
-  findEmbeddedRefs,
+  findEmbeddedRefTokens,
   parseRef,
   serializeRef,
   type WorkflowRef,
@@ -105,15 +106,20 @@ function resolveRefsInString(s: string, state: ExecutionState): unknown {
   const pure = parseRef(s);
   if (pure !== null) return resolveSingleRef(pure, state);
 
-  const embedded = findEmbeddedRefs(s);
+  const embedded = findEmbeddedRefTokens(s);
   if (embedded.length === 0) return s;
 
   // Sort replacements by length-descending so longer matches replace
   // before shorter ones (avoid replacing `@nodes.1` inside
   // `@nodes.10.foo`).
-  const replacements = embedded.map((r) => ({
-    token: serializeRef(r),
-    value: resolveSingleRef(r, state),
+  //
+  // Use `token` (the original matched text, e.g. `@workflow.key`) as
+  // the needle rather than `serializeRef(ref)` (which always outputs
+  // the canonical `@inputs.key` form). This ensures the backward-compat
+  // `@workflow.*` alias is found correctly in older specs.
+  const replacements = embedded.map(({ ref, token }) => ({
+    token,
+    value: resolveSingleRef(ref, state),
   }));
   replacements.sort((a, b) => b.token.length - a.token.length);
 

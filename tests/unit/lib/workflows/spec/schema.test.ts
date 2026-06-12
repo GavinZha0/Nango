@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   CanonicalWorkflowSpecSchema,
-  DEFAULT_AGENT_OUTPUT_SCHEMA,
   LLMWorkflowSpecSchema,
   type CanonicalAgentNode,
   type CanonicalToolNode,
@@ -21,9 +20,10 @@ const toolNode: LLMToolNode = {
   id: 0,
   description: "Fetch Q4 orders",
   depends_on: [],
-  type: "tool",
-  tool: "fetch_data_table",
-  inputs: { dataSourceName: "warehouse_prod", sql: "SELECT *" },
+  type: "tool",  inputs: {
+    name: "fetch_data_table",
+    arguments: { dataSourceName: "warehouse_prod", sql: "SELECT *" },
+  },
 };
 
 const agentNode: LLMAgentNode = {
@@ -31,16 +31,17 @@ const agentNode: LLMAgentNode = {
   description: "Summarise anomalies",
   depends_on: [0],
   type: "agent",
-  agent: "Nango Builtin / Data Analyst",
-  inputs: { data: "@nodes.0.dataset", task: "find anomalies" },
-  output_schema: DEFAULT_AGENT_OUTPUT_SCHEMA,
+  inputs: {
+    name: "Nango Builtin / Data Analyst",
+    task: "find anomalies",
+    context: "@nodes.0.dataset",
+  },
 };
 
 const baseLLMSpec: LLMWorkflowSpec = {
-  version: "1.0",
   name: "Q4 Sales Analysis",
   nodes: [toolNode, agentNode],
-  outputs: { summary: "@nodes.1.text" },
+  outputs: { summary: "@nodes.1.result" },
 };
 
 const canonicalToolNode: CanonicalToolNode = {
@@ -52,11 +53,13 @@ const canonicalAgentNode: CanonicalAgentNode = {
   ...agentNode,
   type: "agent",
   schema_version: "1",
-  agent_id: "550e8400-e29b-41d4-a716-446655440000",
+  inputs: {
+    ...agentNode.inputs,
+    agent_id: "550e8400-e29b-41d4-a716-446655440000",
+  },
 };
 const baseCanonicalSpec: CanonicalWorkflowSpec = {
   ...baseLLMSpec,
-  ref_recon_algorithm: "ref_recon_v1",
   nodes: [canonicalToolNode, canonicalAgentNode],
 };
 
@@ -65,7 +68,7 @@ describe("LLMWorkflowSpecSchema", () => {
     const parsed = LLMWorkflowSpecSchema.parse(baseLLMSpec);
     expect(parsed.name).toBe("Q4 Sales Analysis");
     expect(parsed.nodes).toHaveLength(2);
-    expect(parsed.outputs).toEqual({ summary: "@nodes.1.text" });
+    expect(parsed.outputs).toEqual({ summary: "@nodes.1.result" });
   });
 
   it("requires non-empty nodes[]", () => {
@@ -107,16 +110,15 @@ describe("LLMWorkflowSpecSchema", () => {
     ).toThrow();
   });
 
-  it("requires agent node to declare output_schema", () => {
-    // Strip output_schema — the resulting node should fail to
-    // parse as either an LLMToolNode (no tool field) or an
-    // LLMAgentNode (no output_schema).
+  it("rejects an agent node missing the required inputs.task field", () => {
+    // Strip inputs.task — the resulting node should fail to parse
+    // as an LLMAgentNode (task is required).
     const broken = {
       id: 1,
       description: agentNode.description,
       depends_on: agentNode.depends_on,
-      agent: agentNode.agent,
-      inputs: agentNode.inputs,
+      type: "agent" as const,
+      inputs: { name: agentNode.inputs.name },
     };
     expect(() =>
       LLMWorkflowSpecSchema.parse({
@@ -161,15 +163,8 @@ describe("LLMWorkflowSpecSchema", () => {
 describe("CanonicalWorkflowSpecSchema", () => {
   it("accepts a minimal valid canonical spec", () => {
     const parsed = CanonicalWorkflowSpecSchema.parse(baseCanonicalSpec);
-    expect(parsed.ref_recon_algorithm).toBe("ref_recon_v1");
     expect(parsed.nodes[0].type).toBe("tool");
     expect(parsed.nodes[1].type).toBe("agent");
-  });
-
-  it("requires the refReconAlgorithm tag (D26)", () => {
-    const { ref_recon_algorithm: _omit, ...withoutTag } = baseCanonicalSpec;
-    void _omit;
-    expect(() => CanonicalWorkflowSpecSchema.parse(withoutTag)).toThrow();
   });
 
   it("requires every node to carry the bucket tag (type)", () => {
@@ -186,48 +181,33 @@ describe("CanonicalWorkflowSpecSchema", () => {
     ).toThrow();
   });
 
-  it("requires agent node to carry resolved agentId (D27)", () => {
-    const { agent_id: _omit, ...incomplete } = canonicalAgentNode;
+  it("requires agent node to carry resolved inputs.agent_id", () => {
+    const { agent_id: _omit, ...inputsWithoutId } = canonicalAgentNode.inputs;
     void _omit;
-    expect(() =>
-      CanonicalWorkflowSpecSchema.parse({
-        ...baseCanonicalSpec,
-        nodes: [canonicalToolNode, incomplete],
-      }),
-    ).toThrow();
-  });
-
-  it("rejects non-UUID agentId", () => {
     expect(() =>
       CanonicalWorkflowSpecSchema.parse({
         ...baseCanonicalSpec,
         nodes: [
           canonicalToolNode,
-          { ...canonicalAgentNode, agent_id: "not-a-uuid" },
+          { ...canonicalAgentNode, inputs: inputsWithoutId },
         ],
       }),
     ).toThrow();
   });
-});
 
-describe("DEFAULT_AGENT_OUTPUT_SCHEMA (D30)", () => {
-  it("matches the { text: string } shape the save pipeline writes", () => {
-    expect(DEFAULT_AGENT_OUTPUT_SCHEMA).toEqual({
-      type: "object",
-      properties: { text: { type: "string" } },
-      required: ["text"],
-    });
-  });
-
-  it("parses cleanly as an agent node's output_schema field", () => {
-    // Round-trip: take the default constant, plug it into an agent
-    // node, parse the spec — should succeed without modification.
-    const node: LLMAgentNode = {
-      ...agentNode,
-      output_schema: { ...DEFAULT_AGENT_OUTPUT_SCHEMA },
-    };
-    const spec: LLMWorkflowSpec = { ...baseLLMSpec, nodes: [toolNode, node] };
-    expect(() => LLMWorkflowSpecSchema.parse(spec)).not.toThrow();
+  it("rejects non-UUID inputs.agent_id", () => {
+    expect(() =>
+      CanonicalWorkflowSpecSchema.parse({
+        ...baseCanonicalSpec,
+        nodes: [
+          canonicalToolNode,
+          {
+            ...canonicalAgentNode,
+            inputs: { ...canonicalAgentNode.inputs, agent_id: "not-a-uuid" },
+          },
+        ],
+      }),
+    ).toThrow();
   });
 });
 
@@ -248,7 +228,6 @@ describe("LLMChartNodeSchema", () => {
     }>,
   ): unknown {
     return {
-      version: "1.0",
       name: "demo",
       nodes: [
         toolNode,

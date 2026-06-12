@@ -28,9 +28,7 @@ function spec(
   extra?: Partial<CanonicalWorkflowSpec>,
 ): CanonicalWorkflowSpec {
   return {
-    version: "1.0",
     name: "demo",
-    ref_recon_algorithm: "ref_recon_v1",
     nodes,
     outputs,
     ...extra,
@@ -41,7 +39,7 @@ function tool(
   id: number,
   toolName: string,
   depends_on: number[] = [],
-  inputs: Record<string, unknown> = {},
+  args: Record<string, unknown> = {},
 ): CanonicalNode {
   return {
     type: "tool",
@@ -49,30 +47,28 @@ function tool(
     id,
     description: `n${id}`,
     depends_on,
-    tool: toolName,
-    inputs,
+    inputs: { name: toolName, arguments: args },
   };
 }
 
 function agent(
   id: number,
   depends_on: number[] = [],
-  inputs: Record<string, unknown> = {},
+  extra?: { task?: string; context?: string },
 ): CanonicalNode {
+  const inputs: Extract<CanonicalNode, { type: "agent" }>["inputs"] = {
+    name: "Builtin / DataAnalyst",
+    agent_id: AGENT_UUID,
+    task: extra?.task ?? "Analyse the dataset",
+  };
+  if (extra?.context !== undefined) inputs.context = extra.context;
   return {
     type: "agent",
     schema_version: "1",
     id,
     description: `agent-${id}`,
     depends_on,
-    agent: "Builtin / DataAnalyst",
-    agent_id: AGENT_UUID,
     inputs,
-    output_schema: {
-      type: "object",
-      properties: { summary: { type: "string" } },
-      required: ["summary"],
-    },
   };
 }
 
@@ -258,14 +254,14 @@ describe("inProcessWorkflowEngine — happy paths", () => {
     const s = spec(
       [
         tool(0, "extract"),
-        agent(1, [0], { dataset: "@nodes.0.dataset" }),
+        agent(1, [0], { task: "@nodes.0.dataset" }),
       ],
-      { summary: "@nodes.1.summary" },
+      { result: "@nodes.1.result" },
     );
     const deps = buildDeps({
       tools: { extract: () => ({ dataset: "p.parquet" }) },
       runAgent: async () => ({
-        output: { summary: "5 rows analysed" },
+        output: { result: "5 rows analysed" },
         childRunId: "child-1",
       }),
     });
@@ -275,8 +271,10 @@ describe("inProcessWorkflowEngine — happy paths", () => {
     );
     expect(deps.toolCalls.map((c) => c.name)).toEqual(["extract"]);
     expect(deps.agentCalls).toHaveLength(1);
-    expect(deps.agentCalls[0]!.input).toEqual({ dataset: "p.parquet" });
-    expect(result.output).toEqual({ summary: "5 rows analysed" });
+    // The agent receives the resolved `task` string (the engine
+    // promotes `node.inputs.task` to the runner's `input.task`).
+    expect(deps.agentCalls[0]!.input).toEqual({ task: "p.parquet" });
+    expect(result.output).toEqual({ result: "5 rows analysed" });
   });
 
   it("resolves spec.outputs entries from heterogeneous sources", async () => {

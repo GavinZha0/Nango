@@ -61,6 +61,23 @@ export interface InspectorDrawerProps {
   onClose: () => void;
 }
 
+// ── Type guards for tool-only fields ─────────────────────────────────
+
+function hasOutputSchema(
+  node: CanonicalNode,
+): node is CanonicalNode & { output_schema: Record<string, unknown> } {
+  return "output_schema" in node &&
+    (node as CanonicalToolNode).output_schema !== undefined;
+}
+
+function hasOutputs(
+  node: CanonicalNode,
+): node is CanonicalNode & { outputs: string[] } {
+  return "outputs" in node &&
+    Array.isArray((node as CanonicalToolNode).outputs) &&
+    (node as CanonicalToolNode).outputs!.length > 0;
+}
+
 // ── Visual identity (kept in sync with node-cards.tsx) ───────────────
 
 interface Accent {
@@ -100,13 +117,13 @@ const ACCENTS: Record<CanonicalNode["type"], Accent> = {
 function nodeTitle(node: CanonicalNode): string {
   switch (node.type) {
     case "tool":
-      return node.tool;
+      return node.inputs.name;
     case "agent":
-      return node.agent;
+      return node.inputs.name;
     case "code":
-      return node.language;
+      return node.inputs.language;
     case "sql":
-      return node.name ?? node.data_source_name;
+      return node.inputs.dataset_name ?? node.inputs.data_source_name;
     case "chart":
       return `${node.inputs.renderer} chart`;
   }
@@ -204,13 +221,16 @@ export function InspectorDrawer({
             </Section>
           )}
 
-          {hasOutputSchema(node) && node.output_schema !== undefined && (
+          {hasOutputSchema(node) && (
             <Section title="Output schema">
-              <JsonView data={node.output_schema} defaultExpandDepth={1} />
+              <JsonView
+                data={node.output_schema}
+                defaultExpandDepth={1}
+              />
             </Section>
           )}
 
-          {node.outputs && node.outputs.length > 0 && (
+          {hasOutputs(node) && (
             <Section title="Outputs">
               <ChipList items={node.outputs} />
             </Section>
@@ -234,7 +254,7 @@ export function InspectorDrawer({
 function ToolBody({ node }: { node: CanonicalToolNode }): ReactElement {
   return (
     <Section title="Tool">
-      <CodeInline value={node.tool} />
+      <CodeInline value={node.inputs.name} />
     </Section>
   );
 }
@@ -243,24 +263,34 @@ function AgentBody({ node }: { node: CanonicalAgentNode }): ReactElement {
   return (
     <>
       <Section title="Agent">
-        <CodeInline value={node.agent} />
+        <CodeInline value={node.inputs.name} />
       </Section>
       <Section title="Agent ID">
-        <CodeInline value={node.agent_id} subtle />
+        <CodeInline value={node.inputs.agent_id} subtle />
       </Section>
     </>
   );
 }
 
 function CodeBody({ node }: { node: CanonicalCodeNode }): ReactElement {
+  const language = node.inputs.language;
+  const codeText = node.inputs.code_text;
+  const codeFile = node.inputs.code_file;
   return (
     <>
       <Section title="Language">
-        <CodeInline value={node.language} />
+        <CodeInline value={language} />
       </Section>
-      <Section title="Code">
-        <CodeBlock language={node.language} value={node.code} />
-      </Section>
+      {codeText !== undefined && (
+        <Section title="Code">
+          <CodeBlock language={language} value={codeText} />
+        </Section>
+      )}
+      {codeFile !== undefined && (
+        <Section title="Code file (reserved)">
+          <CodeInline value={codeFile} subtle />
+        </Section>
+      )}
     </>
   );
 }
@@ -286,26 +316,30 @@ function SqlBody({ node }: { node: CanonicalSqlNode }): ReactElement {
   // doesn't recognise could in principle bubble an exception. In
   // that case the user sees the raw query — same as if formatting
   // wasn't applied — instead of an empty drawer.
+  const sqlText = node.inputs.sql_text;
   const formattedQuery: string = useMemo(() => {
     try {
-      return formatSql(node.query, {
+      return formatSql(sqlText, {
         language: "duckdb",
         tabWidth: 2,
         keywordCase: "preserve",
       });
     } catch {
-      return node.query;
+      return sqlText;
     }
-  }, [node.query]);
+  }, [sqlText]);
 
   return (
     <>
       <Section title="Data source">
-        <CodeInline value={node.data_source_name} />
+        <CodeInline value={node.inputs.data_source_name} />
       </Section>
-      {node.name && (
+      <Section title="Data source ID">
+        <CodeInline value={node.inputs.data_source_id} subtle />
+      </Section>
+      {node.inputs.dataset_name && (
         <Section title="Dataset name">
-          <CodeInline value={node.name} />
+          <CodeInline value={node.inputs.dataset_name} />
         </Section>
       )}
       <Section title="Query">
@@ -349,27 +383,14 @@ function RuntimeMetaSection({
 // ── Type-narrowing helpers ───────────────────────────────────────────
 
 /**
- * True when the node carries a generic `input` map (tool / agent —
- * always present; code — optional). SQL has no `input` field.
+ * True when the node carries an `inputs` object the drawer can
+ * render as JSON. SQL still has no `inputs` field; chart's `inputs`
+ * is rendered by its own dedicated body section.
  */
 function hasInputMap(
   node: CanonicalNode,
 ): node is CanonicalToolNode | CanonicalAgentNode | CanonicalCodeNode {
-  if (node.type === "sql") return false;
-  if (node.type === "code") return node.inputs !== undefined;
-  return true;
-}
-
-/**
- * True when the node may declare `output_schema`. SQL has a fixed
- * `{name, rowCount}` shape — no schema is stored on the canonical
- * node (the executor strips to that shape unconditionally), and
- * agent / code / tool all may carry one.
- */
-function hasOutputSchema(
-  node: CanonicalNode,
-): node is CanonicalToolNode | CanonicalAgentNode | CanonicalCodeNode {
-  return node.type !== "sql";
+  return node.type === "tool" || node.type === "agent" || node.type === "code";
 }
 
 // ── Small atoms ──────────────────────────────────────────────────────

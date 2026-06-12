@@ -17,7 +17,15 @@
 
 import { WorkflowError } from "../error";
 import { parseRef } from "../spec/refs";
-import type { CanonicalWorkflowSpec } from "../spec/schema";
+import type {
+  CanonicalAgentNode,
+  CanonicalChartNode,
+  CanonicalCodeNode,
+  CanonicalNode,
+  CanonicalSqlNode,
+  CanonicalToolNode,
+  CanonicalWorkflowSpec,
+} from "../spec/schema";
 import { executeAgentNode } from "../nodes/agent-node";
 import { executeChartNode } from "../nodes/chart-node";
 import { executeCodeNode } from "../nodes/code-node";
@@ -106,7 +114,40 @@ export const inProcessWorkflowEngine: WorkflowEngine = {
   },
 };
 
-// ─── Dispatcher: tool vs agent ─────────────────────────────────────────
+// ─── Executor table: (type:version) → executor ─────────────────────────
+
+/**
+ * Type-erased wrapper for a node executor. The table key guarantees the
+ * node passed at runtime has the correct subtype; the `as` casts inside
+ * each entry are safe because `validate.ts::validateExecutorKeys` checked
+ * the same key at save time.
+ */
+type AnyNodeExecutorFn = (
+  node: CanonicalNode,
+  state: ExecutionState,
+  deps: WorkflowEngineDependencies,
+) => Promise<Record<string, unknown>>;
+
+/**
+ * Registry of all `"<type>:<schema_version>"` executors this build
+ * supports. When a breaking schema change bumps a version:
+ *   1. Add the new `"<type>:<newVersion>"` entry.
+ *   2. KEEP the old `"<type>:<oldVersion>"` entry — persisted workflows
+ *      must keep running.
+ *   3. Update `SUPPORTED_EXECUTOR_KEYS` in `spec/canonicalize.ts` to
+ *      match (both current + legacy).
+ *
+ * `validate.ts::validateExecutorKeys` ensures every spec saved against
+ * this build has a matching entry here, so `SCHEMA_VERSION_UNKNOWN` is
+ * caught at save time rather than at refresh time.
+ */
+const NODE_EXECUTOR_TABLE: Record<string, AnyNodeExecutorFn> = {
+  "tool:1":  (n, s, d) => executeToolNode(n as CanonicalToolNode, s, d),
+  "agent:1": (n, s, d) => executeAgentNode(n as CanonicalAgentNode, s, d),
+  "code:1":  (n, s, d) => executeCodeNode(n as CanonicalCodeNode, s, d),
+  "sql:1":   (n, s, d) => executeSqlNode(n as CanonicalSqlNode, s, d),
+  "chart:1": (n, s, d) => executeChartNode(n as CanonicalChartNode, s, d),
+};
 
 function buildNodeExecutor(deps: WorkflowEngineDependencies): NodeExecutor {
   return async (nodeId, state) => {
@@ -119,17 +160,22 @@ function buildNodeExecutor(deps: WorkflowEngineDependencies): NodeExecutor {
         nodeId,
       });
     }
-    if (node.type === "tool") return executeToolNode(node, state, deps);
-    if (node.type === "agent") return executeAgentNode(node, state, deps);
-    if (node.type === "code") return executeCodeNode(node, state, deps);
-    if (node.type === "sql") return executeSqlNode(node, state, deps);
-    if (node.type === "chart") return executeChartNode(node, state);
-    const _exhaustive: never = node;
-    throw new WorkflowError({
-      errorCode: "SPEC_SCHEMA_MISMATCH",
-      message: `Unknown node type: ${JSON.stringify(_exhaustive)}`,
-      nodeId,
-    });
+    const key = `${node.type}:${node.schema_version}`;
+    const executor = NODE_EXECUTOR_TABLE[key];
+    if (executor === undefined) {
+      // validate.ts::validateExecutorKeys should have caught this at save
+      // time. Reaching here means either the spec bypassed the save
+      // pipeline or was persisted by a newer build.
+      throw new WorkflowError({
+        errorCode: "SCHEMA_VERSION_UNKNOWN",
+        message:
+          `Node ${nodeId}: no executor registered for "${key}". ` +
+          `This build supports: ${Object.keys(NODE_EXECUTOR_TABLE).join(", ")}.`,
+        nodeId,
+        nodeName: key,
+      });
+    }
+    return executor(node, state, deps);
   };
 }
 
@@ -227,6 +273,13 @@ function withCache(
     // top would either double-cache or fight with the tool-side
     // cache invalidation. Skip the engine cache wrapper.
     if (node.type === "sql") return baseExecutor(nodeId, state);
+
+    // Chart nodes are pure in-memory config transforms with no
+    // network I/O. Their inputs.config can reach the
+    // CHART_CONFIG_TOO_LARGE cap (64 KB) for not-refreshable charts,
+    // which would produce oversized cache keys. The transform is fast
+    // enough that caching adds no value.
+    if (node.type === "chart") return baseExecutor(nodeId, state);
 
     // Resolve refs to derive the cache key. If resolution throws,
     // skip the cache check — the base executor will throw the same

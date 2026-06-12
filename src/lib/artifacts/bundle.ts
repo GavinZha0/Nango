@@ -31,6 +31,13 @@ export interface ArtifactBundle {
   fromCache?: boolean;
   /** ISO-8601 timestamp of the execution that produced `data`. */
   executedAt?: string;
+  /** True when `data` was served from `node.snapshot` without
+   *  executing the workflow. False when the workflow was executed
+   *  live (including the fallback when snapshot is absent). */
+  fromSnapshot?: boolean;
+  /** ISO-8601 timestamp of the snapshot that produced `data`.
+   *  Present only when `fromSnapshot=true`. */
+  snapshotAt?: string;
 }
 
 export interface DataResolution {
@@ -116,6 +123,33 @@ export async function buildArtifactBundle(
     };
   }
 
+  const workflowMeta = {
+    id: workflow.id,
+    name: workflow.name,
+    spec,
+    outputField,
+  };
+
+  // ── Snapshot path ────────────────────────────────────────────────
+  // When view_mode='snapshot' and a snapshot exists, return it
+  // immediately without executing the workflow.
+  if (
+    options?.forceFresh !== true &&
+    node.viewMode === "snapshot" &&
+    node.snapshot !== null &&
+    node.snapshot !== undefined
+  ) {
+    return {
+      node,
+      workflow: workflowMeta,
+      data: node.snapshot,
+      fromSnapshot: true,
+      snapshotAt: node.snapshotAt?.toISOString(),
+    };
+  }
+
+  // ── Live path ────────────────────────────────────────────────────
+  // view_mode='live', forceFresh=true, or snapshot is absent (first open).
   const resolution = await deps.executeWorkflow({
     workflowId: workflow.id,
     spec,
@@ -127,12 +161,8 @@ export async function buildArtifactBundle(
 
   const bundle: ArtifactBundle = {
     node,
-    workflow: {
-      id: workflow.id,
-      name: workflow.name,
-      spec,
-      outputField,
-    },
+    workflow: workflowMeta,
+    fromSnapshot: false,
   };
   if (resolution !== null) {
     bundle.data = resolution.data;

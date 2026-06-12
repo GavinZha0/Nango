@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1780330761353,
-      "tag": "0000_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1780337705181,
-      "tag": "0001_optimize-verification-run-recovery-index",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1780338072191,
-      "tag": "0002_verification-case-result-unique-recovery",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1780350427163,
-      "tag": "0003_agent-role-enum-and-drop-is-supervisor",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1780538590390,
-      "tag": "0004_drop_artifact_content_column",
+      "when": 1781220798005,
+      "tag": "0000_initial",
       "breakpoints": true
     }
   ]

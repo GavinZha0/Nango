@@ -1015,8 +1015,19 @@ class RunnerImpl implements Runner {
     const builtinAgent = agents[input.entityId];
     if (!builtinAgent) {
       releaseBuiltinBorrows(borrowed);
+      // Use the per-agent degradation reason when available — it is
+      // more specific than the generic fallback. For a deleted agent
+      // this carries "Agent spec unavailable (disabled, deleted, or
+      // invalid)." which surfaces in the workflow AGENT_EXECUTION_FAILED
+      // message and helps the user distinguish deletion from a missing
+      // credential or model misconfiguration.
+      const agentDegradations = degradations.get(input.entityId) ?? [];
+      const reason =
+        agentDegradations.length > 0
+          ? agentDegradations.map((d) => d.message).join("; ")
+          : "disabled, missing credential, or unsupported model";
       throw new Error(
-        `Runner.start: built-in agent ${input.entityId} could not be resolved (disabled, missing credential, or unsupported model).`,
+        `Runner.start: built-in agent ${input.entityId} could not be resolved — ${reason}`,
       );
     }
     return {

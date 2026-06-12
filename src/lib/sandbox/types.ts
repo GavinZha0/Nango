@@ -40,7 +40,27 @@ export function resolveContainerRuntime(): ContainerRuntime {
   );
 }
 
-// Inputs / outputs
+// ─── Shared env-var key constants ──────────────────────────────────
+
+/**
+ * Env var key under which the workflow engine serializes a code
+ * node's `inputs.params` object as a JSON string before handing
+ * it to the sandbox adapter.
+ *
+ * The sandbox preamble reads this key and deserializes it into the
+ * language-native `params` variable:
+ *   Python: `params = json.loads(os.environ[SANDBOX_PARAMS_ENV_KEY])`
+ *
+ * Rule: the sandbox Docker image must NEVER declare this key in its
+ * own `ENV` instructions — doing so would let the image-baked value
+ * silently override a caller-supplied payload in the Docker adapter,
+ * which does not apply an allowlist filter (unlike the subprocess
+ * adapter). Double-underscore prefix is the naming convention that
+ * marks these keys as "owned by the Nango engine, not user space".
+ */
+export const SANDBOX_PARAMS_ENV_KEY = "__PARAMS__" as const;
+
+// ─── Input / output shapes ──────────────────────────────────────────
 
 export interface SandboxInput {
   /** argv array — never a shell string. argv[0] must be a runtime in
@@ -64,6 +84,20 @@ export interface SandboxInput {
    *  the writable `/work` mount; the subprocess adapter writes them
    *  under `tmpHostDir`. */
   inputFiles?: Record<string, Buffer>;
+
+  /**
+   * Caller-supplied environment variable overlay injected into the
+   * sandbox process. Values MUST be plain strings; the caller is
+   * responsible for any necessary serialization (e.g. JSON for typed
+   * data — see `__PARAMS__` in `execute-workflow.ts`).
+   *
+   * CONTRACT (security): both adapters merge this overlay AFTER their
+   * own allowlists/defaults, so callers cannot override system-managed
+   * variables such as PATH, HOME, TMPDIR, NANGO_SANDBOX_BACKEND, or
+   * the venv VIRTUAL_ENV setting. Attempting to set any of those keys
+   * here is silently ignored.
+   */
+  env?: Record<string, string>;
 
   /** Hard timeout. SIGKILL on overshoot. Default: 30 000. */
   timeoutMs?: number;

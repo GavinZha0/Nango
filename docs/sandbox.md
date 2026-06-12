@@ -76,10 +76,10 @@ export interface SandboxOutput {
   stderr: string;
 
   /** Process exit code; 124 by convention on timeout. */
-  exitCode: number;
+  exit_code: number;
 
   /** Wall-clock execution time, milliseconds. */
-  durationMs: number;
+  duration_ms: number;
 
   /** Set when the runner killed the process (timeout, OOM, signal, ...). */
   termination?: "timeout" | "oom" | "signal" | "abort";

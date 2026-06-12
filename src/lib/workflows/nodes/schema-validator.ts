@@ -36,14 +36,31 @@ export type SchemaValidationResult =
   | { ok: false; errors: SchemaValidationError[] };
 
 /**
- * Validate `value` against a JSON Schema. Schemas are compiled on
- * each call — fine for V1 sizes (≤ 50 nodes per workflow).
+ * Validate `value` against a JSON Schema. Compiled validators are
+ * cached by schema content (JSON-stringified key) so repeated
+ * validations against the same schema (e.g. across retries or
+ * multiple nodes sharing a tool) skip the compile step.
  */
 export function validateAgainstSchema(
   schema: Record<string, unknown>,
   value: unknown,
 ): SchemaValidationResult {
-  const validator = compile(schema);
+  let validator: ValidateFunction;
+  try {
+    validator = compile(schema);
+  } catch (err) {
+    return {
+      ok: false,
+      errors: [
+        {
+          path: "",
+          keyword: "schema",
+          message: `Invalid JSON Schema: ${err instanceof Error ? err.message : String(err)}`,
+          schemaPath: "#",
+        },
+      ],
+    };
+  }
   const ok = validator(value) as boolean;
   if (ok) return { ok: true };
   const errors = (validator.errors ?? []).map(normaliseError);
@@ -79,8 +96,20 @@ function getAjv(): Ajv {
   return ajv;
 }
 
+/**
+ * Compile cache keyed by JSON-stringified schema. Prevents
+ * redundant AJV compilations when the same schema is validated
+ * multiple times (retries, multiple tool nodes sharing a schema).
+ */
+const compiledCache = new Map<string, ValidateFunction>();
+
 function compile(schema: Record<string, unknown>): ValidateFunction {
-  return getAjv().compile(schema);
+  const key = JSON.stringify(schema);
+  const cached = compiledCache.get(key);
+  if (cached !== undefined) return cached;
+  const validator = getAjv().compile(schema);
+  compiledCache.set(key, validator);
+  return validator;
 }
 
 function normaliseError(e: ErrorObject): SchemaValidationError {

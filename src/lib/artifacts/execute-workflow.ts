@@ -31,6 +31,7 @@ import type {
 } from "@/lib/workflows/engine";
 import { runner } from "@/lib/runner";
 import { getActiveAdapter } from "@/lib/sandbox/registry.server";
+import { SANDBOX_PARAMS_ENV_KEY } from "@/lib/sandbox/types";
 import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 
 import type { DataResolution } from "./bundle";
@@ -163,20 +164,23 @@ function buildEngineDeps(
 
 /** Bridge from the engine's `runCode` contract to the active
  *  sandbox adapter. Adding a new language means extending
- *  `languageCommand` AND `CodeLanguageSchema`. */
+ *  `languageCommand`, `buildPythonStdin`, AND `CodeLanguageSchema`. */
 async function runCodeViaSandbox(
   req: CodeRunRequest,
 ): Promise<CodeRunResult> {
   const command = languageCommand(req.language);
   const adapter = await getActiveAdapter();
+  // Build the full stdin payload: preamble (datasets/params bindings)
+  // followed by either the inline code text or a preamble+exec-wrapper
+  // that executes the sandbox-resident file in the current scope.
+  const stdin = buildSandboxStdin(req.language, req.datasets, req.env, req.code, req.codeFile);
   const result = await adapter.run({
     command,
-    stdin: req.code,
+    stdin,
     datasets: req.datasets,
+    env: Object.keys(req.env).length > 0 ? req.env : undefined,
     timeoutMs: req.timeoutMs,
     signal: req.abortSignal,
-    // `env` plumb-through: sandbox adapters don't yet accept a
-    // per-call env overlay (only the operator-tuned allowlist).
   });
   return {
     stdout: result.stdout,
@@ -190,21 +194,129 @@ function languageCommand(language: CodeRunRequest["language"]): string[] {
   switch (language) {
     case "python":
       return ["python3", "-"];
+    case "javascript":
+      // `node -` reads script from stdin in CommonJS mode.
+      // ES module syntax (import/export at the top level) is NOT
+      // supported — use require(). To enable ESM, the caller would
+      // need "--input-type=module" instead.
+      return ["node", "-"];
   }
 }
 
-/** Convert a `ToolDefinition` (Vercel AI SDK shape:
+/**
+ * Build the complete stdin payload for a code-node execution.
+ *
+ * Two modes, unified via stdin → `python3 -`:
+ *
+ *  **code_text** (`code` is set):
+ *    `<preamble>\n<user code>`
+ *    Preamble defines `datasets` / `params`; user code follows inline.
+ *
+ *  **code_file** (`codeFile` is set):
+ *    `<preamble>\nexec(compile(open('./code/<file>').read(), ...))`
+ *    Preamble runs first (same scope); then `exec` runs the file so
+ *    preamble-defined `datasets` / `params` are visible to file code.
+ *    `compile(src, filename, 'exec')` sets the co_filename so tracebacks
+ *    reference the real file path rather than `<stdin>`.
+ *
+ * Adding a new language (e.g. JavaScript) requires a new `case` here
+ * and a new entry in `languageCommand`.
+ */
+function buildSandboxStdin(
+  language: CodeRunRequest["language"],
+  datasets: string[],
+  env: Record<string, string>,
+  code: string | undefined,
+  codeFile: string | undefined,
+): string {
+  switch (language) {
+    case "python":
+      return buildPythonStdin(datasets, env[SANDBOX_PARAMS_ENV_KEY], code, codeFile);
+    case "javascript":
+      // validate.ts rejects JS + datasets and JS + code_file at save time,
+      // so neither can reach this branch. Pass only paramsJson + code.
+      return buildJavaScriptStdin(env[SANDBOX_PARAMS_ENV_KEY], code);
+  }
+}
+
+function buildPythonStdin(
+  datasets: string[],
+  paramsJson: string | undefined,
+  code: string | undefined,
+  codeFile: string | undefined,
+): string {
+  const lines: string[] = [];
+  if (paramsJson !== undefined) {
+    lines.push("import json as __nango_json, os as __nango_os");
+  }
+  if (datasets.length > 0) {
+    // Embed dataset names directly — they are plain strings, not typed
+    // data, and embedding avoids an extra env var round-trip.
+    lines.push(`datasets = ${JSON.stringify(datasets)}`);
+  }
+  if (paramsJson !== undefined) {
+    // Read the JSON-serialized params from the env var set by the
+    // engine. json.loads preserves int / float / bool / list shapes;
+    // env var transport keeps the serialization boundary clean.
+    lines.push(`params = __nango_json.loads(__nango_os.environ['${SANDBOX_PARAMS_ENV_KEY}'])`);
+  }
+  const preamble = lines.length > 0 ? lines.join("\n") + "\n" : "";
+
+  if (code !== undefined) {
+    // Inline text mode — append user code after preamble.
+    return preamble + code;
+  }
+  // File mode — exec the file so preamble vars remain in scope.
+  // Using exec(compile(...)) rather than exec(open(...).read()) so that
+  // the co_filename in compiled bytecode is the real path, giving
+  // readable tracebacks (e.g. "main.py, line 5" not "<stdin>, line 5").
+  const filePath = `./code/${codeFile!}`;
+  const execLine =
+    `exec(compile(open(${JSON.stringify(filePath)}).read(), ` +
+    `${JSON.stringify(filePath)}, 'exec'))`;
+  return preamble + execLine + "\n";
+}
+
+/**
+ * Build the stdin payload for a JavaScript code node.
+ *
+ * v1 constraints (enforced by validate.ts before this is called):
+ *  - Only `code_text` mode — `code_file` is rejected at save time.
+ *  - No `datasets` — Node.js v1 runtime has no Parquet reader.
+ *  - CommonJS mode — `import` / `export` are not supported; use
+ *    `require()`. The entrypoint runs under `node -` (stdin script).
+ *
+ * `params` is the only preamble binding: one JSON.parse line that
+ * reads SANDBOX_PARAMS_ENV_KEY from the process env. See
+ * docs/workflow-spec.md for the engine-injected variables contract.
+ */
+function buildJavaScriptStdin(
+  paramsJson: string | undefined,
+  code: string | undefined,
+): string {
+  const preamble = paramsJson !== undefined
+    ? `const params = JSON.parse(process.env[${JSON.stringify(SANDBOX_PARAMS_ENV_KEY)}] ?? '{}');\n`
+    : "";
+  return preamble + (code ?? "");
+}
+
+/** Convert a `ToolDefinition` (CopilotKit shape:
  *  `execute(args, ctx?)`) to the engine's `ToolHandle` shape
- *  (`execute({ input, abortSignal, context })`). abortSignal /
- *  context are not forwarded; tools use process-level cancellation
- *  and AsyncLocalStorage for user context. */
+ *  (`execute({ input, abortSignal, context })`).
+ *
+ *  `abortSignal` is forwarded as `ctx.abortSignal` so tools that
+ *  opt into cancellation (`web_search`, `run_ssh_command`, …) can
+ *  compose it with their own timeout controllers. Tools that don't
+ *  accept a second parameter simply ignore it (JS discards extra
+ *  positional args). */
 function adaptToolHandle(def: ToolDefinition): ToolHandle {
   return {
-    execute: async ({ input, abortSignal, context }) => {
-      void abortSignal;
-      void context;
-      const executor = def.execute as (args: unknown) => Promise<unknown>;
-      return executor(input);
+    execute: async ({ input, abortSignal }) => {
+      const executor = def.execute as (
+        args: unknown,
+        ctx?: { abortSignal?: AbortSignal },
+      ) => Promise<unknown>;
+      return executor(input, { abortSignal });
     },
   };
 }
@@ -274,22 +386,29 @@ function buildRealRunAgent(
     }
 
     // Runner returns plain text; engine's schema validator confirms
-    // shape matches the spec's `output_schema` (default
-    // `{ text: string }`).
+    // shape matches the spec's canonical `output_schema`
+    // (`AGENT_NODE_OUTPUT_SCHEMA` — `{ result: string }`).
     return {
-      output: { text: result.summary },
+      output: { result: result.summary },
       childRunId: result.runId,
     };
   };
 }
 
-/** Pull a natural-language prompt from `input` — chat captures
- *  store it under `text`; other shapes round-trip through JSON.
- *  Falls back to a placeholder so the prompt is never blank. */
+/** Pull a natural-language prompt from `input` — the agent-node
+ *  executor passes `{ task, context? }` (resolved from
+ *  `node.inputs.task` and `node.inputs.context`). `context`
+ *  appears after a blank line so the agent sees task + background
+ *  in a familiar prompt layout. Falls back to a placeholder so the
+ *  prompt is never blank. */
 function extractTaskString(input: Record<string, unknown>): string {
-  if (typeof input.text === "string" && input.text.length > 0) {
-    return input.text;
+  const task = typeof input.task === "string" ? input.task.trim() : "";
+  const context = typeof input.context === "string" ? input.context.trim() : "";
+  if (task.length > 0 && context.length > 0) {
+    return `${task}\n\nContext:\n${context}`;
   }
+  if (task.length > 0) return task;
+  if (context.length > 0) return context;
   const serialised = JSON.stringify(input);
   return serialised === "{}" ? "(empty workflow agent input)" : serialised;
 }

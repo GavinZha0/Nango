@@ -31,6 +31,9 @@ function leaf(id: string, parentId: string | null, name: string): ArtifactNode {
     sourceOutcomeId: null,
     workflowId: null,
     workflowOutputField: null,
+    snapshot: null,
+    snapshotAt: null,
+    viewMode: "snapshot",
     children: [],
   };
 }

@@ -49,7 +49,7 @@ export interface ColumnSchema {
 
 export interface DatasetSchema {
   columns: ColumnSchema[];
-  rowCount: number;
+  total_rows: number;
   byteSize: number;
 }
 
@@ -196,20 +196,32 @@ Adapters are not invoked by agents directly. The agent runtime exposes a tool (p
 
 ```ts
 extract_dataset_by_sql({
-  name: "sales_q1_2025",
-  dataSourceName: "vertica_prod",  // matches data_source.name (LLM-facing slug)
-  query: "SELECT * FROM sales WHERE quarter = '2025-Q1'",
-  // Optional: previewRows (default 5), forceRefresh (default false)
-}) → { cacheHit, name, rowCount, schema: { columns }, ttlHours, preview? }
+  dataset_name:     "sales_q1_2025",
+  data_source_name: "vertica_prod",  // matches data_source.name (LLM-facing slug)
+  sql_text:         "SELECT * FROM sales WHERE quarter = '2025-Q1'",
+  // Optional: row_limit (default 5), force_refresh (default false)
+}) → {
+  cache_hit, dataset_name, total_rows, returned_rows,
+  rows, row_schema, ttl_hours, replaced_prior?
+}
 ```
 
-The LLM-facing surface is intentionally minimal: `name` / `dataSourceName` /
-`query` carry the task semantics; `previewRows` / `forceRefresh` cover the
-two cases where the agent has a value-add decision (inline peek vs.
-sandbox-only, fresh fetch vs. cached). System bounds — wall-clock budget,
-row ceiling, default TTL — live in env vars (`DATA_EXTRACT_TIMEOUT_MS`,
-`DATA_EXTRACT_MAX_ROWS`, `DATA_EXTRACT_DEFAULT_TTL_HOURS`) so the LLM is
-not asked to invent a number it has no signal to choose.
+The LLM-facing surface is intentionally minimal: `dataset_name` /
+`data_source_name` / `sql_text` carry the task semantics;
+`row_limit` / `force_refresh` cover the two cases where the agent
+has a value-add decision (inline peek vs. sandbox-only, fresh
+fetch vs. cached). System bounds — wall-clock budget, row
+ceiling, default TTL — live in env vars
+(`DATA_EXTRACT_TIMEOUT_MS`, `DATA_EXTRACT_MAX_ROWS`,
+`DATA_EXTRACT_DEFAULT_TTL_HOURS`) so the LLM is not asked to
+invent a number it has no signal to choose.
+
+`rows` is delivered as a row-of-objects array
+(`Record<columnName, cellValue>[]`); `returned_rows` is the
+number of rows actually carried (≤ `row_limit`, ≤ the server
+preview byte budget). When `returned_rows < total_rows` the
+result was truncated — agents read the full dataset from the
+parquet handle via `run_code_in_sandbox.datasets[]`.
 
 The tool is implemented in the data-sources layer; it consults the cache (§4), invokes the adapter on cache miss, and returns the **virtual** mount path (`./data/...`) so the agent's next call to `run_in_sandbox` can mount it without leaking the host path.
 
@@ -241,14 +253,14 @@ The cache is a host-filesystem region under `<repoRoot>/.cache/datasource/` owne
 
 - `datasetName` is the cache key. Agent picks it; convention is `{source}_{scope}_{time}` (kebab- or snake-case).
 - Names are validated: `^[a-z0-9][a-z0-9_-]{0,127}$`. Path traversal is impossible by construction.
-- **A name is a slot, not an identifier.** Re-extracting under the same name with a DIFFERENT query is a slot reassignment, not an error. The cache stores the canonicalised `query_hash`; on hash mismatch the new snapshot replaces the prior bytes on disk via `commitWriteSlot`'s atomic `rm -rf + rename`. The tool result returns `replacedPrior: true` so the agent knows the prior data is gone.
-- Re-extracting with the SAME query is a cache hit (`cacheHit: true`, no source roundtrip) — same as before.
+- **A name is a slot, not an identifier.** Re-extracting under the same name with a DIFFERENT query is a slot reassignment, not an error. The cache stores the canonicalised `query_hash`; on hash mismatch the new snapshot replaces the prior bytes on disk via `commitWriteSlot`'s atomic `rm -rf + rename`. The tool result returns `replaced_prior: true` so the agent knows the prior data is gone.
+- Re-extracting with the SAME query is a cache hit (`cache_hit: true`, no source roundtrip) — same as before.
 - **Why slot semantics?** LLMs treat names as variables (`customers`, `recent_orders`), not as durable identifiers; the alternative (fail-fast on hash mismatch) traps the LLM after a restart when it has no memory of prior session names, and trapped the agent mid-conversation when it naturally wanted to "rebind" a slug to a refined query. The slot-reassignment model matches every programming language's variable semantics — no concept to learn.
 - **Defence still in place:** in-flight readers of `./data/<name>/...` in another sandbox process keep their bytes via the OS's open-FD and page-cache semantics (POSIX: a deleted file referenced by an open FD stays alive); only NEW sandbox runs see the replaced bytes. Atomic `rename(tmp, final)` means there's no half-state window for fresh readers either.
 
 ### 4.3 TTL and invalidation
 
-Each dataset carries a `ttlHours`. The cache check is:
+Each dataset carries a `ttl_hours`. The cache check is:
 
 ```
 exists(parquet/<name>/) AND (now - created_at) < ttl_hours * 3600s
@@ -357,31 +369,32 @@ All three phases (D-1, D-2, D-3) are landed.
   runs `adapter.extract`, commits. Naming uses the `extract_dataset_by_*`
   family so future siblings can fetch datasets by URL or REST API call
   without breaking callers.
-- Return shape: `{ cacheHit, name, rowCount, schema: { columns },
-  ttlHours, preview? }`. `rowCount` is top-level so agents can
-  short-circuit empty results without poking the schema. The mount
-  path is conventional (`./data/<name>/`) and is documented in
-  the `run_code_in_sandbox` description, so neither `mountedAt` nor
-  `byteSize` are surfaced to the LLM (`byteSize` lives in the
-  `<name>.meta.json` sidecar for admin debugging). On a cache hit the
-  `columns` array is empty (sidecar persists totals only).
-- `previewRows: number` (optional, max 200) lets the LLM peek at the
-  first N rows inline — handy when the result is small enough to
-  reason over directly without entering the sandbox. The runtime
-  reads via DuckDB `read_parquet(..) LIMIT N` and trims to a
-  ≤50KB JSON budget; `preview.truncated` flips when either cap kicks
-  in so the LLM knows to fall back to the sandbox.
-- Preview is **column-oriented** —
-  `preview = { columns: string[], rows: unknown[][], truncated }` —
-  not row-of-objects. This saves ~50% tokens vs the obvious
-  `[{col1: v1, col2: v2}, …]` shape (column names appear once
-  instead of once-per-row) while keeping full JSON type fidelity
-  (number / boolean / null / nested values). The tool description
-  spells out the DataFrame-style indexing convention so the LLM
-  doesn't try `row.colName`.
-- Hash-mismatch handling: same `name` + different `query` REPLACES
-  the prior snapshot under that slot (last-write-wins) and the
-  result carries `replacedPrior: true`. See §4.2 for the rationale.
+- Return shape: `{ cache_hit, dataset_name, total_rows,
+  returned_rows, rows, row_schema, ttl_hours, replaced_prior? }`.
+  `total_rows` is top-level so agents can short-circuit empty
+  results without poking the schema. The mount path is
+  conventional (`./data/<dataset_name>/`) and is documented in
+  the `run_code_in_sandbox` description, so neither `mountedAt`
+  nor `byteSize` are surfaced to the LLM (`byteSize` lives in
+  the `<name>.meta.json` sidecar for admin debugging). On a
+  cache hit `row_schema.columns` is empty (sidecar persists
+  totals only).
+- `row_limit: number` (optional, max 200) lets the LLM peek at
+  the first N rows inline — handy when the result is small
+  enough to reason over directly without entering the sandbox.
+  The runtime reads via DuckDB `read_parquet(..) LIMIT N` and
+  trims to a ≤50KB JSON budget; `returned_rows < total_rows`
+  signals truncation so the LLM knows to fall back to the
+  sandbox.
+- `rows` is delivered as a **row-of-objects** array
+  (`Record<columnName, cellValue>[]`). Chart nodes consume it
+  directly via `inputs.dataset: "@nodes.X.rows"`; code nodes
+  typically stick with the parquet handle (`run_code_in_sandbox.
+  datasets[]`) which is faster for large data sets.
+- Hash-mismatch handling: same `dataset_name` + different
+  `sql_text` REPLACES the prior snapshot under that slot
+  (last-write-wins) and the result carries `replaced_prior:
+  true`. See §4.2 for the rationale.
 - The companion `run_code_in_sandbox` tool (sandbox layer)
   bind-mounts each dataset name from `datasets: [...]` at
   `./data/<name>` read-only — the prompt convention and the
@@ -398,7 +411,7 @@ All three phases (D-1, D-2, D-3) are landed.
   force-adds the tool name to the build set (`runner/dispatch/
   builtin.ts:205-207`) and `data-sources/prompt-block.server.ts`
   emits the "Available data sources" block listing the legal
-  `dataSourceName` values. The two move as one unit — without a
+  `data_source_name` values. The two move as one unit — without a
   binding the tool would have nothing to call and no prompt block
   to describe what slugs are valid. This mirrors the
   `run_ssh_command` / `ssh_server` and `get_skill` / `skill`
@@ -418,7 +431,7 @@ All three phases (D-1, D-2, D-3) are landed.
 - `credential.fields` for datasource providers slimmed to
   `{ user, password }` only; `restUrl` is kept as an admin-facing
   reference label ("which DB is this credential pointing at?").
-- `extract_dataset_by_sql.dataSourceName` carries the
+- `extract_dataset_by_sql.data_source_name` carries the
   `data_source.name` (a stable LLM-facing slug, NOT a uuid); the
   runtime joins datasource + credential via
   `resolveDataSourceByName()` before calling the adapter.
@@ -486,8 +499,8 @@ All three phases (D-1, D-2, D-3) are landed.
   lookup to *this agent's* allowed sources.
 - Prompt injection: `data-sources/prompt-block.server.ts` renders
   the bound list into the system prompt as
-  `Available data sources (pass the slug as dataSourceName...): - name (provider) — description`
-  so the LLM knows which `dataSourceName` values are valid without
+  `Available data sources (pass the slug as data_source_name...): - name (provider) — description`
+  so the LLM knows which `data_source_name` values are valid without
   needing a separate "list_data_sources" tool.
 
 ### Phase D-3 — MySQL / MariaDB / Vertica coverage ✅ done

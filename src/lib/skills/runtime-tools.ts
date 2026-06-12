@@ -18,6 +18,7 @@ import {
 } from "./storage";
 import type { SkillSpec } from "./skill-pool";
 import { getActiveAdapter } from "@/lib/sandbox/registry.server";
+import { assembleCodeOutput } from "@/lib/sandbox/code-output";
 
 /** Subdirectory whitelist (matches `validateSkillFilePath`). */
 const ALLOWED_PREFIXES = ["references", "scripts", "assets", "evals"] as const;
@@ -158,7 +159,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const runSkillScript = defineTool({
     name: "run_skill_script",
     description:
-      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns { stdout, stderr, exitCode, durationMs, backend, termination? }.",
+      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: z.object({
       name: z.string().describe("Skill name."),
       filename: z
@@ -224,11 +225,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         datasets: datasets ?? [],
       });
       return {
-        stdout: out.stdout,
-        stderr: out.stderr,
-        exitCode: out.exitCode,
-        durationMs: out.durationMs,
-        ...(out.termination ? { termination: out.termination } : {}),
+        ...assembleCodeOutput(out),
         backend: adapter.backend,
       };
     },

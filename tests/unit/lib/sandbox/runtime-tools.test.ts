@@ -40,16 +40,28 @@ describe("buildRunInSandboxTool", () => {
     });
     const tool = buildRunInSandboxTool();
     const result = await tool.execute({
-      command: ["echo", "hello"],
+      language: "python",
+      code_text: "print('hello')",
     });
+    // The tool maps `language: "python"` → argv `["python3", "-"]`
+    // internally; the LLM never picks the argv.
     expect(mockRun).toHaveBeenCalledWith(
-      expect.objectContaining({ command: ["echo", "hello"] }),
+      expect.objectContaining({
+        command: ["python3", "-"],
+        stdin: "print('hello')",
+      }),
     );
+    // buildRunInSandboxTool returns { ...assembleCodeOutput(out), backend }.
+    // "hello\n" is not valid JSON → message = raw stdout, all data fields null.
     expect(result).toEqual({
-      stdout: "hello\n",
-      stderr: "",
-      exitCode: 0,
-      durationMs: 12,
+      ok: true,
+      duration_ms: 12,
+      rows: null,
+      row_count: null,
+      row_schema: null,
+      message: "hello\n",
+      files: null,
+      error: null,
       backend: "subprocess",
     });
   });
@@ -63,13 +75,13 @@ describe("buildRunInSandboxTool", () => {
     });
     const tool = buildRunInSandboxTool();
     await tool.execute({
-      command: ["python3", "-"],
-      stdin: "print(1)",
+      language: "python",
+      code_text: "print(1)",
       datasets: ["sales_q1"],
       // Tool surface is SECONDS (project convention; field name
       // disambiguates from the LLM's setTimeout intuition); internally
       // it gets multiplied by 1000 before reaching the adapter.
-      timeoutSeconds: 5,
+      timeout_seconds: 5,
     });
     expect(mockRun).toHaveBeenCalledWith({
       command: ["python3", "-"],
@@ -88,9 +100,14 @@ describe("buildRunInSandboxTool", () => {
       termination: "timeout",
     });
     const tool = buildRunInSandboxTool();
-    const result = await tool.execute({ command: ["sleep", "999"] });
-    expect((result as { termination?: string }).termination).toBe("timeout");
-    expect((result as { exitCode: number }).exitCode).toBe(124);
+    const result = await tool.execute({
+      language: "python",
+      code_text: "import time; time.sleep(999)",
+    });
+    // assembleCodeOutput maps exitCode≠0 → ok=false; stderr.trim() → error.
+    // The adapter's `termination` field is not forwarded (not in CodeOutputEnvelope).
+    expect((result as { ok: boolean }).ok).toBe(false);
+    expect((result as { error: string | null }).error).toBe("killed");
   });
 });
 

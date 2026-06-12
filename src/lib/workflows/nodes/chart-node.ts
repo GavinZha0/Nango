@@ -16,10 +16,11 @@
  *      of `{ source }` entries.
  *   4. Returns `{ option: <merged config> }`.
  *
- * There is no external tool call here — the node is a pure
- * deterministic transform. Retries / abort signal handling are
- * therefore omitted: a chart node either succeeds or surfaces a
- * schema mismatch on the first try.
+ * The merge itself is a pure deterministic transform — no external
+ * tool calls, no I/O. It cannot fail by exhausting retries, but it
+ * still passes through `withRetries` so that admin forensics sees
+ * the standard `workflow_node_attempt_started` /
+ * `workflow_node_completed` events for every node type uniformly.
  *
  * Frontend rendering of the merged option still happens in the
  * browser; the engine never produces pixels.
@@ -33,6 +34,11 @@ import {
   resolveRefs,
   type ExecutionState,
 } from "../engine/execution-context";
+import type { WorkflowEngineDependencies } from "../engine";
+import { withRetries } from "./with-retries";
+
+/** Deps subset the chart executor needs (only event emission). */
+export type ChartNodeDeps = Pick<WorkflowEngineDependencies, "emitEvent">;
 
 /** Output bag — single key `option`. See `CHART_NODE_OUTPUTS`. */
 interface ChartNodeOutputs extends Record<string, unknown> {
@@ -40,15 +46,35 @@ interface ChartNodeOutputs extends Record<string, unknown> {
 }
 
 /**
- * Execute one chart node. Synchronous in shape (returns a Promise
- * for engine-dispatch parity with other nodes).
+ * Execute one chart node. Wraps the deterministic merge in
+ * `withRetries` so the admin run timeline shows
+ * `workflow_node_attempt_started` / `workflow_node_completed` events
+ * consistently with all other node types.
  */
 export async function executeChartNode(
   node: CanonicalChartNode,
   state: ExecutionState,
+  deps: ChartNodeDeps,
 ): Promise<ChartNodeOutputs> {
-  const merged = mergeRendererConfig(node, state);
-  return { option: merged };
+  return withRetries({
+    node,
+    nodeName: `chart:${node.inputs.renderer}`,
+    state,
+    deps,
+    attemptFn: () => {
+      const merged = mergeRendererConfig(node, state);
+      return Promise.resolve({ option: merged });
+    },
+    wrapError: (err: unknown): WorkflowError => {
+      if (err instanceof WorkflowError) return err;
+      return new WorkflowError({
+        errorCode: "UNKNOWN_ERROR",
+        message: err instanceof Error ? err.message : String(err),
+        nodeId: node.id,
+        nodeName: `chart:${node.inputs.renderer}`,
+      });
+    },
+  }) as Promise<ChartNodeOutputs>;
 }
 
 /**
@@ -122,9 +148,10 @@ function mergeEchartsConfig(
 
 /**
  * Resolve a single dataset ref string into the upstream array of
- * rows. Throws `CHART_DATASET_REF_INVALID` if the ref does not
- * resolve to a JSON array (ECharts `dataset.source` accepts arrays
- * of arrays OR arrays of objects; either shape passes here).
+ * rows. Throws `CHART_DATASET_TYPE_MISMATCH` when the ref resolves
+ * successfully but the value is not a JSON array. ECharts
+ * `dataset.source` accepts arrays of arrays OR arrays of objects;
+ * either shape passes here — only non-array values are rejected.
  */
 function resolveRowsRef(
   nodeId: number,
@@ -134,7 +161,7 @@ function resolveRowsRef(
   const resolved: unknown = resolveRefs(refStr, state);
   if (!Array.isArray(resolved)) {
     throw new WorkflowError({
-      errorCode: "REF_UNRESOLVED",
+      errorCode: "CHART_DATASET_TYPE_MISMATCH",
       message:
         `Node ${nodeId} (chart): ref ${JSON.stringify(refStr)} ` +
         `must resolve to an array of rows; got ${typeof resolved}.`,

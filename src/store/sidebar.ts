@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 /** Left-panel IDs. The *active* panel is URL-driven (see
  *  `resolveActivePanel` in `sidebar-panel-registry.tsx`); this
@@ -55,27 +56,47 @@ interface SidebarState {
   setRightTab: (tab: RightTab) => void;
 }
 
-export const useSidebarStore = create<SidebarState>((set, get) => ({
-  // Left Panel
-  leftPanelOpen: true,
+export const useSidebarStore = create<SidebarState>()(
+  persist(
+    (set, get) => ({
+      // Left Panel
+      leftPanelOpen: true,
 
-  toggleLeftPanel: () =>
-    set({ leftPanelOpen: !get().leftPanelOpen }),
+      toggleLeftPanel: () =>
+        set({ leftPanelOpen: !get().leftPanelOpen }),
 
-  setLeftPanelOpen: (open: boolean) =>
-    set({ leftPanelOpen: open }),
+      setLeftPanelOpen: (open: boolean) =>
+        set({ leftPanelOpen: open }),
 
-  // Right Panel
-  rightPanelOpen: true,
+      // Right Panel
+      rightPanelOpen: true,
 
-  toggleRightPanel: () =>
-    set({ rightPanelOpen: !get().rightPanelOpen }),
+      toggleRightPanel: () =>
+        set({ rightPanelOpen: !get().rightPanelOpen }),
 
-  setRightPanelOpen: (open: boolean) =>
-    set({ rightPanelOpen: open }),
+      setRightPanelOpen: (open: boolean) =>
+        set({ rightPanelOpen: open }),
 
-  // Right Panel Tab
-  rightTab: "chat",
+      // Right Panel Tab (not persisted — always opens to chat)
+      rightTab: "chat",
 
-  setRightTab: (tab: RightTab) => set({ rightTab: tab }),
-}));
+      setRightTab: (tab: RightTab) => set({ rightTab: tab }),
+    }),
+    {
+      name: "nango:sidebar",
+      // SSR guard: localStorage is not available on the server.
+      storage: createJSONStorage(() =>
+        typeof window !== "undefined"
+          ? localStorage
+          : (undefined as never),
+      ),
+      // Only persist the two panel visibility flags.
+      // Actions (functions) are excluded automatically.
+      // rightTab is intentionally omitted — chat is always the default.
+      partialize: (state) => ({
+        leftPanelOpen: state.leftPanelOpen,
+        rightPanelOpen: state.rightPanelOpen,
+      }),
+    },
+  ),
+);

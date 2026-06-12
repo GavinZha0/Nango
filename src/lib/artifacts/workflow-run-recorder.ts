@@ -83,20 +83,49 @@ export async function startRecording(
 
 function buildRecorder(runId: string): WorkflowRunRecorder {
   let seq = 0;
+  /** In-flight event writes. `flush()` awaits all before finalize. */
+  const pending: Promise<void>[] = [];
 
   function emit(event: WorkflowEngineEvent): void {
     const type: EntityRunEventType = mapEngineEventToEventType(event.type);
-    // Async fire-and-log — never block the engine event tape on
-    // DB latency.
-    void recordEvent(runId, seq++, type, event).catch((err: unknown) => {
-      log.warn(
-        { err, runId, eventType: event.type },
-        "failed to persist workflow event",
+    const currentSeq = seq++;
+    // Fire-and-collect — never block the engine event tape on
+    // DB latency, but track the promise so flush() can await it.
+    const p = recordEvent(runId, currentSeq, type, event).catch(
+      (err: unknown) => {
+        log.error(
+          { err, runId, eventType: event.type, seq: currentSeq },
+          "failed to persist workflow event",
+        );
+      },
+    );
+    pending.push(p);
+  }
+
+  /**
+   * Await all in-flight event writes. Called before `finalizeRun`
+   * so the event timeline is complete when the run status changes.
+   * Individual failures are already logged by each emit's catch;
+   * this step surfaces any that settled as rejected after the
+   * original catch (should not happen, but defensive).
+   */
+  async function flush(): Promise<void> {
+    const results = await Promise.allSettled(pending);
+    pending.length = 0;
+    let failCount = 0;
+    for (const r of results) {
+      if (r.status === "rejected") failCount++;
+    }
+    if (failCount > 0) {
+      log.error(
+        { runId, failCount, total: results.length },
+        "workflow event flush completed with failures",
       );
-    });
+    }
   }
 
   async function succeed(): Promise<void> {
+    await flush();
     try {
       await finalizeRun(runId, "succeeded");
     } catch (err) {
@@ -108,6 +137,7 @@ function buildRecorder(runId: string): WorkflowRunRecorder {
   }
 
   async function fail(err: unknown): Promise<void> {
+    await flush();
     const errorMessage: string =
       err instanceof Error ? err.message : String(err);
     try {

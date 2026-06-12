@@ -186,6 +186,22 @@ export class LocalDockerAdapter implements ISandboxAdapter {
       );
     }
 
+    // Caller-supplied env var overlay (e.g. SANDBOX_PARAMS_ENV_KEY for
+    // workflow code nodes). The container has no network access and a
+    // read-only rootfs, so injecting caller env is safe.
+    //
+    // SECURITY / PRIORITY NOTE: unlike the subprocess adapter (which
+    // applies a strict allowlist and silently drops keys that collide
+    // with system variables), `--env K=V` here will OVERRIDE any `ENV K`
+    // set in the sandbox Dockerfile. This difference is intentional —
+    // Docker containers have no shared host secrets to protect — but it
+    // means the image must never declare ENV keys that begin with `__`
+    // (the Nango-engine-owned namespace, e.g. `__PARAMS__`). See
+    // `sandbox/types.ts::SANDBOX_PARAMS_ENV_KEY` for the contract.
+    for (const [k, v] of Object.entries(input.env ?? {})) {
+      args.push("--env", `${k}=${v}`);
+    }
+
     args.push(this.image, ...input.command);
     return args;
   }

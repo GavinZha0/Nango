@@ -227,12 +227,11 @@ function RightPanelToolbar(): ReactNode {
         <SquarePen className="h-3.5 w-3.5" />
       </Button>
 
-      {/* ── Segmented control (Chat / History) ─────────────────────── */}
-      <div
-        className="inline-flex rounded-md border bg-muted/40 p-0.5"
-        role="tablist"
-        aria-label="Right panel view"
-      >
+      {/* ── Separator ───────────────────────────────────────────────── */}
+      <div className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+
+      {/* ── Chat / History tab buttons (no group wrapper) ────────────── */}
+      <div role="tablist" aria-label="Right panel view" className="flex items-center">
         {TAB_SEGMENTS.map(({ id, label, icon: Icon }) => {
           const active = rightTab === id;
           return (
@@ -262,10 +261,10 @@ function RightPanelToolbar(): ReactNode {
                 }
               }}
               className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-sm transition-colors",
+                "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                 active
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >

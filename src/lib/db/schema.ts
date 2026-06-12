@@ -260,6 +260,29 @@ export const ArtifactTable = pgTable(
      *  `Record<key, RefString>` map declared in the workflow spec. */
     workflowOutputField: text("workflow_output_field"),
 
+    /**
+     * Snapshot of the last successfully saved workflow output.
+     * Populated on first save (initial execution) and updated only
+     * via explicit "Save as snapshot" action. NULL for artifacts
+     * without a snapshot yet.
+     */
+    snapshot: jsonb("snapshot"),
+    /** UTC timestamp of the most recent snapshot write. */
+    snapshotAt: timestamp("snapshot_at"),
+
+    /**
+     * Controls whether GET returns the stored snapshot or executes
+     * the workflow live.
+     *
+     * 'snapshot' (default) — return `snapshot` data directly;
+     *   falls back to live execution when `snapshot` is NULL.
+     * 'live' — always re-execute the workflow on every GET.
+     */
+    viewMode: text("view_mode")
+      .$type<"snapshot" | "live">()
+      .notNull()
+      .default("snapshot"),
+
     createdBy: uuid("created_by")
       .notNull()
       .references(() => UserTable.id, { onDelete: "cascade" }),
@@ -270,7 +293,9 @@ export const ArtifactTable = pgTable(
     index("artifact_parent_idx").on(t.parentId),
     index("artifact_created_by_idx").on(t.createdBy),
     index("artifact_type_idx").on(t.type),
-    index("artifact_source_idx").on(t.sourceThreadId, t.sourceOutcomeId),
+    uniqueIndex("artifact_source_unique_idx")
+      .on(t.sourceThreadId, t.sourceOutcomeId)
+      .where(sql`${t.sourceThreadId} IS NOT NULL AND ${t.sourceOutcomeId} IS NOT NULL`),
     // Workflow reverse lookup: "show me all artifacts using workflow
     // X" — used for dependent-artifact discovery + admin cascade-
     // delete UX. Without this index, deleting a workflow row forces
