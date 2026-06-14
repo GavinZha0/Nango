@@ -8,9 +8,18 @@
 import { NextRequest } from "next/server";
 import type { Logger } from "pino";
 
-import { BuiltInAgent } from "@/lib/copilot/index.server";
-import type { AbstractAgent } from "@/lib/copilot/index.server";
+import { Observable } from "rxjs";
+
+import type { AbstractAgent, BaseEvent } from "@/lib/copilot/index.server";
+import { AbstractAgent as BaseAbstractAgent } from "@/lib/copilot/index.server";
 import { getAgentCredentialConfigById } from "@/lib/credentials/lookup";
+
+class BackendStubAgent extends BaseAbstractAgent {
+  run() {
+    return new Observable<BaseEvent>((s) => s.complete());
+  }
+}
+
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { runWithAgents } from "@/lib/backends/runtime.server";
 import { CREDENTIAL_ID_HEADER, CREDENTIAL_ID_PATTERN } from "@/lib/http/chat-headers";
@@ -92,7 +101,7 @@ async function handleInfoRequest(
 
   const stubAgents: Record<string, AbstractAgent> = {};
   for (const entity of entities) {
-    stubAgents[entity.id] = new BuiltInAgent({ model: "stub" });
+    stubAgents[entity.id] = new BackendStubAgent();
   }
 
   return runWithAgents(req, {

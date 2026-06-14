@@ -105,21 +105,14 @@ per row.
 
 ## 4. Audit: count rows per key
 
-```ts
-import { db } from "@/lib/db";
-import { CredentialTable } from "@/lib/db/schema";
-import { inspectCiphertextKeyId } from "@/lib/credentials/crypto";
-
-const rows = await db
-  .select({ id: CredentialTable.id, ct: CredentialTable.encryptedPayload })
-  .from(CredentialTable);
-
-const counts = new Map<string, number>();
-for (const r of rows) {
-  const keyId = inspectCiphertextKeyId(r.ct);
-  counts.set(keyId, (counts.get(keyId) ?? 0) + 1);
-}
-console.log(Object.fromEntries(counts));
+```typescript
+// Pseudo-code for audit query:
+rows = db.selectAll(CredentialTable);
+counts = {};
+for row in rows:
+    keyId = inspectCiphertextKeyId(row.encryptedPayload);
+    counts[keyId] = (counts[keyId] || 0) + 1;
+print(counts);
 ```
 
 ## 5. Failure modes and safeguards

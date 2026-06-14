@@ -23,22 +23,11 @@ Not implementation-ready yet — sitting in `docs/` for review and iteration.
 
 ---
 
-## 1. Why a sidecar (and not a Python child process)
+## 1. Why a sidecar
 
-PageIndex (https://github.com/VectifyAI/PageIndex, MIT, 26k★) is the
-long-document index + retrieval engine we want to depend on. It's a Python
-library; Nango is Node/Next.js. Three integration options were considered:
+PageIndex is the long-document index + retrieval engine we depend on. Since it's a Python library and Nango is Node/Next.js, we integrate it via an **HTTP sidecar**. This avoids the latency of spawning child processes per call and bypasses WASM portability issues with C extensions.
 
-| Option | Verdict |
-|---|---|
-| Spawn `python ...` per call from Node | Rejected — process startup 100-500ms; no state; awkward error handling |
-| Embed via WASM / pyodide | Rejected — PageIndex has C extension deps (PDF parsing); not portable |
-| **HTTP sidecar (Python service alongside Nango)** | **Chosen** |
-| Use VectifyAI's hosted cloud API | Optional fallback — adds vendor + data-egress; keep as opt-in path for high-quality OCR |
-
-The sidecar runs PageIndex inside a small FastAPI app, exposing two
-endpoints (build + search). It's containerised next to Nango and shares
-the KB filesystem volume so it can read PDFs directly without HTTP upload.
+The sidecar runs PageIndex inside a minimal FastAPI app and shares the KB filesystem volume with Nango to read PDFs directly.
 
 ## 2. Sidecar API
 
@@ -238,25 +227,8 @@ Query path:
      Re-synth with concrete page content
 ```
 
-## 6. Open questions
+## 6. Open Questions & Future Plans
 
-- **Multi-tenant isolation**: when collections grow large, do we need
-  per-user/team paths or is `<collection_id>` namespace enough? Probably
-  fine for v1.
-- **Tree refresh strategy**: if PageIndex output schema changes between
-  versions, do we re-index everything? Likely yes; budget LLM cost.
-- **Sidecar HA**: for now, single replica is fine. If it crashes, no
-  query path works. Acceptable for V1; add reverse-proxy retry later.
-- **Auth between Nango and sidecar**: V1 assumes internal docker network
-  + no inbound port. If we expose the sidecar (rare), add a shared
-  secret header.
-- **OpenKB code reuse**: their Apache 2.0 compile prompts are worth
-  studying for §5 skill implementations. May vendor them or reference
-  patterns in the skill source.
-
-## 7. Decision summary
-
-- Sidecar: yes, Python + FastAPI + PageIndex, shares filesystem volume with Nango.
-- Storage: Postgres for metadata + markdown content, filesystem for binaries + tree JSON, behind a `KbStorage` interface that supports a future S3 driver.
-- Compile pipeline: orchestrated by Nango skills, sidecar is called only for `index` and `search`.
-- Default driver: `local`. `s3` is a single-commit switch when multi-instance becomes a requirement.
+- **Multi-tenant isolation**: Determine if `<collection_id>` namespace is sufficient for large scale.
+- **Tree refresh strategy**: Handle re-indexing when PageIndex output schema changes.
+- **Sidecar HA & Auth**: Evaluate adding reverse-proxy retries and shared secret headers for distributed deployments.

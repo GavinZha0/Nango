@@ -25,20 +25,17 @@ logging (`NANGO_LOG_*`).
 
 ## 2. Schema
 
-```sql
-CREATE TABLE config (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  key         text NOT NULL UNIQUE,       -- dot-notation: 'sandbox.timeout'
-  value       text NOT NULL,              -- current value (string representation)
-  value_type  text NOT NULL DEFAULT 'string',  -- 'string' | 'number' | 'boolean' | 'json'
-  options     jsonb,                      -- enum allowed values, NULL = free input
-  prev_value  text,                       -- previous value (single-level rollback)
-  description text,                       -- human-readable description
-  updated_by  uuid REFERENCES "user"(id) ON DELETE SET NULL,
-  created_at  timestamp DEFAULT now(),
-  updated_at  timestamp DEFAULT now()
-);
-```
+The `config` table stores the configuration parameters:
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | uuid | Primary key |
+| `key` | text | Unique dot-notation key (e.g. 'sandbox.timeout') |
+| `value` | text | Current value (string representation) |
+| `value_type` | text | 'string' \| 'number' \| 'boolean' \| 'json' |
+| `options` | jsonb | Enum allowed values (NULL = free input) |
+| `prev_value` | text | Previous value for single-level rollback |
+| `description` | text | Human-readable description |
 
 **Key design decisions:**
 
@@ -113,21 +110,8 @@ boot automatically seeds it into the DB.
 
 ## 5. Read API
 
-Five typed getters, all resolving through the same internal
-`resolve(key)` function:
-
-```typescript
-getConfig(key, defaultValue): string
-getConfigNumber(key, defaultValue): number
-getConfigMs(key, defaultSeconds): number    // reads seconds, returns ms
-getConfigBoolean(key, defaultValue): boolean
-getConfigJson<T>(key, defaultValue): T
-```
-
-`resolve(key)` checks the in-memory cache first (populated by
-`loadAllConfigs` at boot), then falls back to `CONFIG_DEFAULTS_MAP`.
-The `defaultValue` parameter is the final fallback if neither has the
-key.
+The configuration service provides typed getters (`getConfig`, `getConfigNumber`, `getConfigMs`, `getConfigBoolean`, `getConfigJson`) that all resolve through an internal `resolve(key)` function.
+`resolve(key)` checks the in-memory cache first, then falls back to code defaults, and finally to a provided `defaultValue`.
 
 ### Unit conventions
 
@@ -149,16 +133,7 @@ megabytes; keys with `_bytes` suffix store bytes.
 
 ## 6. Write API
 
-Used by the admin API routes:
-
-```typescript
-updateConfig({ key, value, updatedBy })  // stores prev_value
-createConfig({ key, value, valueType, description, updatedBy })
-deleteConfig(key)  // only custom keys; predefined keys throw
-```
-
-All write operations automatically refresh the in-memory cache by
-calling `loadAllConfigs()` after the DB write.
+The write API provides functions to `updateConfig`, `createConfig`, and `deleteConfig`. Predefined keys cannot be deleted. All write operations automatically refresh the in-memory cache by calling `loadAllConfigs()` after the DB write.
 
 ---
 
@@ -199,12 +174,11 @@ with options from the `options` JSONB column.
 
 ## 9. Config Keys Reference
 
-36 predefined keys across 8 groups.
+There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `auth`, `mcp`, and `observability`. 
 
-### sandbox (6)
+For the complete, authoritative list of keys, their default values, and descriptions, always refer to `src/lib/config/defaults.ts`.
 
-| Key | Default | Type | Description |
-|---|---|---|---|
+---|---|---|---|
 | `sandbox.timeout` | 30 | number | Execution timeout in seconds |
 | `sandbox.memory_mb` | 256 | number | Container memory limit in MB |
 | `sandbox.cpu_cores` | 0.8 | number | CPU limit as fractional cores |
@@ -281,62 +255,8 @@ with options from the `options` JSONB column.
 
 ## 10. Adding a New Config Key
 
-1. Add an entry to `CONFIG_DEFAULTS` in `src/lib/config/defaults.ts`:
-
-```typescript
-{ key: "mymodule.my_param", value: "42", valueType: "number", description: "..." },
-```
-
-2. Read the value in your module:
-
-```typescript
-import { getConfigNumber } from "@/lib/config";
-const myParam = getConfigNumber("mymodule.my_param", 42);
-```
-
-3. That's it. Next boot, `seedDefaults()` inserts the new row. No
-   migration needed for new keys.
-
-For enum configs, add `options`:
-
-```typescript
-{ key: "mymodule.mode", value: "a", valueType: "string", description: "...", options: ["a", "b", "c"] },
-```
+1. Add an entry to `CONFIG_DEFAULTS` in `src/lib/config/defaults.ts`.
+2. Use the appropriate typed getter (e.g., `getConfigNumber`) in your module to read the value.
+3. The next boot will automatically seed the new key into the database via `seedDefaults()`. No database migration is needed.
 
 ---
-
-## 11. File Layout
-
-```
-src/lib/config/
-├── defaults.ts        36 predefined config entries (single source of truth)
-├── service.ts         seed, load, read (typed getters), write, cache
-└── index.ts           public re-exports
-
-src/app/api/admin/config/
-├── route.ts           GET (list) + POST (create custom)
-└── [key]/route.ts     GET + PATCH + DELETE per key
-
-src/components/admin/
-└── ConfigManagement.tsx   Admin UI: grouped table with inline editing
-
-src/lib/db/migrations/
-├── 0028_*.sql         CREATE TABLE config + INSERT 36 defaults
-└── 0029_*.sql         ADD COLUMN options + UPDATE enum rows
-```
-
----
-
-## 12. Scripts Compatibility
-
-Scripts that run outside Next.js (via `tsx`, before DB is available)
-cannot use the config service. They import `CONFIG_DEFAULTS_MAP`
-directly from `defaults.ts` to read code-level defaults:
-
-```typescript
-import { CONFIG_DEFAULTS_MAP } from "@/lib/config/defaults";
-const image = CONFIG_DEFAULTS_MAP.get("sandbox.image")?.value ?? "sandbox-runner:latest";
-```
-
-This ensures scripts work without DB access while staying consistent
-with the default values.

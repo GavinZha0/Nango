@@ -73,19 +73,15 @@ bodies.
 
 ### 2.2 `skill_file` table
 
-```sql
-CREATE TABLE skill_file (
-  id            bigint generated always as identity primary key,
-  skill_id      uuid not null references skill(id) on delete cascade,
-  path          text not null,         -- e.g. 'references/output-format.md'
-  content       bytea not null,        -- raw bytes; ≤ 256 KB enforced at write
-  size          integer not null,
-  content_type  text,                  -- 'text/markdown', 'text/x-python', 'image/png'
-  updated_at    timestamp default current_timestamp,
-  unique (skill_id, path)
-);
-CREATE INDEX skill_file_skill_id_idx ON skill_file(skill_id);
-```
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigint | Primary key |
+| `skill_id` | uuid | FK to `skill(id)` ON DELETE CASCADE |
+| `path` | text | Relative POSIX path (e.g. `references/output.md`). Validated prefixes: `references/`, `scripts/`, `assets/`, `evals/`. |
+| `content` | bytea | Raw bytes (≤ 256 KB) |
+| `size` | integer | File size |
+| `content_type` | text | MIME type |
+| `updated_at` | timestamp | Last modified |
 
 **Path semantics**: `path` is a **relative POSIX path** matching one of
 the four allowed prefixes:
@@ -482,12 +478,13 @@ seconds, not minutes.
   `INTERPRETER_BY_EXTENSION` AND the binary present in the sandbox
   rootfs. Out of scope until a real use case lands.
 
-### 9.x Skill-declared Python dependencies (build-time aggregation)
+### 9.x Skill-declared Python dependencies
 
-**Status:** implemented. **Scope:** builtin skills only — user skills (DB / `$NANGO_SKILLS_HOME`) inherit whatever the image was built with; promoting a user skill to builtin (PR into `<repo>/skills/`) is the path to extend deps.
+**Status:** Built-in skills only. User skills inherit the image's dependencies.
 
-#### 9.x.0 Author quick reference
+#### Author quick reference
 
+Declare dependencies in `SKILL.md` frontmatter:
 ```yaml
 ---
 name: my-skill
@@ -496,102 +493,12 @@ dependencies-python: ["scikit-learn>=1.3", "scipy"]
 ---
 ```
 
-```bash
-pnpm sandbox:build    # regenerate requirements.txt + rebuild docker image
-pnpm sandbox:check    # CI: fail if requirements.txt is out of date
-pnpm sandbox:deps     # just regenerate requirements.txt (no docker)
-```
+**Commands:**
+- `pnpm sandbox:build`: Regenerate `docker/sandbox/requirements.txt` and rebuild image.
+- `pnpm sandbox:check`: CI drift check.
+- `pnpm sandbox:deps`: Just regenerate `requirements.txt`.
 
-Then commit BOTH the SKILL.md edit AND the regenerated `docker/sandbox/requirements.txt`. CI rejects PRs where the two have drifted apart.
+The build pipeline aggregates `dependencies-python` from all built-in `SKILL.md` files, merges them with core packages, detects version conflicts (hard-failing the build), and writes a unified `requirements.txt`.
 
-#### 9.x.1 Problem
-
-`docker/sandbox/Dockerfile` pins `duckdb / pandas / numpy / pyarrow` (`CORE_PACKAGES` in `src/lib/skills/dep-aggregation.ts`; `pyarrow` was promoted to a core package when the workflow SQL node went GA so `pd.read_parquet` fails closed at image build rather than mid-run inside a sandbox) and the rootfs is `read-only + no network`, so `import scipy` / `import requests` / etc. inside a skill script fails at runtime with `ModuleNotFoundError` — silently, with no install-time signal. SKILL.md frontmatter has no field for declaring runtime deps. Reviewer-flagged.
-
-#### 9.x.2 Design
-
-Author declares in SKILL.md frontmatter using a **flat key** (current `parser.ts` parses inline arrays without adding a YAML dep):
-
-```yaml
----
-name: my-skill
-description: ...
-dependencies-python: ["scikit-learn>=1.3", "scipy"]
----
-```
-
-Build pipeline:
-
-```
-pnpm sandbox:build
-  └─→ scripts/collect-skill-deps.ts
-        scan <repo>/skills/*/SKILL.md
-        merge dependencies-python from all builtins
-        strict conflict detection
-        write docker/sandbox/requirements.txt (commit to repo)
-  └─→ docker build -f docker/sandbox/Dockerfile
-        COPY docker/sandbox/requirements.txt /tmp/
-        RUN pip install --no-cache-dir -r /tmp/requirements.txt
-```
-
-`requirements.txt` source = `[CORE constants in collect script] ∪ [dependencies-python from every builtin SKILL.md]`. Output groups entries by source as comments (`# === core ===`, `# === from skills/<name> ===`) for diffability.
-
-**No runtime validation, no manifest.json.** A user skill that declares an unsatisfiable `dependencies-python` writes successfully and fails at execution; this is intentional scope.
-
-#### 9.x.3 Hard decisions (locked)
-
-| Question | Decision | Why |
-|---|---|---|
-| YAML nested object vs flat key | **Flat key** (`dependencies-python: [...]`) | Current `parser.ts` already handles inline arrays; adding `yaml` npm dep is a +50 KB cost for marginal ergonomics. Flat key gives a clean expansion path (`dependencies-node`, `dependencies-system`, …) when other languages land. |
-| Source: AST `import` scan vs frontmatter declaration | **Frontmatter only** | `import cv2` ≠ pkg `opencv-python`, `import sklearn` ≠ `scikit-learn`, conditional/dynamic imports invisible, can't pin versions. AST scan acceptable later as an additive lint ("declared but not imported / imported but not declared") but never as build source-of-truth. |
-| Where do core deps live | **In the collect script** as a `CORE` constant, all packages flow through `requirements.txt` | Single source for conflict detection; otherwise a skill declaring `pandas==1.5` would silently downgrade the core `pandas 2.x` in a second `pip install` layer. |
-| Version conflict between two skills | **Hard-fail the build** with both source paths in the error | `pip` resolver failures at image-build time are nearly impossible to attribute back to the skill that caused them. Catch in JS, attribute precisely. No automatic "take max / take intersection" — that's guessing intent. |
-| User-skill deps | **Out of scope** | Build-time only by user decision. User-skill `dependencies-python` is parsed and stored but has no enforcement path. |
-| When to run collect | **Manual `pnpm sandbox:build` + CI drift check** | Mirrors existing `db:generate` / `db:migrate` pattern. Auto-running on `pnpm dev` couples Next.js and sandbox-image pipelines that are otherwise independent. |
-| Lockfile (`pip-compile`) | **Defer** | `pandas>=2.0` resolves to a different patch each build; for sandbox the strict-pin is YAGNI. Add only when a non-reproducibility bug forces it. |
-
-#### 9.x.4 Open questions (decide at implementation time)
-
-- **Image-size CI signal.** A skill PR adding `torch` blows the image from ~270 MB to ~3 GB. No hard limit, but CI workflow should print the new sandbox image size in PR comments so reviewers see the jump. Need to choose: GitHub Actions step + `actions/github-script` to comment, or just write it to job summary.
-- **`dependencies-python` declared but no `.py` files in the skill dir.** Lint-warn (collect script prints) vs lint-error (collect script exits 1). Probably warn — author may keep example code under `references/`.
-- **Empty `dependencies-python: []` vs absent key.** Treat identically (no contribution to requirements.txt). Trivial.
-
-#### 9.x.5 Implementation status
-
-Landed in commits `…` (parser+lib+script) and downstream:
-
-| # | File | Status |
-|---|---|---|
-| 1 | `src/lib/skills/parser.ts` | ✅ `dependenciesPython?: string[]` first-class field; bare-value fallback wraps to `[v]` so unbracketed authors don't silently lose entries. |
-| 2 | `src/lib/skills/dep-aggregation.ts` | ✅ NEW. Pure helpers (`packageNameOf`, `mergeDeps`, `renderRequirements`, `CORE_PACKAGES`) — extracted so the script's logic is unit-testable without spawning. |
-| 3 | `scripts/collect-skill-deps.ts` | ✅ Thin fs-IO + CLI glue around the lib. `--check` mode for drift; SkillParseError on a per-skill basis is logged + skipped, never aborts the run for siblings. |
-| 4 | `docker/sandbox/Dockerfile` | ✅ `COPY requirements.txt /tmp/` + `pip install -r`. Header comment now points authors at SKILL.md instead of inline pip lines. |
-| 5 | `docker/sandbox/requirements.txt` | ✅ Committed; initial content = core only (4 packages: `duckdb / pandas / numpy / pyarrow`). |
-| 6 | `package.json` | ✅ `sandbox:deps` (regen only), `sandbox:build` (regen + image), `sandbox:check` (drift CI). |
-| 7 | CI drift check | ⏳ Repo has no `.github/workflows/` yet. `pnpm sandbox:check` is ready to drop into the first workflow whenever CI lands. |
-| 8 | Docs | ✅ This section, `docs/sandbox.md` §3.3 (skill-driven deps note), Dockerfile header. |
-| 9 | Tests | ✅ `tests/unit/lib/skills/parser-dependencies.test.ts` (6 cases) + `tests/unit/lib/skills/dep-aggregation.test.ts` (16 cases) covering version specs, extras, multi-conflict reporting, sort stability, core-shadow dedup. |
-
-#### 9.x.6 Migration
-
-Zero migration. Existing builtin SKILL.md files have no `dependencies-python` key; collect script emits exactly the current core packages; image rebuild is byte-equivalent. Authors opt-in skill-by-skill as scripts grow non-trivial.
-
-#### 9.x.7 Future ecosystems (when adding non-Python languages)
-
-The flat-key naming (`dependencies-python`, not nested `dependencies.python`) leaves room for:
-
-| Ecosystem | Future key | Covers extensions | Registry |
-|---|---|---|---|
-| Python | `dependencies-python` (current) | `.py` | PyPI / pip |
-| Node | `dependencies-node` | `.js` AND `.ts` (same registry) | npm |
-| System | `dependencies-system` | any (binaries: `jq`, `graphviz`, `ffmpeg`, …) | apt / brew |
-
-**Note: ecosystem name, not file extension.** TypeScript and JavaScript share npm; we do NOT have separate `dependencies-js` / `dependencies-ts`. `.sh` scripts have no language-specific package manager — they pull system binaries via `dependencies-system`.
-
-When adding a new language (per §9 "Languages beyond .py / .sh"), the implementation pattern mirrors §9.x.5 #1–3:
-
-1. Add `dependenciesNode?: string[]` (or `dependenciesSystem?: string[]`) to `SkillFrontmatter`.
-2. Extend `dep-aggregation.ts` with parallel collect / merge / render emitting `package.json` deps (or `apt-packages.txt`) instead of `requirements.txt`.
-3. Update `Dockerfile` to install from the new artifact at the appropriate layer.
-
-Conflict detection generalises trivially — same package name + different spec → fail. Cross-ecosystem conflicts (e.g. system `python3-requests` AND PyPI `requests`) are out of scope; document the precedence rule when the second ecosystem actually lands.
+#### Future ecosystems
+The flat-key naming (`dependencies-python`) leaves room for future extensions like `dependencies-node` or `dependencies-system`.

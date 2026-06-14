@@ -1,40 +1,8 @@
 # A2A compatibility — `EntityDescriptor` ↔ `AgentCard` mapping
 
-Status: **forward-compatibility notes only — Nango does not implement
-A2A today**.
+Status: **Forward-compatibility notes only — Nango does not implement A2A today.**
 
-This document records the design decisions taken while reviewing
-Google's [A2A protocol](https://github.com/google/a2a) (Agent2Agent)
-in May 2026, so that whenever we choose to expose Nango agents over
-A2A — or consume external A2A agents as a new backend module — we
-won't have to re-derive the field mapping from scratch.
-
-It also pairs with the analogous IBM-led
-[ACP](https://github.com/ibm/acp) protocol; for this codebase we
-intentionally don't track ACP separately because (a) the A2A and ACP
-ecosystems are converging, and (b) IBM's BeeAI agents are already
-adding A2A support, suggesting the long-term direction is a single
-LF-hosted standard rooted in A2A.
-
----
-
-## 1. Why this document exists
-
-The current backend abstraction (`src/lib/backends/types.ts`) was
-designed around the platforms Nango actually integrates with —
-agno, Mastra, Dify. Those platforms each have their own REST shape,
-and `EntityDescriptor` is a least-common-denominator projection.
-
-A2A specifies a richer agent-discovery format (the **Agent Card**)
-that — *if* the project ever decides to follow it — would let any
-A2A-compliant runtime drop into Nango via a single generic adapter
-instead of a hand-written per-platform module.
-
-For now we are explicitly choosing *not* to introduce A2A. This file
-exists so the next person who picks the question up has a complete
-mapping table to start from rather than a blank page.
-
----
+This document records the field mapping for Google's [A2A protocol](https://github.com/google/a2a). It serves as a reference for future integration, allowing Nango to either expose agents over A2A or consume external A2A agents via a generic adapter.
 
 ## 2. Mapping summary
 
@@ -94,19 +62,9 @@ Placement of the helper: `src/lib/backends/a2a/skill-projection.ts`
 
 ---
 
-## 3. Implemented mirror (May 2026)
+## 3. Implemented Mirror
 
-Only one field has been mirrored into `EntityDescriptor` for now:
-
-```ts
-// src/lib/backends/types.ts
-export interface EntityDescriptor {
-  // ...
-  /** Optional version label surfaced in the agent list.
-   *  Maps to A2A AgentCard.version. */
-  version?: string;
-}
-```
+Currently, only the `version` field has been mirrored into `EntityDescriptor` (`src/lib/backends/types.ts`).
 
 Source mapping per adapter:
 
@@ -123,43 +81,25 @@ matching the MCP panel's existing version chip style.
 
 ---
 
-## 4. What we deliberately did *not* add (and why)
+## 4. Deferred Additions & Triggers
 
-The following fields were considered and rejected for the May 2026
-pass — adding them costs almost nothing in TypeScript but would
-inflate `EntityDescriptor` with placeholders that nothing reads:
-
-- `iconUrl` (semantics conflict with the existing builtin `icon` field)
-- `documentationUrl`
+The following fields are deferred to avoid inflating `EntityDescriptor` with unused placeholders:
+- `iconUrl`, `documentationUrl`
 - `defaultInputModes` / `defaultOutputModes`
 - `capabilities.{streaming, pushNotifications, stateTransitionHistory}`
 - `skills[]`
 - `supportsAuthenticatedExtendedCard`
 
-The agreement: revisit when one of the following triggers fires.
+### Trigger signals for re-opening this integration:
+1. Agno, Mastra, or Dify ships a native A2A endpoint.
+2. A user needs to connect a custom A2A agent (e.g., in-house LangGraph workflow).
+3. Strategic decision to expose the Nango supervisor as an A2A agent.
 
-### Trigger signals for re-opening this question
-
-1. **Any** of agno / Mastra / Dify ships a native A2A endpoint.
-2. A concrete user request to add a non-listed A2A agent (e.g. a
-   LangGraph workflow the customer wrote in-house and exposes as
-   A2A) to Nango.
-3. A strategic decision to expose the Nango supervisor as an A2A
-   agent to other systems.
-
-When that happens, the recommended path is:
-
-1. **Don't replace** the existing backend modules. Add a new
-   `src/lib/backends/a2a/` module that consumes / emits Agent Cards.
-2. Extend `EntityDescriptor` with the remaining optional fields
-   from §2 — type-only changes, no migration.
-3. Implement `lib/backends/a2a/skill-projection.ts` for the
-   `skills[]` expansion described in §2.2.
-4. Expose an Agent Card endpoint (e.g.
-   `/api/.well-known/agent.json?credentialId=...&agentId=...`) for
-   outbound interop.
-
----
+### Recommended Implementation Path:
+1. Add a new `src/lib/backends/a2a/` module (do not replace existing backend modules).
+2. Extend `EntityDescriptor` with the remaining optional fields.
+3. Implement `lib/backends/a2a/skill-projection.ts` for `skills[]` expansion.
+4. Expose an outbound Agent Card endpoint (e.g., `/api/.well-known/agent.json`).
 
 ## 5. Source pointers
 

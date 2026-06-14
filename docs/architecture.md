@@ -104,20 +104,15 @@ Three core capabilities:
 
 ### 3.2 Architectural Principles
 
-1. **Protocol unification.** The browser only ever sees an **AG-UI event stream**. Every backend chat handler bridges its upstream platform's REST + SSE into AG-UI events on the fly (agno / Mastra / Dify all share this shape). When the credential has `aguiUrl` populated, every handler short-circuits to an AG-UI passthrough (`HttpAgent`) at the top of `buildAgent`.
-2. **Server-side secret isolation.** All third-party secrets (API keys, bearer tokens) are AES-256-GCM encrypted in the `credential` table. Decryption only happens in modules marked `import "server-only"`; secrets never reach the browser bundle.
+1. **Protocol unification**: The browser only ever sees an AG-UI event stream.
+2. **Secret isolation**: All API keys are AES-256-GCM encrypted and never reach the browser.
 3. **Parallel multi-source loading.** `WorkspaceProvider` loads three agent sources in parallel on mount (Backend Agents / Backend Teams / Built-in Agents). The first source with available agents auto-selects the default; the UI is never blocked by the slowest source.
 4. **Adapter pattern.** Each backend platform plugs in by implementing `IBackendAdapter` (metadata) and `IBackendChatHandler` (chat). The registry uses `satisfies Record<BackendId, …>` so forgetting to register an adapter is a compile error.
-5. **Cache with precise, reverse-indexed invalidation.** Six process-wide caches live in the Node process. Four back the Built-in runtime: the credential lookup cache, the `AgentSpec` pool (LRU + 10-min TTL), the MCP provider pool (refcounted + idle reaper), and the Skill pool (LRU + 10-min TTL). The fifth is the control-plane `EntityCatalog` cache (`backends/entity-catalog.ts`, keyed by `credentialId`, 10-min TTL) used for UI entity listing, supervisor catalog rendering, and schedule validation. The sixth is the `thread-state` cache (`backends/thread-state.server.ts`, LRU keyed by `(credentialId, threadId)`) that fronts the `backend_thread_state` table for upstream-session tokens (Dify `conversation_id` today). Writes invalidate only the entries that depend on the mutated row, never the whole world. **All six caches** — plus the related `langfuse` and `oauth-token-manager` singletons — are pinned to `globalThis` slots so dev-server HMR reloads don't lose state mid-session. See `docs/cache.md` (full inventory + §2.7 HMR pinning rule) and `docs/builtin-runtime.md` (per-pool contracts).
-6. **Run-as-first-class.** Every dispatch (chat, supervisor delegation, async, scheduled, **workflow refresh**) produces one `entity_run` row + an append-only `entity_run_event` timeline. Async runs notify on terminal events; scheduled runs reuse the async path so the inbox is uniform. Workflow refresh adds three node-level event types (`workflow_node_attempt_started` / `_failed` / `workflow_node_completed`) on the `forceFresh: true` path only — see `docs/workflow.md` §5.3 and `docs/runner-events.md` §8.1. See `docs/orchestrator.md` for the full dispatch model.
-7. **Supervisor catalog inlined, not tooled.** Nango (the user's `role = 'supervisor'` agent) sees the routable specialist catalog as part of its system prompt — no `list_agents` round-trip. Delegation tools reference catalog entries by `displayName` and the server resolves the keys, so the LLM cannot leak credential ids or pick non-routable targets. System-role agents (`role !== null`) are structurally excluded from the catalog so secretary / evaluator (when implemented) can never be delegated to.
-8. **Vendor lock-in mitigation (CopilotKit + AG-UI).** `@copilotkit/runtime/v2` and `@copilotkit/react-core/v2` are in active iteration; we already absorbed v1 → v2 once. Concentrate the import surface so the next upgrade is a single-file edit, not a 10-file sed:
-   - **Server runtime**: every `@copilotkit/runtime/v2` import MUST go through `lib/copilot/index.server.ts`.
-   - **Client UI**: every `@copilotkit/react-core/v2` import MUST go through `lib/copilot/client.ts`.
-   - **AG-UI protocol**: every `@ag-ui/client` import MUST go through `lib/copilot/index.server.ts`. CopilotKit pins its own `@ag-ui/client` version internally; routing all consumers through one barrel forces a single resolution path so an `instanceof AbstractAgent` mismatch from npm dedupe drift becomes detectable here, not in random call sites. Type-only imports from this server-only file are safe in client components — `import type` is erased before webpack sees the module reference.
-   - **CSS stylesheet**: `@copilotkit/react-ui/v2/styles.css` is imported directly in `RightPanel.tsx` and `ChatPanel.tsx`. Explicit exception — barrels cannot abstract `import "...css"` side-effects.
-   - **What this principle is NOT**: it's a vendor-surface containment, NOT a directory layout rule. `defineTool` calls live in their domain module (`skills/runtime-tools.ts`, `data-sources/runtime-tools.ts`, `sandbox/runtime-tools.ts`) — that's the right home; only the import path is funnelled. Same for AG-UI types in backend bridges (`agno/chat.server.ts`, `mastra/chat.server.ts`, `dify/chat.server.ts`).
-9. **LLM is direct, not adapted.** Built-in agents reach LLM providers (OpenAI / Anthropic / Vertex / …) **directly** through the CopilotKit + AI SDK runtime — there is no pool / adapter layer between agent and LLM. This is a deliberate asymmetry: MCP servers, SSH hosts, data sources, and the sandbox all get wrapped behind their respective pool / adapter (different protocols, lifecycles, connection caching), but the LLM call is the **driver** of agent reasoning, not a tool the agent decides to call. Backend agents reach LLM transitively through their upstream platform (agno / Mastra / Dify), which is opaque to us.
+5. **Cache with precise, reverse-indexed invalidation.** Six process-wide caches live in the Node process (e.g., credentials, agents, MCP connections). Writes invalidate only dependent entries. All caches are pinned to `globalThis` to survive dev-server HMR reloads.
+6. **Run-as-first-class.** Every execution (chat, scheduled, workflow refresh) produces a unified `entity_run` row and an append-only timeline.
+7. **Supervisor catalog inlined.** The supervisor agent sees available specialists directly in its system prompt—avoiding extra round-trips to list agents.
+8. **Vendor lock-in mitigation.** Third-party SDKs (e.g., CopilotKit, AG-UI) are wrapped in centralized barrel files (`lib/copilot/`). Upgrades require editing a single file rather than touching scattered call sites.
+9. **LLM is direct, not adapted.** Built-in agents interact directly with LLM providers without an intermediate adapter layer, as the LLM drives the reasoning process itself.
 
 ### 3.3 Four Integration Layers (Adapter Pattern)
 
@@ -374,37 +369,7 @@ Runtime (inside Built-in Agent):
 
 ### 5.4 Outcomes Panel & Artifact Library
 
-Two distinct surfaces, deliberately separated — see `docs/data-visualization.md` for the full design.
-
-**Transient Outcomes Panel — `/outcomes` (V1):**
-
-```
-Built-in agent calls render_chart frontend tool
-   ↓
-useOutcomeTools handler (handler-only) runs
-   ├─ enforce 64KB hard cap on option JSON
-   ├─ capture agentId + threadId from workspaceStore
-   ├─ outcomeStore.addOutcome({ outcomeId, kind:"chart", option, … })
-   ├─ if pathname === "/" AND first outcome of thread → router.push("/outcomes")
-   ↓
-/outcomes → OutcomesPanel → OutcomeCard list (grid or focus view)
-   ├─ shadcn Collapsible + Card per outcome (no react-grid-layout)
-   ├─ EChartsRenderer (next/dynamic + next-themes dark)
-   ├─ per-card ChartErrorBoundary
-   ├─ Save icon → POST /api/artifacts (idempotent)
-```
-
-`useRenderTool` registers `ChartPreviewCard` for the chat-side inline preview. The handler/render split is mandatory — combining them on `useFrontendTool` collides with the wildcard `useDefaultRenderTool("*")`. See `useInteractiveTools.tsx:13-33` for the same pitfall.
-
-Thread switches in `workspaceStore.runtimeThreadId` drive `outcomeStore.clearForThreadSwitch + loadForThread` via a `WorkspaceProvider` subscriber. The replay endpoint `GET /api/threads/[threadId]/outcomes` rebuilds the panel from `entity_run_event` `tool_call_chunk` rows where `payload->>'toolName' = 'render_chart'`, back-filling `savedArtifactId` from the `artifact` table.
-
-**Permanent Artifact Library — `/artifact` (V2, scaffolded):**
-
-The `artifact` table (with V1 additions `source_thread_id` / `source_outcome_id` for idempotent save) backs the future Artifact library. V1 only ships the WRITE side (`POST /api/artifacts`); list / detail / categorization UI is V2.
-
-**Don't confuse the two:** the Outcomes panel is per-thread, derived from `entity_run_event` history, ephemeral; the Artifact library is permanent, user-owned, with visibility. The Save button on an outcome card is the only bridge.
-
-Legacy `workspaceStore.activeArtifact` / `openArtifact` / `closeArtifact` (the `open_artifact` / `close_artifact` frontend-tool scaffold) was deleted in V1 — see `docs/data-visualization.md` §6.4 for the rationale.
+Transient Outcomes Panel (/outcomes) for per-thread charts; Permanent Artifact Library (/artifact) for saved outcomes.
 
 ### 5.5 Credential Lifecycle
 
@@ -468,86 +433,10 @@ Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the u
 ---
 
 ## 7. Time & Timezone
-
-### 7.1 Core Principle: UTC Everywhere, Timezone for Display
-
-All timestamps in the database and all server-side computations use
-**UTC**. Timezone is a **presentation concern** resolved at the edge
-(frontend display and calendar-interval arithmetic).
-
-| Layer | Convention |
-|---|---|
-| **Database** | All 60 timestamp columns across 24 tables use PostgreSQL `timestamp without time zone`. Values are UTC instants. |
-| **API transport** | ISO-8601 UTC strings (`"2026-06-13T14:51:03.000Z"`). Timezone is never baked into the timestamp — it travels as a separate field when needed (e.g. `schedule.timezone`). |
-| **Server-side comparisons** | `Date.now()` / `Date.getTime()` — epoch milliseconds, timezone-independent. Session expiry, token TTL, cache freshness, schedule validation all use absolute UTC math. |
-| **Scheduler interval arithmetic** | `addInterval()` uses the schedule's IANA timezone for `day/week/month` intervals to preserve wall-clock time across DST transitions, then converts the result back to UTC. `minute/hour` intervals add fixed milliseconds — no timezone involved. |
-| **Frontend display** | All user-visible timestamps are formatted using the user's **profile timezone** via `useDisplayTimezone()` + `formatTimestamp()`. |
-
-### 7.2 User Timezone Model
-
-Each user has two fields in the `user` table:
-
-| Field | Type | Purpose |
-|---|---|---|
-| `timezone` | `text` (nullable) | IANA timezone name (e.g. `"America/New_York"`). Source of truth for `get_current_datetime` tool, default schedule timezone, and all frontend timestamp display. |
-| `timezone_follow_browser` | `boolean` (default `true`) | When true, `timezone` is auto-synced to the browser's timezone on every session load. When false, `timezone` is a fixed value set by the user on the Profile page. |
-
-**Resolution flow (WorkspaceProvider on session load):**
-
-1. `followBrowser = true` and browser timezone differs from stored → update profile to match browser.
-2. `followBrowser = false` and timezone already set → skip (fixed mode).
-3. `timezone` is null (first visit) → always seed from browser regardless of `followBrowser`.
-
-This ensures `timezone` always has a value for server-side consumers (`get_current_datetime`, `create_schedule`, headless scheduled runs).
-
-### 7.3 Frontend Display Format
-
-All user-facing timestamps use a single function:
-
-```typescript
-formatTimestamp(iso, timeZone, style?)
-```
-
-Fixed locale `en-US`, no year. Four styles:
-
-| Style | Output | Use case |
-|---|---|---|
-| `"datetime"` (default) | `6/13, 10:51 AM` | Notifications, run history, admin lists |
-| `"time"` | `10:51 AM` | Compact inline (reserved) |
-| `"datetimePrecise"` | `6/13, 10:51:03 AM` | Thread detail RunCard (multiple runs per minute) |
-| `"timePrecise"` | `10:51:03 AM` | EventTimeline rows (date shown in parent context) |
-
-All call sites use `useDisplayTimezone()` to read the profile timezone and pass it to `formatTimestamp()`. No call site uses raw `toLocaleString()` without a timezone parameter.
-
-**Files**: `src/components/admin/format.tsx` (formatter), `src/hooks/useDisplayTimezone.ts` (hook).
-
-### 7.4 Schedule Timezone
-
-Each schedule row carries its own `timezone` field — a **creation-time snapshot** of the user's profile timezone. Changing the user's profile timezone later does NOT affect existing schedules.
-
-The schedule's timezone serves two purposes:
-1. **Calendar interval arithmetic** — `addInterval()` uses it for DST-safe `day/week/month` stepping.
-2. **UI display** — the ScheduleEditor shows the schedule's snapshotted timezone in the Advanced section.
-
-### 7.5 Invariants
-
-1. **Never store local time.** All `timestamp` columns contain UTC values produced by `new Date()` (server) or `CURRENT_TIMESTAMP` (PostgreSQL).
-2. **Never format without a timezone.** Every user-facing timestamp call passes the profile timezone from `useDisplayTimezone()`.
-3. **Timezone does not affect server logic.** Token expiry, session validity, cache TTL, run duration — all use UTC epoch math. The only server-side use of IANA timezone is `addInterval()` for calendar intervals.
-4. **`timezone` is always populated.** The `WorkspaceProvider` auto-detect + `followBrowser` sync ensures the field is never null after the user's first session load.
-
-### 7.6 Testing
-
-Two test files cover the core time logic:
-
-- `tests/unit/components/admin/format-timestamp.test.ts` — 13 cases: four style variants, timezone shifts (including cross-midnight), null/invalid edge cases.
-- `tests/unit/lib/runner/scheduler-time.test.ts` — 16 cases: `addInterval` (fixed-ms, calendar, DST spring-forward / fall-back), `nextFireAt` (one-shot, recurring, endAt cap, hourly).
-
-### 7.7 Ops: Docker Clock Drift
-
-On macOS Docker Desktop, the Linux VM's clock can drift after host sleep/wake cycles. Since the scheduler uses `setTimeout(delay)` where `delay = nextFire.getTime() - Date.now()`, a stale `Date.now()` produces an incorrect delay. **Fix: restart Docker Desktop** to re-sync the VM clock. Linux-native Docker does not have this issue (the host kernel runs NTP continuously).
-
----
+- **UTC Everywhere**: All DB 	imestamp columns and server-side computations use absolute UTC.
+- **Display**: Timezone is purely a edge/presentation concern, resolved via useDisplayTimezone() + ormatTimestamp(iso, tz, style).
+- **User Profile**: 	imezone field in user table is the source of truth, optionally synced to browser via 	imezone_follow_browser.
+- **Schedules**: schedule.timezone captures a snapshot of the user's timezone at creation time, used for DST-safe interval arithmetic.
 
 ## 8. Security
 
@@ -557,7 +446,7 @@ On macOS Docker Desktop, the Linux VM's clock can drift after host sleep/wake cy
 | Secret in client bundle | All decryption modules start with `import "server-only"` (compile-time enforced) |
 | Session hijacking | better-auth session cookies + CSRF + secure cookies (forced HTTPS in production) |
 | Privilege escalation | `(workspace)` layout calls `requireSession()`; `admin/*` layout adds `requireAdmin()`; API routes also call `getSession()` |
-| Injection | `X-Credential-Id` is matched against a strict UUID regex (`/^[a-f0-9-]{36}$/`); `agentId` (parsed from URL path) against `/^[A-Za-z0-9._\-]{1,128}$/`; `entityKind` is server-derived from EntityCatalog so cannot be tampered |
+| Injection | Incoming IDs (`X-Credential-Id`, `agentId`) are matched against strict regex patterns; `entityKind` is server-derived from EntityCatalog so cannot be tampered |
 | Log leakage | pino redacts `headers.authorization` / `headers.cookie` / `headers['x-credential-id']` etc. automatically |
 | MCP failures | `GracefulMcpProvider` wraps tool calls: 5s timeout, errors degrade to readable text — never abort the LLM run |
 
@@ -575,106 +464,7 @@ See `docs/observability.md` for details.
 ---
 
 ## 10. Extensibility
-
-### 10.1 Adding a New Agent Backend
-
-The architectural reference (control / data plane separation,
-`BackendModule` pattern, security model, hot-path invariants) lives
-in `docs/backend-integration.md`; §10 of the same doc is the
-step-by-step onboarding walkthrough.
-
-Four-step summary: append the slug to `PROVIDER_IDS` in
-`src/lib/backends/types.ts`; create
-`src/lib/backends/<slug>/{adapter, chat.server, entity.server, index.server}.ts`
-(build the chat bridge on `bridge-runtime-kit.server.ts` — don't
-hand-roll an Observable); register in `src/lib/backends/registry.ts`
-(client-safe) and `src/lib/backends/registry.server.ts`
-(server-only). Both registries use `satisfies Record<BackendId, …>`
-so missing or typo-mismatched registrations fail `tsc`.
-
-### 10.2 Adding a New Outcome Kind
-
-The polymorphic `Outcome` union in `src/store/outcome-store.ts` already
-admits `kind: "chart" | "html" | "image"`. V1 only produces `"chart"`;
-adding a producer for the other kinds is mostly a matter of:
-
-1. (If a new kind) extend `OutcomeKind` and the discriminated union in `src/store/outcome-store.ts`.
-2. Add a `case` to `OutcomeBody` in `src/components/workspace/OutcomeCard.tsx` for the new kind's renderer (e.g. iframe sandbox for HTML).
-3. Add a frontend tool in `src/hooks/useOutcomeTools.tsx` (or split into `useOutcomeTools.tsx` once non-chart kinds ship) following the handler/render split rule.
-4. Update `toCreateArtifactBody` in `src/hooks/useSaveOutcome.ts` to shape the artifact body for the new kind.
-5. (Optional) update `src/lib/outcomes/prompt-block.server.ts` to tell qualified agents about the new tool.
-
-### 10.2bis Adding a New Saved-Artifact Type
-
-The persisted `artifact` table also has a `type` enum
-(`code`/`chart`/`dashboard`/`image`/`html`/`ppt`/`report`):
-
-1. Append the type to `ARTIFACT_TYPES` in `src/lib/domain/artifact.ts`.
-2. Add a branch to the `renderByType` switch in `ArtifactRenderer.tsx`.
-3. (V2) Add a branch in the future `/artifact/[id]` page.
-
-### 10.3 LLM Endpoints (Ollama / vLLM / Groq / …)
-
-Do **not** register raw LLM endpoints as agent backend platforms. Instead:
-1. Create a credential with `serviceType="llm"`.
-2. Pick that credential when authoring a Built-in Agent.
-3. CopilotKit Runtime drives the model through `BuiltInAgent` and the AI SDK provider.
-
----
-
-## 11. Document Index
-
-- `AGENTS.md` — project-wide development rules and directory conventions
-- `CLAUDE.md` — Claude AI assistant context
-- `README.md` — getting started and scripts
-- `docs/backend-integration.md` — multi-backend integration architecture (layered view, control / data plane separation, `BackendModule` pattern, security model, hot-path invariants); §10 is the four-step onboarding walkthrough for a new platform
-- `docs/observability.md` — logging and tracing in depth
-- `docs/builtin-runtime.md` — Built-in runtime pools, invalidation contract, operator guide
-- `docs/key-rotation.md` — credential encryption keyring & rotation procedure
-- `docs/memory-architecture.md` — agent memory system design (not yet implemented)
-- `docs/threadid-lifecycle.md` — CopilotKit v2 threadId lifecycle
-- `docs/orchestrator.md` — Runner kernel, supervisor, async, schedules, run forensics
-- `docs/runner-events.md` — event pipeline (reception → coalescing → persistence → replay → admin display) + AG-UI ↔ `EntityRunEventType` reference table
-- `docs/runner.md` — runner kernel implementation: dispatch paths, request flow, file layout
-- `docs/cache.md` — six process-wide caches: invalidation, HMR `globalThis` pinning (§2.7), observability
-- `docs/workflow.md` — workflow V1 reference: architecture, spec format (5 node types), save / refresh flows, design principles, constraints, backlog
-- `docs/skills.md` — DB-resident Skills runtime: build pipeline, boot reconcile, runtime tool surface
-- `docs/data-sources.md` — `IDataSourceAdapter` contract, Parquet cache strategy, per-source adapter onboarding
-- `docs/sandbox.md` — `ISandboxAdapter` contract, three local backends (Subprocess / Nsjail / LocalDocker), `./data/<name>/data.parquet` path contract, agent-tool surface
-- `docs/data-visualization.md` — outcomes panel + chart UI, `render_chart` frontend tool
-- `docs/artifact-evolution.md` — artifact library V2 plans (enlarge / minimize, multi-type artifacts)
-
----
-
-## Appendix A: Module Dependency Cheat-sheet
-
-```
-RightPanel ──► <CopilotKit/> v2
-                │
-                ├─ runtimeUrl=/api/copilotkit          (backend agents)
-                │                │
-                │                ├─ EntityCatalog.list(credentialId) → kind (server-derived)
-                │                ├─ getCredentialConfigById ── credential cache
-                │                └─ backends/registry.server → BackendModule
-                │                                              │
-                │                                              ├─ dataPlane.chatHandler.buildAgent
-                │                                              │   └─ BridgeAgent on
-                │                                              │      bridge-runtime-kit.server.ts
-                │                                              │      (agno / mastra / dify)
-                │                                              └─ wrapped by PersistingAgent
-                │                                                 (entity_run + entity_run_event)
-                │
-                ├─ runtimeUrl=/api/copilotkit/builtin  (built-in agents)
-                │                │
-                │                ├─ isAgentVisibleTo / listVisibleAgentIds
-                │                ├─ agentPool.get → AgentSpec
-                │                │     ↳ apiKey ← credential cache
-                │                ├─ mcpProviderPool.borrow × N
-                │                │     ↳ GracefulMcpProvider (refcounted, shared)
-                │                └─ new CopilotRuntime({ agents }) — per request
-                │
-                └─ useOutcomeTools: render_chart (frontend tool)
-                                              │
-                                              ├─ outcomeStore.addOutcome → /outcomes panel
-                                              └─ Save button → POST /api/artifacts
-```
+- **New Agent Backend**: See docs/backend-integration.md. Create adapter/chat handlers under src/lib/backends/<slug>/ and register in 
+egistry.ts.
+- **New MCP Server**: Handled fully via UI at /mcp (saves to mcp_server table).
+- **New Frontend Tool**: Define schema in src/hooks/useOutcomeTools.tsx, add render logic in OutcomesPanel.tsx.

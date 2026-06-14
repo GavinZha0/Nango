@@ -31,75 +31,15 @@ This document describes the implemented design. Phases D-1, D-2 (with sub-phases
 
 ## 2. The contract
 
-```ts
-// src/lib/data-sources/types.ts
+### Core Types
 
-/** Stable string id used for registry lookup ("mysql", "postgres", "vertica", ...). */
-export type DataSourceId = string;
-
-/** Schema describing a single Parquet column, used by adapters that
- *  preserve type fidelity (Postgres `numeric`, Vertica `LONG VARCHAR`, ...). */
-export interface ColumnSchema {
-  name: string;
-  type: "bool" | "int32" | "int64" | "float32" | "float64"
-      | "string" | "timestamp" | "date" | "decimal" | "binary";
-  nullable: boolean;
-  description?: string;
-}
-
-export interface DatasetSchema {
-  columns: ColumnSchema[];
-  total_rows: number;
-  byteSize: number;
-}
-
-export interface ExtractInput {
-  /** Stable cache key — the dataset identity. */
-  datasetName: string;
-  /** SQL the adapter executes against the source. Adapter is free to
-   *  rewrite for dialect compatibility; the result must match the SQL's
-   *  semantics from the agent's perspective. */
-  query: string;
-  /** Optional bound parameters; safer than string interpolation. */
-  params?: Record<string, string | number | boolean | null>;
-  /** Where to write the Parquet output. */
-  outputPath: string;
-  /** Hard time budget. Adapter MUST cancel if exceeded. */
-  timeoutMs: number;
-  /** Hard row cap; adapter aborts if exceeded. */
-  maxRows: number;
-  /** AbortSignal plumbed through cancellable network clients. */
-  signal: AbortSignal;
-}
-
-export interface ExtractResult {
-  schema: DatasetSchema;
-  /** sha256 of the canonicalised query text — used for cache-key composition. */
-  queryHash: string;
-}
-
-export interface IDataSourceAdapter {
-  /** Stable id matching `credential.provider` for sources of `serviceType="database"`. */
-  readonly id: DataSourceId;
-
-  /** Human-readable display name for the UI / logs. */
-  readonly displayName: string;
-
-  /** Quick connectivity probe; called by admin "Test connection" button. */
-  testConnection(credentialId: string, signal: AbortSignal): Promise<{
-    ok: boolean;
-    latencyMs: number;
-    error?: string;
-  }>;
-
-  /** Run the query, stream rows, write Parquet at `input.outputPath`. */
-  extract(credentialId: string, input: ExtractInput): Promise<ExtractResult>;
-
-  /** Optional: list available tables / views so the agent can introspect.
-   *  V1 may stub this — agents typically receive an explicit allow-list. */
-  describeNamespace?(credentialId: string, namespace: string): Promise<DatasetSchema[]>;
-}
-```
+| Interface | Purpose | Key Fields/Methods |
+|---|---|---|
+| `ColumnSchema` | Describes a Parquet column | `name`, `type`, `nullable` |
+| `DatasetSchema` | Describes a dataset | `columns`, `total_rows`, `byteSize` |
+| `ExtractInput` | Input to extraction | `datasetName`, `query`, `outputPath`, `timeoutMs`, `maxRows` |
+| `ExtractResult` | Result of extraction | `schema`, `queryHash` |
+| `IDataSourceAdapter` | Adapter interface | `id`, `displayName`, `testConnection()`, `extract()` |
 
 Two design choices in this contract:
 
@@ -137,24 +77,11 @@ Each provider module exposes a static client-safe descriptor (`adapter.ts`) and 
 
 ### 3.1 The DuckDB-backed extraction shortcut
 
-For sources DuckDB has a native scanner extension (Postgres, MySQL, SQLite, Iceberg, Delta), the adapter implementation is short:
+For sources with DuckDB native scanner extensions (Postgres, MySQL, SQLite), the adapter uses DuckDB to directly query the source and write Parquet in a single streaming operation. This gives us:
+- Streaming end-to-end (low memory)
+- Type preservation
+- Optimised row group sizing
 
-```ts
-// src/lib/data-sources/providers/postgres/extract.server.ts
-import { Database } from "duckdb-async";
-
-export async function extract(input: ExtractInput, conn: PgConnInfo) {
-  const db = await Database.create(":memory:");
-  await db.run(`INSTALL postgres; LOAD postgres;`);
-  await db.run(`ATTACH '${conn.toAttachString()}' AS src (TYPE POSTGRES, READ_ONLY);`);
-  await db.run(`
-    COPY (${input.query})
-    TO '${input.outputPath}'
-    (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)
-  `);
-  return introspectParquet(input.outputPath);
-}
-```
 
 Three things this gives us for free:
 
@@ -164,22 +91,8 @@ Three things this gives us for free:
 
 ### 3.2 The custom-adapter path (e.g. Vertica)
 
-DuckDB has no Vertica extension. We use the source's native Node client and produce Parquet through DuckDB. **V1 takes a JSON-intermediate shortcut**, knowingly, because Vertica is currently the *only* adapter on this path and the type-mapping work for a streaming approach was disproportionate at that scale:
+For sources without DuckDB extensions (e.g. Vertica), the adapter uses the native Node client to fetch the full result into memory, writes it to an intermediate NDJSON file, and then uses DuckDB to convert NDJSON to Parquet. This path accepts costs in memory, CPU, and type fidelity but provides identical Parquet output to the agent.
 
-```ts
-// Actual V1 shape (vertica/extract.server.ts):
-const client = new VerticaClient(conn);
-const result = await client.query(input.query);                         // ← buffers full result in JS heap
-const ndjson = result.rows.map((r) => JSON.stringify(r)).join("\n");    // ← N × JSON.stringify
-await fs.writeFile(tmpJson, ndjson);                                    // ← disk pass 1
-
-// Convert NDJSON → Parquet via DuckDB. read_json_auto infers types.
-const db = await DuckDBInstance.create(":memory:");
-await db.run(
-  `COPY (SELECT * FROM read_json_auto('${tmpJson}', format='newline_delimited')) ` +
-  `TO '${outputPath}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)`,
-);                                                                       // ← disk pass 2 (read NDJSON)
-```
 
 Costs we accept in V1:
 
@@ -194,17 +107,13 @@ The same `IDataSourceAdapter` contract and the same Parquet output the runtime s
 
 Adapters are not invoked by agents directly. The agent runtime exposes a tool (provisional name, finalised in phase 4):
 
-```ts
-extract_dataset_by_sql({
-  dataset_name:     "sales_q1_2025",
-  data_source_name: "vertica_prod",  // matches data_source.name (LLM-facing slug)
-  sql_text:         "SELECT * FROM sales WHERE quarter = '2025-Q1'",
-  // Optional: row_limit (default 5), force_refresh (default false)
-}) → {
-  cache_hit, dataset_name, total_rows, returned_rows,
-  rows, row_schema, ttl_hours, replaced_prior?
-}
-```
+| Parameter | Description |
+|---|---|
+| `dataset_name` | The target slot name. |
+| `data_source_name` | The LLM-facing slug for the data source. |
+| `sql_text` | The query. |
+| `row_limit` | Optional limit for inline preview. |
+| `force_refresh` | Optional flag to bypass cache. |
 
 The LLM-facing surface is intentionally minimal: `dataset_name` /
 `data_source_name` / `sql_text` carry the task semantics;
@@ -276,7 +185,7 @@ Two operational problems disappear under this rule:
 
 1. **Disk accumulation.** With no background GC, naive TTL semantics let cache files grow monotonically across the life of a long-running server / chain of restarts. Boot-time sweep gives us a deterministic upper bound: at most one process-worth of extractions on disk at any moment.
 
-2. **Cross-restart name collisions (historical).** The earlier `QUERY_HASH_MISMATCH` guard rejected `same-name + different-queryHash` to defend against in-session ambiguity. After a restart the LLM had no memory of prior session names, so reusing a slug like `customers` for an unrelated query failed unexpectedly. The boot sweep removed the cross-restart half of this problem; §4.2 ("name is a SLOT") removed the in-session half by switching to slot reassignment semantics instead of fail-fast.
+
 
 Implications:
 
@@ -342,237 +251,15 @@ A new admin form under `/admin/credentials` validates the JSON shape per `provid
 
 ---
 
-## 6. Implementation phases
-
-All three phases (D-1, D-2, D-3) are landed.
-
-### Phase D-1 — Skeleton + Postgres adapter ✅ done
-
-- Defined `IDataSourceAdapter`, `ExtractInput`, `ExtractResult`.
-- Both registries (`registry.ts` + `registry.server.ts`) wired with
-  `satisfies Record<DataSourceId, …>` for compile-time coverage.
-- Cache layer (`cache.ts`) using file convention + sidecar
-  `<name>.meta.json`. Atomic-rename concurrency.
-- Postgres adapter as reference: `INSTALL postgres → ATTACH → COPY (...)
-  TO 'x.parquet'` via DuckDB.
-- `serviceType="datasource"` added to `CredentialServiceType`;
-  `provider="postgres"` entry in `src/lib/constants/providers.ts`.
-
-### Phase D-2 — Agent tools + sandbox handoff ✅ done
-
-- `extract_dataset_by_sql` agent tool
-  (`src/lib/data-sources/runtime-tools.ts`): validates the cache key,
-  resolves the data source by name (D-2.2 — was credentialId before),
-  applies the policy gate (read-only / table allowlist / denylist via
-  `node-sql-parser`), picks the right adapter, checks cache first
-  (cheap on hit + matching query hash), acquires a tmp slot on miss,
-  runs `adapter.extract`, commits. Naming uses the `extract_dataset_by_*`
-  family so future siblings can fetch datasets by URL or REST API call
-  without breaking callers.
-- Return shape: `{ cache_hit, dataset_name, total_rows,
-  returned_rows, rows, row_schema, ttl_hours, replaced_prior? }`.
-  `total_rows` is top-level so agents can short-circuit empty
-  results without poking the schema. The mount path is
-  conventional (`./data/<dataset_name>/`) and is documented in
-  the `run_code_in_sandbox` description, so neither `mountedAt`
-  nor `byteSize` are surfaced to the LLM (`byteSize` lives in
-  the `<name>.meta.json` sidecar for admin debugging). On a
-  cache hit `row_schema.columns` is empty (sidecar persists
-  totals only).
-- `row_limit: number` (optional, max 200) lets the LLM peek at
-  the first N rows inline — handy when the result is small
-  enough to reason over directly without entering the sandbox.
-  The runtime reads via DuckDB `read_parquet(..) LIMIT N` and
-  trims to a ≤50KB JSON budget; `returned_rows < total_rows`
-  signals truncation so the LLM knows to fall back to the
-  sandbox.
-- `rows` is delivered as a **row-of-objects** array
-  (`Record<columnName, cellValue>[]`). Chart nodes consume it
-  directly via `inputs.dataset: "@nodes.X.rows"`; code nodes
-  typically stick with the parquet handle (`run_code_in_sandbox.
-  datasets[]`) which is faster for large data sets.
-- Hash-mismatch handling: same `dataset_name` + different
-  `sql_text` REPLACES the prior snapshot under that slot
-  (last-write-wins) and the result carries `replaced_prior:
-  true`. See §4.2 for the rationale.
-- The companion `run_code_in_sandbox` tool (sandbox layer)
-  bind-mounts each dataset name from `datasets: [...]` at
-  `./data/<name>` read-only — the prompt convention and the
-  return value of `extract_dataset_by_sql` are symmetric.
-- `run_code_in_sandbox` is in the user-selectable built-in tool catalog
-  (`src/lib/builtin-tools/catalog.ts`); admins enable it per agent
-  via `BuiltinAgentEditor`'s "Built-in Tools" section. Bound names
-  land as `builtin_agent_tool` rows; dispatch (`runner/dispatch/
-  builtin.ts`) resolves the names back through the catalog and
-  injects the `ToolDefinition` into the agent at run time.
-- `extract_dataset_by_sql` is **auto-mounted by data_source binding**,
-  not user-selectable. Whenever an agent has at least one
-  `builtin_agent_tool { toolType="datasource" }` row, dispatch
-  force-adds the tool name to the build set (`runner/dispatch/
-  builtin.ts:205-207`) and `data-sources/prompt-block.server.ts`
-  emits the "Available data sources" block listing the legal
-  `data_source_name` values. The two move as one unit — without a
-  binding the tool would have nothing to call and no prompt block
-  to describe what slugs are valid. This mirrors the
-  `run_ssh_command` / `ssh_server` and `get_skill` / `skill`
-  auto-mount patterns. Legacy `builtin_agent_tool` rows pointing at
-  `"extract_dataset_by_sql"` (from before this tool moved out of the
-  catalog) are silently dropped via the catalog's forward-compat
-  branch — no migration needed; auto-mount covers the same agents.
-
-### Phase D-2.1/D-2.2 — DataSource entity + runtime swap ✅ done
-
-- `data_source` table is the agent-facing access entity: connection
-  metadata (host / port / database / params), policy (readOnly /
-  tableAllowlist / tableDenylist), and a FK to `credential` for auth.
-  One credential can back multiple data sources with different
-  policies (e.g. `prod_pg_readonly` + `prod_pg_admin` over the same
-  DB).
-- `credential.fields` for datasource providers slimmed to
-  `{ user, password }` only; `restUrl` is kept as an admin-facing
-  reference label ("which DB is this credential pointing at?").
-- `extract_dataset_by_sql.data_source_name` carries the
-  `data_source.name` (a stable LLM-facing slug, NOT a uuid); the
-  runtime joins datasource + credential via
-  `resolveDataSourceByName()` before calling the adapter.
-- Policy enforcement (`policy.ts`): app-layer SQL parse via
-  `node-sql-parser` rejects writes (when `readOnly`), denied tables,
-  and tables outside the allowlist BEFORE the cache is even touched.
-  CTE names are stripped (parser lists them as if they were real
-  tables; we walk `ast.with` to subtract them). On parse failure
-  we fail closed with `PARSE_ERROR`. Adapter-level read-only
-  transactions are deferred to D-2.3 (defence in depth).
-- Cache cleanup: `purgeDatasetsForDataSource(dataSourceId)` walks
-  the parquet root, reads each sidecar, and removes datasets whose
-  `dataSourceId` matches. Wired into the data source DELETE API
-  in D-2.3.
-- Runtime tool error codes surfaced to LLM:
-  `INVALID_NAME` / `NOT_FOUND` / `DISABLED` /
-  `UNSUPPORTED_PROVIDER` / `CREDENTIAL_MISSING` /
-  `CREDENTIAL_DECRYPT_FAILED` / `WRITE_NOT_ALLOWED` /
-  `TABLE_DENIED` / `TABLE_NOT_ALLOWED` / `PARSE_ERROR` /
-  `EXTRACT_FAILED`. (`QUERY_HASH_MISMATCH` was retired in favour
-  of slot-reassignment — see §4.2.)
-
-### Phase D-2.3 — REST API ✅ done
-
-- `GET/POST/PATCH/DELETE /api/data-sources` + `/api/data-sources/[id]`
-  + `POST /api/data-sources/[id]/test-connection`. RBAC: editor+ for
-  create/edit, creator-or-admin for delete + visibility flips, any
-  signed-in user for `GET` (visibility-filtered).
-- `name` is immutable on PATCH — agent prompts and schedules may
-  reference it directly, so renaming silently breaks dependents.
-  Delete + recreate to rename. `provider` IS mutable on PATCH (see
-  the editor's "provider unlocked" change); cache invalidation on
-  provider change is intentionally NOT triggered here — a separate
-  admin "purge cache" workflow is on the roadmap, and the runtime
-  re-applies the new provider on the next cache miss.
-- POST/PATCH do NOT cross-check `credential.provider` against
-  `data_source.provider`. Same DB account often spans heterogeneous
-  engines (one ops user covering MariaDB + Vertica), and the shared
-  `DatabaseConnectionBase` payload (`{username, password}`) makes
-  the swap safe at runtime. The credential's own `provider` tag is
-  shown next to the name in the picker as a hint, not a filter.
-- DELETE invalidates agent specs first, then calls
-  `purgeDatasetsForDataSource()`, then drops the row — so no
-  half-deleted state can be observed by an in-flight runtime call.
-- `GET /api/datasource-credentials` returns the editor's credential
-  picker list filtered to `serviceType="datasource"` and the
-  matching `provider`.
-
-### Phase D-2.4 — UI (panel + editor + agent binding) ✅ done
-
-- `DataSourcePanel` (left side panel, editor+ visible) lists data
-  sources grouped by provider; new-button opens a blank editor.
-- `/datasource/[id]` route hosts `DataSourceEditor` (mirrors
-  `/agent/[id]` and `/skills/[id]`). Form covers connection metadata,
-  policy (readOnly + table allowlist/denylist), credential picker,
-  visibility, enabled flag, and a "Test connection" button that hits
-  the `/test-connection` endpoint.
-- Agent binding: `BuiltinAgentEditor` gains a "Data Sources" section;
-  bound rows land in `builtin_agent_tool` with `toolType="datasource"`
-  and a `dataSourceId` FK. Disabled data sources are filtered out of
-  the picker.
-- Dispatch wiring (`runner/dispatch/builtin.ts`) resolves bound
-  data sources at request time and passes them as
-  `dataSourcesRuntime` so `extract_dataset_by_sql` can scope its
-  lookup to *this agent's* allowed sources.
-- Prompt injection: `data-sources/prompt-block.server.ts` renders
-  the bound list into the system prompt as
-  `Available data sources (pass the slug as data_source_name...): - name (provider) — description`
-  so the LLM knows which `data_source_name` values are valid without
-  needing a separate "list_data_sources" tool.
-
-### Phase D-3 — MySQL / MariaDB / Vertica coverage ✅ done
-
-- MySQL adapter via DuckDB `mysql` extension (mirrors Postgres).
-- MariaDB adapter shares the `mysql` extension and reuses the
-  MySQL secrets schema + attach-string builder; the `provider`
-  slug stays distinct so the admin form / labels remain accurate.
-- Vertica adapter via `vertica-nodejs` (custom client; no DuckDB
-  scanner extension exists). Rows are written to NDJSON then
-  converted to Parquet via DuckDB's `read_json_auto` —
-  type-fidelity is best-effort in V1; high-precision use cases
-  can swap to a typed `DuckDBAppender` path later without
-  changing `IDataSourceAdapter`.
-- `vertica-nodejs` is plain JavaScript with no `.d.ts`; the
-  adapter declares only the slice it uses (`Client.connect /
-  query / end`) and a top-level shim sits at
-  `vertica/vertica-nodejs.d.ts`.
-- Adapter contract tests: `tests/unit/lib/data-sources/registry.test.ts`
-  covers all four ids; `secrets-schemas.test.ts` covers Zod payload
-  parsing + the MySQL attach-string builder.
-
 ### Future / out-of-scope for V1
 
-- BigQuery / Snowflake / ClickHouse adapters (write when needed).
-- `cache_meta.duckdb` migration if the dataset count justifies it.
-- Background TTL sweeper (cron-style) instead of lazy expiry.
-- Per-user data isolation flow end-to-end (interface is reserved; no UI yet).
-- Adapter "describe" endpoint for agent-driven schema introspection.
+- BigQuery / Snowflake / ClickHouse adapters.
+- `cache_meta.duckdb` migration if dataset count justifies it.
+- Background TTL sweeper.
+- Per-user data isolation flow end-to-end.
+- Adapter "describe" endpoint for introspection.
 - Streaming / CDC sources.
-- **Unify non-DuckDB-extension adapters on `odbc_scanner` (deferred).** §3.2 explains the V1 NDJSON shortcut Vertica takes (full buffer + JSON round-trip + double disk pass + a `vertica-nodejs` direct dependency). Acceptable for one adapter; **not** acceptable as a copy-paste pattern. The plan to fold all such adapters onto a single ODBC backbone is recorded here and **deferred until DuckDB's `odbc_scanner` ships as a core extension**.
-
-  **Why `odbc_scanner` is the right backbone.** DuckDB Labs released `odbc_scanner` (<https://github.com/duckdb/odbc-scanner>) in mid-2025 as a Labs / nightly extension and has publicly stated intent to promote it to a **core extension** in a future DuckDB release. It exposes a `odbc_query(handle, sql)` table function that streams results through DuckDB's pipeline straight into `COPY ... TO ...parquet` — the same code shape the Postgres / MySQL DuckDB extensions already use. With it, every database that ships an ODBC driver (Vertica, Oracle, SQL Server, DB2, Snowflake, Firebird, …) becomes a ~40-line adapter built on a shared factory; no Node-side driver, no V8-heap buffering, no NDJSON round-trip. This **supersedes** the earlier "createDuckdbStreamingAdapter via DuckDB Appender" sketch — same goal, smaller and more uniform footprint.
-
-  **Trigger condition (do not implement before either holds):**
-  1. `odbc_scanner` is promoted to a DuckDB core extension (currently still has to be installed via `INSTALL odbc_scanner FROM core_nightly` and lacks `ATTACH` support — issue duckdb/odbc-scanner#162), **OR**
-  2. A second non-DuckDB-extension adapter is requested (Oracle / MSSQL / Snowflake / ClickHouse) before condition 1 holds — at that point the `core_nightly` channel is acceptable cost to avoid copy-pasting a second 250-line custom client.
-
-  **Design decisions, frozen for the future PR:**
-  - **Provider ids stay specific** (`vertica`, future `oracle`, `mssql`, …) — not a generic `odbc`. Existing `data_source.provider` rows survive zero-migration; UI keeps DB-typed labels; users don't have to know their ODBC driver name. Internally each is a thin wrapper over a shared `createOdbcAdapter` factory.
-  - **New factory, not a `mode` switch on `createDuckdbExtensionAdapter`.** The ATTACH lifecycle (long-lived catalog mapping) and the `odbc_connect` + `odbc_query` lifecycle (per-call handle) differ enough that mixing them in one factory makes `pinDefaultSchema`-style flags semantically wrong. New file: `src/lib/data-sources/odbc-adapter.server.ts`.
-  - **Bound params remain rejected** (same as the ATTACH path) — agents don't use them and `odbc_query` supports them via a separate `params = row(...)` arg the factory can wire up later without changing the public contract.
-  - **First call cost.** `odbc_scanner` is ~5 MB. Hot-load it once at boot in `instrumentation.ts` (mirrors how DuckDB extensions cache locally after first download).
-  - **Driver shipping.** unixODBC into the Dockerfile unconditionally; per-DB drivers gated by build ARGs (`VERTICA_ODBC_TARBALL`, `ORACLE_INSTANTCLIENT_TARBALL`, …) because most are commercial-license tarballs that can't be baked into the OSS image.
-
-  **Per-adapter shape after migration (Vertica is the worked example):**
-
-  ```ts
-  // vertica/extract.server.ts — ~40 lines total
-  const adapter = createOdbcAdapter({
-    driverName: "Vertica",
-    buildOdbcConnString: (r) =>
-      `Driver={Vertica};Server=${r.host};Port=${r.port};Database=${r.database};` +
-      `SSLMode=${r.params.tls_mode ?? "disable"}`,
-  });
-  export const { extract: extractFromVertica, testConnection: testVerticaConnection } = adapter;
-  ```
-
-  Adding Oracle / MSSQL / Snowflake post-migration is the same three-file pattern (`adapter.ts` + `extract.server.ts` + `index.server.ts`), no Node-native driver.
-
-  **Phased plan when the trigger fires** — each phase is a separate PR:
-  1. Spike: confirm `INSTALL odbc_scanner FROM core_nightly` works under the project's locked `@duckdb/node-api` version against a real ODBC endpoint.
-  2. Plumbing: add `odbc-scanner.server.ts` + `odbc-adapter.server.ts`; extract `raceWithTimeoutAndAbort` / `introspectParquet` to a `duckdb-shared.server.ts` for reuse.
-  3. Cut Vertica over to the factory; remove `vertica-nodejs` from `package.json` / `pnpm-lock.yaml` / `next.config.ts:serverExternalPackages` / `vertica/vertica-nodejs.d.ts`.
-  4. Dockerfile: unixODBC + optional Vertica ODBC driver via build ARG.
-  5. Update §3.2 to point at the new factory; add an "Adding an ODBC-backed provider" recipe.
-
-  **Acceptance gate:** the same Vertica `SELECT` produces a Parquet whose `SUMMARIZE` (column names, types, row count) is byte-equivalent to the legacy path's output before `vertica-nodejs` is removed.
-
-  **One known compatibility caveat to schedule into Phase 3.** The legacy adapter respects `params.schema` by issuing `SET search_path TO ...` on the connection; the ODBC path can't do this transparently (no equivalent `odbc_set_session_param`). Phase 3 needs to either (a) drop `params.schema` after auditing existing `data_source` rows for usage, or (b) inline the schema as a query prefix at extract time.
-
-  Why not now: `odbc_scanner` is still a Labs-owned nightly extension. Its `ATTACH` support is on the roadmap but not in a stable release. Both make the swap a moving target. Cost of waiting is one custom adapter; cost of moving early is tracking a non-frozen extension API. The decision is reversible — if a second non-extension adapter is requested before the trigger, jump to phase 2 above with `core_nightly` as the install channel and accept the upgrade churn.
+- **Unify non-DuckDB adapters on `odbc_scanner`:** When DuckDB's `odbc_scanner` becomes a core extension, migrate custom adapters (like Vertica) to use a shared ODBC factory. This will eliminate Node-side drivers, buffering, and NDJSON round-trips.
 
 ---
 

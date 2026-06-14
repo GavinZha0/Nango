@@ -115,7 +115,15 @@ export function addInterval(
   const target = { ...parts };
   if (unit === "day") target.day += value;
   else if (unit === "week") target.day += value * 7;
-  else if (unit === "month") target.month += value;
+  else if (unit === "month") {
+    target.month += value;
+    // Clamp the day to the maximum valid day for the computed target month/year.
+    // target.month is 1-indexed. In JS Date, month index is 0-based.
+    // Day 0 of a given month index actually refers to the last day of the PREVIOUS month.
+    // So target.month (which is next month's index) with day 0 gives the max day of our target month.
+    const maxDays = new Date(Date.UTC(target.year, target.month, 0)).getUTCDate();
+    target.day = Math.min(target.day, maxDays);
+  }
   return composeDate(target, timezone);
 }
 
@@ -217,8 +225,9 @@ export function nextFireAt(row: ScheduleEntity, now: Date = new Date()): Date | 
   let steps = 0;
   const MAX_STEPS = 100_000;
   while (candidate.getTime() < lowerMs) {
-    candidate = addInterval(candidate, value, unit, timezone);
-    if (++steps >= MAX_STEPS) {
+    steps++;
+    candidate = addInterval(startAt, steps * value, unit, timezone);
+    if (steps >= MAX_STEPS) {
       log.warn(
         {
           event: "next_fire_overflow",

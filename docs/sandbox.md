@@ -32,73 +32,35 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 
 ## 2. The contract
 
-```ts
-// src/lib/sandbox/types.ts
+**`SandboxBackend`**: `"subprocess" | "local-docker" | "remote-docker"`
 
-export type SandboxBackend = "subprocess" | "local-docker" | "remote-docker";
+**`SandboxInput`**
+| Field | Type | Description |
+|---|---|---|
+| `command` | `string[]` | argv array — never a shell string. |
+| `stdin` | `string?` | Optional content piped to stdin. |
+| `datasets` | `string[]?` | Dataset names to expose read-only at `./data/<name>/` in cwd. |
+| `inputFiles` | `Record<string, Buffer>?` | Extra files written to cwd before execution. |
+| `timeoutMs` | `number?` | Hard timeout (default: 30000). |
+| `maxMemoryMb` | `number?` | Memory cap (default: 256). |
+| `maxCpuCores` | `number?` | CPU cap (default: 0.8). |
 
-export interface SandboxInput {
-  /** argv array — never a shell string. Caller is responsible for argv[0]
-   *  being a runtime in the rootfs ("python3", "node", "bash"). */
-  command: string[];
+**`SandboxOutput`**
+| Field | Type | Description |
+|---|---|---|
+| `stdout`, `stderr` | `string` | Truncated, path-masked output. |
+| `exit_code` | `number` | Process exit code (124 on timeout). |
+| `duration_ms` | `number` | Wall-clock time. |
+| `termination` | `enum?` | `"timeout" \| "oom" \| "signal" \| "abort"` |
 
-  /** Optional content piped to the command's stdin. The runner does NOT
-   *  write this to a file; the command receives it on its stdin. */
-  stdin?: string;
-
-  /** Datasets to expose read-only at ./data/<name>/ in the sandbox's
-   *  current working directory. Resolved by the data-source layer to
-   *  absolute Parquet directory paths before the runner invokes the
-   *  backend. Subprocess realises this with a symlink in cwd; docker
-   *  with a bind mount at /work/data/<name>. */
-  datasets?: string[];
-
-  /** Extra files written into the sandbox cwd before execution. Cleared
-   *  on exit. Useful for shipping a small script or fixture without
-   *  pushing it through stdin. */
-  inputFiles?: Record<string, Buffer>;
-
-  /** Hard timeout. SIGKILL on expiry. Default: 30_000. */
-  timeoutMs?: number;
-
-  /** Memory cap in MB. SIGKILL when exceeded (cgroup or RSS poll). Default: 256. */
-  maxMemoryMb?: number;
-
-  /** CPU cap as fractional cores. Default: 0.8. */
-  maxCpuCores?: number;
-}
-
-export interface SandboxOutput {
-  /** Truncated, path-masked stdout. */
-  stdout: string;
-
-  /** Truncated, path-masked stderr. */
-  stderr: string;
-
-  /** Process exit code; 124 by convention on timeout. */
-  exit_code: number;
-
-  /** Wall-clock execution time, milliseconds. */
-  duration_ms: number;
-
-  /** Set when the runner killed the process (timeout, OOM, signal, ...). */
-  termination?: "timeout" | "oom" | "signal" | "abort";
-}
-
-export interface ISandboxAdapter {
-  readonly backend: SandboxBackend;
-  readonly displayName: string;
-
-  /** True if this backend can be used in the current process's environment.
-   *  E.g. NsjailAdapter.isAvailable() === false on macOS. */
-  isAvailable(): Promise<boolean>;
-
-  /** Execute one command in a fresh sandbox; tear down on return. */
-  run(input: SandboxInput): Promise<SandboxOutput>;
-}
-```
+**`ISandboxAdapter`**
+- `backend`: Backend type.
+- `displayName`: Human-readable name.
+- `isAvailable()`: Returns true if usable in the current environment.
+- `run(input: SandboxInput)`: Executes command in a fresh sandbox and returns `SandboxOutput`.
 
 Three things the contract makes explicit:
+
 
 1. **`command` is `string[]`, never a shell string.** Eliminates an entire class of injection bugs the moment an agent constructs the command from user input.
 2. **`datasets` are names, not paths.** The runner resolves them via the data-source layer. The sandbox layer stays in its lane.
@@ -329,44 +291,3 @@ Design notes:
 
 ---
 
-## 9. Alternative isolation backends considered
-
-The `ISandboxAdapter` interface is designed to be pluggable — adding a
-new backend is a matter of implementing the interface and registering
-it in `registry.server.ts`. Two alternative backends were evaluated but
-not adopted for V1:
-
-### 9.1 nsjail
-
-[nsjail](https://github.com/google/nsjail) is a Linux-only process
-isolation tool using kernel namespaces and seccomp-bpf. It offers
-~5 ms cold-start (vs Docker's 200–500 ms), making it attractive for
-high-frequency code execution loops. It was considered for a dedicated
-Linux production backend but was not adopted due to:
-
-- **Platform limitation**: Linux-only; developers on macOS cannot use it.
-- **Operational complexity**: requires cgroup v2 configuration, seccomp
-  whitelist maintenance (strace-driven auditing on every Python/pandas/
-  duckdb upgrade), compilation from source (apt's version is outdated),
-  and AppArmor/SELinux exemptions.
-- **Marginal latency benefit**: in Nango's typical call chain, LLM
-  inference (1–10 s) dominates; Docker's 200–500 ms startup is not
-  the bottleneck.
-
-If future profiling identifies Docker startup as a proven bottleneck,
-nsjail remains a viable option. The adapter interface supports it
-without changes to the rest of the system.
-
-### 9.2 gVisor (runsc)
-
-[gVisor](https://gvisor.dev/) is an OCI-compatible container runtime
-that intercepts syscalls in userspace. It can be used as a drop-in
-Docker runtime (`docker run --runtime=runsc ...`) with ~50–100 ms
-cold-start and no seccomp whitelist maintenance. It is a simpler
-alternative to nsjail if lower startup latency is needed:
-
-- Install: `apt install runsc` + one-line Docker daemon config.
-- Code change: add a `--runtime` parameter to `LocalDockerAdapter`.
-- Trade-off: slightly higher per-syscall overhead than native
-  execution, but eliminates the need for manual seccomp policy
-  management.

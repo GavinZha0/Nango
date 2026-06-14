@@ -38,80 +38,42 @@ process to manage, multi-host through a single slug.
 
 ## 2. Data model
 
-The credential **reuses existing types** — Nango deliberately does
-not mint an SSH-specific shape. The OS username travels with the
-credential alongside the secret, so a single credential identifies
-one OS user across many hosts.
+The credential **reuses existing types** — Nango deliberately does not mint an SSH-specific shape.
 
-```
-credential
-├─ id, name, enabled
-├─ type ∈ {'basic_auth', 'private_key'}
-├─ service_type='integration', provider='ssh'   (canonical SSH)
-└─ encrypted_payload  (AES-256-GCM, shape per `type`):
+**`credential` Table**
+| Column | Notes |
+|---|---|
+| `id`, `name`, `enabled` | Basic fields |
+| `type` | `'basic_auth'` \| `'private_key'` |
+| `service_type` | `'integration'` |
+| `provider` | `'ssh'` |
+| `encrypted_payload` | AES-256-GCM. For `basic_auth`: `{username, password}`. For `private_key`: `{username, privateKey, passphrase?}`. |
 
-   type = 'basic_auth':
-   { username: string, password: string }
+**`ssh_server` Table**
+| Column | Notes |
+|---|---|
+| `id` | UUID |
+| `name` | LLM-facing slug, globally unique. |
+| `description` | Injected into the agent prompt. |
+| `credential_id` | FK to `credential`. |
+| `host`, `port` | Default port 22. |
+| `known_host_fingerprint` | Pinned host key. |
+| `command_allow`, `command_deny` | JSON arrays of regex patterns. |
+| `enabled`, `visibility` | RBAC/UI toggles. |
 
-   type = 'private_key':
-   { username: string, privateKey: string, passphrase?: string }
-
-ssh_server
-├─ id, name (LLM-facing slug, globally unique, regex
-│           [a-z][a-z0-9_-]{0,62})
-├─ description (free-text; injected into the agent prompt)
-├─ credential_id (FK, RESTRICT on delete)
-├─ host, port (default 22)
-├─ known_host_fingerprint  (pinned, format SHA256:<base64>)
-├─ command_allow jsonb<string[] | null>
-├─ command_deny  jsonb<string[]>     (default [])
-├─ enabled, visibility ('private' | 'public')
-└─ created_by, updated_by, created_at, updated_at
-
-builtin_agent_tool
-├─ tool_type = 'ssh_server'
-└─ ssh_server_id  (FK, SET NULL on delete)
-```
-
-Notes:
-
-- **No `username` column on `ssh_server`** — sourced at runtime from
-  the credential payload (`auth-loader.ts` normalises both shapes
-  into `NormalisedSshAuth = {kind, username, ...secret}`).
-- **Strict pinning at runtime.** `known_host_fingerprint` is
-  `NOT NULL`. `client.ts` always strict-compares the offered key
-  against the pin and rejects on mismatch. The only relaxation is
-  capture mode used by `verifyConnection` — see §4.
-- **RBAC.** Editors+ create / manage `ssh_server` rows. Admins
-  manage `credential` rows. The split lets editors do ssh-server
-  work without ever seeing the secret.
+**`builtin_agent_tool` Table**
+| Column | Notes |
+|---|---|
+| `tool_type` | `'ssh_server'` |
+| `ssh_server_id` | FK to `ssh_server` |
 
 ### 2.1 Credential payload schemas
 
-```ts
-// lib/ssh/credential-schema.ts
-export const SshBasicAuthPayload = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
-});
-
-export const SshPrivateKeyPayload = z.object({
-  username: z.string().min(1),
-  privateKey: z.string().min(1),    // OpenSSH PEM body
-  passphrase: z.string().optional(),
-});
-
-export type NormalisedSshAuth =
-  | { kind: "password";   username: string; password: string }
-  | { kind: "privateKey"; username: string; privateKey: string;
-      passphrase?: string };
-```
-
-`auth-loader.ts` reads `credential.type`, picks the matching schema,
-returns the normalised `kind`-discriminated record that `client.ts`
-consumes. Decrypt or schema-parse failures log a warning and return
-`null` — the tool wrapper surfaces `CREDENTIAL_DECRYPT_FAILED`
-without crashing the run.
+Normalised auth shape handled by `auth-loader.ts`:
+| Kind | Fields |
+|---|---|
+| `password` | `username`, `password` |
+| `privateKey` | `username`, `privateKey`, optional `passphrase` |
 
 ### 2.2 ssh_server validation
 
@@ -367,24 +329,7 @@ All routes use the standard error envelope from `withSession` /
 | `components/middle-panels/BuiltinAgentEditor.tsx` | Adds an "SSH Hosts" Section parallel to "Data Sources" / "Skills" / "MCP Servers" so an agent's bound `ssh_server` ids are managed alongside other tools. |
 | `components/admin/CredentialFormDialog.tsx` | When the admin picks `provider='ssh'`, the URL inputs are hidden (host/port/fingerprint live on `ssh_server`), and the Credential Type defaults to `basic_auth` or `private_key` via the standard PAYLOAD_FIELDS path. The dialog has no SSH-specific branch. |
 
-## 8. Hard decisions (locked)
-
-| Question | Decision | Rationale |
-|---|---|---|
-| Credential carries connection metadata | NO — only auth | One identity, many hosts; RBAC; LLM-facing identifier needs to be on the host row. |
-| `ssh_server.name` is the LLM identifier | YES, slug, immutable | Stable across credential rotation; matches `data_source.name`. |
-| Auto-mount tools on binding | YES | Same UX trap as data-sources had — binding without the consuming tool produces tool calls that never get a result. |
-| Command allow / deny enforced | YES, runtime | Schema + UI + runtime gate landed; fail-closed on malformed regex. |
-| Library | `node-ssh` (ssh2 underneath) | Promise API, host-verifier callback, SFTP ready when V2 file-transfer lands. |
-| Host-key trust | STRICT at runtime; admin-confirmed TOFU at editor time | Runtime TOFU is silent MITM. Editor TOFU is OpenSSH-style "first connect — accept yes/no" rendered as a red inline hint. |
-| `username` column on `ssh_server` | NO — sourced from credential | One credential = one OS identity. Avoids re-pasting username when the same identity authenticates against several hosts. |
-| Connection pooling | NONE | Premature; LLM round-trip dominates. |
-| MCP sidecar instead | REJECTED | More code, weaker integration. |
-| Streaming output | NO | Tool returns final stdout / stderr; consistent with `run_code_in_sandbox`. |
-| PTY / interactive shell | OUT | Different protocol shape. |
-| SSH agent forwarding | NOT SUPPORTED | Auth from credential payload only. |
-
-## 9. Code map
+## 8. Code map
 
 | Concern | File |
 |---|---|
@@ -402,7 +347,7 @@ All routes use the standard error envelope from `withSession` /
 | Editor / panel | `src/components/middle-panels/SshServerEditor.tsx`, `src/components/left-panels/SshServerPanel.tsx` |
 | Tests | `tests/unit/lib/ssh/{client,credential-schema,limits,lookup,policy}.test.ts` |
 
-## 10. Future work
+## 9. Future work
 
 In rough priority order, when real demand surfaces. None of these are
 required for V1 to be useful.

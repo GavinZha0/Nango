@@ -183,84 +183,18 @@ Key properties:
   asynchronously (fire-and-forget). A DB failure does not block the
   chat stream.
 
-### 2.7 HMR survival — `globalThis` pinning (C1)
+### 2.7 HMR survival — `globalThis` pinning
 
-**All** module-scope mutable singletons are pinned to a `globalThis`
-slot so dev-server HMR reloads keep the live state. The pattern is:
-
-```ts
-declare global { var __nangoX: T | undefined; }
-export const x: T = (globalThis.__nangoX ??= /* init */);
-```
-
-Without this, every save during `next dev` would reset the cache and
-the pool would balloon with leaked subscriptions / open MCP
-connections. The rule is non-negotiable for any new module-level
-mutable state (caches, pools, in-flight promise maps, subscriber
-registries, third-party SDK clients).
-
-Current slots:
-
-| Slot | Owner | Section / file |
-|---|---|---|
-| `__nangoCredentialCache` | 4 credential lookup LRUs + invalidation subscribers | §2.1 |
-| `__nangoAgentPool` | agent pool | §2.2 |
-| `__nangoMcpProviderPool` | MCP provider pool | §2.3 |
-| `__nangoSkillPool` | skill pool | §2.4 |
-| `__nangoEntityCatalogCache` | entity catalog | §2.5 |
-| `__nangoBackendThreadStateCache` | backend thread state | §2.6 |
-| `__nangoLangfuse` | Langfuse client holder | `src/lib/observability/langfuse.ts` |
-| `__nangoOAuthTokenManager` | OAuth token cache + in-flight refresh map + credential-invalidation subscription flag | `src/lib/credentials/oauth-token-manager.ts` |
-
-The last two are not "caches" in the chat-path sense (they hold a
-single client / a small token map respectively) but follow the same
-rule because their state can't survive HMR otherwise.
-
+To survive Next.js dev server Hot Module Replacement (HMR), all module-scope mutable singletons (caches, connection pools, clients) are pinned to `globalThis` (e.g., `globalThis.__nangoAgentPool`). This prevents memory leaks and stale connections during development.
 ### 2.8 OAuth Token Manager
 
-`src/lib/credentials/oauth-token-manager.ts` mints and caches access
-tokens for the OAuth 2.0 Client Credentials grant
-(`oauth_client` credential type with `{clientId, clientSecret,
-tokenUrl, scope?}`).
+Manages access tokens for the OAuth 2.0 Client Credentials grant.
 
-Behaviour:
-
-- **Lazy refresh, no background timer.** Tokens are fetched on
-  first call and re-fetched automatically when the cached entry is
-  within `REFRESH_SKEW_MS` (60 s) of its `expiresAt`. No
-  `setInterval` to leak through HMR; no traffic to the IdP for
-  unused credentials.
-- **Concurrency dedup.** If N callers ask for the same credential's
-  token while a fetch is in flight, they all await the same
-  Promise. Exactly one network round-trip per refresh cycle.
-- **Cache invalidation hook-up.** Subscribes to
-  `onCredentialCacheInvalidated` so an admin edit (rotated secret,
-  changed `tokenUrl`, …) takes effect on the next call without a
-  process restart.
-- **Three-tier API.**
-  1. `getOAuthAccessToken(id)` returns the raw token string —
-     used for non-Bearer schemes (DPoP, custom headers).
-  2. `getOAuthAuthorizationHeader(id)` returns `"Bearer <token>"`.
-  3. `withOAuth(id, init)` returns a `RequestInit` with
-     `Authorization: Bearer <token>` merged in — what most
-     callers want.
-- **Manual eviction.** `invalidateOAuthToken(id)` drops the cached
-  token; useful after a downstream 401 if the IdP revoked the
-  token earlier than its advertised `expires_in`.
-
-Constants:
-
-| Constant | Value | Purpose |
-|---|---|---|
-| `REFRESH_SKEW_MS` | 60 000 ms | Refresh window before `expiresAt` |
-| `DEFAULT_EXPIRES_IN_S` | 3600 s | Fallback when the IdP omits `expires_in` |
-| `DEFAULT_CACHE_TTL_S` | 4 h | LRU TTL safety net (per-entry `expiresAt` is the real expiry) |
-
-Out of scope: `refresh_token` (RFC 6749 §4.4.3 forbids it for the
-Client Credentials grant — every refresh re-runs the
-`client_credentials` flow with the stored secret) and mTLS / PEM
-client certificates (handle those at the TLS layer:
-`NODE_EXTRA_CA_CERTS` or a custom `https.Agent`).
+| Property | Behavior |
+|---|---|
+| **Refresh** | Lazy refresh on first call, auto-refresh within 60s of expiry. No background timers. |
+| **Concurrency** | Multiple callers await the same in-flight fetch. |
+| **Invalidation** | Listens to credential cache clears to apply admin edits immediately. |
 
 ---
 
@@ -340,66 +274,11 @@ await invalidateForCredentialChange(id);  // AFTER update (order doesn't matter)
 
 ### 3.4 Reverse-Index Queries
 
-All cascade functions follow the same pattern:
-
-```ts
-// Find agents bound to the changed resource
-const rows = await db
-  .select({ agentId: BuiltinAgentToolTable.agentId })
-  .from(BuiltinAgentToolTable)
-  .where(and(
-    eq(BuiltinAgentToolTable.toolType, "mcp_server"),
-    eq(BuiltinAgentToolTable.mcpServerId, mcpServerId),
-  ));
-
-// Deduplicate — one agent may bind the same resource via multiple junction rows
-const uniqueAgentIds = new Set(rows.map((r) => r.agentId));
-for (const id of uniqueAgentIds) agentPool.invalidate(id);
-```
-
-Deduplication is critical: an agent can bind the same MCP server
-through multiple junction rows (different tool subsets).
+All cascade functions query the `builtin_agent_tool` junction table to find agents bound to the changed resource, deduplicate the `agentId`s, and selectively invalidate those agents in the `agentPool`.
 
 ### 3.5 Subscriber Pattern
 
-`invalidateCredentialCache()` in `lookup.ts` notifies registered
-subscribers after clearing. This decouples downstream caches from
-the credential module:
-
-```ts
-// Registration (e.g. in observability/langfuse.ts)
-onCredentialCacheInvalidated(() => {
-  invalidateLangfuseClient();
-});
-```
-
-Currently the only subscriber is the Langfuse client singleton,
-which rebuilds when the observability credential changes.
-
----
-
-## 4. Wiring Map
-
-Complete reference of which write path calls which invalidation hook:
-
-| Write path | Hook | Notes |
-|---|---|---|
-| `POST /api/admin/credentials` | none | New row cannot be in any cache. |
-| `PATCH /api/admin/credentials/[id]` | `invalidateForCredentialChange(id)` | Includes `invalidateCredentialCache()` internally. |
-| `DELETE /api/admin/credentials/[id]` | `invalidateForCredentialChange(id)` | 409 precheck ensures no dependents, so reverse-index is a no-op. |
-| `POST /api/builtin-agents` | none | New row cannot be in any cache. |
-| `PATCH /api/builtin-agents/[id]` | `invalidateForAgentChange(id)` | Tool-binding edits are part of the same lifecycle. |
-| `DELETE /api/builtin-agents/[id]` | `invalidateForAgentChange(id)` | |
-| `PATCH /api/mcp-servers/[id]` | `invalidateForMcpServerChange(id)` | After UPDATE. |
-| `DELETE /api/mcp-servers/[id]` | `invalidateForMcpServerChange(id)` | **Before** DELETE (FK is `ON DELETE SET NULL`). |
-| `POST /api/skills` | `invalidateForSkillChange(id)` | Reconciles agent prompt blocks. |
-| `PATCH /api/skills/[id]` | `invalidateForSkillChange(id)` | Only when skillMd/enabled/visibility changed. |
-| `DELETE /api/skills/[id]` | `invalidateForSkillChange(id)` | **Before** DELETE. |
-| `PATCH /api/data-sources/[id]` | `invalidateForDataSourceChange(id)` | |
-| `DELETE /api/data-sources/[id]` | `invalidateForDataSourceChange(id)` | Also calls `purgeDatasetsForDataSource(id)`. |
-| `PATCH /api/ssh-servers/[id]` | `invalidateForSshServerChange(id)` | |
-| `DELETE /api/ssh-servers/[id]` | `invalidateForSshServerChange(id)` | |
-| `builtin-reconcile.ts` (boot) | `invalidateForSkillChange(id)` | Reconciles builtin skills from `dist/builtin-skills.json`. |
+`invalidateCredentialCache()` notifies registered subscribers after clearing. For example, the Langfuse client singleton listens to this event to rebuild itself when the observability credential changes.
 
 ---
 
@@ -580,14 +459,3 @@ network.
 Currently none of these are exposed via env vars. Change them at
 construction time in the respective module if needed.
 
-### 8.3 Test Coverage
-
-| Layer | File |
-|---|---|
-| Agent Pool | `tests/unit/lib/builtin-agents/agent-pool.test.ts` |
-| MCP Provider Pool | `tests/unit/lib/mcp/provider-pool.test.ts` |
-| Entity Catalog | `tests/unit/lib/backends/entity-catalog.test.ts` |
-| Thread State | `tests/unit/lib/backends/thread-state.test.ts` |
-| Credential Lookup | `tests/unit/lib/credentials/lookup.test.ts` |
-| Cascade Invalidation | `tests/unit/lib/credentials/invalidation.test.ts` |
-| Agent Visibility | `tests/unit/lib/access/agent-visibility.test.ts` |

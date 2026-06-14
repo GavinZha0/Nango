@@ -74,14 +74,12 @@ describe("addInterval — calendar units", () => {
     expect(result.toISOString()).toBe("2026-07-15T14:00:00.000Z");
   });
 
-  it("month: handles month-end overflow (Jan 31 + 1 month)", () => {
+  it("month: handles month-end overflow by clamping to target month's end (Jan 31 + 1 month)", () => {
     // Jan 31 → Feb 28 (2026 is not a leap year)
     const base = utc("2026-01-31T15:00:00Z"); // 10:00 AM EST
     const result = addInterval(base, 1, "month", "America/New_York");
-    // JS Date auto-overflows: month=2 day=31 → March 3.
-    // This is the documented JS behavior.
-    const d = result;
-    expect(d.getUTCMonth()).toBe(2); // March (0-indexed)
+    // Expected: Feb 28, rather than overflowing into March.
+    expect(result.toISOString()).toBe("2026-02-28T15:00:00.000Z");
   });
 });
 

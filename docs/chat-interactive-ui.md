@@ -68,123 +68,48 @@ input — no dedicated tool.
 
 #### `ask_user_choice` — Single-choice selection
 
-```typescript
-const choiceSchema = z.object({
-  question: z.string().describe("The question to display"),
-  options: z.array(z.object({
-    label: z.string().describe("Display text"),
-    value: z.string().describe("Value returned on selection"),
-    description: z.string().optional().describe("Brief explanation"),
-  })).describe("2-5 options to choose from"),
-});
-```
+| Property | Type | Description |
+|---|---|---|
+| `question` | string | The question to display |
+| `options` | array | 2-5 options to choose from |
+| `options[].label` | string | Display text |
+| `options[].value` | string | Value returned on selection |
+| `options[].description` | string | Brief explanation (optional) |
 
-Render (`ChoiceSelector.tsx`): **executing** → clickable chips;
-**complete** → selected chip highlighted (emerald border + `Check`),
-others dimmed.
+Render (`ChoiceSelector.tsx`): **executing** → clickable chips; **complete** → selected chip highlighted.
 
 #### `ask_user_confirmation` — Approve / Reject
 
-```typescript
-const confirmSchema = z.object({
-  message: z.string().describe("What needs confirmation"),
-  confirmLabel: z.string().optional().describe("Confirm button text (default: 'Approve')"),
-  rejectLabel: z.string().optional().describe("Reject button text (default: 'Reject')"),
-});
-```
+| Property | Type | Description |
+|---|---|---|
+| `message` | string | What needs confirmation |
+| `confirmLabel` | string | Confirm button text (default: 'Approve') |
+| `rejectLabel` | string | Reject button text (default: 'Reject') |
 
-Render (`ConfirmationButtons.tsx`): **executing** → Approve / Reject
-buttons with amber warning background; **complete** → chosen button
-highlighted (Approve → emerald, Reject → destructive), other dimmed.
-
-> **Dark-mode note**: colours use shadcn/ui semantic tokens where
-> available and Tailwind `amber-500` with opacity modifiers. Opacity-
-> based colours work correctly under both light and dark themes.
+Render (`ConfirmationButtons.tsx`): **executing** → Approve / Reject buttons; **complete** → chosen button highlighted.
 
 #### `ask_user_datetime` — Date/time picker
 
-```typescript
-const datetimeSchema = z.object({
-  prompt: z.string().describe("What to ask the user, e.g. 'Select start time'"),
-  mode: z.enum(["single", "range"]).optional()
-    .describe("'single' for one datetime (default), 'range' for start+end"),
-  defaultStart: z.string().optional().describe("Default start value as ISO 8601 string"),
-  defaultEnd: z.string().optional().describe("Default end value as ISO 8601 string (range mode only)"),
-});
-```
-
-Render (`DateTimePicker.tsx`): native `<input type="datetime-local">`,
-single or range mode. **complete** → formatted datetime badges.
-Uses `useId()` for label linkage and `[color-scheme:dark]` for native
-input dark mode support.
-
-### 3.2 Shared Render Props Type
-
-```typescript
-type HitlRenderProps<T> =
-  | { name: string; args: Partial<T>; status: "inProgress"; result: undefined; respond: undefined }
-  | { name: string; args: T; status: "executing"; result: undefined; respond: (v: unknown) => Promise<void> }
-  | { name: string; args: T; status: "complete"; result: string; respond: undefined };
-```
-
-### 3.3 Edge Cases
-
-#### `agentId` scoping
-
-Interactive tools are registered **without** `agentId` — available to
-every built-in agent. Scope individual tools to specific agents if
-needed in the future.
-
-#### Agent switch while HITL is pending
-
-`useInteractiveTools` maintains a `useRef` for each tool's pending
-`resolve` callback. A single `useEffect` cleanup at the hook level
-cancels all pending Promises on unmount with the sentinel
-`"__hitl_cancelled__"`. Each tool's `description` instructs the LLM
-to treat this sentinel as "user declined to answer".
-
-Hook-level (not component-level) cleanup avoids React 19 strict-mode
-double-mount resolving the Promise before user interaction.
-
-#### Timeout
-
-CopilotKit does not impose a timeout on frontend tool Promises. The
-agent waits indefinitely — acceptable for interactive tools. Wrap with
-`Promise.race` against `setTimeout` if a timeout is needed later.
-
-#### Multiple simultaneous HITL tools
-
-CopilotKit handles multiple concurrent HITL tool calls correctly —
-each gets its own Promise. Render components appear sequentially in
-tool-call order.
-
-#### Known limitation: duplicate-key console warning
-
-`useFrontendTool` and the wildcard `useDefaultRenderTool("*")` both
-register entries through `copilotkit.addHookRenderToolCall`, producing
-two React elements with the same key. This causes a harmless console
-warning; functionality is unaffected. Elimination requires replacing
-`useDefaultRenderTool()` with a custom wildcard that skips HITL tool
-names.
-
----
-
-## 4. Comparison
-
-| Dimension | Path A (`useFrontendTool` + `useRenderTool`) | Path B (message detection) |
+| Property | Type | Description |
 |---|---|---|
-| Agent type | Built-in only | All agents |
-| Trigger | Explicit tool call | Heuristic pattern match |
-| Agent pauses | Yes — waits for tool result | No — receives new message |
-| Result type | Structured (JSON) | Plain text message |
-| Reliability | High (schema-validated) | Medium (detection may miss/false-positive) |
-| Completed state | All options preserved, selected highlighted | Chip becomes disabled / hidden |
-| Implementation | `useFrontendTool` + `useRenderTool` | Custom `assistantMessage` renderer |
-| Status | **Shipped** | Not implemented |
+| `prompt` | string | What to ask the user, e.g. 'Select start time' |
+| `mode` | string | 'single' (default) or 'range' |
+| `defaultStart` | string | Default start value as ISO 8601 string (optional) |
+| `defaultEnd` | string | Default end value (range mode only) (optional) |
+
+Render (`DateTimePicker.tsx`): native `<input type="datetime-local">`.
+
+### 3.2 Shared Render States
+
+| Status | Render Behavior |
+|---|---|
+| `inProgress` | Tool call is streaming in. |
+| `executing` | UI component is active and waiting for user input. |
+| `complete` | User has interacted, tool result returned, UI is static. |
 
 ---
 
-## 5. Files
+## 4. Files
 
 | File | Description |
 |---|---|
@@ -198,7 +123,7 @@ names.
 
 ---
 
-## 6. Out of Scope
+## 5. Out of Scope
 
 - **Pure presentational cards** — no general card framework. Markdown
   and existing tool renderers are sufficient. Add individual
@@ -212,7 +137,7 @@ names.
 
 ---
 
-## 7. Accessibility Requirements
+## 6. Accessibility Requirements
 
 All interactive components must meet the following baseline:
 

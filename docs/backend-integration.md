@@ -258,61 +258,21 @@ through its own server-owned channel:
 The browser does **not** carry `kind` on the chat route — there is no
 `X-Agent-Kind` header. A client cannot supply or override the field.
 
-### Why server-derive kind on the chat route
-
-EntityCatalog is on the chat dispatch path, but it's almost always
-free in practice:
-
-- 10-minute LRU TTL with concurrent-fetch dedup (`lru-cache.fetch`).
-- Warmed by `WorkspaceProvider` on UI mount (the agent picker
-  pre-pulls the catalog for every enabled credential).
-- Cache hit = synchronous in-process Map lookup (sub-ms).
-- Cache miss happens at most once per credential per 10 minutes, and
-  only if no one has loaded the picker since the last invalidation.
-
-The cold-miss cost (one upstream `/agents` or `/teams` listing call,
-typically 200-800ms) is acceptable because:
-
-1. It happens at most once per credential per 10 minutes (not per chat
-   message). After server boot, the first user to mount the workspace
-   pays it; everyone else hits cache.
-2. The catalog is already needed for the agent picker, so the cache is
-   warm well before any chat dispatch.
-3. The alternative (trusting `kind` from the browser) lets a malformed
-   or malicious client supply a wrong kind that routes to a
-   non-existent upstream endpoint and 404s — observably broken instead
-   of safely rejected. The server-derived path returns a clean "agent
-   not found in credential" 404 instead.
-
-Apart from `kind` lookup, the chat hot path depends only on:
-
-- session validation (cheap, in-process),
-- credential lookup (10-min TTL cache, near-100% hit rate after warmup),
-- synchronous registry lookup (`getChatHandler(provider)`).
-
-There is no upstream round-trip on chat dispatch unless the
-EntityCatalog cache is cold for that credential.
-
----
+### Why server-derive kind
+EntityCatalog cache cold-miss cost is acceptable because it warms on UI mount, and prevents malicious clients from routing to non-existent upstream endpoints.
 
 ## 4. Provider Module Pattern
 
 ### The `BackendModule` interface
 
 ```ts
-export interface BackendModule {
-  readonly id: BackendId;
-  readonly capabilities: BackendCapabilities;
-  readonly controlPlane: {
-    /** Client-safe REST helpers proxied via /api/backend. */
-    readonly adapter: IBackendAdapter;
-    /** Server-only entity discovery for EntityCatalog. */
-    readonly fetchEntities: EntityFetcher;
-  };
-  readonly dataPlane: {
-    readonly chatHandler: IBackendChatHandler;
-  };
-}
+| Field | Type | Description |
+|---|---|---|
+| `id` | `BackendId` | The unique slug for the backend. |
+| `capabilities` | `BackendCapabilities` | Feature flags for UI. |
+| `controlPlane.adapter` | `IBackendAdapter` | Client-safe REST helpers proxied via /api/backend. |
+| `controlPlane.fetchEntities` | `EntityFetcher` | Server-only entity discovery for EntityCatalog. |
+| `dataPlane.chatHandler` | `IBackendChatHandler` | Chat handler that bridges upstream to AG-UI. |
 ```
 
 Each backend platform exposes itself through one `BackendModule`
@@ -356,81 +316,14 @@ The const tuple is the only place a slug is declared. Adding a slug:
 
 ---
 
-## 11. Provider-Specific Quirks and Mappings
+## 4.1 Provider API Mappings
 
-### agno
+Each provider has unique bridging logic codified in its `chat.server.ts` to map upstream events to AG-UI events:
+- **Agno**: Maps `*Delta` and `*Step` to AG-UI text/reasoning events. Filters out internal tools to avoid CopilotKit hangs.
+- **Mastra**: Dedupes double-emitted tool calls. Translates SSE stream to AG-UI standard.
+- **Dify**: Manages stateful `conversation_id` persistently. Synthesizes `TOOL_CALL_RESULT` for server-side tools to close the CopilotKit sequence.
 
-**Bridge (`agno/chat.server.ts`)**
-- Targets agno 2.6.4. Endpoints: `POST /agents/{id}/runs` (kind = agent) or `/teams/{id}/runs` (kind = team), `multipart/form-data` body (`message`, `stream=true`, `monitor=true`, `session_id`, `user_id`).
-- **Quirk:** agno owns its session memory keyed by `session_id`, so we send only the latest user message. Re-sending historical assistant + tool messages round-trips OpenAI tool-call ids back into agno's bridge in problematic ways.
-- **Quirk (`monitor=true`):** This param makes AgentOS persist the run to its session DB so the History panel can list it later.
-- **Quirk (Reasoning / Streaming):** agno 2.6 added streaming `*Delta` distinct from the full-text `*Step`. Both carry text in `reasoning_content`; we forward whichever arrives. Any open reasoning blocks are closed before final-answer text starts, as the agent has moved on.
-- **Mapping (agno → AG-UI):**
-  - `RunContent` / `TeamRunContent` → `TEXT_MESSAGE_*` (delta = `content`)
-  - `Reasoning(Started|*Delta|Step|*|Completed)` / `Team*` → `REASONING_*` + `REASONING_MESSAGE_*` (delta = `reasoning_content`)
-  - `ToolCall*Started` / `Team*` → `TOOL_CALL_START` + `ARGS` + `END`
-  - `RunError` / `TeamRunError` → throws → `RUN_ERROR`
-  - Everything else is silently dropped.
-
-**Discovery (`agno/entity.server.ts`)**
-- Direct fetch to the credential's `restUrl` for `/agents`, `/teams`, `/workflows`.
-- Sub-failures degrade gracefully — a deployment without `/workflows` still surfaces agents and teams.
-- **Quirk (Opaque DB IDs)**: agno requires an opaque `dbId` per-entity for memory/evals/metrics API calls. We capture it at entity discovery so future server-side endpoints can read it back from `EntityCatalog` on demand, keeping it off the client side.
-
-### Mastra
-
-**Bridge (`mastra/chat.server.ts`)**
-- Endpoint: `POST /agents/:agentId/stream` (`streamFormat: 'sse'`).
-- **Quirk:** Mastra emits each tool call twice — streaming start/delta/end trio AND a consolidated `tool-call` chunk. Both share `toolCallId`; `ToolCallFilter` dedupes on first-seen.
-- **Quirk:** Strip AG-UI-only roles (`developer`, …) that Mastra/AI-SDK doesn't understand before forwarding.
-- **Mapping (Chunk → AG-UI):**
-  - `text-start` / `-delta` / `-end` → `TEXT_MESSAGE_START` / `CONTENT` / `END`
-  - `tool-call-input-streaming-start` → `TOOL_CALL_START`
-  - `tool-call-delta` → `TOOL_CALL_ARGS`
-  - `tool-call-input-streaming-end` → `TOOL_CALL_END`
-  - `tool-call` (single, non-streamed) → `START` + `ARGS` + `END` trio
-  - `tool-result` → `TOOL_CALL_RESULT`
-  - `error` → throws → `RUN_ERROR`
-  - `start` / `step-*` / `response-meta` / `reasoning-*` / `workflow-*` / `abort` / `raw` / `file` / `source` / `finish` → IGNORED for v1
-
-**Discovery (`mastra/entity.server.ts`)**
-- Mastra's `GET /agents` returns an object map `{ [agentId]: agent }`.
-- Mastra has no team / workflow concept (today), so the result is always `kind: "agent"`.
-
-### Dify
-
-**Bridge (`dify/chat.server.ts`)**
-- Endpoint: `POST /chat-messages` (per-app API key model — each credential identifies a single app, so `agentId` is a synthetic placeholder and ignored on the wire).
-- **Quirk (conversation_id strategy):** AG-UI `threadId` and Dify `conversation_id` are independent namespaces. We keep `(credId, threadId) → conv_id` durably in the `backend_thread_state` table (`state.dify.convId`), fronted by an LRU cache in `lib/backends/thread-state.server.ts` for hot-path reads. Cache misses lazy-hydrate from the DB; writes update both atomically (cache sync, DB fire-and-forget).
-  1. If a row is mapped, send the `conv_id`. On 404 / 400, retry without `conversation_id` (stale-mapping case — Dify-side conv was deleted / expired out-of-band) and capture the new `conv_id` from `message_end`.
-  2. If no row is mapped (first message of a brand-new thread), omit `conversation_id` entirely so Dify allocates a fresh one — DO NOT speculatively send Nango's `threadId` as the `conv_id`, because Dify generates conv_ids internally and rejects unknown values with 404, so that "speculation" was a guaranteed wasted round-trip.
-  Persisted across Node restarts so a recurring scheduled chat keeps Dify-side LLM context. The retry only fires when we already had a known-but-expired conv_id; a 4xx on the first omit-conv_id request is a genuine error and surfaces immediately.
-- **Quirk (Non-unique Identity)**: `EntityDescriptor.id` alone is not globally unique across credentials (e.g. Dify synthesizes `"default"` for every app). React keys, sets, and run inputs must use the `(credentialId, entityId)` tuple.
-- **Quirk (Server-side Tools):** Agent-mode tools are server-side (Dify executes them) but we forward them to the browser so the user sees what Dify did. This synthesises the result by pairing every `TOOL_CALL_START` with a synthesised `TOOL_CALL_RESULT` (from Dify's `observation`) so CopilotKit sees a closed sequence.
-- **Mapping (Dify → AG-UI):**
-  - `message` / `agent_message` → `TEXT_MESSAGE_START` / `CONTENT`
-  - `agent_thought` (with `tool`) → `TOOL_CALL_START` + `ARGS` + `END`
-  - `agent_thought` (with `observation`) → `TOOL_CALL_RESULT`
-  - `message_end` → `TEXT_MESSAGE_END`, capture `conversation_id`
-  - `error` → throws → `RUN_ERROR`
-  - `ping` / unknown → ignored
-
-**Discovery (`dify/entity.server.ts`)**
-- Synthesise one agent (id="default") per credential, with name/description sourced from `GET /info`.
-
----
-
-## 12. AG-UI Runtime Quirks
-
-**History Trimming (`runtime.server.ts`)**
-- CopilotKit v2's transport sends the entire `messages[]` snapshot on every run. Backends that own their session memory (agno, Mastra, …) re-derive history from `threadId`, so re-sending historical assistant-with-toolCalls + tool messages is at best redundant.
-- Specifically with agno + OpenAI Responses API: each historical tool message carries its OpenAI `call_id` (`fc_…`). agno's AGUI bridge forwards `function_call_output` but fails to forward the matching `function_call`, and OpenAI 400s with "No tool call found for function call output" — resulting in silent RUN_FINISHED with no content events.
-- **What we keep:** "From the last user message onward" (i.e. `[…, user, assistant_with_toolCall, tool_result]`). This preserves HITL flows where trailing assistant + tool messages MUST reach the upstream to resume the run, while dropping pre-turn history.
-- **Security:** Only `/agent/:id/run` POSTs are touched; `/info`, `/threads/*`, GETs pass through verbatim.
-
-`isSupportedBackend` is a type-narrowing predicate so untrusted
-strings (DB rows, request headers, query params) can be funnelled
-into a registry lookup without an unchecked cast.
+*Note: Historical edge cases and workarounds are documented natively within the respective bridging files.*
 
 ### Per-provider folder shape
 
@@ -527,68 +420,10 @@ Runner *after* the handler returns its agent.
 
 ## 7. Hot-Path Invariants
 
-Four invariants must hold for any new provider — these are the
-cross-cutting properties the kernel relies on:
-
-1. **No control-plane round-trip on the chat hot path.** The Runner
-   never calls `EntityCatalog.list` during dispatch. Kind comes from
-   the caller's input. If a provider needs upstream metadata to
-   dispatch (e.g. a `db_id` for session scoping), fetch it once in
-   `buildAgent` and cache it in the `BridgeConfig` — do not poke the
-   catalog.
-
-2. **Cancellation propagates.** Every `fetch` call inside a bridge
-   handler must pass the `abortSignal` from
-   `createBridgeRunObservable`. When the user closes the chat tab,
-   CopilotRuntime tears down the Observable subscription, the kit's
-   `AbortController` fires, the upstream `fetch` is cancelled, and
-   `PersistingAgent`'s `finalize` operator writes
-   `entity_run.status = 'cancelled'` exactly once (DB-level
-   idempotent UPDATE on `WHERE status='running'`).
-
-3. **Tool-call events must never hang CopilotKit's state machine.**
-   CopilotKit cannot satisfy a tool call it didn't register: a
-   `TOOL_CALL_START` reaching the browser without an eventual
-   `TOOL_CALL_RESULT` (either supplied by the browser executing a
-   client-declared tool, or synthesised by the bridge) leaves the
-   chat in a pending state that swallows subsequent text deltas.
-
-   This invariant has two compliant implementation modes; pick the
-   one matching the upstream's protocol shape:
-
-   - **Mode A — filter to client-declared tools (agno, Mastra).**
-     The upstream stream mixes (a) tools the agent executes
-     internally (memory, RAG, workflow steps) — which carry no
-     result and would never be closed by the browser — with (b)
-     client-declared tools the browser registered via
-     `RunAgentInput.tools` (e.g. `open_artifact`). Use
-     `ToolCallFilter` to forward only (b); (a) is dropped. The
-     browser executes (b) and emits `TOOL_CALL_RESULT` itself.
-
-   - **Mode B — forward server-side tool calls with synthesised
-     result (Dify).** Dify Agent-mode tools are server-side only —
-     the upstream emits each call's args and observation together
-     on `agent_thought` events sharing one stable id. The bridge
-     emits a complete `TOOL_CALL_START + ARGS + END + RESULT`
-     four-tuple, so CopilotKit sees a closed sequence and the user
-     sees what the agent did. No client-declared tools land on this
-     stream because Dify's Agent mode does not surface them.
-
-   A bridge that fits Mode A must NOT also forward server-side
-   calls (that would hang the state machine); a Mode B bridge MUST
-   pair every START with a synthesised RESULT before stream end. If
-   a future provider mixes both shapes (some calls self-contained,
-   some client-bound), the bridge needs both: filter to declared
-   tools first, then synthesise RESULT for the server-side calls
-   the user should see.
-
-4. **Persistence is best-effort.** `PersistingAgent` writes events
-   fire-and-forget. Chat latency must not depend on
-   `entity_run_event` writes. If an event needs to surface to the
-   user, emit it as `RUN_ERROR` in the AG-UI stream — that path is
-   both rendered in the UI and persisted.
-
----
+1. **No control-plane round-trip on the chat hot path**: The Runner never calls `EntityCatalog.list` during dispatch. Kind comes from the caller's input.
+2. **Cancellation propagates**: Closing the chat tab aborts the upstream fetch and writes `cancelled` status.
+3. **Tool-call events must never hang CopilotKit**: Bridge must either filter to client-declared tools (Mode A) or synthesise `TOOL_CALL_RESULT` for server-side calls (Mode B).
+4. **Persistence is best-effort**: `PersistingAgent` writes `entity_run_event` fire-and-forget.
 
 ## 8. End-to-End Dispatch Flow
 
@@ -672,158 +507,10 @@ and register in both `registry.ts` and `registry.server.ts`.
 The `satisfies Record<BackendId, …>` clauses on the registries make
 forgetting either step a compile-time error.
 
-What you should *not* touch:
-
-| File | Why it stays untouched |
-|---|---|
-| `runner.ts` / `persisting-agent.ts` | Provider-agnostic — uses `getChatHandler(provider)`. |
-| `entity-catalog.ts` | Provider-agnostic — reads `PROVIDERS[provider].controlPlane.fetchEntities`. |
-| `cache-invalidation.ts` | Operates on credential ids, not provider slugs. |
-| `app/api/copilotkit/[...path]/route.ts` | Already provider-agnostic; only reads headers + credential. |
-| `app/api/backend/[...path]/route.ts` | Pure reverse proxy keyed by `credentialId`. |
-| `bridge-runtime-kit.server.ts` | Don't fork. If you find behaviour the kit doesn't cover, extend the kit so all existing providers benefit too. |
+Only modify `PROVIDER_IDS` and the two registries. Do not fork `bridge-runtime-kit.server.ts` or `runner.ts`.
 
 If `pnpm exec tsc --noEmit` passes after step 4, every callsite
 (Runner chat dispatch, EntityCatalog, supervisor catalog, admin run
 forensics, schedule fires) routes correctly to the new provider.
 
-### Health probes — deferred by design
-
-`IBackendAdapter` deliberately does NOT carry a `ping` / `health`
-method. Earlier iterations exposed an optional `ping(credentialId)`
-shape for a planned workspace status indicator; the indicator was
-never built and the optional method became dead code (only one
-provider implemented it, no caller invoked it). Removed in commit
-`<see git log>` to stop misleading reviewers.
-
-If a future feature genuinely needs upstream health, design it
-when the consumer exists — the right shape almost certainly is
-NOT per-credential one-off probes:
-
-- Batched (one fan-out across all enabled credentials) to amortise
-  fetch cost and round-trip latency.
-- Cached / debounced inside `EntityCatalog` so the indicator polling
-  rate is decoupled from the actual upstream call rate.
-- Returns a structured snapshot (`{ ok, latencyMs, lastError? }`)
-  rather than a boolean — the indicator usually wants to show
-  "degraded" / "slow" states, not just up/down.
-
-When that lands, the adapter contract is the right place — but add
-it together with the implementation, not as an aspirational stub.
-
 ---
-
-## Future Inbound Protocols (A2A et al.)
-
-> Status: investigated 2026-05; no implementation planned for v1.
-
-A2A (Agent-to-Agent), Google's agent interoperability protocol
-announced April 2024, defines an HTTP/JSON-RPC standard for
-cross-platform agent discovery, messaging, tasks, and artifacts. The
-question we evaluated: should we add an A2A backend alongside the
-existing per-platform REST translators (Dify / Agno / Mastra)?
-
-Conclusion: **not now, but the door is open**. The `BackendModule`
-abstraction is protocol-agnostic, so when a triggering condition
-fires, an A2A backend slots in via the four-step onboarding (§10).
-This section preserves the analysis so future evaluations do not
-re-derive it from scratch.
-
-### Why not now (May 2026)
-
-- **No upstream platform we integrate exposes a first-class A2A
-  endpoint.** Dify, Agno, and Mastra all ship REST APIs only; A2A is
-  mentioned in community issues but is not in any official release.
-  LangGraph has an experimental A2A server behind an opt-in flag.
-- **Spec is still v0.x.** A2A is not in any standards body
-  (IETF / W3C); the message envelope and task schema have changed
-  multiple times within six months. Early adoption would mean
-  repeated churn in our wire layer.
-- **Our cross-platform abstraction already exists.** AG-UI is the
-  client-facing standard; per-platform translators feed it. A2A is
-  an *agent ↔ agent* protocol, not a *wire-level* standard — adopting
-  it as a new backend would add a translator (A2A client → AG-UI),
-  not remove the existing ones.
-- **The realistic v1 consumer is narrow.** As of May 2026, Google
-  Vertex AI Agent Builder is the only mainstream platform with a
-  production A2A endpoint, and we have not been asked to integrate
-  it.
-
-### Why the door stays open
-
-`BackendModule` (§4) is protocol-agnostic by design. Adding A2A
-follows the same four-step onboarding as any other platform (§10):
-
-```
-src/lib/backends/a2a/
-├── adapter.ts           # client-safe metadata
-├── entity.server.ts     # GET /.well-known/agent.json  (Agent Card)
-├── chat.server.ts       # POST messages.stream → AG-UI translation
-└── index.server.ts      # BackendModule export
-```
-
-The credential type would extend the existing pattern with
-`serviceType: "a2a"`; `restUrl` becomes the A2A server base URL.
-The bridge-runtime-kit (§12) is reusable as-is — only the SSE
-event names change.
-
-A2A's surface maps cleanly onto our existing primitives:
-
-| A2A concept | Nango equivalent |
-|---|---|
-| `messages.send` (sync) | `runner.runChatRequest({ mode: "sync" })` |
-| `messages.stream` (SSE) | AG-UI events on SSE |
-| `tasks.create` (async) | `runner.start({ mode: "async" })` |
-| `tasks.get` / `tasks.cancel` | `entity_run` lookup + cancellation |
-| `artifacts` (streaming) | Outcome / `artifact` table |
-| Agent Card discovery | `EntityCatalog` listing |
-
-So the migration cost is bounded: one new folder, no abstraction
-changes, no callsite changes outside the two registries.
-
-### Triggers for revisiting
-
-Adopt A2A as a new backend when ANY of the following becomes true:
-
-- A user / customer request points at an **A2A-only platform** worth
-  integrating (e.g. Vertex AI Agent Builder, a customer's internal
-  agent registry).
-- An existing integrated platform (Dify / Agno / Mastra) ships a
-  first-class A2A endpoint AND that endpoint exposes capabilities the
-  current REST does not — most plausibly native task lifecycle for
-  long-running async runs (replacing our `entity_run`-based polling),
-  or first-class streaming artifacts.
-- A2A enters a real standards body (IETF / W3C) and either OpenAI or
-  Anthropic publicly commits — at that point platform inertia will
-  swing toward the protocol regardless of individual upstreams'
-  support.
-
-Until then, treat this section as the written record of "we looked
-at it, it isn't ready, here's the migration shape when it is."
-
-### Related: exposing Nango as an A2A *server*
-
-The mirror question — letting external systems call our built-in
-agents over A2A — is **out of scope for this section**. It's a
-product decision (does anything want to call Nango remotely?) not a
-backends-bridge decision, and the implementation surface is
-different (HTTP endpoint + Agent Card publication + auth) rather
-than another `BackendModule`. If the need arises, that work would
-live alongside the runner kernel, not in `src/lib/backends/`.
-
----
-
-## Document History
-
-| Version | Date | Notes |
-|---|---|---|
-| v1 | 2026-05 | Extracted from `docs/architecture.md` Appendix B + §3.1/§3.2/§9.1; consolidated control/data plane separation rationale; added security model and hot-path invariants. |
-| v1.1 | 2026-05 | Added "Future Inbound Protocols (A2A et al.)" — investigation notes + migration shape + revisit triggers; doc-only, no code change. |
-
-### Entity Catalog (`entity-catalog.ts`)
-- **Quirk (Caching & Singleflight)**: The `EntityCatalog` maintains a whole-table per `credentialId` cache with a 10-minute TTL. The first miss triggers one upstream fan-out. Concurrent misses share the same in-flight Promise (singleflight registry) to prevent hammering the upstream. The in-flight Promise is registered synchronously *before* the first `await` so subsequent callers in the same event loop tick can join it. It is cleared in a `finally` block so failed loads don't poison retries.
-- **Quirk (Invalidation)**: `invalidate(credentialId)` drops the resolved catalog entry from memory but explicitly leaves any in-flight load alone. Concurrent invalidate + refresh callers join the in-flight fetch rather than spawning redundant parallel round-trips.
-
-### Bridge Runtime Kit (`bridge-runtime-kit.server.ts`)
-- **Quirk (Tool Filtering):** Backends like agno and Mastra mix internal tools (knowledge, memory, RAG) with client-declared tools in the same stream. Internal tools don't produce results that CopilotKit expects and would hang the client if forwarded. The `ToolCallFilter` ensures only explicitly client-declared tools are forwarded.
-- **Quirk (Text Stream Framing):** Many upstreams only emit delta chunks without explicit START/END events. The `TextStreamState` helper synthesises `START` on the first non-empty delta, and `END` on explicit terminators or stream close to fulfill AG-UI's expected sequence (`TEXT_MESSAGE_START` → `CONTENT` → `END`).

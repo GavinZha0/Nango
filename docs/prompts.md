@@ -88,21 +88,8 @@ perspective.
 
 ---
 
-## Why merge into `SUPERVISOR_PROMPT` instead of composing?
-
-`SAFETY_POLICY_BLOCK` and `ERROR_POLICY_BLOCK` are kept external for
-regular agents (so a user who edits one agent's persona doesn't
-accidentally drop them). Supervisor doesn't have an editable
-persona — `SUPERVISOR_PROMPT` is fully owned by the code — so
-inlining safety + error-handling into one self-contained prompt
-text makes the supervisor easier to read end-to-end (the contents of
-`spec.prompt` *is* the contract), at the cost of a small amount of
-duplicated wording with the external blocks.
-
----
-
 ## Related
 
 - `AGENTS.md` "Supervisor (Nango) + agent `role` enum" — runtime contract
 - `docs/orchestrator.md` — dispatch kernel, supervisor tool set
-- `docs/data-visualization.md` — chart block rationale
+- `docs/outcomes.md` — outcomes block rationale

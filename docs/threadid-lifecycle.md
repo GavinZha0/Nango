@@ -164,8 +164,7 @@ no thread) instead of Branch B (clone B). See `docs/chat-flow-audit.md`
 
 ### 5. New Chat Button
 
-- `handleNewChat` calls `useWorkspaceStore.startFreshChat()`. Back to
-  step 1.
+- `handleNewChat` calls `useWorkspaceStore.startFreshChat()`. Back to step 1.
 
 **What `startFreshChat()` does atomically:**
 
@@ -173,38 +172,7 @@ no thread) instead of Branch B (clone B). See `docs/chat-flow-audit.md`
 2. `explicitThreadId = null`
 3. `chatEpoch += 1`
 
-**Why the epoch (step 3) is needed.** In fresh-chat mode the
-`<CopilotChat threadId>` prop stays `undefined`. Without a key bump,
-clearing the two store fields is a chat-surface no-op:
-
-- `MemoChat` is wrapped in `React.memo`; `undefined → undefined` is
-  treated as no change → MemoChat skips re-render.
-- Even on re-render, CopilotChat caches
-  `resolvedThreadId = useMemo(() => providedThreadId ?? randomUUID(), [providedThreadId])`
-  — `providedThreadId` (undefined) never changes, so `resolvedThreadId`
-  stays at the first-mint ABC for the entire lifetime of the mounted
-  component. `useAgent`'s WeakMap then keeps returning the same
-  clone B with all its message history.
-
-The only thing that breaks this lock-in is a full unmount of
-`<CopilotChat>`, achieved via the React `key` containing `chatEpoch`.
-Agent / Nango / handoff switches don't need to bump because `agentId`
-is already part of the key.
-
-**Why the field-clear (steps 1+2) is needed _alongside_ the bump.**
-The epoch bump remounts CopilotChat, which then mints a brand new
-internal ABC2. `RightPanel.ChatProviderHooks`'s lazy-capture writes
-ABC2 into `runtimeThreadId` on the next `onAgentRunStarted` — but the
-write is guarded by `if (state.runtimeThreadId) return;` to avoid
-clobbering the live id when sibling runs finalize. If the caller
-bumped the epoch *without* first clearing `runtimeThreadId`, the
-guard would refuse the new ABC2 and the conversation would silently
-lose its store-side identity. `startFreshChat()` exists precisely so
-no caller can get this ordering wrong.
-
-**Future entry points** that start a new conversation should call
-`startFreshChat()`, not assemble the three steps manually.
-
+*Note: The epoch bump is required to unmount and remount `<CopilotChat>` so it mints a new internal ID. The fields must be cleared simultaneously so the lazy-capture loop accepts the new ID.*
 ### 6. Switch Agent
 
 - `setActiveAgent(newId)` resets both threadId fields to null (unless
@@ -221,27 +189,6 @@ no caller can get this ordering wrong.
   would force re-render, but the bump keeps every "transition into a
   fresh chat surface" going through `chatEpoch++` so the state
   machine is uniform.
-
----
-
-## Why eager-mint Was Removed
-
-Earlier code in `WorkspaceProvider.tsx` used `useLayoutEffect` to
-pre-mint a UUID into `workspace.threadId` before the first paint, so
-that all external hooks (anything in `ChatPanelInner` calling
-`useAgent`) would resolve to clone B from render one. This was needed
-because those hooks could not see CopilotKit's internal
-`CopilotChatConfigurationProvider`, so their `useAgent({threadId: undefined})`
-fell through to Branch A (registry agent).
-
-The chatView slot wrapper (`ChatViewShell`) moves those hook calls
-*inside* the config provider, where `useAgent`'s built-in fallback
-(`threadId ??= chatConfig?.threadId`) resolves clone B without any
-pre-minting. Eager-mint is therefore unnecessary, and removing it
-restores the CopilotKit-recommended fresh-chat semantics (welcome
-screen, no `/connect` on empty thread).
-
-For the full chain of reasoning, see `docs/chat-flow-audit.md` §1.
 
 ---
 

@@ -456,25 +456,3 @@ emitted for the bookkeeping failure while the run itself is preserved.
 
 ---
 
-## 9. Test Coverage
-
-| File | Test File | Coverage |
-|---|---|---|
-| event-bus.ts | event-bus.test.ts | Fully covered (7 tests) |
-| schedule-dto.ts | schedule-dto.test.ts | Fully covered (5 tests) |
-| schedule-validation.ts | schedule-validation.test.ts | Fully covered (19 tests) |
-| notifications.ts | notifications.test.ts | previewBody covered (5 tests) |
-| event-store.ts | event-store.test.ts | RecursionDepthExceeded covered (2 tests) |
-| recovery.ts | recovery.test.ts | Core flow covered (2 tests) |
-| process-boot.ts | process-boot.test.ts | Core flow covered (2 tests) |
-| scheduler.ts (pure fns) | schedule-validation.test.ts | isValidTimezone + validateTriggerSpec timezone (9 tests) |
-| runner.ts | — | No unit tests (integration layer) |
-| persisting-agent.ts | — | No unit tests (needs AG-UI mock) |
-| dispatch/builtin.ts | — | No unit tests (needs pool mocks) |
-| supervisor-tools.server.ts | — | No unit tests (needs runner mock) |
-| scheduler.ts (timer paths) | — | No unit tests (needs timer mock) |
-
-The untested files are deeply coupled integration layers. Testing them
-requires mocking CopilotKit Runtime, AG-UI event streams, and multiple
-pool interactions. They are better covered by integration tests with
-a real (or mock) LLM endpoint.

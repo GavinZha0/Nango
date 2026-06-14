@@ -7,49 +7,27 @@
 
 ---
 
-## 1. What Replaced the Old Per-User Runtime Cache
+## 1. Overview
 
-The previous design (`src/lib/builtin-runtime-cache.ts`, removed) cached
-one `CopilotRuntime` per user for 10 minutes. That design coupled three
-unrelated concerns into one cache key:
-
-1. **Construction.** Building `BuiltInAgent` and `CopilotRuntime`
-   objects requires DB reads + credential decryption — worth caching.
-2. **MCP transport lifetime.** Every (user, agent) tuple opened its own
-   MCP connection, scaling as O(N·M) for N users × M servers per agent
-   — pure waste for connection-stateless servers.
-3. **Authorization.** Whatever rows the cache loader's SQL returned was
-   exactly what the user could invoke. Authorization was an emergent
-   property of cache contents; any code path that bypassed the cache
-   also bypassed the access check.
-
-The new design splits these into independent pieces:
+The built-in runtime relies on several independent pools and caches to ensure high performance and correct authorization:
 
 | Concern | Module | Lifetime |
 |---|---|---|
-| Authorization | `src/lib/access/agent-visibility.ts` | per request, no cache |
-| Decrypted spec | `src/lib/builtin-agents/agent-pool.ts` | LRU + 10-min TTL, keyed by `agentId`, shared across users |
-| MCP transport | `src/lib/mcp/provider-pool.ts` | refcounted + idle reaper, keyed by `mcpServerId`, shared globally |
-| `CopilotRuntime` | `src/app/api/copilotkit/builtin/[...path]/route.ts` | per request — never cached |
-
-The route handler simply orchestrates them; on a warm process, every
-request is two map lookups and a refcount increment per bound MCP
-server.
-
----
+| Authorization | src/lib/access/agent-visibility.ts | per request, no cache |
+| Decrypted spec | src/lib/builtin-agents/agent-pool.ts | LRU + 10-min TTL, keyed by gentId, shared across users |
+| MCP transport | src/lib/mcp/provider-pool.ts | refcounted + idle reaper, keyed by mcpServerId, shared globally |
+| CopilotRuntime | src/app/api/copilotkit/builtin/[...path]/route.ts | per request — never cached |
 
 ## 2. Pool Contracts
 
 ### 2.1 AgentSpec Pool — `src/lib/builtin-agents/`
 
-```ts
-class AgentPool {
-  get(agentId: string): Promise<AgentSpec | null>
-  invalidate(agentId: string): void
-  invalidateByCredential(credentialId: string): Promise<void>
-  invalidateAll(): void
-}
-```
+| Method | Description |
+|---|---|
+| `get(agentId)` | Fetches the `AgentSpec` from cache or DB. |
+| `invalidate(agentId)` | Removes a specific agent from the cache. |
+| `invalidateByCredential(credentialId)` | Removes all agents dependent on this credential. |
+| `invalidateAll()` | Clears the entire pool. |
 
 **Key properties.**
 
@@ -74,15 +52,13 @@ an MCP server) is loaded but not yet wired.
 
 ### 2.2 MCP Provider Pool — `src/lib/mcp/`
 
-```ts
-class McpProviderPool {
-  borrow(serverId: string): Promise<GracefulMcpProvider>
-  release(serverId: string, provider: GracefulMcpProvider): void
-  evict(serverId: string): Promise<void>
-  startReaper(): void
-  shutdown(): Promise<void>
-}
-```
+| Method | Description |
+|---|---|
+| `borrow(serverId)` | Gets or creates a connection for the MCP server. |
+| `release(serverId, provider)` | Decrements refcount for a connection. |
+| `evict(serverId)` | Detaches the connection from the pool. |
+| `startReaper()` | Starts background cleanup of idle connections. |
+| `shutdown()` | Gracefully closes all connections. |
 
 **Lifecycle states for one entry.**
 
@@ -228,20 +204,8 @@ notify the pool. The cross-cutting helpers in
 
 ### 4.1 Helper Reference
 
-```ts
-// src/lib/cache/invalidation.ts
-
-invalidateForCredentialChange(credentialId): Promise<void>
-  // 1) agentPool.invalidateByCredential(credentialId)
-  // 2) for every mcp_server WHERE credential_id = ?:
-  //      mcpProviderPool.evict(id)
-
-invalidateForMcpServerChange(mcpServerId): Promise<void>
-  // 1) mcpProviderPool.evict(mcpServerId)
-  // 2) for every distinct builtin_agent_tool.agent_id WHERE
-  //      tool_type='mcp_server' AND mcp_server_id = ?:
-  //      agentPool.invalidate(agentId)
-```
+- `invalidateForCredentialChange(credentialId)`: Invalidates all associated agents and evicts associated MCP servers.
+- `invalidateForMcpServerChange(mcpServerId)`: Evicts the MCP server and invalidates any agents that bind it.
 
 ### 4.2 Wiring Map
 
@@ -339,37 +303,3 @@ calls — not a shared cache.
 
 ---
 
-## 6. Test Coverage
-
-| Layer | File | What it covers |
-|---|---|---|
-| Visibility | `tests/unit/lib/access/agent-visibility.test.ts` | `isAgentVisibleTo` truth table; `listVisibleAgentIds` projection |
-| AgentSpec pool | `tests/unit/lib/builtin-agents/agent-pool.test.ts` | LRU semantics; null-not-cached; concurrent dedup; `invalidate*` variants; full spec hydration; tool-row mapping; dangling FK drop |
-| MCP provider pool | `tests/unit/lib/mcp/provider-pool.test.ts` | borrow/release; concurrent dedup; reaper eviction; explicit evict (active vs idle); shutdown idempotence |
-| Cross-cutting hooks | `tests/unit/lib/credentials/invalidation.test.ts` | both helpers; reverse-index empty-set behavior; agentId dedup |
-
-End-to-end smoke tests of the route handler itself are intentionally
-out of scope for the unit suite — the CopilotKit runtime needs a real
-LLM credential to exercise meaningfully, so those run as part of the
-deployment smoke checklist (build a session → send a message → swap
-agent → delete agent + send → update credential + send).
-
----
-
-## 7. Implementation Details and Quirks
-
-### Agent Pool (`agent-pool.ts`)
-- **Quirk (Re-enabling/Disabling):** `null` results from the loader are never cached. If a credential is dead or an agent is disabled, the next `get(id)` will re-fetch it from the DB. This deliberate design ensures that re-enabling an agent or fixing a credential takes effect immediately without waiting for TTL.
-- **Contract:** Concurrent `get(id)` calls share one in-flight loader Promise. Thundering herd is prevented natively by `lru-cache`.
-- **Invalidation order:** To invalidate properly, you call `invalidateByCredential` which performs a reverse-index `SELECT` on `builtin_agent.credential_id`. The cost scales with the number of dependent agents, not the cache size.
-
-### MCP Provider Pool (`provider-pool.ts`)
-- **Quirk (Thundering herd deduplication):** Concurrent first-time `borrow()` calls share the same in-flight creation Promise.
-- **Quirk (Re-check on await):** After `await pending`, the pool re-checks the state in the synchronous turn to prevent races where another borrower may have installed an entry or `evict()` re-detached it.
-- **Quirk (Reaper interval):** The interval handle is explicitly `unref()`'d. The background reaper never keeps the Node process alive on its own.
-- **Quirk (Snapshot iteration):** The reaper uses snapshot iteration `[...this.entries]` because it deletes items from the map inside the loop.
-
-### Credential Lookup Cache (`credentials/lookup.ts`)
-- **Quirk (Fallback Strategy):** When multiple enabled credentials exist for the same provider, the most-recently-created wins. This guarantees deterministic behavior.
-- **Quirk (Decryption Failure):** A decryption error typically means the encryption key changed (rotation without re-encrypt) or the row is corrupted. Such errors are explicitly logged.
-- **Quirk (Lazy load / TTL):** Also operates on a 10-minute TTL, similar to the agent-pool. Write paths explicitly call `invalidateCredentialCache()` after mutations.

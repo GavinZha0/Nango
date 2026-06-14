@@ -19,23 +19,21 @@ Langfuse is misconfigured, unreachable, or simply not in use.
 
 ---
 
-## 1. Why this layer exists
+## 1. Overview
 
-Nango is a unified frontend + proxy in front of multiple agent backends.
-Each backend already runs its own observability (most production agno /
-Mastra deployments push traces to a Langfuse project). Re-tracing the
-same LLM calls from the proxy would:
+Nango provides an observability layer that captures only what backend-side instrumentation cannot see. The structured logs provide a full request audit trail, while Langfuse traces are used specifically for the BuiltIn runtime.
 
-- double the storage cost,
-- create conflicting "source of truth" trees in Langfuse,
-- and force us to re-parse upstream protocols just to recover what the
-  backend already captured.
+| Slice | Captured by Nango? |
+|---|---|
+| LLM prompt / completion / tokens (backend agent) | ❌ (handled by backend) |
+| Server-side tool calls (backend agent) | ❌ (handled by backend) |
+| BuiltIn agent runtime (no upstream) | ✅ Phase 2 |
+| Frontend tool calls (open_artifact, …) | ⏳ Phase 3 |
+| Proxy-layer errors (cred fail, timeout) | ⏳ Phase 2-C |
+| Cross-backend user journey (multi-agent thread) | ⏳ via userId + sessionId correlation |
+| Application-level user identity | ✅ Phase 1+2 |
 
-So Nango deliberately captures only what backend-side instrumentation
-**cannot see**:
-
-| Slice | Visible to backend Langfuse? | Captured by Nango? |
-|---|---|---|
+---|---|---|
 | LLM prompt / completion / tokens (backend agent) | ✅ | ❌ (skip) |
 | Server-side tool calls (backend agent) | ✅ | ❌ (skip) |
 | BuiltIn agent runtime (no upstream) | n/a | ✅ Phase 2 |

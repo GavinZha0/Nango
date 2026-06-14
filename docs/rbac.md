@@ -33,20 +33,7 @@ zero admins. The route returns 409 CONFLICT.
 
 ### Better-auth integration
 
-The role lives in `user.role` (text). `better-auth/plugins/admin` is
-configured with:
-
-```ts
-adminPlugin({
-  defaultRole: "user",
-  adminRoles: ["admin"],
-}),
-```
-
-`adminRoles: ["admin"]` only governs which roles can call the admin
-plugin's *built-in* APIs (listUsers, banUser, impersonate, etc.).
-Application-level authorisation (editor, public/private rules) lives
-in our own route guards and is independent.
+The user role is stored in `user.role`. We use `better-auth/plugins/admin` configured with `defaultRole: "user"` and `adminRoles: ["admin"]`. This plugin only governs built-in APIs (listUsers, banUser, etc.); our application-level authorisation (editor, public/private) lives in custom route guards.
 
 ---
 
@@ -171,61 +158,12 @@ because the author left) or block on FK constraints (worse UX).
 Soft delete sidesteps both. The user row stays forever; only its
 `deleted_at` timestamp marks it inactive.
 
-### 4.2 Schema
+### 4.2 Schema & Rules
 
-```sql
-ALTER TABLE "user" ADD COLUMN deleted_at  timestamp;
-ALTER TABLE "user" ADD COLUMN deleted_by  uuid REFERENCES "user"(id) ON DELETE SET NULL;
-
--- Email unique only among active rows
-DROP INDEX IF EXISTS user_email_key;
-CREATE UNIQUE INDEX user_email_active_idx ON "user"(email)
-  WHERE deleted_at IS NULL;
-```
-
-### 4.3 What happens at soft delete
-
-```
-admin clicks "Delete user" on /admin/users
-  ↓
-DELETE /api/admin/users/:id
-  ↓
-  - UPDATE user SET deleted_at = NOW(), deleted_by = adminId WHERE id = :id
-  - DELETE FROM session WHERE user_id = :id      ← sessions immediately invalid
-  ↓
-The user's next request returns 401 (no session).
-Their email is now reusable for a new sign-up.
-Their public resources keep their createdBy = oldUserId; UI shows
-"Created by X (deleted)".
-```
-
-### 4.4 Application-layer filtering
-
-Every query that returns a user row (login, session resolution, listing
-admin users) MUST filter `deleted_at IS NULL`. The session resolver
-in `auth-instance.ts` rejects sessions belonging to a soft-deleted user.
-
-UI displays of `createdBy` / `updatedBy` show `(deleted)` next to the
-display name when the referenced user has `deleted_at != NULL`.
-
-### 4.5 FK strategy on resource tables
-
-To keep "soft delete" robust **even if** a future operator decides to
-hard-purge a deleted user (e.g. for GDPR), all `created_by` /
-`updated_by` columns on resource tables use `ON DELETE SET NULL`:
-
-```
-skill.created_by, skill.updated_by                  → SET NULL
-mcp_server.created_by, mcp_server.updated_by        → SET NULL
-builtin_agent.created_by, builtin_agent.updated_by  → SET NULL
-credential.created_by, credential.updated_by        → SET NULL
-schedule.created_by, schedule.owner_id              → keep CASCADE (owner-only data)
-artifact.created_by                                 → keep CASCADE (same)
-thread / entity_run / notification                  → keep CASCADE
-```
-
-Soft delete is the daily path; hard purge is a deliberate admin action
-for compliance, not the routine.
+- **Schema**: `user` table has `deleted_at` (timestamp) and `deleted_by` (FK to user). The `email` uniqueness constraint only applies to active rows (`WHERE deleted_at IS NULL`), allowing reuse of emails for deleted accounts.
+- **Action**: When an admin deletes a user, `deleted_at` is set, and active sessions are wiped. Subsequent login attempts fail.
+- **Application Filtering**: All queries returning user rows must filter `deleted_at IS NULL`.
+- **FK Strategy**: `created_by` and `updated_by` on resource tables (skills, agents, etc.) use `ON DELETE SET NULL` to preserve public resources even if the user is hard-purged. Owner-only tables (schedules, artifacts, threads) use `CASCADE`.
 
 ### 4.6 Hard purge (future)
 
@@ -387,18 +325,3 @@ These are properties the system relies on; violating them is a bug.
    sole reader / writer, plus admin for forensics.
 
 ---
-
-## 8. Open questions / future work
-
-- **Hard purge UX** (`/admin/users/:id/purge`): pending, low priority.
-- **Audit log table**: current `updatedBy` field is enough for
-  collaboration UX; a full audit table can be added later if compliance
-  requires it.
-- **Resource transfer**: when an admin wants to "give" Alice's resources
-  to Bob (e.g. before purging Alice). v1 has no UI for this; admin can
-  do it manually via SQL.
-- **Group / team permissions**: not in v1. The single-tenant /
-  small-team positioning lets us defer this. If it ever lands,
-  `visibility` would extend to `private | team:<id> | public`.
-- **`Duplicate` / fork builtin → local**: deferred per product decision;
-  reconsider when users actually request it.
