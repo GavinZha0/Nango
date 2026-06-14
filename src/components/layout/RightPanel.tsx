@@ -42,6 +42,7 @@ import { WildcardToolRenderer } from "@/components/copilotkit/WildcardToolRender
 import { webSearchArgsSchema } from "@/lib/web-search/schema";
 import { useHandoffTools } from "@/hooks/useHandoff";
 import { useInteractiveTools } from "@/hooks/useInteractiveTools";
+import { useCopilotSharedStateSync } from "@/hooks/useCopilotSharedState";
 
 // Chat-error classification
 
@@ -299,6 +300,7 @@ function RightPanelToolbar(): ReactNode {
  */
 function ChatProviderHooks(): ReactNode {
   useOutcomeTools();
+  useCopilotSharedStateSync();
   // Specific renderers — CopilotKit's matcher prefers exact name
   // match before falling back to the wildcard.
   useRenderTool({

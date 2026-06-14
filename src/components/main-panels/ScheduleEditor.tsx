@@ -8,6 +8,7 @@ import {
   startTransition,
   useMemo,
   useState,
+  useCallback,
   type ReactNode,
 } from "react";
 import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
@@ -51,7 +52,7 @@ import {
   computeSourceLabel,
 } from "@/lib/orchestration/display-name";
 import type { EntityKind } from "@/lib/backends/types";
-
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 // Agent option helpers
 
 interface AgentOption {
@@ -264,6 +265,17 @@ export function ScheduleEditor({
   const [deleting, setDeleting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  const getCurrentData = useCallback(() => (form as unknown as Record<string, unknown>), [form]);
+  const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    setForm((f) => ({ ...f, ...draft }));
+  }, []);
+
+  const { draftApplied, clearDraftState } = useCopilotDraft({
+    resourceType: "schedule",
+    getCurrentData,
+    applyDraft,
+  });
+
   // Delete is destructive + irreversible; gate behind an AlertDialog
   // (matches SkillEditor / DataSourceEditor / SshServerEditor). On
   // success we navigate via `onSaved` so the editor pops out to the
@@ -365,6 +377,7 @@ export function ScheduleEditor({
       });
       setSubmitting(false);
       if (created) {
+        clearDraftState();
         startTransition(() => onSaved());
       } else {
         setError("Create failed. Please retry.");
@@ -384,6 +397,7 @@ export function ScheduleEditor({
       name: form.name.trim() || null,
     });
     setSubmitting(false);
+    clearDraftState();
     startTransition(() => onSaved());
   };
 
@@ -408,7 +422,7 @@ export function ScheduleEditor({
             size="sm"
             onClick={() => void submit()}
             disabled={submitting || startInPast}
-            className="h-8 cursor-pointer gap-1.5"
+            className={cn("h-8 cursor-pointer gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
           >
             {submitting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -481,6 +495,8 @@ export function ScheduleEditor({
               {error}
             </p>
           )}
+
+
 
           {/* Name */}
           <div className="grid grid-cols-[88px_1fr] items-center gap-3">

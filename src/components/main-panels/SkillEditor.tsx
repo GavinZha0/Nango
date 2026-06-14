@@ -5,8 +5,9 @@
  */
 
 import {
-  startTransition,
   useState,
+  useCallback,
+  startTransition,
   type ReactNode,
 } from "react";
 import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
@@ -14,8 +15,10 @@ import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -121,13 +124,30 @@ export function SkillEditor({
    *  more robust; the cheap proxy is "still equal to a template we
    *  could have built". Keeps the auto-fill helpful without
    *  fighting the user. */
-  const onNameChange = (next: string): void => {
+  const onNameChange = useCallback((next: string): void => {
     setName(next);
     if (!isCreating) return;
     if (skillMd === buildTemplate(name) || skillMd === buildTemplate("")) {
       setSkillMd(buildTemplate(next));
     }
-  };
+  }, [isCreating, skillMd, name]);
+
+  const getCurrentData = useCallback(() => ({ name, skillMd }), [name, skillMd]);
+  const applyDraft = useCallback((draft: Partial<{ name: string; skillMd: string }>) => {
+    if (draft.name !== undefined && draft.skillMd === undefined) {
+      // Use the component's sync logic if the agent only touched the name
+      onNameChange(draft.name);
+    } else {
+      if (draft.name !== undefined) setName(draft.name);
+      if (draft.skillMd !== undefined) setSkillMd(draft.skillMd);
+    }
+  }, [onNameChange]);
+
+  const { draftApplied, clearDraftState } = useCopilotDraft({
+    resourceType: "skill",
+    getCurrentData,
+    applyDraft,
+  });
 
   const submit = async (): Promise<void> => {
     if (readOnly) return;
@@ -157,6 +177,7 @@ export function SkillEditor({
           body?.message ?? body?.error ?? `HTTP ${res.status}`,
         );
       }
+      clearDraftState();
       startTransition(() => onSaved());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -227,7 +248,7 @@ export function SkillEditor({
                 size="sm"
                 onClick={() => void submit()}
                 disabled={saving || deleting}
-                className="h-8 gap-1.5"
+                className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
               >
                 {saving ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

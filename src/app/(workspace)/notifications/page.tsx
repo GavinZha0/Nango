@@ -4,7 +4,7 @@
  * /notifications — full-area management page for the inbox.
  */
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, useEffect, type ReactNode } from "react";
 import {
   CheckCheck,
   ChevronDown,
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { useNotificationsStore, useBellItems } from "@/store/notifications";
+import { useCopilotStateStore } from "@/store/copilot";
 import { notificationActions } from "@/hooks/useNotifications";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { formatTimestamp } from "@/components/admin/format";
@@ -259,6 +260,21 @@ export default function NotificationsPage(): ReactNode {
     () => items.reduce((n, it) => n + (it.readAt === null ? 1 : 0), 0),
     [items],
   );
+
+  const setActiveResourceData = useCopilotStateStore((s) => s.setActiveResourceData);
+
+  useEffect(() => {
+    const minimalData = filtered.map((n) => ({
+      id: n.id,
+      title: n.title,
+      task: n.task,
+      kind: n.kind,
+      source: n.sourceLabel,
+      read: n.readAt !== null,
+    }));
+    setActiveResourceData({ filter, notifications: minimalData });
+    return () => setActiveResourceData(null);
+  }, [filtered, filter, setActiveResourceData]);
 
   return (
     <div className="flex h-full w-full flex-col px-6 py-6">
