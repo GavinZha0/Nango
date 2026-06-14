@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,16 +12,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserFormDialog } from "@/components/admin/UserFormDialog";
-import { UserActionMenu } from "@/components/admin/UserActionMenu";
+import {
+  RoleBadge,
+  StatusBadge,
+  UserActions,
+  type UserRow,
+} from "@/components/admin/UserActionMenu";
+import { formatTimestamp } from "@/components/admin/format";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { UserPlus, Search } from "lucide-react";
 
-interface UserRow {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  org?: string | null;
-  banned?: boolean | null;
+interface UserRowWithDate extends UserRow {
   createdAt: Date;
 }
 
@@ -36,7 +36,8 @@ interface FetchParams {
 }
 
 export function UserManagement(): ReactNode {
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const tz = useDisplayTimezone();
+  const [users, setUsers] = useState<UserRowWithDate[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -68,7 +69,7 @@ export function UserManagement(): ReactNode {
       try {
         const res = await fetch(url.toString(), { credentials: "include" });
         if (res.ok) {
-          const body = (await res.json()) as { users: UserRow[]; total: number };
+          const body = (await res.json()) as { users: UserRowWithDate[]; total: number };
           if (!cancelled) {
             setUsers(body.users);
             setTotal(body.total);
@@ -120,20 +121,21 @@ export function UserManagement(): ReactNode {
               <TableHead>Org</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Last Active</TableHead>
               <TableHead>Created</TableHead>
-              <TableHead className="w-10" />
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                   No users found.
                 </TableCell>
               </TableRow>
@@ -144,22 +146,19 @@ export function UserManagement(): ReactNode {
                   <TableCell className="text-muted-foreground">{user.email}</TableCell>
                   <TableCell className="text-muted-foreground">{user.org ?? "—"}</TableCell>
                   <TableCell>
-                    <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                      {user.role}
-                    </Badge>
+                    <RoleBadge user={user} onRefresh={refresh} />
                   </TableCell>
                   <TableCell>
-                    {user.banned ? (
-                      <Badge variant="destructive">Banned</Badge>
-                    ) : (
-                      <Badge variant="outline">Active</Badge>
-                    )}
+                    <StatusBadge user={user} onRefresh={refresh} />
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {new Date(user.createdAt).toLocaleDateString()}
+                    {user.lastActiveAt ? formatTimestamp(user.lastActiveAt, tz) : "—"}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {formatTimestamp(user.createdAt, tz)}
                   </TableCell>
                   <TableCell>
-                    <UserActionMenu user={user} onRefresh={refresh} />
+                    <UserActions user={user} onRefresh={refresh} />
                   </TableCell>
                 </TableRow>
               ))

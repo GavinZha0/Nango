@@ -39,11 +39,12 @@ import {
   type EventRowData,
 } from "@/components/admin/EventTimeline";
 import {
-  formatAbsolute,
+  formatTimestamp,
   formatDuration,
   formatDurationMs,
 } from "@/components/admin/format";
 import { StatusBadge } from "@/components/admin/StatusBadge";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 
 // ---------------------------------------------------------------------------
 // Wire-shape mirrors `GET /api/admin/threads/[id]` (commit 63315c5).
@@ -255,6 +256,7 @@ function RunCard({
   selectedRunId,
   onSelect,
   depth,
+  tz,
 }: {
   run: RunWithMetrics;
   /** "#1", "#2.a", etc. — admin-friendly label that encodes the
@@ -263,6 +265,7 @@ function RunCard({
   childrenByParent: Map<string, RunWithMetrics[]>;
   selectedRunId: string | null;
   onSelect: (id: string) => void;
+  tz: string;
   /** 0 = top-level, deeper for sub-runs. Drives indentation but is
    *  also bounded so an unexpectedly deep tree (debate sub-run forest)
    *  doesn't blow out the column width. */
@@ -311,7 +314,7 @@ function RunCard({
             {ordinalLabel}
           </span>
           <span className="font-mono text-[10px] text-muted-foreground">
-            {formatAbsolute(run.startedAt ?? run.createdAt)}
+            {formatTimestamp(run.startedAt ?? run.createdAt, tz, "datetimePrecise")}
           </span>
           <span className="min-w-0 flex-1 truncate text-[11px] text-foreground/80">
             {entityLabel(run)}
@@ -400,6 +403,7 @@ function RunCard({
               selectedRunId={selectedRunId}
               onSelect={onSelect}
               depth={depth + 1}
+              tz={tz}
             />
           ))}
         </div>
@@ -477,6 +481,7 @@ function Stat({
 // ---------------------------------------------------------------------------
 
 export function ThreadDetailView({ threadId }: { threadId: string }): ReactNode {
+  const tz = useDisplayTimezone();
   const [data, setData] = useState<ThreadDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -617,6 +622,7 @@ export function ThreadDetailView({ threadId }: { threadId: string }): ReactNode 
                   selectedRunId={selectedRunId}
                   onSelect={onSelectRun}
                   depth={0}
+                  tz={tz}
                 />
               ))
             )}

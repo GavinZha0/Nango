@@ -20,6 +20,7 @@ interface StaleRow {
   ownerId: string;
   entityId: string;
   inputTask: string;
+  initiator: string;
 }
 
 /**
@@ -40,6 +41,7 @@ export async function recoverStrandedRuns(
       ownerId: EntityRunTable.ownerId,
       entityId: EntityRunTable.entityId,
       inputTask: EntityRunTable.inputTask,
+      initiator: EntityRunTable.initiator,
     })
     .from(EntityRunTable)
     .where(
@@ -80,6 +82,7 @@ export async function recoverStrandedRuns(
       title: "A task was interrupted",
       body: errorMessage,
       task: row.inputTask,
+      initiator: row.initiator,
     });
   }
 

@@ -5,6 +5,8 @@
 
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { AbstractAgent, EventType } from "@/lib/copilot/index.server";
 import type { RunAgentInput, BaseEvent, Message } from "@/lib/copilot/index.server";
 import type { Observable } from "rxjs";
@@ -85,6 +87,11 @@ class MastraBridgeAgent extends AbstractAgent {
 
       const tools = new ToolCallFilter(input.tools);
 
+      // Fallback messageId when upstream doesn't provide one in `p.id`.
+      // Minted fresh after each tool-result so subsequent text doesn't
+      // share a messageId with the tool call's assistant message.
+      let fallbackMsgId: string = randomUUID();
+
       for await (const line of readSseLines(response.body!)) {
         if (isCancelled()) break;
         if (!line.startsWith("data:")) continue;
@@ -102,7 +109,7 @@ class MastraBridgeAgent extends AbstractAgent {
 
         switch (chunk.type) {
           case "text-start": {
-            const id = (p.id as string) ?? `msg_${input.runId}`;
+            const id = (p.id as string) ?? fallbackMsgId;
             emit({
               type: EventType.TEXT_MESSAGE_START,
               messageId: id,
@@ -111,7 +118,7 @@ class MastraBridgeAgent extends AbstractAgent {
             break;
           }
           case "text-delta": {
-            const id = (p.id as string) ?? `msg_${input.runId}`;
+            const id = (p.id as string) ?? fallbackMsgId;
             const text = (p.text as string) ?? "";
             if (text) {
               emit({
@@ -123,7 +130,7 @@ class MastraBridgeAgent extends AbstractAgent {
             break;
           }
           case "text-end": {
-            const id = (p.id as string) ?? `msg_${input.runId}`;
+            const id = (p.id as string) ?? fallbackMsgId;
             emit({ type: EventType.TEXT_MESSAGE_END, messageId: id });
             break;
           }
@@ -183,15 +190,14 @@ class MastraBridgeAgent extends AbstractAgent {
             if (!tcId || !tools.isForwarded(tcId)) break;
             const content =
               typeof p.result === "string" ? p.result : JSON.stringify(p.result ?? null);
-            // AG-UI REQUIRES `messageId` on TOOL_CALL_RESULT — synthesise
-            // a stable id from runId so persistence + replay link back
-            // to the same logical turn.
             emit({
               type: EventType.TOOL_CALL_RESULT,
-              messageId: `msg_${input.runId}`,
+              messageId: fallbackMsgId,
               toolCallId: tcId,
               content,
             });
+            // Mint a fresh fallback so post-tool text gets its own message.
+            fallbackMsgId = randomUUID();
             break;
           }
 

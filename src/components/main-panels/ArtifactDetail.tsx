@@ -95,6 +95,8 @@ import {
 } from "@/hooks/useArtifactTree";
 import type { ArtifactEntity } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { formatTimestamp } from "@/components/admin/format";
 import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
 
 /**
@@ -136,15 +138,7 @@ interface SnapshotInfo {
   timestamp: string;
 }
 
-/** Format an ISO-8601 timestamp for the title-row data timestamp badge. */
-function formatDataTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+
 
 /**
  * localStorage id for the vertical (chart / workflow) split. One
@@ -180,6 +174,7 @@ export interface ArtifactDetailProps {
 }
 
 export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElement {
+  const tz = useDisplayTimezone();
   const router = useRouter();
   const { data, error, isLoading, mutate } = useSWR<ArtifactBundleResponse>(
     `/api/artifacts/${artifactId}`,
@@ -297,16 +292,16 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
   // Compute the data timestamp for the title row.
   const snapshotInfo: SnapshotInfo | undefined = useMemo(() => {
     if (data?.fromSnapshot === true && data.snapshotAt) {
-      return { fromSnapshot: true, timestamp: formatDataTime(data.snapshotAt) };
+      return { fromSnapshot: true, timestamp: formatTimestamp(data.snapshotAt, tz) };
     }
     if (data?.fromSnapshot === false && data.executedAt) {
-      return { fromSnapshot: false, timestamp: formatDataTime(data.executedAt) };
+      return { fromSnapshot: false, timestamp: formatTimestamp(data.executedAt, tz) };
     }
     if (data?.executedAt) {
-      return { fromSnapshot: false, timestamp: formatDataTime(data.executedAt) };
+      return { fromSnapshot: false, timestamp: formatTimestamp(data.executedAt, tz) };
     }
     return undefined;
-  }, [data]);
+  }, [data, tz]);
 
   if (isLoading) {
     return (

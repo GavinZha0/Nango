@@ -8,6 +8,34 @@
       "when": 1781220798005,
       "tag": "0000_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781368816965,
+      "tag": "0001_add-timezone-follow-browser",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781377081902,
+      "tag": "0002_add-notification-initiator",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781389340065,
+      "tag": "0003_add-login-event-table",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781395051873,
+      "tag": "0004_use-timestamptz-everywhere",
+      "breakpoints": true
     }
   ]
 }

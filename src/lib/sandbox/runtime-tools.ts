@@ -18,11 +18,11 @@ const RunInSandboxArgs = z.object({
    *  argv internally (python → `["python3","-"]`); the LLM never
    *  picks the argv directly. */
   language: z
-    .enum(["python"])
+    .enum(["python", "javascript"])
     .describe(
-      "Interpreter to run `code_text` in. Currently 'python' only " +
-        "(python3, read from stdin). More entries land as new " +
-        "runtimes ship.",
+      "Interpreter to run `code_text` in. 'python' (python3) for " +
+        "data analysis with duckdb/pandas/numpy; 'javascript' (node) " +
+        "for general scripting. Both read from stdin.",
     ),
   /** Source body piped to the interpreter's stdin. */
   code_text: z
@@ -80,8 +80,9 @@ const RunInSandboxArgs = z.object({
 });
 
 /** Per-language argv table the sandbox adapter executes. */
-const LANGUAGE_COMMAND: Record<"python", readonly string[]> = {
+const LANGUAGE_COMMAND: Record<"python" | "javascript", readonly string[]> = {
   python: ["python3", "-"],
+  javascript: ["node", "--input-type=module", "-"],
 } as const;
 
 /**
@@ -97,14 +98,17 @@ export function buildRunInSandboxTool(): ToolDefinition {
     description:
       "Execute source code in a sandboxed environment. The sandbox " +
       "has no network access, a read-only rootfs, a writable /tmp, " +
-      "and strict memory/CPU/timeout limits. The rootfs ships with " +
-      "python3, duckdb, pandas, numpy. Use this for ad-hoc data " +
-      "analysis on cached Parquet files. Pick the interpreter via " +
+      "and strict memory/CPU/timeout limits. Two languages: " +
+      "'python' (python3 with duckdb, pandas, numpy — best for " +
+      "data analysis on cached Parquet files) and 'javascript' " +
+      "(node — for general scripting). Pick the interpreter via " +
       "`language` and pass the script body via `code_text` — the " +
-      "tool handles the argv internally (python → `python3 -`). " +
+      "tool handles the argv internally (python → `python3 -`, " +
+      "javascript → `node -`). " +
       "Optional `timeout_seconds` is in SECONDS (NOT milliseconds), " +
       "integer 1-300, default 30. Pass typed runtime parameters via " +
-      "`params` (env vars; read with `os.environ['<KEY>']`); do not " +
+      "`params` (env vars; read with `os.environ['<KEY>']` in " +
+      "Python or `process.env['<KEY>']` in JavaScript); do not " +
       "embed secrets there. Each name passed in `datasets` appears " +
       "read-only at `./data/<name>/` in the sandbox's current " +
       "working directory — construct paths in your script as " +

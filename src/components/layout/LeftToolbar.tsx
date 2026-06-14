@@ -21,8 +21,11 @@ import { SIDEBAR_PANEL_REGISTRY } from "@/components/layout/sidebar-panel-regist
 import { useRole } from "@/hooks/useRole";
 import {
   selectUnreadCount,
+  selectHasUnreadSchedule,
+  selectHasScheduleFailure,
   useNotificationsStore,
 } from "@/store/notifications";
+import { notificationActions } from "@/hooks/useNotifications";
 import {
   Tooltip,
   TooltipContent,
@@ -96,6 +99,8 @@ export function LeftToolbar(): ReactNode {
   const toggleLeftPanel = useSidebarStore((s) => s.toggleLeftPanel);
   const { isAdmin, isEditor } = useRole();
   const unreadCount = useNotificationsStore(selectUnreadCount);
+  const hasUnreadSchedule = useNotificationsStore(selectHasUnreadSchedule);
+  const hasScheduleFailure = useNotificationsStore(selectHasScheduleFailure);
   const isOnNotificationsRoute = pathname.startsWith("/notifications");
 
   // Filter by role, then group by role for visual segmentation.
@@ -124,6 +129,9 @@ export function LeftToolbar(): ReactNode {
       router.push(def.href);
       setLeftPanelOpen(true);
     }
+    if (id === "schedules") {
+      void notificationActions.markScheduleRead();
+    }
   }
 
   return (
@@ -137,6 +145,8 @@ export function LeftToolbar(): ReactNode {
                 pathname,
                 isOnNotificationsRoute,
                 unreadCount,
+                hasUnreadSchedule,
+                hasScheduleFailure,
                 onPanel: handlePanelClick,
                 onRoute: (href: string) => router.push(href),
               }))}
@@ -159,6 +169,8 @@ interface RenderContext {
   pathname: string;
   isOnNotificationsRoute: boolean;
   unreadCount: number;
+  hasUnreadSchedule: boolean;
+  hasScheduleFailure: boolean;
   onPanel: (id: LeftPanelId) => void;
   onRoute: (href: string) => void;
 }
@@ -176,12 +188,20 @@ function renderPanel(item: ToolbarPanelItem, ctx: RenderContext): ReactNode {
   // open (`/agent/<id>` keeps the Agent button lit). Matches the
   // `renderRoute` convention.
   const active = ctx.pathname.startsWith(def.href);
+
+  // Schedule status dot: green = recent run succeeded, amber = failed.
+  const showScheduleDot =
+    item.id === "schedules" && ctx.hasUnreadSchedule;
+  const scheduleDotColor = ctx.hasScheduleFailure
+    ? "bg-amber-500"
+    : "bg-emerald-500";
+
   return (
     <Tooltip key={`panel-${item.id}`}>
       <TooltipTrigger
         onClick={() => ctx.onPanel(item.id)}
         className={cn(
-          "flex h-9 w-9 cursor-pointer items-center justify-center rounded-md transition-colors",
+          "relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-md transition-colors",
           active
             ? "bg-primary text-primary-foreground"
             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -190,6 +210,14 @@ function renderPanel(item: ToolbarPanelItem, ctx: RenderContext): ReactNode {
         aria-pressed={active}
       >
         <Icon className="h-6 w-6" />
+        {showScheduleDot && (
+          <span
+            className={cn(
+              "absolute right-1 top-1 h-2 w-2 rounded-full",
+              scheduleDotColor,
+            )}
+          />
+        )}
       </TooltipTrigger>
       <TooltipContent side="right">
         <p>{def.label}</p>

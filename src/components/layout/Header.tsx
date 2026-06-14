@@ -13,7 +13,6 @@ import {
   MessagesSquare,
   LogOut,
   UserRound,
-  Settings,
   ChevronDown,
   Sun,
   Moon,
@@ -61,7 +60,6 @@ function UserMenu(): ReactNode {
   const user = session?.user;
   const userName = getUserName(user);
   const userInitial = getUserInitial(userName);
-  const userEmail = user?.email ?? "";
 
   async function handleSignOut(): Promise<void> {
     await authClient.signOut();
@@ -84,19 +82,10 @@ function UserMenu(): ReactNode {
         <ChevronDown className="h-3 w-3 text-muted-foreground" />
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent side="bottom" align="end" className="w-56">
-        <DropdownMenuItem disabled className="flex-col items-start gap-0.5 py-2">
-          <p className="truncate text-sm font-medium text-foreground">{userName}</p>
-          <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
+      <DropdownMenuContent side="bottom" align="end" className="w-40">
         <DropdownMenuItem onClick={() => router.push("/profile")}>
           <UserRound className="h-4 w-4" />
           <span>Profile</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled>
-          <Settings className="h-4 w-4" />
-          <span>Preferences</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void handleSignOut()}>

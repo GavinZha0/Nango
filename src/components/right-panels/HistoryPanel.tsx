@@ -1,9 +1,19 @@
 "use client";
 
-import { RefreshCw, Star, Trash2, ChevronRight } from "lucide-react";
+import { Star, Trash2, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { SessionDescriptor } from "@/lib/backends/types";
 import { useWorkspaceStore } from "@/store/workspace";
 import { useSidebarStore } from "@/store/sidebar";
@@ -143,10 +153,10 @@ function HistoryPanelContent(): ReactNode {
   const startFreshChat = useWorkspaceStore((s) => s.startFreshChat);
   const pinnedSessions = useWorkspaceStore((s) => s.pinnedSessions);
   const togglePin = useWorkspaceStore((s) => s.togglePin);
+  const historyRevision = useSidebarStore((s) => s.historyRevision);
   const [sessions, setSessions] = useState<SessionDescriptor[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,7 +187,7 @@ function HistoryPanelContent(): ReactNode {
 
     void load();
     return () => { cancelled = true; };
-  }, [activeAgentId, activeAgentType, revision]);
+  }, [activeAgentId, activeAgentType, historyRevision]);
 
   const setRightTab = useSidebarStore((s) => s.setRightTab);
 
@@ -256,21 +266,63 @@ function HistoryPanelContent(): ReactNode {
     });
   }
 
+  // Bulk-delete state: which group is pending confirmation.
+  const [bulkDeleteGroup, setBulkDeleteGroup] = useState<TimeGroup | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  /** Count of deletable (non-pinned) sessions in the target group. */
+  const bulkDeleteCount =
+    bulkDeleteGroup
+      ? (grouped[bulkDeleteGroup] ?? []).filter(
+          (s) => !pinnedSessions.has(s.session_id),
+        ).length
+      : 0;
+
+  async function handleBulkDelete(): Promise<void> {
+    if (!bulkDeleteGroup) return;
+    const items = grouped[bulkDeleteGroup] ?? [];
+    const toDelete = items.filter(
+      (s) => !pinnedSessions.has(s.session_id),
+    );
+    if (toDelete.length === 0) {
+      setBulkDeleteGroup(null);
+      return;
+    }
+
+    setBulkDeleting(true);
+    setError(null);
+    const previousSessions = sessions;
+    const deleteIds = new Set(toDelete.map((s) => s.session_id));
+
+    // Optimistic removal
+    setSessions((prev) => prev.filter((s) => !deleteIds.has(s.session_id)));
+    if (threadId && deleteIds.has(threadId)) {
+      startFreshChat();
+    }
+
+    // Fire all deletes in parallel
+    const results = await Promise.all(
+      toDelete.map((s) => deleteThread(s.session_id)),
+    );
+    const anyFailed = results.some((r) => !r.ok);
+
+    if (anyFailed) {
+      // Rollback all — simpler than partial rollback
+      setSessions(previousSessions);
+      if (threadId && deleteIds.has(threadId)) {
+        setRuntimeThreadId(threadId);
+        setExplicitThreadId(threadId);
+        bumpChatEpoch();
+      }
+      setError("Some conversations could not be deleted.");
+    }
+
+    setBulkDeleting(false);
+    setBulkDeleteGroup(null);
+  }
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto h-6 w-6"
-          onClick={() => setRevision((r) => r + 1)}
-          disabled={loading}
-          aria-label="Refresh sessions"
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-        </Button>
-      </div>
-
       <ScrollArea className="min-h-0 flex-1">
         {loading && sessions.length === 0 ? (
           <p className="p-4 text-center text-xs text-muted-foreground">Loading…</p>
@@ -286,19 +338,33 @@ function HistoryPanelContent(): ReactNode {
               const items = grouped[group];
               if (!items?.length) return null;
               const isOpen = openGroups.has(group);
+              const showGroupDelete = group !== "pinned";
               return (
                 <div key={group}>
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(group)}
-                    className="flex w-full items-center gap-1 bg-muted/40 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    <ChevronRight
-                      className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")}
-                    />
-                    <span>{GROUP_LABELS[group]}</span>
-                    <span className="text-[10px] text-muted-foreground/60">({items.length})</span>
-                  </button>
+                  <div className="group/header flex items-center bg-muted/40 px-2 py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group)}
+                      className="flex flex-1 items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronRight
+                        className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")}
+                      />
+                      <span>{GROUP_LABELS[group]}</span>
+                      <span className="text-[10px] text-muted-foreground/60">({items.length})</span>
+                    </button>
+                    {showGroupDelete && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 shrink-0 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover/header:opacity-100"
+                        onClick={() => setBulkDeleteGroup(group)}
+                        aria-label={`Delete all ${GROUP_LABELS[group]} conversations`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
                   {isOpen && (
                     <ul className="space-y-0.5 py-0.5">
                       {items.map((s) => (
@@ -317,6 +383,34 @@ function HistoryPanelContent(): ReactNode {
                 </div>
               );
             })}
+
+            {/* Bulk-delete confirmation dialog */}
+            <AlertDialog
+              open={bulkDeleteGroup !== null}
+              onOpenChange={(open) => { if (!open) setBulkDeleteGroup(null); }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    Delete {bulkDeleteGroup ? GROUP_LABELS[bulkDeleteGroup] : ""} conversations?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {bulkDeleteCount} conversation{bulkDeleteCount !== 1 ? "s" : ""} will
+                    be permanently deleted. Pinned conversations will be kept.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => void handleBulkDelete()}
+                    disabled={bulkDeleting || bulkDeleteCount === 0}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {bulkDeleting ? "Deleting…" : `Delete ${bulkDeleteCount}`}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         )}
       </ScrollArea>

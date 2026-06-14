@@ -246,7 +246,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `mcp/provider-pool.ts` + `mcp/index.ts` | Process-wide MCP provider pool: one transport per server, refcounted, with idle reaper and detach-on-evict. Singleton in `mcp/index.ts`. |
 | `credentials/invalidation.ts` | Cross-cutting helpers: `invalidateForCredentialChange` and `invalidateForMcpServerChange`. Call from any write path. |
 | `mcp/client-providers.ts` | `createGracefulMcpProvider` — degrade MCP failures without aborting agent runs |
-| `runner/runner.ts` | Execution kernel: `runChatRequest` (backend) / `runBuiltinChatRequest` (built-in) / `start` (programmatic, sync + async). Every dispatch produces an `entity_run` row. |
+| `runner/runner.ts` | Execution kernel: `runChatRequest` (backend) / `runBuiltinChatRequest` (built-in) / `start` (programmatic, sync + async). Every dispatch produces an `entity_run` row. Sync runs timeout after `runner.sync_timeout` (default 300s); async runs timeout after `runner.async_timeout` (default 1800s / 30 min). Both are configurable in the admin config table. |
 | `runner/persisting-agent.ts` | AG-UI event tee — wraps every dispatched agent so the event stream both reaches the browser and persists into `entity_run_event`. Storage is **coalesced**: TEXT_MESSAGE_CONTENT / REASONING_MESSAGE_CONTENT deltas are buffered in memory and flushed to a single `message` / `reasoning` row at each natural boundary (tool call, message-id change, stream end). The browser still sees real-time deltas on the wire. |
 | `runner/event-bus.ts` | In-process pub/sub keyed by `ownerId`, surfaced via `/api/runs/stream` SSE; `globalThis` slot for HMR safety. |
 | `runner/notifications.ts` | `recordRunNotification` (NUL-strip + 280-char preview + 16 KB body cap); used by async + scheduled fires + recovery. |
@@ -467,7 +467,89 @@ Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the u
 
 ---
 
-## 7. Security
+## 7. Time & Timezone
+
+### 7.1 Core Principle: UTC Everywhere, Timezone for Display
+
+All timestamps in the database and all server-side computations use
+**UTC**. Timezone is a **presentation concern** resolved at the edge
+(frontend display and calendar-interval arithmetic).
+
+| Layer | Convention |
+|---|---|
+| **Database** | All 60 timestamp columns across 24 tables use PostgreSQL `timestamp without time zone`. Values are UTC instants. |
+| **API transport** | ISO-8601 UTC strings (`"2026-06-13T14:51:03.000Z"`). Timezone is never baked into the timestamp — it travels as a separate field when needed (e.g. `schedule.timezone`). |
+| **Server-side comparisons** | `Date.now()` / `Date.getTime()` — epoch milliseconds, timezone-independent. Session expiry, token TTL, cache freshness, schedule validation all use absolute UTC math. |
+| **Scheduler interval arithmetic** | `addInterval()` uses the schedule's IANA timezone for `day/week/month` intervals to preserve wall-clock time across DST transitions, then converts the result back to UTC. `minute/hour` intervals add fixed milliseconds — no timezone involved. |
+| **Frontend display** | All user-visible timestamps are formatted using the user's **profile timezone** via `useDisplayTimezone()` + `formatTimestamp()`. |
+
+### 7.2 User Timezone Model
+
+Each user has two fields in the `user` table:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `timezone` | `text` (nullable) | IANA timezone name (e.g. `"America/New_York"`). Source of truth for `get_current_datetime` tool, default schedule timezone, and all frontend timestamp display. |
+| `timezone_follow_browser` | `boolean` (default `true`) | When true, `timezone` is auto-synced to the browser's timezone on every session load. When false, `timezone` is a fixed value set by the user on the Profile page. |
+
+**Resolution flow (WorkspaceProvider on session load):**
+
+1. `followBrowser = true` and browser timezone differs from stored → update profile to match browser.
+2. `followBrowser = false` and timezone already set → skip (fixed mode).
+3. `timezone` is null (first visit) → always seed from browser regardless of `followBrowser`.
+
+This ensures `timezone` always has a value for server-side consumers (`get_current_datetime`, `create_schedule`, headless scheduled runs).
+
+### 7.3 Frontend Display Format
+
+All user-facing timestamps use a single function:
+
+```typescript
+formatTimestamp(iso, timeZone, style?)
+```
+
+Fixed locale `en-US`, no year. Four styles:
+
+| Style | Output | Use case |
+|---|---|---|
+| `"datetime"` (default) | `6/13, 10:51 AM` | Notifications, run history, admin lists |
+| `"time"` | `10:51 AM` | Compact inline (reserved) |
+| `"datetimePrecise"` | `6/13, 10:51:03 AM` | Thread detail RunCard (multiple runs per minute) |
+| `"timePrecise"` | `10:51:03 AM` | EventTimeline rows (date shown in parent context) |
+
+All call sites use `useDisplayTimezone()` to read the profile timezone and pass it to `formatTimestamp()`. No call site uses raw `toLocaleString()` without a timezone parameter.
+
+**Files**: `src/components/admin/format.tsx` (formatter), `src/hooks/useDisplayTimezone.ts` (hook).
+
+### 7.4 Schedule Timezone
+
+Each schedule row carries its own `timezone` field — a **creation-time snapshot** of the user's profile timezone. Changing the user's profile timezone later does NOT affect existing schedules.
+
+The schedule's timezone serves two purposes:
+1. **Calendar interval arithmetic** — `addInterval()` uses it for DST-safe `day/week/month` stepping.
+2. **UI display** — the ScheduleEditor shows the schedule's snapshotted timezone in the Advanced section.
+
+### 7.5 Invariants
+
+1. **Never store local time.** All `timestamp` columns contain UTC values produced by `new Date()` (server) or `CURRENT_TIMESTAMP` (PostgreSQL).
+2. **Never format without a timezone.** Every user-facing timestamp call passes the profile timezone from `useDisplayTimezone()`.
+3. **Timezone does not affect server logic.** Token expiry, session validity, cache TTL, run duration — all use UTC epoch math. The only server-side use of IANA timezone is `addInterval()` for calendar intervals.
+4. **`timezone` is always populated.** The `WorkspaceProvider` auto-detect + `followBrowser` sync ensures the field is never null after the user's first session load.
+
+### 7.6 Testing
+
+Two test files cover the core time logic:
+
+- `tests/unit/components/admin/format-timestamp.test.ts` — 13 cases: four style variants, timezone shifts (including cross-midnight), null/invalid edge cases.
+- `tests/unit/lib/runner/scheduler-time.test.ts` — 16 cases: `addInterval` (fixed-ms, calendar, DST spring-forward / fall-back), `nextFireAt` (one-shot, recurring, endAt cap, hourly).
+
+### 7.7 Ops: Docker Clock Drift
+
+On macOS Docker Desktop, the Linux VM's clock can drift after host sleep/wake cycles. Since the scheduler uses `setTimeout(delay)` where `delay = nextFire.getTime() - Date.now()`, a stale `Date.now()` produces an incorrect delay. **Fix: restart Docker Desktop** to re-sync the VM clock. Linux-native Docker does not have this issue (the host kernel runs NTP continuously).
+
+---
+
+## 8. Security
 
 | Risk | Control |
 |---|---|
@@ -481,7 +563,7 @@ Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the u
 
 ---
 
-## 8. Observability
+## 9. Observability
 
 Two independent phases:
 
@@ -492,9 +574,9 @@ See `docs/observability.md` for details.
 
 ---
 
-## 9. Extensibility
+## 10. Extensibility
 
-### 9.1 Adding a New Agent Backend
+### 10.1 Adding a New Agent Backend
 
 The architectural reference (control / data plane separation,
 `BackendModule` pattern, security model, hot-path invariants) lives
@@ -510,7 +592,7 @@ hand-roll an Observable); register in `src/lib/backends/registry.ts`
 (server-only). Both registries use `satisfies Record<BackendId, …>`
 so missing or typo-mismatched registrations fail `tsc`.
 
-### 9.2 Adding a New Outcome Kind
+### 10.2 Adding a New Outcome Kind
 
 The polymorphic `Outcome` union in `src/store/outcome-store.ts` already
 admits `kind: "chart" | "html" | "image"`. V1 only produces `"chart"`;
@@ -522,7 +604,7 @@ adding a producer for the other kinds is mostly a matter of:
 4. Update `toCreateArtifactBody` in `src/hooks/useSaveOutcome.ts` to shape the artifact body for the new kind.
 5. (Optional) update `src/lib/outcomes/prompt-block.server.ts` to tell qualified agents about the new tool.
 
-### 9.2bis Adding a New Saved-Artifact Type
+### 10.2bis Adding a New Saved-Artifact Type
 
 The persisted `artifact` table also has a `type` enum
 (`code`/`chart`/`dashboard`/`image`/`html`/`ppt`/`report`):
@@ -531,7 +613,7 @@ The persisted `artifact` table also has a `type` enum
 2. Add a branch to the `renderByType` switch in `ArtifactRenderer.tsx`.
 3. (V2) Add a branch in the future `/artifact/[id]` page.
 
-### 9.3 LLM Endpoints (Ollama / vLLM / Groq / …)
+### 10.3 LLM Endpoints (Ollama / vLLM / Groq / …)
 
 Do **not** register raw LLM endpoints as agent backend platforms. Instead:
 1. Create a credential with `serviceType="llm"`.
@@ -540,7 +622,7 @@ Do **not** register raw LLM endpoints as agent backend platforms. Instead:
 
 ---
 
-## 10. Document Index
+## 11. Document Index
 
 - `AGENTS.md` — project-wide development rules and directory conventions
 - `CLAUDE.md` — Claude AI assistant context

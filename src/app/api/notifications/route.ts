@@ -52,20 +52,27 @@ export const GET = withSession(ROUTE, async ({ req, session }) => {
 });
 
 /**
- * POST /api/notifications/mark-all-read
- * Convenience: flip every unread row owned by the caller in one
- * shot. The dedicated per-id PATCH route lives in `[id]/route.ts`.
+ * POST /api/notifications?initiator=schedule
+ * Mark unread notifications as read. Optional `initiator` query param
+ * scopes the update to a specific initiator (e.g. "schedule"); omit
+ * to mark all unread. The per-id PATCH route lives in `[id]/route.ts`.
  */
-export const POST = withSession(ROUTE, async ({ session }) => {
+export const POST = withSession(ROUTE, async ({ req, session }) => {
+  const url = new URL(req.url);
+  const initiator = url.searchParams.get("initiator")?.trim() || null;
+
+  const conditions = [
+    eq(NotificationTable.ownerId, session.user.id),
+    isNull(NotificationTable.readAt),
+  ];
+  if (initiator) {
+    conditions.push(eq(NotificationTable.initiator, initiator));
+  }
+
   const updated = await db
     .update(NotificationTable)
     .set({ readAt: new Date() })
-    .where(
-      and(
-        eq(NotificationTable.ownerId, session.user.id),
-        isNull(NotificationTable.readAt),
-      ),
-    )
+    .where(and(...conditions))
     .returning({ id: NotificationTable.id });
   return NextResponse.json({ ok: true, count: updated.length });
 });

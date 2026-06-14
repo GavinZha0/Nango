@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
-  timestamp,
+  timestamp as pgTimestamp,
   jsonb,
   uuid,
   bigint,
@@ -15,6 +15,17 @@ import {
   check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+
+/**
+ * All timestamp columns use `timestamp with time zone` (timestamptz).
+ * PostgreSQL stores UTC internally; the driver returns timezone-aware
+ * strings so JavaScript never misinterprets the value regardless of
+ * the server's `timezone` setting.
+ */
+function timestamp(name: string) {
+  return pgTimestamp(name, { withTimezone: true });
+}
+
 import type { ArtifactKind, ArtifactType } from "@/lib/domain/artifact";
 
 /**
@@ -46,11 +57,18 @@ export const UserTable = pgTable(
     imAccounts: jsonb("im_accounts"),  // { teams?: string, dingtalk?: string, ... }
     /** IANA timezone (e.g. "Asia/Shanghai") — the user's primary
      *  timezone. Null until first detected from the browser on session
-     *  load (WorkspaceProvider); once set it is NEVER auto-overwritten,
-     *  so a user-chosen value sticks across logins and devices. Source
-     *  of truth for the `get_current_datetime` tool and the default
-     *  timezone of newly created schedules. */
+     *  load (WorkspaceProvider). Source of truth for the
+     *  `get_current_datetime` tool, the default timezone of newly
+     *  created schedules, and all frontend timestamp display. When
+     *  `timezoneFollowBrowser` is true the value is kept in sync with
+     *  the browser on every session load; when false it is only ever
+     *  changed by an explicit user save on the Profile page. */
     timezone: text("timezone"),
+    /** When true, `timezone` is automatically synced to the browser's
+     *  IANA zone on every session load (WorkspaceProvider). When false,
+     *  `timezone` is a fixed value set by the user on the Profile page.
+     *  Defaults to true for new users and existing users (migration). */
+    timezoneFollowBrowser: boolean("timezone_follow_browser").notNull().default(true),
     /** Soft-delete timestamp; null = active. See docs/rbac.md. */
     deletedAt: timestamp("deleted_at"),
     deletedBy: uuid("deleted_by").references((): AnyPgColumn => UserTable.id, {
@@ -107,6 +125,39 @@ export const VerificationTable = pgTable("verification", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+/**
+ * LoginEvent — append-only audit log for authentication events.
+ *
+ * Records sign-in (success / failure) and sign-out events. Used by
+ * the admin "Login Events" tab for security auditing.
+ *
+ * Retention: application-level cleanup (default 90 days) runs at boot
+ * or via scheduled task. No FK to session — sessions are ephemeral,
+ * events are durable.
+ */
+export const LoginEventTable = pgTable(
+  "login_event",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+    userId: uuid("user_id").references(() => UserTable.id, {
+      onDelete: "cascade",
+    }),
+    eventType: text("event_type").notNull(), // "sign_in" | "sign_in_failed" | "sign_out"
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    detail: text("detail"),
+    createdAt: timestamp("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    index("login_event_user_idx").on(t.userId, t.createdAt.desc()),
+    index("login_event_created_at_idx").on(t.createdAt.desc()),
+  ],
+);
 
 // Nango domain tables
 
@@ -1358,6 +1409,11 @@ export const NotificationTable = pgTable(
     runId: uuid("run_id").references(() => EntityRunTable.id, {
       onDelete: "cascade",
     }),
+    /** Denormalised snapshot of `entity_run.initiator` at notification
+     *  time. Enables the bell icon to filter out schedule notifications
+     *  without JOINing entity_run. Null for legacy rows and system
+     *  messages that have no run. */
+    initiator: text("initiator"), // "user" | "orchestrator" | "schedule" | "system"
     /** Null = unread; set on the first mark-as-read API call. */
     readAt: timestamp("read_at"),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

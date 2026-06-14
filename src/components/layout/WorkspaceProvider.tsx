@@ -31,34 +31,52 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     setUserId(userId);
   }, [userId, setUserId]);
 
-  // Auto-detect the user's timezone from the browser ONCE, and only
-  // when the profile has none yet. An existing value (auto-detected
-  // earlier OR set by the user) is NEVER auto-overwritten, so a chosen
-  // timezone sticks across logins and devices. Running on session load
-  // covers sign-up auto-login, manual login, and backend-created users'
-  // first visit alike — no separate hook at the registration step.
-  const tzDetectedRef = useRef(false);
-  const currentTz =
-    (sessionData?.user as { timezone?: string | null } | undefined)?.timezone
-    ?? null;
+  // Timezone sync — two modes controlled by `timezoneFollowBrowser`:
+  //
+  //   followBrowser = true (default):
+  //     On every session load, if the browser timezone differs from
+  //     the stored profile timezone, update the profile to match.
+  //     This keeps `user.timezone` fresh for users who travel or
+  //     change their system timezone.
+  //
+  //   followBrowser = false:
+  //     The stored timezone is a fixed value set by the user on the
+  //     Profile page. Auto-sync is skipped entirely.
+  //
+  // First-visit (timezone is null, regardless of followBrowser):
+  //   Always seed from the browser so `timezone` has a value.
+  const tzSyncedRef = useRef(false);
+  const userFields =
+    sessionData?.user as
+    | { timezone?: string | null; timezoneFollowBrowser?: boolean | null }
+    | undefined;
+  const currentTz = userFields?.timezone ?? null;
+  const followBrowser = userFields?.timezoneFollowBrowser ?? true;
   useEffect(() => {
-    if (!userId || currentTz || tzDetectedRef.current) return;
+    if (!userId || tzSyncedRef.current) return;
     const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (!browserTz) return;
-    tzDetectedRef.current = true;
+
+    // Nothing to do: fixed mode and timezone already populated.
+    if (!followBrowser && currentTz) return;
+
+    // Nothing to do: follow mode but timezone already matches browser.
+    if (followBrowser && currentTz === browserTz) return;
+
+    tzSyncedRef.current = true;
     void authClient
       .updateUser({ timezone: browserTz })
       .then((res) => {
         if (res?.error) {
-          tzDetectedRef.current = false; // allow retry on a later mount
-          console.warn("[workspace] timezone auto-detect failed", res.error);
+          tzSyncedRef.current = false;
+          console.warn("[workspace] timezone sync failed", res.error);
         }
       })
       .catch((err) => {
-        tzDetectedRef.current = false;
-        console.warn("[workspace] timezone auto-detect error", err);
+        tzSyncedRef.current = false;
+        console.warn("[workspace] timezone sync error", err);
       });
-  }, [userId, currentTz]);
+  }, [userId, currentTz, followBrowser]);
 
   // Boot notifications (initial fetch + SSE + BroadcastChannel).
   // Idempotent across re-renders.

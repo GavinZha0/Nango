@@ -14,9 +14,10 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { detectToolResultStatus as detectFromResultString } from "@/lib/copilot/detect-tool-result-status";
 
-import { JsonBlock } from "./format";
+import { formatTimestamp, JsonBlock } from "./format";
 
 export interface EventRowData {
   runId: string;
@@ -109,7 +110,8 @@ function EventRow({
   // Errors auto-open on first render so failures stand out without
   // an extra click.
   const [open, setOpen] = useState(event.type === "error");
-  const ts = new Date(event.ts).toLocaleTimeString();
+  const tz = useDisplayTimezone();
+  const ts = formatTimestamp(event.ts, tz, "timePrecise");
 
   // One-line summary captures the most identifying field of each
   // event type so the timeline reads as a transcript without forcing

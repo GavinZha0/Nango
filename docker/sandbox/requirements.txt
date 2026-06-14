@@ -7,4 +7,3 @@
 duckdb
 pandas
 numpy
-pyarrow

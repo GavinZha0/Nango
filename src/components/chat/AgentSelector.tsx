@@ -1,15 +1,14 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useCallback, useState } from "react";
 import type { ReactNode } from "react";
-import { Bot, ChevronDown, Sparkles, Users } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Sparkles, Users } from "lucide-react";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -20,6 +19,7 @@ import type { BuiltinAgentRow } from "@/components/main-panels/BuiltinAgentEdito
 
 /**
  * AgentSelector — compact dropdown that lists every visible backend
+ * agent and built-in agent, grouped with collapsible sections.
  */
 
 export interface AgentSelectorProps {
@@ -41,6 +41,42 @@ export interface AgentSelectorProps {
     credentialId?: string,
     provider?: string,
   ) => void;
+}
+
+/** Clickable group header with chevron + count badge. */
+function GroupHeader({
+  label,
+  count,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+}): ReactNode {
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        "flex w-full items-center gap-1 px-1.5 py-1 text-xs font-medium",
+        "text-muted-foreground hover:text-foreground",
+        "select-none outline-none",
+      )}
+    >
+      <Chevron className="h-3 w-3 shrink-0" />
+      <span className="truncate">{label}</span>
+      <span className="ml-auto text-[10px] tabular-nums opacity-60">
+        {count}
+      </span>
+    </button>
+  );
 }
 
 export function AgentSelector({
@@ -106,8 +142,6 @@ export function AgentSelector({
     })),
   ];
 
-  if (allEntries.length === 0) return null;
-
   // Match by credentialId and id. Built-in agents match when activeCredentialId is undefined.
   const active = allEntries.find(
     (e) =>
@@ -129,6 +163,41 @@ export function AgentSelector({
 
   const hasBackend = backendEntries.length > 0;
   const hasBuiltin = visibleBuiltin.length > 0;
+
+  // Which group key owns the current active agent?
+  const activeGroupKey: string | undefined =
+    active === undefined
+      ? undefined
+      : active.source === "builtin"
+        ? "__builtin__"
+        : active.credentialName;
+
+  // User-toggled overrides. Only records explicit clicks; groups
+  // not present here fall through to the default policy below.
+  // Hooks must be called before any early return.
+  const [userToggled, setUserToggled] = useState<Record<string, boolean>>({});
+
+  const toggle = useCallback((key: string) => {
+    setUserToggled((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  // Effective expanded state: user toggle wins; otherwise the active
+  // agent's group and BuiltIn are expanded, the rest collapsed.
+  // Computed inline so active-agent changes (initial race, user pick,
+  // enterNango) are reflected without an effect.
+  const expanded: Record<string, boolean> = {};
+  for (const key of backendGroups.keys()) {
+    expanded[key] = key in userToggled
+      ? userToggled[key]
+      : key === activeGroupKey;
+  }
+  if (hasBuiltin) {
+    expanded["__builtin__"] = "__builtin__" in userToggled
+      ? userToggled["__builtin__"]
+      : true;
+  }
+
+  if (allEntries.length === 0) return null;
 
   return (
     <DropdownMenu>
@@ -159,12 +228,19 @@ export function AgentSelector({
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="start" side="bottom" className="w-52">
-        {[...backendGroups.entries()].map(([groupName, entries], gi) => (
+        {[...backendGroups.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([groupName, entries], gi) => (
           <Fragment key={groupName}>
             {gi > 0 && <DropdownMenuSeparator />}
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="text-xs">{groupName}</DropdownMenuLabel>
-              {entries.map((e) => {
+              <GroupHeader
+                label={groupName}
+                count={entries.length}
+                expanded={expanded[groupName] ?? false}
+                onToggle={() => toggle(groupName)}
+              />
+              {expanded[groupName] && entries.map((e) => {
                 const key = agentKey(e.credentialId, e.id);
                 const isActive =
                   activeAgentId === e.id &&
@@ -173,7 +249,7 @@ export function AgentSelector({
                 return (
                   <DropdownMenuItem
                     key={key}
-                    className={cn("gap-2 text-xs", isActive && "bg-accent text-accent-foreground")}
+                    className={cn("gap-2 pl-5 text-xs", isActive && "bg-accent text-accent-foreground")}
                     onClick={() =>
                       onSelect(e.id, e.type, "backend", e.credentialId, e.provider)
                     }
@@ -195,12 +271,17 @@ export function AgentSelector({
           <>
             {hasBackend && <DropdownMenuSeparator />}
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="text-xs">BuiltIn</DropdownMenuLabel>
-              {visibleBuiltin.map((b) => (
+              <GroupHeader
+                label="BuiltIn"
+                count={visibleBuiltin.length}
+                expanded={expanded["__builtin__"] ?? false}
+                onToggle={() => toggle("__builtin__")}
+              />
+              {expanded["__builtin__"] && visibleBuiltin.map((b) => (
                 <DropdownMenuItem
                   key={b.id}
                   className={cn(
-                    "gap-2 text-xs",
+                    "gap-2 pl-5 text-xs",
                     activeAgentId === b.id &&
                       activeAgentType === "agent" &&
                       activeCredentialId === undefined &&

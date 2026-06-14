@@ -27,8 +27,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 
-import { formatAbsolute, formatDurationMs } from "./format";
+import { formatTimestamp, formatDurationMs } from "./format";
 
 /** Server-side row shape. Mirrors the response of
  *  `GET /api/admin/threads` 1:1. */
@@ -145,6 +146,7 @@ function ChipGroup<T extends string>({
 }
 
 export function ThreadManagement(): ReactNode {
+  const tz = useDisplayTimezone();
   const [data, setData] = useState<ListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [statuses, setStatuses] = useState<Set<StatusFilter>>(new Set());
@@ -273,7 +275,7 @@ export function ThreadManagement(): ReactNode {
                       title={row.firstRunCreatedAt}
                     >
                       <Link href={href} className="hover:underline">
-                        {formatAbsolute(row.firstRunCreatedAt)}
+                        {formatTimestamp(row.firstRunCreatedAt, tz)}
                       </Link>
                     </TableCell>
                     <TableCell

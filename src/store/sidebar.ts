@@ -23,6 +23,14 @@ export type LeftPanelId = (typeof LEFT_PANEL_IDS)[number];
 export type RightTab = "chat" | "history";
 
 interface SidebarState {
+  // Hydration flag — true once Zustand persist has restored state
+  // from localStorage. Components that depend on persisted values
+  // (e.g. panel open/close) should gate rendering on this to avoid
+  // flash-of-wrong-state on page refresh.
+
+  /** True after persist middleware has restored state from localStorage */
+  hydrated: boolean;
+
   // Left-panel VISIBILITY only — which panel renders is URL-driven.
   // Splitting these lets users collapse the panel while keeping
   // their section context (re-expand pops back to the URL-implied
@@ -54,11 +62,19 @@ interface SidebarState {
   rightTab: RightTab;
   /** Switch the right panel tab */
   setRightTab: (tab: RightTab) => void;
+
+  // History refresh — bumped by the toolbar refresh button,
+  // observed by HistoryPanelContent to re-fetch threads.
+  historyRevision: number;
+  bumpHistoryRevision: () => void;
 }
 
 export const useSidebarStore = create<SidebarState>()(
   persist(
     (set, get) => ({
+      // Hydration — flipped to true by onRehydrateStorage below
+      hydrated: false,
+
       // Left Panel
       leftPanelOpen: true,
 
@@ -81,6 +97,11 @@ export const useSidebarStore = create<SidebarState>()(
       rightTab: "chat",
 
       setRightTab: (tab: RightTab) => set({ rightTab: tab }),
+
+      // History refresh (not persisted)
+      historyRevision: 0,
+      bumpHistoryRevision: () =>
+        set((s) => ({ historyRevision: s.historyRevision + 1 })),
     }),
     {
       name: "nango:sidebar",
@@ -100,3 +121,19 @@ export const useSidebarStore = create<SidebarState>()(
     },
   ),
 );
+
+// Flip hydrated flag once persist has restored from localStorage.
+// `onFinishHydration` is always called — even when storage is empty
+// or unavailable — so the flag is guaranteed to become true on the
+// client.
+if (typeof window !== "undefined") {
+  const unsub = useSidebarStore.persist.onFinishHydration(() => {
+    useSidebarStore.setState({ hydrated: true });
+    unsub();
+  });
+  // If hydration already finished synchronously before the listener
+  // was attached (possible with sync storage like localStorage):
+  if (useSidebarStore.persist.hasHydrated()) {
+    useSidebarStore.setState({ hydrated: true });
+  }
+}

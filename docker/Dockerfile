@@ -116,6 +116,21 @@ COPY --from=builder /app/docker/migrate.mjs ./docker/migrate.mjs
 COPY --from=builder /app/docker/start.sh ./docker/start.sh
 RUN chmod +x ./docker/start.sh
 
+# Python runtime for subprocess sandbox mode. Matches the core deps
+# in docker/sandbox/requirements.txt so run_code_in_sandbox works
+# without a separate sandbox container (local-docker mode).
+# python3-venv supplies pip's wheel-builder; --no-install-recommends
+# keeps the layer small (~120 MB vs ~400 MB with full recommends).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+ && pip3 install --no-cache-dir --break-system-packages duckdb pandas numpy \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Pre-create the runtime cache directory so the non-root user can
+# write datasource Parquet snapshots at runtime (extract_dataset_by_sql).
+# Default path: <cwd>/.cache/datasource/ — see lib/data-sources/cache-root.ts.
+RUN mkdir -p .cache && chown nextjs:nogroup .cache
+
 USER nextjs
 
 ENV PORT=9300

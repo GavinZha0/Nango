@@ -456,9 +456,16 @@ export async function buildSupervisorRuntime(
       task: z
         .string()
         .describe(
-          "Direct instruction for the agent (e.g. \"Analyze ...\", " +
-          "\"Generate ...\", \"Plan ...\"). See the \"Routing tools\" " +
-          "section of the system prompt for the required phrasing.",
+          "Direct instruction for the agent — describe ONLY the action " +
+          "itself (e.g. \"Check disk usage on the dev server and " +
+          "return a summary.\", \"Generate the weekly sales report.\"). " +
+          "NEVER include scheduling details such as time, frequency, " +
+          "'every day', 'daily', 'at 9am', etc. in the task text; " +
+          "those belong in startAt / intervalValue / intervalUnit. " +
+          "The target agent receives this text verbatim as a one-shot " +
+          "prompt with NO schedule context — mentioning recurrence " +
+          "will confuse it into thinking it should create a schedule " +
+          "instead of executing the action.",
         ),
       startAt: z
         .string()
@@ -627,7 +634,10 @@ export async function buildSupervisorRuntime(
         .string()
         .min(1)
         .optional()
-        .describe("New natural-language task / prompt for the agent."),
+        .describe(
+          "New task prompt — action only, no scheduling words " +
+          "(same rule as create_schedule).",
+        ),
       startAt: z
         .string()
         .optional()

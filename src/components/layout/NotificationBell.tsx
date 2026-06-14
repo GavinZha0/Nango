@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useNotificationsStore,
+  useBellItems,
   selectUnreadCount,
 } from "@/store/notifications";
 import { notificationActions } from "@/hooks/useNotifications";
@@ -127,7 +128,7 @@ function NotificationRow({
 }
 
 export function NotificationBell(): ReactNode {
-  const items = useNotificationsStore((s) => s.items);
+  const items = useBellItems();
   const isStreamConnected = useNotificationsStore((s) => s.isStreamConnected);
   const unreadCount = useNotificationsStore(selectUnreadCount);
 

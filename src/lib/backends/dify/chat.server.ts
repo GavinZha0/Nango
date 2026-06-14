@@ -5,6 +5,8 @@
 
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { AbstractAgent, EventType } from "@/lib/copilot/index.server";
 import type { RunAgentInput, BaseEvent } from "@/lib/copilot/index.server";
 import type { Observable } from "rxjs";
@@ -148,7 +150,13 @@ export class DifyBridgeAgent extends AbstractAgent {
 
       await assertValidSseResponse(response);
 
-      const text = new TextStreamState(emit, `msg_${input.runId}`);
+      // Each distinct text segment (before / after tool calls) gets its
+      // own messageId so CopilotKit doesn't merge them into one bubble.
+      // After a TOOL_CALL_RESULT the text state is recreated with a
+      // fresh id; the result's messageId stays tied to the preceding
+      // assistant message that initiated the call.
+      let textMsgId: string = randomUUID();
+      let text = new TextStreamState(emit, textMsgId);
       let capturedConvId: string | null = null;
       const emittedToolThoughts = new Set<string>();
 
@@ -203,17 +211,23 @@ export class DifyBridgeAgent extends AbstractAgent {
 
             // Observation pairs with the earlier START so CopilotKit
             // can close the tool call. AG-UI REQUIRES `messageId` on
-            // TOOL_CALL_RESULT — synthesise a stable id from runId.
+            // TOOL_CALL_RESULT — use the current text segment's id
+            // (which belongs to the assistant message that invoked
+            // the tool). After emitting the result, mint a fresh id
+            // for subsequent text so the reply doesn't merge into the
+            // tool-call bubble.
             if (thoughtId && observation && emittedToolThoughts.has(thoughtId)) {
               emit({
                 type: EventType.TOOL_CALL_RESULT,
-                messageId: `msg_${input.runId}`,
+                messageId: textMsgId,
                 toolCallId: thoughtId,
                 content:
                   typeof observation === "string"
                     ? observation
                     : JSON.stringify(observation),
               });
+              textMsgId = randomUUID();
+              text = new TextStreamState(emit, textMsgId);
             }
 
             // Thought-only events carry intermediate reasoning; dropped

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nango",
+  title: "Nango AI",
   description: "AI-powered Agent Workspace",
 };
 

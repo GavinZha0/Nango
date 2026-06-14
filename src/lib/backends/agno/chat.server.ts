@@ -20,7 +20,6 @@ import {
   readShortErrorBody,
   resolveBridgeCredential,
   TextStreamState,
-  ToolCallFilter,
 } from "../bridge-runtime-kit.server";
 
 type Logger = ReturnType<typeof childLogger>;
@@ -138,8 +137,13 @@ class AgnoBridgeAgent extends AbstractAgent {
           throw new Error("No user message to send to agno.");
         }
 
-        const tools = new ToolCallFilter(input.tools);
-        const text = new TextStreamState(emit, randomUUID());
+        // agno agents own their tools server-side; the names are NOT
+        // in CopilotKit's `input.tools` (those are frontend-registered
+        // tools like handoff / HITL). A simple set deduplicates
+        // double-emissions without filtering out backend-owned calls.
+        const emittedToolCalls = new Set<string>();
+        let textMsgId: string = randomUUID();
+        let text = new TextStreamState(emit, textMsgId);
 
         // Reasoning span — agno-specific, no shared helper yet.
         // AG-UI REQUIRES messageId on REASONING_START / END (outer span)
@@ -300,7 +304,8 @@ class AgnoBridgeAgent extends AbstractAgent {
               const tool = chunk.tool ?? {};
               const tcId = tool.tool_call_id ?? "";
               const tcName = tool.tool_name ?? "";
-              if (!tools.shouldForwardStart(tcName, tcId)) break;
+              if (!tcId || !tcName || emittedToolCalls.has(tcId)) break;
+              emittedToolCalls.add(tcId);
               // Close open text / reasoning so the tool call isn't nested.
               text.closeIfOpen();
               if (reasoningRunOpen) closeReasoning();
@@ -318,6 +323,28 @@ class AgnoBridgeAgent extends AbstractAgent {
                 type: EventType.TOOL_CALL_END,
                 toolCallId: tcId,
               });
+              break;
+            }
+
+            case "ToolCallCompleted":
+            case "TeamToolCallCompleted": {
+              const tool = chunk.tool ?? {};
+              const tcId = tool.tool_call_id ?? "";
+              if (!tcId || !emittedToolCalls.has(tcId)) break;
+              const result = tool.result ?? "";
+              emit({
+                type: EventType.TOOL_CALL_RESULT,
+                messageId: textMsgId,
+                toolCallId: tcId,
+                content:
+                  typeof result === "string"
+                    ? result
+                    : JSON.stringify(result),
+              });
+              // Mint a fresh messageId so post-tool text gets its own
+              // message bubble (same pattern as Dify / Mastra bridges).
+              textMsgId = randomUUID();
+              text = new TextStreamState(emit, textMsgId);
               break;
             }
 

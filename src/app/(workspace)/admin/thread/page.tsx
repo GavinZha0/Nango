@@ -3,8 +3,6 @@ import { MessagesSquare } from "lucide-react";
 
 import { ThreadManagement } from "@/components/admin/ThreadManagement";
 
-export const metadata = { title: "Threads — Nango" };
-
 export default function AdminThreadPage(): ReactNode {
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-8">

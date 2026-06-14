@@ -3,12 +3,16 @@
  * authenticated browser state (cookies) for subsequent tests.
  *
  * This runs as a Playwright "setup" project before any spec files.
+ * Order matters: admin must be the first user created so it receives
+ * the admin role automatically. The editor user is promoted via the
+ * admin API after creation.
  */
 
 import { test as setup, expect } from "@playwright/test";
 import { TEST_USERS } from "../constants/test-users";
 
 const ADMIN_STATE_PATH = "tests/e2e/.auth/admin.json";
+const EDITOR_STATE_PATH = "tests/e2e/.auth/editor.json";
 const USER_STATE_PATH = "tests/e2e/.auth/user.json";
 
 /**
@@ -62,6 +66,35 @@ async function signUpOrSignIn(
 setup("create admin user", async ({ page }) => {
   // Admin must be the FIRST user created (gets admin role automatically)
   await signUpOrSignIn(page, TEST_USERS.admin, ADMIN_STATE_PATH);
+});
+
+setup("create editor user", async ({ page, context }) => {
+  await signUpOrSignIn(page, TEST_USERS.editor, EDITOR_STATE_PATH);
+
+  // Promote to editor via admin API. Load admin auth state into a
+  // separate context so the admin cookie is available for the PATCH.
+  const adminCtx = await page.context().browser()!.newContext({
+    storageState: ADMIN_STATE_PATH,
+  });
+  const adminPage = await adminCtx.newPage();
+  try {
+    // Look up the editor user's id
+    const listRes = await adminPage.request.get(
+      `/api/admin/users?search=${encodeURIComponent(TEST_USERS.editor.email)}&limit=1`,
+    );
+    const listBody = await listRes.json() as { users: { id: string }[] };
+    const editorId = listBody.users?.[0]?.id;
+    if (editorId) {
+      await adminPage.request.patch(`/api/admin/users/${editorId}`, {
+        data: { role: "editor" },
+      });
+    }
+  } finally {
+    await adminCtx.close();
+  }
+
+  // Re-save editor state (session cookie unchanged, role updated server-side)
+  await context.storageState({ path: EDITOR_STATE_PATH });
 });
 
 setup("create regular user", async ({ page }) => {

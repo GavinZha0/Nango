@@ -37,6 +37,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { formatTimestamp } from "@/components/admin/format";
 
 const LIMIT = 5;
 
@@ -353,6 +355,7 @@ interface RunChipProps {
 }
 
 function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
+  const tz = useDisplayTimezone();
   const v = statusVisual(run.status);
   // Inline counts for terminal states; running shows just the spinner.
   const counts =
@@ -394,7 +397,7 @@ function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
           ? "bg-accent text-foreground"
           : cn(v.bg, "hover:brightness-110"),
       )}
-      title={`Run ${run.id} — started ${new Date(run.startedAt).toLocaleString()}`}
+      title={`Run ${run.id} — started ${formatTimestamp(run.startedAt, tz)}`}
       aria-label={`Run ${label}, status ${run.status}`}
       aria-pressed={selected}
     >

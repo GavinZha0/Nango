@@ -62,6 +62,9 @@ interface RecordRunNotificationInput {
   sourceLabel?: string | null;
   /** Original prompt snapshot — pairs the answer with the question. */
   task?: string | null;
+  /** Denormalised copy of `entity_run.initiator` — enables the bell
+   *  icon to filter out schedule notifications without a JOIN. */
+  initiator?: string | null;
 }
 
 /**
@@ -85,6 +88,7 @@ export async function recordRunNotification(
         // Same sanitisation for tasks (NUL-strip + 16KB cap).
         task: fullBody(input.task),
         runId: input.runId,
+        initiator: input.initiator ?? null,
       })
       .returning();
     publish(input.ownerId, { kind: "notification", notification: row });

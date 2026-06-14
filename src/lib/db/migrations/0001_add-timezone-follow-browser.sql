@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "timezone_follow_browser" boolean DEFAULT true NOT NULL;

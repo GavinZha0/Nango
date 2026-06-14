@@ -9,14 +9,43 @@
 
 import type { ReactNode } from "react";
 
-/** Render an ISO/Date timestamp using the visitor's locale. Returns
- *  "—" for null or unparseable inputs so callers don't have to do the
- *  guard at every callsite. */
-export function formatAbsolute(iso: string | Date | null | undefined): string {
+/**
+ * Unified timestamp formatter for all user-facing time display.
+ *
+ * Fixed locale `en-US`, no year.
+ *
+ *   style "datetime"         → "6/13, 10:51 AM"
+ *   style "time"             → "10:51 AM"
+ *   style "datetimePrecise"  → "6/13, 10:51:03 AM"
+ *   style "timePrecise"      → "10:51:03 AM"
+ *
+ * Pass the value from `useDisplayTimezone()` as `timeZone` to honour
+ * the user's profile timezone. Returns "—" for null / unparseable. */
+export type TimestampStyle = "datetime" | "time" | "datetimePrecise" | "timePrecise";
+
+export function formatTimestamp(
+  iso: string | Date | null | undefined,
+  timeZone?: string,
+  style: TimestampStyle = "datetime",
+): string {
   if (!iso) return "—";
   const d = typeof iso === "string" ? new Date(iso) : iso;
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString();
+
+  const opts: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    ...(timeZone ? { timeZone } : {}),
+  };
+  if (style === "datetime" || style === "datetimePrecise") {
+    opts.month = "numeric";
+    opts.day = "numeric";
+  }
+  if (style === "datetimePrecise" || style === "timePrecise") {
+    opts.second = "2-digit";
+  }
+  return new Intl.DateTimeFormat("en-US", opts).format(d);
 }
 
 /** Format a millisecond count as a compact human duration.

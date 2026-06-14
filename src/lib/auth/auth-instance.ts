@@ -9,6 +9,7 @@ import {
   SessionTable,
   AccountTable,
   VerificationTable,
+  LoginEventTable,
 } from "@/lib/db/schema";
 import { count, eq, isNull } from "drizzle-orm";
 
@@ -30,6 +31,24 @@ export async function getIsFirstUser(): Promise<boolean> {
     isFirstUserCache = false;
     return false;
   }
+}
+
+type LoginEventType = "sign_in" | "sign_in_failed" | "sign_out";
+
+function recordLoginEvent(
+  userId: string | null,
+  eventType: LoginEventType,
+  ctx: { request?: Request | null } | null,
+  detail?: string,
+): void {
+  const ip = ctx?.request?.headers?.get?.("x-forwarded-for")
+    ?? ctx?.request?.headers?.get?.("x-real-ip")
+    ?? null;
+  const ua = ctx?.request?.headers?.get?.("user-agent") ?? null;
+  db.insert(LoginEventTable)
+    .values({ userId, eventType, ipAddress: ip, userAgent: ua, detail })
+    .execute()
+    .catch((err: unknown) => console.warn("[auth] login event write failed:", err));
 }
 
 const options = {
@@ -72,10 +91,37 @@ const options = {
         required: false,
         input: true,
       },
+      timezoneFollowBrowser: {
+        type: "boolean",
+        required: false,
+        input: true,
+      },
     },
   },
 
   databaseHooks: {
+    session: {
+      create: {
+        after: async (
+          session: Record<string, unknown>,
+          ctx: Record<string, unknown> | null,
+        ) => {
+          const userId =
+            typeof session.userId === "string" ? session.userId : null;
+          recordLoginEvent(userId, "sign_in", ctx as never);
+        },
+      },
+      delete: {
+        before: async (
+          session: Record<string, unknown>,
+          ctx: Record<string, unknown> | null,
+        ) => {
+          const userId =
+            typeof session.userId === "string" ? session.userId : null;
+          recordLoginEvent(userId, "sign_out", ctx as never);
+        },
+      },
+    },
     user: {
       create: {
         before: async (user: Record<string, unknown>) => {
@@ -119,9 +165,9 @@ const options = {
     // Cache session in cookie for 1 hour to reduce DB queries.
     // Disabled = every request hits database; Enabled = faster but stale data possible.
     cookieCache: { enabled: true, maxAge: 60 * 60 },
-    // Session expires after 7 days of inactivity (user must re-login).
-    expiresIn: 60 * 60 * 24 * 7,
-    // Refresh session cookie every 24 days (extends expiry window).
+    // Session expires after 5 days of inactivity (user must re-login).
+    expiresIn: 60 * 60 * 24 * 5,
+    // Refresh session cookie every 24 hours (extends expiry window).
     updateAge: 60 * 60 * 24,
   },
 

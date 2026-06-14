@@ -51,6 +51,12 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
         org: UserTable.org,
         createdAt: UserTable.createdAt,
         updatedAt: UserTable.updatedAt,
+        lastActiveAt: sql<string | null>`(
+          SELECT MAX(created_at)
+          FROM entity_run
+          WHERE entity_run.owner_id = "user".id
+            AND entity_run.initiator IN ('user', 'orchestrator')
+        )`,
       })
       .from(UserTable)
       .where(where)

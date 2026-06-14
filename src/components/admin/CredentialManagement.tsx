@@ -22,6 +22,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { CredentialFormDialog, type CredentialRow } from "@/components/admin/CredentialFormDialog";
+import { formatTimestamp } from "@/components/admin/format";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { Plus, Trash2, KeyRound } from "lucide-react";
 
 // Type label map
@@ -196,6 +198,7 @@ function EnabledSwitch({ row, onRefresh }: EnabledSwitchProps): ReactNode {
 // Main table
 
 export function CredentialManagement(): ReactNode {
+  const tz = useDisplayTimezone();
   const [rows, setRows] = useState<CredentialRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -332,7 +335,7 @@ export function CredentialManagement(): ReactNode {
                   </TableCell>
 
                   <TableCell className="text-sm text-muted-foreground">
-                    {new Date(row.updatedAt).toLocaleDateString()}
+                    {formatTimestamp(row.updatedAt, tz)}
                   </TableCell>
 
                   <TableCell>

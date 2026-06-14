@@ -125,7 +125,7 @@ function nodeTitle(node: CanonicalNode): string {
     case "sql":
       return node.inputs.dataset_name ?? node.inputs.data_source_name;
     case "chart":
-      return `${node.inputs.renderer} chart`;
+      return node.inputs.renderer;
   }
 }
 

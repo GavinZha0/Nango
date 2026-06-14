@@ -25,8 +25,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { useNotificationsStore } from "@/store/notifications";
+import { useNotificationsStore, useBellItems } from "@/store/notifications";
 import { notificationActions } from "@/hooks/useNotifications";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { formatTimestamp } from "@/components/admin/format";
 import type { NotificationEntity } from "@/lib/db/schema";
 
 type Filter = "all" | "unread" | "read" | "errors";
@@ -37,11 +39,6 @@ const FILTER_LABELS: Record<Filter, string> = {
   read: "Read",
   errors: "Errors",
 };
-
-function formatAbsolute(iso: string | Date): string {
-  const date = typeof iso === "string" ? new Date(iso) : iso;
-  return date.toLocaleString();
-}
 
 /**
  * Render a kind as a coloured icon (same vocabulary as the
@@ -85,9 +82,11 @@ function NotificationRow({
   item,
   expanded,
   onToggle,
+  tz,
 }: {
   item: NotificationEntity;
   expanded: boolean;
+  tz: string;
   onToggle: () => void;
 }): ReactNode {
   const unread = item.readAt === null;
@@ -114,7 +113,7 @@ function NotificationRow({
           </div>
         </TableCell>
         <TableCell className="w-40 whitespace-nowrap align-top text-[11px] text-muted-foreground">
-          {formatAbsolute(item.createdAt)}
+          {formatTimestamp(item.createdAt, tz)}
         </TableCell>
         <TableCell className="w-64 align-top">
           {item.sourceLabel ? (
@@ -240,8 +239,11 @@ function NotificationRow({
 }
 
 export default function NotificationsPage(): ReactNode {
-  const items = useNotificationsStore((s) => s.items);
+  // Exclude schedule notifications — those are surfaced via the
+  // schedule panel's status dot, not the inbox.
+  const items = useBellItems();
   const loaded = useNotificationsStore((s) => s.loaded);
+  const tz = useDisplayTimezone();
   const [filter, setFilter] = useState<Filter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -346,6 +348,7 @@ export default function NotificationsPage(): ReactNode {
                 <NotificationRow
                   key={item.id}
                   item={item}
+                  tz={tz}
                   expanded={expandedId === item.id}
                   onToggle={() => {
                     setExpandedId((prev) =>

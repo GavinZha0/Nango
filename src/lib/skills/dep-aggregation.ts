@@ -9,10 +9,6 @@
  *                 cached Parquet files.
  *   - `pandas`  — the canonical DataFrame surface code nodes use.
  *   - `numpy`   — pandas' implicit dep + the basic numeric runtime.
- *   - `pyarrow` — required by `pd.read_parquet`; without it the
- *                 SQL → code path raises ImportError before any user
- *                 code can run.
- *
  * Skill authors MAY re-declare these in SKILL.md frontmatter;
  * `mergeDeps` dedupes inside `core` and surfaces version conflicts
  * to the operator.
@@ -21,7 +17,6 @@ export const CORE_PACKAGES: readonly string[] = [
   "duckdb",
   "pandas",
   "numpy",
-  "pyarrow",
 ];
 
 /** A single dependency declaration with provenance for diagnostics. */

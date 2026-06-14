@@ -31,6 +31,8 @@ import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { formatTimestamp } from "@/components/admin/format";
 
 import type {
   ScheduleRunsResponse,
@@ -71,12 +73,12 @@ interface RecentRunsProps {
  * notifications page's "Result" expansion. Chevron telegraphs the
  * affordance.
  */
-function RunRow({ run }: { run: ScheduleRunSummary }): ReactElement {
+function RunRow({ run, tz }: { run: ScheduleRunSummary; tz: string }): ReactElement {
   const [open, setOpen] = useState(false);
   // `created_at` is always set; `finished_at` is null while the run
   // is in flight. We show the kickoff time (when the schedule fired)
   // because that's what the user is mentally indexing on.
-  const ts = new Date(run.createdAt).toLocaleString();
+  const ts = formatTimestamp(run.createdAt, tz);
   const hasResult = !!run.summaryLine;
   // Collapsed preview — mirror the notifications-page Context cell:
   // fold all whitespace runs (newlines, tabs, repeated spaces) into a
@@ -181,6 +183,7 @@ function RunStatusIcon({ status }: { status: string }): ReactElement {
 }
 
 export function RecentRuns({ scheduleId }: RecentRunsProps): ReactElement {
+  const tz = useDisplayTimezone();
   // We don't auto-revalidate on focus — the user just navigated
   // here and the data is already fresh.
   const { data, error, isLoading, mutate } = useSWR<ScheduleRunsResponse>(
@@ -235,7 +238,7 @@ export function RecentRuns({ scheduleId }: RecentRunsProps): ReactElement {
         ) : (
           <ul className="flex flex-col">
             {data.items.map((run) => (
-              <RunRow key={run.runId} run={run} />
+              <RunRow key={run.runId} run={run} tz={tz} />
             ))}
           </ul>
         )}

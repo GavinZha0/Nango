@@ -54,6 +54,21 @@ export const notificationActions = {
     }
   },
 
+  async markScheduleRead(): Promise<void> {
+    const hadUnread = useNotificationsStore
+      .getState()
+      .items.some((it) => it.initiator === "schedule" && it.readAt === null);
+    if (!hadUnread) return;
+    useNotificationsStore.getState().applyScheduleRead();
+    try {
+      const res = await fetch("/api/notifications?initiator=schedule", { method: "POST" });
+      if (!res.ok) throw new Error(`mark-schedule-read failed: ${res.status}`);
+    } catch (err) {
+      console.error("notifications.markScheduleRead", err);
+      void notificationActions.refresh();
+    }
+  },
+
   async remove(id: string): Promise<void> {
     useNotificationsStore.getState().applyDelete(id);
     broadcast({ kind: "deleted", id });

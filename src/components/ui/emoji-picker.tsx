@@ -139,6 +139,7 @@ export function EmojiPicker({
             height={360}
             width={300}
             skinTonesDisabled
+            searchDisabled
             // The hovered-glyph preview row eats ~50px without value.
             previewConfig={{ showPreview: false }}
             categories={PICKER_CATEGORIES}

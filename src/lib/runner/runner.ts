@@ -61,8 +61,10 @@ import type {
 
 const log = childLogger({ component: "runner" });
 
-/** True iff this is a real run dispatch (not `/info` / `/threads/*`
- *  bookkeeping). Bookkeeping skips the `entity_run` lifecycle. */
+/** True iff this is a real `/run` dispatch (not `/connect` or
+ *  `/stop`). Non-run paths skip the `entity_run` lifecycle. `/info`
+ *  and `/threads/*` bookkeeping are handled in the route layer and
+ *  never reach `runChatRequest`. */
 function isRunRequest(request: Request): boolean {
   return (
     request.method === "POST" &&
@@ -148,8 +150,8 @@ class RunnerImpl implements Runner {
     }
     const innerAgent: AbstractAgent = built;
 
-    // Bookkeeping paths skip the run lifecycle. /connect is one of
-    // them but still attaches PersistedAgentRunner so replay works.
+    // Non-run paths (/connect, /stop) skip the entity_run lifecycle.
+    // /connect attaches PersistedAgentRunner so history replay works.
     if (!isRunRequest(request)) {
       if (isConnectRequest(request)) {
         ctx.runner = new PersistedAgentRunner({
@@ -878,7 +880,10 @@ class RunnerImpl implements Runner {
       const sourceLabel = input.sourceLabel ?? null;
       const task = input.task;
 
-      persistedAgent.run(runAgentInput).subscribe({
+      const asyncTimeoutMs = getConfigMs("runner.async_timeout", 1800);
+      let settled = false;
+
+      const subscription = persistedAgent.run(runAgentInput).subscribe({
         next: (rawEvent: BaseEvent) => {
           const event = rawEvent as AgUiEvent;
           if (
@@ -891,6 +896,8 @@ class RunnerImpl implements Runner {
           }
         },
         error: (err: unknown) => {
+          settled = true;
+          clearTimeout(asyncTimer);
           try {
             const message = err instanceof Error ? err.message : String(err);
             const finalMessage = errorMessage ?? message;
@@ -909,12 +916,15 @@ class RunnerImpl implements Runner {
               body: finalMessage,
               sourceLabel,
               task,
+              initiator: input.initiator,
             });
           } finally {
             releaseBorrows();
           }
         },
         complete: () => {
+          settled = true;
+          clearTimeout(asyncTimer);
           try {
             const status: "succeeded" | "failed" = errorMessage
               ? "failed"
@@ -939,12 +949,44 @@ class RunnerImpl implements Runner {
               body: status === "failed" ? errorMessage : summary,
               sourceLabel,
               task,
+              initiator: input.initiator,
             });
           } finally {
             releaseBorrows();
           }
         },
       });
+
+      // Guard against zombie runs: cancel and finalize if the run
+      // exceeds the configured async timeout (default 30 min).
+      const asyncTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const timeoutMsg =
+          `Async run timed out after ${asyncTimeoutMs / 1000}s`;
+        subscription.unsubscribe();
+        log.warn({ runId: run.id, timeoutMs: asyncTimeoutMs }, timeoutMsg);
+        finalizeRun(run.id, "failed", { errorMessage: timeoutMsg })
+          .catch(() => {});
+        publish(ownerId, {
+          kind: "run_finalized",
+          runId: run.id,
+          ownerId,
+          status: "failed",
+          preview: timeoutMsg,
+        });
+        void recordRunNotification({
+          ownerId,
+          runId: run.id,
+          kind: "run_failed",
+          title: "Async task timed out",
+          body: timeoutMsg,
+          sourceLabel,
+          task,
+          initiator: input.initiator,
+        });
+        releaseBorrows();
+      }, asyncTimeoutMs);
 
       return {
         runId: run.id,

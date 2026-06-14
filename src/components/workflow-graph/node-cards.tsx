@@ -186,7 +186,7 @@ function summarizeChart(node: CanonicalChartNode): NodeSummary {
     datasetLine = `data: ${dataset}`;
   }
   return {
-    title: `${node.inputs.renderer} chart`,
+    title: node.inputs.renderer,
     // line 1: chart type lifted from the option template if present
     line1: pickChartTypeLine(node.inputs.config),
     // line 2: where the data comes from

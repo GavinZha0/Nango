@@ -32,6 +32,8 @@ import { Loader2, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { formatTimestamp } from "@/components/admin/format";
 import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
   AssertionResult,
@@ -352,6 +354,8 @@ export function CaseInspector({
   historyMeta = null,
   onExitHistoryView,
 }: CaseInspectorProps): ReactNode {
+  const tz = useDisplayTimezone();
+
   // Input pane — JSON object.
   const inputDraft = useJsonDraft<Record<string, unknown>>({
     initial: caseRow.input ?? {},
@@ -427,7 +431,7 @@ export function CaseInspector({
   const showHistoryChrome: boolean =
     historyMeta !== null && lastOutcome === null;
   const historyStartedAtLabel: string | null = showHistoryChrome
-    ? new Date(historyMeta!.startedAt).toLocaleString()
+    ? formatTimestamp(historyMeta!.startedAt, tz)
     : null;
   // Input + assertion textareas freeze in history view so the user
   // can't accidentally mutate the live case definition while reading

@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { History, MessagesSquare, SquarePen } from "lucide-react";
+import { History, MessagesSquare, RefreshCw } from "lucide-react";
 import { z } from "zod";
 import {
   CopilotKitProvider,
@@ -157,6 +157,7 @@ function RightPanelToolbar(): ReactNode {
   const activeCredentialId = useWorkspaceStore((s) => s.activeCredentialId);
   const setActiveAgent = useWorkspaceStore((s) => s.setActiveAgent);
   const startFreshChat = useWorkspaceStore((s) => s.startFreshChat);
+  const bumpHistoryRevision = useSidebarStore((s) => s.bumpHistoryRevision);
 
   // Disabled-backend set — derived from localStorage via the shared
   // `useStoredValue` hook. SSR sees `SSR_EMPTY_SET`, and the real
@@ -215,16 +216,28 @@ function RightPanelToolbar(): ReactNode {
 
       <div className="flex-1" />
 
-      {/* ── New chat (icon-only to save space) ─────────────────────── */}
+      {/* ── New chat (text button for discoverability) ────────────── */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-3 text-xs"
+        onClick={handleNewChat}
+        aria-label="New chat"
+      >
+        New Chat
+      </Button>
+
+      {/* ── Refresh history (always visible, disabled outside History) */}
       <Button
         variant="ghost"
         size="icon"
         className="h-7 w-7 text-muted-foreground hover:text-foreground"
-        onClick={handleNewChat}
-        aria-label="New chat"
-        title="New chat"
+        onClick={bumpHistoryRevision}
+        disabled={rightTab !== "history"}
+        aria-label="Refresh history"
+        title="Refresh history"
       >
-        <SquarePen className="h-3.5 w-3.5" />
+        <RefreshCw className="h-3.5 w-3.5" />
       </Button>
 
       {/* ── Separator ───────────────────────────────────────────────── */}

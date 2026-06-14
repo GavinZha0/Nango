@@ -68,6 +68,7 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
   const router = useRouter();
   const activeLeftPanel = resolveActivePanel(pathname);
 
+  const hydrated = useSidebarStore((s) => s.hydrated);
   const leftPanelOpen = useSidebarStore((s) => s.leftPanelOpen);
   const setLeftPanelOpen = useSidebarStore((s) => s.setLeftPanelOpen);
   const rightPanelOpen = useSidebarStore((s) => s.rightPanelOpen);
@@ -83,11 +84,13 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Track whether the left panel has ever been expanded this session.
-  // On first open after refresh we use resize() (since defaultSize is
-  // 0 and expand() would have no prior size to restore); subsequent
-  // open/close cycles use expand() to honour the user's drag-resized width.
+  // Track whether each panel has ever been expanded this session.
+  // On first open after refresh we use resize() (since defaultSize
+  // may be 0 / collapsed and expand() would have no prior size to
+  // restore); subsequent open/close cycles use expand() to honour
+  // the user's drag-resized width.
   const leftEverExpandedRef = useRef(false);
+  const rightEverExpandedRef = useRef(false);
 
   // Remember the last panel URL the user visited so a drag-expand
   // from collapsed (while the URL is at `/`) can restore it. Updated
@@ -103,6 +106,8 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
   // Sync the resizable panel's collapsed/expanded state with
   // (activePanel from URL) AND (leftPanelOpen from store). Both have
   // to be true for the panel to show — that's the design contract.
+  // `hydrated` is a dependency so the sync runs once after the
+  // hydration gate lifts and ResizablePanel mounts with a live ref.
   const shouldShowLeftPanel = activeLeftPanel !== null && leftPanelOpen;
   useEffect(() => {
     const panel = leftPanelRef.current;
@@ -118,7 +123,7 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
     } else if (!shouldShowLeftPanel && !panel.isCollapsed()) {
       panel.collapse();
     }
-  }, [shouldShowLeftPanel, leftPanelRef]);
+  }, [hydrated, shouldShowLeftPanel, leftPanelRef]);
 
   // Sync right panel with store
   useEffect(() => {
@@ -126,11 +131,16 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
     if (!panel) return;
 
     if (rightPanelOpen && panel.isCollapsed()) {
-      panel.expand();
+      if (!rightEverExpandedRef.current) {
+        panel.resize(RIGHT_DEFAULT_PX);
+        rightEverExpandedRef.current = true;
+      } else {
+        panel.expand();
+      }
     } else if (!rightPanelOpen && !panel.isCollapsed()) {
       panel.collapse();
     }
-  }, [rightPanelOpen, rightPanelRef]);
+  }, [hydrated, rightPanelOpen, rightPanelRef]);
 
   // Drag-resize handlers
 
@@ -165,6 +175,20 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
     }
   }
 
+  // Wait for Zustand persist to restore panel state from localStorage
+  // before mounting ResizablePanelGroup. Without this gate the panels
+  // render with hardcoded defaults then snap to the persisted values,
+  // causing a visible flash (right panel opens then closes).
+  if (!hydrated) {
+    return (
+      <div className="flex min-w-0 flex-1 overflow-hidden">
+        <main className="flex h-full w-full flex-col overflow-hidden">
+          {children}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden">
       <ResizablePanelGroup orientation="horizontal">
@@ -195,7 +219,7 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
         {/* ── Right: Chat + History (collapsible) ────────────────────── */}
         <ResizablePanel
           panelRef={rightPanelRef}
-          defaultSize={RIGHT_DEFAULT_PX}
+          defaultSize="0px"
           minSize={RIGHT_MIN_PX}
           collapsible
           collapsedSize={0}
