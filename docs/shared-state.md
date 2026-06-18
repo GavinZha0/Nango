@@ -1,93 +1,320 @@
-# Nango Shared State (Copilot 交互模式) 架构设计与实施计划
+# Shared State Architecture
 
-## 1. 概述 (Overview)
-为了在 Nango 中同时支持“后台自主执行 (Autonomous)”与“前端交互协同 (Copilot)”两种模式，系统引入 CopilotKit 的 Shared State 机制。
-此架构旨在构建一个**上下文感知、状态双向绑定、所见即所得**的体验，满足 Agent、MCP、Skill、Workflow、Schedule 等资源的交互式编辑，特别是复杂节点图（如 Workflow Artifact）的动态预览与测试需求。
+Status: proposed · last updated: 2025-06-14
 
-## 2. 核心架构思想：状态分层与模式路由
-Nango 的前端架构在现有的数据库事实驱动之上，增加一层**草稿层 (Draft Layer)**。
+## 1) Product Positioning
 
-*   **数据库层 (Truth)**：通过现有的 Backend Tools (如 `update_schedule`, `update_workflow`) 直接修改，适用于后台静默运行的 Agent 任务。
-*   **草稿层 (Shared State)**：驻留在前端内存中。在 Copilot 交互模式下，Agent 的修改指令将优先生成草稿。前端 UI 优先读取并渲染草稿层的数据供用户预览。只有当用户手动点击“验证通过并保存”时，前端才将草稿层的数据作为真实载荷提交到数据库。
+Shared state is a **UX capability**, not the orchestration core.
 
-## 3. 数据结构设计 (Shared State Schema)
-前端定义一个严格类型的共享状态结构，桥接前端与 Agent。
+Goals:
+1. Agent knows where the user is and what they are looking at (all pages).
+2. Agent can propose interactive edits on pages that opt in.
+3. Artifact/workflow editing gets strongest support (primary use case).
 
-```typescript
-export interface NangoSharedState {
-  // 1. 上下文注入 (Frontend -> Agent)
-  // 前端随页面切换实时注入，告知 Agent 用户当前的视觉焦点
+Non-goals:
+- Full auto-mutation platform across all resources
+- Generic event-sourcing / command bus
+- Cross-session draft recovery
+- Central capability registry or tier config
+
+---
+
+## 2) Design Principles
+
+### 2.1 Editability is opt-in, not configured
+
+There is **no central capability registry** and no tier mapping.
+
+A page becomes editable by calling the `useCopilotDraft` hook. That hook:
+1. Reports the page's current data as `activeResourceData` in shared state.
+2. Listens for draft proposals from the agent and applies them locally.
+
+If a page does not call `useCopilotDraft`, its `activeResourceData` is `null`.
+The agent tool handler rejects draft writes when `activeResourceData` is `null`.
+
+This means:
+- Adding draft support to a new page = add `useCopilotDraft` (one hook call).
+- No config file to maintain, no registry to update.
+- The agent naturally infers what is editable from the data it sees.
+
+### 2.2 All pages get context — no exclusions
+
+Every workspace page (including admin pages) automatically provides
+`activeView` + `activeUrl` to the agent via URL-based resolution.
+No page is excluded. Admin pages simply do not call `useCopilotDraft`,
+so they are read-only by default.
+
+### 2.3 Assist-edit first, not blank-form creation
+
+The current scope of `propose_page_edit` targets **modifying existing
+resources** — the agent sees `activeResourceData` as a complete example
+and proposes changes on top of it. Creating resources from a blank form
+is a harder problem (agent lacks field definitions, required/optional
+constraints, enum values, format rules) and is deferred to a future
+phase. For creation flows, the agent should use backend tools
+(`create_schedule`, etc.) or guide the user conversationally.
+
+### 2.4 No auto-commit
+
+Draft tools **never** write to the database. The user must explicitly
+click Save after reviewing the proposed changes.
+
+---
+
+## 3) State Model
+
+Keep the existing `NangoSharedState` shape (defined in
+`src/lib/copilot/shared-state-schema.ts`):
+
+```ts
+interface NangoSharedState {
+  /** Frontend -> Agent: page awareness */
   context: {
-    activePanel: "chat" | "skill_editor" | "workflow_editor" | "artifact_viewer" | "schedule_editor";
-    activeResourceId: string | null; 
-    activeResourceData: any | null;  
+    activeUrl: string;
+    activeView: ActiveView;          // resolved from URL
+    activeResourceId?: string | null;
+    activeResourceData?: Record<string, unknown> | null;
   };
-
-  // 2. 草稿数据 (Agent -> Frontend)
-  // Agent 根据对话生成的修改草稿，前端据此渲染高亮或预览差异
+  /** Agent -> Frontend: proposed edits */
   drafts: {
-    schedule?: Partial<any>;
-    skill?: Partial<any>;
-    workflow?: {
-      nodes: any[];
-      edges: any[];
-    };
-  };
-
-  // 3. UI 交互指令 (Agent -> Frontend)
-  // 用于触发前端的临时视觉效果或弹出面板
-  uiAction?: {
-    type: "HIGHLIGHT_NODE" | "OPEN_PREVIEW_MODAL" | "SHOW_DIFF";
-    targetId?: string;
+    [resourceType: string]: Record<string, unknown> | undefined;
   };
 }
 ```
 
-## 4. 文件组织与模块定位
-此功能定位于架构中的**“集成胶水层 (Integration Layer)”**，不建立完全独立的垂直模块，而是通过 Hook 横向切入现有的状态和组件中。
-
-核心新增文件（2个）：
-1. **`src/lib/copilot/shared-state-schema.ts`**
-   * **职责**：统一定义 `NangoSharedState` 类型接口，供前后端工具链共享，确保状态同步时的类型安全。
-2. **`src/hooks/useCopilotSharedState.ts`**
-   * **职责**：核心网关 Hook。监听 Zustand store（如 Workspace/Sidebar），并在面板切换时调用 `agent.setState()` 注入上下文。同时解析并暴露 `agent.state.drafts` 给下游 UI 组件使用。
-
-现有代码适配修改：
-1. **Agent Prompt/Routing (`src/lib/orchestration/modes.ts` 或对应配置)**：注入路由策略（“如果 `context.activePanel` 为当前修改资源，必须生成草稿，禁用直接 DB 修改”）。
-2. **UI 业务组件 (如 `WorkflowEditor.tsx`、`ScheduleEditor.tsx`)**：引入核心 Hook，读取 Draft，实现草稿覆盖原数据的预览效果，并提供“运行验证”和“保存修改”按钮。
-
-## 5. 交互场景深度还原：Workflow Artifact
-1. **场景初始化**：用户打开数据分析 Artifact (背后对应一个 Workflow)。前端触发 `useCopilotSharedState`，将 `activePanel: 'artifact'` 和当前图结构注入 Agent 状态。
-2. **用户指令**：“加一个数据清洗节点去掉空值”。
-3. **Agent 响应**：发现匹配上下文，走 Copilot 模式。不调 DB 工具，而是生成包含新节点的 JSON，调用状态工具更新 `drafts.workflow`。
-4. **前端预览**：UI 组件检测到 Draft 存在，立刻在图上渲染出新节点（可带高亮特效）。
-5. **Dry-run 验证与保存**：用户点击界面上的“运行验证”，前端带着 Draft 数据向后端发试运行请求。结果正确后，用户点击“保存”，前端发起真实 PATCH 请求落库，并清空当前 Draft。
+Notes:
+- `activeResourceData` is populated **only** when the page calls
+  `useCopilotDraft`. It serves as both the agent's read context and
+  the editability signal.
+- `drafts` is keyed by resource type (e.g. `"schedule"`, `"workflow"`,
+  `"skill"`). Each value is the full proposed object.
+- Remove the unused `uiAction` field from the current implementation.
 
 ---
 
-## 6. 实施计划 (Implementation Plan)
+## 4) Lifecycle
 
-本项目建议采用“三步走”渐进式接入策略：
+- **Agent switch**: clear all drafts and reset `activeResourceData`.
+  Implemented as a `useEffect` on `activeAgentId` in the sync hook.
+- **Page navigation**: `activeResourceData` is automatically cleared
+  when the old editor unmounts (via `useCopilotDraft` cleanup).
+- No session-key map needed. CopilotKit agent state is already per-agent.
 
-### 阶段一：打通双向状态管道 (基础设施建设)
-* **目标**：完成 Shared State 核心机制搭建，实现前端感知与上下文注入，Agent 能根据规则响应。
-* **任务清单**：
-  * [ ] 编写 `shared-state-schema.ts` 定义接口。
-  * [ ] 编写 `useCopilotSharedState.ts` 核心 Hook，实现 Zustand 状态向 Agent 的自动同步。
-  * [ ] 修改全局 Layout，挂载该 Hook，验证 Nango 能够准确识别用户当前所在的 Panel 和查看的资源 ID。
-  * [ ] 修改 Supervisor Prompt，增加“资源修改策略 (Resource Modification Policy)”引导，要求 Agent 理解 `drafts` 机制。
+---
 
-### 阶段二：单一简单资源试点 (以 Schedule 为例)
-* **目标**：跑通第一个完整的 Copilot 交互闭环。
-* **任务清单**：
-  * [ ] 修改 Schedule Editor 界面，引入 `useCopilotSharedState` 读取 `drafts.schedule`。
-  * [ ] 支持将草稿数据预填入表单输入框。
-  * [ ] 提供明确的“保存 Agent 修改”和“丢弃草稿”操作按钮。
-  * [ ] 验证用户指令能否自动拉起编辑器并预填内容，最后由用户点按保存落库。
+## 5) Frontend Tools
 
-### 阶段三：复杂资源的深度支持 (Workflow / Artifact)
-* **目标**：支持图形化资源的所见即所得修改与动态验证。
-* **任务清单**：
-  * [ ] 扩展 Workflow 编辑器/渲染器，支持 Draft 节点的可视化比对（Diff 展示）。
-  * [ ] 实现前置验证 (Dry-run) 逻辑，允许在不污染数据库的情况下，向后端请求并在图表 Artifact 上显示结果。
-  * [ ] 完善交互，在验证成功后，支持一键将 Draft 覆盖写入数据库。
+Two tools, registered in `useCopilotSharedStateSync`:
+
+### 5.1 `propose_page_edit`
+
+Purpose: agent proposes changes to the currently visible editor.
+
+Parameters:
+- `resourceType: z.enum(["schedule", "workflow", "skill", ...])` — constrained enum
+- `draftData: z.record(...)` — the full proposed object (always replace, no merge)
+
+Guard (inline in handler, ~3 lines):
+- If `activeResourceData === null` → reject with message
+  `"Current page has no editable data. Use backend tools or ask the user to navigate."`
+- If `resourceType` does not match `activeView` → reject with mismatch message
+
+### 5.2 `discard_page_edit`
+
+Purpose: agent explicitly clears its own draft.
+
+Parameters:
+- `resourceType: z.enum([...])`
+
+### 5.3 Not implemented (intentionally)
+
+- ❌ `ui_hint` — premature; add specific tools when specific needs arise.
+- ❌ `merge` mode — all drafts use replace. Agent sends full object.
+
+---
+
+## 6) Context Injection
+
+Handled by one central hook: `useCopilotSharedStateSync` (inside
+CopilotKitProvider, mounted in `RightPanel.tsx`).
+
+Responsibilities:
+1. Resolve `activeView` + `activeResourceId` from `usePathname()`.
+2. Read `activeResourceData` from Zustand (set by whichever editor
+   is mounted via `useCopilotDraft`).
+3. Sync the combined context into CopilotKit agent state.
+4. Mirror agent state back to Zustand for cross-component access.
+
+No per-page extractor functions needed. Each editor's `getCurrentData()`
+callback (passed to `useCopilotDraft`) is the only data source.
+
+### 6.1 Schema / format guidance for the agent
+
+The agent infers field semantics from the **current data values** — this
+works well for editing existing resources where every field already has
+a sample value.
+
+For common format concerns, brief hints are embedded in the
+`propose_page_edit` tool description (e.g. date format, cron syntax).
+No per-resource JSON Schema is maintained.
+
+For **workflow** specifically, `getCurrentData()` may include structural
+metadata (available node types, input/output definitions) alongside the
+graph data, so the agent can understand the graph vocabulary.
+
+### 6.2 Read-only page context (extension point, not yet needed)
+
+Some pages may want to provide the agent with extra read-only context
+(e.g. notification summaries, dashboard statistics) without being
+editable. This is **not currently implemented**.
+
+When the need arises, add a `pageInfo` field to
+`NangoSharedState.context` (separate from `activeResourceData`). The
+tool guard only checks `activeResourceData`, so `pageInfo` carries no
+editability signal. This is a ~5-line schema change.
+
+---
+
+## 7) Page Integration Patterns
+
+### Read-only pages (no code change needed)
+
+dashboard, notifications, verification, evaluation, outcomes, profile,
+all admin pages, all list pages.
+
+These pages get `activeView` + `activeUrl` automatically.
+Agent can answer contextual questions but cannot propose edits.
+
+### Form editors (light editing, `useCopilotDraft`)
+
+schedule, skill, agent, mcp, datasource, ssh-server.
+
+Each editor adds ~15 lines:
+```ts
+const getCurrentData = useCallback(() => (form as Record<string, unknown>), [form]);
+const applyDraft = useCallback((draft) => { setForm(f => ({ ...f, ...draft })); }, []);
+const { draftApplied, clearDraftState } = useCopilotDraft({
+  resourceType: "schedule",
+  getCurrentData,
+  applyDraft,
+});
+```
+
+UI shows amber Save button when `draftApplied === true`.
+
+### Artifact / Workflow editor (strong editing, priority)
+
+- `useCopilotDraft` with `resourceType: "workflow"`
+- `getCurrentData` returns `{ nodes, edges }` graph
+- `applyDraft` replaces the working graph (not DB)
+- UI must provide: draft indicator, visual diff/preview, discard, explicit save
+- This is the **primary engineering effort** of the feature
+
+---
+
+## 8) Policy Rules (Hard Guardrails)
+
+1. `propose_page_edit` rejected when `activeResourceData === null`.
+2. No draft tool ever writes to the database.
+3. Agent switch clears all drafts immediately.
+4. If `resourceType` / `activeView` mismatch, tool returns error.
+5. Supervisor prompt instructs agent: use `propose_page_edit` only when
+   `state.context.activeResourceData` is present; otherwise use backend
+   tools or conversational guidance.
+6. `propose_page_edit` targets editing existing data. For blank-form
+   creation, the agent should use backend tools or conversation.
+
+---
+
+## 9) File Organization
+
+### 9.1 Existing Files (no new files needed)
+
+| File | Role |
+|------|------|
+| `src/lib/copilot/shared-state-schema.ts` | `NangoSharedState` type + `defaultSharedState` |
+| `src/store/copilot.ts` | Zustand bridge (CopilotKit ↔ non-Provider components) |
+| `src/hooks/useCopilotSharedState.ts` | Sync hook + tool registration (inside Provider) |
+| `src/hooks/useCopilotDraft.ts` | Per-editor consumer hook |
+
+### 9.2 Files to Update
+
+| File | Change |
+|------|--------|
+| `src/hooks/useCopilotSharedState.ts` | Rename tool → `propose_page_edit`, add `discard_page_edit`, add guard, add agent-switch cleanup |
+| `src/lib/copilot/shared-state-schema.ts` | Remove unused `uiAction` field |
+| `src/lib/constants/supervisor.ts` | Update prompt with new tool names and `activeResourceData` rule |
+| `src/components/layout/RightPanel.tsx` | Already mounted — no change expected |
+
+### 9.3 Editors to Integrate (per-editor ~15 lines)
+
+| Editor | Status |
+|--------|--------|
+| `ScheduleEditor.tsx` | ✅ Done |
+| `SkillEditor.tsx` | ✅ Done |
+| `AgentEditor.tsx` | Pending |
+| `McpEditor` (if exists) | Pending |
+| `DataSourceEditor.tsx` | Pending |
+| `SshServerEditor.tsx` | Pending |
+| Artifact / Workflow editor | Pending (main effort) |
+
+---
+
+## 10) Acceptance Criteria
+
+1. Agent knows current page (`activeView` + `activeUrl`) on every page.
+2. `propose_page_edit` works end-to-end on Schedule and Skill editors.
+3. `propose_page_edit` is rejected on pages without `useCopilotDraft`.
+4. No shared-state path commits DB changes without explicit user Save.
+5. Switching agent clears all drafts immediately.
+6. Workflow editor supports full graph draft with preview and explicit save.
+
+---
+
+## 11) Implementation Plan and Workload Assessment
+
+### Phase 1 — Core refactoring (from current implementation)
+
+| # | Task | Size | Risk | Notes |
+|---|------|------|------|-------|
+| 1 | Rename tool `update_shared_state` → `propose_page_edit` | **S** | low | Search-replace in sync hook + supervisor prompt |
+| 2 | Add `discard_page_edit` tool | **S** | low | ~10 lines in sync hook |
+| 3 | Tighten `resourceType` param to `z.enum([...])` | **S** | low | One line change |
+| 4 | Add `activeResourceData === null` guard in tool handler | **S** | low | ~3 lines |
+| 5 | Add agent-switch cleanup `useEffect` | **S** | low | ~5 lines |
+| 6 | Remove unused `uiAction` from schema | **S** | low | Delete ~8 lines |
+| 7 | Update supervisor prompt | **S** | medium | Prompt wording correctness matters |
+
+**Phase 1 total: S** — half-day work, low risk.
+
+### Phase 2 — Remaining editor integrations
+
+| # | Task | Size | Risk | Notes |
+|---|------|------|------|-------|
+| 1 | Integrate `useCopilotDraft` into remaining editors (agent, datasource, ssh-server, mcp) | **S** | low | ~15 lines each, same pattern as Schedule/Skill |
+| 2 | Polish draft UX (amber badge, discard button) across editors | **S** | low | Consistent UI pattern |
+
+**Phase 2 total: S** — half-day to one-day work.
+
+### Phase 3 — Artifact / Workflow editing (priority, main effort)
+
+| # | Task | Size | Risk | Notes |
+|---|------|------|------|-------|
+| 1 | Design workflow draft shape (`nodes`, `edges` graph) | **S** | medium | Need to align with existing workflow data model |
+| 2 | Integrate `useCopilotDraft` into workflow editor | **M** | medium | Graph data is more complex than flat forms |
+| 3 | Implement visual diff / preview for graph changes | **L** | high | Core UX challenge: show what nodes/edges changed |
+| 4 | Add discard / explicit save flow | **S-M** | medium | Must not corrupt working graph state |
+| 5 | Test with real agent interactions | **M** | medium | Prompt tuning for graph-quality output |
+
+**Phase 3 total: L** — primary engineering effort and risk concentration.
+
+### Overall Summary
+
+| Scope | Size | Timeline Estimate |
+|-------|------|-------------------|
+| Phase 1 (core refactoring) | **S** | 0.5 day |
+| Phase 1 + 2 (all editors except workflow) | **S-M** | 1-1.5 days |
+| Phase 1 + 2 + 3 (full rollout incl. workflow) | **L** | 5-8 days |
+
+**Primary risk**: Phase 3 workflow graph diff/preview. Everything else
+is incremental and pattern-based.

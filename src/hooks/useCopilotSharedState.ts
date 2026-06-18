@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useAgent } from "@copilotkit/react-core/v2";
 import { resolveActivePanel } from "@/components/layout/sidebar-panel-registry";
@@ -36,6 +36,8 @@ export function useCopilotSharedStateSync() {
     // For toolbar items that are not in the panel registry (notifications, admin routes)
     if (panelId === "none") {
       if (pathname.startsWith("/notifications")) panelId = "notifications";
+      else if (pathname.startsWith("/outcomes")) panelId = "outcomes";
+      else if (pathname.startsWith("/profile")) panelId = "profile";
       else if (pathname.startsWith("/admin/user")) panelId = "user";
       else if (pathname.startsWith("/admin/credential")) panelId = "credential";
       else if (pathname.startsWith("/admin/config")) panelId = "config";
@@ -98,28 +100,90 @@ export function useCopilotSharedStateSync() {
     }
   }, [clearDraftRequest, agent, ackClearDraft, setGlobalState]);
 
-  // Provide the update_shared_state tool to the LLM
+  // Clear drafts when the active agent changes to prevent stale state.
+  const prevAgentIdRef = useRef(activeAgentId);
+  useEffect(() => {
+    if (prevAgentIdRef.current !== activeAgentId) {
+      prevAgentIdRef.current = activeAgentId;
+      if (agent) {
+        const cleared = { ...defaultSharedState, context: (agent.state as NangoSharedState)?.context ?? defaultSharedState.context };
+        agent.setState(cleared);
+        setGlobalState(cleared);
+      }
+    }
+  }, [activeAgentId, agent, setGlobalState]);
+
+  /** Constrained resource types that support draft editing. */
+  const draftResourceTypes = z.enum(["schedule", "workflow", "skill", "agent", "datasource", "ssh-server", "mcp"]);
+
+  /** Map activeView → accepted resourceType so we can detect mismatches. */
+  const viewToResource: Record<string, string> = {
+    schedules: "schedule",
+    artifact: "workflow",
+    skills: "skill",
+    agent: "agent",
+    datasource: "datasource",
+    "ssh-server": "ssh-server",
+    mcp: "mcp",
+  };
+
+  // Tool: propose_page_edit
   useValidatedFrontendTool({
-    name: "update_shared_state",
-    description: "Update the shared drafts state to show a preview of changes to the user on the frontend.",
+    name: "propose_page_edit",
+    description: [
+      "Propose changes to the resource currently open in the editor.",
+      "The frontend will show a preview; the user decides whether to save.",
+      "Send the FULL modified object (replace, not merge).",
+      "Format: dates as ISO 8601 (e.g. 2025-06-15T00:00:00.000Z), cron as standard 5-field.",
+      "Only works when the user is viewing an editable page with existing data.",
+    ].join(" "),
     parameters: z.object({
-      resourceType: z.string().describe("The type of resource being modified (e.g., 'schedule', 'workflow', 'skill')."),
-      draftData: z.record(z.string(), z.unknown()).describe("The complete draft object. If the resource exists, this should be the full modified object."),
+      resourceType: draftResourceTypes.describe("The type of resource being modified."),
+      draftData: z.record(z.string(), z.unknown()).describe("The complete draft object with all fields."),
     }),
     handler: async ({ resourceType, draftData }) => {
-      if (!agent) return "Agent not ready";
+      if (!agent) return "Agent not ready.";
+      const rt: string = resourceType;
+      // Guard: reject when the page has no editable data
+      if (!activeResourceData) {
+        return "Current page has no editable data. Use backend tools or ask the user to navigate to the resource editor.";
+      }
+      // Guard: reject resourceType / activeView mismatch
+      const expectedResource = viewToResource[activeView];
+      if (expectedResource && expectedResource !== rt) {
+        return `Mismatch: user is viewing ${activeView} but draft targets ${rt}. Navigate first or use backend tools.`;
+      }
       const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
-      const currentDrafts = currentState.drafts ?? {};
       const newState = {
         ...currentState,
-        drafts: {
-          ...currentDrafts,
-          [resourceType]: draftData,
-        },
+        drafts: { ...currentState.drafts, [rt]: draftData },
       };
       agent.setState(newState);
       setGlobalState(newState);
-      return `Draft for ${resourceType} updated successfully on the frontend.`;
+      return `Draft for ${rt} proposed. The user will review and save.`;
+    },
+  });
+
+  // Tool: discard_page_edit
+  useValidatedFrontendTool({
+    name: "discard_page_edit",
+    description: "Discard a previously proposed draft for a resource type.",
+    parameters: z.object({
+      resourceType: draftResourceTypes.describe("The type of resource whose draft should be discarded."),
+    }),
+    handler: async ({ resourceType }) => {
+      if (!agent) return "Agent not ready.";
+      const rt: string = resourceType;
+      const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
+      if (!currentState.drafts?.[rt]) {
+        return `No draft found for ${rt}.`;
+      }
+      const newDrafts = { ...currentState.drafts };
+      delete newDrafts[rt];
+      const newState = { ...currentState, drafts: newDrafts };
+      agent.setState(newState);
+      setGlobalState(newState);
+      return `Draft for ${rt} discarded.`;
     },
   });
 

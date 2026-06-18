@@ -5,7 +5,7 @@
  * See docs/ssh.md.,
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -29,16 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,62}$/;
@@ -90,6 +81,34 @@ function formatCommandList(list: string[] | null): string {
   return list ? list.join("\n") : "";
 }
 
+// Form state
+
+interface FormState {
+  name: string;
+  description: string;
+  credentialId: string;
+  host: string;
+  port: string;
+  fingerprint: string;
+  commandAllowText: string;
+  commandDenyText: string;
+  loginShell: boolean;
+}
+
+function buildInitialForm(detail: SshServerDetail | undefined): FormState {
+  return {
+    name: detail?.name ?? "",
+    description: detail?.description ?? "",
+    credentialId: detail?.credentialId ?? "",
+    host: detail?.host ?? "",
+    port: String(detail?.port ?? 22),
+    fingerprint: detail?.knownHostFingerprint ?? "",
+    commandAllowText: formatCommandList(detail?.commandAllow ?? null),
+    commandDenyText: formatCommandList(detail?.commandDeny ?? []),
+    loginShell: detail?.loginShell ?? true,
+  };
+}
+
 // Component
 
 export function SshServerEditor({
@@ -100,31 +119,29 @@ export function SshServerEditor({
 }: SshServerEditorProps): ReactNode {
   const isNew = sshServerId === null;
 
-  const [name, setName] = useState<string>(initialDetail?.name ?? "");
-  const [description, setDescription] = useState<string>(
-    initialDetail?.description ?? "",
+  // Form state — single object for all editable fields.
+  // `savedForm` is the snapshot taken at load time; comparing the two
+  // gives us `isDirty` for the Save button.
+  const [form, setForm] = useState<FormState>(() =>
+    buildInitialForm(initialDetail),
   );
-  const [credentialId, setCredentialId] = useState<string>(
-    initialDetail?.credentialId ?? "",
+  const [savedForm] = useState<FormState>(() =>
+    buildInitialForm(initialDetail),
   );
-  const [host, setHost] = useState<string>(initialDetail?.host ?? "");
-  const [port, setPort] = useState<string>(String(initialDetail?.port ?? 22));
-  const [fingerprint, setFingerprint] = useState<string>(
-    initialDetail?.knownHostFingerprint ?? "",
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(savedForm),
+    [form, savedForm],
   );
-  // Allowlist: empty = null = "no constraint".
-  const [commandAllowText, setCommandAllowText] = useState<string>(
-    formatCommandList(initialDetail?.commandAllow ?? null),
-  );
-  const [commandDenyText, setCommandDenyText] = useState<string>(
-    formatCommandList(initialDetail?.commandDeny ?? []),
-  );
-  // Defaults to true for new rows — mirrors the server-side default.
-  const [loginShell, setLoginShell] = useState<boolean>(
-    initialDetail?.loginShell ?? true,
+  const update = useCallback(
+    <K extends keyof FormState>(key: K, value: FormState[K]) =>
+      setForm((prev) => ({ ...prev, [key]: value })),
+    [],
   );
 
+  // Remote data (not part of the form)
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
+
+  // Operation state
   const [saving, setSaving] = useState<boolean>(false);
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
@@ -179,19 +196,27 @@ export function SshServerEditor({
 
   // Validation
 
-  function validateLocal(): string | null {
-    if (!name.trim()) return "Name is required.";
-    if (!NAME_RE.test(name)) {
-      return "Name must start with a-z and contain only [a-z0-9_-] (max 63 chars).";
-    }
-    if (!credentialId) return "Credential is required.";
-    if (!host.trim()) return "Host is required.";
-    const portNum = Number(port);
+  /** Connection-level checks shared by Save and Verify. */
+  function validateConnectionFields(): string | null {
+    if (!form.credentialId) return "Credential is required.";
+    if (!form.host.trim()) return "Host is required.";
+    const portNum = Number(form.port);
     if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) {
       return "Port must be an integer between 1 and 65535.";
     }
+    return null;
+  }
+
+  /** Full form validation for Save (name + connection + fingerprint). */
+  function validateLocal(): string | null {
+    if (!form.name.trim()) return "Name is required.";
+    if (!NAME_RE.test(form.name)) {
+      return "Name must start with a-z and contain only [a-z0-9_-] (max 63 chars).";
+    }
+    const connErr = validateConnectionFields();
+    if (connErr) return connErr;
     // Fingerprint is OPTIONAL on submit.
-    if (fingerprint.trim() && !FP_RE.test(fingerprint.trim())) {
+    if (form.fingerprint.trim() && !FP_RE.test(form.fingerprint.trim())) {
       return (
         "Fingerprint must be SHA256:<base64>. Click Verify connection " +
         "to fill it in automatically, or leave it blank and Save."
@@ -203,22 +228,22 @@ export function SshServerEditor({
   // Persist
 
   function buildPayload(forCreate: boolean): Record<string, unknown> {
-    const allowParsed = parseCommandList(commandAllowText);
-    const denyParsed = parseCommandList(commandDenyText);
-    const fp = fingerprint.trim();
+    const allowParsed = parseCommandList(form.commandAllowText);
+    const denyParsed = parseCommandList(form.commandDenyText);
+    const fp = form.fingerprint.trim();
     const base: Record<string, unknown> = {
-      description: description.trim() || null,
-      credentialId,
-      host: host.trim(),
-      port: Number(port),
+      description: form.description.trim() || null,
+      credentialId: form.credentialId,
+      host: form.host.trim(),
+      port: Number(form.port),
       // Omit the field entirely when blank.
       ...(fp ? { knownHostFingerprint: fp } : {}),
       commandAllow: allowParsed.length > 0 ? allowParsed : null,
       commandDeny: denyParsed,
-      loginShell,
+      loginShell: form.loginShell,
     };
     if (forCreate) {
-      base.name = name;
+      base.name = form.name;
     }
     return base;
   }
@@ -250,6 +275,7 @@ export function SshServerEditor({
       }
       // Save succeeded — clear inline hints.
       setFpHint(null);
+      setVerifyResult(null);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -299,49 +325,27 @@ export function SshServerEditor({
    * below the field is set per the rules in the `fpHint` doc above.
    */
   async function handleVerifyConnection(): Promise<void> {
-    // Local validation skips the fingerprint check.
-    if (!host.trim()) {
-      setVerifyResult({
-        ok: false,
-        code: "VALIDATION_FAILED",
-        message: "Host is required.",
-      });
+    const connErr = validateConnectionFields();
+    if (connErr) {
+      setVerifyResult({ ok: false, code: "VALIDATION_FAILED", message: connErr });
       return;
     }
-    if (!credentialId) {
-      setVerifyResult({
-        ok: false,
-        code: "VALIDATION_FAILED",
-        message: "Credential is required.",
-      });
-      return;
-    }
-    const portNum = Number(port);
-    if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) {
-      setVerifyResult({
-        ok: false,
-        code: "VALIDATION_FAILED",
-        message: "Port must be an integer between 1 and 65535.",
-      });
-      return;
-    }
+    const portNum = Number(form.port);
 
     setVerifying(true);
     setVerifyResult(null);
     try {
-      const res = sshServerId
-        ? await fetch(`/api/ssh-servers/${sshServerId}/verify-connection`, {
-            method: "POST",
-          })
-        : await fetch("/api/ssh-servers/verify-connection", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              host: host.trim(),
-              port: portNum,
-              credentialId,
-            }),
-          });
+      // Always use the stateless endpoint with current form data so
+      // unsaved edits are verified — not the DB-persisted version.
+      const res = await fetch("/api/ssh-servers/verify-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: form.host.trim(),
+          port: portNum,
+          credentialId: form.credentialId,
+        }),
+      });
       const body = (await res.json().catch(() => null)) as
         | {
             ok: boolean;
@@ -369,8 +373,11 @@ export function SshServerEditor({
       const captured = body?.fingerprint ?? null;
       if (captured) {
         // Compute the inline hint BEFORE we overwrite `fingerprint` state.
+        // Use the DB-saved fingerprint from mount time (initialDetail)
+        // instead of the API response since we now always use the
+        // stateless endpoint.
         const previous = sshServerId
-          ? (body?.pinnedFingerprint ?? "")
+          ? (initialDetail?.knownHostFingerprint ?? "")
           : "";
         if (previous && previous !== captured) {
           setFpHint({ kind: "changed", previous });
@@ -379,7 +386,7 @@ export function SshServerEditor({
         } else {
           setFpHint(null);
         }
-        setFingerprint(captured);
+        update("fingerprint", captured);
       }
 
       if (body?.ok) {
@@ -437,7 +444,7 @@ export function SshServerEditor({
           <Button
             size="sm"
             onClick={() => void handleSave()}
-            disabled={saving}
+            disabled={saving || (!isNew && !isDirty)}
             className="h-8 gap-1.5"
           >
             {saving ? (
@@ -466,36 +473,14 @@ export function SshServerEditor({
         </div>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete SSH server</AlertDialogTitle>
-            <AlertDialogDescription>
-              Permanently delete <strong>{initialDetail?.name ?? name}</strong>?
-              Agents that bind this server will lose the binding (no further
-              calls will dispatch). This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDeleteConfirm();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" />
-              )}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        title="Delete SSH server"
+        description={<>Permanently delete <strong>{initialDetail?.name ?? form.name}</strong>? Agents that bind this server will lose the binding (no further calls will dispatch). This cannot be undone.</>}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onConfirm={() => void handleDeleteConfirm()}
+        deleting={deleting}
+      />
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-3xl space-y-6 px-6 py-6">
@@ -547,8 +532,8 @@ export function SshServerEditor({
               <Label htmlFor="ssh-name">Name</Label>
               <Input
                 id="ssh-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={form.name}
+                onChange={(e) => update("name", e.target.value)}
                 disabled={!isNew}
                 placeholder="Lowercase letters, digits, _ and -. Cannot be changed later"
                 className="font-mono"
@@ -558,8 +543,8 @@ export function SshServerEditor({
               <Label htmlFor="ssh-desc">Description</Label>
               <Textarea
                 id="ssh-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                value={form.description}
+                onChange={(e) => update("description", e.target.value)}
                 placeholder=""
                 rows={2}
               />
@@ -577,8 +562,8 @@ export function SshServerEditor({
               </Label>
               <Input
                 id="ssh-host"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
+                value={form.host}
+                onChange={(e) => update("host", e.target.value)}
                 placeholder="prod.example.com or 10.0.1.5"
                 className="flex-1"
               />
@@ -592,8 +577,8 @@ export function SshServerEditor({
                 type="number"
                 min={1}
                 max={65535}
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
+                value={form.port}
+                onChange={(e) => update("port", e.target.value)}
                 className="flex-1"
               />
             </div>
@@ -603,8 +588,8 @@ export function SshServerEditor({
               </Label>
               <div className="flex-1">
                 <Select
-                  value={credentialId}
-                  onValueChange={(v) => setCredentialId(v ?? "")}
+                  value={form.credentialId}
+                  onValueChange={(v) => update("credentialId", v ?? "")}
                 >
                   <SelectTrigger id="ssh-credential" className="w-full">
                     {/*
@@ -618,8 +603,8 @@ export function SshServerEditor({
                      * DataSourceEditor.
                      */}
                     <SelectValue placeholder="Select an SSH credential…">
-                      {credentialId
-                        ? (credentials.find((c) => c.id === credentialId)
+                      {form.credentialId
+                        ? (credentials.find((c) => c.id === form.credentialId)
                             ?.name ?? "Unknown credential")
                         : null}
                     </SelectValue>
@@ -646,9 +631,9 @@ export function SshServerEditor({
               </Label>
               <Input
                 id="ssh-fingerprint"
-                value={fingerprint}
+                value={form.fingerprint}
                 onChange={(e) => {
-                  setFingerprint(e.target.value);
+                  update("fingerprint", e.target.value);
                   // Manual edits invalidate any inline hint sourced
                   // from the last Verify — the user is now in
                   // control of what's about to be saved.
@@ -675,7 +660,7 @@ export function SshServerEditor({
                 <br />
                 <span className="font-mono">Was: {fpHint.previous}</span>
                 <br />
-                <span className="font-mono">Now: {fingerprint}</span>
+                <span className="font-mono">Now: {form.fingerprint}</span>
                 <br />
                 Confirm with the host operator that a legitimate re-key
                 happened, then click Save to update the pin.
@@ -688,8 +673,8 @@ export function SshServerEditor({
               <div className="flex flex-1 items-center gap-2">
                 <Switch
                   id="ssh-login-shell"
-                  checked={loginShell}
-                  onCheckedChange={setLoginShell}
+                  checked={form.loginShell}
+                  onCheckedChange={(v) => update("loginShell", v)}
                 />
                 <span className="text-xs text-muted-foreground">
                   Wrap commands in <code className="font-mono">bash -lc &apos;...&apos;</code>
@@ -718,8 +703,8 @@ export function SshServerEditor({
               <Label htmlFor="ssh-allow">Allowlist</Label>
               <Textarea
                 id="ssh-allow"
-                value={commandAllowText}
-                onChange={(e) => setCommandAllowText(e.target.value)}
+                value={form.commandAllowText}
+                onChange={(e) => update("commandAllowText", e.target.value)}
                 placeholder={"^ls\n^cat\n^tail\n// One regex per line. Anchor with ^ for prefix matches."}
                 rows={5}
                 className="font-mono text-xs"
@@ -731,8 +716,8 @@ export function SshServerEditor({
               </Label>
               <Textarea
                 id="ssh-deny"
-                value={commandDenyText}
-                onChange={(e) => setCommandDenyText(e.target.value)}
+                value={form.commandDenyText}
+                onChange={(e) => update("commandDenyText", e.target.value)}
                 placeholder={"rm\nshutdown\nreboot"}
                 rows={3}
                 className="font-mono text-xs"

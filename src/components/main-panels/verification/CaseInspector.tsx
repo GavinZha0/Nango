@@ -526,7 +526,7 @@ export function CaseInspector({
           {running ? (
             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
           ) : (
-            <Play className="mr-1 h-3 w-3" />
+            <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
           )}
           Run case
         </Button>

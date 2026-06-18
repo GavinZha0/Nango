@@ -378,16 +378,20 @@ export function CredentialFormDialog({
               </p>
             )}
             {fields.map((f) => {
+              const isSecret = f.type === "password" || f.type === "textarea";
+              const placeholder = isEdit && isSecret
+                ? "••••••••  (saved, leave blank to keep)"
+                : f.placeholder;
               if (f.type === "textarea") {
                 return (
                   <div key={f.key} className="space-y-1.5">
                     <Label htmlFor={`cred-${f.key}`}>{f.label}</Label>
                     <textarea
                       id={`cred-${f.key}`}
-                      className="w-full min-h-[120px] rounded-md border bg-background px-3 py-2 text-sm font-mono"
+                      className={cn("w-full min-h-[120px] rounded-md border bg-background px-3 py-2 text-sm font-mono", isEdit && isSecret && "placeholder:text-yellow-400")}
                       value={form.payload[f.key] ?? ""}
                       onChange={(e) => setPayloadField(f.key, e.target.value)}
-                      placeholder={f.placeholder}
+                      placeholder={placeholder}
                       autoComplete="off"
                       spellCheck={false}
                     />
@@ -407,16 +411,13 @@ export function CredentialFormDialog({
                     type={f.type ?? "text"}
                     value={form.payload[f.key] ?? ""}
                     onChange={(e) => setPayloadField(f.key, e.target.value)}
-                    placeholder={f.placeholder}
+                    placeholder={placeholder}
                     autoComplete="off"
-                    className="flex-1"
+                    className={cn("flex-1", isEdit && isSecret && "placeholder:text-yellow-400")}
                   />
                 </div>
               );
             })}
-            {isEdit && (
-              <p className="text-xs text-orange-500">Leave blank to keep existing secrets.</p>
-            )}
           </div>
 
           {form.error && (

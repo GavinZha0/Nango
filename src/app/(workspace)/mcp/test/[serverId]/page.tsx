@@ -4,15 +4,29 @@
  * MCP Tool Test Page
  */
 
-import { useState, useCallback, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Play, Loader2, Search, Save } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { JsonView } from "@/components/ui/json-view";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SaveAsCaseDialog } from "@/components/main-panels/verification/SaveAsCaseDialog";
 import { cn } from "@/lib/utils";
+import { formatTimestamp } from "@/components/admin/format";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import {
+  loadSnapshots,
+  saveSnapshot,
+  togglePin,
+  type ToolInputSnapshot,
+} from "@/lib/mcp/snapshots";
 
 import { withTheme } from "@rjsf/core";
 import { Theme as ShadcnTheme } from "@rjsf/shadcn";
@@ -78,6 +92,114 @@ function generateUiSchema(schema: Record<string, unknown>): Record<string, unkno
 
 type InputTab = "form" | "json" | "schema";
 
+/** Consolidated input-editor state — reset together on tool switch. */
+interface InputState {
+  activeTab: InputTab;
+  jsonInput: string;
+  jsonError: string | null;
+  formData: Record<string, unknown>;
+}
+
+const EMPTY_INPUT: InputState = {
+  activeTab: "form",
+  jsonInput: "{}",
+  jsonError: null,
+  formData: {},
+};
+
+/** Consolidated execution lifecycle state — reset together on tool switch and before each run. */
+interface ExecState {
+  executing: boolean;
+  result: unknown | null;
+  execError: string | null;
+  executedArgs: Record<string, unknown> | null;
+}
+
+const IDLE_EXEC: ExecState = {
+  executing: false,
+  result: null,
+  execError: null,
+  executedArgs: null,
+};
+
+// History dropdown — auto-saved on each successful execution
+
+interface HistoryDropdownProps {
+  serverId: string;
+  toolName: string | null;
+  onLoad: (args: Record<string, unknown>) => void;
+}
+
+function HistoryDropdown({ serverId, toolName, onLoad }: HistoryDropdownProps): ReactNode {
+  const [snapshots, setSnapshots] = useState<ToolInputSnapshot[]>(
+    () => (toolName ? loadSnapshots(serverId, toolName) : []),
+  );
+
+  // Refresh snapshots when the active tool changes.
+  const [prevToolName, setPrevToolName] = useState(toolName);
+  if (toolName !== prevToolName) {
+    setPrevToolName(toolName);
+    setSnapshots(toolName ? loadSnapshots(serverId, toolName) : []);
+  }
+
+  function refresh(): void {
+    if (toolName) setSnapshots(loadSnapshots(serverId, toolName));
+  }
+
+  function handleTogglePin(e: React.MouseEvent, id: string): void {
+    e.stopPropagation();
+    if (!toolName) return;
+    togglePin(serverId, toolName, id);
+    refresh();
+  }
+
+  if (!toolName) return null;
+
+  return (
+    <DropdownMenu onOpenChange={(open) => { if (open) refresh(); }}>
+      <DropdownMenuTrigger
+        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        History
+        {snapshots.length > 0 && (
+          <span className="text-[10px] tabular-nums opacity-70">({snapshots.length})</span>
+        )}
+        <ChevronDown className="h-3 w-3" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-40">
+        {snapshots.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-muted-foreground">
+            No history yet. Run the tool to record.
+          </div>
+        ) : (
+          snapshots.map((snap) => (
+            <DropdownMenuItem
+              key={snap.id}
+              onClick={() => onLoad(snap.args)}
+              className="group flex items-center gap-1.5"
+            >
+              <span className={cn("flex-1 truncate text-xs", snap.pinned && "font-medium")}>{snap.name}</span>
+              <button
+                type="button"
+                onClick={(e) => handleTogglePin(e, snap.id)}
+                className={cn(
+                  "shrink-0 transition-opacity",
+                  snap.pinned
+                    ? "text-amber-500"
+                    : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-amber-500",
+                )}
+                title={snap.pinned ? "Unpin" : "Pin"}
+              >
+                <Star className={cn("h-3 w-3", snap.pinned && "fill-amber-500")} />
+              </button>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /** `key={serverId}` gives automatic state reset on server switch
  *  (every `useState` inside `<ServerView>` re-initialises). */
 export default function McpToolTestPage(): ReactNode {
@@ -87,6 +209,7 @@ export default function McpToolTestPage(): ReactNode {
 
 function ServerView({ serverId }: { serverId: string }): ReactNode {
   const router = useRouter();
+  const tz = useDisplayTimezone();
 
   // Tool metadata
   const [serverTools, setServerTools] = useState<McpToolSnapshot[]>([]);
@@ -100,20 +223,12 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   // simple at `/mcp/test/<serverId>`.
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<InputTab>("form");
-  const [jsonInput, setJsonInput] = useState("{}");
-  const [jsonError, setJsonError] = useState<string | null>(null);
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
-
-  const [executing, setExecuting] = useState(false);
-  const [result, setResult] = useState<unknown | null>(null);
-  const [execError, setExecError] = useState<string | null>(null);
-  // Args that produced the currently-displayed `result`. Captured at
-  // the moment of a SUCCESSFUL execute so "Save as case" persists the
-  // exact call the user just ran — not whatever the input editor
-  // happens to hold after they kept tweaking it.
-  const [executedArgs, setExecutedArgs] = useState<Record<string, unknown> | null>(null);
+  const [input, setInput] = useState<InputState>(EMPTY_INPUT);
+  const [exec, setExec] = useState<ExecState>(IDLE_EXEC);
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
+
+  /** Per-tool state cache so switching tools preserves input + result. */
+  const toolStateCache = useRef<Map<string, { input: InputState; exec: ExecState }>>(new Map());
 
   // Load once: serverId is fixed for this <ServerView> instance
   // (outer Page keys on it).
@@ -159,22 +274,19 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const activeToolName: string | null = tool?.name ?? null;
   const handleExecute = useCallback(async () => {
     if (activeToolName === null) return;
-    setExecuting(true);
-    setExecError(null);
-    setResult(null);
-    setExecutedArgs(null);
+    setExec({ executing: true, result: null, execError: null, executedArgs: null });
 
     let args: Record<string, unknown>;
-    if (activeTab === "json") {
+    if (input.activeTab === "json") {
       try {
-        args = JSON.parse(jsonInput);
+        args = JSON.parse(input.jsonInput);
       } catch {
-        setJsonError("Invalid JSON");
-        setExecuting(false);
+        setInput((prev) => ({ ...prev, jsonError: "Invalid JSON" }));
+        setExec(IDLE_EXEC);
         return;
       }
     } else {
-      args = formData;
+      args = input.formData;
     }
 
     try {
@@ -185,65 +297,52 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       });
       const data = await res.json();
       if (!res.ok) {
-        setExecError(data.error ?? "Execution failed");
+        setExec({ executing: false, result: null, execError: data.error ?? "Execution failed", executedArgs: null });
       } else {
-        setResult(data.result);
-        setExecutedArgs(args);
+        setExec({ executing: false, result: data.result, execError: null, executedArgs: args });
+        // Auto-save input args to history on successful execution.
+        // Skip no-param tools — nothing useful to reload.
+        if (Object.keys(args).length > 0) {
+          saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args);
+        }
       }
     } catch (err) {
-      setExecError(err instanceof Error ? err.message : "Unexpected error");
-    } finally {
-      setExecuting(false);
+      setExec({ executing: false, result: null, execError: err instanceof Error ? err.message : "Unexpected error", executedArgs: null });
     }
-  }, [activeTab, jsonInput, formData, serverId, activeToolName]);
+  }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz]);
 
   const schema = (tool?.input_schema as Record<string, unknown>) ?? {};
   const uiSchema = generateUiSchema(schema);
 
-  /** Reset all per-tool input/output state on pick. */
+  /** Save current tool state to cache, then restore (or reset) the target tool's state. */
   function handleSelectTool(name: string): void {
     if (name === activeToolName) return;
+    // Persist current tool's state before switching.
+    if (activeToolName) {
+      toolStateCache.current.set(activeToolName, { input, exec });
+    }
+    // Restore cached state for the target tool, or start fresh.
+    const cached = toolStateCache.current.get(name);
+    setInput(cached?.input ?? EMPTY_INPUT);
+    setExec(cached?.exec ?? IDLE_EXEC);
     setSelectedToolName(name);
-    setFormData({});
-    setJsonInput("{}");
-    setJsonError(null);
-    setResult(null);
-    setExecError(null);
-    setExecutedArgs(null);
-    setActiveTab("form");
   }
 
   const executeDisabled: boolean =
-    tool === null || (activeTab === "json" && jsonError !== null);
-
-  // useSyncExternalStore gives a stable "Ctrl" label on the server
-  // and swaps to "⌘" only after mount (no hydration mismatch).
-  const isMac: boolean = useSyncExternalStore(
-    () => () => {},
-    () => /Mac|iPhone|iPad/.test(navigator.platform),
-    () => false,
-  );
-  const executeShortcutHint: string = useMemo(
-    () => (isMac ? "⌘↵" : "Ctrl+↵"),
-    [isMac],
-  );
-  const executeShortcutLabel: string = useMemo(
-    () => `Run tool (${isMac ? "⌘" : "Ctrl"} + Enter)`,
-    [isMac],
-  );
+    tool === null || (input.activeTab === "json" && input.jsonError !== null);
 
   // Cmd/Ctrl+Enter shortcut on window so it fires from any focus.
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (e.key !== "Enter") return;
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (executing || executeDisabled) return;
+      if (exec.executing || executeDisabled) return;
       e.preventDefault();
       void handleExecute();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleExecute, executing, executeDisabled]);
+  }, [handleExecute, exec.executing, executeDisabled]);
 
   if (loadingMeta) {
     return (
@@ -356,10 +455,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
           <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
             <button
               type="button"
-              onClick={() => setActiveTab("form")}
+              onClick={() => setInput((prev) => ({ ...prev, activeTab: "form" }))}
               className={cn(
                 "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                activeTab === "form"
+                input.activeTab === "form"
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
@@ -368,43 +467,46 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("json")}
+              onClick={() => setInput((prev) => ({ ...prev, activeTab: "json" }))}
               className={cn(
                 "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                activeTab === "json"
+                input.activeTab === "json"
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
-              JSON
+              Json
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("schema")}
+              onClick={() => setInput((prev) => ({ ...prev, activeTab: "schema" }))}
               className={cn(
                 "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                activeTab === "schema"
+                input.activeTab === "schema"
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               Schema
             </button>
-            <div className="ml-auto flex items-center">
+            <div className="ml-auto flex items-center gap-1">
+              <HistoryDropdown
+                serverId={serverId}
+                toolName={activeToolName}
+                onLoad={(args) => setInput((prev) => ({ ...prev, formData: args, jsonInput: JSON.stringify(args, null, 2) }))}
+              />
               <Button
                 size="sm"
                 className="h-7 gap-1.5 px-2.5 text-xs"
                 onClick={handleExecute}
-                disabled={executing || executeDisabled}
-                title={executeShortcutLabel}
+                disabled={exec.executing || executeDisabled}
               >
-                {executing ? (
+                {exec.executing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
                 )}
                 Run
-                <kbd className="ml-1 hidden text-[10px] opacity-70 sm:inline">{executeShortcutHint}</kbd>
               </Button>
             </div>
           </div>
@@ -417,7 +519,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                     ? "This server has no discovered tools. Refresh it from the left panel to scan."
                     : "Pick a tool from the list to start testing."}
                 </p>
-              ) : activeTab === "form" ? (
+              ) : input.activeTab === "form" ? (
                 Object.keys(schema).length === 0 ? (
                   <p className="text-xs text-muted-foreground">This tool takes no input parameters.</p>
                 ) : (
@@ -425,10 +527,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                     schema={schema}
                     uiSchema={uiSchema}
                     validator={validator}
-                    formData={formData}
+                    formData={input.formData}
                     onChange={(e) => {
-                      setFormData(e.formData ?? {});
-                      setJsonInput(JSON.stringify(e.formData ?? {}, null, 2));
+                      const fd = e.formData ?? {};
+                      setInput((prev) => ({ ...prev, formData: fd, jsonInput: JSON.stringify(fd, null, 2) }));
                     }}
                     templates={{ FieldTemplate: CustomFieldTemplate }}
                   >
@@ -436,19 +538,26 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                     <></>
                   </Form>
                 )
-              ) : activeTab === "json" ? (
+              ) : input.activeTab === "json" ? (
                 <div className="space-y-2">
                   <Textarea
-                    value={jsonInput}
+                    value={input.jsonInput}
                     onChange={(e) => {
-                      setJsonInput(e.target.value);
-                      setJsonError(null);
-                      try { JSON.parse(e.target.value); } catch { setJsonError("Invalid JSON"); }
+                      const v = e.target.value;
+                      let err: string | null = null;
+                      let parsed: Record<string, unknown> | undefined;
+                      try { parsed = JSON.parse(v); } catch { err = "Invalid JSON"; }
+                      setInput((prev) => ({
+                        ...prev,
+                        jsonInput: v,
+                        jsonError: err,
+                        ...(parsed !== undefined ? { formData: parsed } : {}),
+                      }));
                     }}
                     className="min-h-[200px] font-mono text-xs"
                     placeholder='{ "key": "value" }'
                   />
-                  {jsonError && <p className="text-xs text-destructive">{jsonError}</p>}
+                  {input.jsonError && <p className="text-xs text-destructive">{input.jsonError}</p>}
                 </div>
               ) : (
                 <JsonView data={schema} defaultExpandDepth={4} />
@@ -470,10 +579,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
               className="h-7 gap-1.5 rounded-none px-2.5 text-xs"
               onClick={() => setSaveDialogOpen(true)}
               disabled={
-                executing ||
-                result === null ||
-                execError !== null ||
-                executedArgs === null ||
+                exec.executing ||
+                exec.result === null ||
+                exec.execError !== null ||
+                exec.executedArgs === null ||
                 activeToolName === null
               }
               title="Save this call as a verification case"
@@ -487,12 +596,12 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
           </div>
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3">
-              {execError ? (
+              {exec.execError ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
-                  <p className="text-xs text-destructive">{execError}</p>
+                  <p className="text-xs text-destructive">{exec.execError}</p>
                 </div>
-              ) : result !== null ? (
-                <JsonView data={result} defaultExpandDepth={3} />
+              ) : exec.result !== null ? (
+                <JsonView data={exec.result} defaultExpandDepth={3} />
               ) : (
                 <p className="text-xs text-muted-foreground">
                   Click Execute to run the tool.
@@ -503,14 +612,14 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         </div>
       </div>
 
-      {activeToolName !== null && executedArgs !== null && (
+      {activeToolName !== null && exec.executedArgs !== null && (
         <SaveAsCaseDialog
           open={saveDialogOpen}
           onOpenChange={setSaveDialogOpen}
           mcpServerId={serverId}
           serverName={serverName}
           toolName={activeToolName}
-          input={executedArgs}
+          input={exec.executedArgs}
         />
       )}
     </div>

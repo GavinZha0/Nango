@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
-import type { BuiltinAgentRow } from "@/components/main-panels/BuiltinAgentEditor";
+import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 import {
   DEFAULT_ORCHESTRATION_MODE,
   type OrchestrationModeId,

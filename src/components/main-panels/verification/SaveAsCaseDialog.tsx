@@ -131,14 +131,13 @@ export function SaveAsCaseDialog({
   toolName,
   input,
 }: SaveAsCaseDialogProps): ReactNode {
+  // Remote data
   const [suites, setSuites] = useState<VerificationSuiteRow[]>([]);
   const [loadingSuites, setLoadingSuites] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [selectedSuiteId, setSelectedSuiteId] = useState<string>("");
-  const [newSuiteName, setNewSuiteName] = useState<string>("");
-  const [caseName, setCaseName] = useState<string>("");
-
+  // Form state — reset on each open.
+  const [form, setForm] = useState({ selectedSuiteId: "", newSuiteName: "", caseName: "" });
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -148,9 +147,7 @@ export function SaveAsCaseDialog({
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
-      setSelectedSuiteId("");
-      setNewSuiteName("");
-      setCaseName(toolName);
+      setForm({ selectedSuiteId: "", newSuiteName: "", caseName: toolName });
       setSubmitError(null);
     }
   }
@@ -179,16 +176,16 @@ export function SaveAsCaseDialog({
     };
   }, [open]);
 
-  const creatingNewSuite: boolean = selectedSuiteId === NEW_SUITE_SENTINEL;
-  const trimmedCaseName: string = caseName.trim();
-  const trimmedNewSuiteName: string = newSuiteName.trim();
+  const creatingNewSuite: boolean = form.selectedSuiteId === NEW_SUITE_SENTINEL;
+  const trimmedCaseName: string = form.caseName.trim();
+  const trimmedNewSuiteName: string = form.newSuiteName.trim();
 
   const canSubmit: boolean =
     !submitting &&
     trimmedCaseName.length > 0 &&
     (creatingNewSuite
       ? trimmedNewSuiteName.length > 0
-      : selectedSuiteId !== "");
+      : form.selectedSuiteId !== "");
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
@@ -202,7 +199,7 @@ export function SaveAsCaseDialog({
         createdSuite = await createMcpSuite(trimmedNewSuiteName);
         suiteId = createdSuite.id;
       } else {
-        suiteId = selectedSuiteId;
+        suiteId = form.selectedSuiteId;
       }
 
       // 2) Create the case under the resolved suite.
@@ -263,8 +260,8 @@ export function SaveAsCaseDialog({
               Suite <span className="text-destructive">*</span>
             </Label>
             <Select
-              value={selectedSuiteId}
-              onValueChange={(v) => setSelectedSuiteId(v ?? "")}
+              value={form.selectedSuiteId}
+              onValueChange={(v) => setForm((prev) => ({ ...prev, selectedSuiteId: v ?? "" }))}
               disabled={loadingSuites}
             >
               <SelectTrigger id="save-case-suite" className="w-full">
@@ -298,8 +295,8 @@ export function SaveAsCaseDialog({
               </Label>
               <Input
                 id="save-case-new-suite"
-                value={newSuiteName}
-                onChange={(e) => setNewSuiteName(e.target.value)}
+                value={form.newSuiteName}
+                onChange={(e) => setForm((prev) => ({ ...prev, newSuiteName: e.target.value }))}
                 placeholder="e.g. GitHub MCP smoke tests"
                 autoFocus
               />
@@ -313,8 +310,8 @@ export function SaveAsCaseDialog({
             </Label>
             <Input
               id="save-case-name"
-              value={caseName}
-              onChange={(e) => setCaseName(e.target.value)}
+              value={form.caseName}
+              onChange={(e) => setForm((prev) => ({ ...prev, caseName: e.target.value }))}
               placeholder="e.g. search returns at least one hit"
               autoFocus={!creatingNewSuite}
             />

@@ -182,7 +182,7 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
   if (!hydrated) {
     return (
       <div className="flex min-w-0 flex-1 overflow-hidden">
-        <main className="flex h-full w-full flex-col overflow-hidden">
+        <main className="flex h-full w-full flex-col overflow-hidden border-b">
           {children}
         </main>
       </div>
@@ -209,7 +209,7 @@ export function ThreePanelContent({ children }: ThreePanelContentProps) {
 
         {/* ── Center: main workspace ─────────────────────────────────── */}
         <ResizablePanel minSize={CENTER_MIN_PX}>
-          <main className="flex h-full flex-col overflow-hidden">
+          <main className="flex h-full flex-col overflow-hidden border-b">
             {children}
           </main>
         </ResizablePanel>

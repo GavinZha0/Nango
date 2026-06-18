@@ -27,11 +27,17 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "openai",    label: "OpenAI",       service: "llm" },
   { value: "anthropic", label: "Anthropic",    service: "llm" },
   { value: "google",    label: "Google AI",    service: "llm" },
-  { value: "groq",              label: "Groq",                service: "llm" },
+  { value: "groq",              label: "Groq",                service: "llm", defaultRestUrl: "https://api.groq.com/openai/v1" },
   { value: "deepseek",          label: "DeepSeek",            service: "llm" },
   { value: "xai",               label: "xAI (Grok)",          service: "llm" },
   { value: "openrouter",        label: "OpenRouter",          service: "llm" },
   { value: "ollama",            label: "Ollama",              service: "llm" },
+  { value: "siliconflow",      label: "SiliconFlow",         service: "llm", defaultRestUrl: "https://api.siliconflow.cn/v1" },
+  { value: "modelstudio",      label: "ModelStudio",         service: "llm", defaultRestUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
+  { value: "modelscope",       label: "ModelScope",          service: "llm", defaultRestUrl: "https://api-inference.modelscope.cn/v1" },
+  { value: "volcengine-ark",   label: "Volcengine Ark",      service: "llm", defaultRestUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+  { value: "litellm",          label: "LiteLLM",             service: "llm" },
+  { value: "portkey",          label: "Portkey",             service: "llm", defaultRestUrl: "https://api.portkey.ai/v1" },
   // OpenAI-Chat-Completions-compatible endpoints (vLLM, LM Studio, TGI,
   // Together, Fireworks, gateways). Requires `restUrl`. Built-in agents only.
   { value: "openai-compatible", label: "OpenAI-Compatible",   service: "llm" },
@@ -40,9 +46,11 @@ export const PROVIDERS: ProviderEntry[] = [
   // Backends whose models / apps are *agents* (LLM already bound to
   // tools / KB / workflow upstream). For raw LLM endpoints use the LLM
   // category + a Built-in agent.
-  { value: "agno",   label: "Agno",   service: "agent" },
-  { value: "mastra", label: "Mastra", service: "agent" },
-  { value: "dify",   label: "Dify",   service: "agent" },
+  { value: "agno",        label: "Agno",        service: "agent" },
+  { value: "mastra",      label: "Mastra",      service: "agent" },
+  { value: "dify",        label: "Dify",        service: "agent" },
+  { value: "crewai",      label: "CrewAI",      service: "agent" },
+  { value: "deepagents",  label: "DeepAgents",  service: "agent" },
 
   // Search providers
   // The `jina` slot consumes Jina Search (`s.jina.ai`) — a

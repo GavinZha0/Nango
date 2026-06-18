@@ -8,6 +8,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   useRef,
   startTransition,
   type ReactNode,
@@ -22,16 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import {
   Select,
   SelectContent,
@@ -47,56 +39,10 @@ import {
   SUPERVISOR_PROMPT,
 } from "@/lib/constants/supervisor";
 import type { AgentRole } from "@/lib/db/schema";
-
-// Shared row type (re-exported for other consumers)
-
-export interface BuiltinAgentRow {
-  id: string;
-  /** System-agent role mirror. `null` = regular agent. */
-  role?: AgentRole | null;
-  /**
-   * Optional emoji glyph for visual identification (e.g. "🤖", "📊").
-   * Stored as the raw Unicode character. NULL means "use the default
-   * glyph chosen by the renderer" (see DEFAULT_AGENT_ICON).
-   */
-  icon?: string | null;
-  name: string;
-  description: string | null;
-  model: string;
-  modelProvider: string;
-  credentialId: string | null;
-  prompt: string | null;
-  temperature: string | null;
-  maxTokens: number | null;
-  maxSteps: number | null;
-  toolChoice: string;
-  memoryEnabled: boolean;
-  memoryWindowSize: number | null;
-  enabled: boolean;
-  visibility: string;
-  createdBy: string;
-  createdAt: string | Date;
-  updatedAt: string | Date;
-  /** Total number of tool rows attached (non-skill). */
-  toolCount?: number;
-  /** Number of skill-type tool rows. */
-  skillCount?: number;
-}
+export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
+import type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 
 // Types
-
-export interface BoundToolRow {
-  id?: string;
-  toolType: string;
-  mcpServerId?: string | null;
-  mcpServerName?: string | null;
-  sshServerId?: string | null;
-  mcpToolName?: string | null;
-  skillId?: string | null;
-  skillName?: string | null;
-  builtinTool?: string | null;
-  dataSourceId?: string | null;
-}
 
 interface MpcServer { id: string; name: string; description: string | null; enabled: boolean }
 interface Skill { id: string; name: string; description: string | null; source: string }
@@ -205,6 +151,98 @@ function CheckList<T extends { id: string; name: string; description?: string | 
   );
 }
 
+// Form state
+
+interface FormState {
+  name: string;
+  description: string;
+  icon: string | null;
+  model: string;
+  modelProvider: string;
+  credentialId: string | null;
+  prompt: string;
+  toolChoice: string;
+  maxSteps: number;
+  temperature: number;
+  isSupervisor: boolean;
+  kbEnabled: boolean;
+}
+
+const EMPTY_FORM: FormState = {
+  name: "",
+  description: "",
+  icon: null,
+  model: "",
+  modelProvider: "",
+  credentialId: null,
+  prompt: "",
+  toolChoice: "auto",
+  maxSteps: 5,
+  temperature: 0.3,
+  isSupervisor: false,
+  kbEnabled: false,
+};
+
+function formFromDetail(data: AgentDetail): FormState {
+  return {
+    name: data.name,
+    description: data.description ?? "",
+    icon: data.icon ?? null,
+    model: data.model,
+    modelProvider: data.modelProvider,
+    credentialId: data.credentialId ?? null,
+    prompt: data.prompt ?? "",
+    toolChoice: data.toolChoice ?? "auto",
+    maxSteps: data.maxSteps ?? 5,
+    temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
+    isSupervisor: data.role === "supervisor",
+    kbEnabled: false,
+  };
+}
+
+interface ToolSelections {
+  mcp: Set<string>;
+  skills: Set<string>;
+  builtinTools: Set<string>;
+  dataSources: Set<string>;
+  sshServers: Set<string>;
+}
+
+const EMPTY_TOOLS: ToolSelections = {
+  mcp: new Set(),
+  skills: new Set(),
+  builtinTools: new Set(),
+  dataSources: new Set(),
+  sshServers: new Set(),
+};
+
+function toolsFromBoundRows(rows: BoundToolRow[]): ToolSelections {
+  const mcp = new Set<string>();
+  const skills = new Set<string>();
+  const builtinTools = new Set<string>();
+  const dataSources = new Set<string>();
+  const sshServers = new Set<string>();
+  for (const t of rows) {
+    if ((t.toolType === "mcp_server" || t.toolType === "mcp_tool") && t.mcpServerId) mcp.add(t.mcpServerId);
+    if (t.toolType === "skill" && t.skillId) skills.add(t.skillId);
+    if (t.toolType === "builtin_tool" && t.builtinTool) builtinTools.add(t.builtinTool);
+    if (t.toolType === "datasource" && t.dataSourceId) dataSources.add(t.dataSourceId);
+    if (t.toolType === "ssh_server" && t.sshServerId) sshServers.add(t.sshServerId);
+  }
+  return { mcp, skills, builtinTools, dataSources, sshServers };
+}
+
+/** Serialize tool selections for dirty comparison (Sets are not JSON-comparable). */
+function serializeTools(t: ToolSelections): string {
+  return JSON.stringify({
+    mcp: [...t.mcp].sort(),
+    skills: [...t.skills].sort(),
+    builtinTools: [...t.builtinTools].sort(),
+    dataSources: [...t.dataSources].sort(),
+    sshServers: [...t.sshServers].sort(),
+  });
+}
+
 // Main component
 
 interface BuiltinAgentEditorProps {
@@ -245,41 +283,46 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   const [llmCredentials, setLlmCredentials] = useState<LlmCredential[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Form state
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  /** Optional emoji glyph; null = "use the default". */
-  const [icon, setIcon] = useState<string | null>(null);
-  const [model, setModel] = useState("");
-  const [modelProvider, setModelProvider] = useState("");
-  const [credentialId, setCredentialId] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [toolChoice, setToolChoice] = useState("auto");
-  const [maxSteps, setMaxSteps] = useState(5);
-  const [temperature, setTemperature] = useState<number>(0.3);
-  /** Whether this agent is the user's Nango (supervisor). */
-  const [isSupervisor, setIsSupervisor] = useState(false);
+  // Form state — single object for all editable scalar fields.
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [savedForm, setSavedForm] = useState<FormState>(EMPTY_FORM);
+  const update = useCallback(
+    <K extends keyof FormState>(key: K, value: FormState[K]) =>
+      setForm((prev) => ({ ...prev, [key]: value })),
+    [],
+  );
+
+  // Tool selections — grouped into one object (5 Sets).
+  const [tools, setTools] = useState<ToolSelections>(EMPTY_TOOLS);
+  const [savedTools, setSavedTools] = useState<ToolSelections>(EMPTY_TOOLS);
+  function toggleTool(category: keyof ToolSelections, id: string): void {
+    setTools((prev) => {
+      const next = new Set(prev[category]);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return { ...prev, [category]: next };
+    });
+  }
+
+  // Dirty tracking — drives the Save button's disabled state.
+  const isDirty = useMemo(
+    () =>
+      JSON.stringify(form) !== JSON.stringify(savedForm) ||
+      serializeTools(tools) !== serializeTools(savedTools),
+    [form, savedForm, tools, savedTools],
+  );
+
   /** Server-side role at load time. Non-null = role frozen by the
    *  monotonic rule; the toggle goes readonly. */
   const [loadedRole, setLoadedRole] = useState<AgentRole | null>(null);
   /** Snapshot of name/description/prompt taken on "Set as Nango" ON
    *  so cancelling restores the user's prior input.
    *  QUIRK: useRef, not useState — pure side-channel, no re-render. */
-  const preSupervisorSnapshot = useRef<{
-    name: string;
-    description: string;
-    prompt: string;
-  } | null>(null);
+  const preSupervisorSnapshot = useRef<
+    Pick<FormState, "name" | "description" | "prompt"> | null
+  >(null);
   /** id of another agent already holding the supervisor slot for this
    *  user; disables the toggle until that one is deleted. */
   const [otherSupervisorId, setOtherSupervisorId] = useState<string | null>(null);
-  const [selectedMcp, setSelectedMcp] = useState<Set<string>>(new Set());
-  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
-  const [selectedBuiltinTools, setSelectedBuiltinTools] = useState<Set<string>>(new Set());
-  const [selectedDataSources, setSelectedDataSources] = useState<Set<string>>(new Set());
-  const [selectedSshServers, setSelectedSshServers] = useState<Set<string>>(new Set());
-  // KB placeholder — no table exists yet
-  const [kbEnabled, setKbEnabled] = useState(false);
 
   // Save state
   const [saving, setSaving] = useState(false);
@@ -313,36 +356,13 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       if (!isNew && agentRes && agentRes.ok) {
         const data = await agentRes.json() as AgentDetail;
         setAgent(data);
-        setName(data.name);
-        setDescription(data.description ?? "");
-        setIcon(data.icon ?? null);
-        setModel(data.model);
-        setModelProvider(data.modelProvider);
-        setCredentialId(data.credentialId ?? null);
-        setPrompt(data.prompt ?? "");
-        setToolChoice(data.toolChoice ?? "auto");
-        setMaxSteps(data.maxSteps ?? 5);
-        setTemperature(data.temperature != null ? parseFloat(data.temperature) : 0.3);
-        setIsSupervisor(data.role === "supervisor");
+        const loadedForm = formFromDetail(data);
+        setForm(loadedForm);
+        setSavedForm(loadedForm);
         setLoadedRole(data.role ?? null);
-        // Initialise selections from bound tools
-        const mcp = new Set<string>();
-        const sk = new Set<string>();
-        const bt = new Set<string>();
-        const ds = new Set<string>();
-        const ssh = new Set<string>();
-        for (const t of data.tools ?? []) {
-          if ((t.toolType === "mcp_server" || t.toolType === "mcp_tool") && t.mcpServerId) mcp.add(t.mcpServerId);
-          if (t.toolType === "skill" && t.skillId) sk.add(t.skillId);
-          if (t.toolType === "builtin_tool" && t.builtinTool) bt.add(t.builtinTool);
-          if (t.toolType === "datasource" && t.dataSourceId) ds.add(t.dataSourceId);
-          if (t.toolType === "ssh_server" && t.sshServerId) ssh.add(t.sshServerId);
-        }
-        setSelectedMcp(mcp);
-        setSelectedSkills(sk);
-        setSelectedBuiltinTools(bt);
-        setSelectedDataSources(ds);
-        setSelectedSshServers(ssh);
+        const loadedTools = toolsFromBoundRows(data.tools ?? []);
+        setTools(loadedTools);
+        setSavedTools(loadedTools);
       }
       if (toolsRes.ok) {
         const { mcpServers: m, llmCredentials: lc } = await toolsRes.json() as { mcpServers: MpcServer[]; llmCredentials: LlmCredential[] };
@@ -391,45 +411,35 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
 
   useEffect(() => { startTransition(() => { void load(); }); }, [load]);
 
-  // Model select handler
-  // (provider and model id are now edited independently — no combined handler)
-
-  // Toggle helpers
-  function toggle(set: Set<string>, id: string): Set<string> {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  }
-
   // Save
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
 
-    // Build flat tool list: one row per selected tool/skill/mcp.
-    const tools = [
-      ...[...selectedMcp].map((id) => ({ toolType: "mcp_server", mcpServerId: id })),
-      ...[...selectedSkills].map((id) => ({ toolType: "skill", skillId: id })),
-      ...[...selectedBuiltinTools].map((name) => ({ toolType: "builtin_tool", builtinTool: name })),
-      ...[...selectedDataSources].map((id) => ({ toolType: "datasource", dataSourceId: id })),
-      ...[...selectedSshServers].map((id) => ({ toolType: "ssh_server", sshServerId: id })),
+    // Build flat tool list from consolidated ToolSelections.
+    const toolList = [
+      ...[...tools.mcp].map((id) => ({ toolType: "mcp_server", mcpServerId: id })),
+      ...[...tools.skills].map((id) => ({ toolType: "skill", skillId: id })),
+      ...[...tools.builtinTools].map((n) => ({ toolType: "builtin_tool", builtinTool: n })),
+      ...[...tools.dataSources].map((id) => ({ toolType: "datasource", dataSourceId: id })),
+      ...[...tools.sshServers].map((id) => ({ toolType: "ssh_server", sshServerId: id })),
     ];
 
     try {
-      const targetRole: AgentRole | null = isSupervisor ? "supervisor" : null;
+      const targetRole: AgentRole | null = form.isSupervisor ? "supervisor" : null;
       const body = {
-        name: name.trim() || "New Agent",
-        description: description.trim() || null,
+        name: form.name.trim() || "New Agent",
+        description: form.description.trim() || null,
         role: targetRole,
-        icon: icon,
-        model,
-        modelProvider,
-        credentialId,
-        prompt: prompt.trim() || null,
-        toolChoice,
-        maxSteps,
-        temperature,
-        tools,
+        icon: form.icon,
+        model: form.model,
+        modelProvider: form.modelProvider,
+        credentialId: form.credentialId,
+        prompt: form.prompt.trim() || null,
+        toolChoice: form.toolChoice,
+        maxSteps: form.maxSteps,
+        temperature: form.temperature,
+        tools: toolList,
       };
 
       const res = isNew
@@ -458,10 +468,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
           onSaved(result);
         }
       }
-    } catch {
-      setSaveError("Network error");
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
   /**
@@ -525,7 +536,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         // makes the toggle and locked fields readonly.
         const roleIsFrozen = loadedRole !== null;
         const supervisorSlotTaken =
-          !isSupervisor
+          !form.isSupervisor
           && !roleIsFrozen
           && otherSupervisorId !== null
           && otherSupervisorId !== agentId;
@@ -554,24 +565,31 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             >
               <span className="text-xs font-medium">Set as Nango</span>
               <Switch
-                checked={isSupervisor}
+                checked={form.isSupervisor}
                 disabled={supervisorSlotTaken || roleIsFrozen}
                 onCheckedChange={(v) => {
                   if (roleIsFrozen) return;
-                  setIsSupervisor(v);
                   if (v) {
-                    preSupervisorSnapshot.current = { name, description, prompt };
-                    setName(SUPERVISOR_NAME);
-                    setDescription(SUPERVISOR_DESCRIPTION);
-                    setPrompt(SUPERVISOR_PROMPT);
+                    preSupervisorSnapshot.current = {
+                      name: form.name,
+                      description: form.description,
+                      prompt: form.prompt,
+                    };
+                    setForm((prev) => ({
+                      ...prev,
+                      isSupervisor: true,
+                      name: SUPERVISOR_NAME,
+                      description: SUPERVISOR_DESCRIPTION,
+                      prompt: SUPERVISOR_PROMPT,
+                    }));
                   } else {
                     const snap = preSupervisorSnapshot.current;
-                    if (snap) {
-                      setName(snap.name);
-                      setDescription(snap.description);
-                      setPrompt(snap.prompt);
-                      preSupervisorSnapshot.current = null;
-                    }
+                    setForm((prev) => ({
+                      ...prev,
+                      isSupervisor: false,
+                      ...(snap ?? {}),
+                    }));
+                    preSupervisorSnapshot.current = null;
                   }
                 }}
               />
@@ -580,7 +598,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               size="sm"
               className="h-7 shrink-0 gap-1.5 px-3 text-xs"
               onClick={handleSave}
-              disabled={saving || deleting}
+              disabled={saving || deleting || (!isNew && !isDirty)}
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
               Save
@@ -615,33 +633,14 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       })()}
 
       {/* ── Delete confirmation dialog ──────────────────────────── */}
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete agent</AlertDialogTitle>
-            <AlertDialogDescription>
-              Permanently delete <strong>{agent?.name ?? "this agent"}</strong>? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                // The dialog auto-closes on action; we want to await
-                // the DELETE first so the dialog stays up while the
-                // request is in flight, then close on success.
-                e.preventDefault();
-                void handleDeleteConfirm();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        title="Delete agent"
+        description={<>Permanently delete <strong>{agent?.name ?? "this agent"}</strong>? This cannot be undone.</>}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onConfirm={() => void handleDeleteConfirm()}
+        deleting={deleting}
+      />
 
       {saveError && (
         <p className="px-4 py-1.5 text-xs text-destructive">{saveError}</p>
@@ -681,16 +680,16 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               <div className="flex items-center gap-2">
                 <Label className="w-24 shrink-0 text-xs">Name</Label>
                 <Input
-                  value={name}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-                  readOnly={isSupervisor}
-                  className={cn("h-8 flex-1 text-xs", isSupervisor && "bg-muted text-muted-foreground")}
-                  title={isSupervisor ? "Supervisor name is locked." : undefined}
+                  value={form.name}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("name", e.target.value)}
+                  readOnly={form.isSupervisor}
+                  className={cn("h-8 flex-1 text-xs", form.isSupervisor && "bg-muted text-muted-foreground")}
+                  title={form.isSupervisor ? "Supervisor name is locked." : undefined}
                 />
                 <EmojiPicker
-                  value={icon}
-                  onChange={setIcon}
-                  onClear={() => setIcon(null)}
+                  value={form.icon}
+                  onChange={(v) => update("icon", v)}
+                  onClear={() => update("icon", null)}
                   size={32}
                   ariaLabel="Pick agent icon"
                 />
@@ -698,30 +697,30 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               <div className="flex items-center gap-2">
                 <Label className="w-24 shrink-0 text-xs">Description</Label>
                 <Input
-                  value={description}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
-                  readOnly={isSupervisor}
+                  value={form.description}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("description", e.target.value)}
+                  readOnly={form.isSupervisor}
                   className={cn(
                     "h-8 flex-1 text-xs",
-                    isSupervisor && "bg-muted text-muted-foreground",
+                    form.isSupervisor && "bg-muted text-muted-foreground",
                   )}
                   placeholder="What this agent does (one-sentence summary surfaced to the supervisor)"
-                  title={isSupervisor ? "Supervisor description is locked." : undefined}
+                  title={form.isSupervisor ? "Supervisor description is locked." : undefined}
                 />
               </div>
               <div className="flex items-center gap-2">
                 <Label className="w-24 shrink-0 text-xs">Provider</Label>
                 <Select
-                  value={credentialId ?? ""}
+                  value={form.credentialId ?? ""}
                   items={llmCredentials.map((c) => ({
                     value: c.id,
                     label: c.name + (c.provider ? ` (${getProviderLabel(c.provider)})` : ""),
                   }))}
                   onValueChange={(v: string | null) => {
-                    if (!v) { setCredentialId(null); return; }
+                    if (!v) { update("credentialId", null); return; }
                     const cred = llmCredentials.find((c) => c.id === v);
-                    setCredentialId(v);
-                    if (cred?.provider) setModelProvider(cred.provider);
+                    update("credentialId", v);
+                    if (cred?.provider) update("modelProvider", cred.provider);
                   }}
                 >
                   <SelectTrigger className="h-8 flex-1 text-xs">
@@ -745,8 +744,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               <div className="flex items-center gap-2">
                 <Label className="w-24 shrink-0 text-xs">Model ID</Label>
                 <Input
-                  value={model}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setModel(e.target.value)}
+                  value={form.model}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("model", e.target.value)}
                   className="h-8 flex-1 font-mono text-xs"
                   placeholder="e.g. gpt-4o, claude-3-5-sonnet-20241022"
                 />
@@ -758,10 +757,10 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   min={0}
                   max={1}
                   step={0.1}
-                  value={temperature}
+                  value={form.temperature}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => {
                     const v = parseFloat(e.target.value);
-                    setTemperature(Number.isNaN(v) ? 0.3 : Math.min(1, Math.max(0, v)));
+                    update("temperature", Number.isNaN(v) ? 0.3 : Math.min(1, Math.max(0, v)));
                   }}
                   className="h-8 flex-1 text-xs"
                 />
@@ -769,8 +768,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               <div className="flex items-center gap-2">
                 <Label className="w-24 shrink-0 text-xs">Tool Choice</Label>
                 <Select
-                  value={toolChoice}
-                  onValueChange={(v: string | null) => setToolChoice(v ?? "auto")}
+                  value={form.toolChoice}
+                  onValueChange={(v: string | null) => update("toolChoice", v ?? "auto")}
                 >
                   <SelectTrigger className="h-8 flex-1 text-xs">
                     <SelectValue />
@@ -788,8 +787,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   type="number"
                   min={1}
                   max={50}
-                  value={maxSteps}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setMaxSteps(Math.max(1, parseInt(e.target.value) || 1))}
+                  value={form.maxSteps}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("maxSteps", Math.max(1, parseInt(e.target.value) || 1))}
                   className="h-8 flex-1 text-xs"
                 />
               </div>
@@ -799,12 +798,12 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             <Section
               title="Skills"
               defaultOpen={false}
-              count={{ selected: selectedSkills.size, total: skills.length }}
+              count={{ selected: tools.skills.size, total: skills.length }}
             >
               <CheckList
                 items={skills}
-                selected={selectedSkills}
-                onToggle={(id) => setSelectedSkills(toggle(selectedSkills, id))}
+                selected={tools.skills}
+                onToggle={(id) => toggleTool("skills", id)}
                 emptyText="No skills available."
               />
             </Section>
@@ -812,12 +811,12 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             <Section
               title="MCP Servers"
               defaultOpen={false}
-              count={{ selected: selectedMcp.size, total: mcpServers.length }}
+              count={{ selected: tools.mcp.size, total: mcpServers.length }}
             >
               <CheckList
                 items={mcpServers}
-                selected={selectedMcp}
-                onToggle={(id) => setSelectedMcp(toggle(selectedMcp, id))}
+                selected={tools.mcp}
+                onToggle={(id) => toggleTool("mcp", id)}
                 emptyText="No MCP servers configured."
               />
             </Section>
@@ -829,7 +828,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 // Intersect selection with catalog so supervisor self-
                 // injected tools (absent from /api/builtin-tools) don't
                 // inflate the numerator.
-                selected: [...selectedBuiltinTools].filter((n) =>
+                selected: [...tools.builtinTools].filter((n) =>
                   builtinToolCatalog.some((t) => t.name === n),
                 ).length,
                 total: builtinToolCatalog.length,
@@ -841,8 +840,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   name: t.displayName,
                   description: t.description,
                 }))}
-                selected={selectedBuiltinTools}
-                onToggle={(id) => setSelectedBuiltinTools(toggle(selectedBuiltinTools, id))}
+                selected={tools.builtinTools}
+                onToggle={(id) => toggleTool("builtinTools", id)}
                 emptyText="No built-in tools available."
               />
             </Section>
@@ -850,7 +849,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             <Section
               title="SSH Hosts"
               defaultOpen={false}
-              count={{ selected: selectedSshServers.size, total: sshServers.length }}
+              count={{ selected: tools.sshServers.size, total: sshServers.length }}
             >
               <CheckList
                 items={sshServers.map((s) => ({
@@ -859,8 +858,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   description:
                     s.description ?? `${s.username}@${s.host}`,
                 }))}
-                selected={selectedSshServers}
-                onToggle={(id) => setSelectedSshServers(toggle(selectedSshServers, id))}
+                selected={tools.sshServers}
+                onToggle={(id) => toggleTool("sshServers", id)}
                 emptyText="No enabled SSH servers. Create one from the SSH Hosts panel."
               />
             </Section>
@@ -868,7 +867,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             <Section
               title="Data Sources"
               defaultOpen={false}
-              count={{ selected: selectedDataSources.size, total: dataSources.length }}
+              count={{ selected: tools.dataSources.size, total: dataSources.length }}
             >
               <CheckList
                 items={dataSources.map((d) => ({
@@ -876,8 +875,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   name: d.name,
                   description: d.description ?? d.provider,
                 }))}
-                selected={selectedDataSources}
-                onToggle={(id) => setSelectedDataSources(toggle(selectedDataSources, id))}
+                selected={tools.dataSources}
+                onToggle={(id) => toggleTool("dataSources", id)}
                 emptyText="No enabled data sources. Create one from the Data Sources panel."
               />
             </Section>
@@ -886,8 +885,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             <Section title="Knowledge Base" defaultOpen={false}>
               <label className={cn("flex cursor-pointer items-center gap-2.5 rounded-md px-1 py-1 hover:bg-muted/40")}>
                 <Checkbox
-                  checked={kbEnabled}
-                  onCheckedChange={(v: boolean | "indeterminate") => setKbEnabled(v === true)}
+                  checked={form.kbEnabled}
+                  onCheckedChange={(v: boolean | "indeterminate") => update("kbEnabled", v === true)}
                 />
                 <div>
                   <p className="text-xs font-medium">Enable knowledge base</p>
@@ -904,9 +903,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
           <div className="lg:sticky lg:top-0 lg:self-start lg:border-l lg:border-border/40 lg:pl-3">
             <Section title="System Prompt">
               <Textarea
-                value={prompt}
-                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
-                readOnly={isSupervisor}
+                value={form.prompt}
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => update("prompt", e.target.value)}
+                readOnly={form.isSupervisor}
                 placeholder="You are a helpful assistant…"
                 // Override `field-sizing-content` (default in the
                 // shadcn Textarea base) so the box keeps a fixed
@@ -919,9 +918,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 // header + Section title strip on typical viewports.
                 className={cn(
                   "!field-sizing-fixed h-[calc(100vh-12rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed",
-                  isSupervisor && "bg-muted text-muted-foreground",
+                  form.isSupervisor && "bg-muted text-muted-foreground",
                 )}
-                title={isSupervisor ? "Supervisor system prompt is locked." : undefined}
+                title={form.isSupervisor ? "Supervisor system prompt is locked." : undefined}
               />
             </Section>
           </div>

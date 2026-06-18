@@ -15,7 +15,7 @@ export interface NangoSharedState {
     activeView: 
       | "dashboard" | "artifact" | "schedules" | "notifications"
       | "agent" | "mcp" | "skills" | "datasource" | "ssh-server" 
-      | "verification" | "evaluation" 
+      | "verification" | "evaluation" | "outcomes" | "profile"
       | "user" | "credential" | "config" | "thread" 
       | "none";
     activeResourceId?: string | null;
@@ -39,15 +39,6 @@ export interface NangoSharedState {
     [key: string]: Record<string, unknown> | undefined;
   };
 
-  /**
-   * Temporary UI actions requested by the agent (e.g. "open the create modal").
-   * Components act on these and then clear them.
-   */
-  uiAction?: {
-    type: "create_resource" | "open_editor" | "close_editor" | "refresh";
-    resourceType?: string;
-    payload?: Record<string, unknown>;
-  };
 }
 
 export const defaultSharedState: NangoSharedState = {

@@ -18,33 +18,42 @@ import { Label } from "@/components/ui/label";
 
 const MIN_PASSWORD_LENGTH = 8;
 
+interface FormState {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+const EMPTY_FORM: FormState = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: "",
+};
+
 export function PasswordField(): ReactNode {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const update = <K extends keyof FormState>(key: K, value: FormState[K]): void =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
-  const canSubmit =
-    currentPassword.length > 0
-    && newPassword.length >= MIN_PASSWORD_LENGTH
-    && newPassword === confirmPassword
-    && !saving;
-
   function validate(): string | null {
-    if (!currentPassword) return "Current password is required.";
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    if (!form.currentPassword) return "Current password is required.";
+    if (form.newPassword.length < MIN_PASSWORD_LENGTH) {
       return `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
     }
-    if (newPassword !== confirmPassword) return "Passwords do not match.";
-    if (newPassword === currentPassword) {
+    if (form.newPassword !== form.confirmPassword) return "Passwords do not match.";
+    if (form.newPassword === form.currentPassword) {
       return "New password must be different from current password.";
     }
     return null;
   }
+
+  const canSubmit = !saving && validate() === null;
 
   const save = async (): Promise<void> => {
     const validationError = validate();
@@ -58,8 +67,8 @@ export function PasswordField(): ReactNode {
 
     const res = await authClient
       .changePassword({
-        currentPassword,
-        newPassword,
+        currentPassword: form.currentPassword,
+        newPassword: form.newPassword,
         revokeOtherSessions: false,
       })
       .catch((err: unknown) => ({
@@ -77,9 +86,7 @@ export function PasswordField(): ReactNode {
       return;
     }
 
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+    setForm(EMPTY_FORM);
     setSuccess(true);
   };
 
@@ -103,13 +110,14 @@ export function PasswordField(): ReactNode {
             <Input
               id="pw-current"
               type={showCurrent ? "text" : "password"}
-              value={currentPassword}
-              onChange={(e) => { setCurrentPassword(e.target.value); clearState(); }}
+              value={form.currentPassword}
+              onChange={(e) => { update("currentPassword", e.target.value); clearState(); }}
               placeholder="Enter current password"
               autoComplete="current-password"
             />
             <button
               type="button"
+              aria-label={showCurrent ? "Hide current password" : "Show current password"}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               onClick={() => setShowCurrent(!showCurrent)}
               tabIndex={-1}
@@ -130,13 +138,14 @@ export function PasswordField(): ReactNode {
             <Input
               id="pw-new"
               type={showNew ? "text" : "password"}
-              value={newPassword}
-              onChange={(e) => { setNewPassword(e.target.value); clearState(); }}
+              value={form.newPassword}
+              onChange={(e) => { update("newPassword", e.target.value); clearState(); }}
               placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
               autoComplete="new-password"
             />
             <button
               type="button"
+              aria-label={showNew ? "Hide new password" : "Show new password"}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               onClick={() => setShowNew(!showNew)}
               tabIndex={-1}
@@ -156,8 +165,8 @@ export function PasswordField(): ReactNode {
           <Input
             id="pw-confirm"
             type="password"
-            value={confirmPassword}
-            onChange={(e) => { setConfirmPassword(e.target.value); clearState(); }}
+            value={form.confirmPassword}
+            onChange={(e) => { update("confirmPassword", e.target.value); clearState(); }}
             placeholder="Re-enter new password"
             autoComplete="new-password"
           />

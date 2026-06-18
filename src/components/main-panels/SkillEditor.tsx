@@ -7,6 +7,7 @@
 import {
   useState,
   useCallback,
+  useMemo,
   startTransition,
   type ReactNode,
 } from "react";
@@ -19,18 +20,9 @@ import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 
-interface SkillRow {
+export interface SkillRow {
   id: string;
   path: string;
   name: string;
@@ -43,7 +35,13 @@ interface SkillRow {
   updatedAt: string;
 }
 
-interface SkillDetail extends SkillRow {
+export interface SkillDetail extends SkillRow {
+  skillMd: string;
+}
+
+/** Form-level state for the skill editor. */
+interface FormState {
+  name: string;
   skillMd: string;
 }
 
@@ -106,15 +104,27 @@ export function SkillEditor({
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
 
-  // Lazy initialiser keeps the template generation off the React-19
-  // purity hot-path — `Date.now()` etc. would be flagged otherwise.
-  // On edit, the row's existing skillMd is the source of truth.
-  const [name, setName] = useState<string>(() =>
-    initialDetail?.name ?? "",
+  // Form state — single object for all editable fields.
+  // `savedForm` is the snapshot taken at load time; comparing the two
+  // gives us a free `isDirty` flag for the Save button.
+  const [form, setForm] = useState<FormState>(() => ({
+    name: initialDetail?.name ?? "",
+    skillMd: initialDetail?.skillMd ?? buildTemplate(""),
+  }));
+  const [savedForm] = useState<FormState>(() => ({
+    name: initialDetail?.name ?? "",
+    skillMd: initialDetail?.skillMd ?? buildTemplate(""),
+  }));
+  const isDirty = useMemo(
+    () => form.name !== savedForm.name || form.skillMd !== savedForm.skillMd,
+    [form, savedForm],
   );
-  const [skillMd, setSkillMd] = useState<string>(() =>
-    initialDetail?.skillMd ?? buildTemplate(""),
+  const update = useCallback(
+    <K extends keyof FormState>(key: K, value: FormState[K]) =>
+      setForm((prev) => ({ ...prev, [key]: value })),
+    [],
   );
+
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,21 +135,25 @@ export function SkillEditor({
    *  could have built". Keeps the auto-fill helpful without
    *  fighting the user. */
   const onNameChange = useCallback((next: string): void => {
-    setName(next);
-    if (!isCreating) return;
-    if (skillMd === buildTemplate(name) || skillMd === buildTemplate("")) {
-      setSkillMd(buildTemplate(next));
-    }
-  }, [isCreating, skillMd, name]);
+    setForm((prev) => {
+      const md =
+        isCreating &&
+        (prev.skillMd === buildTemplate(prev.name) || prev.skillMd === buildTemplate(""))
+          ? buildTemplate(next)
+          : prev.skillMd;
+      return { name: next, skillMd: md };
+    });
+  }, [isCreating]);
 
-  const getCurrentData = useCallback(() => ({ name, skillMd }), [name, skillMd]);
-  const applyDraft = useCallback((draft: Partial<{ name: string; skillMd: string }>) => {
+  const getCurrentData = useCallback(
+    () => form as FormState & Record<string, unknown>,
+    [form],
+  );
+  const applyDraft = useCallback((draft: Partial<FormState>) => {
     if (draft.name !== undefined && draft.skillMd === undefined) {
-      // Use the component's sync logic if the agent only touched the name
       onNameChange(draft.name);
     } else {
-      if (draft.name !== undefined) setName(draft.name);
-      if (draft.skillMd !== undefined) setSkillMd(draft.skillMd);
+      setForm((prev) => ({ ...prev, ...draft }));
     }
   }, [onNameChange]);
 
@@ -151,11 +165,11 @@ export function SkillEditor({
 
   const submit = async (): Promise<void> => {
     if (readOnly) return;
-    if (!skillMd.trim()) {
+    if (!form.skillMd.trim()) {
       setError("SKILL.md cannot be empty.");
       return;
     }
-    if (isCreating && !name.trim()) {
+    if (isCreating && !form.name.trim()) {
       setError("Please enter a name for the skill.");
       return;
     }
@@ -167,7 +181,7 @@ export function SkillEditor({
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skillMd }),
+        body: JSON.stringify({ skillMd: form.skillMd }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as
@@ -247,7 +261,7 @@ export function SkillEditor({
               <Button
                 size="sm"
                 onClick={() => void submit()}
-                disabled={saving || deleting}
+                disabled={saving || deleting || (!isCreating && !isDirty)}
                 className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
               >
                 {saving ? (
@@ -282,40 +296,14 @@ export function SkillEditor({
         )}
       </header>
 
-      {/* Delete confirmation dialog */}
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete skill</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes <strong>{initialDetail?.name ?? "this skill"}</strong>{" "}
-              from the database and from disk. Agents that bind this skill
-              will lose the binding.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                // The dialog auto-closes on action; preventDefault
-                // keeps it up while DELETE is in flight, then we close
-                // explicitly on success inside handleDeleteConfirm.
-                e.preventDefault();
-                void handleDeleteConfirm();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" />
-              )}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        title="Delete skill"
+        description={<>This permanently removes <strong>{initialDetail?.name ?? "this skill"}</strong> from the database and from disk. Agents that bind this skill will lose the binding.</>}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onConfirm={() => void handleDeleteConfirm()}
+        deleting={deleting}
+      />
 
       <ScrollArea className="flex-1">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
@@ -331,7 +319,7 @@ export function SkillEditor({
             <Input
               id="skill-name"
               placeholder="my-skill"
-              value={name}
+              value={form.name}
               onChange={(e) => onNameChange(e.target.value)}
               disabled={!isCreating || readOnly}
             />
@@ -349,8 +337,8 @@ export function SkillEditor({
             <Textarea
               id="skill-md"
               rows={24}
-              value={skillMd}
-              onChange={(e) => setSkillMd(e.target.value)}
+              value={form.skillMd}
+              onChange={(e) => update("skillMd", e.target.value)}
               disabled={readOnly}
               className="min-h-[28rem] resize-y font-mono text-xs"
               placeholder="--- name: ..."

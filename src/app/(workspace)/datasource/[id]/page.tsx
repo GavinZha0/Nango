@@ -7,21 +7,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-import { DataSourceEditor } from "@/components/main-panels/DataSourceEditor";
+import {
+  DataSourceEditor,
+  type DataSourceDetail,
+} from "@/components/main-panels/DataSourceEditor";
 
-interface DataSourceDetail {
-  id: string;
-  name: string;
-  description: string | null;
-  provider: string;
-  credentialId: string;
-  host: string;
-  port: number;
-  database: string;
-  params: Record<string, string>;
-  readOnly: boolean;
-  tableAllowlist: string[] | null;
-  tableDenylist: string[];
+/** Page-level detail includes list-view fields not used by the editor. */
+interface DataSourcePageDetail extends DataSourceDetail {
   enabled: boolean;
   visibility: string;
 }
@@ -31,7 +23,7 @@ export default function DataSourceEditorPage() {
   const { id } = useParams<{ id: string }>();
   const isNew = id === "new";
 
-  const [detail, setDetail] = useState<DataSourceDetail | undefined>(undefined);
+  const [detail, setDetail] = useState<DataSourcePageDetail | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(!isNew);
 
@@ -50,7 +42,7 @@ export default function DataSourceEditorPage() {
             (body && (body.message ?? body.error)) ?? `HTTP ${res.status}`,
           );
         }
-        const d = (await res.json()) as DataSourceDetail;
+        const d = (await res.json()) as DataSourcePageDetail;
         if (!cancelled) setDetail(d);
       } catch (err) {
         if (!cancelled) {

@@ -6,6 +6,7 @@
  */
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -35,16 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
 
 // Match server-side DATA_SOURCE_IDS. Hard-coded here to avoid pulling
@@ -60,7 +52,7 @@ const NAME_RE = /^[a-z][a-z0-9_-]{0,62}$/;
 
 // Types
 
-interface DataSourceDetail {
+export interface DataSourceDetail {
   id: string;
   name: string;
   description: string | null;
@@ -128,6 +120,41 @@ function formatTableList(list: string[] | null): string {
   return list ? list.join(", ") : "";
 }
 
+// Form state
+
+interface FormState {
+  name: string;
+  description: string;
+  provider: string;
+  credentialId: string;
+  host: string;
+  port: string;
+  database: string;
+  paramRows: ParamRow[];
+  readOnly: boolean;
+  tableAllowlistText: string;
+  tableDenylistText: string;
+}
+
+function buildInitialForm(
+  detail: DataSourceDetail | undefined,
+  defaultProvider: (typeof PROVIDERS)[number],
+): FormState {
+  return {
+    name: detail?.name ?? "",
+    description: detail?.description ?? "",
+    provider: detail?.provider ?? defaultProvider.id,
+    credentialId: detail?.credentialId ?? "",
+    host: detail?.host ?? "",
+    port: String(detail?.port ?? defaultProvider.defaultPort),
+    database: detail?.database ?? "",
+    paramRows: detail ? paramsToRows(detail.params) : [],
+    readOnly: detail?.readOnly ?? true,
+    tableAllowlistText: formatTableList(detail?.tableAllowlist ?? null),
+    tableDenylistText: formatTableList(detail?.tableDenylist ?? []),
+  };
+}
+
 // Component
 
 export function DataSourceEditor({
@@ -140,30 +167,30 @@ export function DataSourceEditor({
 
   // Defaults for create.
   const defaultProvider = PROVIDERS[0];
-  const [name, setName] = useState<string>(initialDetail?.name ?? "");
-  const [description, setDescription] = useState<string>(initialDetail?.description ?? "");
-  const [provider, setProvider] = useState<string>(
-    initialDetail?.provider ?? defaultProvider.id,
+
+  // Form state — single object for all editable fields.
+  // `savedForm` is the snapshot taken at load time; comparing the two
+  // gives us `isDirty` for the Save button.
+  const [form, setForm] = useState<FormState>(() =>
+    buildInitialForm(initialDetail, defaultProvider),
   );
-  const [credentialId, setCredentialId] = useState<string>(
-    initialDetail?.credentialId ?? "",
+  const [savedForm] = useState<FormState>(() =>
+    buildInitialForm(initialDetail, defaultProvider),
   );
-  const [host, setHost] = useState<string>(initialDetail?.host ?? "");
-  const [port, setPort] = useState<string>(
-    String(initialDetail?.port ?? defaultProvider.defaultPort),
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(savedForm),
+    [form, savedForm],
   );
-  const [database, setDatabase] = useState<string>(initialDetail?.database ?? "");
-  const [paramRows, setParamRows] = useState<ParamRow[]>(
-    initialDetail ? paramsToRows(initialDetail.params) : [],
+  const update = useCallback(
+    <K extends keyof FormState>(key: K, value: FormState[K]) =>
+      setForm((prev) => ({ ...prev, [key]: value })),
+    [],
   );
-  const [readOnly, setReadOnly] = useState<boolean>(initialDetail?.readOnly ?? true);
-  const [tableAllowlistText, setTableAllowlistText] = useState<string>(
-    formatTableList(initialDetail?.tableAllowlist ?? null),
-  );
-  const [tableDenylistText, setTableDenylistText] = useState<string>(
-    formatTableList(initialDetail?.tableDenylist ?? []),
-  );
+
+  // Remote data (not part of the form)
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
+
+  // Operation state
   const [saving, setSaving] = useState<boolean>(false);
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
@@ -205,32 +232,44 @@ export function DataSourceEditor({
 
   // Auto-default the port when the user picks a different provider on create.
   function handleProviderChange(next: string): void {
-    setProvider(next);
     const def = PROVIDERS.find((p) => p.id === next);
-    if (def) setPort(String(def.defaultPort));
+    setForm((prev) => ({
+      ...prev,
+      provider: next,
+      ...(def ? { port: String(def.defaultPort) } : {}),
+    }));
   }
 
   function addParam(): void {
-    setParamRows((prev) => [...prev, { key: "", value: "" }]);
+    setForm((prev) => ({
+      ...prev,
+      paramRows: [...prev.paramRows, { key: "", value: "" }],
+    }));
   }
   function updateParam(i: number, patch: Partial<ParamRow>): void {
-    setParamRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    setForm((prev) => ({
+      ...prev,
+      paramRows: prev.paramRows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
+    }));
   }
   function removeParam(i: number): void {
-    setParamRows((prev) => prev.filter((_, idx) => idx !== i));
+    setForm((prev) => ({
+      ...prev,
+      paramRows: prev.paramRows.filter((_, idx) => idx !== i),
+    }));
   }
 
   // Validation
 
   function validateLocal(): string | null {
-    if (!name.trim()) return "Name is required.";
-    if (!NAME_RE.test(name)) {
+    if (!form.name.trim()) return "Name is required.";
+    if (!NAME_RE.test(form.name)) {
       return "Name must start with a-z and contain only [a-z0-9_-] (max 63 chars).";
     }
-    if (!credentialId) return "Credential is required.";
-    if (!host.trim()) return "Host is required.";
-    if (!database.trim()) return "Database is required.";
-    const portNum = Number(port);
+    if (!form.credentialId) return "Credential is required.";
+    if (!form.host.trim()) return "Host is required.";
+    if (!form.database.trim()) return "Database is required.";
+    const portNum = Number(form.port);
     if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) {
       return "Port must be an integer between 1 and 65535.";
     }
@@ -241,23 +280,23 @@ export function DataSourceEditor({
 
   function buildPayload(forCreate: boolean): Record<string, unknown> {
     // Empty allowlist text → null = no restriction.
-    const allowlistParsed = parseTableList(tableAllowlistText);
+    const allowlistParsed = parseTableList(form.tableAllowlistText);
     const allowlist = allowlistParsed.length > 0 ? allowlistParsed : null;
-    const denylist = parseTableList(tableDenylistText);
-    const params = rowsToParams(paramRows);
+    const denylist = parseTableList(form.tableDenylistText);
+    const params = rowsToParams(form.paramRows);
     const base: Record<string, unknown> = {
-      description: description.trim() || null,
-      credentialId,
-      host: host.trim(),
-      port: Number(port),
-      database: database.trim(),
+      description: form.description.trim() || null,
+      credentialId: form.credentialId,
+      host: form.host.trim(),
+      port: Number(form.port),
+      database: form.database.trim(),
       params,
-      readOnly,
+      readOnly: form.readOnly,
       tableAllowlist: allowlist,
       tableDenylist: denylist,
     };
     if (forCreate) {
-      base.name = name;
+      base.name = form.name;
     }
     // Provider is sent on both create AND update — it is now mutable.
     // Cache invalidation on provider change is deferred (a separate
@@ -265,7 +304,7 @@ export function DataSourceEditor({
     // provider mid-life will leave stale Parquet snapshots that no
     // longer match the upstream dialect until the same `name` is
     // re-extracted.
-    base.provider = provider;
+    base.provider = form.provider;
     return base;
   }
 
@@ -326,11 +365,8 @@ export function DataSourceEditor({
   }
 
   async function handleTestConnection(): Promise<void> {
-    // Two endpoints intentionally:
-    //   - POST /api/data-sources/[id]/test-connection   — for saved rows
-    //   - POST /api/data-sources/test-connection        — stateless,
-    //     accepts the in-flight form payload (the New flow).
-    // Validate locally first so we don't ship "host: ''" upstream.
+    // Always use the stateless endpoint with current form data so
+    // unsaved edits are tested — not the DB-persisted version.
     const localErr = validateLocal();
     if (localErr) {
       setTestResult({ ok: false, error: localErr });
@@ -339,22 +375,18 @@ export function DataSourceEditor({
     setTesting(true);
     setTestResult(null);
     try {
-      const res = dataSourceId
-        ? await fetch(`/api/data-sources/${dataSourceId}/test-connection`, {
-            method: "POST",
-          })
-        : await fetch("/api/data-sources/test-connection", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              provider,
-              credentialId,
-              host: host.trim(),
-              port: Number(port),
-              database: database.trim(),
-              params: rowsToParams(paramRows),
-            }),
-          });
+      const res = await fetch("/api/data-sources/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: form.provider,
+          credentialId: form.credentialId,
+          host: form.host.trim(),
+          port: Number(form.port),
+          database: form.database.trim(),
+          params: rowsToParams(form.paramRows),
+        }),
+      });
       const body = (await res.json().catch(() => null)) as
         | { ok: boolean; latencyMs: number; error?: string; message?: string }
         | null;
@@ -413,7 +445,7 @@ export function DataSourceEditor({
           <Button
             size="sm"
             onClick={() => void handleSave()}
-            disabled={saving}
+            disabled={saving || (!isNew && !isDirty)}
             className="h-8 gap-1.5"
           >
             {saving ? (
@@ -442,35 +474,14 @@ export function DataSourceEditor({
         </div>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete data source</AlertDialogTitle>
-            <AlertDialogDescription>
-              Permanently delete <strong>{initialDetail?.name ?? "this data source"}</strong>?
-              Cached datasets produced by this source will be removed too. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDeleteConfirm();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" />
-              )}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        title="Delete data source"
+        description={<>Permanently delete <strong>{initialDetail?.name ?? "this data source"}</strong>? Cached datasets produced by this source will be removed too. This cannot be undone.</>}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onConfirm={() => void handleDeleteConfirm()}
+        deleting={deleting}
+      />
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-3xl space-y-6 px-6 py-6">
@@ -515,8 +526,8 @@ export function DataSourceEditor({
               <Label htmlFor="ds-name">Name</Label>
               <Input
                 id="ds-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={form.name}
+                onChange={(e) => update("name", e.target.value)}
                 placeholder="Lowercase letters, digits, _ and -. Cannot be changed later"
                 disabled={!isNew}
               />
@@ -525,8 +536,8 @@ export function DataSourceEditor({
               <Label htmlFor="ds-description">Description</Label>
               <Textarea
                 id="ds-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                value={form.description}
+                onChange={(e) => update("description", e.target.value)}
                 rows={3}
                 placeholder=""
               />
@@ -550,7 +561,7 @@ export function DataSourceEditor({
               </Label>
               <div className="flex-1">
                 <Select
-                  value={provider}
+                  value={form.provider}
                   onValueChange={(v) => v && handleProviderChange(v)}
                 >
                   <SelectTrigger id="ds-provider" className="w-full">
@@ -572,8 +583,8 @@ export function DataSourceEditor({
               </Label>
               <Input
                 id="ds-host"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
+                value={form.host}
+                onChange={(e) => update("host", e.target.value)}
                 placeholder="10.0.0.5"
                 className="flex-1"
               />
@@ -585,8 +596,8 @@ export function DataSourceEditor({
               <Input
                 id="ds-port"
                 type="number"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
+                value={form.port}
+                onChange={(e) => update("port", e.target.value)}
                 placeholder="5432"
                 className="flex-1"
               />
@@ -597,8 +608,8 @@ export function DataSourceEditor({
               </Label>
               <Input
                 id="ds-database"
-                value={database}
-                onChange={(e) => setDatabase(e.target.value)}
+                value={form.database}
+                onChange={(e) => update("database", e.target.value)}
                 placeholder="sales"
                 className="flex-1"
               />
@@ -608,7 +619,7 @@ export function DataSourceEditor({
                 Credential
               </Label>
               <div className="flex-1">
-                <Select value={credentialId} onValueChange={(v) => setCredentialId(v ?? "")}>
+                <Select value={form.credentialId} onValueChange={(v) => update("credentialId", v ?? "")}>
                   <SelectTrigger id="ds-credential" className="w-full">
                     {/*
                      * Resolve the label from our own lookup. Radix's
@@ -622,8 +633,8 @@ export function DataSourceEditor({
                      * that fallback.
                      */}
                     <SelectValue placeholder="Select a credential">
-                      {credentialId
-                        ? (credentials.find((c) => c.id === credentialId)?.name
+                      {form.credentialId
+                        ? (credentials.find((c) => c.id === form.credentialId)?.name
                           ?? "Unknown credential")
                         : null}
                     </SelectValue>
@@ -668,9 +679,9 @@ export function DataSourceEditor({
                 Driver-specific URL params (e.g. <code>timezone=UTC</code>,{" "}
                 <code>sslmode=require</code>, <code>charset=utf8mb4</code>).
               </p>
-              {paramRows.length > 0 && (
+              {form.paramRows.length > 0 && (
                 <div className="space-y-2">
-                  {paramRows.map((row, i) => (
+                  {form.paramRows.map((row, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <Input
                         value={row.key}
@@ -708,8 +719,8 @@ export function DataSourceEditor({
             <div className="flex items-start gap-2">
               <Checkbox
                 id="ds-readonly"
-                checked={readOnly}
-                onCheckedChange={(v) => setReadOnly(v === true)}
+                checked={form.readOnly}
+                onCheckedChange={(v) => update("readOnly", v === true)}
               />
               <div className="space-y-0.5">
                 <Label htmlFor="ds-readonly" className="cursor-pointer">
@@ -721,8 +732,8 @@ export function DataSourceEditor({
               <Label htmlFor="ds-allowlist">Allowlist (optional)</Label>
               <Textarea
                 id="ds-allowlist"
-                value={tableAllowlistText}
-                onChange={(e) => setTableAllowlistText(e.target.value)}
+                value={form.tableAllowlistText}
+                onChange={(e) => update("tableAllowlistText", e.target.value)}
                 rows={2}
                 placeholder="Separate table names with comma or semicolon."
               />
@@ -731,8 +742,8 @@ export function DataSourceEditor({
               <Label htmlFor="ds-denylist">Denylist (optional)</Label>
               <Textarea
                 id="ds-denylist"
-                value={tableDenylistText}
-                onChange={(e) => setTableDenylistText(e.target.value)}
+                value={form.tableDenylistText}
+                onChange={(e) => update("tableDenylistText", e.target.value)}
                 rows={2}
                 placeholder="Separate table names with comma or semicolon."
               />

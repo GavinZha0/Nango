@@ -3,25 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-import { SkillEditor } from "@/components/main-panels/SkillEditor";
+import {
+  SkillEditor,
+  type SkillDetail,
+} from "@/components/main-panels/SkillEditor";
 
 /**
  * /skills/[id] — center workspace editor for one skill.
  */
-
-interface SkillDetail {
-  id: string;
-  path: string;
-  name: string;
-  description: string | null;
-  source: "builtin" | "local";
-  enabled: boolean;
-  visibility: "private" | "public" | string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-  skillMd: string;
-}
 
 export default function SkillEditorPage() {
   const router = useRouter();

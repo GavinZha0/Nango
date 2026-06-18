@@ -15,7 +15,7 @@ import {
 import { agentKey } from "@/lib/backends/facade";
 import type { EntityKind } from "@/lib/backends/types";
 import { cn } from "@/lib/utils";
-import type { BuiltinAgentRow } from "@/components/main-panels/BuiltinAgentEditor";
+import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 
 /**
  * AgentSelector — compact dropdown that lists every visible backend

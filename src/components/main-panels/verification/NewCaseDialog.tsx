@@ -76,16 +76,15 @@ export function NewCaseDialog({
   onOpenChange,
   onCreated,
 }: NewCaseDialogProps): ReactNode {
+  // Remote data
   const [servers, setServers] = useState<McpServerRow[]>([]);
   const [loadingServers, setLoadingServers] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Form state — reset on each open.
+  const [form, setForm] = useState({ name: "", mcpServerId: "", toolName: "" });
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // Form
-  const [name, setName] = useState<string>("");
-  const [mcpServerId, setMcpServerId] = useState<string>("");
-  const [toolName, setToolName] = useState<string>("");
 
   // Fetch the server catalog on open. Cancellable so a rapid
   // open/close doesn't fire stale setState. The setLoading/setError
@@ -123,17 +122,15 @@ export function NewCaseDialog({
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
-      setName("");
-      setMcpServerId("");
-      setToolName("");
+      setForm({ name: "", mcpServerId: "", toolName: "" });
       setSubmitError(null);
     }
   }
 
   // Tool list narrows to the selected server's snapshot.
   const selectedServer = useMemo(
-    () => servers.find((s) => s.id === mcpServerId),
-    [servers, mcpServerId],
+    () => servers.find((s) => s.id === form.mcpServerId),
+    [servers, form.mcpServerId],
   );
   const tools = useMemo<McpToolSnapshot[]>(() => {
     if (!selectedServer || !selectedServer.tools) return [];
@@ -141,29 +138,34 @@ export function NewCaseDialog({
   }, [selectedServer]);
 
   const canSubmit =
-    name.trim().length > 0 &&
-    mcpServerId !== "" &&
-    toolName !== "" &&
+    form.name.trim().length > 0 &&
+    form.mcpServerId !== "" &&
+    form.toolName !== "" &&
     !submitting;
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
-    const created = await caseActions.create(suiteId, {
-      name: name.trim(),
-      mcpServerId,
-      toolName,
-      input: {},
-      assertions: [],
-    });
-    setSubmitting(false);
-    if (created) {
-      onOpenChange(false);
-      onCreated?.(created);
-    } else {
-      // The store sets its own error; surface it here too for visibility.
-      setSubmitError("Create failed. Please check the form and retry.");
+    try {
+      const created = await caseActions.create(suiteId, {
+        name: form.name.trim(),
+        mcpServerId: form.mcpServerId,
+        toolName: form.toolName,
+        input: {},
+        assertions: [],
+      });
+      if (created) {
+        onOpenChange(false);
+        onCreated?.(created);
+      } else {
+        // The store sets its own error; surface it here too for visibility.
+        setSubmitError("Create failed. Please check the form and retry.");
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -182,8 +184,8 @@ export function NewCaseDialog({
             </Label>
             <Input
               id="case-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={form.name}
+              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
               placeholder="e.g. search returns at least one hit"
               autoFocus
             />
@@ -195,12 +197,11 @@ export function NewCaseDialog({
               Server <span className="text-destructive">*</span>
             </Label>
             <Select
-              value={mcpServerId}
+              value={form.mcpServerId}
               items={servers.map((s) => ({ value: s.id, label: s.name }))}
               onValueChange={(v) => {
-                setMcpServerId(v ?? "");
                 // Clear tool selection — it's scoped to the prior server.
-                setToolName("");
+                setForm((prev) => ({ ...prev, mcpServerId: v ?? "", toolName: "" }));
               }}
               disabled={loadingServers || servers.length === 0}
             >
@@ -231,8 +232,8 @@ export function NewCaseDialog({
               Tool <span className="text-destructive">*</span>
             </Label>
             <Select
-              value={toolName}
-              onValueChange={(v) => setToolName(v ?? "")}
+              value={form.toolName}
+              onValueChange={(v) => setForm((prev) => ({ ...prev, toolName: v ?? "" }))}
               disabled={!selectedServer || tools.length === 0}
             >
               <SelectTrigger className="w-full">

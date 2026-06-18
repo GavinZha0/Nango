@@ -34,7 +34,7 @@ import { useWorkspaceStore } from "@/store/workspace";
 import { cn } from "@/lib/utils";
 import { useStoredValue } from "@/hooks/useStoredValue";
 import { useRouter, usePathname } from "next/navigation";
-import type { BuiltinAgentRow } from "@/components/main-panels/BuiltinAgentEditor";
+import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 import { resolveAgentIcon } from "@/components/ui/emoji-picker";
 
 // localStorage keys + parse/serialize helpers — values are read via

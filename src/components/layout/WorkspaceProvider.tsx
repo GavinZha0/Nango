@@ -12,7 +12,7 @@ import type { EntityKind } from "@/lib/backends/types";
 import { authClient } from "@/lib/auth/client";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
-import type { BuiltinAgentRow } from "@/components/main-panels/BuiltinAgentEditor";
+import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 import { useStartNotifications } from "@/hooks/useNotifications";
 
 interface WorkspaceProviderProps {

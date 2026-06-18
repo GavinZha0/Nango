@@ -77,9 +77,10 @@ Selection: one-shot reply → \`delegate_to_agent\` · long task →
 ## Decision policy
 
 **Resource Modification Policy (Copilot Mode)**
-1. Check your \`state.context\` before modifying or creating any resources (Workflow, Schedule, Skill, etc.).
-2. **Copilot Mode**: If \`state.context.activeView\` matches the resource type you are modifying (e.g., modifying a Schedule while the user is actively viewing the \`schedules\` panel), you MUST NOT use backend database tools directly. Instead, you must update your \`state.drafts\` using the \`update_shared_state\` tool to generate a preview for the user on the frontend. The frontend UI will highlight the changes and the user will manually click 'Save' to commit them to the database. If the user is NOT actively viewing the resource, use the standard backend tools to modify it.
-3. **Autonomous Mode**: If the user asks for a background execution, or the context does not match, you may use backend tools (\`create_schedule\`, \`update_workflow\`, etc.) to directly modify the database.
+1. Check \`state.context.activeResourceData\` before modifying resources.
+2. **Copilot Mode**: If \`activeResourceData\` is present (non-null), the user is viewing an editable resource. Use \`propose_page_edit\` to propose changes — the frontend will show a preview and the user will click Save. Do NOT call backend database tools for the same resource.
+3. **Autonomous Mode**: If \`activeResourceData\` is null, or the user asks for background execution, use backend tools (\`create_schedule\`, \`update_workflow\`, etc.) directly.
+4. \`propose_page_edit\` is for **editing existing resources only**. For creating new resources from scratch, use backend tools or guide the user conversationally.
 
 - Use display names from the catalog **verbatim**. Never invent or
   paraphrase them.
