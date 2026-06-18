@@ -28,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES, type EvalCriteria, type EvalTurn } from "./mock-data";
+import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES, type EvalCriteria, type EvalTurn } from "@/lib/evaluation/types";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 
 function dimensionName(id: string): string {
@@ -66,7 +66,7 @@ function TurnRow({ turn, index, canDelete, selected, onChange, onDelete, onViewR
             hasResponse
               ? selected
                 ? "bg-emerald-500/15 text-emerald-400"
-                : "text-emerald-500/70 hover:bg-emerald-500/10 hover:text-emerald-400"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
               : "text-muted-foreground/30 cursor-default",
           )}
           title={hasResponse ? "View response" : "Not yet executed"}
@@ -88,7 +88,7 @@ function TurnRow({ turn, index, canDelete, selected, onChange, onDelete, onViewR
         value={turn.userMessage}
         onChange={(e) => onChange({ ...turn, userMessage: e.target.value })}
         placeholder="User message…"
-        className="min-h-[52px] text-xs resize-y"
+        className="h-20 text-xs resize-none field-sizing-fixed"
       />
     </div>
   );
@@ -106,10 +106,7 @@ function ResponseViewer({ turn, index }: { turn: EvalTurn; index: number }): Rea
   }
 
   return (
-    <div className="space-y-2 p-3">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
-        Turn {index + 1} — Agent Response
-      </span>
+    <div className="flex flex-col space-y-2 p-3 h-full min-h-0">
       {turn.toolCalls && turn.toolCalls.length > 0 && (
         <div className="space-y-1">
           {turn.toolCalls.map((tc, i) => (
@@ -121,7 +118,7 @@ function ResponseViewer({ turn, index }: { turn: EvalTurn; index: number }): Rea
           ))}
         </div>
       )}
-      <div className="rounded border bg-background px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
+      <div className="flex-1 rounded border bg-background px-2.5 py-2 text-xs leading-relaxed text-muted-foreground overflow-y-auto">
         {turn.actualResponse}
       </div>
     </div>
@@ -156,14 +153,14 @@ function CriteriaEditor({ criteria, onChange }: CriteriaEditorProps): ReactNode 
   }
 
   return (
-    <div className="flex flex-col gap-1.5 p-3">
+    <div className="flex flex-col gap-1.5 p-3 h-full min-h-0">
       <Textarea
         value={text}
         onChange={(e) => handleChange(e.target.value)}
         placeholder={'{\n  "expected_outcome": "...",\n  "tool_calls": ["..."],\n  "expected_keywords": ["..."],\n  "assertions": ["duration_ms <= 5000"]\n}'}
-        className={cn("min-h-[140px] font-mono text-xs resize-none", error ? "border-destructive" : "border-amber-500/30")}
+        className={cn("flex-1 font-mono text-xs resize-none field-sizing-fixed", error ? "border-destructive" : "border-amber-500/30")}
       />
-      {error && <p className="text-[10px] text-destructive">{error}</p>}
+      {error && <p className="text-[10px] text-destructive shrink-0">{error}</p>}
     </div>
   );
 }
@@ -268,7 +265,6 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
               >
                 <SlidersHorizontal className="h-3 w-3" />
                 Dims ({activeDimensions.length})
-                {isOverridden && <span className="text-[9px]">*</span>}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 p-2">
                 <div className="max-h-[280px] overflow-y-auto space-y-2">
@@ -312,11 +308,13 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
             <Button
               size="sm"
               className="h-6 px-2 text-xs"
+              disabled={!suite.evaluatorAgentId}
+              title={suite.evaluatorAgentId ? undefined : "Evaluator Agent is required to run"}
             >
               {false ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               ) : (
-                <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
+                <Play className={cn("mr-1 h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
               )}
               Run case
             </Button>
@@ -330,7 +328,7 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
                 turn={turn}
                 index={i}
                 canDelete={turns.length > 1}
-                selected={bottomTab === "response" && responseTurnIdx === i}
+                selected={responseTurnIdx === i}
                 onChange={(updated) => updateTurn(i, updated)}
                 onDelete={() => deleteTurn(i)}
                 onViewResponse={() => viewResponse(i)}
@@ -345,10 +343,10 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
             type="button"
             onClick={() => setBottomTab("criteria")}
             className={cn(
-              "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+              "px-3 py-1.5 text-xs font-medium transition-colors",
               bottomTab === "criteria"
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             Criteria
@@ -357,10 +355,10 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
             type="button"
             onClick={() => setBottomTab("response")}
             className={cn(
-              "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+              "px-3 py-1.5 text-xs font-medium transition-colors",
               bottomTab === "response"
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             Response
@@ -383,11 +381,6 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Evaluation
             </span>
-            {isOverridden && (
-              <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-500">
-                override
-              </span>
-            )}
           </div>
           <ScrollArea className="flex-1 min-h-0">
             <div className="space-y-4 p-3">

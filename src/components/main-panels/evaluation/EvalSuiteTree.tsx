@@ -84,7 +84,7 @@ export function EvalSuiteTree({
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-xs font-semibold">{suite.name}</span>
                     <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                      {cases.length}
+                      ({cases.length})
                     </span>
                   </div>
                   <span className="truncate text-[10px] text-muted-foreground">
@@ -113,9 +113,10 @@ export function EvalSuiteTree({
                   size="sm"
                   className="h-6 w-6 p-0 shrink-0"
                   onClick={() => onRunSuite(suite.id)}
-                  title="Run suite"
+                  title={suite.evaluatorAgentId ? "Run suite" : "Evaluator Agent is required to run"}
+                  disabled={!suite.evaluatorAgentId}
                 >
-                  <Play className="h-3 w-3 fill-green-500 text-green-500" />
+                  <Play className={cn("h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
                 </Button>
               </div>
 

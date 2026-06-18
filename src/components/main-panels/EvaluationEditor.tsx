@@ -144,7 +144,7 @@ export function EvaluationEditor({ agentId, agentSource, onBack }: EvaluationEdi
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        {agentDisplay.icon && <span className="text-sm">{agentDisplay.icon}</span>}
+
         <h2 className="text-sm font-semibold truncate">{agentDisplay.name}</h2>
         <span className="text-xs text-muted-foreground shrink-0">
           ({totalCases})

@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES } from "./mock-data";
+import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES } from "@/lib/evaluation/types";
 import type { EvalSuiteRow } from "@/store/evaluation";
 
 interface EvaluatorAgent {
@@ -92,29 +92,43 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
 
         <div className="space-y-4 py-2">
           {/* Name */}
-          <div className="space-y-1.5">
-            <Label htmlFor="suite-name">Name</Label>
+          <div className="flex items-center gap-3">
+            <Label htmlFor="suite-name" className="w-16 shrink-0">Name</Label>
             <Input
               id="suite-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Suite name"
+              className="flex-1"
             />
           </div>
 
           {/* Evaluator agent — Select dropdown */}
-          <div className="space-y-1.5">
-            <Label>Evaluator Agent</Label>
-            <Select
-              value={selectedEvalId}
-              onValueChange={(v) => setSelectedEvalId(v ?? "")}
-            >
+          <div className="flex items-center gap-3">
+            <Label className="w-16 shrink-0">Evaluator</Label>
+            <div className="flex-1">
+              <Select
+                value={selectedEvalId}
+                onValueChange={(v) => setSelectedEvalId(v ?? "")}
+              >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select an evaluator agent…" />
+                <SelectValue placeholder="Select an evaluator agent…">
+                  {selectedEvalId ? (() => {
+                    const ev = evaluators.find((e) => e.id === selectedEvalId);
+                    return ev ? (
+                      <span className="flex items-center gap-1.5">
+                        {ev.icon && <span>{ev.icon}</span>}
+                        <span>{ev.name}</span>
+                      </span>
+                    ) : (
+                      "Unknown agent"
+                    );
+                  })() : null}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {evaluators.map((ev) => (
-                  <SelectItem key={ev.id} value={ev.id}>
+                  <SelectItem key={ev.id} value={ev.id} label={ev.name}>
                     <span className="flex items-center gap-1.5">
                       {ev.icon && <span>{ev.icon}</span>}
                       <span>{ev.name}</span>
@@ -123,9 +137,7 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-[10px] text-muted-foreground">
-              Only agents with role &quot;evaluator&quot; are listed.
-            </p>
+            </div>
           </div>
 
           {/* Dimensions — grouped by category */}
@@ -136,7 +148,7 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
                 {selectedDims.size} selected
               </span>
             </div>
-            <div className="max-h-[280px] overflow-y-auto rounded-md border p-3 space-y-3">
+            <div className="max-h-[340px] overflow-y-auto rounded-md border p-3 space-y-3">
               {grouped.map((group) => (
                 <div key={group.category}>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">

@@ -12,7 +12,7 @@
 
 import { create } from "zustand";
 
-import type { EvalCriteria } from "@/components/main-panels/evaluation/mock-data";
+import type { EvalCriteria } from "@/lib/evaluation/types";
 
 // API row shapes — match what the eval-suites API returns.
 
@@ -246,5 +246,32 @@ export const evalActions = {
         .getState()
         .setError(err instanceof Error ? err.message : String(err));
     }
+  },
+
+  async ensureDraftSuite(agentId: string, agentSource: string = "builtin"): Promise<string | null> {
+    const key = agentKey(agentId, agentSource);
+    const store = useEvaluationStore.getState();
+    if (!store.suitesLoaded[key]) {
+      await this.refreshSuites(agentId, agentSource);
+    }
+    
+    // Check again after refresh
+    const suites = useEvaluationStore.getState().suitesByAgent[key] ?? [];
+    const draftsSuite = suites.find(s => s.name === "Drafts");
+    
+    if (draftsSuite) {
+      return draftsSuite.id;
+    }
+    
+    // Create it
+    const newSuite = await this.create({
+      agentId,
+      agentSource,
+      name: "Drafts",
+      dimensionIds: [], // Empty default dimensions
+      description: "Auto-generated suite for capturing conversational feedback.",
+    });
+    
+    return newSuite?.id ?? null;
   },
 };

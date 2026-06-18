@@ -9,8 +9,9 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, Play, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
 import {
   useEvaluationStore,
@@ -63,13 +64,15 @@ interface AgentRowProps {
   item: EvalAgentItem;
   active: boolean;
   onSelect: () => void;
+  onRunAgent: () => void;
+  onDeleteAgent: () => void;
 }
 
-function AgentRow({ item, active, onSelect }: AgentRowProps): ReactNode {
+function AgentRow({ item, active, onSelect, onRunAgent, onDeleteAgent }: AgentRowProps): ReactNode {
   return (
     <div
       className={cn(
-        "flex items-center gap-2 border-b border-border/70 last:border-0 px-3 py-2 transition-colors",
+        "group flex items-center gap-2 border-b border-border/70 last:border-0 px-3 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-muted/30",
       )}
     >
@@ -85,18 +88,31 @@ function AgentRow({ item, active, onSelect }: AgentRowProps): ReactNode {
         >
           {item.agentName ?? item.agentId}
         </button>
-        {item.caseCount > 0 && (
+        {item.suiteCount > 0 && (
           <span
             className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
-            title={`${item.caseCount} case${item.caseCount === 1 ? "" : "s"}`}
+            title={`${item.suiteCount} suite${item.suiteCount === 1 ? "" : "s"}`}
           >
-            {item.caseCount}
+            {item.suiteCount}
           </span>
         )}
       </div>
-      <span className="shrink-0 text-[10px] text-muted-foreground">
-        {item.suiteCount} suite{item.suiteCount === 1 ? "" : "s"}
-      </span>
+      <button
+        type="button"
+        onClick={onDeleteAgent}
+        title="Delete all suites"
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onRunAgent}
+        title="Run all suites (except Drafts)"
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-green-500"
+      >
+        <Play className="h-3.5 w-3.5 fill-current" />
+      </button>
     </div>
   );
 }
@@ -111,6 +127,17 @@ export function EvaluationPanel(): ReactNode {
   const agents = useEvaluationStore((s) => s.agents);
   const agentsLoaded = useEvaluationStore((s) => s.agentsLoaded);
   const loading = useEvaluationStore((s) => s.loading);
+  const suitesByAgent = useEvaluationStore((s) => s.suitesByAgent);
+
+  const [deleteTarget, setDeleteTarget] = useState<EvalAgentItem | null>(null);
+
+  const handleRunAgent = (agentId: string, agentSource: string) => {
+    // Key mirrors evaluation.ts `agentKey(agentId, agentSource)`
+    const key = `${agentSource}:${agentId}`;
+    const suites = suitesByAgent[key] || [];
+    const runnable = suites.filter((s) => s.enabled && s.evaluatorAgentId);
+    console.log(`TODO: run ${runnable.length} suites for agent ${agentId}`, runnable);
+  };
 
   // Resolve agent display names — fetch from builtin_agent catalog
   const [agentNames, setAgentNames] = useState<Record<string, { name: string; icon: string | null }>>({});
@@ -152,6 +179,17 @@ export function EvaluationPanel(): ReactNode {
     ? pathname.split("/")[2] ?? null
     : null;
 
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    const key = `${deleteTarget.agentSource}:${deleteTarget.agentId}`;
+    const suites = suitesByAgent[key] || [];
+    await Promise.all(suites.map((s) => evalActions.remove(s.id)));
+    if (activeId === deleteTarget.agentId) {
+      router.push("/evaluation");
+    }
+    setDeleteTarget(null);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-stretch border-b bg-muted/40">
@@ -187,10 +225,31 @@ export function EvaluationPanel(): ReactNode {
               item={item}
               active={item.agentId === activeId}
               onSelect={() => router.push(`/evaluation/${item.agentId}`)}
+              onRunAgent={() => handleRunAgent(item.agentId, item.agentSource)}
+              onDeleteAgent={() => setDeleteTarget(item)}
             />
           ))
         )}
       </ScrollArea>
+
+      <DeleteConfirmDialog
+        title="Delete agent evaluations"
+        description={
+          deleteTarget ? (
+            <>
+              Permanently delete all suites for <strong>{deleteTarget.agentName ?? deleteTarget.agentId}</strong>? This cannot be undone.
+            </>
+          ) : (
+            ""
+          )
+        }
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        deleting={false}
+      />
     </div>
   );
 }

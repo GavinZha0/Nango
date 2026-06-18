@@ -9,8 +9,8 @@
  * `docs/copilotkit-provider-lifecycle.md`.
  */
 
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { History, MessagesSquare, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { History, MessagesSquare, RefreshCw, Hospital } from "lucide-react";
 import { z } from "zod";
 import {
   CopilotKitProvider,
@@ -43,6 +43,8 @@ import { webSearchArgsSchema } from "@/lib/web-search/schema";
 import { useHandoffTools } from "@/hooks/useHandoff";
 import { useInteractiveTools } from "@/hooks/useInteractiveTools";
 import { useCopilotSharedStateSync } from "@/hooks/useCopilotSharedState";
+import { useRole } from "@/hooks/useRole";
+import { SaveToEvalDialog } from "@/components/chat/SaveToEvalDialog";
 
 // Chat-error classification
 
@@ -147,6 +149,9 @@ function parseDisabledBackend(raw: string | null): Set<string> {
  * CopilotKit context — only Zustand state.
  */
 function RightPanelToolbar(): ReactNode {
+  const { isEditor } = useRole();
+  const [evalDialogOpen, setEvalDialogOpen] = useState(false);
+  
   const rightTab = useSidebarStore((s) => s.rightTab);
   const setRightTab = useSidebarStore((s) => s.setRightTab);
 
@@ -155,7 +160,9 @@ function RightPanelToolbar(): ReactNode {
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
   const activeAgentType = useWorkspaceStore((s) => s.activeAgentType);
+  const activeAgentSource = useWorkspaceStore((s) => s.activeAgentSource);
   const activeCredentialId = useWorkspaceStore((s) => s.activeCredentialId);
+  const runtimeThreadId = useWorkspaceStore((s) => s.runtimeThreadId);
   const setActiveAgent = useWorkspaceStore((s) => s.setActiveAgent);
   const startFreshChat = useWorkspaceStore((s) => s.startFreshChat);
   const bumpHistoryRevision = useSidebarStore((s) => s.bumpHistoryRevision);
@@ -227,6 +234,31 @@ function RightPanelToolbar(): ReactNode {
       >
         New Chat
       </Button>
+
+      {/* ── Add to Eval ─────────────────────────────────────────────── */}
+      {isEditor && (
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={() => setEvalDialogOpen(true)}
+            aria-label="Add to Eval"
+            title="Add to Eval"
+          >
+            <Hospital className="h-4 w-4" />
+          </Button>
+          {activeAgentId && runtimeThreadId && (
+            <SaveToEvalDialog
+              open={evalDialogOpen}
+              onOpenChange={setEvalDialogOpen}
+              agentId={activeAgentId}
+              agentSource={activeAgentSource || "builtin"}
+              threadId={runtimeThreadId}
+            />
+          )}
+        </>
+      )}
 
       {/* ── Refresh history (always visible, disabled outside History) */}
       <Button
