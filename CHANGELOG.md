@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* evaluation entry ([d138255](https://github.com/GavinZha0/Nango/commit/d13825561498d46276ec7da45743df3922be6479))
+* evaluation entry ([d138255](https://github.com/GavinZha0/Nango/commit/d13825561498d46276ec7da45743df3922be6479)) by @GavinZha0
 
 ## [0.3.0](https://github.com/GavinZha0/Nango/compare/v0.2.0...v0.3.0) (2026-06-18)
 
