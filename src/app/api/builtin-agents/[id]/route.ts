@@ -21,6 +21,7 @@ import {
   canViewResource,
 } from "@/lib/auth/permissions";
 import {
+  isUniqueViolation,
   nonEmptyString,
   optionalTrimmedString,
   parseBody,
@@ -35,15 +36,6 @@ import {
   SUPERVISOR_NAME,
   SUPERVISOR_PROMPT,
 } from "@/lib/constants/supervisor";
-
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object"
-    && err !== null
-    && "code" in err
-    && (err as { code?: unknown }).code === "23505"
-  );
-}
 
 const ROUTE = "/api/builtin-agents/[id]";
 

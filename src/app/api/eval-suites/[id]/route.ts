@@ -1,14 +1,12 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db } from "@/lib/db";
-import { EvalCaseTable, EvalSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadSuite } from "@/lib/evaluation/access";
+import * as storage from "@/lib/evaluation/storage";
 
 const ROUTE = "/api/eval-suites/[id]";
 
@@ -18,11 +16,8 @@ export const GET = withEditor<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const suite = await loadSuite(params.id, session);
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(EvalCaseTable)
-      .where(eq(EvalCaseTable.suiteId, suite.id));
-    return NextResponse.json({ ...suite, caseCount: count });
+    const caseCount = await storage.getCaseCount(suite.id);
+    return NextResponse.json({ ...suite, caseCount });
   },
 );
 
@@ -48,29 +43,12 @@ export const PATCH = withEditor<{ id: string }>(
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval suite.");
     }
 
-    const updates: Record<string, unknown> = { updatedBy: session.user.id };
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.evaluatorAgentId !== undefined)
-      updates.evaluatorAgentId = body.evaluatorAgentId;
-    if (body.dimensionIds !== undefined) updates.dimensionIds = body.dimensionIds;
-    if (body.enabled !== undefined) updates.enabled = body.enabled;
-    updates.updatedAt = sql`CURRENT_TIMESTAMP`;
-
     try {
-      const [updated] = await db
-        .update(EvalSuiteTable)
-        .set(updates)
-        .where(eq(EvalSuiteTable.id, suite.id))
-        .returning();
-      const [{ count }] = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(EvalCaseTable)
-        .where(eq(EvalCaseTable.suiteId, suite.id));
-      return NextResponse.json({ ...updated, caseCount: count });
+      const updated = await storage.updateSuite(suite.id, body, session.user.id);
+      const caseCount = await storage.getCaseCount(suite.id);
+      return NextResponse.json({ ...updated, caseCount });
     } catch (err) {
-      const cause = (err as { cause?: { code?: string } }).cause;
-      if (cause?.code === "23505" && body.name) {
+      if (isUniqueViolation(err) && body.name) {
         throw new ApiError(
           "CONFLICT",
           409,
@@ -95,9 +73,7 @@ export const DELETE = withEditor<{ id: string }>(
         "Only the creator or an admin can delete this eval suite.",
       );
     }
-    await db
-      .delete(EvalSuiteTable)
-      .where(eq(EvalSuiteTable.id, suite.id));
+    await storage.deleteSuite(suite.id);
     return new NextResponse(null, { status: 204 });
   },
 );

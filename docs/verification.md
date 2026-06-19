@@ -14,7 +14,7 @@
 >
 > **Position in the product**: a *deterministic* assert-on-output
 > harness. Stochastic / quality-grade evaluation of agents lives in
-> the separate **Eval** subsystem (`docs/eval.md`, TBD).
+> the separate **Eval** subsystem (`docs/evaluation.md`).
 
 This document is the single source of truth for the Verification subsystem.
 `AGENTS.md` carries the one-paragraph summary + the schema table

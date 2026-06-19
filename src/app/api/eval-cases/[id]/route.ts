@@ -1,14 +1,13 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db } from "@/lib/db";
-import { EvalCaseTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadCase } from "@/lib/evaluation/access";
+import * as storage from "@/lib/evaluation/storage";
+import { evalCriteriaSchema } from "@/lib/evaluation/types";
 
 const ROUTE = "/api/eval-cases/[id]";
 
@@ -20,7 +19,7 @@ const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     turns: z.array(z.object({ userMessage: z.string() }).passthrough()).optional(),
-    criteria: z.record(z.string(), z.unknown()).optional(),
+    criteria: evalCriteriaSchema.optional(),
     dimensionOverride: z.array(z.string()).optional().nullable(),
     enabled: z.boolean().optional(),
   })
@@ -40,25 +39,11 @@ export const PATCH = withEditor<{ id: string }>(
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval case.");
     }
 
-    const updates: Record<string, unknown> = {};
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.turns !== undefined) updates.turns = body.turns as unknown;
-    if (body.criteria !== undefined) updates.criteria = body.criteria as unknown;
-    if (body.dimensionOverride !== undefined)
-      updates.dimensionOverride = body.dimensionOverride;
-    if (body.enabled !== undefined) updates.enabled = body.enabled;
-    updates.updatedAt = sql`CURRENT_TIMESTAMP`;
-
     try {
-      const [row] = await db
-        .update(EvalCaseTable)
-        .set(updates)
-        .where(eq(EvalCaseTable.id, caseRow.id))
-        .returning();
+      const row = await storage.updateCase(caseRow.id, body);
       return NextResponse.json(row);
     } catch (err) {
-      const cause = (err as { cause?: { code?: string } }).cause;
-      if (cause?.code === "23505" && body.name) {
+      if (isUniqueViolation(err) && body.name) {
         throw new ApiError(
           "CONFLICT",
           409,
@@ -89,9 +74,7 @@ export const DELETE = withEditor<{ id: string }>(
       );
     }
 
-    await db
-      .delete(EvalCaseTable)
-      .where(eq(EvalCaseTable.id, caseRow.id));
+    await storage.deleteCase(caseRow.id);
     return new NextResponse(null, { status: 204 });
   },
 );

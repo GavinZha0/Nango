@@ -1899,50 +1899,25 @@ export type VerificationErrorSource =
   | "internal";
 
 // ---------------------------------------------------------------------------
-// Evaluation subsystem — LLM-judged quality assessment for agent
-// conversations. Distinct from "verification" which is deterministic
-// assert-on-output. See the evaluation schema discussion for the full
-// design.
-//
-// Hierarchy:
-//   eval_suite  →  eval_case        (static definition)
-//   eval_agent_run  →  eval_run  →  eval_case_result   (runtime)
-//
-// The target agent is identified by a polymorphic triplet
-// (agent_id, agent_source, credential_id) — same vocabulary as
-// EntityRunTable — so both builtin and backend agents are supported.
+// Evaluation subsystem — see docs/evaluation.md.
 // ---------------------------------------------------------------------------
 
-/**
- * EvalSuite — a collection of evaluation cases targeting a specific
- * agent. Each suite selects an evaluator agent (role='evaluator') and
- * a set of evaluation dimensions whose prompts are injected at runtime.
- *
- * `agent_source`:
- *   - "builtin" → agent_id is a builtin_agent.id UUID
- *   - "backend" → agent_id is a platform entity ID; credential_id required
- */
+/** EvalSuite — case collection targeting one agent. See docs/evaluation.md. */
 export const EvalSuiteTable = pgTable(
   "eval_suite",
   {
     id: uuid("id").primaryKey().notNull().defaultRandom(),
-    /** Target agent being evaluated. Text (not FK) for polymorphic support. */
     agentId: text("agent_id").notNull(),
     agentSource: text("agent_source").notNull().default("builtin"),
-    /** Backend credential. NULL for builtin agents. CASCADE so removing
-     *  a credential cleans up its eval suites. */
     credentialId: uuid("credential_id").references(() => CredentialTable.id, {
       onDelete: "cascade",
     }),
-    /** Evaluator agent that scores responses. NULL = not yet configured
-     *  (suite can be created but not run). */
     evaluatorAgentId: uuid("evaluator_agent_id").references(
       () => BuiltinAgentTable.id,
       { onDelete: "set null" },
     ),
     name: text("name").notNull(),
     description: text("description"),
-    /** Selected dimension IDs — references code-constant BUILTIN_DIMENSIONS. */
     dimensionIds: jsonb("dimension_ids")
       .notNull()
       .default(sql`'[]'::jsonb`)
@@ -1973,15 +1948,7 @@ export const EvalSuiteTable = pgTable(
 
 export type EvalSuiteEntity = typeof EvalSuiteTable.$inferSelect;
 
-/**
- * EvalCase — one multi-turn test case within a suite. `turns` is a
- * JSONB array of EvalTurn objects (userMessage + optional criteria).
- * Agent responses are NOT stored here — they live in entity_run_event,
- * linked via eval_case_result.thread_id at execution time.
- *
- * PK is bigint identity — cases are parent-owned children, never
- * URL-exposed (the suite is).
- */
+/** EvalCase — multi-turn test case within a suite. See docs/evaluation.md. */
 export const EvalCaseTable = pgTable(
   "eval_case",
   {
@@ -1992,17 +1959,8 @@ export const EvalCaseTable = pgTable(
       .notNull()
       .references(() => EvalSuiteTable.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    /** Multi-turn conversation script. Each element: { userMessage: string }.
-     *  Pure dialogue — no per-turn criteria. */
     turns: jsonb("turns").notNull().default(sql`'[]'::jsonb`),
-    /** Case-level evaluation criteria (conversation-level, not per-turn).
-     *  Two evaluation paths in one object:
-     *  - LLM-evaluated: expected_outcome, reference, context
-     *  - Deterministic: tool_calls, expected_keywords, unexpected_keywords,
-     *    assertions (expression strings like 'entity_name == "abc"')
-     *  See EvalCriteria type for the full shape. */
     criteria: jsonb("criteria").notNull().default(sql`'{}'::jsonb`),
-    /** Per-case dimension override. NULL inherits from suite. */
     dimensionOverride: jsonb("dimension_override").$type<string[] | null>(),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at")
@@ -2020,21 +1978,13 @@ export const EvalCaseTable = pgTable(
 
 export type EvalCaseEntity = typeof EvalCaseTable.$inferSelect;
 
-/**
- * EvalAgentRun — one agent-level evaluation execution. Created when the
- * user clicks "Run agent"; spawns one EvalRun per enabled suite. Only
- * `agent_id` is stored (denormalized for fast grouping queries); full
- * agent details are on the child eval_run → eval_suite path.
- */
+/** EvalAgentRun — agent-level batch execution. See docs/evaluation.md. */
 export const EvalAgentRunTable = pgTable(
   "eval_agent_run",
   {
     id: uuid("id").primaryKey().notNull().defaultRandom(),
-    /** Denormalized target agent ID for efficient history queries. */
     agentId: text("agent_id").notNull(),
-    /** Lifecycle: running → passed | failed | errored. */
     status: text("status").notNull(),
-    /** Aggregated score 0–100. NULL while running. */
     score: integer("score"),
     totalCount: integer("total_count").notNull(),
     passedCount: integer("passed_count").notNull().default(0),
@@ -2060,11 +2010,7 @@ export const EvalAgentRunTable = pgTable(
 export type EvalAgentRunEntity = typeof EvalAgentRunTable.$inferSelect;
 export type EvalAgentRunStatus = "running" | "passed" | "failed" | "errored";
 
-/**
- * EvalRun — one suite-level evaluation execution. Optionally part of
- * an agent-level batch (agent_run_id). When agent_run_id is NULL the
- * run was triggered standalone (e.g. "Run suite" or "Run case").
- */
+/** EvalRun — suite-level execution. See docs/evaluation.md. */
 export const EvalRunTable = pgTable(
   "eval_run",
   {
@@ -2072,13 +2018,10 @@ export const EvalRunTable = pgTable(
     suiteId: uuid("suite_id")
       .notNull()
       .references(() => EvalSuiteTable.id, { onDelete: "cascade" }),
-    /** Parent batch. NULL for standalone suite/case runs. */
     agentRunId: uuid("agent_run_id").references(() => EvalAgentRunTable.id, {
       onDelete: "cascade",
     }),
-    /** Lifecycle: running → passed | failed | errored. */
     status: text("status").notNull(),
-    /** Suite-level score 0–100. NULL while running. */
     score: integer("score"),
     totalCount: integer("total_count").notNull(),
     passedCount: integer("passed_count").notNull().default(0),
@@ -2105,15 +2048,7 @@ export const EvalRunTable = pgTable(
 export type EvalRunEntity = typeof EvalRunTable.$inferSelect;
 export type EvalRunStatus = "running" | "passed" | "failed" | "errored";
 
-/**
- * EvalCaseResult — per-case execution result within a run. Composite
- * PK (run_id, case_id) — one run evaluates each case at most once.
- *
- * No `turns_snapshot`: the full conversation (agent responses, tool
- * calls) is recorded in entity_run + entity_run_event, linked by
- * `thread_id`. The evaluator agent's scoring session is similarly
- * linked by `evaluator_thread_id`.
- */
+/** EvalCaseResult — per-case scoring result. Composite PK (run_id, case_id). See docs/evaluation.md. */
 export const EvalCaseResultTable = pgTable(
   "eval_case_result",
   {
@@ -2123,27 +2058,17 @@ export const EvalCaseResultTable = pgTable(
     caseId: bigint("case_id", { mode: "number" })
       .notNull()
       .references(() => EvalCaseTable.id, { onDelete: "cascade" }),
-    /** passed | failed | errored | skipped. */
     status: text("status").notNull(),
-    /** Overall case score 0–100. */
     score: integer("score"),
-    /** Per-dimension scores: { [dimensionId]: number }. */
     dimensionScores: jsonb("dimension_scores").$type<
       Record<string, number>
     >(),
-    /** Evaluator agent's textual feedback. */
     feedback: text("feedback"),
-    /** Target agent conversation thread — links to entity_run records. */
     threadId: uuid("thread_id"),
-    /** Evaluator agent scoring thread — links to entity_run records. */
     evaluatorThreadId: uuid("evaluator_thread_id"),
-    /** Structured error envelope. NULL for passed cases. */
     error: jsonb("error"),
-    /** Time to first token (ms). */
     ttftMs: integer("ttft_ms"),
-    /** Total end-to-end duration (ms). */
     durationMs: integer("duration_ms"),
-    /** Total token usage. */
     tokens: integer("tokens"),
     startedAt: timestamp("started_at")
       .notNull()

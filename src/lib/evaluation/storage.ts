@@ -1,9 +1,4 @@
-/**
- * Evaluation — DB access layer.
- *
- * Thin Drizzle wrappers for eval_suite, eval_case, eval_run, and
- * eval_case_result. Mirrors the verification/storage.ts pattern.
- */
+/** Evaluation — DB access layer. See docs/evaluation.md. */
 
 import "server-only";
 
@@ -76,7 +71,49 @@ export async function listSuitesByAgent(
     .orderBy(asc(EvalSuiteTable.name));
 }
 
+export interface UpdateSuiteInput {
+  name?: string;
+  description?: string | null;
+  evaluatorAgentId?: string | null;
+  dimensionIds?: string[];
+  enabled?: boolean;
+}
+
+export async function updateSuite(
+  id: string,
+  input: UpdateSuiteInput,
+  updatedBy: string,
+): Promise<EvalSuiteEntity> {
+  const updates: Record<string, unknown> = { updatedBy };
+  if (input.name !== undefined) updates.name = input.name;
+  if (input.description !== undefined) updates.description = input.description;
+  if (input.evaluatorAgentId !== undefined)
+    updates.evaluatorAgentId = input.evaluatorAgentId;
+  if (input.dimensionIds !== undefined) updates.dimensionIds = input.dimensionIds;
+  if (input.enabled !== undefined) updates.enabled = input.enabled;
+  updates.updatedAt = sql`CURRENT_TIMESTAMP`;
+
+  const [row] = await db
+    .update(EvalSuiteTable)
+    .set(updates)
+    .where(eq(EvalSuiteTable.id, id))
+    .returning();
+  return row;
+}
+
+export async function deleteSuite(id: string): Promise<void> {
+  await db.delete(EvalSuiteTable).where(eq(EvalSuiteTable.id, id));
+}
+
 // --- Cases ------------------------------------------------------------------
+
+export async function getCaseCount(suiteId: string): Promise<number> {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(EvalCaseTable)
+    .where(eq(EvalCaseTable.suiteId, suiteId));
+  return count;
+}
 
 export interface CreateCaseInput {
   suiteId: string;
@@ -125,9 +162,41 @@ export async function listCasesBySuite(
     .orderBy(asc(EvalCaseTable.name));
 }
 
-// --- Aggregate queries (left panel) -----------------------------------------
+export interface UpdateCaseInput {
+  name?: string;
+  turns?: unknown[];
+  criteria?: Record<string, unknown>;
+  dimensionOverride?: string[] | null;
+  enabled?: boolean;
+}
 
-/** Agent row for the left panel — one per distinct (agent_id, agent_source). */
+export async function updateCase(
+  id: number,
+  input: UpdateCaseInput,
+): Promise<EvalCaseEntity> {
+  const updates: Record<string, unknown> = {};
+  if (input.name !== undefined) updates.name = input.name;
+  if (input.turns !== undefined) updates.turns = input.turns as unknown;
+  if (input.criteria !== undefined) updates.criteria = input.criteria as unknown;
+  if (input.dimensionOverride !== undefined)
+    updates.dimensionOverride = input.dimensionOverride;
+  if (input.enabled !== undefined) updates.enabled = input.enabled;
+  updates.updatedAt = sql`CURRENT_TIMESTAMP`;
+
+  const [row] = await db
+    .update(EvalCaseTable)
+    .set(updates)
+    .where(eq(EvalCaseTable.id, id))
+    .returning();
+  return row;
+}
+
+export async function deleteCase(id: number): Promise<void> {
+  await db.delete(EvalCaseTable).where(eq(EvalCaseTable.id, id));
+}
+
+// --- Aggregate queries ------------------------------------------------------
+
 export interface EvalAgentRow {
   agentId: string;
   agentSource: string;
@@ -136,9 +205,11 @@ export interface EvalAgentRow {
   caseCount: number;
 }
 
-/** Returns distinct agents that have at least one eval suite, with counts. */
-export async function listAgentsWithEval(): Promise<EvalAgentRow[]> {
-  const rows = await db
+export async function listAgentsWithEval(
+  userId: string,
+  isAdmin: boolean = false,
+): Promise<EvalAgentRow[]> {
+  const query = db
     .select({
       agentId: EvalSuiteTable.agentId,
       agentSource: EvalSuiteTable.agentSource,
@@ -147,21 +218,32 @@ export async function listAgentsWithEval(): Promise<EvalAgentRow[]> {
       caseCount: sql<number>`count(${EvalCaseTable.id})::int`,
     })
     .from(EvalSuiteTable)
-    .leftJoin(EvalCaseTable, eq(EvalCaseTable.suiteId, EvalSuiteTable.id))
+    .leftJoin(EvalCaseTable, eq(EvalCaseTable.suiteId, EvalSuiteTable.id));
+
+  if (!isAdmin) {
+    query.where(eq(EvalSuiteTable.createdBy, userId));
+  }
+
+  const rows = await query
     .groupBy(EvalSuiteTable.agentId, EvalSuiteTable.agentSource)
     .orderBy(asc(EvalSuiteTable.agentId));
   return rows;
 }
 
-/** Suite row for the editor — includes case count. */
 export interface EvalSuiteRow extends EvalSuiteEntity {
   caseCount: number;
 }
 
 export async function listSuitesByAgentWithCaseCount(
   agentId: string,
-  agentSource: string = "builtin",
+  agentSource: string,
+  userId: string,
+  isAdmin: boolean = false,
 ): Promise<EvalSuiteRow[]> {
+  const createdByClause = isAdmin
+    ? sql`true`
+    : sql`${EvalSuiteTable.createdBy} = ${userId}`;
+
   const rows = await db
     .select({
       id: EvalSuiteTable.id,
@@ -184,18 +266,20 @@ export async function listSuitesByAgentWithCaseCount(
     })
     .from(EvalSuiteTable)
     .where(
-      sql`${EvalSuiteTable.agentId} = ${agentId} AND ${EvalSuiteTable.agentSource} = ${agentSource}`,
+      sql`${EvalSuiteTable.agentId} = ${agentId}
+        AND ${EvalSuiteTable.agentSource} = ${agentSource}
+        AND ${createdByClause}`,
     )
     .orderBy(asc(EvalSuiteTable.name));
   return rows;
 }
 
-// --- Recent run history (placeholder for future) ----------------------------
+// --- Run history (Stage 2) --------------------------------------------------
 
+/** Placeholder — will be wired when the run executor lands. */
 export async function listRecentRuns(
   _suiteId: string,
   _limit: number = 10,
 ): Promise<unknown[]> {
-  // QUIRK: eval_run queries will be wired when the run executor lands.
   return [];
 }

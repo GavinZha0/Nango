@@ -15,7 +15,7 @@ import {
   VerificationSuiteTable,
 } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadVisibleSuite } from "@/lib/verification/access";
 
 const ROUTE = "/api/verification-suites/[id]";
@@ -107,8 +107,7 @@ export const PATCH = withEditor<{ id: string }>(
         .where(eq(VerificationCaseTable.suiteId, suite.id));
       return NextResponse.json({ ...updated, caseCount: count });
     } catch (err) {
-      const cause = (err as { cause?: { code?: string } }).cause;
-      if (cause?.code === "23505" && body.name) {
+      if (isUniqueViolation(err) && body.name) {
         throw new ApiError(
           "CONFLICT",
           409,

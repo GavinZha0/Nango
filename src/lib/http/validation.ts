@@ -58,3 +58,19 @@ export const optionalTrimmedString = z
   });
 
 export const uuidString = z.string().uuid();
+
+// DB error helpers
+
+/**
+ * Returns `true` when a Drizzle/pg error represents a unique-constraint
+ * violation (Postgres error code 23505). Drizzle sometimes surfaces the
+ * pg error directly on `err`, sometimes wraps it in `err.cause` — this
+ * helper checks both.
+ */
+export function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as Record<string, unknown>;
+  if (e.code === "23505") return true;
+  const cause = e.cause as Record<string, unknown> | undefined;
+  return cause?.code === "23505";
+}

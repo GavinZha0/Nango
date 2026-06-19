@@ -9,11 +9,12 @@
  * Header hosts Add Turn and Evaluate buttons.
  */
 
-import { useState, type ReactNode } from "react";
+import { useState, useMemo, useCallback, type ReactNode } from "react";
 import {
   Play,
   Loader2,
   Plus,
+  Save,
   Trash2,
   SlidersHorizontal,
   MessageSquareText,
@@ -30,6 +31,12 @@ import {
 import { cn } from "@/lib/utils";
 import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES, type EvalCriteria, type EvalTurn } from "@/lib/evaluation/types";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
+import { evalCaseActions } from "@/store/evaluation-cases";
+
+/** EvalTurn with a stable React key (runtime-only, not persisted). */
+interface KeyedTurn extends EvalTurn {
+  _key: number;
+}
 
 function dimensionName(id: string): string {
   return BUILTIN_DIMENSIONS.find((d) => d.id === id)?.name ?? id;
@@ -130,9 +137,10 @@ function ResponseViewer({ turn, index }: { turn: EvalTurn; index: number }): Rea
 interface CriteriaEditorProps {
   criteria: EvalCriteria;
   onChange: (updated: EvalCriteria) => void;
+  onErrorChange: (hasError: boolean) => void;
 }
 
-function CriteriaEditor({ criteria, onChange }: CriteriaEditorProps): ReactNode {
+function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorProps): ReactNode {
   const [text, setText] = useState(JSON.stringify(criteria, null, 2));
   const [error, setError] = useState<string | null>(null);
 
@@ -140,15 +148,18 @@ function CriteriaEditor({ criteria, onChange }: CriteriaEditorProps): ReactNode 
     setText(v);
     if (!v.trim() || v.trim() === "{}") {
       setError(null);
+      onErrorChange(false);
       onChange({});
       return;
     }
     try {
       const parsed: EvalCriteria = JSON.parse(v);
       setError(null);
+      onErrorChange(false);
       onChange(parsed);
     } catch {
       setError("Invalid JSON");
+      onErrorChange(true);
     }
   }
 
@@ -196,14 +207,54 @@ interface EvalCaseInspectorProps {
   suite: EvalSuiteRow;
 }
 
+// CONTRACT: parent renders <EvalCaseInspector key={evalCase.id} />,
+// so the counter resets on case switch via remount.
+let nextTurnKey = 0;
+function mintKey(): number { return nextTurnKey++; }
+
 export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): ReactNode {
-  const [turns, setTurns] = useState<EvalTurn[]>(evalCase.turns as EvalTurn[]);
+  const [turns, setTurns] = useState<KeyedTurn[]>(() =>
+    (evalCase.turns as EvalTurn[]).map((t) => ({ ...t, _key: mintKey() })),
+  );
   const [criteria, setCriteria] = useState<EvalCriteria>((evalCase.criteria ?? {}) as EvalCriteria);
   const [dimOverride, setDimOverride] = useState<string[] | null>(evalCase.dimensionOverride as string[] | null);
+  const [criteriaHasError, setCriteriaHasError] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   type BottomTab = "criteria" | "response";
   const [bottomTab, setBottomTab] = useState<BottomTab>("criteria");
   const [responseTurnIdx, setResponseTurnIdx] = useState<number>(0);
+
+  // Strip runtime-only `_key` for persistence and comparison.
+  function stripKeys(kt: KeyedTurn[]): EvalTurn[] {
+    return kt.map(({ _key: _, ...rest }) => rest);
+  }
+
+  // Snapshot original values for dirty comparison (stable across renders).
+  const origTurnsJson = useMemo(() => JSON.stringify(evalCase.turns), [evalCase.turns]);
+  const origCriteriaJson = useMemo(() => JSON.stringify(evalCase.criteria ?? {}), [evalCase.criteria]);
+  const origDimOverrideJson = useMemo(() => JSON.stringify(evalCase.dimensionOverride ?? null), [evalCase.dimensionOverride]);
+
+  const isDirty =
+    JSON.stringify(stripKeys(turns)) !== origTurnsJson ||
+    JSON.stringify(criteria) !== origCriteriaJson ||
+    JSON.stringify(dimOverride) !== origDimOverrideJson;
+
+  const canSave = isDirty && !criteriaHasError && !saving;
+
+  const handleSave = useCallback(async (): Promise<void> => {
+    if (!canSave) return;
+    setSaving(true);
+    await evalCaseActions.patch(
+      { id: evalCase.id, suiteId: evalCase.suiteId },
+      {
+        turns: stripKeys(turns) as Array<{ userMessage: string }>,
+        criteria: criteria as Record<string, unknown>,
+        dimensionOverride: dimOverride,
+      },
+    );
+    setSaving(false);
+  }, [canSave, evalCase.id, evalCase.suiteId, turns, criteria, dimOverride]);
 
   const activeDimensions = dimOverride ?? suite.dimensionIds;
   const isOverridden = dimOverride !== null;
@@ -221,7 +272,7 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
   }
 
   function updateTurn(index: number, updated: EvalTurn): void {
-    setTurns((prev) => prev.map((t, i) => (i === index ? updated : t)));
+    setTurns((prev) => prev.map((t, i) => (i === index ? { ...updated, _key: t._key } : t)));
   }
 
   function deleteTurn(index: number): void {
@@ -232,7 +283,7 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
   }
 
   function addTurn(): void {
-    setTurns((prev) => [...prev, { userMessage: "" }]);
+    setTurns((prev) => [...prev, { userMessage: "", _key: mintKey() }]);
   }
 
   function viewResponse(index: number): void {
@@ -299,24 +350,37 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
             </DropdownMenu>
             <Button
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-6 w-6 p-0"
               onClick={addTurn}
+              title="Add turn"
             >
-              <Plus className="mr-1 h-3 w-3" />
-              Add Turn
+              <Plus className="h-3 w-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant={canSave ? "default" : "outline"}
+              className="h-6 w-6 p-0"
+              disabled={!canSave}
+              onClick={handleSave}
+            >
+              {saving ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Save className="h-3 w-3" />
+              )}
             </Button>
             <Button
               size="sm"
               className="h-6 px-2 text-xs"
               disabled={!suite.evaluatorAgentId}
-              title={suite.evaluatorAgentId ? undefined : "Evaluator Agent is required to run"}
+              title={suite.evaluatorAgentId ? "Run case" : "Evaluator Agent is required to run"}
             >
               {false ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               ) : (
                 <Play className={cn("mr-1 h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
               )}
-              Run case
+              Run
             </Button>
           </div>
         </div>
@@ -324,7 +388,7 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
           <div className="space-y-3 p-3">
             {turns.map((turn, i) => (
               <TurnRow
-                key={i}
+                key={turn._key}
                 turn={turn}
                 index={i}
                 canDelete={turns.length > 1}
@@ -366,7 +430,7 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
         </div>
         <ScrollArea className="basis-1/2 min-h-0">
           {bottomTab === "criteria" ? (
-            <CriteriaEditor criteria={criteria} onChange={setCriteria} />
+            <CriteriaEditor criteria={criteria} onChange={setCriteria} onErrorChange={setCriteriaHasError} />
           ) : turns[responseTurnIdx] ? (
             <ResponseViewer turn={turns[responseTurnIdx]} index={responseTurnIdx} />
           ) : (

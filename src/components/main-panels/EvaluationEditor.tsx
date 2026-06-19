@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * EvaluationEditor — host for the `/evaluation/[id]` page.
+ * EvaluationEditor — host for evaluation editor pages.
+ *
+ * Serves both builtin (`/evaluation/[id]`) and backend
+ * (`/evaluation/[credentialId]/[agentId]`) routes.
  *
  * Layout:
  *   Header: [Back] agent name + icon
@@ -13,7 +16,7 @@
  * Wired to evaluation + evaluation-cases Zustand stores.
  */
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -31,14 +34,19 @@ import {
   evalCaseActions,
   type EvalCaseRow,
 } from "@/store/evaluation-cases";
+import { useWorkspaceStore } from "@/store/workspace";
+import { useShallow } from "zustand/react/shallow";
+import type { EntityDescriptor } from "@/lib/backends/types";
 
 interface EvaluationEditorProps {
   agentId: string;
   agentSource: string;
+  /** Required for backend agents; ignored for builtin. */
+  credentialId?: string;
   onBack: () => void;
 }
 
-export function EvaluationEditor({ agentId, agentSource, onBack }: EvaluationEditorProps): ReactNode {
+export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }: EvaluationEditorProps): ReactNode {
   const key = agentKey(agentId, agentSource);
   const suites = useEvaluationStore((s) => s.suitesByAgent[key] ?? []);
   const totalCases = suites.reduce((n, s) => n + s.caseCount, 0);
@@ -55,20 +63,33 @@ export function EvaluationEditor({ agentId, agentSource, onBack }: EvaluationEdi
     | null
   >(null);
 
-  // Agent display name — resolve from builtin_agents
-  const [agentDisplay, setAgentDisplay] = useState<{ name: string; icon: string | null }>({ name: agentId, icon: null });
+  // Agent display name — builtin: fetch from API; backend: read workspace store.
+  const backendEntities = useWorkspaceStore(useShallow((s) => [...s.agents, ...s.teams, ...s.workflows]));
+  const backendDisplay = useMemo<{ name: string; icon: string | null } | null>(() => {
+    if (agentSource !== "backend" || !credentialId) return null;
+    const entity: EntityDescriptor | undefined = backendEntities.find(
+      (e) => e.credentialId === credentialId && e.id === agentId,
+    );
+    return entity ? { name: entity.name ?? entity.id, icon: null } : null;
+  }, [agentSource, credentialId, agentId, backendEntities]);
+
+  const [builtinDisplay, setBuiltinDisplay] = useState<{ name: string; icon: string | null } | null>(null);
   useEffect(() => {
+    if (agentSource !== "builtin") return;
     async function resolve(): Promise<void> {
       try {
         const res = await fetch("/api/builtin-agents");
         if (!res.ok) return;
         const rows = (await res.json()) as Array<{ id: string; name: string; icon: string | null }>;
         const found = rows.find((r) => r.id === agentId);
-        if (found) setAgentDisplay({ name: found.name, icon: found.icon });
+        if (found) setBuiltinDisplay({ name: found.name, icon: found.icon });
       } catch { /* silent */ }
     }
     void resolve();
-  }, [agentId]);
+  }, [agentId, agentSource]);
+
+  const agentDisplay = (agentSource === "builtin" ? builtinDisplay : backendDisplay)
+    ?? { name: agentId, icon: null };
 
   // Load cases for all suites
   const casesBySuite = useEvalCasesStore((s) => s.bySuite);

@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadVisibleSuite } from "@/lib/verification/access";
 import * as storage from "@/lib/verification/storage";
 import {
@@ -114,8 +114,7 @@ export const POST = withEditor<{ id: string }>(
         .returning();
       return NextResponse.json(row, { status: 201 });
     } catch (err) {
-      const cause = (err as { cause?: { code?: string } }).cause;
-      if (cause?.code === "23505") {
+      if (isUniqueViolation(err)) {
         throw new ApiError(
           "CONFLICT",
           409,

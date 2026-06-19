@@ -3,12 +3,11 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db";
-import { EvalCaseTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadSuite } from "@/lib/evaluation/access";
 import * as storage from "@/lib/evaluation/storage";
+import { evalCriteriaSchema } from "@/lib/evaluation/types";
 
 const ROUTE = "/api/eval-suites/[id]/cases";
 
@@ -29,7 +28,7 @@ const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     turns: z.array(z.object({ userMessage: z.string() }).passthrough()).optional(),
-    criteria: z.record(z.string(), z.unknown()).optional(),
+    criteria: evalCriteriaSchema.optional(),
     dimensionOverride: z.array(z.string()).optional().nullable(),
     enabled: z.boolean().optional(),
   })
@@ -50,21 +49,13 @@ export const POST = withEditor<{ id: string }>(
     }
 
     try {
-      const [row] = await db
-        .insert(EvalCaseTable)
-        .values({
-          suiteId: suite.id,
-          name: body.name,
-          turns: (body.turns ?? []) as unknown,
-          criteria: (body.criteria ?? {}) as unknown,
-          dimensionOverride: body.dimensionOverride ?? null,
-          enabled: body.enabled ?? true,
-        })
-        .returning();
+      const row = await storage.createCase({
+        suiteId: suite.id,
+        ...body,
+      });
       return NextResponse.json(row, { status: 201 });
     } catch (err) {
-      const cause = (err as { cause?: { code?: string } }).cause;
-      if (cause?.code === "23505") {
+      if (isUniqueViolation(err)) {
         throw new ApiError(
           "CONFLICT",
           409,

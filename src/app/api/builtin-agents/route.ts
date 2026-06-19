@@ -9,6 +9,7 @@ import { BuiltinAgentTable, BuiltinAgentToolTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
 import { visibilitySql } from "@/lib/auth/permissions";
 import {
+  isUniqueViolation,
   nonEmptyString,
   optionalTrimmedString,
   parseBody,
@@ -125,20 +126,7 @@ const createSchema = z.object({
   tools: z.array(boundToolSchema).optional(),
 });
 
-/**
- * Wrap a Drizzle write that may collide with the per-user supervisor
- * unique index. Postgres surfaces the violation as code "23505"; we
- * translate it into a 409 CONFLICT so the UI can render a friendly
- * message instead of a generic 500.
- */
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object"
-    && err !== null
-    && "code" in err
-    && (err as { code?: unknown }).code === "23505"
-  );
-}
+
 
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);

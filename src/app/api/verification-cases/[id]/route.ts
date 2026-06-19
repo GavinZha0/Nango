@@ -8,7 +8,7 @@ import { canEditResource } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { VerificationCaseTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadVisibleCase } from "@/lib/verification/access";
 import {
   assertionsArraySchema,
@@ -78,8 +78,7 @@ export const PATCH = withEditor<{ id: string }>(
         .returning();
       return NextResponse.json(row);
     } catch (err) {
-      const cause = (err as { cause?: { code?: string } }).cause;
-      if (cause?.code === "23505" && body.name) {
+      if (isUniqueViolation(err) && body.name) {
         throw new ApiError(
           "CONFLICT",
           409,

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import {
   useEvaluationStore,
   evalActions,
+  agentKey,
   type EvalAgentItem,
 } from "@/store/evaluation";
 
@@ -132,8 +133,7 @@ export function EvaluationPanel(): ReactNode {
   const [deleteTarget, setDeleteTarget] = useState<EvalAgentItem | null>(null);
 
   const handleRunAgent = (agentId: string, agentSource: string) => {
-    // Key mirrors evaluation.ts `agentKey(agentId, agentSource)`
-    const key = `${agentSource}:${agentId}`;
+    const key = agentKey(agentId, agentSource);
     const suites = suitesByAgent[key] || [];
     const runnable = suites.filter((s) => s.enabled && s.evaluatorAgentId);
     console.log(`TODO: run ${runnable.length} suites for agent ${agentId}`, runnable);
@@ -175,16 +175,36 @@ export function EvaluationPanel(): ReactNode {
   const builtinCount = enriched.filter((a) => a.agentSource === "builtin").length;
   const externalCount = enriched.filter((a) => a.agentSource === "backend").length;
 
-  const activeId = pathname.startsWith("/evaluation/")
-    ? pathname.split("/")[2] ?? null
-    : null;
+  // Active row detection. Two route shapes flow into this panel:
+  //   /evaluation/<id>                           → builtin
+  //   /evaluation/<credentialId>/<agentId>        → backend
+  const segments = pathname.startsWith("/evaluation/")
+    ? pathname.replace("/evaluation/", "").split("/").filter(Boolean)
+    : [];
+  const activeBuiltinId = segments.length === 1 ? segments[0] : null;
+  const activeBackend =
+    segments.length === 2
+      ? { credentialId: decodeURIComponent(segments[0]), agentId: decodeURIComponent(segments[1]) }
+      : null;
+
+  function isRowActive(item: EvalAgentItem): boolean {
+    if (item.agentSource === "builtin") return item.agentId === activeBuiltinId;
+    return activeBackend !== null
+      && activeBackend.credentialId === item.credentialId
+      && activeBackend.agentId === item.agentId;
+  }
+
+  function evalHref(item: EvalAgentItem): string {
+    if (item.agentSource === "builtin") return `/evaluation/${item.agentId}`;
+    return `/evaluation/${encodeURIComponent(item.credentialId ?? "")}/${encodeURIComponent(item.agentId)}`;
+  }
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
-    const key = `${deleteTarget.agentSource}:${deleteTarget.agentId}`;
+    const key = agentKey(deleteTarget.agentId, deleteTarget.agentSource);
     const suites = suitesByAgent[key] || [];
     await Promise.all(suites.map((s) => evalActions.remove(s.id)));
-    if (activeId === deleteTarget.agentId) {
+    if (isRowActive(deleteTarget)) {
       router.push("/evaluation");
     }
     setDeleteTarget(null);
@@ -223,8 +243,8 @@ export function EvaluationPanel(): ReactNode {
             <AgentRow
               key={`${item.agentId}:${item.agentSource}`}
               item={item}
-              active={item.agentId === activeId}
-              onSelect={() => router.push(`/evaluation/${item.agentId}`)}
+              active={isRowActive(item)}
+              onSelect={() => router.push(evalHref(item))}
               onRunAgent={() => handleRunAgent(item.agentId, item.agentSource)}
               onDeleteAgent={() => setDeleteTarget(item)}
             />

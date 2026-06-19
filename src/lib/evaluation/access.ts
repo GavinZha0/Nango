@@ -1,9 +1,4 @@
-/**
- * Evaluation — API-layer access helpers.
- *
- * Load-and-visibility-check wrappers reused by all eval route handlers.
- * Mirrors the verification/access.ts pattern.
- */
+/** Evaluation — API-layer access helpers. See docs/evaluation.md. */
 
 import "server-only";
 

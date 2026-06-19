@@ -7,7 +7,7 @@ import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { VerificationSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 const ROUTE = "/api/verification-suites";
@@ -113,9 +113,3 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     throw err;
   }
 });
-
-function isUniqueViolation(err: unknown): boolean {
-  // drizzle wraps the pg error in `cause`
-  const cause = (err as { cause?: { code?: string } }).cause;
-  return cause?.code === "23505";
-}

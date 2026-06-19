@@ -25,19 +25,24 @@ export const BUILTIN_DIMENSIONS: EvalDimension[] = [
   { id: "hallucination",  name: "Hallucination",    category: "Factuality", description: "Whether the model fabricated statements without factual basis",                      builtin: true },
   { id: "faithfulness",   name: "Faithfulness",     category: "Factuality", description: "Whether the answer is faithful to the provided context without deviating from facts",  builtin: true },
 
-  // 4. Agent & Reasoning
+  // 3. Agent & Reasoning
   { id: "topic-adherence",   name: "Topic Adherence",      category: "Agent & Reasoning", description: "Whether the model stays on the preset topic during interaction",                   builtin: true },
   { id: "goal-accuracy",     name: "Goal Accuracy",        category: "Agent & Reasoning", description: "Whether the final output truly satisfies the user's business requirement",        builtin: true },
   { id: "exec-completeness", name: "Exec Completeness",    category: "Agent & Reasoning", description: "Whether every step of the instruction was actually executed with logical support", builtin: true },
   { id: "tool-usage",        name: "Tool Usage",           category: "Agent & Reasoning", description: "Whether external APIs or tools were called correctly and appropriately",          builtin: true },
 
-  // 5. Format & Domain
+  // 4. Format & Domain
   { id: "format-compliance", name: "Format Compliance", category: "Format & Domain", description: "Whether the output strictly follows the prescribed JSON, XML, or structural format", builtin: true },
   { id: "sql-equivalence",   name: "SQL Equivalence",   category: "Format & Domain", description: "Whether the generated SQL query is logically equivalent to the reference query",    builtin: true },
 ];
 
 export interface EvalCriteria {
   // ─── LLM-evaluated (sent to evaluator agent as context) ───
+  /** User-reported problem observed during conversation.
+   *  Typically captured via SaveToEvalDialog when the user flags a
+   *  chat as problematic. Guides the evaluator to focus on this
+   *  specific deficiency. */
+  issue?: string;
   /** Natural language description of the expected outcome. */
   expected_outcome?: string;
   /** Reference answer / ground truth. */
@@ -56,6 +61,25 @@ export interface EvalCriteria {
    *  Reserved paths: duration_ms, tokens, ttft_ms (execution metrics). */
   assertions?: string[];
 }
+
+import { z } from "zod";
+
+/** Runtime Zod schema matching {@link EvalCriteria}.
+ *  `.passthrough()` keeps forward compatibility — unknown fields are
+ *  preserved (not stripped) so future additions don't break existing
+ *  API callers. */
+export const evalCriteriaSchema = z
+  .object({
+    issue: z.string().optional(),
+    expected_outcome: z.string().optional(),
+    reference: z.string().optional(),
+    context: z.array(z.string()).optional(),
+    tool_calls: z.array(z.string()).optional(),
+    expected_keywords: z.array(z.string()).optional(),
+    unexpected_keywords: z.array(z.string()).optional(),
+    assertions: z.array(z.string()).optional(),
+  })
+  .passthrough();
 
 export interface EvalTurn {
   /** User message — sent to the agent during test execution. */

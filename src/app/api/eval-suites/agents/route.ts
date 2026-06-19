@@ -11,7 +11,10 @@ const ROUTE = "/api/eval-suites/agents";
 // Returns distinct agents that have at least one eval suite,
 // with suite and case counts. Used by the left panel.
 
-export const GET = withEditor(ROUTE, async () => {
-  const rows = await storage.listAgentsWithEval();
+export const GET = withEditor(ROUTE, async ({ session }) => {
+  const rows = await storage.listAgentsWithEval(
+    session.user.id,
+    session.user.role === "admin",
+  );
   return NextResponse.json(rows);
 });
