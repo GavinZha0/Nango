@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* evaluation bugs ([508e962](https://github.com/GavinZha0/Nango/commit/508e9620d53b9351780d095b4ec760289e13e354))
+* evaluation bugs ([508e962](https://github.com/GavinZha0/Nango/commit/508e9620d53b9351780d095b4ec760289e13e354)) by @GavinZha0
 
 ## [0.3.1](https://github.com/GavinZha0/Nango/compare/v0.3.0...v0.3.1) (2026-06-18)
 
