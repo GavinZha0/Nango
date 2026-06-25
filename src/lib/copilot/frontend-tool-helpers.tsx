@@ -95,6 +95,8 @@ export interface ValidatedFrontendToolConfig<
    *  `useFrontendTool({ render })` — same `addHookRenderToolCall`
    *  registration, same exact-name-over-wildcard matcher precedence. */
   render?: FrontendToolRender<T>;
+  /** Optional availability toggle. Matches useFrontendTool's available prop. */
+  available?: boolean;
 }
 
 /**
@@ -132,6 +134,7 @@ export function useValidatedFrontendTool<T extends Record<string, unknown>>(
       return config.handler(parsed.data);
     },
     ...(config.render !== undefined ? { render: config.render } : {}),
+    ...(config.available !== undefined ? { available: config.available } : {}),
   });
 }
 

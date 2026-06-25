@@ -21,7 +21,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Switch } from "@/components/ui/switch";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import {
@@ -164,7 +163,7 @@ interface FormState {
   toolChoice: string;
   maxSteps: number;
   temperature: number;
-  isSupervisor: boolean;
+  role: AgentRole | null;
   kbEnabled: boolean;
 }
 
@@ -179,7 +178,7 @@ const EMPTY_FORM: FormState = {
   toolChoice: "auto",
   maxSteps: 5,
   temperature: 0.3,
-  isSupervisor: false,
+  role: null,
   kbEnabled: false,
 };
 
@@ -195,7 +194,7 @@ function formFromDetail(data: AgentDetail): FormState {
     toolChoice: data.toolChoice ?? "auto",
     maxSteps: data.maxSteps ?? 5,
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
-    isSupervisor: data.role === "supervisor",
+    role: data.role ?? null,
     kbEnabled: false,
   };
 }
@@ -321,8 +320,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     Pick<FormState, "name" | "description" | "prompt"> | null
   >(null);
   /** id of another agent already holding the supervisor slot for this
-   *  user; disables the toggle until that one is deleted. */
+   *  user; disables the option until that one is deleted. */
   const [otherSupervisorId, setOtherSupervisorId] = useState<string | null>(null);
+  const [otherSecretaryId, setOtherSecretaryId] = useState<string | null>(null);
 
   // Save state
   const [saving, setSaving] = useState(false);
@@ -398,12 +398,16 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         setSshServers(all.filter((s) => s.enabled));
       }
       if (allAgentsRes.ok) {
-        // Find an existing supervisor that is not the current agent to flag the slot as occupied.
+        // Find existing system agents to flag their slots as occupied.
         const all = (await allAgentsRes.json()) as Array<{ id: string; role?: AgentRole | null; createdBy?: string }>;
-        const other = all.find(
+        const otherSup = all.find(
           (a) => a.role === "supervisor" && a.id !== (agentId ?? ""),
         );
-        setOtherSupervisorId(other?.id ?? null);
+        setOtherSupervisorId(otherSup?.id ?? null);
+        const otherSec = all.find(
+          (a) => a.role === "secretary" && a.id !== (agentId ?? ""),
+        );
+        setOtherSecretaryId(otherSec?.id ?? null);
       }
     } catch { /* silent */ }
     setLoading(false);
@@ -426,7 +430,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     ];
 
     try {
-      const targetRole: AgentRole | null = form.isSupervisor ? "supervisor" : null;
+      const targetRole: AgentRole | null = form.role;
       const body = {
         name: form.name.trim() || "New Agent",
         description: form.description.trim() || null,
@@ -527,77 +531,22 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   }
 
   const headerTitle = isNew ? "Create Agent" : (agent?.name ?? "");
+  const roleIsFrozen = loadedRole !== null;
+  const supervisorSlotTaken = !roleIsFrozen && form.role !== "supervisor" && otherSupervisorId !== null && otherSupervisorId !== agentId;
+  const secretarySlotTaken = !roleIsFrozen && form.role !== "secretary" && otherSecretaryId !== null && otherSecretaryId !== agentId;
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      {(() => {
-        // `roleIsFrozen` — already-saved supervisor: monotonic rule
-        // makes the toggle and locked fields readonly.
-        const roleIsFrozen = loadedRole !== null;
-        const supervisorSlotTaken =
-          !form.isSupervisor
-          && !roleIsFrozen
-          && otherSupervisorId !== null
-          && otherSupervisorId !== agentId;
-        return (
-          <div className="flex items-center gap-2 border-b px-3 py-2.5">
-            <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={onBack} aria-label="Back to agent list">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{headerTitle}</span>
-            <label
-              className={cn(
-                "mr-4 flex shrink-0 items-center gap-1.5",
-                roleIsFrozen
-                  ? "cursor-default"
-                  : supervisorSlotTaken
-                    ? "cursor-not-allowed opacity-60"
-                    : "cursor-pointer",
-              )}
-              title={
-                roleIsFrozen
-                  ? "This is your Nango (Supervisor). Role is locked once set — delete and recreate to change."
-                  : supervisorSlotTaken
-                    ? "You already have a Nango. Delete it first to designate a new one."
-                    : "Your personal supervisor that can delegate tasks to other agents. Only one Nango per user."
-              }
-            >
-              <span className="text-xs font-medium">Set as Nango</span>
-              <Switch
-                checked={form.isSupervisor}
-                disabled={supervisorSlotTaken || roleIsFrozen}
-                onCheckedChange={(v) => {
-                  if (roleIsFrozen) return;
-                  if (v) {
-                    preSupervisorSnapshot.current = {
-                      name: form.name,
-                      description: form.description,
-                      prompt: form.prompt,
-                    };
-                    setForm((prev) => ({
-                      ...prev,
-                      isSupervisor: true,
-                      name: SUPERVISOR_NAME,
-                      description: SUPERVISOR_DESCRIPTION,
-                      prompt: SUPERVISOR_PROMPT,
-                    }));
-                  } else {
-                    const snap = preSupervisorSnapshot.current;
-                    setForm((prev) => ({
-                      ...prev,
-                      isSupervisor: false,
-                      ...(snap ?? {}),
-                    }));
-                    preSupervisorSnapshot.current = null;
-                  }
-                }}
-              />
-            </label>
-            <Button
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 px-3 text-xs"
-              onClick={handleSave}
+      <div className="flex items-center gap-2 border-b px-3 py-2.5">
+        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={onBack} aria-label="Back to agent list">
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{headerTitle}</span>
+        <Button
+          size="sm"
+          className="h-7 shrink-0 gap-1.5 px-3 text-xs"
+          onClick={handleSave}
               disabled={saving || deleting || (!isNew && !isDirty)}
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -629,10 +578,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               </Button>
             )}
           </div>
-        );
-      })()}
-
-      {/* ── Delete confirmation dialog ──────────────────────────── */}
       <DeleteConfirmDialog
         title="Delete agent"
         description={<>Permanently delete <strong>{agent?.name ?? "this agent"}</strong>? This cannot be undone.</>}
@@ -678,13 +623,13 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             {/* ── Basic info — single-line per field ── */}
             <Section title="Basic">
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Name</Label>
+                <Label className="w-20 shrink-0 text-xs">Name</Label>
                 <Input
                   value={form.name}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => update("name", e.target.value)}
-                  readOnly={form.isSupervisor}
-                  className={cn("h-8 flex-1 text-xs", form.isSupervisor && "bg-muted text-muted-foreground")}
-                  title={form.isSupervisor ? "Supervisor name is locked." : undefined}
+                  readOnly={form.role === "supervisor"}
+                  className={cn("h-8 flex-1 text-xs", form.role === "supervisor" && "bg-muted text-muted-foreground")}
+                  title={form.role === "supervisor" ? "Supervisor name is locked." : undefined}
                 />
                 <EmojiPicker
                   value={form.icon}
@@ -695,21 +640,71 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Description</Label>
+                <Label className="w-20 shrink-0 text-xs">Description</Label>
                 <Input
                   value={form.description}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => update("description", e.target.value)}
-                  readOnly={form.isSupervisor}
+                  readOnly={form.role === "supervisor"}
                   className={cn(
                     "h-8 flex-1 text-xs",
-                    form.isSupervisor && "bg-muted text-muted-foreground",
+                    form.role === "supervisor" && "bg-muted text-muted-foreground",
                   )}
                   placeholder="What this agent does (one-sentence summary surfaced to the supervisor)"
-                  title={form.isSupervisor ? "Supervisor description is locked." : undefined}
+                  title={form.role === "supervisor" ? "Supervisor description is locked." : undefined}
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Provider</Label>
+                <Label className="w-20 shrink-0 text-xs">Role</Label>
+                <Select
+                  value={form.role ?? "specialist"}
+                  disabled={roleIsFrozen}
+                  onValueChange={(v: string | null) => {
+                    if (roleIsFrozen || !v) return;
+                    const newRole = v === "specialist" ? null : (v as AgentRole);
+                    
+                    if (newRole === "supervisor") {
+                      preSupervisorSnapshot.current = {
+                        name: form.name,
+                        description: form.description,
+                        prompt: form.prompt,
+                      };
+                      setForm((prev) => ({
+                        ...prev,
+                        role: newRole,
+                        name: SUPERVISOR_NAME,
+                        description: SUPERVISOR_DESCRIPTION,
+                        prompt: SUPERVISOR_PROMPT,
+                      }));
+                    } else {
+                      const snap = preSupervisorSnapshot.current;
+                      setForm((prev) => ({
+                        ...prev,
+                        role: newRole,
+                        ...(prev.role === "supervisor" ? (snap ?? {}) : {}),
+                      }));
+                      if (form.role === "supervisor") {
+                         preSupervisorSnapshot.current = null;
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8 flex-1 text-xs">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="specialist" className="text-xs">Specialist</SelectItem>
+                    <SelectItem value="supervisor" disabled={supervisorSlotTaken} className="text-xs">
+                      Supervisor
+                    </SelectItem>
+                    <SelectItem value="secretary" disabled={secretarySlotTaken} className="text-xs">
+                      Secretary
+                    </SelectItem>
+                    <SelectItem value="evaluator" className="text-xs">Evaluator</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="w-20 shrink-0 text-xs">Provider</Label>
                 <Select
                   value={form.credentialId ?? ""}
                   items={llmCredentials.map((c) => ({
@@ -742,7 +737,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Model ID</Label>
+                <Label className="w-20 shrink-0 text-xs">Model ID</Label>
                 <Input
                   value={form.model}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => update("model", e.target.value)}
@@ -751,7 +746,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Temperature</Label>
+                <Label className="w-20 shrink-0 text-xs">Temperature</Label>
                 <Input
                   type="number"
                   min={0}
@@ -766,7 +761,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Tool Choice</Label>
+                <Label className="w-20 shrink-0 text-xs">Tool Choice</Label>
                 <Select
                   value={form.toolChoice}
                   onValueChange={(v: string | null) => update("toolChoice", v ?? "auto")}
@@ -782,7 +777,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-24 shrink-0 text-xs">Max Steps</Label>
+                <Label className="w-20 shrink-0 text-xs">Max Steps</Label>
                 <Input
                   type="number"
                   min={1}
@@ -905,7 +900,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               <Textarea
                 value={form.prompt}
                 onChange={(e: ChangeEvent<HTMLTextAreaElement>) => update("prompt", e.target.value)}
-                readOnly={form.isSupervisor}
+                readOnly={form.role === "supervisor"}
                 placeholder="You are a helpful assistant…"
                 // Override `field-sizing-content` (default in the
                 // shadcn Textarea base) so the box keeps a fixed
@@ -918,9 +913,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 // header + Section title strip on typical viewports.
                 className={cn(
                   "!field-sizing-fixed h-[calc(100vh-12rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed",
-                  form.isSupervisor && "bg-muted text-muted-foreground",
+                  form.role === "supervisor" && "bg-muted text-muted-foreground",
                 )}
-                title={form.isSupervisor ? "Supervisor system prompt is locked." : undefined}
+                title={form.role === "supervisor" ? "Supervisor system prompt is locked." : undefined}
               />
             </Section>
           </div>

@@ -17,8 +17,11 @@ import { z } from "zod";
  */
 export function useCopilotSharedStateSync() {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const { agent } = useAgent({ agentId: activeAgentId || undefined });
   const pathname = usePathname();
+
+  const isSupervisor = builtinAgents.find((a) => a.id === activeAgentId)?.role === "supervisor";
 
   const setGlobalState = useCopilotStateStore((s) => s.setState);
   const clearDraftRequest = useCopilotStateStore((s) => s.clearDraftRequest);
@@ -130,6 +133,7 @@ export function useCopilotSharedStateSync() {
   // Tool: propose_page_edit
   useValidatedFrontendTool({
     name: "propose_page_edit",
+    available: isSupervisor,
     description: [
       "Propose changes to the resource currently open in the editor.",
       "The frontend will show a preview; the user decides whether to save.",
@@ -144,14 +148,20 @@ export function useCopilotSharedStateSync() {
     handler: async ({ resourceType, draftData }) => {
       if (!agent) return "Agent not ready.";
       const rt: string = resourceType;
+      
+      // Read fresh state from Zustand to avoid stale closures from useFrontendTool
+      const globalState = useCopilotStateStore.getState();
+      const currentResourceData = globalState.activeResourceData;
+      const currentActiveView = globalState.state.context?.activeView ?? "none";
+
       // Guard: reject when the page has no editable data
-      if (!activeResourceData) {
+      if (!currentResourceData) {
         return "Current page has no editable data. Use backend tools or ask the user to navigate to the resource editor.";
       }
       // Guard: reject resourceType / activeView mismatch
-      const expectedResource = viewToResource[activeView];
+      const expectedResource = viewToResource[currentActiveView];
       if (expectedResource && expectedResource !== rt) {
-        return `Mismatch: user is viewing ${activeView} but draft targets ${rt}. Navigate first or use backend tools.`;
+        return `Mismatch: user is viewing ${currentActiveView} but draft targets ${rt}. Navigate first or use backend tools.`;
       }
       const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
       const newState = {
@@ -159,7 +169,7 @@ export function useCopilotSharedStateSync() {
         drafts: { ...currentState.drafts, [rt]: draftData },
       };
       agent.setState(newState);
-      setGlobalState(newState);
+      globalState.setState(newState);
       return `Draft for ${rt} proposed. The user will review and save.`;
     },
   });
@@ -167,6 +177,7 @@ export function useCopilotSharedStateSync() {
   // Tool: discard_page_edit
   useValidatedFrontendTool({
     name: "discard_page_edit",
+    available: isSupervisor,
     description: "Discard a previously proposed draft for a resource type.",
     parameters: z.object({
       resourceType: draftResourceTypes.describe("The type of resource whose draft should be discarded."),
@@ -182,7 +193,7 @@ export function useCopilotSharedStateSync() {
       delete newDrafts[rt];
       const newState = { ...currentState, drafts: newDrafts };
       agent.setState(newState);
-      setGlobalState(newState);
+      useCopilotStateStore.getState().setState(newState);
       return `Draft for ${rt} discarded.`;
     },
   });

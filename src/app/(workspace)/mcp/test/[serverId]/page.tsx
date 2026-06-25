@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -64,6 +64,47 @@ function CustomFieldTemplate(props: FieldTemplateProps): ReactNode {
       )}
     </div>
   );
+}
+
+/**
+ * Recursively flattens Pydantic-style `anyOf: [{type: "X"}, {type: "null"}]`
+ * into `{ type: ["X", "null"] }` so RJSF renders a normal input instead of a dropdown.
+ */
+function sanitizeSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  if (!schema || typeof schema !== "object") return schema;
+
+  if (Array.isArray(schema.anyOf) && schema.anyOf.length === 2) {
+    const anyOf = schema.anyOf as Record<string, unknown>[];
+    const nullIndex = anyOf.findIndex((s) => s.type === "null");
+    if (nullIndex !== -1) {
+      const otherSchema = anyOf[nullIndex === 0 ? 1 : 0];
+      const { anyOf: _anyOf, ...restSchema } = schema;
+      const otherType = otherSchema.type;
+      
+      if (typeof otherType === "string") {
+        const merged = {
+          ...restSchema,
+          ...otherSchema,
+          type: [otherType, "null"],
+        };
+        return sanitizeSchema(merged as Record<string, unknown>);
+      }
+    }
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (Array.isArray(v)) {
+      result[k] = v.map((item) =>
+        typeof item === "object" && item !== null ? sanitizeSchema(item as Record<string, unknown>) : item
+      );
+    } else if (typeof v === "object" && v !== null) {
+      result[k] = sanitizeSchema(v as Record<string, unknown>);
+    } else {
+      result[k] = v;
+    }
+  }
+  return result;
 }
 
 // Generate UI schema
@@ -226,6 +267,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const [input, setInput] = useState<InputState>(EMPTY_INPUT);
   const [exec, setExec] = useState<ExecState>(IDLE_EXEC);
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
+  const [resultTab, setResultTab] = useState<"view" | "raw">("view");
 
   /** Per-tool state cache so switching tools preserves input + result. */
   const toolStateCache = useRef<Map<string, { input: InputState; exec: ExecState }>>(new Map());
@@ -311,7 +353,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     }
   }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz]);
 
-  const schema = (tool?.input_schema as Record<string, unknown>) ?? {};
+  const schema = useMemo(() => {
+    const raw = (tool?.input_schema as Record<string, unknown>) ?? {};
+    return sanitizeSchema(raw);
+  }, [tool]);
   const uiSchema = generateUiSchema(schema);
 
   /** Save current tool state to cache, then restore (or reset) the target tool's state. */
@@ -359,14 +404,9 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => router.push("/mcp")} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h2 className="text-sm font-semibold shrink-0 truncate max-w-[40%]">
-          {tool?.name ?? (serverName || "Select a tool")}
+        <h2 className="text-sm font-semibold shrink-0 truncate">
+          {tool ? `${serverName} / ${tool.name}` : (serverName || "Select a tool")}
         </h2>
-        {tool !== null && (tool.description ?? serverName) && (
-          <span className="text-xs text-muted-foreground truncate min-w-0">
-            — {tool.description ?? serverName}
-          </span>
-        )}
       </div>
 
       {/* Three-column content (tool list + input + result). */}
@@ -497,7 +537,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
               />
               <Button
                 size="sm"
-                className="h-7 gap-1.5 px-2.5 text-xs"
+                className="h-6 gap-1.5 px-2.5 text-xs"
                 onClick={handleExecute}
                 disabled={exec.executing || executeDisabled}
               >
@@ -512,7 +552,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
           </div>
 
           <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3">
+            <div className="p-3 h-full flex flex-col">
               {tool === null ? (
                 <p className="text-xs text-muted-foreground">
                   {serverTools.length === 0
@@ -539,7 +579,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                   </Form>
                 )
               ) : input.activeTab === "json" ? (
-                <div className="space-y-2">
+                <div className="flex flex-col flex-1 min-h-0 space-y-2">
                   <Textarea
                     value={input.jsonInput}
                     onChange={(e) => {
@@ -554,10 +594,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                         ...(parsed !== undefined ? { formData: parsed } : {}),
                       }));
                     }}
-                    className="min-h-[200px] font-mono text-xs"
+                    className="flex-1 resize-none font-mono text-xs"
                     placeholder='{ "key": "value" }'
                   />
-                  {input.jsonError && <p className="text-xs text-destructive">{input.jsonError}</p>}
+                  {input.jsonError && <p className="text-xs text-destructive shrink-0">{input.jsonError}</p>}
                 </div>
               ) : (
                 <JsonView data={schema} defaultExpandDepth={4} />
@@ -569,30 +609,72 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         {/* Right: Result */}
         <div className="flex flex-[4] flex-col min-w-0">
           <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
-            {/* Save-as-case lives here (Result column header) rather than
-                next to Execute, so the visual order matches the workflow:
-                run on the left, then capture on the right. Enabled only
-                after a SUCCESSFUL run — see `executedArgs`. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1.5 rounded-none px-2.5 text-xs"
-              onClick={() => setSaveDialogOpen(true)}
-              disabled={
-                exec.executing ||
-                exec.result === null ||
-                exec.execError !== null ||
-                exec.executedArgs === null ||
-                activeToolName === null
-              }
-              title="Save this call as a verification case"
-            >
-              <Save className="h-3.5 w-3.5" />
-              Save as case
-            </Button>
-            <span className="ml-auto self-center py-1.5 border-b-2 border-transparent text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Result
-            </span>
+            {/* Left: Save as case */}
+            <div className="flex items-center">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 gap-1.5 rounded-sm px-2.5 text-xs"
+                onClick={() => setSaveDialogOpen(true)}
+                disabled={
+                  exec.executing ||
+                  exec.result === null ||
+                  exec.execError !== null ||
+                  exec.executedArgs === null ||
+                  activeToolName === null
+                }
+                title="Save this call as a verification case"
+              >
+                <Save className="h-3.5 w-3.5" />
+                Save as case
+              </Button>
+            </div>
+            
+            {/* Center: Tabs */}
+            <div className="flex-1 flex justify-center items-stretch">
+              <button
+                type="button"
+                onClick={() => setResultTab("view")}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                  resultTab === "view"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Result View
+              </button>
+              <button
+                type="button"
+                onClick={() => setResultTab("raw")}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                  resultTab === "raw"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Raw Json
+              </button>
+            </div>
+
+            {/* Right: Copy */}
+            <div className="flex items-center">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0 rounded-sm"
+                onClick={() => {
+                  if (exec.result) {
+                    navigator.clipboard.writeText(JSON.stringify(exec.result, null, 2));
+                  }
+                }}
+                disabled={exec.result === null}
+                title="Copy JSON"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3">
@@ -601,7 +683,13 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                   <p className="text-xs text-destructive">{exec.execError}</p>
                 </div>
               ) : exec.result !== null ? (
-                <JsonView data={exec.result} defaultExpandDepth={3} />
+                resultTab === "view" ? (
+                  <JsonView data={exec.result} defaultExpandDepth={3} />
+                ) : (
+                  <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                    {JSON.stringify(exec.result, null, 2)}
+                  </pre>
+                )
               ) : (
                 <p className="text-xs text-muted-foreground">
                   Click Execute to run the tool.

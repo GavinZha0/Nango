@@ -7,7 +7,7 @@
  * its cases. Wired to flat store model (suites + cases separate).
  */
 
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -45,6 +45,21 @@ export function EvalSuiteTree({
   onDeleteCase,
 }: EvalSuiteTreeProps): ReactNode {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [evaluators, setEvaluators] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    async function fetchEvaluators(): Promise<void> {
+      try {
+        const res = await fetch("/api/builtin-agents?role=evaluator");
+        if (!res.ok) return;
+        const rows = (await res.json()) as Array<{ id: string; name: string }>;
+        const map: Record<string, string> = {};
+        for (const row of rows) map[row.id] = row.name;
+        setEvaluators(map);
+      } catch { /* silent */ }
+    }
+    void fetchEvaluators();
+  }, []);
 
   function toggleCollapse(suiteId: string): void {
     setCollapsed((prev) => {
@@ -88,6 +103,7 @@ export function EvalSuiteTree({
                     </span>
                   </div>
                   <span className="truncate text-[10px] text-muted-foreground">
+                    {suite.evaluatorAgentId ? `${evaluators[suite.evaluatorAgentId] ?? "Unknown Evaluator"} · ` : ""}
                     {suite.dimensionIds.length} dim
                   </span>
                 </div>

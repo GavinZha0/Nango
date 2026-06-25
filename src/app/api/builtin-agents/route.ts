@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { desc, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
@@ -31,7 +31,9 @@ const ROUTE = "/api/builtin-agents";
 // GET /api/builtin-agents
 // Returns the caller's own agents + all public agents, with tool/skill counts.
 
-export const GET = withSession(ROUTE, async ({ session }) => {
+export const GET = withSession(ROUTE, async ({ req, session }) => {
+  const url = new URL(req.url);
+  const roleParam = url.searchParams.get("role") as AgentRole | null;
   const rows = await db
     .select({
       id: BuiltinAgentTable.id,
@@ -68,11 +70,14 @@ export const GET = withSession(ROUTE, async ({ session }) => {
     })
     .from(BuiltinAgentTable)
     .where(
-      visibilitySql(
-        session,
-        BuiltinAgentTable.visibility,
-        BuiltinAgentTable.createdBy,
-      ),
+      and(
+        visibilitySql(
+          session,
+          BuiltinAgentTable.visibility,
+          BuiltinAgentTable.createdBy,
+        ),
+        roleParam ? eq(BuiltinAgentTable.role, roleParam) : undefined,
+      )
     )
     .orderBy(desc(BuiltinAgentTable.createdAt));
 
