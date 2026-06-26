@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3](https://github.com/GavinZha0/Nango/compare/v0.3.2...v0.3.3) (2026-06-26)
+
+
+### Bug Fixes
+
+* agent roles display and shared state ([e40c802](https://github.com/GavinZha0/Nango/commit/e40c802c28140fee04138308d1a97402389ad96f))
+* workflow issue ([bff5bb5](https://github.com/GavinZha0/Nango/commit/bff5bb5117d946796a3ab9a1450322954df1ee7e))
+
 ## [0.3.2](https://github.com/GavinZha0/Nango/compare/v0.3.1...v0.3.2) (2026-06-19)
 
 
