@@ -5,9 +5,9 @@
 
 ### Bug Fixes
 
-* agent roles display and shared state ([e40c802](https://github.com/GavinZha0/Nango/commit/e40c802c28140fee04138308d1a97402389ad96f))
-* e2e test ([4c464d7](https://github.com/GavinZha0/Nango/commit/4c464d737dbeb1ca1b67aba516dd4628e444dae0))
-* workflow issue ([bff5bb5](https://github.com/GavinZha0/Nango/commit/bff5bb5117d946796a3ab9a1450322954df1ee7e))
+* agent roles display and shared state ([e40c802](https://github.com/GavinZha0/Nango/commit/e40c802c28140fee04138308d1a97402389ad96f)) by @GavinZha0
+* e2e test ([4c464d7](https://github.com/GavinZha0/Nango/commit/4c464d737dbeb1ca1b67aba516dd4628e444dae0)) by @GavinZha0
+* workflow issue ([bff5bb5](https://github.com/GavinZha0/Nango/commit/bff5bb5117d946796a3ab9a1450322954df1ee7e)) by @GavinZha0
 
 ## [0.3.2](https://github.com/GavinZha0/Nango/compare/v0.3.1...v0.3.2) (2026-06-19)
 
