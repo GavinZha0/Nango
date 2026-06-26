@@ -16,7 +16,6 @@ import { buildBuiltinTools } from "@/lib/builtin-tools";
 import { buildDataSourcesPromptBlock } from "@/lib/data-sources/prompt-block.server";
 import { buildExtractDatasetTool } from "@/lib/data-sources/runtime-tools";
 import { buildGetCurrentDatetimeTool } from "@/lib/time/runtime-tools";
-import { buildGenerateEchartsConfigTool } from "@/lib/outcomes/runtime-tools";
 import { buildChartPromptBlock } from "@/lib/outcomes/prompt-block.server";
 import { mcpProviderPool } from "@/lib/mcp";
 import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
@@ -256,18 +255,8 @@ export async function buildBuiltinAgents(
     //   • `get_current_datetime` — read "now" in the user's timezone.
     //     `userId` is captured in the closure; absent on some
     //     programmatic builds → server-tz fallback.
-    //   • `generate_echarts_config` — push a chart preview into the
-    //     Outcomes panel. Server-side validator only; the actual
-    //     store update is driven by a client-side side-effect hook
-    //     in `ChartPreviewCard` on tool_call_result.
-    //     Excluded for supervisor — SUPERVISOR_PROMPT explicitly tells
-    //     it to delegate visualization work, so it doesn't need the
-    //     tool in its catalog.
     const ambientTools: ToolDefinition[] = [
       buildGetCurrentDatetimeTool({ userId: ctx?.userId }),
-      ...(spec.role === "supervisor"
-        ? []
-        : [buildGenerateEchartsConfigTool()]),
     ];
 
     const supervisorTools: SupervisorRuntime["tools"] = [];
@@ -311,12 +300,12 @@ export async function buildBuiltinAgents(
     // Binding-implied tools are built directly above, not here.
     const builtinTools: ToolDefinition[] = buildBuiltinTools([...builtinToolNames]);
 
-    // Chart prompt block — usage policy for the ambient
+    // Chart prompt block — usage policy for the opt-in
     // `generate_echarts_config` server tool. Skipped for supervisor
-    // (covered inside SUPERVISOR_PROMPT, and the tool is excluded
-    // from the supervisor's ambientTools anyway).
+    // or if the tool is not explicitly enabled for this agent.
     // See docs/data-visualization.md.
-    const chartPromptBlock: string = isSupervisor
+    const hasEcharts = builtinToolNames.has("generate_echarts_config");
+    const chartPromptBlock: string = (isSupervisor || !hasEcharts)
       ? ""
       : buildChartPromptBlock({
           hasDataSource: dataSourceIds.length > 0,

@@ -88,6 +88,27 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
         };
       }
 
+      // interceptor 1: prevent data in series
+      const hasDataInSeries = series.some((s: { data?: unknown }) => s && Array.isArray(s.data) && s.data.length > 0);
+      if (hasDataInSeries) {
+        return {
+          ok: false,
+          error: "DATA_IN_SERIES",
+          message: "CRITICAL: You put data inside `series[*].data`. You MUST remove it and map data exclusively via `series[*].encode` using `dataset.source`.",
+        };
+      }
+
+      // interceptor 2: enforce dataset.source is an array of row objects
+      const dataset = (args.option as { dataset?: { source?: unknown } }).dataset;
+      const source = dataset?.source;
+      if (Array.isArray(source) && source.length > 0 && Array.isArray(source[0])) {
+        return {
+          ok: false,
+          error: "DATASET_FORMAT_INVALID",
+          message: "CRITICAL: `dataset.source` is a 2D array (array of arrays). It MUST be an array of row objects (e.g. [{ name: 'apple', value: 10 }]) EXACTLY matching the upstream tool's output.",
+        };
+      }
+
       return {
         ok: true,
         chart_id: args.chart_id,

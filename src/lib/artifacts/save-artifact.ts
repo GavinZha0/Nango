@@ -302,27 +302,7 @@ async function resolveOutcomeToCall(args: {
   outcomeId: string;
   ownerId: string;
 }): Promise<{ runId: string; toolCallId: string }> {
-  const chunkRows = await db
-    .select({
-      runId: EntityRunEventTable.runId,
-      seq: EntityRunEventTable.seq,
-      type: EntityRunEventTable.type,
-      payload: EntityRunEventTable.payload,
-      ts: EntityRunEventTable.ts,
-    })
-    .from(EntityRunEventTable)
-    .innerJoin(
-      EntityRunTable,
-      eq(EntityRunTable.id, EntityRunEventTable.runId),
-    )
-    .where(
-      and(
-        eq(EntityRunTable.threadId, args.threadId),
-        eq(EntityRunTable.ownerId, args.ownerId),
-        eq(EntityRunEventTable.type, "tool_call_chunk"),
-      ),
-    )
-    .orderBy(asc(EntityRunEventTable.ts), asc(EntityRunEventTable.seq));
+  const chunkRows = await loadThreadEvents(args.threadId, args.ownerId);
 
   // Coalesce so multi-chunk args (Vercel AI SDK streams args
   // incrementally) end up as a single parseable object. Passing
@@ -334,6 +314,7 @@ async function resolveOutcomeToCall(args: {
   // chunk rows. First chunk per toolCallId wins.
   const runIdByCall = new Map<string, string>();
   for (const row of chunkRows) {
+    if (row.type !== "tool_call_chunk") continue;
     const p = row.payload;
     if (p === null || typeof p !== "object") continue;
     const id = (p as { toolCallId?: unknown }).toolCallId;
@@ -341,7 +322,13 @@ async function resolveOutcomeToCall(args: {
     if (!runIdByCall.has(id)) runIdByCall.set(id, row.runId);
   }
 
-  for (const inv of invocations) {
+  // Iterate backwards to find the LATEST invocation that produced this outcome.
+  // We explicitly skip failed invocations (!inv.ok) because they are filtered
+  // out by the save pipeline and cannot be the source of a saved artifact.
+  for (let i = invocations.length - 1; i >= 0; i--) {
+    const inv = invocations[i]!;
+    if (!inv.ok) continue;
+
     if (inv.callId === args.outcomeId) {
       const runId = runIdByCall.get(inv.callId);
       if (runId !== undefined) {

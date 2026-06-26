@@ -38,14 +38,14 @@ describe("BUILTIN_TOOLS catalog", () => {
     // their respective domain modules and are auto-mounted by
     // dispatch/builtin.ts when their binding is present.
     const names = BUILTIN_TOOLS.map((t) => t.name).sort();
-    expect(names).toEqual(["run_code_in_sandbox", "web_search"]);
+    expect(names).toEqual(["generate_echarts_config", "run_code_in_sandbox", "web_search"]);
   });
 
   it("each entry has a displayName, description, and category", () => {
     for (const t of BUILTIN_TOOLS) {
       expect(t.displayName.length).toBeGreaterThan(0);
       expect(t.description.length).toBeGreaterThan(20);
-      expect(["sandbox", "search"]).toContain(t.category);
+      expect(["sandbox", "search", "outcomes"]).toContain(t.category);
       expect(typeof t.build).toBe("function");
     }
   });

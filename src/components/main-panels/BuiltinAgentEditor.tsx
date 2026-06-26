@@ -43,7 +43,7 @@ import type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 
 // Types
 
-interface MpcServer { id: string; name: string; description: string | null; enabled: boolean }
+interface MpcServer { id: string; name: string; description: string | null; serverDescription?: string | null; serverInstructions?: string | null; url: string; enabled: boolean }
 interface Skill { id: string; name: string; description: string | null; source: string }
 interface BuiltinToolDescriptor {
   name: string;
@@ -809,7 +809,10 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               count={{ selected: tools.mcp.size, total: mcpServers.length }}
             >
               <CheckList
-                items={mcpServers}
+                items={mcpServers.map((s) => ({
+                  ...s,
+                  description: s.description || s.serverDescription || s.serverInstructions || s.url,
+                }))}
                 selected={tools.mcp}
                 onToggle={(id) => toggleTool("mcp", id)}
                 emptyText="No MCP servers configured."

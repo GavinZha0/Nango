@@ -375,14 +375,17 @@ export function getOutputFields(
 ): ReadonlyArray<string> {
   const schema = getOutputSchema(descriptor);
   if (schema === undefined) return [];
-  const required = (schema as { required?: unknown }).required;
-  if (Array.isArray(required)) {
-    return required.filter((f): f is string => typeof f === "string");
-  }
   const properties = (schema as { properties?: unknown }).properties;
   if (properties !== null && typeof properties === "object" && !Array.isArray(properties)) {
     return Object.keys(properties as Record<string, unknown>);
   }
+  
+  // Fallback to required array if properties is missing for some reason
+  const required = (schema as { required?: unknown }).required;
+  if (Array.isArray(required)) {
+    return required.filter((f): f is string => typeof f === "string");
+  }
+  
   return [];
 }
 

@@ -18,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 
@@ -249,11 +248,7 @@ export function SkillEditor({
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <h1 className="text-sm font-semibold">
-          {isCreating
-            ? "New skill"
-            : isBuiltin
-              ? "View skill (built-in)"
-              : "Edit skill"}
+          {isCreating ? "New skill" : form.name}
         </h1>
         {(!readOnly || canDelete) && (
           <div className="ml-auto flex items-center gap-2">
@@ -305,8 +300,8 @@ export function SkillEditor({
         deleting={deleting}
       />
 
-      <ScrollArea className="flex-1">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
+      <div className="min-h-0 flex-1 flex flex-col">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6 flex-1 min-h-0">
           {error && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
@@ -314,33 +309,31 @@ export function SkillEditor({
           )}
 
           {/* Name */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="skill-name">Name</Label>
+          <div className="flex items-center gap-3">
+            <Label htmlFor="skill-name" className="w-12">Name</Label>
             <Input
               id="skill-name"
               placeholder="my-skill"
               value={form.name}
               onChange={(e) => onNameChange(e.target.value)}
-              disabled={!isCreating || readOnly}
+              readOnly={!isCreating || readOnly}
+              className={cn("flex-1", (!isCreating || readOnly) && "bg-muted/30 focus-visible:ring-0 cursor-default")}
             />
-            {!isCreating && (
-              <p className="text-[11px] text-muted-foreground">
-                Renaming a skill is not supported via PATCH. Delete and
-                recreate to change the name.
-              </p>
-            )}
           </div>
 
           {/* SKILL.md */}
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 flex-1 min-h-0">
             <Label htmlFor="skill-md">SKILL.md</Label>
             <Textarea
               id="skill-md"
               rows={24}
               value={form.skillMd}
               onChange={(e) => update("skillMd", e.target.value)}
-              disabled={readOnly}
-              className="min-h-[28rem] resize-y font-mono text-xs"
+              readOnly={readOnly}
+              className={cn(
+                "flex-1 resize-none font-mono text-xs [field-sizing:fixed]",
+                readOnly && "bg-muted/30 focus-visible:ring-0"
+              )}
               placeholder="--- name: ..."
             />
             <p className="text-[11px] text-muted-foreground">
@@ -352,7 +345,7 @@ export function SkillEditor({
             </p>
           </div>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

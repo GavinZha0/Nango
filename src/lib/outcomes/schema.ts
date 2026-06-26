@@ -116,7 +116,7 @@ export interface GenerateEchartsConfigSuccess {
  */
 export interface GenerateEchartsConfigFailure {
   ok: false;
-  error: "OPTION_TOO_LARGE" | "OPTION_NO_SERIES";
+  error: "OPTION_TOO_LARGE" | "OPTION_NO_SERIES" | "DATA_IN_SERIES" | "DATASET_FORMAT_INVALID";
   message: string;
 }
 

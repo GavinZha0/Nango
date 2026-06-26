@@ -117,6 +117,9 @@ export function buildRunInSandboxTool(): ToolDefinition {
       "intermediate files (plots, intermediate Parquets, etc.) can " +
       "be saved next to the data with `./output.png`, " +
       "`./scratch.parquet`, etc. " +
+      "IMPORTANT OUTPUT CONVENTION: Your code MUST print exactly one JSON object to stdout containing a 'rows' array and an optional 'message'. " +
+      "For example in JS: console.log(JSON.stringify({ rows: [...], message: '...' })); or in Python: print(json.dumps({'rows': [...], 'message': '...'})). " +
+      "Do NOT print raw arrays or other text to stdout. " +
       "Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: RunInSandboxArgs,
     execute: async (args) => {

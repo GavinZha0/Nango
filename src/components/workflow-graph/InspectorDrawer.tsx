@@ -54,6 +54,7 @@ import type {
   CanonicalNode,
   CanonicalSqlNode,
   CanonicalToolNode,
+  CanonicalChartNode,
 } from "@/lib/workflows/spec/schema";
 
 export interface InspectorDrawerProps {
@@ -197,13 +198,7 @@ export function InspectorDrawer({
       {/* Body — scrollable per-type sections */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 px-3 py-3 text-xs">
-          {node.description && (
-            <Section title="Description">
-              <p className="whitespace-pre-wrap text-foreground">
-                {node.description}
-              </p>
-            </Section>
-          )}
+          {node.description && <DescriptionSection node={node} />}
 
           {/* Per-type body — the meaningful "what this node does"
               block (tool name, agent identity, code body, SQL
@@ -212,6 +207,7 @@ export function InspectorDrawer({
           {node.type === "agent" && <AgentBody node={node} />}
           {node.type === "code" && <CodeBody node={node} />}
           {node.type === "sql" && <SqlBody node={node} />}
+          {node.type === "chart" && <ChartBody node={node} />}
 
           {/* Universal sections — these apply to every node type
               that has them. */}
@@ -236,7 +232,7 @@ export function InspectorDrawer({
             </Section>
           )}
 
-          {node.depends_on.length > 0 && (
+          {node.type !== "chart" && node.depends_on.length > 0 && (
             <Section title="Depends on">
               <ChipList items={node.depends_on.map((n) => `#${n}`)} />
             </Section>
@@ -278,9 +274,6 @@ function CodeBody({ node }: { node: CanonicalCodeNode }): ReactElement {
   const codeFile = node.inputs.code_file;
   return (
     <>
-      <Section title="Language">
-        <CodeInline value={language} />
-      </Section>
       {codeText !== undefined && (
         <Section title="Code">
           <CodeBlock language={language} value={codeText} />
@@ -349,6 +342,14 @@ function SqlBody({ node }: { node: CanonicalSqlNode }): ReactElement {
   );
 }
 
+function ChartBody({ node }: { node: CanonicalChartNode }): ReactElement {
+  return (
+    <Section title="Config">
+      <JsonView data={node.inputs.config} defaultExpandDepth={2} />
+    </Section>
+  );
+}
+
 function RuntimeMetaSection({
   node,
 }: {
@@ -389,8 +390,8 @@ function RuntimeMetaSection({
  */
 function hasInputMap(
   node: CanonicalNode,
-): node is CanonicalToolNode | CanonicalAgentNode | CanonicalCodeNode {
-  return node.type === "tool" || node.type === "agent" || node.type === "code";
+): node is CanonicalToolNode | CanonicalAgentNode {
+  return node.type === "tool" || node.type === "agent";
 }
 
 // ── Small atoms ──────────────────────────────────────────────────────
@@ -408,6 +409,60 @@ function Section({ title, children }: SectionProps): ReactElement {
       </div>
       {children}
     </div>
+  );
+}
+
+function DescriptionSection({ node }: { node: CanonicalNode }): ReactElement {
+  const description = node.description || "";
+  const match = description.match(/^([\s\S]+?)\s+—\s+([\s\S]+)$/);
+  
+  let content;
+  if (!match) {
+    content = <p className="whitespace-pre-wrap text-foreground">{description}</p>;
+  } else {
+    const toolName = match[1];
+    const argsString = match[2];
+    const args = argsString.split(", ");
+    
+    content = (
+      <div className="flex flex-col gap-1 text-foreground">
+        <div>
+          <span className="font-medium text-muted-foreground">tool: </span>
+          <span className="font-mono">{toolName}</span>
+        </div>
+        {args.map((arg, i) => {
+          const eqIdx = arg.indexOf("=");
+          if (eqIdx === -1) return <div key={i}>{arg}</div>;
+          const key = arg.slice(0, eqIdx);
+          const val = arg.slice(eqIdx + 1);
+          if (node.type === "code" && (key === "code_text" || key === "code_file")) return null;
+          return (
+            <div key={i} className="flex gap-1.5 leading-snug">
+              <span className="font-medium text-muted-foreground shrink-0">{key}:</span>
+              <span className="break-all">{val}</span>
+            </div>
+          );
+        })}
+        {node.type === "chart" && (
+          <div className="flex gap-1.5 leading-snug">
+            <span className="font-medium text-muted-foreground shrink-0">renderer:</span>
+            <span className="break-all">{node.inputs.renderer}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const isTargetNode = node.type === "code" || node.type === "chart";
+
+  if (isTargetNode) {
+    return <div className="flex flex-col gap-1.5">{content}</div>;
+  }
+
+  return (
+    <Section title="Description">
+      {content}
+    </Section>
   );
 }
 

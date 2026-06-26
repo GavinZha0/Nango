@@ -19,9 +19,10 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 
 import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
+import { buildGenerateEchartsConfigTool } from "@/lib/outcomes/runtime-tools";
 
 /** Coarse grouping for the UI's section headings. */
-export type BuiltinToolCategory = "sandbox" | "search";
+export type BuiltinToolCategory = "sandbox" | "search" | "outcomes";
 
 export interface BuiltinToolEntry {
   /** Tool name as registered with `defineTool`; ALSO the slug stored in
@@ -38,10 +39,18 @@ export interface BuiltinToolEntry {
 
 export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
   {
+    name: "generate_echarts_config",
+    displayName: "Generate Echarts config",
+    description:
+      "Generate a chart configuration based on ECharts for data visualization.",
+    category: "outcomes",
+    build: buildGenerateEchartsConfigTool,
+  },
+  {
     name: "run_code_in_sandbox",
     displayName: "Run code in sandbox",
     description:
-      "Execute Python/Bash in an isolated sandbox with no network and read-only access to extracted datasets at ./data/<name>/ (relative to the sandbox cwd).",
+      "Execute Python/JavaScript in an isolated sandbox with read-only datasets at ./data/<name>/.",
     category: "sandbox",
     build: buildRunInSandboxTool,
   },
@@ -49,7 +58,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     name: "web_search",
     displayName: "Web search",
     description:
-      "Search the public web via a configured search provider (Exa today; Tavily / Brave reserved). Requires at least one enabled Search credential.",
+      "Search the public web via a configured search engine (Exa today; Tavily / Brave).",
     category: "search",
     build: buildWebSearchTool,
   },

@@ -158,20 +158,16 @@ function SkillItem({
       )}
     >
       <div className="flex items-center gap-2">
-        {/* Left cluster: name (click to edit when allowed) */}
+        {/* Left cluster: name (click to view/edit) */}
         <div className="flex flex-1 min-w-0 items-center gap-1">
-          {canEdit ? (
-            <button
-              type="button"
-              onClick={() => onEdit(row)}
-              className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2"
-              aria-label={`Edit ${row.name}`}
-            >
-              {row.name}
-            </button>
-          ) : (
-            <span className="truncate text-base font-medium">{row.name}</span>
-          )}
+          <button
+            type="button"
+            onClick={() => onEdit(row)}
+            className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2"
+            aria-label={canEdit ? `Edit ${row.name}` : `View ${row.name}`}
+          >
+            {row.name}
+          </button>
         </div>
 
         {/* Right cluster: visibility + enabled — sit together so all
@@ -475,7 +471,7 @@ export function SkillsPanel(): ReactNode {
                 active={row.id === activeSkillId}
                 isOwner={row.createdBy === currentUserId}
                 isAdmin={currentUserRole === "admin"}
-                onEdit={() => undefined}
+                onEdit={(r) => router.push(`/skills/${r.id}`)}
                 onToggleEnabled={handleToggleEnabled}
                 onToggleVisibility={handleToggleVisibility}
               />

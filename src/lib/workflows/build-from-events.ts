@@ -880,6 +880,25 @@ function addArrayOutputsToIndex(
 const ARRAY_INDEX_MAX_SERIALIZED_LEN = 1_000_000;
 
 /**
+ * Stable stringifier that sorts object keys alphabetically.
+ * Ensures that {a: 1, b: 2} and {b: 2, a: 1} serialize to the same string.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    const parts = keys.map((k) => 
+      `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`
+    );
+    return `{${parts.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
  * Canonical JSON key for a candidate array — used as the
  * `arrayIndex` map key. Returns `null` for values that should NOT be
  * indexed (non-arrays, empty arrays, oversize serializations,
@@ -888,7 +907,7 @@ const ARRAY_INDEX_MAX_SERIALIZED_LEN = 1_000_000;
 function canonicalArrayKey(value: unknown): string | null {
   if (!Array.isArray(value) || value.length === 0) return null;
   try {
-    const s = JSON.stringify(value);
+    const s = stableStringify(value);
     if (s.length > ARRAY_INDEX_MAX_SERIALIZED_LEN) return null;
     return s;
   } catch {
