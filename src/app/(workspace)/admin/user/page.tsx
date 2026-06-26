@@ -47,7 +47,7 @@ export default function AdminUserPage(): ReactNode {
       </div>
 
       <div className="flex border-b">
-        <TabButton label="Users" active={tab === "users"} onClick={() => setTab("users")} />
+        <TabButton label="User Accounts" active={tab === "users"} onClick={() => setTab("users")} />
         <TabButton label="Login Events" active={tab === "login-events"} onClick={() => setTab("login-events")} />
       </div>
 

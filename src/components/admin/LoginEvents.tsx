@@ -91,7 +91,7 @@ export function LoginEvents(): ReactNode {
               <TableHead>User</TableHead>
               <TableHead>Event</TableHead>
               <TableHead>IP</TableHead>
-              <TableHead>User Agent</TableHead>
+              <TableHead>Client</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

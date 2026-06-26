@@ -23,7 +23,8 @@ test.describe("User Management", () => {
   test("should display the users page with tabs", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
     // Both tab buttons should be visible
-    await expect(page.getByRole("button", { name: "Users" })).toBeVisible();
+    // Tab button should be visible (renamed from Users to avoid strict mode violation with sidebar tooltip)
+    await expect(page.getByRole("button", { name: "User Accounts" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Login Events" })).toBeVisible();
   });
 
@@ -35,6 +36,6 @@ test.describe("User Management", () => {
     await expect(page.getByRole("columnheader", { name: "User" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Event" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "IP" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "User Agent" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Client" })).toBeVisible();
   });
 });
