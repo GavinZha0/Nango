@@ -25,7 +25,7 @@ import {
   loadSnapshots,
   saveSnapshot,
   togglePin,
-  type ToolInputSnapshot,
+  type ToolExecutionSnapshot,
 } from "@/lib/mcp/snapshots";
 
 import { withTheme } from "@rjsf/core";
@@ -168,11 +168,11 @@ const IDLE_EXEC: ExecState = {
 interface HistoryDropdownProps {
   serverId: string;
   toolName: string | null;
-  onLoad: (args: Record<string, unknown>) => void;
+  onLoad: (args: Record<string, unknown>, result?: unknown) => void;
 }
 
 function HistoryDropdown({ serverId, toolName, onLoad }: HistoryDropdownProps): ReactNode {
-  const [snapshots, setSnapshots] = useState<ToolInputSnapshot[]>(
+  const [snapshots, setSnapshots] = useState<ToolExecutionSnapshot[]>(
     () => (toolName ? loadSnapshots(serverId, toolName) : []),
   );
 
@@ -216,7 +216,7 @@ function HistoryDropdown({ serverId, toolName, onLoad }: HistoryDropdownProps): 
           snapshots.map((snap) => (
             <DropdownMenuItem
               key={snap.id}
-              onClick={() => onLoad(snap.args)}
+              onClick={() => onLoad(snap.args, snap.result)}
               className="group flex items-center gap-1.5"
             >
               <span className={cn("flex-1 truncate text-xs", snap.pinned && "font-medium")}>{snap.name}</span>
@@ -339,14 +339,13 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       });
       const data = await res.json();
       if (!res.ok) {
-        setExec({ executing: false, result: null, execError: data.error ?? "Execution failed", executedArgs: null });
+        const baseErr = data.message ?? data.error ?? "Execution failed";
+        const execError = data.code ? `[${data.code}] ${baseErr}` : baseErr;
+        setExec({ executing: false, result: null, execError, executedArgs: null });
       } else {
         setExec({ executing: false, result: data.result, execError: null, executedArgs: args });
-        // Auto-save input args to history on successful execution.
-        // Skip no-param tools — nothing useful to reload.
-        if (Object.keys(args).length > 0) {
-          saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args);
-        }
+        // Auto-save input args and result to history on successful execution.
+        saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args, data.result);
       }
     } catch (err) {
       setExec({ executing: false, result: null, execError: err instanceof Error ? err.message : "Unexpected error", executedArgs: null });
@@ -358,6 +357,18 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     return sanitizeSchema(raw);
   }, [tool]);
   const uiSchema = generateUiSchema(schema);
+
+  const resultSizeStr = useMemo(() => {
+    if (exec.result === null) return null;
+    try {
+      const str = JSON.stringify(exec.result);
+      const bytes = new TextEncoder().encode(str).length;
+      if (bytes < 1024) return `${bytes} B`;
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    } catch {
+      return null;
+    }
+  }, [exec.result]);
 
   /** Save current tool state to cache, then restore (or reset) the target tool's state. */
   function handleSelectTool(name: string): void {
@@ -404,9 +415,25 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => router.push("/mcp")} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h2 className="text-sm font-semibold shrink-0 truncate">
+        <h2 className="text-sm font-semibold shrink-0 truncate flex-1">
           {tool ? `${serverName} / ${tool.name}` : (serverName || "Select a tool")}
         </h2>
+        {tool && (
+          <div className="shrink-0 flex items-center">
+            <HistoryDropdown
+              serverId={serverId}
+              toolName={activeToolName}
+              onLoad={(args, result) => {
+                setInput((prev) => ({ ...prev, formData: args, jsonInput: JSON.stringify(args, null, 2) }));
+                if (result !== undefined) {
+                  setExec({ executing: false, result, execError: null, executedArgs: args });
+                } else {
+                  setExec(IDLE_EXEC);
+                }
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Three-column content (tool list + input + result). */}
@@ -530,11 +557,6 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
               Schema
             </button>
             <div className="ml-auto flex items-center gap-1">
-              <HistoryDropdown
-                serverId={serverId}
-                toolName={activeToolName}
-                onLoad={(args) => setInput((prev) => ({ ...prev, formData: args, jsonInput: JSON.stringify(args, null, 2) }))}
-              />
               <Button
                 size="sm"
                 className="h-6 gap-1.5 px-2.5 text-xs"
@@ -659,7 +681,12 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
             </div>
 
             {/* Right: Copy */}
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
+              {resultSizeStr && (
+                <span className="text-[10px] tabular-nums text-muted-foreground">
+                  {resultSizeStr}
+                </span>
+              )}
               <Button
                 size="sm"
                 variant="ghost"

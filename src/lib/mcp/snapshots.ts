@@ -10,10 +10,11 @@
 const PREFIX = "nango:mcp-snapshot";
 const MAX_SNAPSHOTS = 20;
 
-export interface ToolInputSnapshot {
+export interface ToolExecutionSnapshot {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  result?: unknown;
   pinned?: boolean;
 }
 
@@ -22,20 +23,24 @@ function storageKey(serverId: string, toolName: string): string {
 }
 
 /** Read all snapshots for a tool (pinned first, then newest first). */
-export function loadSnapshots(serverId: string, toolName: string): ToolInputSnapshot[] {
+export function loadSnapshots(serverId: string, toolName: string): ToolExecutionSnapshot[] {
   try {
     const raw = localStorage.getItem(storageKey(serverId, toolName));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as ToolInputSnapshot[];
+    return parsed as ToolExecutionSnapshot[];
   } catch {
     return [];
   }
 }
 
-function persist(serverId: string, toolName: string, list: ToolInputSnapshot[]): void {
-  localStorage.setItem(storageKey(serverId, toolName), JSON.stringify(list));
+function persist(serverId: string, toolName: string, list: ToolExecutionSnapshot[]): void {
+  try {
+    localStorage.setItem(storageKey(serverId, toolName), JSON.stringify(list));
+  } catch (err) {
+    console.warn("Failed to save MCP snapshot to localStorage:", err);
+  }
 }
 
 /**
@@ -47,8 +52,19 @@ export function saveSnapshot(
   toolName: string,
   name: string,
   args: Record<string, unknown>,
-): ToolInputSnapshot {
-  const entry: ToolInputSnapshot = { id: crypto.randomUUID(), name, args };
+  result: unknown,
+): ToolExecutionSnapshot {
+  let finalResult = result;
+  try {
+    const stringified = JSON.stringify(result);
+    if (stringified.length > 24576) {
+      finalResult = { truncated_preview: stringified.slice(0, 24000) };
+    }
+  } catch {
+    finalResult = { truncated_preview: "Unserializable result" };
+  }
+
+  const entry: ToolExecutionSnapshot = { id: crypto.randomUUID(), name, args, result: finalResult };
   const existing = loadSnapshots(serverId, toolName);
   const list = [entry, ...existing];
   // Evict oldest unpinned entries beyond the cap.
