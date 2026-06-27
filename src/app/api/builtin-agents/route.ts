@@ -33,7 +33,9 @@ const ROUTE = "/api/builtin-agents";
 
 export const GET = withSession(ROUTE, async ({ req, session }) => {
   const url = new URL(req.url);
-  const roleParam = url.searchParams.get("role") as AgentRole | null;
+  const rawRole = url.searchParams.get("role");
+  const parsed = rawRole ? z.enum(["supervisor", "secretary", "evaluator"]).safeParse(rawRole) : null;
+  const roleParam: AgentRole | null = parsed?.success ? parsed.data : null;
   const rows = await db
     .select({
       id: BuiltinAgentTable.id,

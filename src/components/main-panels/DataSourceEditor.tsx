@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import {
   Select,
   SelectContent,
@@ -187,6 +188,20 @@ export function DataSourceEditor({
     [],
   );
 
+  // Copilot draft integration
+  const getCurrentData = useCallback(
+    () => form as FormState & Record<string, unknown>,
+    [form],
+  );
+  const applyDraft = useCallback((draft: Partial<FormState>) => {
+    setForm((prev) => ({ ...prev, ...draft }));
+  }, []);
+  const { draftApplied, clearDraftState } = useCopilotDraft({
+    resourceType: "datasource",
+    getCurrentData,
+    applyDraft,
+  });
+
   // Remote data (not part of the form)
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
 
@@ -335,6 +350,7 @@ export function DataSourceEditor({
           | null;
         throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
+      clearDraftState();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -445,8 +461,8 @@ export function DataSourceEditor({
           <Button
             size="sm"
             onClick={() => void handleSave()}
-            disabled={saving || (!isNew && !isDirty)}
-            className="h-8 gap-1.5"
+            disabled={saving || (!isNew && !isDirty && !draftApplied)}
+            className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import {
   Select,
   SelectContent,
@@ -137,6 +138,20 @@ export function SshServerEditor({
       setForm((prev) => ({ ...prev, [key]: value })),
     [],
   );
+
+  // Copilot draft integration
+  const getCurrentData = useCallback(
+    () => form as FormState & Record<string, unknown>,
+    [form],
+  );
+  const applyDraft = useCallback((draft: Partial<FormState>) => {
+    setForm((prev) => ({ ...prev, ...draft }));
+  }, []);
+  const { draftApplied, clearDraftState } = useCopilotDraft({
+    resourceType: "ssh-server",
+    getCurrentData,
+    applyDraft,
+  });
 
   // Remote data (not part of the form)
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
@@ -273,9 +288,10 @@ export function SshServerEditor({
         setError(body?.message ?? body?.error ?? `HTTP ${res.status}`);
         return;
       }
-      // Save succeeded — clear inline hints.
+      // Save succeeded — clear inline hints + draft state.
       setFpHint(null);
       setVerifyResult(null);
+      clearDraftState();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -444,8 +460,8 @@ export function SshServerEditor({
           <Button
             size="sm"
             onClick={() => void handleSave()}
-            disabled={saving || (!isNew && !isDirty)}
-            className="h-8 gap-1.5"
+            disabled={saving || (!isNew && !isDirty && !draftApplied)}
+            className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

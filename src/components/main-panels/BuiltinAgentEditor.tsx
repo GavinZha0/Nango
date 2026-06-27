@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { getProviderLabel } from "@/lib/constants/providers";
 import {
   SUPERVISOR_DESCRIPTION,
@@ -310,6 +311,43 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     [form, savedForm, tools, savedTools],
   );
 
+  // Copilot draft integration — merge form + tools into a single
+  // serializable object for the agent, split back on apply.
+  const getCurrentData = useCallback(
+    () => ({
+      ...form,
+      tools: {
+        mcp: [...tools.mcp].sort(),
+        skills: [...tools.skills].sort(),
+        builtinTools: [...tools.builtinTools].sort(),
+        dataSources: [...tools.dataSources].sort(),
+        sshServers: [...tools.sshServers].sort(),
+      },
+    }) as Record<string, unknown>,
+    [form, tools],
+  );
+  const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    const { tools: draftTools, ...formFields } = draft;
+    if (Object.keys(formFields).length > 0) {
+      setForm((prev) => ({ ...prev, ...formFields as Partial<FormState> }));
+    }
+    if (draftTools && typeof draftTools === "object" && !Array.isArray(draftTools)) {
+      const t = draftTools as Record<string, string[]>;
+      setTools((prev) => ({
+        mcp:          Array.isArray(t.mcp)          ? new Set(t.mcp)          : prev.mcp,
+        skills:       Array.isArray(t.skills)       ? new Set(t.skills)       : prev.skills,
+        builtinTools: Array.isArray(t.builtinTools) ? new Set(t.builtinTools) : prev.builtinTools,
+        dataSources:  Array.isArray(t.dataSources)  ? new Set(t.dataSources)  : prev.dataSources,
+        sshServers:   Array.isArray(t.sshServers)   ? new Set(t.sshServers)   : prev.sshServers,
+      }));
+    }
+  }, []);
+  const { draftApplied, clearDraftState } = useCopilotDraft({
+    resourceType: "agent",
+    getCurrentData,
+    applyDraft,
+  });
+
   /** Server-side role at load time. Non-null = role frozen by the
    *  monotonic rule; the toggle goes readonly. */
   const [loadedRole, setLoadedRole] = useState<AgentRole | null>(null);
@@ -466,6 +504,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         setSaveError(err.message ?? err.error ?? "Save failed");
       } else {
         const result = await res.json() as BuiltinAgentRow;
+        clearDraftState();
         if (isNew) {
           (onCreated ?? onSaved)(result);
         } else {
@@ -545,9 +584,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">{headerTitle}</span>
         <Button
           size="sm"
-          className="h-7 shrink-0 gap-1.5 px-3 text-xs"
+          className={cn("h-7 shrink-0 gap-1.5 px-3 text-xs", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
           onClick={handleSave}
-              disabled={saving || deleting || (!isNew && !isDirty)}
+              disabled={saving || deleting || (!isNew && !isDirty && !draftApplied)}
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
               Save

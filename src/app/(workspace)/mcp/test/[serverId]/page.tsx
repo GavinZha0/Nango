@@ -6,11 +6,12 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star, Copy } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { JsonView } from "@/components/ui/json-view";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -268,6 +269,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const [exec, setExec] = useState<ExecState>(IDLE_EXEC);
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
   const [resultTab, setResultTab] = useState<"view" | "raw">("view");
+  const [copied, setCopied] = useState<boolean>(false);
 
   /** Per-tool state cache so switching tools preserves input + result. */
   const toolStateCache = useRef<Map<string, { input: InputState; exec: ExecState }>>(new Map());
@@ -357,6 +359,36 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     return sanitizeSchema(raw);
   }, [tool]);
   const uiSchema = generateUiSchema(schema);
+
+  // Copilot shared-state: expose test page context so the agent can
+  // help build tool params or analyse execution results.
+  const getCurrentData = useCallback(
+    () => ({
+      serverName,
+      toolName: activeToolName,
+      toolDescription: tool?.description ?? null,
+      inputSchema: schema,
+      jsonInput: input.jsonInput,
+      executionResult: exec.result,
+      executionError: exec.execError,
+    }) as Record<string, unknown>,
+    [serverName, activeToolName, tool?.description, schema, input.jsonInput, exec.result, exec.execError],
+  );
+  const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    if (typeof draft.jsonInput === "string") {
+      const raw = draft.jsonInput;
+      let parsed: Record<string, unknown> | undefined;
+      let jsonError: string | null = null;
+      try { parsed = JSON.parse(raw) as Record<string, unknown>; } catch { jsonError = "Invalid JSON"; }
+      setInput((prev) => ({
+        ...prev,
+        jsonInput: raw,
+        jsonError,
+        ...(parsed !== undefined ? { formData: parsed } : {}),
+      }));
+    }
+  }, []);
+  useCopilotDraft({ resourceType: "mcp", getCurrentData, applyDraft });
 
   const resultSizeStr = useMemo(() => {
     if (exec.result === null) return null;
@@ -691,15 +723,18 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 size="sm"
                 variant="ghost"
                 className="h-6 w-6 p-0 rounded-sm"
-                onClick={() => {
-                  if (exec.result) {
-                    navigator.clipboard.writeText(JSON.stringify(exec.result, null, 2));
-                  }
+                onClick={async () => {
+                  if (!exec.result) return;
+                  try {
+                    await navigator.clipboard.writeText(JSON.stringify(exec.result, null, 2));
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  } catch { /* clipboard unavailable */ }
                 }}
                 disabled={exec.result === null}
                 title="Copy JSON"
               >
-                <Copy className="h-3.5 w-3.5" />
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
               </Button>
             </div>
           </div>

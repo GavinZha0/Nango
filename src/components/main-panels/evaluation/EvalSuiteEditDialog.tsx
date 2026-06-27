@@ -7,7 +7,7 @@
  * dimension multi-select grouped by category.
  */
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,13 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES } from "@/lib/evaluation/types";
+import { useWorkspaceStore } from "@/store/workspace";
 import type { EvalSuiteRow } from "@/store/evaluation";
-
-interface EvaluatorAgent {
-  id: string;
-  name: string;
-  icon: string | null;
-}
 
 interface EvalSuiteEditDialogProps {
   open: boolean;
@@ -44,21 +39,13 @@ interface EvalSuiteEditDialogProps {
 
 export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalSuiteEditDialogProps): ReactNode {
   const [name, setName] = useState(suite.name);
-  const [evaluators, setEvaluators] = useState<EvaluatorAgent[]>([]);
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const evaluators = useMemo(
+    () => builtinAgents.filter((a) => a.role === "evaluator"),
+    [builtinAgents],
+  );
   const [selectedEvalId, setSelectedEvalId] = useState(suite.evaluatorAgentId ?? "");
   const [selectedDims, setSelectedDims] = useState<Set<string>>(new Set(suite.dimensionIds));
-
-  useEffect(() => {
-    async function fetchEvaluators(): Promise<void> {
-      try {
-        const res = await fetch("/api/builtin-agents?role=evaluator");
-        if (!res.ok) return;
-        const rows = (await res.json()) as EvaluatorAgent[];
-        setEvaluators(rows);
-      } catch { /* silent */ }
-    }
-    if (open) void fetchEvaluators();
-  }, [open]);
 
   function toggleDimension(dimId: string): void {
     setSelectedDims((prev) => {

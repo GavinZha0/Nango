@@ -63,33 +63,22 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
     | null
   >(null);
 
-  // Agent display name — builtin: fetch from API; backend: read workspace store.
+  // Agent display name — builtin: read workspace store; backend: read workspace store.
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const backendEntities = useWorkspaceStore(useShallow((s) => [...s.agents, ...s.teams, ...s.workflows]));
-  const backendDisplay = useMemo<{ name: string; icon: string | null } | null>(() => {
-    if (agentSource !== "backend" || !credentialId) return null;
-    const entity: EntityDescriptor | undefined = backendEntities.find(
-      (e) => e.credentialId === credentialId && e.id === agentId,
-    );
-    return entity ? { name: entity.name ?? entity.id, icon: null } : null;
-  }, [agentSource, credentialId, agentId, backendEntities]);
-
-  const [builtinDisplay, setBuiltinDisplay] = useState<{ name: string; icon: string | null } | null>(null);
-  useEffect(() => {
-    if (agentSource !== "builtin") return;
-    async function resolve(): Promise<void> {
-      try {
-        const res = await fetch("/api/builtin-agents");
-        if (!res.ok) return;
-        const rows = (await res.json()) as Array<{ id: string; name: string; icon: string | null }>;
-        const found = rows.find((r) => r.id === agentId);
-        if (found) setBuiltinDisplay({ name: found.name, icon: found.icon });
-      } catch { /* silent */ }
+  const agentDisplay = useMemo<{ name: string; icon: string | null }>(() => {
+    if (agentSource === "builtin") {
+      const found = builtinAgents.find((a) => a.id === agentId);
+      return found ? { name: found.name, icon: found.icon ?? null } : { name: agentId, icon: null };
     }
-    void resolve();
-  }, [agentId, agentSource]);
-
-  const agentDisplay = (agentSource === "builtin" ? builtinDisplay : backendDisplay)
-    ?? { name: agentId, icon: null };
+    if (credentialId) {
+      const entity: EntityDescriptor | undefined = backendEntities.find(
+        (e) => e.credentialId === credentialId && e.id === agentId,
+      );
+      if (entity) return { name: entity.name ?? entity.id, icon: null };
+    }
+    return { name: agentId, icon: null };
+  }, [agentSource, agentId, credentialId, builtinAgents, backendEntities]);
 
   // Load cases for all suites
   const casesBySuite = useEvalCasesStore((s) => s.bySuite);

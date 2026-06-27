@@ -413,56 +413,39 @@ function Section({ title, children }: SectionProps): ReactElement {
 }
 
 function DescriptionSection({ node }: { node: CanonicalNode }): ReactElement {
-  const description = node.description || "";
-  const match = description.match(/^([\s\S]+?)\s+—\s+([\s\S]+)$/);
-  
-  let content;
-  if (!match) {
-    content = <p className="whitespace-pre-wrap text-foreground">{description}</p>;
-  } else {
-    const toolName = match[1];
-    const argsString = match[2];
-    const args = argsString.split(", ");
-    
-    content = (
-      <div className="flex flex-col gap-1 text-foreground">
-        <div>
-          <span className="font-medium text-muted-foreground">tool: </span>
-          <span className="font-mono">{toolName}</span>
+  switch (node.type) {
+    case "code":
+      return (
+        <div className="flex flex-col gap-1 text-foreground">
+          <KV label="tool" value="run_code_in_sandbox" mono />
+          <KV label="language" value={node.inputs.language} />
+          {node.inputs.datasets && node.inputs.datasets.length > 0 && (
+            <KV label="datasets" value={String(node.inputs.datasets.length)} />
+          )}
         </div>
-        {args.map((arg, i) => {
-          const eqIdx = arg.indexOf("=");
-          if (eqIdx === -1) return <div key={i}>{arg}</div>;
-          const key = arg.slice(0, eqIdx);
-          const val = arg.slice(eqIdx + 1);
-          if (node.type === "code" && (key === "code_text" || key === "code_file")) return null;
-          return (
-            <div key={i} className="flex gap-1.5 leading-snug">
-              <span className="font-medium text-muted-foreground shrink-0">{key}:</span>
-              <span className="break-all">{val}</span>
-            </div>
-          );
-        })}
-        {node.type === "chart" && (
-          <div className="flex gap-1.5 leading-snug">
-            <span className="font-medium text-muted-foreground shrink-0">renderer:</span>
-            <span className="break-all">{node.inputs.renderer}</span>
-          </div>
-        )}
-      </div>
-    );
+      );
+    case "chart":
+      return (
+        <div className="flex flex-col gap-1 text-foreground">
+          <KV label="tool" value="generate_echarts_config" mono />
+          <KV label="renderer" value={node.inputs.renderer} />
+        </div>
+      );
+    default:
+      return (
+        <Section title="Description">
+          <p className="whitespace-pre-wrap text-foreground">{node.description}</p>
+        </Section>
+      );
   }
+}
 
-  const isTargetNode = node.type === "code" || node.type === "chart";
-
-  if (isTargetNode) {
-    return <div className="flex flex-col gap-1.5">{content}</div>;
-  }
-
+function KV({ label, value, mono }: { label: string; value: string; mono?: boolean }): ReactElement {
   return (
-    <Section title="Description">
-      {content}
-    </Section>
+    <div className="flex gap-1.5 leading-snug">
+      <span className="font-medium text-muted-foreground shrink-0">{label}:</span>
+      <span className={cn("break-all", mono && "font-mono")}>{value}</span>
+    </div>
   );
 }
 

@@ -7,7 +7,7 @@
  * its cases. Wired to flat store model (suites + cases separate).
  */
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useWorkspaceStore } from "@/store/workspace";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 
 // Component
@@ -45,21 +46,14 @@ export function EvalSuiteTree({
   onDeleteCase,
 }: EvalSuiteTreeProps): ReactNode {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [evaluators, setEvaluators] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    async function fetchEvaluators(): Promise<void> {
-      try {
-        const res = await fetch("/api/builtin-agents?role=evaluator");
-        if (!res.ok) return;
-        const rows = (await res.json()) as Array<{ id: string; name: string }>;
-        const map: Record<string, string> = {};
-        for (const row of rows) map[row.id] = row.name;
-        setEvaluators(map);
-      } catch { /* silent */ }
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const evaluators = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const a of builtinAgents) {
+      if (a.role === "evaluator") map[a.id] = a.name;
     }
-    void fetchEvaluators();
-  }, []);
+    return map;
+  }, [builtinAgents]);
 
   function toggleCollapse(suiteId: string): void {
     setCollapsed((prev) => {

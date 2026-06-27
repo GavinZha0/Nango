@@ -7,12 +7,13 @@
  * Wired to the evaluation Zustand store + API.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Loader2, Play, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
+import { useWorkspaceStore } from "@/store/workspace";
 import {
   useEvaluationStore,
   evalActions,
@@ -139,26 +140,17 @@ export function EvaluationPanel(): ReactNode {
     console.log(`TODO: run ${runnable.length} suites for agent ${agentId}`, runnable);
   };
 
-  // Resolve agent display names — fetch from builtin_agent catalog
-  const [agentNames, setAgentNames] = useState<Record<string, { name: string; icon: string | null }>>({});
+  // Resolve agent display names from workspace store (populated at app boot).
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const agentNames = useMemo(() => {
+    const map: Record<string, { name: string; icon: string | null }> = {};
+    for (const a of builtinAgents) map[a.id] = { name: a.name, icon: a.icon ?? null };
+    return map;
+  }, [builtinAgents]);
 
   useEffect(() => {
     if (!agentsLoaded) void evalActions.refreshAgents();
   }, [agentsLoaded]);
-
-  useEffect(() => {
-    async function resolveNames(): Promise<void> {
-      try {
-        const res = await fetch("/api/builtin-agents");
-        if (!res.ok) return;
-        const rows = (await res.json()) as Array<{ id: string; name: string; icon: string | null }>;
-        const map: Record<string, { name: string; icon: string | null }> = {};
-        for (const r of rows) map[r.id] = { name: r.name, icon: r.icon };
-        setAgentNames(map);
-      } catch { /* silent */ }
-    }
-    void resolveNames();
-  }, []);
 
   const enriched: EvalAgentItem[] = agents.map((a) => {
     const resolved = agentNames[a.agentId];
