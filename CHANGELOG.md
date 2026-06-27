@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4](https://github.com/GavinZha0/Nango/compare/v0.3.3...v0.3.4) (2026-06-27)
+
+
+### Bug Fixes
+
+* snapshot of mcp test ([f30e189](https://github.com/GavinZha0/Nango/commit/f30e189429e2a3b9fa686f7a4bff1c65f138c8fb))
+* state sharing issue ([825516c](https://github.com/GavinZha0/Nango/commit/825516c380c924ca879f33ce7a95978e19addb0f))
+
 ## [0.3.3](https://github.com/GavinZha0/Nango/compare/v0.3.2...v0.3.3) (2026-06-26)
 
 
