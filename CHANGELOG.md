@@ -5,14 +5,14 @@
 
 ### Features
 
-* html generation and calendar extraction ([82d6cdf](https://github.com/GavinZha0/Nango/commit/82d6cdf9d72e6ec1a6edd1946770513af770c08e))
+* html generation and calendar extraction ([82d6cdf](https://github.com/GavinZha0/Nango/commit/82d6cdf9d72e6ec1a6edd1946770513af770c08e)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* chatbot displaying ([c491c76](https://github.com/GavinZha0/Nango/commit/c491c76cba9f11e32316d5ec0d485a9dd741d37c))
-* snapshot of mcp test ([f30e189](https://github.com/GavinZha0/Nango/commit/f30e189429e2a3b9fa686f7a4bff1c65f138c8fb))
-* state sharing issue ([825516c](https://github.com/GavinZha0/Nango/commit/825516c380c924ca879f33ce7a95978e19addb0f))
+* chatbot displaying ([c491c76](https://github.com/GavinZha0/Nango/commit/c491c76cba9f11e32316d5ec0d485a9dd741d37c)) by @GavinZha0
+* snapshot of mcp test ([f30e189](https://github.com/GavinZha0/Nango/commit/f30e189429e2a3b9fa686f7a4bff1c65f138c8fb)) by @GavinZha0
+* state sharing issue ([825516c](https://github.com/GavinZha0/Nango/commit/825516c380c924ca879f33ce7a95978e19addb0f)) by @GavinZha0
 
 ## [0.3.3](https://github.com/GavinZha0/Nango/compare/v0.3.2...v0.3.3) (2026-06-26)
 
