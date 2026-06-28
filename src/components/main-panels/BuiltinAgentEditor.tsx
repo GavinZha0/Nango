@@ -206,6 +206,7 @@ interface ToolSelections {
   builtinTools: Set<string>;
   dataSources: Set<string>;
   sshServers: Set<string>;
+  calendars: Set<string>;
 }
 
 const EMPTY_TOOLS: ToolSelections = {
@@ -214,6 +215,7 @@ const EMPTY_TOOLS: ToolSelections = {
   builtinTools: new Set(),
   dataSources: new Set(),
   sshServers: new Set(),
+  calendars: new Set(),
 };
 
 function toolsFromBoundRows(rows: BoundToolRow[]): ToolSelections {
@@ -222,14 +224,16 @@ function toolsFromBoundRows(rows: BoundToolRow[]): ToolSelections {
   const builtinTools = new Set<string>();
   const dataSources = new Set<string>();
   const sshServers = new Set<string>();
+  const calendars = new Set<string>();
   for (const t of rows) {
     if ((t.toolType === "mcp_server" || t.toolType === "mcp_tool") && t.mcpServerId) mcp.add(t.mcpServerId);
     if (t.toolType === "skill" && t.skillId) skills.add(t.skillId);
     if (t.toolType === "builtin_tool" && t.builtinTool) builtinTools.add(t.builtinTool);
     if (t.toolType === "datasource" && t.dataSourceId) dataSources.add(t.dataSourceId);
     if (t.toolType === "ssh_server" && t.sshServerId) sshServers.add(t.sshServerId);
+    if (t.toolType === "calendar" && t.calendarCredentialId) calendars.add(t.calendarCredentialId);
   }
-  return { mcp, skills, builtinTools, dataSources, sshServers };
+  return { mcp, skills, builtinTools, dataSources, sshServers, calendars };
 }
 
 /** Serialize tool selections for dirty comparison (Sets are not JSON-comparable). */
@@ -240,6 +244,7 @@ function serializeTools(t: ToolSelections): string {
     builtinTools: [...t.builtinTools].sort(),
     dataSources: [...t.dataSources].sort(),
     sshServers: [...t.sshServers].sort(),
+    calendars: [...t.calendars].sort(),
   });
 }
 
@@ -278,6 +283,10 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
    *  rows. Disabled rows are filtered out. */
   const [sshServers, setSshServers] = useState<
     Array<{ id: string; name: string; description: string | null; host: string; username: string; enabled: boolean }>
+  >([]);
+  /** Calendar credentials (serviceType="calendar") available for binding. */
+  const [calendars, setCalendars] = useState<
+    Array<{ id: string; name: string; description: string | null; provider: string | null }>
   >([]);
   /** LLM credentials available to pick from */
   const [llmCredentials, setLlmCredentials] = useState<LlmCredential[]>([]);
@@ -339,6 +348,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         builtinTools: Array.isArray(t.builtinTools) ? new Set(t.builtinTools) : prev.builtinTools,
         dataSources:  Array.isArray(t.dataSources)  ? new Set(t.dataSources)  : prev.dataSources,
         sshServers:   Array.isArray(t.sshServers)   ? new Set(t.sshServers)   : prev.sshServers,
+        calendars:    Array.isArray(t.calendars)    ? new Set(t.calendars)    : prev.calendars,
       }));
     }
   }, []);
@@ -382,6 +392,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         builtinToolsRes,
         dataSourcesRes,
         sshServersRes,
+        calendarsRes,
       ] = await Promise.all([
         isNew ? Promise.resolve(null) : fetch(`/api/builtin-agents/${agentId}`),
         fetch("/api/tools"),
@@ -390,6 +401,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         fetch("/api/builtin-tools"),
         fetch("/api/data-sources"),
         fetch("/api/ssh-servers"),
+        fetch("/api/calendar-credentials"),
       ]);
       if (!isNew && agentRes && agentRes.ok) {
         const data = await agentRes.json() as AgentDetail;
@@ -435,6 +447,15 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         }>;
         setSshServers(all.filter((s) => s.enabled));
       }
+      if (calendarsRes.ok) {
+        const all = (await calendarsRes.json()) as Array<{
+          id: string;
+          name: string;
+          description: string | null;
+          provider: string | null;
+        }>;
+        setCalendars(all);
+      }
       if (allAgentsRes.ok) {
         // Find existing system agents to flag their slots as occupied.
         const all = (await allAgentsRes.json()) as Array<{ id: string; role?: AgentRole | null; createdBy?: string }>;
@@ -465,6 +486,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       ...[...tools.builtinTools].map((n) => ({ toolType: "builtin_tool", builtinTool: n })),
       ...[...tools.dataSources].map((id) => ({ toolType: "datasource", dataSourceId: id })),
       ...[...tools.sshServers].map((id) => ({ toolType: "ssh_server", sshServerId: id })),
+      ...[...tools.calendars].map((id) => ({ toolType: "calendar", calendarCredentialId: id })),
     ];
 
     try {
@@ -915,6 +937,23 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 selected={tools.dataSources}
                 onToggle={(id) => toggleTool("dataSources", id)}
                 emptyText="No enabled data sources. Create one from the Data Sources panel."
+              />
+            </Section>
+
+            <Section
+              title="Calendars"
+              defaultOpen={false}
+              count={{ selected: tools.calendars.size, total: calendars.length }}
+            >
+              <CheckList
+                items={calendars.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  description: c.description ?? c.provider ?? "ICS",
+                }))}
+                selected={tools.calendars}
+                onToggle={(id) => toggleTool("calendars", id)}
+                emptyText="No calendar credentials. Create one with service type 'Calendar' in Credentials."
               />
             </Section>
 

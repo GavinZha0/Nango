@@ -16,7 +16,9 @@ import { buildBuiltinTools } from "@/lib/builtin-tools";
 import { buildDataSourcesPromptBlock } from "@/lib/data-sources/prompt-block.server";
 import { buildExtractDatasetTool } from "@/lib/data-sources/runtime-tools";
 import { buildGetCurrentDatetimeTool } from "@/lib/time/runtime-tools";
-import { buildChartPromptBlock } from "@/lib/outcomes/prompt-block.server";
+import { buildCalendarPromptBlock } from "@/lib/calendar/prompt-block.server";
+import { buildFetchCalendarEventsTool } from "@/lib/calendar/runtime-tools";
+import { buildChartPromptBlock, buildHtmlPagePromptBlock } from "@/lib/outcomes/prompt-block.server";
 import { mcpProviderPool } from "@/lib/mcp";
 import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
 import {
@@ -140,6 +142,7 @@ export async function buildBuiltinAgents(
     const builtinToolNames: Set<string> = new Set();
     const dataSourceIds: string[] = [];
     const sshServerIds: string[] = [];
+    const calendarCredentialIds: string[] = [];
     for (const tool of spec.tools) {
       if (tool.kind === "mcp_server") {
         try {
@@ -222,6 +225,8 @@ export async function buildBuiltinAgents(
         dataSourceIds.push(tool.dataSourceId);
       } else if (tool.kind === "ssh_server") {
         sshServerIds.push(tool.sshServerId);
+      } else if (tool.kind === "calendar") {
+        calendarCredentialIds.push(tool.calendarCredentialId);
       }
       // mcp_tool: not yet wired (single-tool granularity).
     }
@@ -247,6 +252,13 @@ export async function buildBuiltinAgents(
           buildRunSshCommandTool({ agentSshServerIds: sshServerIds }),
           buildListSshHostsTool({ agentSshServerIds: sshServerIds }),
         ]
+      : [];
+
+    // Binding any calendar credential auto-mounts fetch_calendar_events.
+    const calendarRuntime =
+      await buildCalendarPromptBlock(calendarCredentialIds);
+    const calendarTools: ToolDefinition[] = calendarCredentialIds.length > 0
+      ? [buildFetchCalendarEventsTool({ agentCalendarCredentialIds: calendarCredentialIds })]
       : [];
 
     // Ambient tools — mounted on EVERY non-supervisor built-in agent
@@ -312,6 +324,13 @@ export async function buildBuiltinAgents(
           hasSandbox: builtinToolNames.has("run_code_in_sandbox"),
         });
 
+    // HTML page prompt block — usage policy for the opt-in
+    // `generate_html_page` server tool. Same skip logic as chart.
+    const hasHtmlPage = builtinToolNames.has("generate_html_page");
+    const htmlPagePromptBlock: string = (isSupervisor || !hasHtmlPage)
+      ? ""
+      : buildHtmlPagePromptBlock();
+
     // Always true in practice — `ambientTools` is never empty. Kept as
     // a disjunction so the invariant still holds if ambient tools ever
     // become conditional. `maxSteps` below depends on this: a tool-only
@@ -323,6 +342,7 @@ export async function buildBuiltinAgents(
       || builtinTools.length > 0
       || dataSourceTools.length > 0
       || sshTools.length > 0
+      || calendarTools.length > 0
       || ambientTools.length > 0;
 
     // Prompt composition order — see docs/prompts.md.
@@ -353,7 +373,11 @@ export async function buildBuiltinAgents(
       if (sshHostsRuntime.promptBlock.length > 0) {
         parts.push(sshHostsRuntime.promptBlock);
       }
+      if (calendarRuntime.promptBlock.length > 0) {
+        parts.push(calendarRuntime.promptBlock);
+      }
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
+      if (htmlPagePromptBlock.length > 0) parts.push(htmlPagePromptBlock);
 
       if (isSupervisor) {
         if (supervisorCatalogBlock.length > 0) {
@@ -401,6 +425,7 @@ export async function buildBuiltinAgents(
       ...builtinTools,
       ...dataSourceTools,
       ...sshTools,
+      ...calendarTools,
       ...ambientTools,
     ].map((t) => wrapToolExecute(t, t.name, log, "server_tool_failed"));
 

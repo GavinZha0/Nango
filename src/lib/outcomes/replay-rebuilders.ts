@@ -29,8 +29,11 @@ import type {
 } from "@/lib/web-search/schema";
 import {
   chartArgsToContent,
+  htmlArgsToContent,
   readGenerateEchartsConfigArgs,
+  readGenerateHtmlPageArgs,
   type GenerateEchartsConfigArtifactArgs,
+  type GenerateHtmlPageArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
@@ -237,6 +240,81 @@ export function rebuildWebSearchOutcome(
       // WebSearchInlinePreview — see the comment there. Show results
       // expanded; users still have the chevron + inner "Show more"
       // for compactness on demand.
+      collapsed: false,
+      savedArtifactId: null,
+    },
+  };
+}
+
+// generate_html_page
+//
+// Same rebuild-from-chunk-only pattern as generate_echarts_config.
+
+/**
+ * Rebuild a `generate_html_page` outcome from its
+ * tool_call_chunk payload. `outcomeId` is the LLM-supplied
+ * `page_id` (kebab-case slug) — stable, and "same id overwrites"
+ * is the policy.
+ *
+ * Returns `null` (with a warn log) on any payload-shape issue so the
+ * caller skips the row rather than crashing the whole replay.
+ */
+export function rebuildHtmlPageOutcome(
+  chunk: ToolCallChunkPayload,
+  ctx: RebuildContext,
+): { id: string; outcome: Outcome } | null {
+  let rawArgs: Record<string, unknown>;
+  try {
+    rawArgs = JSON.parse(chunk.args) as Record<string, unknown>;
+  } catch (err) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_parse_failed",
+        tool: "generate_html_page",
+        runId: ctx.runId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "skipping unparseable generate_html_page payload",
+    );
+    return null;
+  }
+  const args: GenerateHtmlPageArtifactArgs | null =
+    readGenerateHtmlPageArgs(rawArgs);
+  if (args === null) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_invalid_args",
+        tool: "generate_html_page",
+        runId: ctx.runId,
+      },
+      "skipping generate_html_page row with invalid args shape",
+    );
+    return null;
+  }
+  const content = htmlArgsToContent(args);
+  if (content === null) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_missing_html",
+        runId: ctx.runId,
+        pageId: args.page_id,
+      },
+      "skipping generate_html_page row with no usable html payload",
+    );
+    return null;
+  }
+  return {
+    id: args.page_id,
+    outcome: {
+      outcomeId: args.page_id,
+      kind: "report",
+      title: args.title,
+      description: args.description,
+      blocks: content.blocks,
+      agentId: ctx.entityId,
+      threadId: ctx.threadId,
+      runId: ctx.runId,
+      createdAt: ctx.ts.getTime(),
       collapsed: false,
       savedArtifactId: null,
     },

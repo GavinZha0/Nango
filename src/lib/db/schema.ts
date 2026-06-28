@@ -668,6 +668,7 @@ export const CREDENTIAL_SERVICE_TYPES = [
   "observability",
   "integration",
   "datasource",
+  "calendar",
   "other",
 ] as const;
 
@@ -991,6 +992,13 @@ export const BuiltinAgentToolTable = pgTable(
       onDelete: "cascade",
     }),
 
+    // Calendar
+    /** Set for toolType "calendar". References a credential with serviceType="calendar".
+     *  Binding any calendar auto-mounts fetch_calendar_events. */
+    calendarCredentialId: uuid("calendar_credential_id").references(() => CredentialTable.id, {
+      onDelete: "cascade",
+    }),
+
     /** Display / injection order within the agent. Lower values come first. */
     order: integer("order").notNull().default(0),
   },
@@ -1002,6 +1010,7 @@ export const BuiltinAgentToolTable = pgTable(
     index("builtin_agent_tool_skill_idx").on(t.skillId),
     index("builtin_agent_tool_data_source_idx").on(t.dataSourceId),
     index("builtin_agent_tool_ssh_server_idx").on(t.sshServerId),
+    index("builtin_agent_tool_calendar_credential_idx").on(t.calendarCredentialId),
   ],
 );
 
@@ -1107,7 +1116,8 @@ export type AgentToolType =
   | "skill"
   | "builtin_tool"
   | "datasource"
-  | "ssh_server";
+  | "ssh_server"
+  | "calendar";
 
 // Runner — entity_run + entity_run_event
 

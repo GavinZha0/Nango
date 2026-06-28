@@ -501,6 +501,7 @@ const PROVIDER_TABS: ReadonlyArray<{
   { service: "observability", label: "Observability" },
   { service: "integration", label: "Integration" },
   { service: "datasource", label: "Datasource" },
+  { service: "calendar", label: "Calendar" },
 ];
 
 function ProviderPicker({ value, onChange }: ProviderPickerProps): ReactNode {
@@ -538,7 +539,7 @@ function ProviderPicker({ value, onChange }: ProviderPickerProps): ReactNode {
       <div
         role="tablist"
         aria-label="Provider category"
-        className="flex items-stretch gap-1 overflow-x-auto border-b px-1"
+        className="flex flex-wrap items-stretch gap-1 border-b px-1"
       >
         {PROVIDER_TABS.map((tab) => {
           const selected = activeTab === tab.service;

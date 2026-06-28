@@ -58,3 +58,30 @@ export function buildChartPromptBlock(input: BuildChartPromptInput): string {
   void input;
   return CHART_PROMPT_BLOCKS.encourage;
 }
+
+// ─── generate_html_page ─────────────────────────────────────────────
+
+/**
+ * Usage-policy block for the `generate_html_page` server tool.
+ * Same role as `CHART_PROMPT_BLOCKS` but simpler — HTML has fewer
+ * structural foot-guns than ECharts options.
+ */
+export const HTML_PAGE_PROMPT_BLOCKS = {
+  encourage: [
+    "## generate_html_page usage",
+    "",
+    "- Generate a COMPLETE HTML page. Small CSS/JS should be inlined via <style>/<script> tags.",
+    "- For large libraries (D3, Three.js, Tailwind, Chart.js, etc.), use public CDN links (e.g. cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com). This keeps the payload small.",
+    "- The page renders inside a sandboxed iframe IMMEDIATELY on success — do NOT paste HTML source into your chat reply.",
+    "- Only call this tool when you have concrete content to render. If the user just asks a question, reply in text.",
+    "- Re-calling with the same page_id OVERWRITES the previous page.",
+  ].join("\n"),
+} as const;
+
+/**
+ * Return the HTML page prompt block for non-supervisor agents.
+ * Mirrors `buildChartPromptBlock` in shape.
+ */
+export function buildHtmlPagePromptBlock(): string {
+  return HTML_PAGE_PROMPT_BLOCKS.encourage;
+}

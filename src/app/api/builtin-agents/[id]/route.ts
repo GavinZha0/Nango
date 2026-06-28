@@ -86,6 +86,8 @@ export const GET = withSession<{ id: string }>(
         dataSourceId: BuiltinAgentToolTable.dataSourceId,
         // SSH
         sshServerId: BuiltinAgentToolTable.sshServerId,
+        // Calendar
+        calendarCredentialId: BuiltinAgentToolTable.calendarCredentialId,
       })
       .from(BuiltinAgentToolTable)
       .leftJoin(McpServerTable, eq(BuiltinAgentToolTable.mcpServerId, McpServerTable.id))
@@ -107,6 +109,7 @@ const boundToolSchema = z.object({
     "builtin_tool",
     "datasource",
     "ssh_server",
+    "calendar",
   ]),
   mcpServerId: uuidString.nullable().optional(),
   mcpToolName: z.string().nullable().optional(),
@@ -114,6 +117,7 @@ const boundToolSchema = z.object({
   builtinTool: z.string().nullable().optional(),
   dataSourceId: uuidString.nullable().optional(),
   sshServerId: uuidString.nullable().optional(),
+  calendarCredentialId: uuidString.nullable().optional(),
 });
 
 const updateSchema = z
@@ -322,6 +326,7 @@ export const PATCH = withEditor<{ id: string }>(
               builtinTool: t.builtinTool ?? null,
               dataSourceId: t.dataSourceId ?? null,
               sshServerId: t.sshServerId ?? null,
+              calendarCredentialId: t.calendarCredentialId ?? null,
               order: i,
             })),
           );

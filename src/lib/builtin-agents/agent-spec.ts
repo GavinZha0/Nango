@@ -16,7 +16,8 @@ export type AgentToolRef =
   | { kind: "skill"; skillId: string }
   | { kind: "builtin_tool"; name: string }
   | { kind: "datasource"; dataSourceId: string }
-  | { kind: "ssh_server"; sshServerId: string };
+  | { kind: "ssh_server"; sshServerId: string }
+  | { kind: "calendar"; calendarCredentialId: string };
 
 import type { AgentRole } from "@/lib/db/schema";
 

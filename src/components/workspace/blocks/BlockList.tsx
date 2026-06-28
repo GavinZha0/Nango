@@ -25,6 +25,7 @@ import type { OutcomeBlock } from "@/store/outcome-store";
 
 import { CardListBlockRenderer } from "./CardListBlock";
 import { ChartBlockRenderer } from "./ChartBlock";
+import { HtmlBlockRenderer } from "./HtmlBlock";
 import { TextBlockRenderer } from "./TextBlock";
 
 export type BlockSize = "compact" | "large";
@@ -64,6 +65,8 @@ function BlockSwitch({
       return <CardListBlockRenderer block={block} size={size} />;
     case "chart":
       return <ChartBlockRenderer block={block} size={size} />;
+    case "html":
+      return <HtmlBlockRenderer block={block} size={size} />;
     default: {
       // exhaustiveness check — TS will error here if a new block
       // kind is added to the union without a branch above.

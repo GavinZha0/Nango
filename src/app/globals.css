@@ -188,6 +188,7 @@ body[style*="color-scheme: dark"] {
 .copilotKitUserMessage [class*="prose"] {
   background-color: #b9f8cf !important;
   color: #000 !important;
+  padding-block: 2px !important;
 }
 /* Hide the copy button on assistant messages.                                 */
 .copilotKitAssistantMessage [data-testid="copilot-copy-button"] {

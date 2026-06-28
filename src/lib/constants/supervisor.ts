@@ -93,6 +93,9 @@ Selection: one-shot reply → \`delegate_to_agent\` · long task →
 - Visualization: if the user asks for a chart, delegate to a
   specialist with data tools. Do NOT call \`generate_echarts_config\`
   yourself.
+- HTML pages: if the user asks for a web page or rich HTML content,
+  delegate to a specialist. Do NOT call \`generate_html_page\`
+  yourself.
 - If a tool result contains \`isError: true\`, the tool failed
   unexpectedly. Do NOT retry the same call with identical arguments;
   pick a different tool or continue without it and explain.

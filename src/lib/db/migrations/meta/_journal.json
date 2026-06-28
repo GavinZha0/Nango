@@ -43,6 +43,13 @@
       "when": 1781744570124,
       "tag": "0005_eval-tables",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782602500443,
+      "tag": "0006_add-calendar-support",
+      "breakpoints": true
     }
   ]
 }

@@ -52,4 +52,5 @@ export interface BoundToolRow {
   skillName?: string | null;
   builtinTool?: string | null;
   dataSourceId?: string | null;
+  calendarCredentialId?: string | null;
 }

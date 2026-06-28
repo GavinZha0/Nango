@@ -82,6 +82,14 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "mysql",     label: "MySQL",        service: "datasource" },
   { value: "mariadb",   label: "MariaDB",      service: "datasource" },
   { value: "vertica",   label: "Vertica",      service: "datasource" },
+
+  // Calendar sources
+  // ICS subscriptions and calendar API integrations. `restUrl` carries
+  // the ICS subscription URL; encrypted payload is typically empty
+  // (auth token is embedded in the URL) or carries an API key.
+  { value: "ics",              label: "ICS",       service: "calendar" },
+  { value: "google",  label: "Google",    service: "calendar" },
+  { value: "outlook",          label: "Outlook",   service: "calendar" },
 ];
 
 /** Lookup map: provider slug → ProviderEntry. */
@@ -106,5 +114,6 @@ export const SERVICE_LABELS: Record<CredentialServiceType, string> = {
   observability: "Observability",
   integration: "Integration",
   datasource: "Data Source",
+  calendar: "Calendar",
   other: "Other",
 };

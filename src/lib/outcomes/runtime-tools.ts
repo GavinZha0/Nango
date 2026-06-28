@@ -20,6 +20,10 @@ import {
   generateEchartsConfigSchema,
   type GenerateEchartsConfigArgs,
   type GenerateEchartsConfigResult,
+  HTML_PAGE_HARD_CAP_BYTES,
+  generateHtmlPageSchema,
+  type GenerateHtmlPageArgs,
+  type GenerateHtmlPageResult,
 } from "./schema";
 
 /**
@@ -118,6 +122,76 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
         }),
         option: args.option,
         ...(args.dataset_id !== undefined && { dataset_id: args.dataset_id }),
+      };
+    },
+  });
+}
+
+/**
+ * Build the `generate_html_page` tool definition.
+ *
+ * Mounted as an opt-in built-in tool via the admin's "Built-in
+ * Tools" checkbox. The tool validates the HTML payload size and
+ * echoes it back verbatim so the frontend side-effect hook can
+ * update the Outcomes store.
+ *
+ * Validation contract:
+ *   - `html` serialized length ≤ HTML_PAGE_HARD_CAP_BYTES
+ *   - `html` must be a non-empty string
+ * On failure returns `{ ok: false, error, message }` so the LLM
+ * can self-correct on the next turn.
+ */
+export function buildGenerateHtmlPageTool(): ToolDefinition {
+  return defineTool({
+    name: "generate_html_page",
+    description:
+      "Generate a complete HTML page and surface it as a preview " +
+      "card in the user's Outcomes panel. The page renders in a " +
+      "sandboxed iframe IMMEDIATELY on success — DO NOT paste the " +
+      "HTML source into your text reply. Re-calling with the same " +
+      "page_id OVERWRITES the previous page. " +
+      "USE THIS when the user asks for a web page, landing page, " +
+      "interactive visualization, prototype, or any rich HTML " +
+      "content. " +
+      "FORMAT: provide a complete HTML document string. Inline " +
+      "small CSS/JS via <style>/<script> tags. For large " +
+      "libraries (D3, Three.js, Tailwind, etc.) use public CDN " +
+      "links (cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com). " +
+      "The iframe sandbox blocks form submissions and top-level " +
+      "navigation but allows scripts.",
+    parameters: generateHtmlPageSchema,
+    execute: async (
+      args: GenerateHtmlPageArgs,
+    ): Promise<GenerateHtmlPageResult> => {
+      // size cap
+      const byteLength = new TextEncoder().encode(args.html).length;
+      if (byteLength > HTML_PAGE_HARD_CAP_BYTES) {
+        return {
+          ok: false,
+          error: "HTML_TOO_LARGE",
+          message:
+            `HTML is ${byteLength} bytes; cap is ${HTML_PAGE_HARD_CAP_BYTES}. ` +
+            `Move large libraries to CDN links and reduce inline content.`,
+        };
+      }
+
+      // empty check (schema min(1) should catch, but belt-and-suspenders)
+      if (args.html.trim().length === 0) {
+        return {
+          ok: false,
+          error: "HTML_EMPTY",
+          message: "html must contain non-whitespace content.",
+        };
+      }
+
+      return {
+        ok: true,
+        page_id: args.page_id,
+        title: args.title,
+        ...(args.description !== undefined && {
+          description: args.description,
+        }),
+        html: args.html,
       };
     },
   });

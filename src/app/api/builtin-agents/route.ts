@@ -97,6 +97,7 @@ const boundToolSchema = z.object({
     "builtin_tool",
     "datasource",
     "ssh_server",
+    "calendar",
   ]),
   mcpServerId: uuidString.nullable().optional(),
   mcpToolName: z.string().nullable().optional(),
@@ -104,6 +105,7 @@ const boundToolSchema = z.object({
   builtinTool: z.string().nullable().optional(),
   dataSourceId: uuidString.nullable().optional(),
   sshServerId: uuidString.nullable().optional(),
+  calendarCredentialId: uuidString.nullable().optional(),
 });
 
 const createSchema = z.object({
@@ -194,6 +196,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
             builtinTool: t.builtinTool ?? null,
             dataSourceId: t.dataSourceId ?? null,
             sshServerId: t.sshServerId ?? null,
+            calendarCredentialId: t.calendarCredentialId ?? null,
             order: i,
           })),
         );

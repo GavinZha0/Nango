@@ -394,6 +394,16 @@ export function synthesizeToolCallResult(
       /* fall through with empty extra */
     }
   }
+  if (payload.toolName === "generate_html_page") {
+    try {
+      const args = JSON.parse(payload.args) as { page_id?: unknown };
+      if (typeof args.page_id === "string" && args.page_id.length > 0) {
+        extra = { page_id: args.page_id };
+      }
+    } catch {
+      /* fall through with empty extra */
+    }
+  }
   return buildSyntheticResult(
     payload.toolCallId,
     JSON.stringify({

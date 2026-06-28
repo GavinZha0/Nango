@@ -819,6 +819,22 @@ function ArtifactBody({
     );
   }
 
+  // HTML artifacts: `bundle.data` is the HTML string produced by
+  // the generate_html_page tool. Render via sandboxed iframe.
+  if (node.type === "html" && isHtmlContent(data)) {
+    return (
+      <div className="h-[480px] w-full">
+        <iframe
+          srcDoc={data as string}
+          sandbox="allow-scripts"
+          referrerPolicy="no-referrer"
+          title={node.name ?? "HTML page"}
+          className="h-full w-full rounded border border-border bg-white"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="rounded border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">
       No renderer for this artifact type yet
@@ -846,6 +862,11 @@ function isChartOption(value: unknown): boolean {
   }
   const series = (value as { series?: unknown }).series;
   return Array.isArray(series);
+}
+
+/** Cheap check — HTML content is a non-empty string. */
+function isHtmlContent(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 // dialogs

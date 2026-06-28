@@ -19,7 +19,7 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 
 import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
-import { buildGenerateEchartsConfigTool } from "@/lib/outcomes/runtime-tools";
+import { buildGenerateEchartsConfigTool, buildGenerateHtmlPageTool } from "@/lib/outcomes/runtime-tools";
 
 /** Coarse grouping for the UI's section headings. */
 export type BuiltinToolCategory = "sandbox" | "search" | "outcomes";
@@ -53,6 +53,14 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       "Execute Python/JavaScript in an isolated sandbox with read-only datasets at ./data/<name>/.",
     category: "sandbox",
     build: buildRunInSandboxTool,
+  },
+  {
+    name: "generate_html_page",
+    displayName: "Generate HTML page",
+    description:
+      "Generate a complete HTML page and render it in a sandboxed iframe for rich visual content.",
+    category: "outcomes",
+    build: buildGenerateHtmlPageTool,
   },
   {
     name: "web_search",

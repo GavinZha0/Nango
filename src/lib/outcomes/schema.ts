@@ -123,3 +123,97 @@ export interface GenerateEchartsConfigFailure {
 export type GenerateEchartsConfigResult =
   | GenerateEchartsConfigSuccess
   | GenerateEchartsConfigFailure;
+
+// ─── generate_html_page ─────────────────────────────────────────────
+
+/**
+ * Hard upper bound on the HTML string a single
+ * `generate_html_page` call can carry. HTML pages are typically
+ * larger than ECharts configs because they may embed inline CSS,
+ * JS, and SVG content. Heavy libraries should be referenced via
+ * public CDN links rather than inlined.
+ */
+export const HTML_PAGE_HARD_CAP_BYTES = 524_288; // 512 KB
+
+/**
+ * Parameter schema for the `generate_html_page` server tool.
+ *
+ * LLM-facing — every `.describe` text ends up in the model's tool
+ * catalog. The schema also drives client-side render-tool parameter
+ * validation (CopilotKit `useRenderTool`).
+ */
+export const generateHtmlPageSchema = z.object({
+  page_id: z
+    .string()
+    .regex(
+      /^[a-z0-9-]+$/,
+      "page_id must be lowercase kebab-case (letters, numbers, hyphens only)",
+    )
+    .min(1, "page_id cannot be empty")
+    .max(64, "page_id max 64 characters")
+    .describe(
+      "Stable per-thread identifier; re-calling with the same id " +
+        "overwrites the previous page. Pick a short kebab-case slug " +
+        "like 'landing-page' or 'dashboard-preview'. Lowercase " +
+        "letters, numbers, and hyphens only.",
+    ),
+  title: z
+    .string()
+    .min(1, "title cannot be empty")
+    .describe(
+      "Human-readable page title (shown on the card header).",
+    ),
+  description: z
+    .string()
+    .optional()
+    .describe("One-sentence description of what the page shows."),
+  html: z
+    .string()
+    .min(1, "html cannot be empty")
+    .describe(
+      [
+        "Complete, self-contained HTML page source.",
+        "Small CSS/JS should be inlined via <style> and <script> tags.",
+        "For large libraries (D3, Three.js, Tailwind, Chart.js, etc.), " +
+          "use public CDN links (cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com).",
+        "The page renders inside a sandboxed iframe — external navigation and form " +
+          "submissions are blocked.",
+        "",
+        "Example:",
+        "  <!DOCTYPE html>",
+        "  <html><head><style>body{font-family:sans-serif;padding:2rem}</style></head>",
+        "  <body><h1>Hello</h1><p>This is a generated page.</p></body></html>",
+      ].join("\n"),
+    ),
+});
+
+export type GenerateHtmlPageArgs = z.infer<typeof generateHtmlPageSchema>;
+
+/**
+ * Shape returned by the server tool's `execute()` on success.
+ * Mirrored verbatim into the AG-UI `tool_call_result` payload so
+ * the frontend side-effect hook can read it without re-deriving
+ * fields from the original args.
+ */
+export interface GenerateHtmlPageSuccess {
+  ok: true;
+  page_id: string;
+  title: string;
+  description?: string;
+  html: string;
+}
+
+/**
+ * Shape returned by the server tool's `execute()` on validation
+ * failure. `error` is a stable code; `message` is a human-readable
+ * (and LLM-readable) explanation.
+ */
+export interface GenerateHtmlPageFailure {
+  ok: false;
+  error: "HTML_TOO_LARGE" | "HTML_EMPTY";
+  message: string;
+}
+
+export type GenerateHtmlPageResult =
+  | GenerateHtmlPageSuccess
+  | GenerateHtmlPageFailure;

@@ -14,6 +14,7 @@ import { ApiError, withSession } from "@/lib/http/route-handlers";
 import type { Outcome } from "@/store/outcome-store";
 import {
   rebuildChartOutcome,
+  rebuildHtmlPageOutcome,
   rebuildWebSearchOutcome,
   type RebuildContext,
   type ToolCallChunkPayload,
@@ -33,7 +34,7 @@ const ROUTE = "/api/threads/[threadId]/outcomes" as const;
 /** Tool names this replay endpoint knows how to rebuild. Mirrors
  *  the dispatch switch in the loop body — adding a new tool
  *  requires touching both sides (compile-friction is intentional). */
-const REBUILDABLE_TOOLS = ["generate_echarts_config", "web_search"] as const;
+const REBUILDABLE_TOOLS = ["generate_echarts_config", "generate_html_page", "web_search"] as const;
 type RebuildableTool = (typeof REBUILDABLE_TOOLS)[number];
 
 function isRebuildable(name: string | undefined): name is RebuildableTool {
@@ -83,7 +84,7 @@ export const GET = withSession<{ threadId: string }>(
           or(
             and(
               eq(EntityRunEventTable.type, "tool_call_chunk"),
-              sql`${EntityRunEventTable.payload}->>'toolName' IN ('generate_echarts_config', 'web_search')`,
+              sql`${EntityRunEventTable.payload}->>'toolName' IN ('generate_echarts_config', 'generate_html_page', 'web_search')`,
             ),
             eq(EntityRunEventTable.type, "tool_call_result"),
           ),
@@ -115,12 +116,24 @@ export const GET = withSession<{ threadId: string }>(
         const chunk = row.payload as ToolCallChunkPayload;
         if (!isRebuildable(chunk.toolName)) continue;
 
-        // generate_echarts_config rebuilds from chunk only — the
-        // result event is a server-side echo of the same payload,
-        // and the chunk already carries everything needed to
-        // reconstruct the outcome.
+        // generate_echarts_config and generate_html_page rebuild from
+        // chunk only — the result event is a server-side echo of the
+        // same payload, and the chunk already carries everything
+        // needed to reconstruct the outcome.
         if (chunk.toolName === "generate_echarts_config") {
           const built = rebuildChartOutcome(chunk, {
+            threadId,
+            runId: row.runId,
+            entityId: row.entityId,
+            ts: row.eventTs,
+            log,
+          });
+          if (built) outcomes.set(built.id, built.outcome);
+          continue;
+        }
+
+        if (chunk.toolName === "generate_html_page") {
+          const built = rebuildHtmlPageOutcome(chunk, {
             threadId,
             runId: row.runId,
             entityId: row.entityId,

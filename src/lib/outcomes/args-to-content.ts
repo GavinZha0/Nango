@@ -24,6 +24,7 @@ import "server-only";
 
 import type {
   ChartBlock,
+  HtmlBlock,
   OutcomeBlock,
 } from "@/store/outcome-store";
 
@@ -99,6 +100,66 @@ export function readGenerateEchartsConfigArgs(
   }
   if (typeof args.dataset_id === "string") {
     out.dataset_id = args.dataset_id;
+  }
+  return out;
+}
+
+// ─── generate_html_page ────────────────────────────────────────────────
+
+/**
+ * Subset of `generate_html_page` args we project into the content
+ * blocks. Mirrors `generateHtmlPageSchema` in
+ * `lib/outcomes/schema.ts`.
+ */
+export interface GenerateHtmlPageArtifactArgs {
+  page_id: string;
+  title: string;
+  description?: string;
+  html: string;
+}
+
+/**
+ * Build the renderable content payload for a `generate_html_page`
+ * artifact. Returns `null` when the args don't carry a usable HTML
+ * string; the save flow surfaces that as a hard error, the replay
+ * flow skips the row.
+ */
+export function htmlArgsToContent(
+  args: GenerateHtmlPageArtifactArgs,
+): { blocks: OutcomeBlock[] } | null {
+  if (typeof args.html !== "string" || args.html.trim().length === 0) {
+    return null;
+  }
+  const block: HtmlBlock = {
+    kind: "html",
+    html: args.html,
+  };
+  return { blocks: [block] };
+}
+
+/**
+ * Defensive read of an arbitrary args object into
+ * `GenerateHtmlPageArtifactArgs` shape. Returns `null` when the
+ * required fields aren't present — the caller treats that as "this
+ * isn't a generate_html_page payload".
+ */
+export function readGenerateHtmlPageArgs(
+  args: Record<string, unknown>,
+): GenerateHtmlPageArtifactArgs | null {
+  const page_id = args.page_id;
+  const title = args.title;
+  if (typeof page_id !== "string" || page_id.length === 0) return null;
+  if (typeof title !== "string" || title.length === 0) return null;
+  if (typeof args.html !== "string" || args.html.trim().length === 0) {
+    return null;
+  }
+  const out: GenerateHtmlPageArtifactArgs = {
+    page_id,
+    title,
+    html: args.html,
+  };
+  if (typeof args.description === "string") {
+    out.description = args.description;
   }
   return out;
 }

@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
     "pg",
     "pg-native",
     "vertica-nodejs",
+    "node-ical",
   ],
 
   env: {

@@ -519,6 +519,7 @@ function deriveArtifactType(toolName: string): ArtifactType {
   switch (toolName) {
     case "generate_echarts_config":
       return "chart";
+    case "generate_html_page":
     case "render_html":
       return "html";
     case "render_markdown":
