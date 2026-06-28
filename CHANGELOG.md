@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/GavinZha0/Nango/compare/v0.4.0...v0.4.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* issues of Verfication/Evaluation ([198885a](https://github.com/GavinZha0/Nango/commit/198885af78bbd0110428398ecf24a622f74e3d2d))
+
 ## [0.4.0](https://github.com/GavinZha0/Nango/compare/v0.3.3...v0.4.0) (2026-06-28)
 
 
