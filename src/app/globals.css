@@ -177,18 +177,21 @@ body[style*="color-scheme: dark"] {
 /* Left-align user messages (CopilotKit defaults to right-aligned).            */
 .copilotKitUserMessage {
   align-items: flex-start !important;
+  max-width: 100% !important;
 }
 .copilotKitUserMessage > div {
   align-items: flex-start !important;
+  max-width: 100% !important;
 }
 .copilotKitUserMessage [data-testid="copilot-user-toolbar"] {
-  justify-content: flex-start !important;
+  display: none !important;
 }
 /* User message bubble styling.                                                */
 .copilotKitUserMessage [class*="prose"] {
   background-color: #b9f8cf !important;
   color: #000 !important;
   padding-block: 2px !important;
+  max-width: 100% !important;
 }
 /* Hide the copy button on assistant messages.                                 */
 .copilotKitAssistantMessage [data-testid="copilot-copy-button"] {

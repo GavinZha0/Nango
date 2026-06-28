@@ -9,6 +9,7 @@ export {
   CopilotChat,
   CopilotChatView,
   CopilotChatAssistantMessage,
+  CopilotChatUserMessage,
   useCopilotKit,
   useAgent,
   useFrontendTool,
@@ -20,6 +21,7 @@ export {
 export type {
   CopilotChatAssistantMessageProps,
   CopilotChatViewProps,
+  CopilotChatUserMessageProps,
 } from "@copilotkit/react-core/v2";
 
 import { useAgent } from "@copilotkit/react-core/v2";

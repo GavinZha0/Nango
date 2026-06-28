@@ -2,17 +2,21 @@
 
 import "@copilotkit/react-ui/v2/styles.css";
 
-import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CopilotChat,
   CopilotChatAssistantMessage,
+  CopilotChatUserMessage,
   CopilotChatView,
   type CopilotAgent,
   type CopilotChatAssistantMessageProps,
+  type CopilotChatUserMessageProps,
   type CopilotChatViewProps,
   useAgent,
   useCopilotKit,
 } from "@/lib/copilot/client";
+
+import { cn } from "@/lib/utils";
 
 import { useWorkspaceStore } from "@/store/workspace";
 import { NangoSlotButton } from "@/components/right-panels/NangoSlotButton";
@@ -87,6 +91,46 @@ function useOnRegenerate(agent: CopilotAgent | undefined) {
   }, []); // stable — deps captured via refs
 }
 
+function CollapsibleUserMessage(props: CopilotChatUserMessageProps): ReactNode {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [canCollapse, setCanCollapse] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      if (containerRef.current) {
+        const proseEl = containerRef.current.querySelector('[class*="prose"]') as HTMLElement;
+        if (proseEl && !isExpanded) {
+          // If the intrinsic height (scrollHeight) is greater than the clamped height
+          // (clientHeight), the text is overflowing the 3-line limit.
+          setCanCollapse(proseEl.scrollHeight > proseEl.clientHeight);
+        }
+      }
+    };
+
+    const timeout = setTimeout(checkOverflow, 50);
+    return () => clearTimeout(timeout);
+  }, [props.message.content, isExpanded]);
+
+  return (
+    <div className="relative group/user-msg flex flex-col w-full">
+      <div
+        ref={containerRef}
+        onClick={() => {
+          if (canCollapse) setIsExpanded(!isExpanded);
+        }}
+        className={cn(
+          "transition-all duration-200",
+          canCollapse && "cursor-pointer hover:opacity-95",
+          !isExpanded && "[&_[class*='prose']]:line-clamp-3 [&_[class*='prose']]:overflow-hidden [&_[class*='prose']]:[-webkit-box-orient:vertical]"
+        )}
+      >
+        <CopilotChatUserMessage {...props} />
+      </div>
+    </div>
+  );
+}
+
 // ChatViewShell — chatView slot wrapper
 
 /** Slot wrapper inside CopilotChat's chatConfig provider. Hooks
@@ -118,16 +162,32 @@ function ChatViewShellBody({
 
   // Wire up onRegenerate; thumbs/read-aloud slots are no-op stubs.
   const AssistantMessageWithRegenerate = useCallback(
-    (props: CopilotChatAssistantMessageProps) => (
-      <CopilotChatAssistantMessage
-        {...props}
-        onRegenerate={onRegenerate}
-        onThumbsUp={noop}
-        onThumbsDown={noop}
-        onReadAloud={noop}
-      />
-    ),
-    [onRegenerate],
+    (props: CopilotChatAssistantMessageProps) => {
+      // Determine if this is the last message of the assistant's current turn.
+      // If there's another assistant message or tool call immediately after this one,
+      // we hide the toolbar to avoid rendering multiple sets of action buttons.
+      const messages = agent.messages;
+      const index = messages.findIndex((m) => m.id === props.message.id);
+      
+      let isEndOfTurn = true;
+      if (index !== -1 && index < messages.length - 1) {
+        const nextMessage = messages[index + 1];
+        if (nextMessage?.role !== "user") {
+          isEndOfTurn = false;
+        }
+      }
+
+      return (
+        <CopilotChatAssistantMessage
+          {...props}
+          onRegenerate={isEndOfTurn ? onRegenerate : undefined}
+          onThumbsUp={isEndOfTurn ? noop : undefined}
+          onThumbsDown={isEndOfTurn ? noop : undefined}
+          onReadAloud={isEndOfTurn ? noop : undefined}
+        />
+      );
+    },
+    [onRegenerate, agent.messages],
   );
 
   // `SlotValue<C>` requires `C` (a namespace component with static fields)
@@ -135,6 +195,8 @@ function ChatViewShellBody({
   // satisfy TS without forcing our render fn into a namespace shape.
   const messageView = useMemo(
     () => ({
+      userMessage:
+        CollapsibleUserMessage as unknown as typeof CopilotChatUserMessage,
       assistantMessage:
         AssistantMessageWithRegenerate as unknown as typeof CopilotChatAssistantMessage,
     }),
