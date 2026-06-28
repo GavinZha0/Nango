@@ -143,4 +143,4 @@ export interface CaseExecutionOutcome {
  *  between "fits in a single TOAST inline page" and "covers the typical
  *  structured MCP response without trimming"; tools returning larger
  *  blobs should be re-run from the editor to see the full body. */
-export const RESULT_PAYLOAD_MAX_BYTES = 8 * 1024;
+export const RESULT_PAYLOAD_MAX_BYTES = 24 * 1024;

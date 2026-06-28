@@ -378,7 +378,7 @@ export function VerificationSuiteEditor({
             Workflow verification cases are coming in a later release.
           </p>
         ) : (
-          <div className="grid h-full grid-cols-[260px_1fr] overflow-hidden">
+          <div className="grid h-full grid-cols-[20%_1fr] overflow-hidden">
             <CaseTree
               cases={cases}
               serverNameById={serverNameById}
@@ -395,7 +395,8 @@ export function VerificationSuiteEditor({
                 !isWorkflow ? (
                   <Button
                     size="sm"
-                    className="h-6 px-2 text-xs"
+                    className="h-6 w-6 p-0"
+                    variant="ghost"
                     onClick={handleStartRun}
                     disabled={
                       starting || !row.enabled || liveRun.phase === "running"
@@ -405,15 +406,14 @@ export function VerificationSuiteEditor({
                         ? "Enable the suite to run it."
                         : liveRun.phase === "running"
                           ? "A run is already in progress."
-                          : "Run all cases in this suite."
+                          : "Run suite"
                     }
                   >
                     {starting || liveRun.phase === "running" ? (
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
+                      <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
                     )}
-                    Run suite
                   </Button>
                 ) : null
               }

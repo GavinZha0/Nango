@@ -159,7 +159,7 @@ create a case in a `category='workflow'` suite returns
 
 ## 8. UI
 
-The UI is built around `/verification/[id]`, consisting of a left CaseTree column and a right CaseInspector column (2x2 grid: Input, Assertions, Output, Verdicts).
+The UI is built around `/verification/[id]`, consisting of three columns: a left CaseTree column, a middle column (Input, Assertions), and a right column (Output, Verdicts).
 
 - **CaseTree**: Displays suites and nested cases. Includes statuses driven by live SSE updates or snapshot loads.
 - **Recent Runs Banner**: A horizontal list of recent suite runs (`#N · ✓4 ✗2`), allowing pagination. Clicking a run switches the editor into read-only snapshot mode (history-view).
@@ -185,7 +185,7 @@ user-authored.
 
 ## 10. Operational Notes
 
-- **Payload truncation**: `result_payload` is capped at 8 KB. Assertions evaluate on the full payload before truncation.
+- **Payload truncation**: `result_payload` is capped at 24 KB. Assertions evaluate on the full payload before truncation.
 - **Concurrency**: MCP cases reuse clients from `mcp/provider-pool`.
 - **Schema drift**: Assertions are editable after runs; history-view strictly shows the historical `assertion_results` verdicts, not the latest definitions.
 
@@ -195,5 +195,5 @@ user-authored.
 - **Shareable history-view URLs**: Promote UI state to `?run=<id>`.
 - **AI-assisted case generation**: Supervisor tool to bulk-author test cases.
 - **Schedule-driven regression**: Hook suites into the scheduler.
-- **Result blob storage**: Offload >8 KB payloads if needed.
+- **Result blob storage**: Offload >24 KB payloads if needed.
 

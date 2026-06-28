@@ -167,7 +167,7 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSave} disabled={selectedDims.size === 0 || !selectedEvalId}>Save</Button>
+          <Button onClick={handleSave} disabled={!selectedEvalId}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

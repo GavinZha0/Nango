@@ -39,6 +39,7 @@ import {
   SUPERVISOR_PROMPT,
 } from "@/lib/constants/supervisor";
 import type { AgentRole } from "@/lib/db/schema";
+import { DEFAULT_EVALUATOR_SYSTEM_PROMPT } from "@/lib/evaluation/types";
 export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 import type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 
@@ -710,7 +711,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     "h-8 flex-1 text-xs",
                     form.role === "supervisor" && "bg-muted text-muted-foreground",
                   )}
-                  placeholder="What this agent does (one-sentence summary surfaced to the supervisor)"
+                  placeholder="One-sentence summary of the agent's responsibility"
                   title={form.role === "supervisor" ? "Supervisor description is locked." : undefined}
                 />
               </div>
@@ -738,11 +739,19 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                       }));
                     } else {
                       const snap = preSupervisorSnapshot.current;
-                      setForm((prev) => ({
-                        ...prev,
-                        role: newRole,
-                        ...(prev.role === "supervisor" ? (snap ?? {}) : {}),
-                      }));
+                      setForm((prev) => {
+                        const restored = prev.role === "supervisor" && snap ? snap : {};
+                        const nextName = (prev.role === "supervisor" ? snap?.name : undefined) ?? prev.name;
+                        const nextPrompt = (prev.role === "supervisor" ? snap?.prompt : undefined) ?? prev.prompt;
+                        
+                        return {
+                          ...prev,
+                          role: newRole,
+                          ...restored,
+                          ...(newRole === "evaluator" && nextPrompt.trim() === "" ? { prompt: DEFAULT_EVALUATOR_SYSTEM_PROMPT } : {}),
+                          ...(newRole === "evaluator" && nextName.trim() === "" ? { name: "Evaluator" } : {}),
+                        };
+                      });
                       if (form.role === "supervisor") {
                          preSupervisorSnapshot.current = null;
                       }

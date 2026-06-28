@@ -1,8 +1,9 @@
 # Evaluation Subsystem
 
 > **Status**: Stage 1 — schema, CRUD, and editor UI are shipped.
-> The run executor (agent dispatch + evaluator scoring) is not yet
-> implemented; the right-side result panel shows placeholder scores.
+> **Next (Stage 2)**: The run executor (agent dispatch + evaluator scoring).
+> This involves wiring up the `Run` API endpoints, executing the target agent,
+> dispatching the evaluator agent, parsing scores, and persisting results to `eval_case_result`.
 
 **Position in the product**: a *stochastic* LLM-as-Judge quality
 assessment framework for agent conversations. Complementary to the
@@ -59,15 +60,15 @@ Five tables. Migration: `0005_eval-tables.sql`.
 
 ## 3. Evaluation Dimensions
 
-12 builtin dimensions across 4 categories, defined as code constants
-in `lib/evaluation/types.ts` (`BUILTIN_DIMENSIONS`).
+5 builtin specialized dimensions across 4 categories, defined as code constants
+in `lib/evaluation/types.ts` (`BUILTIN_DIMENSIONS`). The foundational criteria (Task Completion, Safety, Fluency) are baked into the `DEFAULT_EVALUATOR_SYSTEM_PROMPT` universal baseline, while these specialized dimensions are injected dynamically.
 
 | Category | Dimensions |
 |---|---|
-| Text Quality | helpfulness, coherence, conciseness, toxicity, tone |
-| Factuality | hallucination, faithfulness |
-| Agent & Reasoning | topic-adherence, goal-accuracy, exec-completeness, tool-usage |
-| Format & Domain | format-compliance, sql-equivalence |
+| Knowledge & RAG | faithfulness |
+| Agent & Execution | tool-correctness |
+| Formatting & Output | format-compliance, code-accuracy |
+| Persona & Style | tone-persona |
 
 Suite-level dimension selection; per-case override via `dimension_override`.
 
@@ -83,7 +84,7 @@ evaluation paths:
 | Field | Purpose |
 |---|---|
 | `issue` | User-reported problem observed during conversation. |
-| `expected_outcome` | Natural language description of correct behavior. |
+| `expectation` | Natural language description of correct behavior. |
 | `reference` | Ground truth / reference answer. |
 | `context[]` | Supplementary business rules or knowledge snippets. |
 

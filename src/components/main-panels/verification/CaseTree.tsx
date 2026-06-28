@@ -166,7 +166,7 @@ export function CaseTree({
 
   return (
     <div className="flex h-full flex-col border-r">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Cases
         </h2>
@@ -182,6 +182,7 @@ export function CaseTree({
               size="icon"
               className="h-6 w-6"
               onClick={onNewCase}
+              title="Add case"
               aria-label="New case"
             >
               <Plus className="h-3.5 w-3.5" />

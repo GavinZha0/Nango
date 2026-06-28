@@ -257,7 +257,7 @@ function extractMcpErrorText(raw: unknown): string | null {
 /**
  * Persistence-side truncation. Assertions run against the FULL value
  * so this is purely an artefact-storage concern. We measure JSON byte
- * length; payloads larger than {@link RESULT_PAYLOAD_MAX_BYTES} (8 KB)
+ * length; payloads larger than {@link RESULT_PAYLOAD_MAX_BYTES} (24 KB)
  * are swapped for a placeholder summarising the truncation.
  */
 function truncatePayload(raw: unknown): {

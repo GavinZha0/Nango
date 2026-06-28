@@ -113,7 +113,7 @@ export function SaveToEvalDialog({
 
       const criteria: Record<string, unknown> = {};
       if (issue.trim()) criteria.issue = issue.trim();
-      if (expectedOutcome.trim()) criteria.expected_outcome = expectedOutcome.trim();
+      if (expectedOutcome.trim()) criteria.expectation = expectedOutcome.trim();
 
       const input: CreateCaseInput = {
         name: caseName,

@@ -458,80 +458,6 @@ export function CaseInspector({
       {/* Top toolbar spans both columns so the four panes below share
           a single vertical baseline — OUTPUT lines up with INPUT and
           VERDICTS lines up with ASSERTIONS. */}
-      <div
-        className={cn(
-          "flex items-center gap-2 border-b px-3 py-2",
-          // History tint — amber background + bottom border so the row
-          // itself acts as the "you're viewing run #N" indicator,
-          // replacing the previous standalone notice bar.
-          showHistoryChrome &&
-            "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        )}
-      >
-        {showHistoryChrome && (
-          <span
-            className="text-xs font-semibold"
-            title={`Viewing snapshot of run #${historyMeta!.seq} — started ${historyStartedAtLabel}`}
-          >
-            #{historyMeta!.seq}
-          </span>
-        )}
-        {displayedOutcome && (
-          <>
-            <span
-              className={cn(
-                "text-xs font-semibold",
-                // In history-view the row already carries amber. Keep
-                // the status word readable but defer color to the row
-                // tint so the whole line reads as one history badge.
-                showHistoryChrome
-                  ? "text-amber-700 dark:text-amber-300"
-                  : outcomeStatusColor(displayedOutcome.status),
-              )}
-            >
-              {displayedOutcome.status.toUpperCase()}
-            </span>
-            <span
-              className={cn(
-                "text-[11px]",
-                showHistoryChrome
-                  ? "text-amber-700/80 dark:text-amber-300/80"
-                  : "text-muted-foreground",
-              )}
-            >
-              {displayedOutcome.durationMs} ms
-              {historyStartedAtLabel && (
-                <span className="ml-1">({historyStartedAtLabel})</span>
-              )}
-            </span>
-          </>
-        )}
-        <Button
-          size="sm"
-          // h-6 + text-xs to baseline-match the Run suite button on the
-          // sibling CaseTree header — they share the same `py-2` outer
-          // padding, so equal inner heights guarantee aligned bottom
-          // borders across the two columns.
-          className="ml-auto h-6 px-2 text-xs"
-          onClick={() => void handleRunCase()}
-          disabled={running || !caseRow.enabled}
-          title={
-            !caseRow.enabled
-              ? "Enable the case to run it."
-              : showHistoryChrome
-                ? "Run this case now — exits history view."
-                : "Run this case once. Result is shown below — nothing is persisted."
-          }
-        >
-          {running ? (
-            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          ) : (
-            <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
-          )}
-          Run case
-        </Button>
-      </div>
-
       {/* Transport / orchestration error from `handleRunCase`. The
           outcome-level error envelope is rendered separately inside
           VERDICTS so it sits next to the assertion verdicts it
@@ -542,49 +468,132 @@ export function CaseInspector({
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_1fr]">
+      <div className="grid h-full grid-cols-2 overflow-hidden">
         {/* --- Left column: Input (top, 2fr) + Assertions (bottom, 3fr) --- */}
-        <div className="grid min-h-0 grid-rows-[2fr_3fr] overflow-hidden lg:border-r">
-          <JsonPane
-            label="Input"
-            hint=""
-            draft={inputDraft}
-            readOnly={readOnly}
-            ariaLabel="Case input JSON"
-            overrideText={inputOverrideText}
-          />
-          <JsonPane
-            label="Assertions"
-            hint=""
-            draft={assertionsDraft}
-            readOnly={readOnly}
-            ariaLabel="Case assertions JSON"
-            placeholder={ASSERTIONS_PLACEHOLDER}
-            overrideText={assertionsHistoryNotice}
-            // Mirror the `(N)` count Verdicts shows on the right.
-            // We use the committed `caseRow.assertions` rather than
-            // parsing the live draft so an in-flight invalid edit
-            // doesn't flicker the badge. Suppressed in history view
-            // (the override notice owns the body).
-            count={
-              showHistoryChrome ? null : (caseRow.assertions?.length ?? 0)
-            }
-          />
+        <div className="flex min-h-0 flex-col border-r min-w-0">
+          <div className="flex h-8 shrink-0 items-center border-b border-l bg-muted/40 px-3">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Input
+            </span>
+            {inputDraft.saving && (
+              <Loader2 className="ml-2 h-3 w-3 animate-spin text-muted-foreground" />
+            )}
+            <Button
+              size="sm"
+              className="ml-auto h-6 px-2 text-xs"
+              onClick={() => void handleRunCase()}
+              disabled={running || !caseRow.enabled}
+              title={
+                !caseRow.enabled
+                  ? "Enable the case to run it."
+                  : showHistoryChrome
+                    ? "Run this case now — exits history view."
+                    : "Run this case once. Result is shown below — nothing is persisted."
+              }
+            >
+              {running ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
+              )}
+              Run case
+            </Button>
+          </div>
+          
+          <div className="grid min-h-0 flex-1 grid-rows-[2fr_3fr] overflow-hidden">
+            <JsonPane
+              label="Input"
+              hideHeader
+              hint=""
+              draft={inputDraft}
+              readOnly={readOnly}
+              ariaLabel="Case input JSON"
+              overrideText={inputOverrideText}
+            />
+            <JsonPane
+              label="Assertions"
+              hint=""
+              draft={assertionsDraft}
+              readOnly={readOnly}
+              ariaLabel="Case assertions JSON"
+              placeholder={ASSERTIONS_PLACEHOLDER}
+              overrideText={assertionsHistoryNotice}
+              count={
+                showHistoryChrome ? null : (caseRow.assertions?.length ?? 0)
+              }
+            />
+          </div>
         </div>
 
         {/* --- Right column: Output (top, 2fr) ↔ Input,
                               Verdicts (bot, 3fr) ↔ Assertions --- */}
-        <div className="grid min-h-0 grid-rows-[2fr_3fr] overflow-hidden">
-          <OutputPane
-            outcome={displayedOutcome}
-            running={running}
-            readOnly={readOnly}
-          />
-          <VerdictsPane
-            outcome={displayedOutcome}
-            running={running}
-            readOnly={readOnly}
-          />
+        <div className="flex min-h-0 flex-col min-w-0">
+          <div
+            className={cn(
+              "flex h-8 shrink-0 items-center border-b border-l px-3",
+              showHistoryChrome
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "bg-muted/40"
+            )}
+          >
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Output
+            </span>
+            {displayedOutcome?.resultTruncated && (
+              <span className="ml-2 text-[10px] text-muted-foreground">(truncated)</span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {showHistoryChrome && (
+                <span
+                  className="text-xs font-semibold"
+                  title={`Viewing snapshot of run #${historyMeta!.seq} — started ${historyStartedAtLabel}`}
+                >
+                  #{historyMeta!.seq}
+                </span>
+              )}
+              {displayedOutcome && (
+                <>
+                  <span
+                    className={cn(
+                      "text-xs font-semibold",
+                      showHistoryChrome
+                        ? "text-amber-700 dark:text-amber-300"
+                        : outcomeStatusColor(displayedOutcome.status),
+                    )}
+                  >
+                    {displayedOutcome.status.toUpperCase()}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-[11px]",
+                      showHistoryChrome
+                        ? "text-amber-700/80 dark:text-amber-300/80"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {displayedOutcome.durationMs} ms
+                    {historyStartedAtLabel && (
+                      <span className="ml-1">({historyStartedAtLabel})</span>
+                    )}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="grid min-h-0 flex-1 grid-rows-[2fr_3fr] overflow-hidden">
+            <OutputPane
+              outcome={displayedOutcome}
+              running={running}
+              readOnly={readOnly}
+              hideHeader
+            />
+            <VerdictsPane
+              outcome={displayedOutcome}
+              running={running}
+              readOnly={readOnly}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -615,6 +624,8 @@ interface JsonPaneProps {
   /** Optional item-count badge rendered next to the label, e.g.
    *  `Assertions (3)` to mirror the Verdicts pane. `null` hides it. */
   count?: number | null;
+  /** Hides the internal header if lifted to a parent container. */
+  hideHeader?: boolean;
 }
 
 function JsonPane({
@@ -626,6 +637,7 @@ function JsonPane({
   placeholder,
   overrideText = null,
   count = null,
+  hideHeader = false,
 }: JsonPaneProps): ReactNode {
   // Override wins when present — it carries history-view content
   // (input snapshot OR an explanatory notice) that must never be
@@ -636,18 +648,20 @@ function JsonPane({
     overrideText === null && !!placeholder && draft.text.trim() === "";
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
-        {count !== null && (
-          <span className="text-[10px] text-muted-foreground">({count})</span>
-        )}
-        {draft.saving && (
-          <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
-        )}
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pb-2">
+      {!hideHeader && (
+        <div className="flex items-center gap-2 px-3 py-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {label}
+          </span>
+          {count !== null && (
+            <span className="text-[10px] text-muted-foreground">({count})</span>
+          )}
+          {draft.saving && (
+            <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
+          )}
+        </div>
+      )}
+      <div className={cn("flex min-h-0 flex-1 flex-col gap-1 px-3 pb-2", hideHeader && "pt-2")}>
         {/* Relative wrapper hosts the ghost-text overlay. */}
         <div className="relative min-h-0 flex-1">
           <textarea
@@ -680,7 +694,9 @@ function JsonPane({
         {draft.parseError && overrideText === null && (
           <p className="text-[11px] text-destructive">{draft.parseError}</p>
         )}
-        <p className="text-[10px] text-muted-foreground">{hint}</p>
+        {hint ? (
+          <p className="text-[10px] text-muted-foreground">{hint}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -707,6 +723,7 @@ interface OutputPaneProps {
   outcome: CaseExecutionOutcome | null;
   running: boolean;
   readOnly: boolean;
+  hideHeader?: boolean;
 }
 
 /**
@@ -715,19 +732,21 @@ interface OutputPaneProps {
  * envelope) once a run has produced one. Before that, shows an
  * in-frame placeholder so the box itself never disappears.
  */
-function OutputPane({ outcome, running, readOnly }: OutputPaneProps): ReactNode {
+function OutputPane({ outcome, running, readOnly, hideHeader = false }: OutputPaneProps): ReactNode {
   const truncated: boolean = outcome?.resultTruncated ?? false;
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Output
-        </span>
-        {truncated && (
-          <span className="text-[10px] text-muted-foreground">(truncated)</span>
-        )}
-      </div>
-      <div className="min-h-0 flex-1 px-3 pb-2">
+      {!hideHeader && (
+        <div className="flex items-center gap-2 px-3 py-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Output
+          </span>
+          {truncated && (
+            <span className="text-[10px] text-muted-foreground">(truncated)</span>
+          )}
+        </div>
+      )}
+      <div className={cn("min-h-0 flex-1 px-3 pb-2", hideHeader && "pt-2")}>
         {outcome && outcome.resultPayload !== null ? (
           <pre className="h-full w-full overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] leading-relaxed">
             {JSON.stringify(outcome.resultPayload, null, 2)}

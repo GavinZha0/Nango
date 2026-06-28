@@ -13,7 +13,7 @@ import { useState, useMemo, useCallback, type ReactNode } from "react";
 import {
   Play,
   Loader2,
-  Plus,
+  SquarePlus,
   Save,
   Trash2,
   SlidersHorizontal,
@@ -168,7 +168,7 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
       <Textarea
         value={text}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder={'{\n  "expected_outcome": "...",\n  "tool_calls": ["..."],\n  "expected_keywords": ["..."],\n  "assertions": ["duration_ms <= 5000"]\n}'}
+        placeholder={'{\n  "expectation": "...",\n  "tool_calls": ["..."],\n  "expected_keywords": ["..."],\n  "assertions": ["duration_ms <= 5000"]\n}'}
         className={cn("flex-1 font-mono text-xs resize-none field-sizing-fixed", error ? "border-destructive" : "border-amber-500/30")}
       />
       {error && <p className="text-[10px] text-destructive shrink-0">{error}</p>}
@@ -178,10 +178,10 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
 
 // Score bar
 
-function ScoreBar({ dimensionId, score }: { dimensionId: string; score: number | null }): ReactNode {
+function ScoreBar({ dimensionId, nameOverride, score }: { dimensionId: string; nameOverride?: string; score: number | null }): ReactNode {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 truncate text-xs text-muted-foreground">{dimensionName(dimensionId)}</span>
+      <span className="w-28 shrink-0 truncate text-xs text-muted-foreground">{nameOverride ?? dimensionName(dimensionId)}</span>
       <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
         {score !== null && (
           <div
@@ -296,12 +296,9 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
       {/* Middle: conversation (top) + criteria/response tabs (bottom) */}
       <div className="flex flex-[4] flex-col border-r min-w-0">
         {/* Top: conversation turns */}
-        <div className="flex h-8 items-center border-b bg-muted/40 px-3">
+        <div className="flex h-10 shrink-0 items-center border-b bg-muted/40 px-3">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Conversation
-          </span>
-          <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">
-            ({turns.length})
           </span>
           <div className="ml-auto flex items-center gap-1">
             {/* Dimension override dropdown */}
@@ -350,15 +347,16 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
             </DropdownMenu>
             <Button
               size="sm"
+              variant="ghost"
               className="h-6 w-6 p-0"
               onClick={addTurn}
               title="Add turn"
             >
-              <Plus className="h-3 w-3" />
+              <SquarePlus className="h-3 w-3" />
             </Button>
             <Button
               size="sm"
-              variant={canSave ? "default" : "outline"}
+              variant="ghost"
               className="h-6 w-6 p-0"
               disabled={!canSave}
               onClick={handleSave}
@@ -441,32 +439,32 @@ export function EvalCaseInspector({ evalCase, suite }: EvalCaseInspectorProps): 
 
         {/* Right: evaluation result */}
         <div className="flex flex-[3] flex-col min-w-0">
-          <div className="flex h-8 items-center border-b bg-muted/40 px-3">
+          <div className="flex h-10 shrink-0 items-center border-b bg-muted/40 px-3">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Evaluation
             </span>
           </div>
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="space-y-4 p-3">
-              {/* Dimension list (no scores yet — will show after run) */}
-              {activeDimensions.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Dimensions
-                  </span>
-                  <div className="space-y-1.5">
-                    {activeDimensions.map((dimId) => (
-                      <ScoreBar key={dimId} dimensionId={dimId} score={null} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <p className="text-xs text-muted-foreground">
-                No evaluation result yet. Click Run case to evaluate.
-              </p>
+          <div className="flex flex-1 flex-col p-3 min-h-0 gap-4">
+            <div className="shrink-0 space-y-4">
+              <ScoreBar dimensionId="overall" nameOverride="Overall Score" score={null} />
+              <div className="h-px bg-border w-full" />
+              <div className="space-y-1.5">
+                <ScoreBar dimensionId="baseline" nameOverride="Baseline" score={null} />
+                {activeDimensions.map((dimId) => (
+                  <ScoreBar key={dimId} dimensionId={dimId} score={null} />
+                ))}
+              </div>
             </div>
-          </ScrollArea>
+
+            <div className="flex flex-col flex-1 min-h-0 space-y-1.5">
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Summary
+              </span>
+              <div className="flex-1 overflow-y-auto text-xs text-muted-foreground bg-muted/30 p-2 rounded border border-dashed">
+                No evaluation result yet. Click Run case to evaluate.
+              </div>
+            </div>
+          </div>
         </div>
     </div>
   );

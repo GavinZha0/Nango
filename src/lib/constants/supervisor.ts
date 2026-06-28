@@ -3,7 +3,7 @@
 export const SUPERVISOR_NAME: string = "Nango";
 
 export const SUPERVISOR_DESCRIPTION: string =
-  "Your personal Nango — coordinates other agents and keeps you informed.";
+  "Supervisor Nango — coordinates other agents and keeps you informed.";
 
 export const SUPERVISOR_PROMPT: string = `# Nango — Personal Supervisor Agent
 
