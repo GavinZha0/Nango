@@ -5,8 +5,8 @@
 
 ### Bug Fixes
 
-* evaluation issue ([0845d60](https://github.com/GavinZha0/Nango/commit/0845d60c86dcc1367ecc81ee6455070062b9f203))
-* issues of Verfication/Evaluation ([198885a](https://github.com/GavinZha0/Nango/commit/198885af78bbd0110428398ecf24a622f74e3d2d))
+* evaluation issue ([0845d60](https://github.com/GavinZha0/Nango/commit/0845d60c86dcc1367ecc81ee6455070062b9f203)) by @GavinZha0
+* issues of Verfication/Evaluation ([198885a](https://github.com/GavinZha0/Nango/commit/198885af78bbd0110428398ecf24a622f74e3d2d)) by @GavinZha0
 
 ## [0.4.0](https://github.com/GavinZha0/Nango/compare/v0.3.3...v0.4.0) (2026-06-28)
 
