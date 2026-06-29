@@ -16,13 +16,14 @@
  * Wired to evaluation + evaluation-cases Zustand stores.
  */
 
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { EvalSuiteTree } from "@/components/main-panels/evaluation/EvalSuiteTree";
 import { EvalSuiteEditDialog } from "@/components/main-panels/evaluation/EvalSuiteEditDialog";
 import { EvalCaseInspector } from "@/components/main-panels/evaluation/EvalCaseInspector";
+import { useEvaluationRunStream } from "@/hooks/useEvaluationRunStream";
 import {
   useEvaluationStore,
   evalActions,
@@ -52,6 +53,30 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
   const totalCases = suites.reduce((n, s) => n + s.caseCount, 0);
 
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
+
+  // Run state — shared across suite-level and case-level runs.
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [runningSuiteId, setRunningSuiteId] = useState<string | null>(null);
+  const liveRun = useEvaluationRunStream(activeRunId);
+
+  const handleRunSuite = useCallback(async (suiteId: string): Promise<void> => {
+    try {
+      const res = await fetch(`/api/eval-suites/${suiteId}/run`, { method: "POST" });
+      if (!res.ok) return;
+      const { runId } = (await res.json()) as { runId: string };
+      setActiveRunId(runId);
+      setRunningSuiteId(suiteId);
+    } catch { /* swallow */ }
+  }, []);
+
+  const handleRunCase = useCallback(async (caseId: number): Promise<void> => {
+    try {
+      const res = await fetch(`/api/eval-cases/${caseId}/run`, { method: "POST" });
+      if (!res.ok) return;
+      const { runId } = (await res.json()) as { runId: string };
+      setActiveRunId(runId);
+    } catch { /* swallow */ }
+  }, []);
 
   // Suite edit dialog
   const [editingSuite, setEditingSuite] = useState<EvalSuiteRow | null>(null);
@@ -169,8 +194,10 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
             suites={suites}
             casesBySuite={casesBySuite}
             selectedCaseId={selectedCaseId}
+            liveRun={liveRun}
+            runningSuiteId={runningSuiteId}
             onSelectCase={setSelectedCaseId}
-            onRunSuite={(_id) => { /* TODO */ }}
+            onRunSuite={(id) => void handleRunSuite(id)}
             onEditSuite={handleSuiteEdit}
             onDeleteSuite={handleDeleteSuiteRequest}
             onDeleteCase={handleDeleteCaseRequest}
@@ -179,7 +206,13 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
 
         {/* Mid + Right: case inspector */}
         {selected ? (
-          <EvalCaseInspector key={selected.evalCase.id} evalCase={selected.evalCase} suite={selected.suite} />
+          <EvalCaseInspector
+            key={selected.evalCase.id}
+            evalCase={selected.evalCase}
+            suite={selected.suite}
+            liveRun={liveRun}
+            onRunCase={handleRunCase}
+          />
         ) : (
           <div className="flex flex-[7] items-center justify-center text-xs text-muted-foreground">
             Select a case from the tree to inspect.

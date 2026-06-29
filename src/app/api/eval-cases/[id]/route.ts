@@ -20,7 +20,6 @@ const updateSchema = z
     name: z.string().trim().min(1).max(120).optional(),
     turns: z.array(z.object({ userMessage: z.string() }).passthrough()).optional(),
     criteria: evalCriteriaSchema.optional(),
-    dimensionOverride: z.array(z.string()).optional().nullable(),
     enabled: z.boolean().optional(),
   })
   .strict();

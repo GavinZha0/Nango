@@ -95,6 +95,8 @@ export interface BuiltinBuildContext {
   userId: string;
   /** Active orchestration mode. Only consulted for supervisor agents. */
   mode?: OrchestrationModeId;
+  /** Context for programmatic run start (e.g. expectedDimensionIds for evaluator tools). */
+  context?: Record<string, unknown>;
 }
 
 /**
@@ -307,6 +309,15 @@ export async function buildBuiltinAgents(
         "supervisor tools skipped: no user context (programmatic build)",
       );
     }
+    
+    const isEvaluator: boolean = spec.role === "evaluator";
+    const evaluatorTools: ToolDefinition[] = [];
+    if (isEvaluator && ctx?.context?.expectedDimensionIds) {
+      const { buildSubmitEvaluationScoresTool } = await import("@/lib/evaluation/runtime-tools");
+      evaluatorTools.push(buildSubmitEvaluationScoresTool({ 
+        expectedDimensionIds: ctx.context.expectedDimensionIds as string[] 
+      }));
+    }
     // User-selected built-in tools. Unknown names are dropped — a
     // junction row pointing at a retired tool name must not crash.
     // Binding-implied tools are built directly above, not here.
@@ -422,6 +433,7 @@ export async function buildBuiltinAgents(
     const serverTools: ToolDefinition[] = [
       ...skillsRuntime.tools,
       ...supervisorTools,
+      ...evaluatorTools,
       ...builtinTools,
       ...dataSourceTools,
       ...sshTools,

@@ -89,6 +89,11 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
 
   // ── observability ─────────────────────────────────────────────────
   { key: "observability.langfuse.targets", value: "builtin,frontend,proxy_errors", valueType: "string", description: "Comma-separated Langfuse trace targets: builtin, frontend, proxy_errors" },
+
+  // ── evaluation ──────────────────────────────────────────────────
+  { key: "eval.threshold.excellent", value: "80", valueType: "number", description: "Score >= this is 'Excellent' (0-100)" },
+  { key: "eval.threshold.pass", value: "60", valueType: "number", description: "Score >= this is 'Pass' (0-100)" },
+  { key: "eval.threshold.poor", value: "40", valueType: "number", description: "Score >= this is 'Poor'; below is 'Fail' (0-100)" },
 ] as const;
 
 /** Lookup map for fast default resolution. */

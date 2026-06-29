@@ -1971,7 +1971,6 @@ export const EvalCaseTable = pgTable(
     name: text("name").notNull(),
     turns: jsonb("turns").notNull().default(sql`'[]'::jsonb`),
     criteria: jsonb("criteria").notNull().default(sql`'{}'::jsonb`),
-    dimensionOverride: jsonb("dimension_override").$type<string[] | null>(),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at")
       .notNull()
@@ -2069,17 +2068,32 @@ export const EvalCaseResultTable = pgTable(
       .notNull()
       .references(() => EvalCaseTable.id, { onDelete: "cascade" }),
     status: text("status").notNull(),
+    /** Overall case score (0-100). */
     score: integer("score"),
+    /** Per-dimension scores from evaluator: { "faithfulness": 90, ... }. */
     dimensionScores: jsonb("dimension_scores").$type<
       Record<string, number>
     >(),
+    /** Case-level criteria score (evaluator expectation score × deterministic pass rate). */
+    criteriaScore: integer("criteria_score"),
+    /** Per-item deterministic check results for UI display.
+     *  Array of { label, kind, passed, actual? }. */
+    criteriaResults: jsonb("criteria_results"),
+    /** Evaluator's text feedback (2-5 sentences). */
     feedback: text("feedback"),
+    /** Thread ID linking to the target agent's entity_run. */
     threadId: uuid("thread_id"),
+    /** Thread ID linking to the evaluator agent's scoring session. */
     evaluatorThreadId: uuid("evaluator_thread_id"),
     error: jsonb("error"),
+    /** Observability — kept but not used as eval threshold. */
     ttftMs: integer("ttft_ms"),
+    /** End-to-end duration in milliseconds. */
     durationMs: integer("duration_ms"),
-    tokens: integer("tokens"),
+    /** Output token count (renamed from `tokens` in migration eval-stage2). */
+    outputTokens: integer("output_tokens"),
+    /** Number of tool calls the target agent made. */
+    toolCallCount: integer("tool_call_count"),
     startedAt: timestamp("started_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

@@ -47,6 +47,16 @@ export async function register(): Promise<void> {
     } catch (err) {
       console.error("[nango] verification recovery failed:", err);
     }
+
+    // Evaluation subsystem: same recovery pattern.
+    const { recoverStrandedEvalRuns } = await import(
+      "@/lib/evaluation/recovery"
+    );
+    try {
+      await recoverStrandedEvalRuns(bootStartedAt);
+    } catch (err) {
+      console.error("[nango] evaluation recovery failed:", err);
+    }
   }
 
   // Application config: seed defaults (insert-if-absent), then load all

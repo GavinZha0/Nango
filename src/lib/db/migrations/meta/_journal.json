@@ -50,6 +50,13 @@
       "when": 1782602500443,
       "tag": "0006_add-calendar-support",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782690063775,
+      "tag": "0007_eval-stage2",
+      "breakpoints": true
     }
   ]
 }

@@ -37,9 +37,8 @@ export interface EvalCaseRow {
   id: number;
   suiteId: string;
   name: string;
-  turns: Array<{ userMessage: string; actualResponse?: string; toolCalls?: Array<{ name: string; args: string; result: string }> }>;
+  turns: Array<{ userMessage: string }>;
   criteria: EvalCriteria;
-  dimensionOverride: string[] | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

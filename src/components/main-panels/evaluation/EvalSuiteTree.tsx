@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleSlash,
+  Loader2,
   Pencil,
   Play,
   Trash2,
@@ -21,6 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/store/workspace";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
+import type { EvaluationRunLiveState } from "@/hooks/useEvaluationRunStream";
 
 // Component
 
@@ -28,6 +30,8 @@ interface EvalSuiteTreeProps {
   suites: EvalSuiteRow[];
   casesBySuite: Record<string, EvalCaseRow[]>;
   selectedCaseId: number | null;
+  liveRun: EvaluationRunLiveState;
+  runningSuiteId: string | null;
   onSelectCase: (caseId: number) => void;
   onRunSuite: (suiteId: string) => void;
   onEditSuite: (suiteId: string) => void;
@@ -39,6 +43,8 @@ export function EvalSuiteTree({
   suites,
   casesBySuite,
   selectedCaseId,
+  liveRun,
+  runningSuiteId,
   onSelectCase,
   onRunSuite,
   onEditSuite,
@@ -74,6 +80,7 @@ export function EvalSuiteTree({
         suites.map((suite) => {
           const isCollapsed = collapsed.has(suite.id);
           const cases = casesBySuite[suite.id] ?? [];
+          const isSuiteRunning = liveRun.phase === "running" && runningSuiteId === suite.id;
           return (
             <div key={suite.id} className="border-b border-border/40">
               {/* Suite header */}
@@ -118,15 +125,31 @@ export function EvalSuiteTree({
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
+                {/* Live run status badge */}
+                {runningSuiteId === suite.id && liveRun.phase !== "idle" && liveRun.totals && (
+                  <span className="shrink-0 text-[9px] font-mono tabular-nums text-muted-foreground">
+                    {liveRun.totals.passedCount}/{liveRun.totals.totalCount}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-6 w-6 p-0 shrink-0"
                   onClick={() => onRunSuite(suite.id)}
-                  title={suite.evaluatorAgentId ? "Run suite" : "Evaluator Agent is required to run"}
-                  disabled={!suite.evaluatorAgentId}
+                  title={
+                    !suite.evaluatorAgentId
+                      ? "Evaluator Agent is required to run"
+                      : isSuiteRunning
+                        ? "A run is in progress"
+                        : "Run suite"
+                  }
+                  disabled={!suite.evaluatorAgentId || isSuiteRunning}
                 >
-                  <Play className={cn("h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
+                  {isSuiteRunning && runningSuiteId === suite.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Play className={cn("h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
+                  )}
                 </Button>
               </div>
 

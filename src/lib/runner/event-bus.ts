@@ -50,10 +50,26 @@ export interface VerificationRunEvent {
 import type { VerificationFrame } from "@/lib/verification/types";
 export type { VerificationFrame };
 
+/**
+ * Evaluation subsystem frames — same multiplexing pattern as
+ * verification. See docs/evaluation.md.
+ */
+export interface EvaluationRunEvent {
+  kind: "evaluation";
+  ownerId: string;
+  frame: {
+    topic: "evaluation_run";
+    kind: string;
+    runId: string;
+    [key: string]: unknown;
+  };
+}
+
 export type RunnerEvent =
   | RunFinalizedEvent
   | NotificationCreatedEvent
-  | VerificationRunEvent;
+  | VerificationRunEvent
+  | EvaluationRunEvent;
 
 type Subscriber = (event: RunnerEvent) => void;
 

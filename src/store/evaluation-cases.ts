@@ -75,14 +75,12 @@ export interface CreateCaseInput {
   name: string;
   turns?: Array<{ userMessage: string }>;
   criteria?: Record<string, unknown>;
-  dimensionOverride?: string[] | null;
 }
 
 export interface PatchCaseInput {
   name?: string;
   turns?: Array<{ userMessage: string }>;
   criteria?: Record<string, unknown>;
-  dimensionOverride?: string[] | null;
   enabled?: boolean;
 }
 

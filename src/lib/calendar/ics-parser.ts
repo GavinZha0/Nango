@@ -31,6 +31,8 @@ const cache = new LRUCache<string, CachedCalendar>({
   ttl: 5 * 60 * 1000, // 5 minutes
 });
 
+const ICS_FETCH_TIMEOUT_MS = 15_000;
+
 /**
  * Fetch and parse an ICS URL, returning events within the given
  * date range. Uses a 5-minute LRU cache keyed by URL.
@@ -42,11 +44,24 @@ export async function fetchIcsEvents(
 ): Promise<CalendarEvent[]> {
   let parsed: ical.CalendarResponse;
 
+  // SECURITY: only allow HTTPS URLs to prevent SSRF via file:// / http://internal etc.
+  if (!icsUrl.startsWith("https://")) {
+    throw new Error("Only HTTPS calendar URLs are supported.");
+  }
+
   const cached = cache.get(icsUrl);
   if (cached) {
     parsed = cached.events;
   } else {
-    parsed = await ical.async.fromURL(icsUrl);
+    // QUIRK: node-ical's type overloads mark (url, options) as void
+    // (callback style) but the runtime returns a Promise when no
+    // callback is provided. Cast to satisfy TS.
+    parsed = await (ical.async.fromURL as (
+      url: string,
+      opts: RequestInit,
+    ) => Promise<ical.CalendarResponse>)(icsUrl, {
+      signal: AbortSignal.timeout(ICS_FETCH_TIMEOUT_MS),
+    });
     cache.set(icsUrl, { events: parsed, fetchedAt: Date.now() });
   }
 

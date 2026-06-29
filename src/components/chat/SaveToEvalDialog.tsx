@@ -67,37 +67,16 @@ export function SaveToEvalDialog({
       let currentTurn: EvalTurn | null = null;
       
       // We also need to map tool call results which come in subsequent 'tool' role messages.
-      const toolResultsMap = new Map<string, string>();
-      for (const msg of messages) {
-        if (msg.role === "tool") {
-          toolResultsMap.set(msg.toolCallId, msg.content);
-        }
-      }
-
+      // EvalTurn only captures user-side input; the agent's response
+      // will be produced by the evaluation runner at execution time
+      // (not replayed from the original chat).
       for (const msg of messages) {
         if (msg.role === "user") {
-          // Push previous turn if exists
           if (currentTurn) turns.push(currentTurn);
           currentTurn = { userMessage: msg.content };
-        } else if (msg.role === "assistant") {
-          if (!currentTurn) {
-            // Edge case: assistant message without prior user message
-            currentTurn = { userMessage: "" };
-          }
-          if (msg.content) {
-            currentTurn.actualResponse = (currentTurn.actualResponse ? currentTurn.actualResponse + "\n" : "") + msg.content;
-          }
-          if (msg.toolCalls && msg.toolCalls.length > 0) {
-            currentTurn.toolCalls = currentTurn.toolCalls || [];
-            for (const tc of msg.toolCalls) {
-              currentTurn.toolCalls.push({
-                name: tc.function.name,
-                args: tc.function.arguments,
-                result: toolResultsMap.get(tc.id) ?? "",
-              });
-            }
-          }
         }
+        // assistant / tool messages are skipped — responses are
+        // captured fresh during eval execution via entity_run_event.
       }
       if (currentTurn) turns.push(currentTurn);
 
