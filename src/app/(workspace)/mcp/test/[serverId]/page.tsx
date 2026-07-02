@@ -347,7 +347,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       } else {
         setExec({ executing: false, result: data.result, execError: null, executedArgs: args });
         // Auto-save input args and result to history on successful execution.
-        saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args, data.result);
+        saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args, data.result, data.snapshotMaxBytes);
       }
     } catch (err) {
       setExec({ executing: false, result: null, execError: err instanceof Error ? err.message : "Unexpected error", executedArgs: null });

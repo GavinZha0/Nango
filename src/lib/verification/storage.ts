@@ -32,7 +32,7 @@ import type {
   VerificationRunStatus,
   VerificationSuiteCategory,
 } from "./types";
-import { RESULT_PAYLOAD_MAX_BYTES } from "./types";
+import { getConfigNumber } from "@/lib/config";
 
 // --- Suites -----------------------------------------------------------------
 
@@ -382,11 +382,12 @@ function truncatePayload(raw: unknown): { truncatedPayload: unknown; truncated: 
     return { truncatedPayload: { __nonSerialisable: true, repr: String(raw) }, truncated: true };
   }
   const byteLength = Buffer.byteLength(serialised, "utf8");
-  if (byteLength <= RESULT_PAYLOAD_MAX_BYTES) {
+  const maxBytes = getConfigNumber("verification.payload_max_kb", 24) * 1024;
+  if (byteLength <= maxBytes) {
     return { truncatedPayload: raw, truncated: false };
   }
   return {
-    truncatedPayload: { truncated_preview: serialised.slice(0, Math.floor(RESULT_PAYLOAD_MAX_BYTES / 2)) },
+    truncatedPayload: { truncated_preview: serialised.slice(0, Math.floor(maxBytes / 2)) },
     truncated: true,
   };
 }

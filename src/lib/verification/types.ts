@@ -134,13 +134,3 @@ export interface CaseExecutionOutcome {
   startedAt: number;
   durationMs: number;
 }
-
-// --- Payload truncation cap --------------------------------------------------
-
-/** JSON byte cap before persistence. Assertions are always evaluated
- *  against the FULL payload before this is applied — this cap only
- *  governs what gets stored for later inspection. 8 KB is a balance
- *  between "fits in a single TOAST inline page" and "covers the typical
- *  structured MCP response without trimming"; tools returning larger
- *  blobs should be re-run from the editor to see the full body. */
-export const RESULT_PAYLOAD_MAX_BYTES = 24 * 1024;

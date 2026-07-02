@@ -53,12 +53,13 @@ export function saveSnapshot(
   name: string,
   args: Record<string, unknown>,
   result: unknown,
+  maxBytes: number = 24576,
 ): ToolExecutionSnapshot {
   let finalResult = result;
   try {
     const stringified = JSON.stringify(result);
-    if (stringified.length > 24576) {
-      finalResult = { truncated_preview: stringified.slice(0, 24000) };
+    if (stringified.length > maxBytes) {
+      finalResult = { truncated_preview: stringified.slice(0, Math.floor(maxBytes / 2)) };
     }
   } catch {
     finalResult = { truncated_preview: "Unserializable result" };
