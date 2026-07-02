@@ -5,8 +5,8 @@
 
 ### Bug Fixes
 
-* limitition of mcp response ([00de7e9](https://github.com/GavinZha0/Nango/commit/00de7e9b4572fac5d21369deb8c4a1ef04d0d43f))
-* mcp truncate issue and evaluation issue ([dceb3da](https://github.com/GavinZha0/Nango/commit/dceb3da6d0c47d5e3cf9c313bab930a04dfa8fac))
+* limitition of mcp response ([00de7e9](https://github.com/GavinZha0/Nango/commit/00de7e9b4572fac5d21369deb8c4a1ef04d0d43f)) by @GavinZha0
+* mcp truncate issue and evaluation issue ([dceb3da](https://github.com/GavinZha0/Nango/commit/dceb3da6d0c47d5e3cf9c313bab930a04dfa8fac)) by @GavinZha0
 
 ## [0.4.1](https://github.com/GavinZha0/Nango/compare/v0.4.0...v0.4.1) (2026-06-29)
 
