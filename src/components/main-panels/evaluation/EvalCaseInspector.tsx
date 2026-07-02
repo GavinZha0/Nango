@@ -29,7 +29,6 @@ import { cn } from "@/lib/utils";
 import {
   BUILTIN_DIMENSIONS,
   evalCriteriaSchema,
-  CRITERIA_KEYS,
   type EvalCriteria,
   type EvalTurn,
   type CriteriaCheckResult,
@@ -182,7 +181,9 @@ interface CriteriaEditorProps {
 }
 
 function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorProps): ReactNode {
-  const [text, setText] = useState(JSON.stringify(criteria, null, 2));
+  const [text, setText] = useState(() => {
+    return Object.keys(criteria).length === 0 ? "" : JSON.stringify(criteria, null, 2);
+  });
   const [error, setError] = useState<string | null>(null);
 
   function handleChange(v: string): void {
@@ -215,7 +216,26 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
     onChange(result.data as EvalCriteria);
   }
 
-  const placeholder = `{\n${CRITERIA_KEYS.map((k) => `  "${k}": ...`).join(",\n")}\n}`;
+  const placeholder = JSON.stringify(
+    {
+      issue: "Describe the previous issue or bug you found",
+      expectation: "Natural language description of the expected outcome",
+      reference: "A good example of an agent response or ground truth",
+      context: ["Business rule 1", "Knowledge snippet 2"],
+      assertions: [
+        "The response time is under 10ms",
+        "The agent mentions the correct tracking number",
+      ],
+      tool_calls: ["search_database", "send_email"],
+      expected_keywords: ["pass", "success", "approved"],
+      unexpected_keywords: ["error", "fail", "null"],
+      max_duration_s: 15,
+      max_output_tokens: 50000,
+      max_tool_calls: 3,
+    },
+    null,
+    2
+  );
 
   return (
     <div className="flex flex-col gap-1.5 p-3 h-full min-h-0">
@@ -708,7 +728,7 @@ function EvaluationPanel({
             "text-xs text-muted-foreground rounded border p-3 min-h-full",
             hasResult ? "bg-muted/10 border-border" : "bg-muted/20 border-dashed",
           )}>
-            {feedback ?? (running ? "Evaluating..." : "No evaluation result yet. Click Run to evaluate.")}
+            {feedback ?? "No evaluation result yet. Click Run to evaluate."}
           </div>
         </div>
       </ScrollArea>

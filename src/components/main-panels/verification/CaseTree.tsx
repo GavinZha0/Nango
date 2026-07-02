@@ -381,7 +381,6 @@ function CaseRow({
           type="button"
           onClick={onSelect}
           className="cursor-pointer truncate text-left hover:underline underline-offset-2"
-          title={caseRow.name}
         >
           {caseRow.name}
         </button>

@@ -102,6 +102,10 @@ export const POST = withEditor<{ id: string }>(
             caseName: caseRow.name,
             status: result.status,
             score: result.score,
+            dimensionScores: result.dimensionScores,
+            criteriaScore: result.criteriaScore,
+            criteriaResults: result.criteriaResults,
+            feedback: result.feedback,
           },
         });
       } catch {

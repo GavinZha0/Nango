@@ -19,6 +19,8 @@ import "server-only";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+import { normalizeAndDeduplicateMcpResult } from "@/lib/mcp/tool-result-utils";
 import { dynamicTool, jsonSchema } from "ai";
 import type { MCPClientProvider } from "@/lib/copilot/index.server";
 
@@ -270,7 +272,8 @@ function wrapTools(
           name: raw.name,
           arguments: (args ?? {}) as Record<string, unknown>,
         });
-        return result;
+
+        return normalizeAndDeduplicateMcpResult(result, { parseForUi: false });
       },
     });
     wrapped[raw.name] = wrapToolExecute(baseTool, raw.name, log, "mcp_tool_call_failed");

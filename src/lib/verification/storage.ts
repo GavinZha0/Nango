@@ -32,6 +32,7 @@ import type {
   VerificationRunStatus,
   VerificationSuiteCategory,
 } from "./types";
+import { RESULT_PAYLOAD_MAX_BYTES } from "./types";
 
 // --- Suites -----------------------------------------------------------------
 
@@ -218,6 +219,8 @@ export interface WriteCaseResultInput {
 export async function writeCaseResult(
   input: WriteCaseResultInput,
 ): Promise<VerificationCaseResultEntity> {
+  const { truncatedPayload, truncated } = truncatePayload(input.outcome.resultPayload);
+
   const [row] = await db
     .insert(VerificationCaseResultTable)
     .values({
@@ -228,8 +231,8 @@ export async function writeCaseResult(
       // this from runner.start for workflow cases.
       entityRunId: null,
       inputSnapshot: input.inputSnapshot,
-      resultPayload: input.outcome.resultPayload ?? null,
-      resultTruncated: input.outcome.resultTruncated,
+      resultPayload: truncatedPayload ?? null,
+      resultTruncated: truncated,
       assertionResults: input.outcome.assertionResults as unknown,
       error: input.outcome.error as unknown,
       durationMs: input.outcome.durationMs,
@@ -369,3 +372,21 @@ export type {
   AssertionResult,
   ErrorEnvelope,
 };
+
+function truncatePayload(raw: unknown): { truncatedPayload: unknown; truncated: boolean } {
+  if (raw === null || raw === undefined) return { truncatedPayload: raw, truncated: false };
+  let serialised: string;
+  try {
+    serialised = JSON.stringify(raw);
+  } catch {
+    return { truncatedPayload: { __nonSerialisable: true, repr: String(raw) }, truncated: true };
+  }
+  const byteLength = Buffer.byteLength(serialised, "utf8");
+  if (byteLength <= RESULT_PAYLOAD_MAX_BYTES) {
+    return { truncatedPayload: raw, truncated: false };
+  }
+  return {
+    truncatedPayload: { truncated_preview: serialised.slice(0, Math.floor(RESULT_PAYLOAD_MAX_BYTES / 2)) },
+    truncated: true,
+  };
+}

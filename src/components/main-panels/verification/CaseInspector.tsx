@@ -27,13 +27,14 @@
  * current DB definition.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Loader2, Play } from "lucide-react";
+import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
+import { Loader2, Play, Check, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { formatTimestamp } from "@/components/admin/format";
+import { JsonView } from "@/components/ui/json-view";
 import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
   AssertionResult,
@@ -370,6 +371,9 @@ export function CaseInspector({
     commit: (value) => caseActions.patch(caseRow, { assertions: value }),
   });
 
+  const [copied, setCopied] = useState(false);
+
+  // Re-sync drafts if row changes underneath us (e.g., from DB polling).
   // Run state
   const [running, setRunning] = useState<boolean>(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -453,6 +457,18 @@ export function CaseInspector({
     ? "// Assertion specs are not snapshotted per run.\n// The evaluated verdicts for this run appear in the Verdicts panel →"
     : null;
 
+  const resultSizeStr = useMemo(() => {
+    if (displayedOutcome?.resultPayload == null) return null;
+    try {
+      const str = JSON.stringify(displayedOutcome.resultPayload);
+      const bytes = new TextEncoder().encode(str).length;
+      if (bytes < 1024) return `${bytes} B`;
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    } catch {
+      return null;
+    }
+  }, [displayedOutcome]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Top toolbar spans both columns so the four panes below share
@@ -500,7 +516,7 @@ export function CaseInspector({
             </Button>
           </div>
           
-          <div className="grid min-h-0 flex-1 grid-rows-[2fr_3fr] overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
             <JsonPane
               label="Input"
               hideHeader
@@ -539,9 +555,37 @@ export function CaseInspector({
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Output
             </span>
-            {displayedOutcome?.resultTruncated && (
-              <span className="ml-2 text-[10px] text-muted-foreground">(truncated)</span>
+
+            {resultSizeStr && (
+              <div className="ml-3 flex items-center gap-2 border-l border-border/50 pl-3">
+                <span className="text-[10px] tabular-nums text-muted-foreground">
+                  {resultSizeStr}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  onClick={() => {
+                    if (displayedOutcome?.resultPayload == null) return;
+                    try {
+                      navigator.clipboard.writeText(
+                        JSON.stringify(displayedOutcome.resultPayload, null, 2)
+                      );
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    } catch {}
+                  }}
+                  title="Copy JSON"
+                >
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
             )}
+
             <div className="ml-auto flex items-center gap-2">
               {showHistoryChrome && (
                 <span
@@ -581,7 +625,7 @@ export function CaseInspector({
             </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 grid-rows-[2fr_3fr] overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
             <OutputPane
               outcome={displayedOutcome}
               running={running}
@@ -733,7 +777,6 @@ interface OutputPaneProps {
  * in-frame placeholder so the box itself never disappears.
  */
 function OutputPane({ outcome, running, readOnly, hideHeader = false }: OutputPaneProps): ReactNode {
-  const truncated: boolean = outcome?.resultTruncated ?? false;
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
       {!hideHeader && (
@@ -741,16 +784,13 @@ function OutputPane({ outcome, running, readOnly, hideHeader = false }: OutputPa
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Output
           </span>
-          {truncated && (
-            <span className="text-[10px] text-muted-foreground">(truncated)</span>
-          )}
         </div>
       )}
       <div className={cn("min-h-0 flex-1 px-3 pb-2", hideHeader && "pt-2")}>
         {outcome && outcome.resultPayload !== null ? (
-          <pre className="h-full w-full overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] leading-relaxed">
-            {JSON.stringify(outcome.resultPayload, null, 2)}
-          </pre>
+          <div className="h-full w-full overflow-auto rounded-md border bg-muted/30 p-2">
+            <JsonView data={outcome.resultPayload} defaultExpandDepth={3} />
+          </div>
         ) : (
           <div className="grid h-full place-items-center rounded-md border border-dashed text-[11px] text-muted-foreground">
             {placeholderText({ outcome, running, readOnly, kind: "output" })}

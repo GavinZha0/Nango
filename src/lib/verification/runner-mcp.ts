@@ -21,7 +21,6 @@ import {
 
 import { runAssertions } from "./assertions";
 import { classifyMcpError } from "./error-source";
-import { RESULT_PAYLOAD_MAX_BYTES } from "./types";
 import type {
   AssertionSpec,
   CaseExecutionOutcome,
@@ -141,8 +140,6 @@ export async function runMcpCase(
     const allAssertionsPassed = assertionResults.every((r) => r.ok);
     const passed = !mcpIsError && allAssertionsPassed;
 
-    const { truncatedPayload, truncated } = truncatePayload(raw);
-
     let topLineError: ErrorEnvelope | null = null;
     if (mcpIsError) {
       // MCP tool itself signalled an error — surface as `upstream`
@@ -169,8 +166,8 @@ export async function runMcpCase(
 
     return {
       status: passed ? "passed" : "failed",
-      resultPayload: truncatedPayload,
-      resultTruncated: truncated,
+      resultPayload: raw,
+      resultTruncated: false,
       assertionResults,
       error: topLineError,
       startedAt,
@@ -254,37 +251,4 @@ function extractMcpErrorText(raw: unknown): string | null {
   return null;
 }
 
-/**
- * Persistence-side truncation. Assertions run against the FULL value
- * so this is purely an artefact-storage concern. We measure JSON byte
- * length; payloads larger than {@link RESULT_PAYLOAD_MAX_BYTES} (24 KB)
- * are swapped for a placeholder summarising the truncation.
- */
-function truncatePayload(raw: unknown): {
-  truncatedPayload: unknown;
-  truncated: boolean;
-} {
-  let serialised: string;
-  try {
-    serialised = JSON.stringify(raw);
-  } catch {
-    // Non-serialisable (circular, BigInt, etc.) — coerce to a string
-    // representation so the column type stays valid.
-    return {
-      truncatedPayload: { __nonSerialisable: true, repr: String(raw) },
-      truncated: true,
-    };
-  }
-  const byteLength = Buffer.byteLength(serialised, "utf8");
-  if (byteLength <= RESULT_PAYLOAD_MAX_BYTES) {
-    return { truncatedPayload: raw, truncated: false };
-  }
-  return {
-    truncatedPayload: {
-      __truncated: true,
-      originalBytes: byteLength,
-      preview: serialised.slice(0, 1024),
-    },
-    truncated: true,
-  };
-}
+

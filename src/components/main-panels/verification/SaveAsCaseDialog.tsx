@@ -243,19 +243,19 @@ export function SaveAsCaseDialog({
 
         <div className="space-y-3 py-2">
           {/* Server (read-only) */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
             <Label className="text-muted-foreground">Server</Label>
             <span className="truncate text-sm font-mono">{serverName}</span>
           </div>
 
           {/* Tool (read-only) */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
             <Label className="text-muted-foreground">Tool</Label>
             <span className="truncate text-sm font-mono">{toolName}</span>
           </div>
 
           {/* Suite picker */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
             <Label htmlFor="save-case-suite">
               Suite <span className="text-destructive">*</span>
             </Label>
@@ -263,6 +263,10 @@ export function SaveAsCaseDialog({
               value={form.selectedSuiteId}
               onValueChange={(v) => setForm((prev) => ({ ...prev, selectedSuiteId: v ?? "" }))}
               disabled={loadingSuites}
+              items={[
+                ...suites.map((s) => ({ value: s.id, label: s.name })),
+                { value: NEW_SUITE_SENTINEL, label: "+ New suite…" },
+              ]}
             >
               <SelectTrigger id="save-case-suite" className="w-full">
                 <SelectValue
@@ -289,9 +293,9 @@ export function SaveAsCaseDialog({
 
           {/* New-suite name (only when creating) */}
           {creatingNewSuite && (
-            <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
               <Label htmlFor="save-case-new-suite">
-                New name <span className="text-destructive">*</span>
+                Suite name <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="save-case-new-suite"
@@ -304,7 +308,7 @@ export function SaveAsCaseDialog({
           )}
 
           {/* Case name */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
             <Label htmlFor="save-case-name">
               Case name <span className="text-destructive">*</span>
             </Label>

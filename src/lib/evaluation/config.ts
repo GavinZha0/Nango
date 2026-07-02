@@ -35,8 +35,8 @@ export interface EvalLevelMeta {
 }
 
 export const LEVEL_META: Record<EvalLevel, EvalLevelMeta> = {
-  excellent: { label: "Excellent", color: "text-blue-400",    barColor: "bg-blue-500",    bgColor: "bg-blue-500/15" },
-  pass:      { label: "Pass",      color: "text-emerald-400", barColor: "bg-emerald-500", bgColor: "bg-emerald-500/15" },
+  excellent: { label: "Excellent", color: "text-emerald-400", barColor: "bg-emerald-500", bgColor: "bg-emerald-500/15" },
+  pass:      { label: "Pass",      color: "text-blue-400",    barColor: "bg-blue-500",    bgColor: "bg-blue-500/15" },
   poor:      { label: "Poor",      color: "text-amber-400",   barColor: "bg-amber-500",   bgColor: "bg-amber-500/15" },
   fail:      { label: "Fail",      color: "text-red-400",     barColor: "bg-red-500",     bgColor: "bg-red-500/15" },
 };

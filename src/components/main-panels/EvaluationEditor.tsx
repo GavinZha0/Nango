@@ -69,12 +69,13 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
     } catch { /* swallow */ }
   }, []);
 
-  const handleRunCase = useCallback(async (caseId: number): Promise<void> => {
+  const handleRunCase = useCallback(async (caseId: number, suiteId: string): Promise<void> => {
     try {
       const res = await fetch(`/api/eval-cases/${caseId}/run`, { method: "POST" });
       if (!res.ok) return;
       const { runId } = (await res.json()) as { runId: string };
       setActiveRunId(runId);
+      setRunningSuiteId(suiteId);
     } catch { /* swallow */ }
   }, []);
 
@@ -211,7 +212,7 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
             evalCase={selected.evalCase}
             suite={selected.suite}
             liveRun={liveRun}
-            onRunCase={handleRunCase}
+            onRunCase={(id) => handleRunCase(id, selected!.suite.id)}
           />
         ) : (
           <div className="flex flex-[7] items-center justify-center text-xs text-muted-foreground">
