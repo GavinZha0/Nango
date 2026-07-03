@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/GavinZha0/Nango/compare/v0.4.2...v0.5.0) (2026-07-03)
+
+
+### Features
+
+* evaluation history ([d2fe205](https://github.com/GavinZha0/Nango/commit/d2fe2050ac42b7c53f8e9560f0ca4b8f31ede36c))
+
+
+### Bug Fixes
+
+* eval criteria ([d6b834d](https://github.com/GavinZha0/Nango/commit/d6b834d7bc0b11bc110a617d3c3ba8c5862e1d75))
+
 ## [0.4.2](https://github.com/GavinZha0/Nango/compare/v0.4.1...v0.4.2) (2026-07-02)
 
 
