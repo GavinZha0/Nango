@@ -16,6 +16,9 @@ import {
   Pencil,
   Play,
   Trash2,
+  CircleCheck,
+  CircleX,
+  CircleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,6 +26,26 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/store/workspace";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import type { EvaluationRunLiveState } from "@/hooks/useEvaluationRunStream";
+
+export interface CaseVerdict {
+  status: "running" | "passed" | "failed" | "errored";
+}
+
+function VerdictBadge({ verdict }: { verdict: CaseVerdict | undefined }): ReactNode {
+  if (!verdict) {
+    return <CircleSlash className="h-3 w-3 text-muted-foreground/35" />;
+  }
+  switch (verdict.status) {
+    case "running":
+      return <Loader2 className="h-3 w-3 animate-spin text-sky-500" />;
+    case "passed":
+      return <CircleCheck className="h-3 w-3 text-emerald-500" />;
+    case "failed":
+      return <CircleX className="h-3 w-3 text-red-500" />;
+    case "errored":
+      return <CircleAlert className="h-3 w-3 text-amber-500" />;
+  }
+}
 
 // Component
 
@@ -32,6 +55,7 @@ interface EvalSuiteTreeProps {
   selectedCaseId: number | null;
   liveRun: EvaluationRunLiveState;
   runningSuiteId: string | null;
+  verdictByCaseId: ReadonlyMap<number, CaseVerdict>;
   onSelectCase: (caseId: number) => void;
   onRunSuite: (suiteId: string) => void;
   onEditSuite: (suiteId: string) => void;
@@ -45,6 +69,7 @@ export function EvalSuiteTree({
   selectedCaseId,
   liveRun,
   runningSuiteId,
+  verdictByCaseId,
   onSelectCase,
   onRunSuite,
   onEditSuite,
@@ -156,32 +181,38 @@ export function EvalSuiteTree({
               {/* Case list */}
               {!isCollapsed && (
                 <div>
-                  {cases.map((c) => (
-                    <div
-                      key={c.id}
-                      className={cn(
-                        "group/case flex w-full items-center gap-2 px-3 py-1.5 transition-colors",
-                        selectedCaseId === c.id
-                          ? "bg-accent"
-                          : "hover:bg-muted/30",
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onSelectCase(c.id)}
-                        className="min-w-0 flex-1 truncate text-left text-xs"
+                  {cases.map((c) => {
+                    const verdict = verdictByCaseId.get(c.id);
+                    return (
+                      <div
+                        key={c.id}
+                        className={cn(
+                          "group/case flex w-full items-center gap-2 px-3 py-1.5 transition-colors",
+                          selectedCaseId === c.id
+                            ? "bg-accent"
+                            : "hover:bg-muted/30",
+                        )}
                       >
-                        {c.name}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteCase(c.id, suite.id)}
-                        className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="shrink-0 flex items-center justify-center">
+                          <VerdictBadge verdict={verdict} />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onSelectCase(c.id)}
+                          className="min-w-0 flex-1 truncate text-left text-xs"
+                        >
+                          {c.name}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteCase(c.id, suite.id)}
+                          className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

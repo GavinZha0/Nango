@@ -285,34 +285,6 @@ pnpm dev                 # http://localhost:9300 上的 Next.js with Turbopack
 docker compose 助手）都在 [`package.json`](package.json) 中——运行
 `pnpm run` 列出它们。
 
-### 项目布局（简略）
-
-```
-src/
-├── app/
-│   ├── (auth)/                # 登录 / 注册
-│   ├── (workspace)/           # 认证工作空间页面
-│   └── api/                   # API 路由处理器
-├── components/
-│   ├── layout/                # 页眉、工具栏、侧 / 右面板
-│   ├── right-panels/          # 代理、聊天、历史、技能、数据源面板
-│   └── workspace/             # 制品渲染器 + 编辑器
-├── lib/
-│   ├── backends/              # 外部代理平台适配器
-│   ├── builtin-agents/        # 内置代理运行时
-│   ├── credentials/           # 加密密钥环 + 查找缓存
-│   ├── mcp/                   # MCP 提供商池
-│   ├── skills/                # 技能子系统
-│   ├── data-sources/          # 查找、策略、提示块
-│   ├── runner/                # 执行内核 + 调度器 + 事件总线
-│   ├── orchestration/         # 模式、主管目录
-│   ├── workflows/             # 工作流 DAG 运行时
-│   ├── artifacts/             # 制品服务
-│   ├── ssh/                   # SSH 运行时工具
-│   └── db/                    # Drizzle 架构 + 迁移
-└── store/                     # Zustand 客户端存储
-```
-
 ---
 
 ## 架构概览

@@ -37,6 +37,8 @@ import {
   type CriteriaCheckResult,
 } from "@/lib/evaluation/types";
 import type { EvaluationRunLiveState } from "@/hooks/useEvaluationRunStream";
+import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { formatTimestamp } from "@/components/admin/format";
 import {
   LEVEL_META,
   scoreToLevel,
@@ -65,9 +67,20 @@ interface TurnRowProps {
   onChange: (updated: EvalTurn) => void;
   onDelete: () => void;
   onViewResponse: () => void;
+  disabled?: boolean;
 }
 
-function TurnRow({ turn, index, canDelete, selected, hasResponse, onChange, onDelete, onViewResponse }: TurnRowProps): ReactNode {
+function TurnRow({
+  turn,
+  index,
+  canDelete,
+  selected,
+  hasResponse,
+  onChange,
+  onDelete,
+  onViewResponse,
+  disabled = false,
+}: TurnRowProps): ReactNode {
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-1.5">
@@ -91,7 +104,7 @@ function TurnRow({ turn, index, canDelete, selected, hasResponse, onChange, onDe
         >
           <MessageSquare className="h-3 w-3" />
         </button>
-        {canDelete && (
+        {canDelete && !disabled && (
           <button
             type="button"
             onClick={onDelete}
@@ -105,8 +118,9 @@ function TurnRow({ turn, index, canDelete, selected, hasResponse, onChange, onDe
       <Textarea
         value={turn.userMessage}
         onChange={(e) => onChange({ ...turn, userMessage: e.target.value })}
-        placeholder="User message..."
+        placeholder={disabled ? "No message content" : "User message..."}
         className="h-20 text-xs resize-none field-sizing-fixed"
+        disabled={disabled}
       />
     </div>
   );
@@ -644,11 +658,26 @@ function CriteriaCheckIcon({ passed }: { passed: boolean | null }): ReactNode {
 
 // Main component
 
+export interface PinnedOutcome {
+  status: "passed" | "failed" | "errored";
+  score: number | null;
+  dimensionScores: Record<string, number>;
+  criteriaScore: number | null;
+  criteriaResults: unknown[];
+  feedback: string | null;
+  durationMs: number | null;
+  outputTokens: number | null;
+  startedAt: Date | string | null;
+}
+
 interface EvalCaseInspectorProps {
   evalCase: EvalCaseRow;
   suite: EvalSuiteRow;
   liveRun: EvaluationRunLiveState;
   onRunCase: (caseId: number) => Promise<void>;
+  pinnedOutcome?: PinnedOutcome;
+  pinnedRunId?: string | null;
+  selectedRunSeq?: number | null;
 }
 
 // CONTRACT: parent renders <EvalCaseInspector key={evalCase.id} />,
@@ -656,7 +685,15 @@ interface EvalCaseInspectorProps {
 let nextTurnKey = 0;
 function mintKey(): number { return nextTurnKey++; }
 
-export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalCaseInspectorProps): ReactNode {
+export function EvalCaseInspector({
+  evalCase,
+  suite,
+  liveRun,
+  onRunCase,
+  pinnedOutcome,
+  pinnedRunId,
+  selectedRunSeq = null,
+}: EvalCaseInspectorProps): ReactNode {
   const [turns, setTurns] = useState<KeyedTurn[]>(() =>
     (evalCase.turns as EvalTurn[]).map((t) => ({ ...t, _key: mintKey() })),
   );
@@ -713,20 +750,38 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
     setTurns((prev) => prev.map((t, i) => (i === index ? { ...updated, _key: t._key } : t)));
   }
 
-  // Derive display scores: prefer liveRun if it has a caseResult for this case, else historical
+  // Derive display scores: prefer pinnedOutcome (history snapshot), then liveRun, then latest-result SWR
   const liveCaseResult = liveRun.caseResults.get(evalCase.id);
   
-  const displayScore = liveCaseResult?.score ?? historicalResult?.score ?? null;
-  const displayDimensionScores = liveCaseResult?.dimensionScores ?? historicalResult?.dimensionScores ?? {};
+  const displayScore = pinnedOutcome
+    ? pinnedOutcome.score
+    : (liveCaseResult?.score ?? (historicalResult?.score ?? null));
+  const displayDimensionScores = pinnedOutcome
+    ? pinnedOutcome.dimensionScores
+    : (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {}));
   const displayBaselineScore = displayDimensionScores?.baseline ?? null;
-  const displayCriteriaScore = liveCaseResult?.criteriaScore ?? historicalResult?.criteriaScore ?? null;
-  const displayFeedback = liveCaseResult?.feedback ?? historicalResult?.feedback ?? null;
-  const displayCriteriaResults = liveCaseResult?.criteriaResults ?? historicalResult?.criteriaResults ?? null;
-  const displayDurationMs = liveCaseResult?.durationMs ?? historicalResult?.durationMs ?? null;
-  const displayOutputTokens = liveCaseResult?.outputTokens ?? historicalResult?.outputTokens ?? null;
+  const displayCriteriaScore = pinnedOutcome
+    ? pinnedOutcome.criteriaScore
+    : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null));
+  const displayFeedback = pinnedOutcome
+    ? pinnedOutcome.feedback
+    : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null));
+  const displayCriteriaResults = pinnedOutcome
+    ? pinnedOutcome.criteriaResults
+    : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null));
+  const displayDurationMs = pinnedOutcome
+    ? pinnedOutcome.durationMs
+    : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null));
+  const displayOutputTokens = pinnedOutcome
+    ? pinnedOutcome.outputTokens
+    : (liveCaseResult?.outputTokens ?? (historicalResult?.outputTokens ?? null));
 
-  const resolvedRunId = liveRun.phase === "idle" ? historicalResult?.runId ?? null : liveRun.runId;
-  const resolvedStatus = liveRun.phase === "idle" ? historicalResult?.status ?? "idle" : (liveCaseResult?.status ?? "running");
+  const resolvedRunId = pinnedOutcome
+    ? pinnedRunId
+    : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId);
+  const resolvedStatus = pinnedOutcome
+    ? pinnedOutcome.status
+    : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"));
 
   const { data: messagesData, isLoading: messagesLoading } = useSWR<{ messages: ResponseMessage[] }>(
     resolvedRunId ? `/api/eval-runs/${resolvedRunId}/messages?caseId=${evalCase.id}&status=${resolvedStatus}` : null,
@@ -771,9 +826,9 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
   }
 
   return (
-    <div className="flex flex-[7] min-h-0">
+    <div className="flex flex-[8] min-h-0">
       {/* Middle: conversation (top) + criteria/response tabs (bottom) */}
-      <div className="flex flex-[4] flex-col border-r min-w-0">
+      <div className="flex flex-[1] flex-col border-r min-w-0">
         {/* Top: conversation turns */}
         <div className="flex h-10 shrink-0 items-center border-b bg-muted/40 px-3">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -786,6 +841,7 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
               className="h-6 w-6 p-0"
               onClick={addTurn}
               title="Add turn"
+              disabled={selectedRunSeq !== null}
             >
               <SquarePlus className="h-3 w-3" />
             </Button>
@@ -793,7 +849,7 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
               size="sm"
               variant="ghost"
               className="h-6 w-6 p-0"
-              disabled={!canSave}
+              disabled={!canSave || selectedRunSeq !== null}
               onClick={handleSave}
             >
               {saving ? (
@@ -805,13 +861,15 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
             <Button
               size="sm"
               className="h-6 px-2 text-xs"
-              disabled={!suite.evaluatorAgentId || liveRun.phase === "running"}
+              disabled={!suite.evaluatorAgentId || liveRun.phase === "running" || selectedRunSeq !== null}
               title={
                 !suite.evaluatorAgentId
                   ? "Evaluator Agent is required to run"
                   : liveRun.phase === "running"
                     ? "A run is in progress"
-                    : "Run case"
+                    : selectedRunSeq !== null
+                      ? "Cannot run while viewing history"
+                      : "Run case"
               }
               onClick={() => void onRunCase(evalCase.id)}
             >
@@ -840,6 +898,7 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
                   setResponseTurnIdx(i);
                   setBottomTab("response");
                 }}
+                disabled={selectedRunSeq !== null}
               />
             ))}
           </div>
@@ -874,7 +933,9 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
         </div>
         <ScrollArea className="basis-1/2 min-h-0">
           {bottomTab === "criteria" ? (
-            <CriteriaEditor criteria={criteria} onChange={setCriteria} onErrorChange={setCriteriaHasError} />
+            <div className={cn("h-full", selectedRunSeq !== null && "pointer-events-none opacity-80")}>
+              <CriteriaEditor criteria={criteria} onChange={setCriteria} onErrorChange={setCriteriaHasError} />
+            </div>
           ) : (
             <ResponseViewer 
               messages={filteredMessages}
@@ -899,6 +960,8 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
           feedback={displayFeedback}
           durationMs={displayDurationMs}
           outputTokens={displayOutputTokens}
+          selectedRunSeq={selectedRunSeq}
+          startedAt={pinnedOutcome?.startedAt}
         />
     </div>
   );
@@ -918,6 +981,8 @@ interface EvaluationPanelProps {
   feedback: string | null;
   durationMs: number | null;
   outputTokens: number | null;
+  selectedRunSeq?: number | null;
+  startedAt?: Date | string | null;
 }
 
 function EvaluationPanel({
@@ -932,8 +997,11 @@ function EvaluationPanel({
   feedback,
   durationMs,
   outputTokens,
+  selectedRunSeq = null,
+  startedAt = null,
 }: EvaluationPanelProps): ReactNode {
   const [criteriaExpanded, setCriteriaExpanded] = useState(true);
+  const tz = useDisplayTimezone();
 
   const criteriaChecklist = useMemo(
     () => buildCriteriaChecklist(criteria, criteriaResults ?? undefined),
@@ -948,13 +1016,22 @@ function EvaluationPanel({
 
   const hasResult = overallScore !== null;
 
+  const formattedTime = startedAt ? formatTimestamp(startedAt, tz) : null;
+
   return (
-    <div className="flex flex-[3] flex-col min-w-0 bg-muted/10">
+    <div className="flex flex-[1] flex-col min-w-0 bg-muted/10">
       {/* Header: "Evaluation" + level badge */}
       <div className="flex h-10 shrink-0 items-center border-b bg-muted/40 px-3">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Evaluation
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Evaluation
+          </span>
+          {selectedRunSeq !== null && (
+            <span className="text-xs font-semibold text-amber-500 shrink-0">
+              (#{selectedRunSeq}{formattedTime ? ` - ${formattedTime}` : ""})
+            </span>
+          )}
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
           {running && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />

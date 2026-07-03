@@ -544,14 +544,7 @@ export function CaseInspector({
         {/* --- Right column: Output (top, 2fr) ↔ Input,
                               Verdicts (bot, 3fr) ↔ Assertions --- */}
         <div className="flex min-h-0 flex-col min-w-0">
-          <div
-            className={cn(
-              "flex h-8 shrink-0 items-center border-b border-l px-3",
-              showHistoryChrome
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                : "bg-muted/40"
-            )}
-          >
+          <div className="flex h-8 shrink-0 items-center border-b border-l bg-muted/40 px-3">
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Output
             </span>
@@ -586,39 +579,27 @@ export function CaseInspector({
               </div>
             )}
 
-            <div className="ml-auto flex items-center gap-2">
-              {showHistoryChrome && (
+            <div className="ml-auto flex items-center gap-1.5">
+              {showHistoryChrome && historyMeta && (
                 <span
-                  className="text-xs font-semibold"
-                  title={`Viewing snapshot of run #${historyMeta!.seq} — started ${historyStartedAtLabel}`}
+                  className="text-xs font-semibold text-amber-600 dark:text-amber-400 shrink-0"
+                  title={`Viewing snapshot of run #${historyMeta.seq} — started ${historyStartedAtLabel}`}
                 >
-                  #{historyMeta!.seq}
+                  (#{historyMeta.seq}{historyStartedAtLabel ? ` - ${historyStartedAtLabel}` : ""})
                 </span>
               )}
               {displayedOutcome && (
                 <>
                   <span
                     className={cn(
-                      "text-xs font-semibold",
-                      showHistoryChrome
-                        ? "text-amber-700 dark:text-amber-300"
-                        : outcomeStatusColor(displayedOutcome.status),
+                      "text-xs font-semibold shrink-0",
+                      outcomeStatusColor(displayedOutcome.status),
                     )}
                   >
                     {displayedOutcome.status.toUpperCase()}
                   </span>
-                  <span
-                    className={cn(
-                      "text-[11px]",
-                      showHistoryChrome
-                        ? "text-amber-700/80 dark:text-amber-300/80"
-                        : "text-muted-foreground",
-                    )}
-                  >
+                  <span className="text-[11px] text-muted-foreground shrink-0">
                     {displayedOutcome.durationMs} ms
-                    {historyStartedAtLabel && (
-                      <span className="ml-1">({historyStartedAtLabel})</span>
-                    )}
                   </span>
                 </>
               )}

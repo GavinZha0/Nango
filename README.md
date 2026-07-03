@@ -288,34 +288,6 @@ All other scripts (lint, test, type-check, db tooling, sandbox image build,
 docker compose helpers) live in [`package.json`](package.json) — run
 `pnpm run` to list them.
 
-### Project layout (abridged)
-
-```
-src/
-├── app/
-│   ├── (auth)/                # Sign-in / sign-up
-│   ├── (workspace)/           # Authenticated workspace pages
-│   └── api/                   # API route handlers
-├── components/
-│   ├── layout/                # Header, toolbar, side / right panels
-│   ├── right-panels/          # Agent, chat, history, skills, datasource panels
-│   └── workspace/             # Artifact renderers + editors
-├── lib/
-│   ├── backends/              # External agent platform adapters
-│   ├── builtin-agents/        # Built-in agent runtime
-│   ├── credentials/           # Encryption keyring + lookup cache
-│   ├── mcp/                   # MCP provider pool
-│   ├── skills/                # Skill subsystem
-│   ├── data-sources/          # Lookup, policy, prompt block
-│   ├── runner/                # Execution kernel + scheduler + event bus
-│   ├── orchestration/         # Modes, supervisor catalog
-│   ├── workflows/             # Workflow DAG runtime
-│   ├── artifacts/             # Artifact service
-│   ├── ssh/                   # SSH runtime tools
-│   └── db/                    # Drizzle schema + migrations
-└── store/                     # Zustand client stores
-```
-
 ---
 
 ## Architecture Overview

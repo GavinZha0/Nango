@@ -16,7 +16,7 @@
  * Wired to evaluation + evaluation-cases Zustand stores.
  */
 
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -24,6 +24,8 @@ import { EvalSuiteTree } from "@/components/main-panels/evaluation/EvalSuiteTree
 import { EvalSuiteEditDialog } from "@/components/main-panels/evaluation/EvalSuiteEditDialog";
 import { EvalCaseInspector } from "@/components/main-panels/evaluation/EvalCaseInspector";
 import { useEvaluationRunStream } from "@/hooks/useEvaluationRunStream";
+import { useEvalRunSnapshot } from "@/hooks/useEvalRunSnapshot";
+import { RecentRunsBanner } from "@/components/main-panels/RecentRunsBanner";
 import {
   useEvaluationStore,
   evalActions,
@@ -50,7 +52,6 @@ interface EvaluationEditorProps {
 export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }: EvaluationEditorProps): ReactNode {
   const key = agentKey(agentId, agentSource);
   const suites = useEvaluationStore((s) => s.suitesByAgent[key] ?? []);
-  const totalCases = suites.reduce((n, s) => n + s.caseCount, 0);
 
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
 
@@ -59,11 +60,66 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
   const [runningSuiteId, setRunningSuiteId] = useState<string | null>(null);
   const liveRun = useEvaluationRunStream(activeRunId);
 
+  // History runs selection state
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunSeq, setSelectedRunSeq] = useState<number | null>(null);
+  const [bannerRefreshKey, setBannerRefreshKey] = useState(0);
+
+  // Auto refresh the history banner when a live evaluation completes
+  const prevPhaseRef = useRef(liveRun.phase);
+  useEffect(() => {
+    if (prevPhaseRef.current !== "idle" && liveRun.phase === "idle") {
+      setBannerRefreshKey((prev) => prev + 1);
+    }
+    prevPhaseRef.current = liveRun.phase;
+  }, [liveRun.phase]);
+
+  const isLiveTerminal = liveRun.phase !== "idle" && liveRun.phase !== "running";
+  const snapshotRunId = selectedRunId ?? (isLiveTerminal ? activeRunId : null);
+  const { snapshot: runSnapshot } = useEvalRunSnapshot(snapshotRunId);
+
+  // Per-case verdict (passed/failed/errored) — maps caseId to check statuses
+  const verdictByCaseId = useMemo<ReadonlyMap<number, { status: "running" | "passed" | "failed" | "errored" }>>(() => {
+    const map = new Map<number, { status: "running" | "passed" | "failed" | "errored" }>();
+    if (runSnapshot) {
+      for (const r of runSnapshot.results) {
+        map.set(r.caseId, {
+          status: r.status as "passed" | "failed" | "errored",
+        });
+      }
+      return map;
+    }
+    for (const [caseId, v] of liveRun.caseResults) {
+      map.set(caseId, { status: v.status });
+    }
+    return map;
+  }, [runSnapshot, liveRun.caseResults]);
+
+  // Derived historical outcome of the currently selected case
+  const pinnedOutcome = useMemo(() => {
+    if (!runSnapshot || selectedCaseId === null) return undefined;
+    const row = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
+    if (!row) return undefined;
+    return {
+      status: row.status as "passed" | "failed" | "errored",
+      score: row.score,
+      dimensionScores: row.dimensionScores as Record<string, number>,
+      criteriaScore: row.criteriaScore,
+      criteriaResults: row.criteriaResults as unknown[],
+      feedback: row.feedback,
+      durationMs: row.durationMs,
+      outputTokens: row.outputTokens,
+      startedAt: row.startedAt,
+    };
+  }, [runSnapshot, selectedCaseId]);
+
   const handleRunSuite = useCallback(async (suiteId: string): Promise<void> => {
     try {
       const res = await fetch(`/api/eval-suites/${suiteId}/run`, { method: "POST" });
       if (!res.ok) return;
       const { runId } = (await res.json()) as { runId: string };
+      setSelectedRunId(null);
+      setSelectedRunSeq(null);
       setActiveRunId(runId);
       setRunningSuiteId(suiteId);
     } catch { /* swallow */ }
@@ -74,6 +130,8 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
       const res = await fetch(`/api/eval-cases/${caseId}/run`, { method: "POST" });
       if (!res.ok) return;
       const { runId } = (await res.json()) as { runId: string };
+      setSelectedRunId(null);
+      setSelectedRunSeq(null);
       setActiveRunId(runId);
       setRunningSuiteId(suiteId);
     } catch { /* swallow */ }
@@ -167,36 +225,54 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
     setDeleteTarget(null);
   }
 
+  const activeSuiteId = selected?.suite.id ?? (suites[0]?.id ?? null);
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+      <div className="flex items-center gap-3 border-b px-4 py-2 shrink-0">
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 shrink-0"
+          className="h-7 w-7 shrink-0"
           onClick={onBack}
           aria-label="Back"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        <h2 className="text-sm font-semibold truncate">{agentDisplay.name}</h2>
-        <span className="text-xs text-muted-foreground shrink-0">
-          ({totalCases})
-        </span>
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{agentDisplay.name}</h2>
+
+        {/* Recent runs banner in header right */}
+        {activeSuiteId && (
+          <div className="shrink-0">
+            <RecentRunsBanner
+              apiPrefix="eval-suites"
+              suiteId={activeSuiteId}
+              refreshKey={bannerRefreshKey}
+              liveRunId={activeRunId}
+              livePhase={liveRun.phase === "idle" ? null : liveRun.phase}
+              selectedRunId={selectedRunId}
+              onSelectRun={(id, seq) => {
+                setSelectedRunId(id);
+                setSelectedRunSeq(seq);
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Three-column body */}
       <div className="flex flex-1 min-h-0">
         {/* Left: suite tree */}
-        <div className="flex flex-[3] flex-col border-r min-w-0">
+        <div className="flex flex-[2] flex-col border-r min-w-0">
           <EvalSuiteTree
             suites={suites}
             casesBySuite={casesBySuite}
             selectedCaseId={selectedCaseId}
             liveRun={liveRun}
             runningSuiteId={runningSuiteId}
+            verdictByCaseId={verdictByCaseId}
             onSelectCase={setSelectedCaseId}
             onRunSuite={(id) => void handleRunSuite(id)}
             onEditSuite={handleSuiteEdit}
@@ -213,9 +289,12 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
             suite={selected.suite}
             liveRun={liveRun}
             onRunCase={(id) => handleRunCase(id, selected!.suite.id)}
+            pinnedOutcome={pinnedOutcome}
+            pinnedRunId={selectedRunId}
+            selectedRunSeq={selectedRunSeq}
           />
         ) : (
-          <div className="flex flex-[7] items-center justify-center text-xs text-muted-foreground">
+          <div className="flex flex-[8] items-center justify-center text-xs text-muted-foreground">
             Select a case from the tree to inspect.
           </div>
         )}

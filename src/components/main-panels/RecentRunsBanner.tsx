@@ -44,7 +44,7 @@ const LIMIT = 5;
 
 // --- Row type ----------------------------------------------------------------
 
-/** Matches the JSON shape of `VerificationRunEntity` over the wire. */
+/** Matches the JSON shape of `VerificationRunEntity` / `EvalRunEntity` over the wire. */
 export interface BannerRun {
   id: string;
   status: "running" | "passed" | "failed" | "errored" | "timeout";
@@ -52,7 +52,7 @@ export interface BannerRun {
   passedCount: number;
   failedCount: number;
   erroredCount: number;
-  skippedCount: number;
+  skippedCount?: number;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -117,7 +117,7 @@ interface UseRecentRunsResult {
   refresh: () => void;
 }
 
-/** Wire shape of `GET /api/verification-suites/[id]/runs`. */
+/** Wire shape of `GET /api/verification-suites/[id]/runs` / `GET /api/eval-suites/[id]/runs`. */
 interface RunsPageResponse {
   rows: BannerRun[];
   total: number;
@@ -130,10 +130,11 @@ interface RunsPageResponse {
  * and the lint mis-flags it when the fetcher is defined locally.
  */
 async function fetchRecentRuns(
+  apiPrefix: "verification-suites" | "eval-suites",
   suiteId: string,
   offset: number,
 ): Promise<RunsPageResponse> {
-  const url = `/api/verification-suites/${suiteId}/runs?offset=${offset}&limit=${LIMIT}`;
+  const url = `/api/${apiPrefix}/${suiteId}/runs?offset=${offset}&limit=${LIMIT}`;
   const res = await fetch(url);
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as
@@ -145,6 +146,7 @@ async function fetchRecentRuns(
 }
 
 function useRecentRuns(
+  apiPrefix: "verification-suites" | "eval-suites",
   suiteId: string,
   offset: number,
   refreshKey: number,
@@ -158,7 +160,7 @@ function useRecentRuns(
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchRecentRuns(suiteId, offset)
+    fetchRecentRuns(apiPrefix, suiteId, offset)
       .then((json) => {
         if (cancelled) return;
         setRows(json.rows);
@@ -175,14 +177,8 @@ function useRecentRuns(
     return () => {
       cancelled = true;
     };
-  }, [suiteId, offset]);
+  }, [apiPrefix, suiteId, offset]);
 
-  // The `react-hooks/set-state-in-effect` lint mis-flags this canonical
-  // "fetch on dep change" pattern: setLoading lives inside `refresh`,
-  // which from the lint's POV is a synchronous setState callsite from
-  // the effect body. The setState calls ARE in callback closures of
-  // the fetch promise chain — they're just not visible across the
-  // useCallback indirection. Suppress narrowly.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => refresh(), [refresh, refreshKey]);
 
@@ -207,6 +203,7 @@ export interface RecentRunsBannerProps {
    *  user can tell at a glance which run they're inspecting. `null`
    *  payload means "deselect, return to live view". */
   onSelectRun: (runId: string | null, seq: number | null) => void;
+  apiPrefix?: "verification-suites" | "eval-suites";
 }
 
 export function RecentRunsBanner({
@@ -216,19 +213,17 @@ export function RecentRunsBanner({
   livePhase,
   selectedRunId,
   onSelectRun,
+  apiPrefix = "verification-suites",
 }: RecentRunsBannerProps): ReactNode {
   const [offset, setOffset] = useState<number>(0);
   const { rows, total, loading, error } = useRecentRuns(
+    apiPrefix,
     suiteId,
     offset,
     refreshKey,
   );
 
-  // Auto-snap to the newest page when a run starts — otherwise a user
-  // who paged backward to inspect history wouldn't see the live chip
-  // appear and could think Run suite did nothing. Genuine "react to
-  // an external prop transition" effect; the lint suppress sits on
-  // the actual setState call where the rule reports.
+  // Auto-snap to the newest page when a run starts
   useEffect(() => {
     if (liveRunId !== null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -237,8 +232,7 @@ export function RecentRunsBanner({
   }, [liveRunId]);
 
   // The live chip is shown only on the newest page (offset=0) and only
-  // when it isn't already present in the fetched list — once persisted
-  // it lives in `rows` like any other run.
+  // when it isn't already present in the fetched list
   const showLiveChip = useMemo(
     () =>
       offset === 0 &&
@@ -260,7 +254,6 @@ export function RecentRunsBanner({
         passedCount: 0,
         failedCount: 0,
         erroredCount: 0,
-        skippedCount: 0,
         startedAt: new Date().toISOString(),
         finishedAt: null,
       });
@@ -268,21 +261,14 @@ export function RecentRunsBanner({
     return out.reverse();
   }, [rows, showLiveChip, liveRunId, livePhase]);
 
-  // Precise pagination guards driven by the server-reported total —
-  // the previous heuristic (`rows.length === LIMIT`) stayed true
-  // during a fetch transition (rows is still the prior page) which
-  // let users click past the end and land on "No runs yet".
   const canGoNewer = offset > 0;
   const canGoOlder = offset + rows.length < total;
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 shrink-0">
       <Button
         variant="ghost"
         size="icon"
-        // Double-chevron + wider hit area — a single 6px chevron is
-        // hard to click; doubling them visually signals "jump a page"
-        // and gives ~24px of click target without growing the row.
         className="h-6 w-auto px-1"
         onClick={() => setOffset((o) => o + LIMIT)}
         disabled={!canGoOlder || loading}
@@ -302,18 +288,6 @@ export function RecentRunsBanner({
           </span>
         )}
         {visible.map((run, i) => {
-          // Absolute run sequence label (1-indexed, oldest = #1).
-          //
-          // `rows` is DESC-ordered (newest first, length `n`); the
-          // optional transient live chip is unshifted then `visible`
-          // is reversed for left=oldest display. So:
-          //   visible[i] = rows[n-1-i]   for i ∈ [0, n-1]
-          //   visible[n] = liveChip      (only when showLiveChip, offset=0)
-          //
-          // seq(rows[k]) = total - offset - k. Substituting k = n-1-i
-          // gives the uniform formula below, which also evaluates to
-          // `total + 1` at the live-chip position (i = n, offset = 0),
-          // matching the "one beyond persisted" convention.
           const seq = total - offset - (rows.length - 1) + i;
           return (
             <RunChip
@@ -357,7 +331,6 @@ interface RunChipProps {
 function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
   const tz = useDisplayTimezone();
   const v = statusVisual(run.status);
-  // Inline counts for terminal states; running shows just the spinner.
   const counts =
     run.status === "running"
       ? null
@@ -386,27 +359,17 @@ function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
       type="button"
       onClick={onClick}
       className={cn(
-        // `ring-inset` so the 1px outline sits INSIDE the chip's
-        // border-box — otherwise the outer scroll container's
-        // `overflow-x-auto` clips the leftmost chip's left ring and
-        // the rightmost chip's right ring (rings are box-shadows,
-        // they render outside the box and aren't covered by gap).
         "flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ring-1 ring-inset transition-colors",
         v.ring,
         selected
           ? "bg-accent text-foreground"
           : cn(v.bg, "hover:brightness-110"),
       )}
-      title={`Run ${run.id} — started ${formatTimestamp(run.startedAt, tz)}`}
+      title={formatTimestamp(run.startedAt, tz)}
       aria-label={`Run ${label}, status ${run.status}`}
       aria-pressed={selected}
     >
       <span className="font-medium">{label}</span>
-      {/* Terminal states: the trailing ✓/✗/! counts already convey
-          status, so a status-coloured center icon would be redundant.
-          We show a faint center-dot separator instead. Running has no
-          counts, so the spinner stays — it's the only signal that
-          work is in progress. */}
       {run.status === "running" ? v.icon : (
         <span aria-hidden className="text-muted-foreground/60">·</span>
       )}

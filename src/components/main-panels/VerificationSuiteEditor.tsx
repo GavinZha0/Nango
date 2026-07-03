@@ -81,7 +81,7 @@ import {
   type CaseVerdict,
 } from "@/components/main-panels/verification/CaseTree";
 import { NewCaseDialog } from "@/components/main-panels/verification/NewCaseDialog";
-import { RecentRunsBanner } from "@/components/main-panels/verification/RecentRunsBanner";
+import { RecentRunsBanner } from "@/components/main-panels/RecentRunsBanner";
 import { type VerificationSuiteRow } from "@/store/verification";
 import {
   caseActions,
