@@ -604,13 +604,19 @@ class RunnerImpl implements Runner {
     runId: string,
     input: StartRunInput,
   ): RunAgentInput {
+    const prev = input.previousMessages ?? [];
     return {
       threadId: input.threadId ?? randomUUID(),
       runId,
       state: {},
       messages: [
+        ...prev.map((m, idx) => ({
+          id: String(idx),
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+        })),
         {
-          id: randomUUID(),
+          id: String(prev.length),
           role: "user",
           content: input.task,
         },

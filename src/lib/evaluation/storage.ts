@@ -2,7 +2,7 @@
 
 import "server-only";
 
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, sql, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -470,5 +470,17 @@ export async function listEnabledCasesForRun(
       sql`${EvalCaseTable.suiteId} = ${suiteId}
         AND ${EvalCaseTable.enabled} = true`,
     )
+    .orderBy(asc(EvalCaseTable.name));
+}
+
+/** List cases by their IDs (alphabetical order, ignoring enabled status). */
+export async function listCasesByIds(
+  ids: number[],
+): Promise<EvalCaseEntity[]> {
+  if (ids.length === 0) return [];
+  return db
+    .select()
+    .from(EvalCaseTable)
+    .where(inArray(EvalCaseTable.id, ids))
     .orderBy(asc(EvalCaseTable.name));
 }

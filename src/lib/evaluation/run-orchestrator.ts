@@ -40,6 +40,7 @@ export interface StartEvalSuiteRunInput {
   suiteId: string;
   ownerId: string;
   triggeredBy: "manual" | "schedule";
+  caseIds?: number[]; // Optional list of specific case IDs to run
 }
 
 export interface StartEvalSuiteRunResult {
@@ -60,7 +61,11 @@ export async function startEvalSuiteRun(
     throw new Error("Eval suite has no evaluator agent assigned.");
   }
 
-  const cases = await storage.listEnabledCasesForRun(input.suiteId);
+  const cases =
+    input.caseIds && input.caseIds.length > 0
+      ? await storage.listCasesByIds(input.caseIds)
+      : await storage.listEnabledCasesForRun(input.suiteId);
+
   const run = await storage.createRun({
     suiteId: input.suiteId,
     totalCount: cases.length,
@@ -194,6 +199,8 @@ async function runAllCases(
       criteriaScore: result.criteriaScore,
       criteriaResults: result.criteriaResults,
       feedback: result.feedback,
+      durationMs: result.durationMs,
+      outputTokens: result.outputTokens,
     });
   }
 }

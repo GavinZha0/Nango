@@ -12,11 +12,12 @@
 import "server-only";
 
 import { z } from "zod";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
   EntityRunEventTable,
+  EntityRunTable,
   type EntityRunEventEntity,
 } from "@/lib/db/schema";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
@@ -57,17 +58,43 @@ export const GET = withSession<{ id: string }>(
       return Response.json({ messages: [] });
     }
 
-    // result.threadId stores the target agent's entity_run.id.
-    // Read events from that run and reconstruct messages.
-    const targetRunId = result.threadId;
+    // result.threadId stores the target agent's conversation threadId.
+    // Read all runs that belong to this thread.
+    const targetThreadId = result.threadId;
 
+    const runs = await db
+      .select({ id: EntityRunTable.id, inputTask: EntityRunTable.inputTask })
+      .from(EntityRunTable)
+      .where(eq(EntityRunTable.threadId, targetThreadId))
+      .orderBy(asc(EntityRunTable.startedAt));
+
+    if (runs.length === 0) {
+      return Response.json({ messages: [] });
+    }
+
+    const runIds = runs.map((r) => r.id);
     const events: EntityRunEventEntity[] = await db
       .select()
       .from(EntityRunEventTable)
-      .where(eq(EntityRunEventTable.runId, targetRunId))
-      .orderBy(asc(EntityRunEventTable.seq));
+      .where(inArray(EntityRunEventTable.runId, runIds))
+      .orderBy(asc(EntityRunEventTable.runId), asc(EntityRunEventTable.seq));
 
-    const messages = reconstructMessages(events);
+    const eventsByRun = new Map<string, EntityRunEventEntity[]>();
+    for (const ev of events) {
+      const list = eventsByRun.get(ev.runId);
+      if (list) list.push(ev);
+      else eventsByRun.set(ev.runId, [ev]);
+    }
+
+    const messages: SimpleMessage[] = [];
+    for (const run of runs) {
+      if (run.inputTask) {
+        messages.push({ role: "user", content: run.inputTask });
+      }
+      const runEvents = eventsByRun.get(run.id) ?? [];
+      messages.push(...reconstructMessages(runEvents));
+    }
+
     return Response.json({ messages });
   },
 );

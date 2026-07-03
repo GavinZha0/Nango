@@ -23,6 +23,11 @@ export interface StartRunInput {
 
   /** Canonical natural-language prompt. */
   task: string;
+  /** Historical context for multi-turn programmatic dispatch (e.g. Eval). */
+  previousMessages?: {
+    role: "user" | "assistant" | "system";
+    content: string;
+  }[];
   /** Structured side-channel data (built-in / workflow runs). */
   context?: Record<string, unknown>;
   params?: Record<string, unknown>;

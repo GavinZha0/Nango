@@ -21,6 +21,8 @@ export interface EvalCaseLive {
   criteriaScore?: number | null;
   criteriaResults?: unknown[];
   feedback?: string | null;
+  durationMs?: number | null;
+  outputTokens?: number | null;
 }
 
 export interface EvaluationRunLiveState {
@@ -107,6 +109,8 @@ export function useEvaluationRunStream(
             criteriaScore: (frame.criteriaScore as number) ?? null,
             criteriaResults: frame.criteriaResults as unknown[],
             feedback: (frame.feedback as string) ?? null,
+            durationMs: (frame.durationMs as number) ?? null,
+            outputTokens: (frame.outputTokens as number) ?? null,
           });
           return { ...base, caseResults: next };
         });

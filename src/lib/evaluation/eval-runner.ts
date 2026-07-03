@@ -16,6 +16,7 @@
  */
 
 import "server-only";
+import { randomUUID } from "crypto";
 
 import { runner } from "@/lib/runner";
 import { readEvents } from "@/lib/runner/event-store";
@@ -62,6 +63,8 @@ export interface RunEvalCaseResult {
   criteriaResults?: CriteriaCheckResult[];
   feedback?: string | null;
   error?: string;
+  durationMs?: number;
+  outputTokens?: number;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -88,18 +91,14 @@ function estimateOutputTokens(summary: string): number {
   return Math.ceil(summary.split(/\s+/).filter(Boolean).length * 1.3);
 }
 
-/** Build conversation text from turns + agent summary for the
+/** Build conversation text from history for the
  *  evaluator prompt. */
 function buildConversationText(
-  turns: Array<{ userMessage: string }>,
-  agentSummary: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>,
 ): string {
-  const lines: string[] = [];
-  for (let i = 0; i < turns.length; i++) {
-    lines.push(`User: ${turns[i].userMessage}`);
-  }
-  lines.push(`Agent: ${agentSummary}`);
-  return lines.join("\n\n");
+  return history
+    .map((msg) => (msg.role === "user" ? `User: ${msg.content}` : `Agent: ${msg.content}`))
+    .join("\n\n");
 }
 
 /** Parse the evaluator's submit_evaluation_scores tool call from
@@ -163,52 +162,65 @@ export async function runEvalCase(
 
   // ── ① Dispatch target agent ───────────────────────────────────
 
-  const task = input.turns.map((t) => t.userMessage).join("\n");
-  let targetResult;
-  try {
-    targetResult = await runner.start({
-      entityId: input.targetAgentId,
-      credentialId: input.targetCredentialId,
-      entityKind: input.targetEntityKind,
-      task,
-      mode: "sync",
-      initiator: "system",
-      ownerId: input.ownerId,
-      createdBy: input.ownerId,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error(
-      { event: "target_dispatch_failed", runId: input.runId, caseId: input.caseId, err: message },
-      "target agent dispatch failed",
-    );
-    await writeErrorResult(input, startMs, `Target agent dispatch failed: ${message}`);
-    return { status: "errored", score: null, error: message };
+  const currentThreadId = randomUUID();
+  const history: { role: "user" | "assistant"; content: string }[] = [];
+  let durationMs = 0;
+  let outputTokens = 0;
+  const actualToolCalls: string[] = [];
+  let finalTargetSummary = "";
+
+  for (const turn of input.turns) {
+    let targetResult;
+    try {
+      targetResult = await runner.start({
+        entityId: input.targetAgentId,
+        credentialId: input.targetCredentialId,
+        entityKind: input.targetEntityKind,
+        task: turn.userMessage,
+        previousMessages: history,
+        threadId: currentThreadId,
+        mode: "sync",
+        initiator: "system",
+        ownerId: input.ownerId,
+        createdBy: input.ownerId,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(
+        { event: "target_dispatch_failed", runId: input.runId, caseId: input.caseId, err: message },
+        "target agent dispatch failed",
+      );
+      await writeErrorResult(input, startMs, `Target agent dispatch failed: ${message}`);
+      return { status: "errored", score: null, error: message };
+    }
+
+    if (targetResult.status === "failed") {
+      const message = targetResult.errorMessage ?? "Target agent run failed";
+      log.warn(
+        { event: "target_run_failed", runId: input.runId, caseId: input.caseId, targetRunId: targetResult.runId },
+        message,
+      );
+      await writeErrorResult(input, startMs, message, targetResult.runId);
+      return { status: "errored", score: null, error: message };
+    }
+
+    finalTargetSummary = targetResult.summary;
+
+    const targetEvents = await readEvents(targetResult.runId);
+    actualToolCalls.push(...extractToolCallNames(targetEvents));
+    outputTokens += estimateOutputTokens(targetResult.summary);
+
+    history.push({ role: "user", content: turn.userMessage });
+    history.push({ role: "assistant", content: targetResult.summary });
   }
 
-  if (targetResult.status === "failed") {
-    const message = targetResult.errorMessage ?? "Target agent run failed";
-    log.warn(
-      { event: "target_run_failed", runId: input.runId, caseId: input.caseId, targetRunId: targetResult.runId },
-      message,
-    );
-    await writeErrorResult(input, startMs, message, targetResult.runId);
-    return { status: "errored", score: null, error: message };
-  }
-
-  const durationMs = Date.now() - startMs;
-
-  // ── Extract metrics from target run ───────────────────────────
-
-  const targetEvents = await readEvents(targetResult.runId);
-  const actualToolCalls = extractToolCallNames(targetEvents);
+  durationMs = Date.now() - startMs;
   const toolCallCount = actualToolCalls.length;
-  const outputTokens = estimateOutputTokens(targetResult.summary);
 
   // ── ② Deterministic checks ───────────────────────────────────
 
   const checkInput: DeterministicCheckInput = {
-    agentText: targetResult.summary,
+    agentText: finalTargetSummary,
     actualToolCalls,
     metrics: { durationMs, outputTokens, toolCallCount },
   };
@@ -219,7 +231,7 @@ export async function runEvalCase(
 
   // ── ③ Assemble evaluator prompt ──────────────────────────────
 
-  const conversationText = buildConversationText(input.turns, targetResult.summary);
+  const conversationText = buildConversationText(history);
   const brief = buildEvaluationBrief({
     dimensionIds: input.dimensionIds,
     criteria: input.criteria as EvalCriteria,
@@ -280,7 +292,7 @@ export async function runEvalCase(
       { event: "evaluator_failed", runId: input.runId, caseId: input.caseId, evaluatorRunId: evaluatorResult?.runId },
       message,
     );
-    await writeErrorResult(input, startMs, message, targetResult.runId, evaluatorResult?.runId);
+    await writeErrorResult(input, startMs, message, currentThreadId, evaluatorResult?.runId);
     return { status: "errored", score: null, error: message };
   }
 
@@ -338,7 +350,7 @@ export async function runEvalCase(
     criteriaScore: criteriaScoreFinal,
     criteriaResults: mergedResults,
     feedback: scores.feedback,
-    threadId: targetResult.runId,
+    threadId: currentThreadId,
     evaluatorThreadId: evaluatorResult.runId,
     durationMs,
     outputTokens,
@@ -352,6 +364,8 @@ export async function runEvalCase(
     criteriaScore: criteriaScoreFinal,
     criteriaResults: mergedResults,
     feedback: scores.feedback,
+    durationMs,
+    outputTokens,
   };
 }
 

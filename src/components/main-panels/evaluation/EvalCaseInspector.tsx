@@ -20,11 +20,14 @@ import {
   Check,
   X,
   MessageSquare,
+  Plus,
 } from "lucide-react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   BUILTIN_DIMENSIONS,
@@ -180,72 +183,392 @@ interface CriteriaEditorProps {
   onErrorChange: (hasError: boolean) => void;
 }
 
+interface DynamicInputListProps {
+  label: string;
+  items: string[];
+  placeholder?: string;
+  onChange: (items: string[]) => void;
+}
+
+function DynamicInputList({ label, items, placeholder, onChange }: DynamicInputListProps): ReactNode {
+  function handleItemChange(idx: number, val: string): void {
+    const next = [...items];
+    next[idx] = val;
+    onChange(next);
+  }
+
+  function addItem(): void {
+    onChange([...items, ""]);
+  }
+
+  function removeItem(idx: number): void {
+    onChange(items.filter((_, i) => i !== idx));
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-[10px] font-semibold text-muted-foreground">{label}</Label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-5 px-1.5 text-[9px] gap-1 hover:bg-muted font-semibold"
+          onClick={addItem}
+        >
+          <Plus className="h-2.5 w-2.5" /> Add
+        </Button>
+      </div>
+      {items.length > 0 && (
+        <div className="space-y-1">
+          {items.map((item, idx) => (
+            <div key={idx} className="flex items-center gap-1">
+              <Input
+                value={item}
+                onChange={(e) => handleItemChange(idx, e.target.value)}
+                placeholder={placeholder ?? "Enter value..."}
+                className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
+                onClick={() => removeItem(idx)}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface CommaSeparatedInputProps {
+  label: string;
+  value: string[];
+  placeholder?: string;
+  onChange: (value: string[]) => void;
+}
+
+function CommaSeparatedInput({ label, value, placeholder, onChange }: CommaSeparatedInputProps): ReactNode {
+  const canonical = value.join(", ");
+  const [state, setState] = useState({
+    text: canonical,
+    prevCanonical: canonical,
+  });
+
+  if (canonical !== state.prevCanonical) {
+    setState({
+      text: canonical,
+      prevCanonical: canonical,
+    });
+  }
+
+  function handleChange(val: string): void {
+    setState((prev) => ({ ...prev, text: val }));
+    const parsed = val
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    onChange(parsed);
+  }
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-[10px] font-semibold text-muted-foreground block">{label}</Label>
+      <Input
+        value={state.text}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder={placeholder ?? "e.g. term1, term2, term3"}
+        className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+      />
+    </div>
+  );
+}
+
 function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorProps): ReactNode {
-  const [text, setText] = useState(() => {
+  type CriteriaSubTab = "expectations" | "checklist" | "limits" | "json";
+  const [subTab, setSubTab] = useState<CriteriaSubTab>("expectations");
+
+  const [jsonText, setJsonText] = useState(() => {
     return Object.keys(criteria).length === 0 ? "" : JSON.stringify(criteria, null, 2);
   });
-  const [error, setError] = useState<string | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null);
 
-  function handleChange(v: string): void {
-    setText(v);
+  const hasExpectations = useMemo(() => {
+    return !!(
+      criteria.expectation ||
+      criteria.issue ||
+      criteria.reference ||
+      (criteria.context && criteria.context.length > 0)
+    );
+  }, [criteria]);
+
+  const hasChecklist = useMemo(() => {
+    return !!(
+      (criteria.assertions && criteria.assertions.length > 0) ||
+      (criteria.expected_keywords && criteria.expected_keywords.length > 0) ||
+      (criteria.unexpected_keywords && criteria.unexpected_keywords.length > 0) ||
+      (criteria.tool_calls && criteria.tool_calls.length > 0)
+    );
+  }, [criteria]);
+
+  const hasLimits = useMemo(() => {
+    return !!(
+      criteria.max_duration_s !== undefined ||
+      criteria.max_output_tokens !== undefined ||
+      criteria.max_tool_calls !== undefined
+    );
+  }, [criteria]);
+
+  const hasJson = useMemo(() => {
+    return Object.keys(criteria).length > 0;
+  }, [criteria]);
+
+  function updateField<K extends keyof EvalCriteria>(key: K, value: EvalCriteria[K]): void {
+    const updated = { ...criteria, [key]: value };
+    if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
+      delete updated[key];
+    }
+    onChange(updated);
+    onErrorChange(false);
+  }
+
+  function handleJsonChange(v: string): void {
+    setJsonText(v);
     if (!v.trim() || v.trim() === "{}") {
-      setError(null);
+      setJsonError(null);
       onErrorChange(false);
       onChange({});
       return;
     }
-    // Step 1: parse JSON syntax.
     let raw: unknown;
     try {
       raw = JSON.parse(v);
     } catch {
-      setError("Invalid JSON");
+      setJsonError("Invalid JSON");
       onErrorChange(true);
       return;
     }
-    // Step 2: validate keys and types against evalCriteriaSchema.
     const result = evalCriteriaSchema.safeParse(raw);
     if (!result.success) {
       const first = result.error.issues[0];
-      setError(first?.message ?? "Invalid criteria");
+      setJsonError(first?.message ?? "Invalid criteria");
       onErrorChange(true);
       return;
     }
-    setError(null);
+    setJsonError(null);
     onErrorChange(false);
     onChange(result.data as EvalCriteria);
   }
 
-  const placeholder = JSON.stringify(
-    {
-      issue: "Describe the previous issue or bug you found",
-      expectation: "Natural language description of the expected outcome",
-      reference: "A good example of an agent response or ground truth",
-      context: ["Business rule 1", "Knowledge snippet 2"],
-      assertions: [
-        "The response time is under 10ms",
-        "The agent mentions the correct tracking number",
-      ],
-      tool_calls: ["search_database", "send_email"],
-      expected_keywords: ["pass", "success", "approved"],
-      unexpected_keywords: ["error", "fail", "null"],
-      max_duration_s: 15,
-      max_output_tokens: 50000,
-      max_tool_calls: 3,
-    },
-    null,
-    2
-  );
+  function switchTab(newTab: CriteriaSubTab): void {
+    if (subTab === "json" && newTab !== "json") {
+      if (jsonError) return;
+    }
+    if (newTab === "json") {
+      setJsonText(Object.keys(criteria).length === 0 ? "" : JSON.stringify(criteria, null, 2));
+      setJsonError(null);
+      onErrorChange(false);
+    }
+    setSubTab(newTab);
+  }
 
   return (
-    <div className="flex flex-col gap-1.5 p-3 h-full min-h-0">
-      <Textarea
-        value={text}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder={placeholder}
-        className={cn("flex-1 font-mono text-xs resize-none field-sizing-fixed", error ? "border-destructive" : "border-amber-500/30")}
-      />
-      {error && <p className="text-[10px] text-destructive shrink-0">{error}</p>}
+    <div className="flex flex-col h-full min-h-0 bg-muted/5">
+      {/* Sub-tabs header */}
+      <div className="flex items-center gap-1 border-b bg-muted/20 px-3 py-1.5 shrink-0">
+        {(
+          [
+            { id: "expectations", label: "Expectations", hasDot: hasExpectations },
+            { id: "checklist", label: "Checklist", hasDot: hasChecklist },
+            { id: "limits", label: "Limits", hasDot: hasLimits },
+            { id: "json", label: "JSON", hasDot: hasJson },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => switchTab(t.id)}
+            disabled={subTab === "json" && !!jsonError && t.id !== "json"}
+            className={cn(
+              "flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium rounded transition-colors border",
+              subTab === t.id
+                ? "bg-muted text-foreground border-muted-foreground/10 font-semibold"
+                : "text-muted-foreground hover:bg-muted/30 hover:text-foreground border-transparent",
+              subTab === "json" && jsonError && t.id !== "json" ? "opacity-50 cursor-not-allowed" : ""
+            )}
+          >
+            <span>{t.label}</span>
+            {t.hasDot && (
+              <span className="w-1 h-1 rounded-full bg-emerald-500 shrink-0 animate-pulse-subtle" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content area */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+        {subTab === "expectations" && (
+          <div className="space-y-3">
+            {/* Expectation */}
+            <div className="space-y-1">
+              <Label className="text-[10px] font-semibold text-muted-foreground">Expectation</Label>
+              <Textarea
+                value={criteria.expectation ?? ""}
+                onChange={(e) => updateField("expectation", e.target.value)}
+                placeholder="Natural language description of the expected outcome..."
+                className="h-16 text-xs resize-none bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+              />
+            </div>
+
+            {/* Reference */}
+            <div className="space-y-1">
+              <Label className="text-[10px] font-semibold text-muted-foreground">Reference answer</Label>
+              <Textarea
+                value={criteria.reference ?? ""}
+                onChange={(e) => updateField("reference", e.target.value)}
+                placeholder="A good example of an agent response or ground truth..."
+                className="h-16 text-xs font-mono resize-none bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+              />
+            </div>
+            
+            {/* Issue */}
+            <div className="space-y-1">
+              <Label className="text-[10px] font-semibold text-muted-foreground">Reported issue</Label>
+              <Input
+                value={criteria.issue ?? ""}
+                onChange={(e) => updateField("issue", e.target.value)}
+                placeholder="Describe the previous issue or bug you observed..."
+                className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+              />
+            </div>
+
+            {/* Context */}
+            <DynamicInputList
+              label="Context (supplementary knowledge)"
+              items={criteria.context ?? []}
+              placeholder="e.g. Business rules, documentation snippet..."
+              onChange={(next) => updateField("context", next)}
+            />
+          </div>
+        )}
+
+        {subTab === "checklist" && (
+          <div className="space-y-3">
+            {/* Expected Keywords */}
+            <CommaSeparatedInput
+              label="Expected keywords (must contain)"
+              value={criteria.expected_keywords ?? []}
+              placeholder="e.g. success, approved"
+              onChange={(next) => updateField("expected_keywords", next)}
+            />
+
+            {/* Unexpected Keywords */}
+            <CommaSeparatedInput
+              label="Unexpected keywords (must not contain)"
+              value={criteria.unexpected_keywords ?? []}
+              placeholder="e.g. failure, error, exception"
+              onChange={(next) => updateField("unexpected_keywords", next)}
+            />
+
+            {/* Tool Calls */}
+            <CommaSeparatedInput
+              label="Expected tool calls"
+              value={criteria.tool_calls ?? []}
+              placeholder="e.g. search_database, send_email"
+              onChange={(next) => updateField("tool_calls", next)}
+            />
+
+            {/* Assertions */}
+            <DynamicInputList
+              label="Assertions (LLM checks)"
+              items={criteria.assertions ?? []}
+              placeholder="e.g. The response does not contain code formatting errors..."
+              onChange={(next) => updateField("assertions", next)}
+            />
+          </div>
+        )}
+
+        {subTab === "limits" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {/* Max Duration */}
+              <div className="space-y-1">
+                <Label className="text-[10px] font-semibold text-muted-foreground block">Max duration</Label>
+                <div className="relative flex items-center">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={criteria.max_duration_s ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? undefined : parseFloat(e.target.value);
+                      updateField("max_duration_s", val);
+                    }}
+                    placeholder="None"
+                    className="h-7 text-xs pr-4 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                  />
+                  <span className="absolute right-1.5 text-[9px] text-muted-foreground font-medium pointer-events-none">s</span>
+                </div>
+              </div>
+
+              {/* Max Output Tokens */}
+              <div className="space-y-1">
+                <Label className="text-[10px] font-semibold text-muted-foreground block">Max tokens</Label>
+                <div className="relative flex items-center">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={criteria.max_output_tokens ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? undefined : parseInt(e.target.value, 10);
+                      updateField("max_output_tokens", val);
+                    }}
+                    placeholder="None"
+                    className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                  />
+                </div>
+              </div>
+
+              {/* Max Tool Calls */}
+              <div className="space-y-1">
+                <Label className="text-[10px] font-semibold text-muted-foreground block">Max tool calls</Label>
+                <div className="relative flex items-center">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={criteria.max_tool_calls ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? undefined : parseInt(e.target.value, 10);
+                      updateField("max_tool_calls", val);
+                    }}
+                    placeholder="None"
+                    className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                  />
+                </div>
+              </div>
+            </div>
+            <p className="text-[9px] text-muted-foreground/70 italic leading-relaxed">
+              These are hard limits measured by the runner. If exceeded, the deterministic checks fail and degrade the score.
+            </p>
+          </div>
+        )}
+
+        {subTab === "json" && (
+          <div className="flex flex-col gap-1.5 h-full min-h-0">
+            <Textarea
+              value={jsonText}
+              onChange={(e) => handleJsonChange(e.target.value)}
+              placeholder="{}"
+              className={cn("flex-1 font-mono text-xs resize-none field-sizing-fixed bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30")}
+            />
+            {jsonError && <p className="text-[10px] text-destructive shrink-0">{jsonError}</p>}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -399,6 +722,8 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
   const displayCriteriaScore = liveCaseResult?.criteriaScore ?? historicalResult?.criteriaScore ?? null;
   const displayFeedback = liveCaseResult?.feedback ?? historicalResult?.feedback ?? null;
   const displayCriteriaResults = liveCaseResult?.criteriaResults ?? historicalResult?.criteriaResults ?? null;
+  const displayDurationMs = liveCaseResult?.durationMs ?? historicalResult?.durationMs ?? null;
+  const displayOutputTokens = liveCaseResult?.outputTokens ?? historicalResult?.outputTokens ?? null;
 
   const resolvedRunId = liveRun.phase === "idle" ? historicalResult?.runId ?? null : liveRun.runId;
   const resolvedStatus = liveRun.phase === "idle" ? historicalResult?.status ?? "idle" : (liveCaseResult?.status ?? "running");
@@ -572,6 +897,8 @@ export function EvalCaseInspector({ evalCase, suite, liveRun, onRunCase }: EvalC
           criteriaScore={displayCriteriaScore}
           criteriaResults={displayCriteriaResults}
           feedback={displayFeedback}
+          durationMs={displayDurationMs}
+          outputTokens={displayOutputTokens}
         />
     </div>
   );
@@ -589,6 +916,8 @@ interface EvaluationPanelProps {
   criteriaScore: number | null;
   criteriaResults: unknown[] | null;
   feedback: string | null;
+  durationMs: number | null;
+  outputTokens: number | null;
 }
 
 function EvaluationPanel({
@@ -601,6 +930,8 @@ function EvaluationPanel({
   criteriaScore,
   criteriaResults,
   feedback,
+  durationMs,
+  outputTokens,
 }: EvaluationPanelProps): ReactNode {
   const [criteriaExpanded, setCriteriaExpanded] = useState(true);
 
@@ -644,6 +975,24 @@ function EvaluationPanel({
       {/* Top Half: Scores and Criteria */}
       <ScrollArea className="basis-1/2 min-h-0 bg-background">
         <div className="p-3 space-y-1.5">
+          {/* Metrics */}
+          {hasResult && (durationMs !== null || outputTokens !== null) && (
+            <div className="flex items-center gap-4 text-[11px] text-muted-foreground mb-3 pb-2 border-b border-muted">
+              {durationMs !== null && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="font-semibold text-foreground/80">Duration:</span>
+                  <span>{(durationMs / 1000).toFixed(1)}s</span>
+                </div>
+              )}
+              {outputTokens !== null && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="font-semibold text-foreground/80">Output token:</span>
+                  <span>{outputTokens}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Baseline — always present */}
           <ScoreBar name="Baseline" score={baselineScore} />
 
