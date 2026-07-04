@@ -180,7 +180,7 @@ export async function runEvalCase(
         previousMessages: history,
         threadId: currentThreadId,
         mode: "sync",
-        initiator: "system",
+        initiator: "evaluator",
         ownerId: input.ownerId,
         createdBy: input.ownerId,
       });
@@ -257,7 +257,7 @@ export async function runEvalCase(
         entityId: input.evaluatorAgentId,
         task: currentTask,
         mode: "sync",
-        initiator: "system",
+        initiator: "evaluator",
         ownerId: input.ownerId,
         createdBy: input.ownerId,
         context: { expectedDimensionIds: input.dimensionIds },

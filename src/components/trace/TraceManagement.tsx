@@ -1,17 +1,15 @@
 "use client";
 
 /**
- * ThreadManagement — admin-only listing of chat threads.
+ * TraceManagement — editor-only listing of chat traces.
  *
- * Thread-first view of `entity_run` history: one row per `thread_id`,
- * populated by `GET /api/admin/threads`. The "first top-level run"
- * of each thread
+ * Trace-first view of `entity_run` history: one row per `thread_id` (Trace ID),
+ * populated by `GET /api/trace`. The "first top-level run" of each trace
  * is the source of truth for the timestamp / task / entity / owner
  * columns; runCount, cumulativeDurationMs and worstStatus are
- * aggregated across all top-level runs (top-level + sub for the
- * status pick — see backend doc for the rationale).
+ * aggregated across all top-level runs.
  *
- * Click a row → `/admin/thread/<id>` (Phase 4 detail page).
+ * Click a row → `/trace/<id>`.
  */
 
 import Link from "next/link";
@@ -29,11 +27,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 
-import { formatTimestamp, formatDurationMs } from "./format";
+import { formatTimestamp, formatDurationMs } from "@/components/admin/format";
 
 /** Server-side row shape. Mirrors the response of
- *  `GET /api/admin/threads` 1:1. */
-interface ThreadRow {
+ *  `GET /api/trace` 1:1. */
+interface TraceRow {
   threadId: string;
   firstRunCreatedAt: string;
   firstRunEntityId: string;
@@ -45,13 +43,14 @@ interface ThreadRow {
   ownerId: string;
   ownerEmail: string | null;
   ownerName: string | null;
+  initiator: string;
   runCount: number;
   cumulativeDurationMs: number;
   worstStatus: string;
 }
 
 interface ListResponse {
-  rows: ThreadRow[];
+  rows: TraceRow[];
   total: number;
   limit: number;
   offset: number;
@@ -71,9 +70,7 @@ const ALL_STATUSES = [
 type StatusFilter = (typeof ALL_STATUSES)[number];
 
 /** Map worstStatus → task-column text colour. Matches the priority
- *  order in `src/lib/runner/thread-metrics.ts::STATUS_PRIORITY`.
- *  Returns Tailwind classes only — no border / background, so the
- *  task text is the sole carrier of the status signal. */
+ *  order in `src/lib/runner/thread-metrics.ts::STATUS_PRIORITY`. */
 function statusToTaskTone(status: string): string {
   switch (status) {
     case "failed":
@@ -92,9 +89,8 @@ function statusToTaskTone(status: string): string {
   }
 }
 
-/** Build the user-friendly entity label. Mirrors the same logic in
- *  ThreadDetailView — keep them in sync. */
-function entityLabel(row: ThreadRow): string {
+/** Build the user-friendly entity label. */
+function entityLabel(row: TraceRow): string {
   if (row.firstRunEntitySource === "builtin") {
     return row.firstRunBuiltinName
       ? `Built-in / ${row.firstRunBuiltinName}`
@@ -145,16 +141,13 @@ function ChipGroup<T extends string>({
   );
 }
 
-export function ThreadManagement(): ReactNode {
+export function TraceManagement(): ReactNode {
   const tz = useDisplayTimezone();
   const [data, setData] = useState<ListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [statuses, setStatuses] = useState<Set<StatusFilter>>(new Set());
   const [offset, setOffset] = useState(0);
 
-  // Build the query string from the current filter state. Memoised so
-  // the fetch effect's dep array is a stable string and we don't
-  // re-fetch on unrelated re-renders.
   const queryString = useMemo(() => {
     const u = new URLSearchParams();
     if (statuses.size > 0) u.set("status", [...statuses].join("|"));
@@ -169,7 +162,7 @@ export function ThreadManagement(): ReactNode {
       if (cancelled) return;
       setLoading(true);
       try {
-        const res = await fetch(`/api/admin/threads?${queryString}`);
+        const res = await fetch(`/api/trace?${queryString}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const d = (await res.json()) as ListResponse;
         if (!cancelled) setData(d);
@@ -203,11 +196,6 @@ export function ThreadManagement(): ReactNode {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Filter bar — single Status ChipGroup. Initiator filter was
-          dropped (rare admin need at the thread granularity); the
-          inclusive status semantics ("any run matched") on the
-          backend means a thread shows up under "failed" even if just
-          one of its runs failed. */}
       <div className="flex flex-wrap items-center gap-4 rounded-md border bg-card/50 px-3 py-2">
         <ChipGroup
           label="Status"
@@ -217,25 +205,16 @@ export function ThreadManagement(): ReactNode {
         />
       </div>
 
-      {/* Table. Column order:
-          Timestamp | Thread (last 8 of uuid) | Task (flex-grow, tinted
-          by worstStatus) | Entity | User | Runs | Compute
-          The "Compute" column is the SUM of run durations
-          (`cumulativeDurationMs` in the response), not wall-clock —
-          we call it Compute, not Duration, so admins don't confuse
-          it with how long the conversation has been open.
-          The whole row is wrapped in a `<Link>` via the first cell;
-          subsequent cells repeat the link so right-click / middle-
-          click works on any column. */}
       <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-44">Timestamp</TableHead>
-              <TableHead className="w-28">Thread</TableHead>
+              <TableHead className="w-28">Trace id</TableHead>
               <TableHead>Task</TableHead>
               <TableHead className="w-48">Entity</TableHead>
               <TableHead className="w-40">User</TableHead>
+              <TableHead className="w-24">Initiator</TableHead>
               <TableHead className="w-16 text-right">Runs</TableHead>
               <TableHead className="w-24">Compute</TableHead>
             </TableRow>
@@ -244,7 +223,7 @@ export function ThreadManagement(): ReactNode {
             {loading && rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="py-10 text-center text-xs text-muted-foreground"
                 >
                   Loading…
@@ -253,19 +232,16 @@ export function ThreadManagement(): ReactNode {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="py-10 text-center text-xs text-muted-foreground"
                 >
-                  No threads match the current filters.
+                  No traces match the current filters.
                 </TableCell>
               </TableRow>
             ) : (
               rows.map((row) => {
                 const taskTone = statusToTaskTone(row.worstStatus);
-                const href = `/admin/thread/${row.threadId}`;
-                // User name first; fall back to email (legacy / pre-
-                // name accounts) then the raw uuid so we never render
-                // a blank cell.
+                const href = `/trace/${row.threadId}`;
                 const userLabel =
                   row.ownerName ?? row.ownerEmail ?? row.ownerId;
                 return (
@@ -305,6 +281,11 @@ export function ThreadManagement(): ReactNode {
                         {userLabel}
                       </Link>
                     </TableCell>
+                    <TableCell className="truncate text-xs font-mono capitalize">
+                      <Link href={href} className="text-foreground">
+                        {row.initiator}
+                      </Link>
+                    </TableCell>
                     <TableCell className="text-right font-mono text-xs text-muted-foreground">
                       <Link href={href}>{row.runCount}</Link>
                     </TableCell>
@@ -323,10 +304,9 @@ export function ThreadManagement(): ReactNode {
         </Table>
       </div>
 
-      {/* Pagination */}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {total === 0 ? "0 threads" : `${start}–${end} of ${total} threads`}
+          {total === 0 ? "0 traces" : `${start}–${end} of ${total} traces`}
         </span>
         <div className="flex items-center gap-2">
           <Button

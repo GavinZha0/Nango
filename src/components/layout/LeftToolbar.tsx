@@ -12,7 +12,7 @@ import {
   KeyRound,
   Settings,
   BellRing,
-  BoomBox,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LeftPanelId } from "@/store/sidebar";
@@ -77,12 +77,12 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   { kind: "panel", id: "ssh-server", role: "editor" },
   { kind: "panel", id: "verification", role: "editor" },
   { kind: "panel", id: "evaluation", role: "editor" },
+  { kind: "route", id: "trace", label: "Traces", icon: Activity, href: "/trace", role: "editor" },
 
   // Admin group
   { kind: "route", id: "user", label: "Users", icon: Users, href: "/admin/user", role: "admin" },
   { kind: "route", id: "credential", label: "Credentials", icon: KeyRound, href: "/admin/credential", role: "admin" },
   { kind: "route", id: "config", label: "Config", icon: Settings, href: "/admin/config", role: "admin" },
-  { kind: "route", id: "thread", label: "Threads", icon: BoomBox, href: "/admin/thread", role: "admin" },
 ];
 
 /** Resolve the effective role for an item (default = "user"). */

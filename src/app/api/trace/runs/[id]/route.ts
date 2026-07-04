@@ -11,15 +11,16 @@ import {
   EntityRunTable,
   UserTable,
 } from "@/lib/db/schema";
-import { ApiError, withAdmin } from "@/lib/http/route-handlers";
+import { ApiError, withEditor } from "@/lib/http/route-handlers";
 
 /**
- * GET /api/admin/runs/[id]
+ * GET /api/trace/runs/[id] — fetch events for a single run inside a trace.
+ * Strictly verifies the run belongs to the session user.
  */
 
-const ROUTE = "/api/admin/runs/[id]";
+const ROUTE = "/api/trace/runs/[id]";
 
-export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
+export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session }) => {
   const [run] = await db
     .select({
       id: EntityRunTable.id,
@@ -53,7 +54,6 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     .leftJoin(UserTable, eq(EntityRunTable.ownerId, UserTable.id))
     .leftJoin(
       BuiltinAgentTable,
-      // text = uuid mismatch — coerce uuid → text (always valid).
       sql`${EntityRunTable.entityId} = ${BuiltinAgentTable.id}::text`,
     )
     .leftJoin(
@@ -65,6 +65,11 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
 
   if (!run) {
     throw new ApiError("NOT_FOUND", 404, "Run not found.");
+  }
+
+  // Strict check: only the run owner is allowed to read events.
+  if (run.ownerId !== session.user.id) {
+    throw new ApiError("FORBIDDEN", 403, "You do not have access to this run.");
   }
 
   const children = await db
@@ -97,10 +102,6 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     .where(eq(EntityRunTable.parentRunId, params.id))
     .orderBy(asc(EntityRunTable.createdAt));
 
-  // Events: cap at a generous-but-bounded number to keep the
-  // wire payload reasonable for chatty runs (large agno tool
-  // chains can emit thousands of deltas). We pull the most recent
-  // 1000 by `seq` and reverse client-side for display order.
   const events = await db
     .select()
     .from(EntityRunEventTable)

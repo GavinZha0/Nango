@@ -12,7 +12,7 @@ import {
   UserTable,
 } from "@/lib/db/schema";
 import { detectToolResultStatus } from "@/lib/copilot/detect-tool-result-status";
-import { ApiError, withAdmin } from "@/lib/http/route-handlers";
+import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import {
   durationMsBetween,
   pickWorstStatus,
@@ -20,14 +20,11 @@ import {
 import { aggregateToolCalls } from "@/lib/runner/tool-call-aggregator";
 
 /**
- * GET /api/admin/threads/[id] — thread-detail payload for the
- * admin page. Returns `{ summary, runs[] }` with per-run metrics
- * (`ttftMs`, `durationMs`, `toolCalls`, `subRunCount`) inlined.
- * Events are NOT included — the right column lazily fetches them
- * via `/api/admin/runs/[id]` on selection.
+ * GET /api/trace/[id] — trace-detail payload for the editor trace page.
+ * Strictly verifies the requested trace belongs to the session user.
  */
 
-const ROUTE = "/api/admin/threads/[id]";
+const ROUTE = "/api/trace/[id]";
 
 interface ToolCallSummary {
   toolCallId: string;
@@ -69,7 +66,7 @@ interface RunWithMetrics {
   metrics: RunMetrics;
 }
 
-interface ThreadSummary {
+interface TraceSummary {
   threadId: string;
   ownerId: string;
   ownerEmail: string | null;
@@ -84,18 +81,16 @@ interface ThreadSummary {
   worstStatus: string;
 }
 
-interface ThreadDetailResponse {
+interface TraceDetailResponse {
   threadId: string;
-  summary: ThreadSummary;
+  summary: TraceSummary;
   runs: ReadonlyArray<RunWithMetrics>;
 }
 
-export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
+export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session }) => {
   const threadId = params.id;
 
-  // ------------------------------------------------------------------
-  // Step 1 — All runs in this thread (top-level + sub).
-  // ------------------------------------------------------------------
+  // Step 1 — All runs in this thread (top-level + sub) strictly belonging to the session user.
   const runs = await db
     .select({
       id: EntityRunTable.id,
@@ -123,37 +118,31 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     .leftJoin(UserTable, eq(EntityRunTable.ownerId, UserTable.id))
     .leftJoin(
       BuiltinAgentTable,
-      // text = uuid mismatch — same coercion pattern as the runs route.
       sql`${EntityRunTable.entityId} = ${BuiltinAgentTable.id}::text`,
     )
     .leftJoin(
       CredentialTable,
       eq(EntityRunTable.credentialId, CredentialTable.id),
     )
-    .where(eq(EntityRunTable.threadId, threadId))
+    .where(
+      and(
+        eq(EntityRunTable.threadId, threadId),
+        eq(EntityRunTable.ownerId, session.user.id),
+      ),
+    )
     .orderBy(asc(EntityRunTable.createdAt));
 
   if (runs.length === 0) {
     throw new ApiError(
       "NOT_FOUND",
       404,
-      "Thread not found or has no runs.",
+      "Trace not found or has no runs.",
     );
   }
 
   const runIds = runs.map((r) => r.id);
 
-  // ------------------------------------------------------------------
-  // Step 2 — TTFT per run: `MIN(event.ts) - run.started_at` over the
-  // first user-visible LLM event (assistant message, reasoning, or
-  // `tool_call_chunk` — tool-only runs need a meaningful TTFT too).
-  //
-  // GOTCHA: arithmetic MUST happen inside Postgres. `entity_run` and
-  // `entity_run_event` both use `timestamp without time zone`; the
-  // drizzle column reader and the raw-SQL aggregate parse those
-  // through different paths and (depending on TZ) disagree by the
-  // session offset, producing the "TTFT shows 4h on every run" bug.
-  // ------------------------------------------------------------------
+  // Step 2 — TTFT per run
   const ttftRows = await db
     .select({
       runId: EntityRunEventTable.runId,
@@ -186,13 +175,7 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
 
   const ttftByRun = new Map(ttftRows.map((r) => [r.runId, r.ttftMs]));
 
-  // ------------------------------------------------------------------
-  // Step 3 — Tool-call timings, paired across runs by toolCallId.
-  // chunk and result can live in different runs (frontend / HITL
-  // tools — chunk in run X, user reply in run X+1). Cross-run
-  // aggregation keeps `durationMs` real and reserves "pending" for
-  // actually-orphaned chunks. See docs/runner-events.md.
-  // ------------------------------------------------------------------
+  // Step 3 — Tool-call timings
   const toolEvents = await db
     .select({
       runId: EntityRunEventTable.runId,
@@ -215,9 +198,7 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
 
   const toolCallsByRun = aggregateToolCalls(toolEvents);
 
-  // ------------------------------------------------------------------
-  // Step 4 — Compose per-run metrics and the response shape.
-  // ------------------------------------------------------------------
+  // Step 4 — Compose per-run metrics and response shape
   const subRunCountByParent = new Map<string, number>();
   for (const r of runs) {
     if (r.parentRunId) {
@@ -235,7 +216,6 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
       : null;
     const createdAt = new Date(r.createdAt).toISOString();
 
-    // Map miss → null (run produced no qualifying event).
     const ttftRaw = ttftByRun.get(r.id);
     const ttftMs =
       ttftRaw !== undefined && Number.isFinite(ttftRaw) && ttftRaw >= 0
@@ -246,7 +226,6 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     const toolCalls: ToolCallSummary[] = perRunToolCalls.map((tc) => {
       let status: ToolCallSummary["status"];
       if (tc.endedAt === null) {
-        // Truly orphaned chunk (no result anywhere) — amber.
         status = "pending";
       } else {
         const detected = detectToolResultStatus(tc.resultContent);
@@ -255,11 +234,8 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
       return {
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
-        // Fall back to endedAt for the rare "result row only" shape.
         startedAt: tc.startedAt ?? tc.endedAt ?? createdAt,
         endedAt: tc.endedAt,
-        // chunk → result interval — for HITL tools this honestly
-        // includes user think time.
         durationMs: durationMsBetween(tc.startedAt, tc.endedAt),
         status,
       };
@@ -295,9 +271,7 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     };
   });
 
-  // ------------------------------------------------------------------
-  // Step 5 — Thread-level summary card metrics.
-  // ------------------------------------------------------------------
+  // Step 5 — Trace-level summary card metrics
   const topLevelRuns = runsWithMetrics.filter((r) => r.parentRunId === null);
   const subRuns = runsWithMetrics.filter((r) => r.parentRunId !== null);
 
@@ -306,9 +280,6 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     0,
   );
 
-  // Average TTFT across runs that have one; top-level only since
-  // sub-run TTFTs are noise for the admin's "how snappy is the chat"
-  // intuition.
   const ttftValues = topLevelRuns
     .map((r) => r.metrics.ttftMs)
     .filter((v): v is number => v !== null);
@@ -340,10 +311,9 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
       ? finishedTimes.reduce((a, b) => (a > b ? a : b))
       : null;
 
-  // Owner is single-tenant per thread; lift from the first run.
   const owner = topLevelRuns[0] ?? runsWithMetrics[0];
 
-  const summary: ThreadSummary = {
+  const summary: TraceSummary = {
     threadId,
     ownerId: owner.ownerId,
     ownerEmail: owner.ownerEmail,
@@ -358,7 +328,7 @@ export const GET = withAdmin<{ id: string }>(ROUTE, async ({ params }) => {
     worstStatus,
   };
 
-  const response: ThreadDetailResponse = {
+  const response: TraceDetailResponse = {
     threadId,
     summary,
     runs: runsWithMetrics,

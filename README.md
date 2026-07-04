@@ -300,22 +300,6 @@ docker compose helpers) live in [`package.json`](package.json) — run
 
 ---
 
-## Recommended Companions
-
-The following independent open-source components are recommended to round out a production setup.
-
-### MCPHub — the unified hub for MCP servers
-
-[**MCPHub**](https://github.com/samanhappy/mcphub) is a unified hub for
-centrally managing and dynamically orchestrating multiple MCP (Model Context
-Protocol) servers and APIs into separate endpoints with flexible routing
-strategies.
-
-
-More companions will be added here as integrations land.
-
----
-
 ## Documentation
 
 Long-form design notes, subsystem references, and architecture decisions

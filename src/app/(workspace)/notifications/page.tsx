@@ -264,10 +264,12 @@ export default function NotificationsPage(): ReactNode {
     <div className="flex h-full w-full flex-col px-6 py-6">
       <header className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-base font-semibold">Notifications</h1>
-          <p className="text-xs text-muted-foreground">
-            {unreadCount > 0 ? `${unreadCount} unread` : "All caught up."}
-          </p>
+          <h1 className="text-base font-semibold">
+            Notifications
+            <span className="text-xs font-normal text-muted-foreground ml-1.5">
+              ({unreadCount > 0 ? `${unreadCount} unread` : "all caught up"})
+            </span>
+          </h1>
         </div>
         {unreadCount > 0 && (
           <Button

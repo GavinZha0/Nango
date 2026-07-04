@@ -44,7 +44,7 @@ export function useCopilotSharedStateSync() {
       else if (pathname.startsWith("/admin/user")) panelId = "user";
       else if (pathname.startsWith("/admin/credential")) panelId = "credential";
       else if (pathname.startsWith("/admin/config")) panelId = "config";
-      else if (pathname.startsWith("/admin/thread")) panelId = "thread";
+      else if (pathname.startsWith("/trace")) panelId = "trace";
     }
     
     // Extract the resource ID

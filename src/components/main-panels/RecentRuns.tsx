@@ -145,7 +145,7 @@ function RunRow({ run, tz }: { run: ScheduleRunSummary; tz: string }): ReactElem
         // matches the chevron+icon block above.
         <pre
           className={cn(
-            "mb-3 ml-10 mr-4 max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded border bg-background px-3 py-2 text-xs leading-relaxed text-foreground",
+            "mb-3 ml-10 mr-4 max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 dark:bg-muted/10 px-3 py-2 text-xs leading-relaxed text-foreground",
             run.status === "failed" && "border-destructive/40 text-destructive",
           )}
         >
@@ -198,7 +198,7 @@ export function RecentRuns({ scheduleId }: RecentRunsProps): ReactElement {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2 border-b px-4 py-3">
+      <header className="flex h-10 items-center gap-2 border-b px-4 py-2 bg-card">
         <History className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">Recent runs</h2>
         {data && (
@@ -255,7 +255,7 @@ export function RecentRuns({ scheduleId }: RecentRunsProps): ReactElement {
 export function RecentRunsPlaceholder(): ReactElement {
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2 border-b px-4 py-3">
+      <header className="flex h-10 items-center gap-2 border-b px-4 py-2 bg-card">
         <History className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">Recent runs</h2>
       </header>

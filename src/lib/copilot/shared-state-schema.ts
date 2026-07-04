@@ -16,7 +16,7 @@ export interface NangoSharedState {
       | "dashboard" | "artifact" | "schedules" | "notifications"
       | "agent" | "mcp" | "skills" | "datasource" | "ssh-server" 
       | "verification" | "evaluation" | "outcomes" | "profile"
-      | "user" | "credential" | "config" | "thread" 
+      | "user" | "credential" | "config" | "trace" 
       | "none";
     activeResourceId?: string | null;
     activeResourceData?: Record<string, unknown> | null; // A readonly copy of the data to give the agent context

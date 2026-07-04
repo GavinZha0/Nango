@@ -1157,7 +1157,7 @@ export const EntityRunTable = pgTable(
     threadId: uuid("thread_id"),
 
     /** Who triggered this run. */
-    initiator: text("initiator").notNull(), // "user" | "orchestrator" | "schedule" | "system"
+    initiator: text("initiator").notNull(), // "user" | "orchestrator" | "schedule" | "system" | "evaluator"
 
     /** Entity reference — same vocabulary as EntityDescriptor. */
     entityId: text("entity_id").notNull(),
@@ -1302,7 +1302,7 @@ export type EntityRunStatus =
   | "failed"
   | "cancelled";
 export type EntityRunMode = "sync" | "async" | "scheduled";
-export type EntityRunInitiator = "user" | "orchestrator" | "schedule" | "system";
+export type EntityRunInitiator = "user" | "orchestrator" | "schedule" | "system" | "evaluator";
 export type EntityRunEventType =
   | "started"
   | "message"
@@ -1423,7 +1423,7 @@ export const NotificationTable = pgTable(
      *  time. Enables the bell icon to filter out schedule notifications
      *  without JOINing entity_run. Null for legacy rows and system
      *  messages that have no run. */
-    initiator: text("initiator"), // "user" | "orchestrator" | "schedule" | "system"
+    initiator: text("initiator"), // "user" | "orchestrator" | "schedule" | "system" | "evaluator"
     /** Null = unread; set on the first mark-as-read API call. */
     readAt: timestamp("read_at"),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

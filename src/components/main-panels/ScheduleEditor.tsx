@@ -11,7 +11,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Save, Trash2, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -260,6 +260,17 @@ export function ScheduleEditor({
       : emptyForm(profileTimezone),
   );
 
+  const [savedForm] = useState<FormState>(() =>
+    initialRow
+      ? formFromExisting(initialRow, options, profileTimezone)
+      : emptyForm(profileTimezone),
+  );
+
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(savedForm),
+    [form, savedForm],
+  );
+
   const [submitting, setSubmitting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
@@ -404,7 +415,7 @@ export function ScheduleEditor({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <header className="flex items-center gap-2 border-b px-4 py-3">
+      <header className="flex items-center gap-2 border-b px-4 py-2">
         <Button
           variant="ghost"
           size="icon"
@@ -417,37 +428,6 @@ export function ScheduleEditor({
         <h1 className="text-sm font-semibold">
           {isCreating ? "New schedule" : "Edit schedule"}
         </h1>
-        <div className="ml-auto flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={() => void submit()}
-            disabled={submitting || startInPast}
-            className={cn("h-8 cursor-pointer gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
-          >
-            {submitting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Save className="h-3.5 w-3.5" />
-            )}
-            Save
-          </Button>
-          {!isCreating && (
-            <Button
-              size="sm"
-              className="h-8 shrink-0 cursor-pointer gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
-              onClick={() => setDeleteOpen(true)}
-              disabled={submitting || deleting}
-              aria-label="Delete this schedule"
-            >
-              {deleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" />
-              )}
-              Delete
-            </Button>
-          )}
-        </div>
       </header>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -481,15 +461,46 @@ export function ScheduleEditor({
       </AlertDialog>
 
       {/* Body — 40/60 split on `lg+` screens (form on the left, run
-          history on the right). The form fields are short labels +
-          inputs so 40% is enough; the wider right column gives the
-          runs table room for full timestamps + status without
-          mid-cell truncation. The form is still centered inside its
-          column so long inputs don't stretch awkwardly. On narrower
-          screens the right column collapses entirely. */}
+          history on the right). */}
       <div className="flex min-h-0 flex-1">
-        <ScrollArea className="min-w-0 flex-1 lg:basis-2/5">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-6 py-6">
+        <div className="flex flex-col min-w-0 flex-1 lg:basis-2/5">
+          <header className="flex h-10 items-center gap-2 border-b px-4 py-2 bg-card">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Settings</h2>
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => void submit()}
+                disabled={submitting || startInPast || (!isCreating && !isDirty && !draftApplied)}
+                className={cn("h-6 cursor-pointer gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
+              >
+                {submitting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
+              {!isCreating && (
+                <Button
+                  size="sm"
+                  className="h-6 shrink-0 cursor-pointer gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                  disabled={submitting || deleting}
+                  aria-label="Delete this schedule"
+                >
+                  {deleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  Delete
+                </Button>
+              )}
+            </div>
+          </header>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-6 py-6">
           {error && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
@@ -706,7 +717,8 @@ export function ScheduleEditor({
           </details>
 
         </div>
-        </ScrollArea>
+          </ScrollArea>
+        </div>
 
         {/* Right column — only visible on `lg+`. `aside` to signal it
             as supplementary to the main form. */}

@@ -297,21 +297,6 @@ docker compose 助手）都在 [`package.json`](package.json) 中——运行
 
 ---
 
-## 推荐组件
-
-建议使用以下独立开源组件来完善生产设置。
-
-### MCPHub — MCP 服务器的统一中心
-
-[**MCPHub**](https://github.com/samanhappy/mcphub) 是一个统一中心，
-用于集中管理和动态编排多个 MCP（模型上下文协议）
-服务器和 API 到具有灵活路由策略的独立端点。
-
-
-随着集成落地，这里将添加更多组件。
-
----
-
 ## 文档
 
 长篇设计说明、子系统参考和架构决策

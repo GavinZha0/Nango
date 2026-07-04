@@ -21,26 +21,23 @@ import {
   EntityRunTable,
   UserTable,
 } from "@/lib/db/schema";
-import { ApiError, withAdmin } from "@/lib/http/route-handlers";
+import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { pickWorstStatus } from "@/lib/runner/thread-metrics";
 
 /**
- * GET /api/admin/threads — one row per `thread_id` for the admin
- * thread list. Aggregates over both top-level and sub-runs so the
- * status filter agrees with the "one failed → red task" colour
- * rule. Anchor sort = first top-level run's `created_at` desc.
+ * GET /api/trace — list traces for the editor user.
+ * Strictly filters runs by the calling user's id (session.user.id).
  */
 
-const ROUTE = "/api/admin/threads";
+const ROUTE = "/api/trace";
 
 const querySchema = z.object({
-  /** Pipe-separated list (e.g. "failed|running"). */
   status: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-export const GET = withAdmin(ROUTE, async ({ req }) => {
+export const GET = withEditor(ROUTE, async ({ req, session }) => {
   const url = new URL(req.url);
   const parsed = querySchema.safeParse(
     Object.fromEntries(url.searchParams.entries()),
@@ -59,8 +56,6 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     ? status.split("|").filter(Boolean)
     : [];
 
-  // Step 1 — candidate thread ids. Aggregate over ALL runs per thread
-  // so the status filter sees both top-level and sub-run statuses.
   const havingConds: SQL[] = [];
   if (statusFilter.length > 0) {
     havingConds.push(
@@ -74,22 +69,26 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
       FILTER (WHERE ${EntityRunTable.parentRunId} IS NULL)
   `;
 
+  // Step 1 — candidate thread ids owned by the session user.
   const threadCandidates = await db
     .select({
       threadId: EntityRunTable.threadId,
       anchorCreatedAt: anchorSort,
     })
     .from(EntityRunTable)
-    .where(isNotNull(EntityRunTable.threadId))
+    .where(
+      and(
+        isNotNull(EntityRunTable.threadId),
+        eq(EntityRunTable.ownerId, session.user.id),
+      ),
+    )
     .groupBy(EntityRunTable.threadId)
     .having(having)
     .orderBy(desc(anchorSort))
     .limit(limit)
     .offset(offset);
 
-  // Total threads for pagination — wrap GROUP BY in a sub-select.
-  // GOTCHA: `db.execute` returns `{ rows, rowCount, ... }`, not an
-  // array — read `.rows[0]`.
+  // Total threads owned by the session user.
   const totalResult = (await db.execute(
     sql<{ totalThreads: number }>`
       SELECT COUNT(*)::int AS "totalThreads"
@@ -97,6 +96,7 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
         SELECT 1
         FROM ${EntityRunTable}
         WHERE ${EntityRunTable.threadId} IS NOT NULL
+          AND ${EntityRunTable.ownerId} = ${session.user.id}::uuid
         GROUP BY ${EntityRunTable.threadId}
         ${
           statusFilter.length > 0
@@ -119,9 +119,7 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
 
   const threadIds = threadCandidates.map((c) => c.threadId as string);
 
-  // Step 2 — anchor run per thread. Fetch top-level runs and dedup
-  // to first-per-thread in TS (avoids a window function; overfetch
-  // is bounded — <20 top-level runs × 200 threads).
+  // Step 2 — anchor run per thread owned by the session user.
   const topLevelRuns = await db
     .select({
       threadId: EntityRunTable.threadId,
@@ -135,13 +133,13 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
       ownerId: EntityRunTable.ownerId,
       ownerEmail: UserTable.email,
       ownerName: UserTable.name,
+      initiator: EntityRunTable.initiator,
       createdAt: EntityRunTable.createdAt,
     })
     .from(EntityRunTable)
     .leftJoin(UserTable, eq(EntityRunTable.ownerId, UserTable.id))
     .leftJoin(
       BuiltinAgentTable,
-      // text = uuid mismatch — same coercion pattern as the runs route.
       sql`${EntityRunTable.entityId} = ${BuiltinAgentTable.id}::text`,
     )
     .leftJoin(
@@ -151,6 +149,7 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     .where(
       and(
         inArray(EntityRunTable.threadId, threadIds),
+        eq(EntityRunTable.ownerId, session.user.id),
         isNull(EntityRunTable.parentRunId),
       ),
     )
@@ -162,8 +161,7 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
     if (!anchorByThread.has(tid)) anchorByThread.set(tid, r);
   }
 
-  // Step 3 — per-thread aggregates: top-level count, cumulative
-  // duration, distinct status set (drives worstStatus colouring).
+  // Step 3 — aggregates.
   const aggregates = await db
     .select({
       threadId: EntityRunTable.threadId,
@@ -188,16 +186,18 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
       statuses: sql<string[]>`ARRAY_AGG(DISTINCT ${EntityRunTable.status})`,
     })
     .from(EntityRunTable)
-    .where(inArray(EntityRunTable.threadId, threadIds))
+    .where(
+      and(
+        inArray(EntityRunTable.threadId, threadIds),
+        eq(EntityRunTable.ownerId, session.user.id),
+      ),
+    )
     .groupBy(EntityRunTable.threadId);
 
   const aggByThread = new Map(
     aggregates.map((a) => [a.threadId as string, a]),
   );
 
-  // Stitch in candidate order. Defensive flatMap: drop malformed rows
-  // (missing anchor / agg) silently rather than emit a half-filled
-  // object.
   const rows = threadCandidates.flatMap((c) => {
     const tid = c.threadId as string;
     const anchor = anchorByThread.get(tid);
@@ -216,6 +216,7 @@ export const GET = withAdmin(ROUTE, async ({ req }) => {
         ownerId: anchor.ownerId,
         ownerEmail: anchor.ownerEmail,
         ownerName: anchor.ownerName,
+        initiator: anchor.initiator,
         runCount: agg.topLevelCount,
         cumulativeDurationMs: agg.cumulativeDurationMs,
         worstStatus: pickWorstStatus(agg.statuses ?? []),

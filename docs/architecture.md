@@ -19,13 +19,15 @@ Nango is an **AI agent workspace frontend** that unifies multi-backend agent int
 - **Complex work is delegated outward.** Long-running and heavy tasks should be executed by backend agent platforms (agno / Mastra / Dify / others).
 - **Built-in agents are a lightweight complement.** Built-in runtime is for local orchestration glue and lightweight capabilities, not distributed heavy execution.
 
-Three core capabilities:
+Key system capabilities:
 
-| Capability | Description | Key modules |
+| Capability | Description | Key modules / References |
 |---|---|---|
 | **Multi-backend agent integration** | Connect heterogeneous agent platforms (agno / Mastra / Dify); browser sees a uniform **AG-UI protocol** | `src/lib/backends/` |
-| **Built-in Agent + MCP** | Build agents in-app via the CopilotKit runtime; extend tools through the Model Context Protocol (MCP) | `src/lib/builtin-agents/agent-pool.ts`, `src/lib/mcp/provider-pool.ts`, `src/lib/mcp/client-providers.ts` |
-| **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs (V1 — charts); promotable into the permanent Artifact library via Save | `src/store/outcome-store.ts`, `src/components/workspace/OutcomesPanel.tsx`, `ArtifactTable` |
+| **Built-in Agent + MCP** | Build agents in-app via the CopilotKit runtime; extend tools through the Model Context Protocol (MCP) | `src/lib/builtin-agents/agent-pool.ts`, `src/lib/mcp/provider-pool.ts` |
+| **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs; permanent Artifact library via Save | `src/lib/artifacts/` |
+| **Verification Subsystem** | Deterministic quality gate for testing MCP tools and workflows using assertions | `src/lib/verification/` ([docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
+| **Evaluation Subsystem** | Stochastic quality assessment for agent conversations using LLM-as-Judge | `src/lib/evaluation/` ([docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 
 ---
 
@@ -68,14 +70,12 @@ Three core capabilities:
 │                                                                     │
 │  /api/copilotkit/[...path]   ──►  Backend chat → Runner → AG-UI     │
 │  /api/copilotkit/builtin/... ──►  Built-in chat → Runner → AG-UI    │
-│  /api/builtin-agents              CRUD: BuiltinAgent + Tools        │
-│  /api/mcp-servers                 CRUD + discover/call-tool         │
-│  /api/skills                      Skills CRUD + helper file read    │
-│  /api/schedules                   Schedule CRUD + trigger-now       │
-│  /api/notifications               Inbox CRUD                        │
-│  /api/runs/stream                 SSE: notifications + finalized    │
-│  /api/admin/{credentials, runs}   Admin: creds, run forensics       │
-│  /api/auth/[...all]               better-auth handler               │
+│  /api/{agents, mcp, skills}       Resource configs & lifecycles      │
+│  /api/{verification, eval}        Test suites, cases & run loops     │
+│  /api/{schedules, notifications}  Triggers & live user notifications │
+│  /api/runs/stream                 SSE: notifications + finalized     │
+│  /api/admin/{credentials, runs}   Admin credentials & forensics      │
+│  /api/auth/[...all]               better-auth handler                │
 │                                                                     │
 │  ┌──────────────────┐  ┌──────────────────────────────────────────┐ │
 │  │ Runner kernel    │  │ Process-wide caches (6)                  │ │
@@ -406,6 +406,8 @@ Lookup paths (server-side only):
 | Built-in Agents | `builtin_agent`, `builtin_agent_tool` | Agent definition + tool bindings (discriminated union) |
 | Tool sources | `mcp_server`, `skill`, `skill_file` | MCP server / DB-resident Skill (helper bytes in `skill_file.content::bytea`) |
 | Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards |
+| Verification | `verification_suite`, `verification_case`, `verification_run`, `verification_case_result` | Deterministic assert-on-output testing for tools and workflows (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
+| Evaluation | `eval_suite`, `eval_case`, `eval_run`, `eval_case_result` | Stochastic quality evaluations using LLM-as-Judge (see [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 
 ### 6.2 Built-in Agent → Tool Binding (Polymorphic FK)
 
