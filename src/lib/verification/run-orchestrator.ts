@@ -19,6 +19,7 @@ import "server-only";
 
 import { childLogger } from "@/lib/observability/logger";
 
+import { recordRunNotification } from "@/lib/runner/notifications";
 import { publishVerificationFrame } from "./event-bus-channel";
 import { runMcpCase } from "./runner-mcp";
 import * as storage from "./storage";
@@ -89,6 +90,7 @@ export async function startSuiteRun(
     kind: "run_started",
     runId: run.id,
     suiteId: input.suiteId,
+    suiteName: suite.name,
     totalCount: cases.length,
   });
 
@@ -124,6 +126,7 @@ export async function startSuiteRun(
     runId: run.id,
     ownerId: input.ownerId,
     timeoutSec: suite.timeoutSec,
+    suiteName: suite.name,
     cases,
   });
 
@@ -134,6 +137,7 @@ interface ExecuteSuiteLoopInput {
   runId: string;
   ownerId: string;
   timeoutSec: number;
+  suiteName: string;
   cases: Awaited<ReturnType<typeof storage.listEnabledCasesForRun>>;
 }
 
@@ -308,6 +312,17 @@ async function finaliseAndAnnounce(
       erroredCount: counters.erroredCount,
       skippedCount: counters.skippedCount,
     });
+
+    await recordRunNotification({
+      ownerId: input.ownerId,
+      runId: input.runId,
+      kind: finalStatus === "passed" ? "run_completed" : "run_failed",
+      title: `Verification: ${input.suiteName}`,
+      body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored, ${counters.skippedCount} Skipped`,
+      sourceLabel: "Verification Suite",
+      task: `Run verification suite '${input.suiteName}'`,
+      initiator: "verification",
+    });
   } catch (err) {
     log.error(
       {
@@ -361,6 +376,17 @@ async function handleSuiteLoopCrash(
       failedCount: counters.failedCount,
       erroredCount: counters.erroredCount + 1,
       skippedCount: counters.skippedCount,
+    });
+
+    await recordRunNotification({
+      ownerId: input.ownerId,
+      runId: input.runId,
+      kind: "run_failed",
+      title: `Verification: ${input.suiteName}`,
+      body: `Crashed: ${err instanceof Error ? err.message : String(err)}`,
+      sourceLabel: "Verification Suite",
+      task: `Run verification suite '${input.suiteName}'`,
+      initiator: "verification",
     });
   } catch {
     // swallow — boot-epoch sweeper is the last resort

@@ -5,6 +5,7 @@
  */
 
 import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import {
   CheckCheck,
   ChevronDown,
@@ -89,6 +90,7 @@ function NotificationRow({
   tz: string;
   onToggle: () => void;
 }): ReactNode {
+  const router = useRouter();
   const unread = item.readAt === null;
   return (
     <Fragment>
@@ -230,6 +232,24 @@ function NotificationRow({
                   </p>
                 )}
               </div>
+              {(item.initiator === "verification" || item.initiator === "evaluation") && (
+                <div className="text-right">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs font-medium hover:bg-accent/40"
+                    onClick={() => {
+                      if (item.initiator === "verification") {
+                        router.push("/verification");
+                      } else {
+                        router.push("/evaluation");
+                      }
+                    }}
+                  >
+                    <span>🎯 跳转至对应套件面板</span>
+                  </Button>
+                </div>
+              )}
             </div>
           </TableCell>
         </TableRow>

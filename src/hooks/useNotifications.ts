@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useNotificationsStore } from "@/store/notifications";
+import { useActiveTasksStore } from "@/store/active-tasks";
 import type { NotificationEntity } from "@/lib/db/schema";
 
 type BroadcastMessage =
@@ -105,17 +106,80 @@ export function useStartNotifications(): void {
   useEffect(() => {
     void notificationActions.refresh();
 
+    // 初始化拉取活跃后台任务
+    const setTasks = useActiveTasksStore.getState().setTasks;
+    fetch("/api/runs/active")
+      .then((res) => (res.ok ? res.json() : { activeTasks: [] }))
+      .then((data) => {
+        if (data.activeTasks) setTasks(data.activeTasks);
+      })
+      .catch((err) => console.error("Failed to fetch active tasks", err));
+
     const es = new EventSource("/api/runs/stream");
     es.onopen = () => setStreamConnected(true);
     es.onerror = () => setStreamConnected(false);
     es.onmessage = (ev) => {
       try {
-        const event = JSON.parse(ev.data) as
-          | { kind: "notification"; notification: NotificationEntity }
-          | { kind: "run_finalized" };
+        const event = JSON.parse(ev.data);
         if (event.kind === "notification") {
           prepend(event.notification);
           broadcast({ kind: "added", item: event.notification });
+        } else if (event.kind === "run_started") {
+          useActiveTasksStore.getState().addTask({
+            id: event.runId,
+            kind: "agent",
+            name: event.entityId,
+            status: "running",
+            startedAt: event.startedAt,
+          });
+        } else if (event.kind === "run_finalized") {
+          useActiveTasksStore.getState().setTerminalState(event.runId, event.status);
+        } else if (event.kind === "verification") {
+          const { frame } = event;
+          if (frame.kind === "run_started") {
+            useActiveTasksStore.getState().addTask({
+              id: frame.runId,
+              kind: "verification",
+              name: frame.suiteName || "Verification",
+              status: "running",
+              startedAt: new Date(),
+              totalCount: frame.totalCount,
+              completedCount: 0,
+            });
+          } else if (frame.kind === "case_finished") {
+            const task = useActiveTasksStore.getState().activeTasks.find((t) => t.id === frame.runId);
+            if (task) {
+              useActiveTasksStore.getState().updateProgress(frame.runId, (task.completedCount ?? 0) + 1);
+            }
+          } else if (frame.kind === "run_finished") {
+            useActiveTasksStore.getState().setTerminalState(
+              frame.runId,
+              frame.status === "passed" ? "succeeded" : "failed"
+            );
+          }
+        } else if (event.kind === "evaluation") {
+          const { frame } = event;
+          if (frame.kind === "run_started") {
+            useActiveTasksStore.getState().addTask({
+              id: frame.runId,
+              kind: "evaluation",
+              name: frame.suiteName || "Evaluation",
+              status: "running",
+              startedAt: new Date(),
+              totalCount: frame.totalCount,
+              completedCount: 0,
+            });
+          } else if (frame.kind === "case_completed") {
+            const task = useActiveTasksStore.getState().activeTasks.find((t) => t.id === frame.runId);
+            if (task) {
+              useActiveTasksStore.getState().updateProgress(frame.runId, (task.completedCount ?? 0) + 1);
+            }
+          } else if (frame.kind === "run_finished") {
+            useActiveTasksStore.getState().setTerminalState(
+              frame.runId,
+              frame.status === "passed" ? "succeeded" : "failed"
+            );
+          }
         }
       } catch (err) {
         console.error("SSE parse failed", err);

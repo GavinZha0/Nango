@@ -51,6 +51,9 @@ import { injectServerUserId } from "./inject-user-id";
 import { PersistingAgent } from "./persisting-agent";
 import { PersistedAgentRunner } from "@/lib/copilot/persisted-agent-runner";
 import { publish } from "./event-bus";
+import { db } from "@/lib/db";
+import { BuiltinAgentTable } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { previewBody, recordRunNotification } from "./notifications";
 import type {
   ProgrammaticRunResult,
@@ -828,6 +831,31 @@ class RunnerImpl implements Runner {
       },
       "entity_run started (programmatic, async)",
     );
+
+    let entityName = input.entityId;
+    if (entitySource === "builtin" && kind === "agent") {
+      try {
+        const [agent] = await db
+          .select({ name: BuiltinAgentTable.name })
+          .from(BuiltinAgentTable)
+          .where(eq(BuiltinAgentTable.id, input.entityId))
+          .limit(1);
+        if (agent) {
+          entityName = agent.name;
+        }
+      } catch (err) {
+        log.warn({ err }, "failed to fetch builtin agent name for run_started event");
+      }
+    }
+
+    publish(input.ownerId, {
+      kind: "run_started",
+      runId: run.id,
+      ownerId: input.ownerId,
+      entityId: entityName,
+      entityKind: kind,
+      startedAt: run.startedAt ?? new Date(),
+    });
 
     let innerAgent: AbstractAgent;
     let borrowed: BorrowRecord[];

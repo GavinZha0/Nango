@@ -1415,10 +1415,10 @@ export const NotificationTable = pgTable(
     sourceLabel: text("source_label"),
     /** Original task/prompt snapshotted for inbox context. */
     task: text("task"),
-    /** Optional FK back to the run that produced the notification. */
-    runId: uuid("run_id").references(() => EntityRunTable.id, {
-      onDelete: "cascade",
-    }),
+    /** Optional reference to the run that produced the notification.
+     *  Can be entity_run.id, verification_run.id, or eval_run.id.
+     *  No FK constraint to support all run types. */
+    runId: uuid("run_id"),
     /** Denormalised snapshot of `entity_run.initiator` at notification
      *  time. Enables the bell icon to filter out schedule notifications
      *  without JOINing entity_run. Null for legacy rows and system

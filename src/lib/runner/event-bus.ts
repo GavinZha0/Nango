@@ -21,6 +21,15 @@ export interface RunFinalizedEvent {
   preview?: string;
 }
 
+export interface RunStartedEvent {
+  kind: "run_started";
+  runId: string;
+  ownerId: string;
+  entityId: string;
+  entityKind: string;
+  startedAt: Date;
+}
+
 export interface NotificationCreatedEvent {
   kind: "notification";
   notification: NotificationEntity;
@@ -66,6 +75,7 @@ export interface EvaluationRunEvent {
 }
 
 export type RunnerEvent =
+  | RunStartedEvent
   | RunFinalizedEvent
   | NotificationCreatedEvent
   | VerificationRunEvent

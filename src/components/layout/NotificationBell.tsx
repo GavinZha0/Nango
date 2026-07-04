@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import {
   DropdownMenu,
@@ -80,6 +81,7 @@ function NotificationRow({
 }: {
   item: NotificationEntity;
 }): ReactNode {
+  const router = useRouter();
   const unread = item.readAt === null;
   // Heading line is the source — falls back to the title only when
   // we genuinely don't know where it came from (e.g. recovery-time
@@ -87,15 +89,24 @@ function NotificationRow({
   const heading = item.sourceLabel ?? item.title;
   // Outer is a `div` styled as a button so the row is clickable for
   // mark-as-read and keyboard-accessible via Enter / Space.
+  const handleClick = () => {
+    void notificationActions.markRead(item.id);
+    if (item.initiator === "verification") {
+      router.push("/verification");
+    } else if (item.initiator === "evaluation") {
+      router.push("/evaluation");
+    }
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => void notificationActions.markRead(item.id)}
+      onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          void notificationActions.markRead(item.id);
+          handleClick();
         }
       }}
       className={cn(

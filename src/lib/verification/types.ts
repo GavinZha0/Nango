@@ -82,6 +82,7 @@ export interface VerificationRunStartedFrame {
   kind: "run_started";
   runId: string;
   suiteId: string;
+  suiteName?: string;
   totalCount: number;
 }
 

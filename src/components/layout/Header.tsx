@@ -4,19 +4,14 @@
  * Header — top-level horizontal header bar.
  */
 
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import {
-  MessagesSquare,
-  LogOut,
-  UserRound,
-  ChevronDown,
-  Sun,
-  Moon,
-} from "lucide-react";
+import { Bot, FlaskConical, Medal, MessagesSquare, LogOut, UserRound, ChevronDown, Sun, Moon } from "lucide-react";
+import { useActiveTasksStore, type ActiveTask } from "@/store/active-tasks";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth/client";
 import { useSidebarStore } from "@/store/sidebar";
@@ -187,6 +182,130 @@ function ChatToggleButton(): ReactNode {
   );
 }
 
+const KIND_ICON: Record<ActiveTask["kind"], React.ComponentType<{ className?: string }>> = {
+  agent: Bot,
+  verification: FlaskConical,
+  evaluation: Medal,
+};
+
+function BadgeVariant({ task, progressText }: { task: ActiveTask; progressText: string }) {
+  const router = useRouter();
+  const toggleRightPanel = useSidebarStore((s) => s.toggleRightPanel);
+  const setLeftPanelOpen = useSidebarStore((s) => s.setLeftPanelOpen);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (task.kind === "agent") {
+      toggleRightPanel();
+    } else if (task.kind === "verification") {
+      router.push("/verification");
+      setLeftPanelOpen(true);
+    } else if (task.kind === "evaluation") {
+      router.push("/evaluation");
+      setLeftPanelOpen(true);
+    }
+  };
+
+  const isRunning = task.status === "running";
+  const TypeIcon = KIND_ICON[task.kind];
+
+  let iconClass = "h-3.5 w-3.5 shrink-0";
+  let borderClass = "";
+  let labelClass = "text-foreground";
+  if (isRunning) {
+    iconClass = cn(iconClass, "text-primary");
+    borderClass = "border-primary/30";
+    labelClass = "text-primary";
+  } else if (task.status === "succeeded") {
+    iconClass = cn(iconClass, "text-emerald-600 dark:text-emerald-400");
+  } else if (task.status === "failed") {
+    iconClass = cn(iconClass, "text-red-600 dark:text-red-400");
+  }
+
+  const label = task.name.replace(/^(builtin|backend)[:/]/i, "").trim();
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className={cn(
+        "inline-flex cursor-pointer select-none items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 transition-all hover:bg-accent",
+        borderClass
+      )}
+    >
+      <TypeIcon className={iconClass} />
+      <div className="flex flex-col items-start leading-none">
+        <span className={cn("text-xs font-medium", labelClass)}>{label}</span>
+        {progressText && (
+          <span className="mt-0.5 text-[10px] text-muted-foreground">{progressText}</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function AgentBadge({ task }: { task: ActiveTask }) {
+  const [elapsed, setElapsed] = useState(() => {
+    const started = new Date(task.startedAt).getTime();
+    const diff = Math.max(0, Math.floor((Date.now() - started) / 1000));
+    const m = Math.floor(diff / 60);
+    const s = diff % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  });
+
+  useEffect(() => {
+    if (task.status !== "running") {
+      return;
+    }
+
+    const started = new Date(task.startedAt).getTime();
+    const update = () => {
+      const diff = Math.max(0, Math.floor((Date.now() - started) / 1000));
+      const m = Math.floor(diff / 60);
+      const s = diff % 60;
+      setElapsed(`${m}:${s.toString().padStart(2, "0")}`);
+    };
+
+    update();
+    const timer = setInterval(update, 10000);
+    return () => clearInterval(timer);
+  }, [task.startedAt, task.status]);
+
+  return <BadgeVariant task={task} progressText={elapsed} />;
+}
+
+function SuiteBadge({ task }: { task: ActiveTask }) {
+  const text =
+    typeof task.totalCount === "number"
+      ? `${task.completedCount ?? 0}/${task.totalCount ?? 0}`
+      : "";
+  return <BadgeVariant task={task} progressText={text} />;
+}
+
+function ActiveTasksIndicators(): ReactNode {
+  const activeTasks = useActiveTasksStore((s) => s.activeTasks);
+
+  if (activeTasks.length === 0) return null;
+
+  const renderList = activeTasks.slice(0, 5);
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {renderList.map((task) => {
+        if (task.kind === "agent") {
+          return <AgentBadge key={task.id} task={task} />;
+        }
+        return <SuiteBadge key={task.id} task={task} />;
+      })}
+      {activeTasks.length > 5 && (
+        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+          +{activeTasks.length - 5}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 // Header
 
 export function Header(): ReactNode {
@@ -214,8 +333,10 @@ export function Header(): ReactNode {
 
       {/* Right: theme + notifications | user menu + chat toggle */}
       <div className="flex items-center gap-1">
-        <ThemeToggleButton />
+        <ActiveTasksIndicators />
+        <span aria-hidden className="mx-1 h-5 w-px bg-border/70" />
         <NotificationBell />
+        <ThemeToggleButton />
         {/* Vertical divider — separates the notifications cluster
             from the identity / chat-toggle cluster. */}
         <span aria-hidden className="mx-1 h-5 w-px bg-border/70" />

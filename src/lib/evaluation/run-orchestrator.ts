@@ -16,6 +16,7 @@ import "server-only";
 import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { runEvalCase, type RunEvalCaseResult } from "./eval-runner";
+import { recordRunNotification } from "@/lib/runner/notifications";
 import * as storage from "./storage";
 import type { EvalCriteria, EvalTurn } from "./types";
 
@@ -77,6 +78,7 @@ export async function startEvalSuiteRun(
     kind: "run_started",
     runId: run.id,
     suiteId: input.suiteId,
+    suiteName: suite.name,
     totalCount: cases.length,
   });
 
@@ -107,6 +109,7 @@ export async function startEvalSuiteRun(
     runId: run.id,
     ownerId: input.ownerId,
     suiteId: input.suiteId,
+    suiteName: suite.name,
     evaluatorAgentId: suite.evaluatorAgentId,
     dimensionIds: (suite.dimensionIds ?? []) as string[],
     targetAgentId: suite.agentId,
@@ -124,6 +127,7 @@ interface SuiteLoopInput {
   runId: string;
   ownerId: string;
   suiteId: string;
+  suiteName: string;
   evaluatorAgentId: string;
   dimensionIds: string[];
   targetAgentId: string;
@@ -227,6 +231,28 @@ async function finaliseAndAnnounce(
     erroredCount: counters.erroredCount,
   });
 
+  try {
+    await recordRunNotification({
+      ownerId: input.ownerId,
+      runId: input.runId,
+      kind: status === "passed" ? "run_completed" : "run_failed",
+      title: `Evaluation: ${input.suiteName}`,
+      body: `Score: ${passRate}%, ✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored`,
+      sourceLabel: "Evaluation Suite",
+      task: `Run evaluation suite '${input.suiteName}'`,
+      initiator: "evaluation",
+    });
+  } catch (notifErr) {
+    log.error(
+      {
+        event: "evaluation_notification_failed",
+        runId: input.runId,
+        err: notifErr instanceof Error ? notifErr.message : String(notifErr),
+      },
+      "failed to record evaluation notification",
+    );
+  }
+
   publishEvalFrame(input.ownerId, {
     topic: "evaluation_run",
     kind: "run_finished",
@@ -270,6 +296,17 @@ async function handleLoopCrash(
       passedCount: counters.passedCount,
       failedCount: counters.failedCount,
       erroredCount: counters.erroredCount,
+    });
+
+    await recordRunNotification({
+      ownerId: input.ownerId,
+      runId: input.runId,
+      kind: "run_failed",
+      title: `Evaluation: ${input.suiteName}`,
+      body: `Crashed: ${message}`,
+      sourceLabel: "Evaluation Suite",
+      task: `Run evaluation suite '${input.suiteName}'`,
+      initiator: "evaluation",
     });
   } catch (finErr) {
     log.error(
