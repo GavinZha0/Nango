@@ -33,19 +33,19 @@ import type { EvalSuiteRow } from "@/store/evaluation";
 interface EvalSuiteEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  suite: EvalSuiteRow;
+  suite?: EvalSuiteRow;
   onSave: (updated: { name: string; evaluatorAgentId?: string | null; dimensionIds: string[] }) => void;
 }
 
 export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalSuiteEditDialogProps): ReactNode {
-  const [name, setName] = useState(suite.name);
+  const [name, setName] = useState(suite?.name ?? "");
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const evaluators = useMemo(
     () => builtinAgents.filter((a) => a.role === "evaluator"),
     [builtinAgents],
   );
-  const [selectedEvalId, setSelectedEvalId] = useState(suite.evaluatorAgentId ?? "");
-  const [selectedDims, setSelectedDims] = useState<Set<string>>(new Set(suite.dimensionIds));
+  const [selectedEvalId, setSelectedEvalId] = useState(suite?.evaluatorAgentId ?? "");
+  const [selectedDims, setSelectedDims] = useState<Set<string>>(new Set(suite?.dimensionIds ?? []));
 
   function toggleDimension(dimId: string): void {
     setSelectedDims((prev) => {
@@ -57,8 +57,10 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
   }
 
   function handleSave(): void {
+    const trimmed = name.trim();
+    if (!trimmed) return;
     onSave({
-      name: name.trim() || suite.name,
+      name: trimmed,
       evaluatorAgentId: selectedEvalId || null,
       dimensionIds: [...selectedDims],
     });
@@ -74,36 +76,36 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Edit Suite</DialogTitle>
+          <DialogTitle>{suite ? "Edit Suite" : "Create Suite"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           {/* Name */}
           <div className="flex items-center gap-3">
-            <Label htmlFor="suite-name" className="w-16 shrink-0">Name</Label>
+            <Label htmlFor="suite-name" className="w-16 shrink-0 text-xs">Name</Label>
             <Input
               id="suite-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Suite name"
-              className="flex-1"
+              className="flex-1 text-xs"
             />
           </div>
 
           {/* Evaluator agent — Select dropdown */}
           <div className="flex items-center gap-3">
-            <Label className="w-16 shrink-0">Evaluator</Label>
-            <div className="flex-1">
+            <Label className="w-16 shrink-0 text-xs">Evaluator</Label>
+            <div className="flex-1 text-xs">
               <Select
                 value={selectedEvalId}
                 onValueChange={(v) => setSelectedEvalId(v ?? "")}
               >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full text-xs">
                 <SelectValue placeholder="Select an evaluator agent…">
                   {selectedEvalId ? (() => {
                     const ev = evaluators.find((e) => e.id === selectedEvalId);
                     return ev ? (
-                      <span className="flex items-center gap-1.5">
+                      <span className="flex items-center gap-1.5 text-xs">
                         {ev.icon && <span>{ev.icon}</span>}
                         <span>{ev.name}</span>
                       </span>
@@ -115,8 +117,8 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
               </SelectTrigger>
               <SelectContent>
                 {evaluators.map((ev) => (
-                  <SelectItem key={ev.id} value={ev.id} label={ev.name}>
-                    <span className="flex items-center gap-1.5">
+                  <SelectItem key={ev.id} value={ev.id} label={ev.name} className="text-xs">
+                    <span className="flex items-center gap-1.5 text-xs">
                       {ev.icon && <span>{ev.icon}</span>}
                       <span>{ev.name}</span>
                     </span>
@@ -128,14 +130,14 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
           </div>
 
           {/* Dimensions — grouped by category */}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 text-xs">
             <div className="flex items-center justify-between">
-              <Label>Evaluation Dimensions</Label>
+              <Label className="text-xs">Evaluation Dimensions</Label>
               <span className="text-[10px] text-muted-foreground tabular-nums">
                 {selectedDims.size} selected
               </span>
             </div>
-            <div className="max-h-[340px] overflow-y-auto rounded-md border p-3 space-y-3">
+            <div className="max-h-[300px] overflow-y-auto rounded-md border p-3 space-y-3">
               {grouped.map((group) => (
                 <div key={group.category}>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
@@ -166,8 +168,8 @@ export function EvalSuiteEditDialog({ open, onOpenChange, suite, onSave }: EvalS
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSave} disabled={!selectedEvalId}>Save</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="text-xs">Cancel</Button>
+          <Button onClick={handleSave} disabled={!name.trim() || !selectedEvalId} className="text-xs">Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

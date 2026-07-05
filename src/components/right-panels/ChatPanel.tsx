@@ -160,6 +160,27 @@ function ChatViewShellBody({
   useInjectHandoffContext(agent);
   const onRegenerate = useOnRegenerate(agent);
 
+  // Auto-focus input when chatbot input moves to bottom after first message
+  const hasFocusedFirstMsgRef = useRef(false);
+  useEffect(() => {
+    if (agent.messages.length === 0) {
+      hasFocusedFirstMsgRef.current = false;
+      return;
+    }
+    if (agent.messages.length > 0 && !hasFocusedFirstMsgRef.current) {
+      hasFocusedFirstMsgRef.current = true;
+      const timer = setTimeout(() => {
+        const textarea = document.querySelector(
+          ".copilotKitChat textarea, .copilotKitChat input, textarea"
+        ) as HTMLTextAreaElement | HTMLInputElement | null;
+        if (textarea) {
+          textarea.focus();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [agent.messages.length]);
+
   // Wire up onRegenerate; thumbs/read-aloud slots are no-op stubs.
   const AssistantMessageWithRegenerate = useCallback(
     (props: CopilotChatAssistantMessageProps) => {

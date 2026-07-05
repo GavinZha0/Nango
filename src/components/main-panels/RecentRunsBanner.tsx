@@ -191,10 +191,6 @@ export interface RecentRunsBannerProps {
   suiteId: string;
   /** Bump to force a refetch (e.g. when a run completes). */
   refreshKey: number;
-  /** ID of the currently-followed run (null = no live run). */
-  liveRunId: string | null;
-  /** Phase of the live run; used to render a leading chip with a spinner. */
-  livePhase: BannerRun["status"] | null;
   /** Run currently being viewed in history mode (null = live editor). */
   selectedRunId: string | null;
   /** Toggle history-view selection. `seq` is the absolute run
@@ -209,8 +205,6 @@ export interface RecentRunsBannerProps {
 export function RecentRunsBanner({
   suiteId,
   refreshKey,
-  liveRunId,
-  livePhase,
   selectedRunId,
   onSelectRun,
   apiPrefix = "verification-suites",
@@ -223,43 +217,10 @@ export function RecentRunsBanner({
     refreshKey,
   );
 
-  // Auto-snap to the newest page when a run starts
-  useEffect(() => {
-    if (liveRunId !== null) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setOffset(0);
-    }
-  }, [liveRunId]);
-
-  // The live chip is shown only on the newest page (offset=0) and only
-  // when it isn't already present in the fetched list
-  const showLiveChip = useMemo(
-    () =>
-      offset === 0 &&
-      liveRunId !== null &&
-      livePhase !== null &&
-      !rows.some((r) => r.id === liveRunId),
-    [offset, liveRunId, livePhase, rows],
-  );
-
-  // Build the visible chip list. Newest-first matches the API, so we
-  // reverse for display (oldest-on-the-left mock-up convention).
+  // Build the visible chip list. Keep original order (newest-on-the-left).
   const visible: BannerRun[] = useMemo(() => {
-    const out = rows.slice();
-    if (showLiveChip && liveRunId && livePhase) {
-      out.unshift({
-        id: liveRunId,
-        status: livePhase,
-        totalCount: 0,
-        passedCount: 0,
-        failedCount: 0,
-        erroredCount: 0,
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-      });
-    }
-    return out.reverse();
-  }, [rows, showLiveChip, liveRunId, livePhase]);
+    return rows.slice();
+  }, [rows]);
 
   const canGoNewer = offset > 0;
   const canGoOlder = offset + rows.length < total;
@@ -270,9 +231,9 @@ export function RecentRunsBanner({
         variant="ghost"
         size="icon"
         className="h-6 w-auto px-1"
-        onClick={() => setOffset((o) => o + LIMIT)}
-        disabled={!canGoOlder || loading}
-        aria-label="Older runs"
+        onClick={() => setOffset((o) => Math.max(0, o - LIMIT))}
+        disabled={!canGoNewer || loading}
+        aria-label="Newer runs"
       >
         <ChevronLeft className="h-3.5 w-3.5" />
         <ChevronLeft className="-ml-2 h-3.5 w-3.5" />
@@ -288,7 +249,7 @@ export function RecentRunsBanner({
           </span>
         )}
         {visible.map((run, i) => {
-          const seq = total - offset - (rows.length - 1) + i;
+          const seq = total - offset - i;
           return (
             <RunChip
               key={run.id}
@@ -308,9 +269,9 @@ export function RecentRunsBanner({
         variant="ghost"
         size="icon"
         className="h-6 w-auto px-1"
-        onClick={() => setOffset((o) => Math.max(0, o - LIMIT))}
-        disabled={!canGoNewer || loading}
-        aria-label="Newer runs"
+        onClick={() => setOffset((o) => o + LIMIT)}
+        disabled={!canGoOlder || loading}
+        aria-label="Older runs"
       >
         <ChevronRight className="h-3.5 w-3.5" />
         <ChevronRight className="-ml-2 h-3.5 w-3.5" />

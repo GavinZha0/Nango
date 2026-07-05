@@ -315,7 +315,7 @@ async function handleLoopCrash(
     );
   }
 
-  publishEvalFrame(input.ownerId, {
+    publishEvalFrame(input.ownerId, {
     topic: "evaluation_run",
     kind: "run_finished",
     runId: input.runId,
@@ -326,4 +326,72 @@ async function handleLoopCrash(
     erroredCount: counters.erroredCount,
     error: message,
   });
+}
+
+export interface StartAgentAllRunsInput {
+  agentId: string;
+  agentSource: string;
+  credentialId?: string | null;
+  ownerId: string;
+  triggeredBy: "manual" | "schedule";
+}
+
+/**
+ * Kick off serial runs for all enabled evaluation suites of an agent.
+ */
+export async function startEvalAgentAllRuns(
+  input: StartAgentAllRunsInput,
+): Promise<void> {
+  const allSuites = await storage.listSuitesByAgent(input.agentId, input.agentSource);
+  const runnable = allSuites.filter((s) => s.enabled && s.evaluatorAgentId);
+  if (runnable.length === 0) return;
+
+  // Background serial execution loop
+  void (async () => {
+    for (const suite of runnable) {
+      try {
+        const cases = await storage.listEnabledCasesForRun(suite.id);
+        if (cases.length === 0) continue;
+
+        const run = await storage.createRun({
+          suiteId: suite.id,
+          totalCount: cases.length,
+          triggeredBy: input.triggeredBy,
+        });
+
+        publishEvalFrame(input.ownerId, {
+          topic: "evaluation_run",
+          kind: "run_started",
+          runId: run.id,
+          suiteId: suite.id,
+          suiteName: suite.name,
+          totalCount: cases.length,
+        });
+
+        await executeSuiteLoop({
+          runId: run.id,
+          ownerId: input.ownerId,
+          suiteId: suite.id,
+          suiteName: suite.name,
+          evaluatorAgentId: suite.evaluatorAgentId!,
+          dimensionIds: (suite.dimensionIds ?? []) as string[],
+          targetAgentId: suite.agentId,
+          targetCredentialId: suite.credentialId ?? undefined,
+          targetAgentSource: suite.agentSource,
+          cases,
+        });
+
+      } catch (err) {
+        log.error(
+          {
+            event: "agent_all_runs_suite_failed",
+            agentId: input.agentId,
+            suiteId: suite.id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "failed to execute suite in agent serial loop",
+        );
+      }
+    }
+  })();
 }

@@ -79,6 +79,7 @@ export interface CreateCaseInput {
 
 export interface PatchCaseInput {
   name?: string;
+  suiteId?: string;
   turns?: Array<{ userMessage: string }>;
   criteria?: Record<string, unknown>;
   enabled?: boolean;
@@ -143,7 +144,14 @@ export const evalCaseActions = {
       });
       if (!res.ok) throw new Error(await readError(res));
       const row = (await res.json()) as EvalCaseRow;
-      useEvalCasesStore.getState().upsert(row);
+      if (row.suiteId !== caseRow.suiteId) {
+        useEvalCasesStore.getState().remove(caseRow.suiteId, caseRow.id);
+        useEvalCasesStore.getState().upsert(row);
+        useEvaluationStore.getState().bumpCaseCount(caseRow.suiteId, -1);
+        useEvaluationStore.getState().bumpCaseCount(row.suiteId, +1);
+      } else {
+        useEvalCasesStore.getState().upsert(row);
+      }
       return row;
     } catch (err) {
       useEvalCasesStore

@@ -17,11 +17,12 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { EvalSuiteTree } from "@/components/main-panels/evaluation/EvalSuiteTree";
 import { EvalSuiteEditDialog } from "@/components/main-panels/evaluation/EvalSuiteEditDialog";
+import { EvalCaseEditDialog } from "@/components/main-panels/evaluation/EvalCaseEditDialog";
 import { EvalCaseInspector } from "@/components/main-panels/evaluation/EvalCaseInspector";
 import { useEvaluationRunStream } from "@/hooks/useEvaluationRunStream";
 import { useEvalRunSnapshot } from "@/hooks/useEvalRunSnapshot";
@@ -139,6 +140,9 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
 
   // Suite edit dialog
   const [editingSuite, setEditingSuite] = useState<EvalSuiteRow | null>(null);
+  const [isCreatingSuite, setIsCreatingSuite] = useState(false);
+  const [editingCase, setEditingCase] = useState<EvalCaseRow | null>(null);
+  const [creatingCaseSuiteId, setCreatingCaseSuiteId] = useState<string | null>(null);
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<
@@ -196,6 +200,40 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
     setEditingSuite(null);
   }
 
+  async function handleSuiteCreate(input: { name: string; evaluatorAgentId?: string | null; dimensionIds: string[] }): Promise<void> {
+    await evalActions.create({
+      agentId,
+      agentSource,
+      credentialId,
+      name: input.name,
+      evaluatorAgentId: input.evaluatorAgentId,
+      dimensionIds: input.dimensionIds,
+    });
+    setIsCreatingSuite(false);
+  }
+
+  async function handleCaseCreate(updated: { name: string; suiteId: string }): Promise<void> {
+    if (!creatingCaseSuiteId) return;
+    const newCase = await evalCaseActions.create(updated.suiteId, {
+      name: updated.name,
+      turns: [],
+      criteria: {},
+    });
+    if (newCase) {
+      setSelectedCaseId(newCase.id);
+    }
+    setCreatingCaseSuiteId(null);
+  }
+
+  async function handleCaseSave(updated: { name: string; suiteId: string }): Promise<void> {
+    if (!editingCase) return;
+    await evalCaseActions.patch(
+      { id: editingCase.id, suiteId: editingCase.suiteId },
+      { name: updated.name, suiteId: updated.suiteId }
+    );
+    setEditingCase(null);
+  }
+
   // Delete handlers
   function handleDeleteSuiteRequest(suiteId: string): void {
     const suite = suites.find((s) => s.id === suiteId);
@@ -241,7 +279,18 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{agentDisplay.name}</h2>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h2 className="truncate text-sm font-semibold">{agentDisplay.name}</h2>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 gap-1 px-2 text-[10px]"
+            onClick={() => setIsCreatingSuite(true)}
+          >
+            <Plus className="h-3 w-3" />
+            <span>New Suite</span>
+          </Button>
+        </div>
 
         {/* Recent runs banner in header right */}
         {activeSuiteId && (
@@ -250,8 +299,6 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
               apiPrefix="eval-suites"
               suiteId={activeSuiteId}
               refreshKey={bannerRefreshKey}
-              liveRunId={activeRunId}
-              livePhase={liveRun.phase === "idle" ? null : liveRun.phase}
               selectedRunId={selectedRunId}
               onSelectRun={(id, seq) => {
                 setSelectedRunId(id);
@@ -278,6 +325,8 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
             onEditSuite={handleSuiteEdit}
             onDeleteSuite={handleDeleteSuiteRequest}
             onDeleteCase={handleDeleteCaseRequest}
+            onCreateCase={setCreatingCaseSuiteId}
+            onEditCase={setEditingCase}
           />
         </div>
 
@@ -307,6 +356,37 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
           onOpenChange={(open) => { if (!open) setEditingSuite(null); }}
           suite={editingSuite}
           onSave={handleSuiteSave}
+        />
+      )}
+
+      {/* Suite create dialog */}
+      {isCreatingSuite && (
+        <EvalSuiteEditDialog
+          open
+          onOpenChange={setIsCreatingSuite}
+          onSave={handleSuiteCreate}
+        />
+      )}
+
+      {/* Case create dialog */}
+      {creatingCaseSuiteId && (
+        <EvalCaseEditDialog
+          open
+          onOpenChange={(open) => { if (!open) setCreatingCaseSuiteId(null); }}
+          suites={suites}
+          defaultSuiteId={creatingCaseSuiteId}
+          onSave={handleCaseCreate}
+        />
+      )}
+
+      {/* Case edit dialog */}
+      {editingCase && (
+        <EvalCaseEditDialog
+          open
+          onOpenChange={(open) => { if (!open) setEditingCase(null); }}
+          evalCase={editingCase}
+          suites={suites}
+          onSave={handleCaseSave}
         />
       )}
 

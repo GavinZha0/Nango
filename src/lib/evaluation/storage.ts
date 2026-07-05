@@ -179,6 +179,7 @@ export async function getLatestCaseResult(
 
 export interface UpdateCaseInput {
   name?: string;
+  suiteId?: string;
   turns?: unknown[];
   criteria?: Record<string, unknown>;
   enabled?: boolean;
@@ -190,6 +191,7 @@ export async function updateCase(
 ): Promise<EvalCaseEntity> {
   const updates: Record<string, unknown> = {};
   if (input.name !== undefined) updates.name = input.name;
+  if (input.suiteId !== undefined) updates.suiteId = input.suiteId;
   if (input.turns !== undefined) updates.turns = input.turns as unknown;
   if (input.criteria !== undefined) updates.criteria = input.criteria as unknown;
   if (input.enabled !== undefined) updates.enabled = input.enabled;

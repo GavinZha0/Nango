@@ -344,8 +344,6 @@ export function VerificationSuiteEditor({
           <RecentRunsBanner
             suiteId={row.id}
             refreshKey={bannerRefreshKey}
-            liveRunId={liveRunId}
-            livePhase={liveRun.phase === "idle" ? null : liveRun.phase}
             selectedRunId={selectedRunId}
             onSelectRun={(id, seq) => {
               setSelectedRunId(id);

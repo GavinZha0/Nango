@@ -19,6 +19,7 @@ import {
   CircleCheck,
   CircleX,
   CircleAlert,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -61,6 +62,8 @@ interface EvalSuiteTreeProps {
   onEditSuite: (suiteId: string) => void;
   onDeleteSuite: (suiteId: string) => void;
   onDeleteCase: (caseId: number, suiteId: string) => void;
+  onCreateCase: (suiteId: string) => void;
+  onEditCase: (c: EvalCaseRow) => void;
 }
 
 export function EvalSuiteTree({
@@ -75,6 +78,8 @@ export function EvalSuiteTree({
   onEditSuite,
   onDeleteSuite,
   onDeleteCase,
+  onCreateCase,
+  onEditCase,
 }: EvalSuiteTreeProps): ReactNode {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
@@ -138,8 +143,17 @@ export function EvalSuiteTree({
                 )}
                 <button
                   type="button"
+                  onClick={() => onCreateCase(suite.id)}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                  title="Add case"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => onEditSuite(suite.id)}
                   className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                  title="Edit suite"
                 >
                   <Pencil className="h-3 w-3" />
                 </button>
@@ -147,6 +161,7 @@ export function EvalSuiteTree({
                   type="button"
                   onClick={() => onDeleteSuite(suite.id)}
                   className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                  title="Delete suite"
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -203,10 +218,19 @@ export function EvalSuiteTree({
                         >
                           {c.name}
                         </button>
+                         <button
+                          type="button"
+                          onClick={() => onEditCase(c)}
+                          className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-foreground mr-0.5"
+                          title="Edit case"
+                        >
+                          <Pencil className="h-2.5 w-2.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => onDeleteCase(c.id, suite.id)}
                           className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-destructive"
+                          title="Delete case"
                         >
                           <Trash2 className="h-2.5 w-2.5" />
                         </button>

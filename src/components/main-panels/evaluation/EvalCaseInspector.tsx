@@ -951,7 +951,6 @@ export function EvalCaseInspector({
         <EvaluationPanel
           activeDimensions={activeDimensions}
           criteria={criteria}
-          running={liveRun.phase === "running"}
           overallScore={displayScore}
           baselineScore={displayBaselineScore}
           dimensionScores={displayDimensionScores}
@@ -972,7 +971,6 @@ export function EvalCaseInspector({
 interface EvaluationPanelProps {
   activeDimensions: string[];
   criteria: EvalCriteria;
-  running: boolean;
   overallScore: number | null;
   baselineScore: number | null;
   dimensionScores: Record<string, number>;
@@ -988,7 +986,6 @@ interface EvaluationPanelProps {
 function EvaluationPanel({
   activeDimensions,
   criteria,
-  running,
   overallScore,
   baselineScore,
   dimensionScores,
@@ -1033,9 +1030,6 @@ function EvaluationPanel({
           )}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          {running && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-          )}
           {levelMeta && overallScore !== null && (
             <>
               <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", levelMeta.color, levelMeta.bgColor)}>
@@ -1123,16 +1117,16 @@ function EvaluationPanel({
                             item.passed === false ? "text-red-400" : "text-muted-foreground",
                           )}>
                             {item.label}
+                            {item.actual !== undefined && (
+                              <span className="text-[10px] text-muted-foreground/60 italic ml-1.5">
+                                (actual: {item.actual})
+                              </span>
+                            )}
                           </span>
                           {item.kind === "expectation" && item.score !== null && (
                             <span className="ml-1.5 text-[10px] font-mono tabular-nums text-muted-foreground">
                               {item.score}/100
                             </span>
-                          )}
-                          {item.actual !== undefined && (
-                            <p className="text-[10px] text-muted-foreground/70">
-                              actual: {item.actual}
-                            </p>
                           )}
                         </div>
                       </div>

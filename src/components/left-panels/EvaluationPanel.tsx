@@ -101,19 +101,19 @@ function AgentRow({ item, active, onSelect, onRunAgent, onDeleteAgent }: AgentRo
       </div>
       <button
         type="button"
-        onClick={onDeleteAgent}
-        title="Delete all suites"
-        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-      <button
-        type="button"
         onClick={onRunAgent}
         title="Run all suites (except Drafts)"
         className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-green-500"
       >
         <Play className="h-3.5 w-3.5 fill-current" />
+      </button>
+      <button
+        type="button"
+        onClick={onDeleteAgent}
+        title="Delete all suites"
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -133,11 +133,19 @@ export function EvaluationPanel(): ReactNode {
 
   const [deleteTarget, setDeleteTarget] = useState<EvalAgentItem | null>(null);
 
-  const handleRunAgent = (agentId: string, agentSource: string) => {
-    const key = agentKey(agentId, agentSource);
-    const suites = suitesByAgent[key] || [];
-    const runnable = suites.filter((s) => s.enabled && s.evaluatorAgentId);
-    console.log(`TODO: run ${runnable.length} suites for agent ${agentId}`, runnable);
+  const handleRunAgent = async (agentId: string, agentSource: string, credentialId: string | null) => {
+    try {
+      await fetch(`/api/eval-agents/${agentId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentSource,
+          credentialId,
+        }),
+      });
+    } catch (err) {
+      console.error("EvaluationPanel: failed to trigger run-all suites", err);
+    }
   };
 
   // Resolve agent display names from workspace store (populated at app boot).
@@ -237,7 +245,7 @@ export function EvaluationPanel(): ReactNode {
               item={item}
               active={isRowActive(item)}
               onSelect={() => router.push(evalHref(item))}
-              onRunAgent={() => handleRunAgent(item.agentId, item.agentSource)}
+              onRunAgent={() => handleRunAgent(item.agentId, item.agentSource, item.credentialId)}
               onDeleteAgent={() => setDeleteTarget(item)}
             />
           ))
