@@ -268,7 +268,7 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-2 shrink-0">
+      <div className="flex h-9 items-center gap-3 border-b px-4 shrink-0">
         <Button
           variant="ghost"
           size="icon"

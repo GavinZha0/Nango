@@ -107,14 +107,44 @@ export async function getCaseById(
   return rows[0] ?? null;
 }
 
+export interface VerificationCaseRunItem {
+  id: number;
+  suiteId: string;
+  name: string;
+  input: unknown;
+  assertions: unknown;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  mcpServerId: string | null;
+  toolName: string | null;
+  workflowId: string | null;
+}
+
 /** Enabled cases of a suite, in name order — the canonical iteration
  *  order for `Run suite` (see docs/verification.md). */
 export async function listEnabledCasesForRun(
   suiteId: string,
-): Promise<VerificationCaseEntity[]> {
-  return db
-    .select()
+): Promise<VerificationCaseRunItem[]> {
+  const rows = await db
+    .select({
+      id: VerificationCaseTable.id,
+      suiteId: VerificationCaseTable.suiteId,
+      name: VerificationCaseTable.name,
+      input: VerificationCaseTable.input,
+      assertions: VerificationCaseTable.assertions,
+      enabled: VerificationCaseTable.enabled,
+      createdAt: VerificationCaseTable.createdAt,
+      updatedAt: VerificationCaseTable.updatedAt,
+      mcpServerId: VerificationSuiteTable.mcpServerId,
+      toolName: VerificationSuiteTable.toolName,
+      workflowId: VerificationSuiteTable.workflowId,
+    })
     .from(VerificationCaseTable)
+    .innerJoin(
+      VerificationSuiteTable,
+      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id)
+    )
     .where(
       and(
         eq(VerificationCaseTable.suiteId, suiteId),
@@ -122,12 +152,47 @@ export async function listEnabledCasesForRun(
       ),
     )
     .orderBy(VerificationCaseTable.name);
+  return rows;
+}
+
+/** Enabled cases of an entire MCP server, in toolName and case name order. */
+export async function listEnabledCasesForServerRun(
+  mcpServerId: string,
+): Promise<VerificationCaseRunItem[]> {
+  const rows = await db
+    .select({
+      id: VerificationCaseTable.id,
+      suiteId: VerificationCaseTable.suiteId,
+      name: VerificationCaseTable.name,
+      input: VerificationCaseTable.input,
+      assertions: VerificationCaseTable.assertions,
+      enabled: VerificationCaseTable.enabled,
+      createdAt: VerificationCaseTable.createdAt,
+      updatedAt: VerificationCaseTable.updatedAt,
+      mcpServerId: VerificationSuiteTable.mcpServerId,
+      toolName: VerificationSuiteTable.toolName,
+      workflowId: VerificationSuiteTable.workflowId,
+    })
+    .from(VerificationCaseTable)
+    .innerJoin(
+      VerificationSuiteTable,
+      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id)
+    )
+    .where(
+      and(
+        eq(VerificationSuiteTable.mcpServerId, mcpServerId),
+        eq(VerificationCaseTable.enabled, true),
+      ),
+    )
+    .orderBy(VerificationSuiteTable.toolName, VerificationCaseTable.name);
+  return rows;
 }
 
 // --- Runs -------------------------------------------------------------------
 
 export interface CreateRunInput {
-  suiteId: string;
+  suiteId?: string | null;
+  mcpServerId?: string | null;
   totalCount: number;
   triggeredBy: "manual" | "schedule";
 }
@@ -138,7 +203,8 @@ export async function createRun(
   const [row] = await db
     .insert(VerificationRunTable)
     .values({
-      suiteId: input.suiteId,
+      suiteId: input.suiteId ?? null,
+      mcpServerId: input.mcpServerId ?? null,
       status: "running",
       totalCount: input.totalCount,
       triggeredBy: input.triggeredBy,
@@ -207,6 +273,30 @@ export async function countRuns(suiteId: string): Promise<number> {
   return rows[0]?.n ?? 0;
 }
 
+/** Paginated history for the recent-runs banner (Server level). */
+export async function listRecentServerRuns(
+  mcpServerId: string,
+  offset: number,
+  limit: number,
+): Promise<VerificationRunEntity[]> {
+  return db
+    .select()
+    .from(VerificationRunTable)
+    .where(eq(VerificationRunTable.mcpServerId, mcpServerId))
+    .orderBy(desc(VerificationRunTable.startedAt))
+    .offset(offset)
+    .limit(limit);
+}
+
+/** Total number of runs persisted for a server. */
+export async function countServerRuns(mcpServerId: string): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(VerificationRunTable)
+    .where(eq(VerificationRunTable.mcpServerId, mcpServerId));
+  return rows[0]?.n ?? 0;
+}
+
 // --- Case results -----------------------------------------------------------
 
 export interface WriteCaseResultInput {
@@ -268,11 +358,12 @@ export async function listResultsByRun(
  */
 export async function selectStrandedRuns(
   bootStartedAt: Date,
-): Promise<Array<Pick<VerificationRunEntity, "id" | "suiteId" | "totalCount">>> {
+): Promise<Array<Pick<VerificationRunEntity, "id" | "suiteId" | "mcpServerId" | "totalCount">>> {
   return db
     .select({
       id: VerificationRunTable.id,
       suiteId: VerificationRunTable.suiteId,
+      mcpServerId: VerificationRunTable.mcpServerId,
       totalCount: VerificationRunTable.totalCount,
     })
     .from(VerificationRunTable)

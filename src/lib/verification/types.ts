@@ -81,8 +81,10 @@ export interface VerificationRunStartedFrame {
   topic: "verification_run";
   kind: "run_started";
   runId: string;
-  suiteId: string;
+  suiteId?: string;
   suiteName?: string;
+  mcpServerId?: string;
+  serverName?: string;
   totalCount: number;
 }
 

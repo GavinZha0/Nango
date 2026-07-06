@@ -830,7 +830,7 @@ export function EvalCaseInspector({
       {/* Middle: conversation (top) + criteria/response tabs (bottom) */}
       <div className="flex flex-[1] flex-col border-r min-w-0">
         {/* Top: conversation turns */}
-        <div className="flex h-10 shrink-0 items-center border-b bg-muted/40 px-3">
+        <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Conversation
           </span>
@@ -1018,7 +1018,7 @@ function EvaluationPanel({
   return (
     <div className="flex flex-[1] flex-col min-w-0 bg-muted/10">
       {/* Header: "Evaluation" + level badge */}
-      <div className="flex h-10 shrink-0 items-center border-b bg-muted/40 px-3">
+      <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Evaluation

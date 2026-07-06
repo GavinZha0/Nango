@@ -20,7 +20,7 @@
 import { create } from "zustand";
 
 import type { AssertionSpec } from "@/lib/verification/types";
-import { useVerificationStore } from "@/store/verification";
+import { verificationActions } from "@/store/verification";
 
 // API row shape — matches what `GET /api/verification-suites/[id]/cases`
 // returns. Server-side it's `VerificationCaseTable.$inferSelect`; we
@@ -32,9 +32,9 @@ export interface VerificationCaseRow {
   id: number;
   suiteId: string;
   name: string;
-  mcpServerId: string | null;
-  toolName: string | null;
-  workflowId: string | null;
+  mcpServerId?: string | null;
+  toolName?: string | null;
+  workflowId?: string | null;
   input: Record<string, unknown>;
   assertions: AssertionSpec[];
   enabled: boolean;
@@ -141,13 +141,34 @@ export const caseActions = {
     }
   },
 
+  async refreshForServer(serverId: string): Promise<void> {
+    try {
+      const res = await fetch(`/api/verification-servers/${serverId}/cases`);
+      if (!res.ok) throw new Error(await readError(res));
+      const items = (await res.json()) as VerificationCaseRow[];
+
+      // Group by suiteId
+      const groups: Record<string, VerificationCaseRow[]> = {};
+      for (const it of items) {
+        if (!groups[it.suiteId]) groups[it.suiteId] = [];
+        groups[it.suiteId].push(it);
+      }
+
+      // Update store buckets
+      for (const [suiteId, cs] of Object.entries(groups)) {
+        useCasesStore.getState().setItemsFor(suiteId, cs);
+      }
+    } catch (err) {
+      console.error("Failed to refresh cases for server", serverId, err);
+    }
+  },
+
   async create(
-    suiteId: string,
     input: CreateMcpCaseInput,
   ): Promise<VerificationCaseRow | null> {
     try {
       const res = await fetch(
-        `/api/verification-suites/${suiteId}/cases`,
+        `/api/verification-cases`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -157,13 +178,11 @@ export const caseActions = {
       if (!res.ok) throw new Error(await readError(res));
       const row = (await res.json()) as VerificationCaseRow;
       useCasesStore.getState().upsert(row);
-      // Keep the suite list's badge count in sync without a re-fetch.
-      useVerificationStore.getState().bumpCaseCount(suiteId, +1);
+      // Refresh left panel to ensure any newly populated server shows up
+      void verificationActions.refresh("mcp");
       return row;
     } catch (err) {
-      useCasesStore
-        .getState()
-        .setError(suiteId, err instanceof Error ? err.message : String(err));
+      console.error("Failed to create case", err);
       return null;
     }
   },
@@ -204,8 +223,8 @@ export const caseActions = {
         throw new Error(await readError(res));
       }
       useCasesStore.getState().remove(caseRow.suiteId, caseRow.id);
-      // Keep the suite list's badge count in sync without a re-fetch.
-      useVerificationStore.getState().bumpCaseCount(caseRow.suiteId, -1);
+      // Refresh left panel to ensure the count badge is in sync or server is removed if empty
+      void verificationActions.refresh("mcp");
     } catch (err) {
       useCasesStore
         .getState()

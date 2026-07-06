@@ -1,35 +1,11 @@
 "use client";
 
-/**
- * Client-side store + actions for Verification suites.
- *
- * Single source of truth for the left `VerificationPanel` and the
- * center `VerificationSuiteEditor`. Suites are partitioned into two
- * disjoint sets by `category` ("mcp" | "workflow") — the panel shows
- * one set at a time, controlled by the top-of-panel tab.
- *
- * Run history (`verification_run` / `verification_case_result`) is
- * NOT cached here — those rows are fetched on-demand by the editor's
- * RecentRunsBanner via `/api/verification-suites/[id]/runs` because
- * they are large, paginated, and grow with usage. Keeping them out
- * of the suite store prevents memory creep.
- *
- * Real-time updates flow through SSE (`/api/runs/stream` topic
- * `verification_run`) — see the editor; the store does NOT subscribe
- * because suite metadata never changes mid-run.
- */
-
 import { create } from "zustand";
 
 import type { VerificationSuiteCategory } from "@/lib/verification/types";
 
-/** Alias kept local to the client store; the DB column is a free-form
- *  text + CHECK, so we don't pull a shared type just for two values. */
 export type VerificationCategory = VerificationSuiteCategory;
 export type VerificationVisibility = "private" | "public";
-
-// API row shapes — match what `/api/verification-suites` and
-// `/api/verification-suites/[id]/cases` actually return today.
 
 export interface VerificationSuiteRow {
   id: string;
@@ -38,20 +14,26 @@ export interface VerificationSuiteRow {
   category: VerificationCategory;
   visibility: VerificationVisibility;
   enabled: boolean;
-  /** Suite-wide timeout in SECONDS (matches DB column `timeout_sec`). */
   timeoutSec: number;
   createdBy: string;
   updatedBy: string | null;
   createdAt: string;
   updatedAt: string;
-  /** Number of cases under this suite, derived server-side via a
-   *  correlated COUNT in GET /api/verification-suites and on the
-   *  single-row endpoints. Drives the left-panel count badge. */
+  caseCount: number;
+}
+
+export interface VerificationServerRow {
+  id: string;
+  name: string;
+  serverTitle: string | null;
+  serverDescription: string | null;
+  enabled: boolean;
+  visibility: VerificationVisibility;
+  createdBy: string;
   caseCount: number;
 }
 
 export interface VerificationCaseRow {
-  /** bigint identity in DB; JSON-encoded as a number (safe ≪ 2^53). */
   id: number;
   suiteId: string;
   name: string;
@@ -59,19 +41,14 @@ export interface VerificationCaseRow {
   toolName: string | null;
   workflowId: string | null;
   input: Record<string, unknown>;
-  /** Opaque to the store — typed at the editor seam via `AssertionSpec[]`. */
   assertions: unknown;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-// Store
-
 interface VerificationState {
-  /** Current category tab. Drives which set of suites is materialised. */
   category: VerificationCategory;
-  /** Cache per category — switching tabs is free if both have been loaded. */
   items: Record<VerificationCategory, VerificationSuiteRow[]>;
   loaded: Record<VerificationCategory, boolean>;
   loading: boolean;
@@ -83,10 +60,6 @@ interface VerificationState {
   setError: (err: string | null) => void;
   upsert: (item: VerificationSuiteRow) => void;
   remove: (id: string) => void;
-  /** Adjust the `caseCount` of a suite by `delta` (signed). Used by
-   *  `caseActions.create/remove` so the panel badge stays in sync
-   *  without re-fetching the full suite list. Silently no-ops if the
-   *  suite isn't loaded in either bucket. */
   bumpCaseCount: (suiteId: string, delta: number) => void;
 }
 
@@ -118,7 +91,6 @@ export const useVerificationStore = create<VerificationState>()((set) => ({
       const idx = bucket.findIndex((it) => it.id === item.id);
       if (idx === -1) bucket.unshift(item);
       else bucket[idx] = item;
-      // Keep alphabetical (matches server `ORDER BY name`).
       bucket.sort((a, b) => a.name.localeCompare(b.name));
       return { items: { ...s.items, [item.category]: bucket } };
     }),
@@ -138,8 +110,7 @@ export const useVerificationStore = create<VerificationState>()((set) => ({
         if (idx === -1) return list;
         const next = list.slice();
         const cur = next[idx];
-        // Clamp to zero — guards against under-counting if a stale
-        // delete fires twice (UI optimistic + server eventual).
+        if (!cur) return list;
         next[idx] = {
           ...cur,
           caseCount: Math.max(0, cur.caseCount + delta),
@@ -155,14 +126,11 @@ export const useVerificationStore = create<VerificationState>()((set) => ({
     }),
 }));
 
-// Actions
-
 export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   category: VerificationCategory;
   visibility?: VerificationVisibility;
-  /** Seconds; backend default = 300 if omitted. */
   timeoutSec?: number;
 }
 
@@ -182,15 +150,18 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 export const verificationActions = {
-  /** Refresh the current category. Idempotent; safe to call repeatedly. */
   async refresh(category?: VerificationCategory): Promise<void> {
     const cat = category ?? useVerificationStore.getState().category;
     useVerificationStore.getState().setLoading(true);
     try {
-      const res = await fetch(`/api/verification-suites?category=${cat}`);
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const items = (await res.json()) as VerificationSuiteRow[];
-      useVerificationStore.getState().setItemsFor(cat, items);
+      if (cat === "mcp") {
+        const res = await fetch(`/api/verification-servers`);
+        if (!res.ok) throw new Error(await readErrorMessage(res));
+        const items = (await res.json()) as VerificationServerRow[];
+        useVerificationStore.getState().setItemsFor("mcp", items as unknown as VerificationSuiteRow[]);
+      } else {
+        useVerificationStore.getState().setItemsFor("workflow", []);
+      }
     } catch (err) {
       useVerificationStore
         .getState()

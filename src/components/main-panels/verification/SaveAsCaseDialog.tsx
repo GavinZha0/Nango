@@ -1,25 +1,6 @@
 "use client";
 
-/**
- * SaveAsCaseDialog — invoked from the MCP test page after a successful
- * tool invocation. Captures (serverId, toolName, input) as a new
- * verification case under either an existing MCP suite or a new one
- * created inline. Initial `assertions` is empty (smoke-test case —
- * see `@/components/main-panels/verification/NewCaseDialog.tsx` for
- * the same convention).
- *
- * Suite list is filtered to `category='mcp'` server-side via
- * `/api/verification-suites?category=mcp`.
- *
- * Direct `fetch` is used (instead of `verificationActions.create` /
- * `caseActions.create`) so 409 / 400 messages can be surfaced INLINE
- * in the dialog; the store actions swallow errors into a panel-wide
- * `error` field which would be invisible here. Stores are still
- * updated on success (`upsert` + `bumpCaseCount`) so the
- * VerificationPanel badge stays consistent without a re-fetch.
- */
-
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,79 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  useVerificationStore,
-  type VerificationSuiteRow,
-} from "@/store/verification";
-import {
-  useCasesStore,
-  type VerificationCaseRow,
-} from "@/store/verification-cases";
-
-// --- Constants --------------------------------------------------------------
-
-/** Sentinel value for the "create new suite" Select item. Chosen so it
- *  can never collide with a real UUID suite id. */
-const NEW_SUITE_SENTINEL = "__new__";
-
-// --- Helpers ----------------------------------------------------------------
-
-interface ErrorEnvelope {
-  message?: string;
-  code?: string;
-}
-
-async function readApiError(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => null)) as ErrorEnvelope | null;
-  return body?.message ?? `${res.status} ${res.statusText}`;
-}
-
-async function fetchMcpSuites(): Promise<VerificationSuiteRow[]> {
-  const res = await fetch("/api/verification-suites?category=mcp");
-  if (!res.ok) throw new Error(await readApiError(res));
-  return (await res.json()) as VerificationSuiteRow[];
-}
-
-async function createMcpSuite(name: string): Promise<VerificationSuiteRow> {
-  const res = await fetch("/api/verification-suites", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name,
-      category: "mcp",
-      visibility: "private",
-    }),
-  });
-  if (!res.ok) throw new Error(await readApiError(res));
-  return (await res.json()) as VerificationSuiteRow;
-}
-
-async function createMcpCase(
-  suiteId: string,
-  body: {
-    name: string;
-    mcpServerId: string;
-    toolName: string;
-    input: Record<string, unknown>;
-  },
-): Promise<VerificationCaseRow> {
-  const res = await fetch(`/api/verification-suites/${suiteId}/cases`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, assertions: [] }),
-  });
-  if (!res.ok) throw new Error(await readApiError(res));
-  return (await res.json()) as VerificationCaseRow;
-}
-
-// --- Props ------------------------------------------------------------------
+import { caseActions } from "@/store/verification-cases";
 
 export interface SaveAsCaseDialogProps {
   open: boolean;
@@ -121,8 +30,6 @@ export interface SaveAsCaseDialogProps {
   input: Record<string, unknown>;
 }
 
-// --- Component --------------------------------------------------------------
-
 export function SaveAsCaseDialog({
   open,
   onOpenChange,
@@ -131,100 +38,43 @@ export function SaveAsCaseDialog({
   toolName,
   input,
 }: SaveAsCaseDialogProps): ReactNode {
-  // Remote data
-  const [suites, setSuites] = useState<VerificationSuiteRow[]>([]);
-  const [loadingSuites, setLoadingSuites] = useState<boolean>(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
   // Form state — reset on each open.
-  const [form, setForm] = useState({ selectedSuiteId: "", newSuiteName: "", caseName: "" });
+  const [caseName, setCaseName] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Reset form whenever the dialog opens. Uses the "render-time prop
-  // change" pattern (mirrors NewCaseDialog) to avoid useEffect churn.
+  // Reset form whenever the dialog opens.
   const [lastOpen, setLastOpen] = useState<boolean>(open);
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
-      setForm({ selectedSuiteId: "", newSuiteName: "", caseName: toolName });
+      setCaseName(toolName);
       setSubmitError(null);
     }
   }
 
-  // Fetch suite list on open. Cancellable for rapid open/close.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadingSuites(true);
-    setLoadError(null);
-    fetchMcpSuites()
-      .then((rows) => {
-        if (cancelled) return;
-        setSuites(rows);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingSuites(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  const creatingNewSuite: boolean = form.selectedSuiteId === NEW_SUITE_SENTINEL;
-  const trimmedCaseName: string = form.caseName.trim();
-  const trimmedNewSuiteName: string = form.newSuiteName.trim();
-
-  const canSubmit: boolean =
-    !submitting &&
-    trimmedCaseName.length > 0 &&
-    (creatingNewSuite
-      ? trimmedNewSuiteName.length > 0
-      : form.selectedSuiteId !== "");
+  const trimmedCaseName: string = caseName.trim();
+  const canSubmit: boolean = !submitting && trimmedCaseName.length > 0;
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      // 1) Resolve suiteId — create the suite first if needed.
-      let suiteId: string;
-      let createdSuite: VerificationSuiteRow | null = null;
-      if (creatingNewSuite) {
-        createdSuite = await createMcpSuite(trimmedNewSuiteName);
-        suiteId = createdSuite.id;
-      } else {
-        suiteId = form.selectedSuiteId;
-      }
-
-      // 2) Create the case under the resolved suite.
-      const caseRow: VerificationCaseRow = await createMcpCase(suiteId, {
+      const caseRow = await caseActions.create({
         name: trimmedCaseName,
         mcpServerId,
         toolName,
         input,
+        assertions: [],
       });
 
-      // 3) Update the client stores so the panels stay in sync without
-      //    a re-fetch. Done AFTER both creates succeed — partial state
-      //    on the suite-level if the case create fails is acceptable
-      //    (the suite is real on the server; we just upsert it too so
-      //    the user sees it on next visit to the verification panel).
-      if (createdSuite) {
-        useVerificationStore.getState().upsert({ ...createdSuite, caseCount: 0 });
+      if (!caseRow) {
+        throw new Error("Failed to create case");
       }
-      useCasesStore.getState().upsert(caseRow);
-      useVerificationStore.getState().bumpCaseCount(suiteId, +1);
 
       toast.success("Saved verification case", {
-        description: createdSuite
-          ? `Created suite "${createdSuite.name}" with 1 case.`
-          : `Added "${caseRow.name}" to the suite.`,
+        description: `Added "${caseRow.name}" to the server regression test suite.`,
       });
       onOpenChange(false);
     } catch (err) {
@@ -254,59 +104,6 @@ export function SaveAsCaseDialog({
             <span className="truncate text-sm font-mono">{toolName}</span>
           </div>
 
-          {/* Suite picker */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-            <Label htmlFor="save-case-suite">
-              Suite <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={form.selectedSuiteId}
-              onValueChange={(v) => setForm((prev) => ({ ...prev, selectedSuiteId: v ?? "" }))}
-              disabled={loadingSuites}
-              items={[
-                ...suites.map((s) => ({ value: s.id, label: s.name })),
-                { value: NEW_SUITE_SENTINEL, label: "+ New suite…" },
-              ]}
-            >
-              <SelectTrigger id="save-case-suite" className="w-full">
-                <SelectValue
-                  placeholder={
-                    loadingSuites ? "Loading suites…" : "Pick a suite"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {suites.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-                {suites.length > 0 && (
-                  <div className="my-1 h-px bg-border" aria-hidden />
-                )}
-                <SelectItem value={NEW_SUITE_SENTINEL}>
-                  + New suite…
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* New-suite name (only when creating) */}
-          {creatingNewSuite && (
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <Label htmlFor="save-case-new-suite">
-                Suite name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="save-case-new-suite"
-                value={form.newSuiteName}
-                onChange={(e) => setForm((prev) => ({ ...prev, newSuiteName: e.target.value }))}
-                placeholder="e.g. GitHub MCP smoke tests"
-                autoFocus
-              />
-            </div>
-          )}
-
           {/* Case name */}
           <div className="grid grid-cols-[120px_1fr] items-center gap-2">
             <Label htmlFor="save-case-name">
@@ -314,21 +111,21 @@ export function SaveAsCaseDialog({
             </Label>
             <Input
               id="save-case-name"
-              value={form.caseName}
-              onChange={(e) => setForm((prev) => ({ ...prev, caseName: e.target.value }))}
+              value={caseName}
+              onChange={(e) => setCaseName(e.target.value)}
               placeholder="e.g. search returns at least one hit"
-              autoFocus={!creatingNewSuite}
+              autoFocus
             />
           </div>
 
           <p className="text-[11px] text-muted-foreground">
             Captures the input you just ran. Edit assertions later in the
-            suite editor.
+            verification panel.
           </p>
 
-          {(loadError || submitError) && (
+          {submitError && (
             <p className="text-xs text-destructive">
-              {submitError ?? loadError}
+              {submitError}
             </p>
           )}
         </div>

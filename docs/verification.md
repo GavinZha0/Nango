@@ -120,7 +120,7 @@ per-tool sidecar HTTP probe, which is V2 territory.
 | `js_expression` | Executes a pure JS expression in a restricted `node:vm`. | `result.totalCount > 42` |
 
 - Empty assertions array acts as a smoke test (passes if no upstream error).
-- Assertions can target the raw MCP envelope by prefixing paths with `$` or using the `envelope` JS binding.
+- Assertions can target the raw MCP output by prefixing paths with `$` or using the `root` JS binding.
 
 ## 5. Execution
 

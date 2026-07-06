@@ -8,25 +8,25 @@
  *
  * Scope convention (see docs/verification.md):
  *
- *   For MCP tool calls the raw payload is a `CallToolResult` envelope
+ *   For MCP tool calls the raw payload is a `CallToolResult` wrapper
  *   `{ content, structuredContent?, isError? }`. To keep assertions
  *   ergonomic for the 90% case, both `jsonpath_equals.path` and
  *   `js_expression.expression` default to **the `structuredContent`
- *   sub-object**, not the envelope:
+ *   sub-object**, not the root:
  *
  *     jsonpath_equals.path:
  *       "cached"               ⇒ evaluated as $.cached  on structuredContent
  *       "items[0].id"          ⇒ evaluated on structuredContent
- *       "$.isError"            ⇒ ABSOLUTE: evaluated on the full envelope
+ *       "$.isError"            ⇒ ABSOLUTE: evaluated on the full root
  *       "$.structuredContent.cached"  ⇒ ABSOLUTE (still works, just verbose)
  *
  *     js_expression bindings:
  *       `result`               ⇒ structuredContent (or `{}` when absent)
- *       `envelope`             ⇒ full CallToolResult
+ *       `root`                 ⇒ full CallToolResult
  *
  *   `isError` handling is OUTSIDE assertion scope — the runner already
- *   marks the case `failed` when `envelope.isError === true`, so users
- *   never need to write `envelope.isError === false`.
+ *   marks the case `failed` when `root.isError === true`, so users
+ *   never need to write `root.isError === false`.
  *
  * See docs/verification.md.
  */
@@ -227,8 +227,45 @@ function resolveJsonPathScope(
  */
 function extractStructured(payload: unknown): unknown {
   if (typeof payload !== "object" || payload === null) return {};
+  
+  // 1. Prioritize structuredContent if present
   const sc = (payload as { structuredContent?: unknown }).structuredContent;
-  return sc ?? {};
+  if (sc !== undefined && sc !== null) {
+    return sc;
+  }
+
+  // 2. Fallback: If structuredContent is missing, scan the content array 
+  // for the first item containing a JSON object or stringified JSON.
+  const content = (payload as { content?: unknown }).content;
+  if (Array.isArray(content) && content.length > 0) {
+    for (const item of content) {
+      if (item && typeof item === "object" && "type" in item && item.type === "text" && "text" in item) {
+        const text = item.text;
+        if (typeof text === "object" && text !== null) {
+          return text;
+        }
+        if (typeof text === "string") {
+          const trimmed = text.trim();
+          const looksLikeJson =
+            (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"));
+          if (looksLikeJson) {
+            try {
+              return JSON.parse(trimmed);
+            } catch {
+              // Ignore invalid JSON and continue checking next items
+            }
+          }
+        }
+      }
+    }
+
+    // 3. If no content item contains parsable JSON, fallback to returning 
+    // the content array itself. This allows users to query it via relative paths.
+    return content;
+  }
+
+  return {};
 }
 
 // --- js_expression -----------------------------------------------------------
@@ -244,7 +281,7 @@ function evaluateJsExpression(
   try {
     const ok = runInNewContext(
       `(${spec.expression})`,
-      { result: extractStructured(payload), envelope: payload },
+      { result: extractStructured(payload), root: payload },
       { timeout: JS_EXPRESSION_TIMEOUT_MS, displayErrors: false },
     );
     return {

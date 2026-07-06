@@ -130,7 +130,7 @@ interface RunsPageResponse {
  * and the lint mis-flags it when the fetcher is defined locally.
  */
 async function fetchRecentRuns(
-  apiPrefix: "verification-suites" | "eval-suites",
+  apiPrefix: "verification-suites" | "eval-suites" | "verification-servers",
   suiteId: string,
   offset: number,
 ): Promise<RunsPageResponse> {
@@ -146,7 +146,7 @@ async function fetchRecentRuns(
 }
 
 function useRecentRuns(
-  apiPrefix: "verification-suites" | "eval-suites",
+  apiPrefix: "verification-suites" | "eval-suites" | "verification-servers",
   suiteId: string,
   offset: number,
   refreshKey: number,
@@ -199,7 +199,7 @@ export interface RecentRunsBannerProps {
    *  user can tell at a glance which run they're inspecting. `null`
    *  payload means "deselect, return to live view". */
   onSelectRun: (runId: string | null, seq: number | null) => void;
-  apiPrefix?: "verification-suites" | "eval-suites";
+  apiPrefix?: "verification-suites" | "eval-suites" | "verification-servers";
 }
 
 export function RecentRunsBanner({

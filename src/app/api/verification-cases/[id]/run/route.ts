@@ -55,17 +55,17 @@ export const POST = withEditor<{ id: string }>(
         { code: "WORKFLOW_TESTS_V2" },
       );
     }
-    if (!caseRow.mcpServerId || !caseRow.toolName) {
+    if (!suite.mcpServerId || !suite.toolName) {
       throw new ApiError(
         "BAD_REQUEST",
         400,
-        "Case is missing its MCP target (mcpServerId / toolName).",
+        "Suite is missing its MCP target (mcpServerId / toolName).",
       );
     }
 
     const outcome = await runMcpCase({
-      mcpServerId: caseRow.mcpServerId,
-      toolName: caseRow.toolName,
+      mcpServerId: suite.mcpServerId,
+      toolName: suite.toolName,
       input: (caseRow.input ?? {}) as Record<string, unknown>,
       assertions: (caseRow.assertions ?? []) as readonly AssertionSpec[],
     });

@@ -27,8 +27,8 @@
  * current DB definition.
  */
 
-import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
-import { Loader2, Play, Check, Copy } from "lucide-react";
+import { useState, useMemo, useCallback, type ReactNode } from "react";
+import { Loader2, Play, Check, Copy, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -42,6 +42,7 @@ import type {
   CaseExecutionOutcome,
   ErrorEnvelope,
 } from "@/lib/verification/types";
+import { AssertionsEditor } from "./AssertionsEditor";
 
 // --- Props ------------------------------------------------------------------
 
@@ -81,8 +82,6 @@ export interface CaseInspectorProps {
 
 // --- useJsonDraft hook ------------------------------------------------------
 
-const DEBOUNCE_MS: number = 400;
-
 interface JsonDraftOptions<T> {
   /** Initial parsed value — captured once on mount. */
   initial: T;
@@ -95,16 +94,16 @@ interface JsonDraftOptions<T> {
 interface JsonDraft {
   text: string;
   setText: (next: string) => void;
-  /** Commit immediately (used on blur). */
-  flushNow: () => void;
-  /** Commit + await; returns true on valid + persisted. Used before Run case. */
+  /** Commit + await; returns true on valid + persisted. Used for manual save. */
   flushAwait: () => Promise<boolean>;
   parseError: string | null;
   saving: boolean;
+  /** Whether the draft has unsaved changes. */
+  isDirty: boolean;
 }
 
 /**
- * Debounced JSON textarea state. Shared by the Input and Assertions
+ * JSON textarea state with manual save. Shared by the Input and Assertions
  * panes so they behave identically.
  *
  * NOTE: `key={caseRow.id}` on the parent ensures this hook remounts
@@ -136,96 +135,36 @@ function useJsonDraft<T>(opts: JsonDraftOptions<T>): JsonDraft {
   const [text, setTextState] = useState<string>(() => seedTextFor(initial));
   const [parseError, setParseError] = useState<string | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Last raw text that was successfully committed to the server.
-  // Seeded to the same value as `text` so the very first blur on an
-  // unchanged pane is a no-op. Without this guard, every focus-out
-  // (and every debounce flush of unchanged content) fires a PATCH —
-  // tabbing between Input and Assertions used to storm the API.
-  const lastCommittedRef = useRef<string>(seedTextFor(initial));
+  const [lastCommitted, setLastCommitted] = useState<string>(() => seedTextFor(initial));
 
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
+  // Track if there are unsaved changes
+  const isDirty = text !== lastCommitted;
 
-  // `commit` and `validate` are NOT held in refs — `setText` /
-  // `flushNow` / `flushAwait` are recreated each render, so any
-  // setTimeout scheduled by them already captures the latest closure.
-  // Holding them in refs would mutate ref.current during render, which
-  // React 19's strict-mode lint rejects.
+  const setText = (next: string): void => {
+    setTextState(next);
+    // Validate JSON format immediately but don't save
+    if (next.trim() === "") {
+      setParseError(null);
+    } else {
+      try {
+        JSON.parse(next);
+        setParseError(null);
+      } catch (err) {
+        setParseError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
 
-  const doCommit = (
-    raw: string,
-    commitNow: JsonDraftOptions<T>["commit"],
-    validateNow: JsonDraftOptions<T>["validate"],
-  ): boolean => {
-    // No-op if the raw text hasn't changed since the last successful
-    // commit. Cheap string compare — covers the common case of
-    // focus-out without edits AND the debounce-flush of an unchanged
-    // value. (Whitespace-only edits still PATCH; acceptable.)
-    if (raw === lastCommittedRef.current) {
+  const flushAwait = async (): Promise<boolean> => {
+    // Short-circuit if nothing changed since the last successful commit
+    if (text === lastCommitted) {
       setParseError(null);
       return true;
     }
     // Empty text is intentional — means "no overrides". Hand `null`
     // to the validator as a sentinel so each pane can substitute its
     // canonical empty value (`[]` for Assertions, `{}` for Input).
-    let parsed: unknown;
-    if (raw.trim() === "") {
-      parsed = null;
-    } else {
-      try {
-        parsed = JSON.parse(raw) as unknown;
-      } catch (err) {
-        setParseError(err instanceof Error ? err.message : String(err));
-        return false;
-      }
-    }
-    const verdict = validateNow(parsed);
-    if (!verdict.ok) {
-      setParseError(verdict.error);
-      return false;
-    }
-    setParseError(null);
-    setSaving(true);
-    lastCommittedRef.current = raw;
-    void commitNow(verdict.value).finally(() => setSaving(false));
-    return true;
-  };
-
-  const setText = (next: string): void => {
-    setTextState(next);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(
-      () => doCommit(next, commit, validate),
-      DEBOUNCE_MS,
-    );
-  };
-
-  const flushNow = (): void => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-    doCommit(text, commit, validate);
-  };
-
-  const flushAwait = async (): Promise<boolean> => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-    // Short-circuit if nothing changed since the last successful
-    // commit — matches `doCommit`'s identical guard so "Run case"
-    // doesn't issue a redundant PATCH before the run POST.
-    if (text === lastCommittedRef.current) {
-      setParseError(null);
-      return true;
-    }
-    // Same empty-text shortcut as `doCommit`. Keep both branches in
-    // sync — `flushAwait` is called by the "Run case" button.
     let parsed: unknown;
     if (text.trim() === "") {
       parsed = null;
@@ -246,42 +185,17 @@ function useJsonDraft<T>(opts: JsonDraftOptions<T>): JsonDraft {
     setSaving(true);
     try {
       await commit(verdict.value);
-      lastCommittedRef.current = text;
+      const canonicalText = seedTextFor(verdict.value);
+      setTextState(canonicalText);
+      setLastCommitted(canonicalText);
       return true;
     } finally {
       setSaving(false);
     }
   };
 
-  return { text, setText, flushNow, flushAwait, parseError, saving };
+  return { text, setText, flushAwait, parseError, saving, isDirty };
 }
-
-// --- Constants -------------------------------------------------------------
-
-/**
- * Shown as ghost-text in the Assertions pane while the textarea is
- * empty. Demonstrates the three assertion kinds together so new users
- * have a copy-paste starting point. The leading `// example:` line
- * makes its hint-nature obvious if the user does paste the body.
- * Pure UI hint — never persisted, never parsed by the runner.
- */
-const ASSERTIONS_PLACEHOLDER: string = `// example:
-${JSON.stringify(
-  [
-    { type: "js_expression", expression: "result.total > 0" },
-    {
-      type: "json_schema",
-      schema: {
-        type: "object",
-        required: ["items"],
-        properties: { items: { type: "array", minItems: 1 } },
-      },
-    },
-    { type: "jsonpath_equals", path: "items[0].key", expected: 12345 },
-  ],
-  null,
-  2,
-)}`;
 
 // --- Validators (module-scoped so hook deps stay stable) -------------------
 
@@ -344,7 +258,23 @@ function validateAssertionsArray(
       };
     }
   }
-  return { ok: true, value: parsed as AssertionSpec[] };
+
+  // Automatically filter out empty/blank assertions before saving to database
+  const assertions = parsed as AssertionSpec[];
+  const filtered = assertions.filter((item) => {
+    if (item.type === "jsonpath_equals") {
+      return item.path && item.path.trim() !== "";
+    }
+    if (item.type === "js_expression") {
+      return item.expression && item.expression.trim() !== "";
+    }
+    if (item.type === "json_schema") {
+      return item.schema && Object.keys(item.schema).length > 0;
+    }
+    return true;
+  });
+
+  return { ok: true, value: filtered };
 }
 
 // --- Component --------------------------------------------------------------
@@ -373,13 +303,29 @@ export function CaseInspector({
 
   const [copied, setCopied] = useState(false);
 
-  // Re-sync drafts if row changes underneath us (e.g., from DB polling).
   // Run state
   const [running, setRunning] = useState<boolean>(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [lastOutcome, setLastOutcome] = useState<CaseExecutionOutcome | null>(
     null,
   );
+
+  // Manual save handler
+  const handleSave = useCallback(async (): Promise<void> => {
+    const [inputOk, assertionsOk] = await Promise.all([
+      inputDraft.flushAwait(),
+      assertionsDraft.flushAwait(),
+    ]);
+    if (!inputOk || !assertionsOk) {
+      setRunError("Fix the JSON errors before saving.");
+    }
+  }, [inputDraft, assertionsDraft]);
+
+  // Check if any draft has unsaved changes
+  const hasUnsavedChanges = inputDraft.isDirty || assertionsDraft.isDirty;
+  const canSave = hasUnsavedChanges && !inputDraft.parseError && !assertionsDraft.parseError && !inputDraft.saving && !assertionsDraft.saving;
+
+  // Re-sync drafts if row changes underneath us (e.g., from DB polling).
 
   // --- Run plumbing ---------------------------------------------------------
 
@@ -494,26 +440,36 @@ export function CaseInspector({
             {inputDraft.saving && (
               <Loader2 className="ml-2 h-3 w-3 animate-spin text-muted-foreground" />
             )}
-            <Button
-              size="sm"
-              className="ml-auto h-6 px-2 text-xs"
-              onClick={() => void handleRunCase()}
-              disabled={running || !caseRow.enabled}
-              title={
-                !caseRow.enabled
-                  ? "Enable the case to run it."
-                  : showHistoryChrome
-                    ? "Run this case now — exits history view."
-                    : "Run this case once. Result is shown below — nothing is persisted."
-              }
-            >
-              {running ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
-              )}
-              Run case
-            </Button>
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0"
+                disabled={!canSave || readOnly}
+                onClick={() => void handleSave()}
+                title="Save changes"
+              >
+                {inputDraft.saving || assertionsDraft.saving ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Save className="h-3 w-3" />
+                )}
+              </Button>
+              <Button
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => void handleRunCase()}
+                disabled={running || !caseRow.enabled}
+                title="Run case"
+              >
+                {running ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
+                )}
+                Run
+              </Button>
+            </div>
           </div>
           
           <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
@@ -526,17 +482,10 @@ export function CaseInspector({
               ariaLabel="Case input JSON"
               overrideText={inputOverrideText}
             />
-            <JsonPane
-              label="Assertions"
-              hint=""
+            <AssertionsEditor
               draft={assertionsDraft}
               readOnly={readOnly}
-              ariaLabel="Case assertions JSON"
-              placeholder={ASSERTIONS_PLACEHOLDER}
               overrideText={assertionsHistoryNotice}
-              count={
-                showHistoryChrome ? null : (caseRow.assertions?.length ?? 0)
-              }
             />
           </div>
         </div>
@@ -617,6 +566,7 @@ export function CaseInspector({
               outcome={displayedOutcome}
               running={running}
               readOnly={readOnly}
+              assertions={caseRow.assertions ?? []}
             />
           </div>
         </div>
@@ -698,7 +648,6 @@ function JsonPane({
               if (overrideText !== null) return;
               draft.setText(e.target.value);
             }}
-            onBlur={overrideText !== null ? undefined : draft.flushNow}
             disabled={readOnly}
             spellCheck={false}
             className={cn(
@@ -786,6 +735,7 @@ interface VerdictsPaneProps {
   outcome: CaseExecutionOutcome | null;
   running: boolean;
   readOnly: boolean;
+  assertions?: AssertionSpec[];
 }
 
 /**
@@ -799,6 +749,7 @@ function VerdictsPane({
   outcome,
   running,
   readOnly,
+  assertions = [],
 }: VerdictsPaneProps): ReactNode {
   const verdicts: readonly AssertionResult[] = outcome?.assertionResults ?? [];
   const error: ErrorEnvelope | null = outcome?.error ?? null;
@@ -822,7 +773,11 @@ function VerdictsPane({
             {verdicts.length > 0 && (
               <ul className="space-y-1">
                 {verdicts.map((r, i) => (
-                  <AssertionVerdictRow key={i} verdict={r} />
+                  <AssertionVerdictRow 
+                    key={i} 
+                    verdict={r} 
+                    spec={assertions[r.index]} 
+                  />
                 ))}
               </ul>
             )}
@@ -876,10 +831,48 @@ function ErrorView({ err }: { err: ErrorEnvelope }): ReactNode {
   );
 }
 
+function getConditionDescription(
+  verdict: AssertionResult,
+  spec?: AssertionSpec,
+): string {
+  if (verdict.type === "jsonpath_equals") {
+    const path = verdict.path ?? (spec?.type === "jsonpath_equals" ? spec.path : "");
+    const expected = verdict.expected !== undefined 
+      ? verdict.expected 
+      : (spec?.type === "jsonpath_equals" ? spec.expected : undefined);
+    return `${path || "path"} === ${JSON.stringify(expected)}`;
+  }
+  
+  if (verdict.type === "js_expression") {
+    if (spec?.type === "js_expression") {
+      return spec.expression;
+    }
+    return "js_expression";
+  }
+  
+  if (verdict.type === "json_schema") {
+    if (spec?.type === "json_schema" && spec.schema) {
+      const typeStr = spec.schema.type ? String(spec.schema.type) : "object";
+      const props = spec.schema.properties && typeof spec.schema.properties === "object"
+        ? Object.keys(spec.schema.properties)
+        : [];
+      if (props.length > 0) {
+        return `JSON Schema (properties: ${props.join(", ")})`;
+      }
+      return `JSON Schema (type: ${typeStr})`;
+    }
+    return "json_schema";
+  }
+  
+  return verdict.type;
+}
+
 function AssertionVerdictRow({
   verdict,
+  spec,
 }: {
   verdict: AssertionResult;
+  spec?: AssertionSpec;
 }): ReactNode {
   return (
     <li className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]">
@@ -895,7 +888,7 @@ function AssertionVerdictRow({
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-muted-foreground">
-          #{verdict.index + 1} · {verdict.type}
+          #{verdict.index + 1} · {getConditionDescription(verdict, spec)}
         </p>
         {verdict.message && (
           <p className="break-words text-[10px]">{verdict.message}</p>

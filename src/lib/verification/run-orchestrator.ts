@@ -18,7 +18,10 @@
 import "server-only";
 
 import { childLogger } from "@/lib/observability/logger";
+import { eq } from "drizzle-orm";
 
+import { db } from "@/lib/db";
+import { McpServerTable } from "@/lib/db/schema";
 import { recordRunNotification } from "@/lib/runner/notifications";
 import { publishVerificationFrame } from "./event-bus-channel";
 import { runMcpCase } from "./runner-mcp";
@@ -54,9 +57,84 @@ export interface StartSuiteRunInput {
   triggeredBy: "manual" | "schedule";
 }
 
+export interface StartServerRunInput {
+  mcpServerId: string;
+  ownerId: string;
+  triggeredBy: "manual" | "schedule";
+}
+
 export interface StartSuiteRunResult {
   runId: string;
   totalCount: number;
+}
+
+/**
+ * Kick off a server run (runs all cases across all tools of this server).
+ */
+export async function startServerRun(
+  input: StartServerRunInput,
+): Promise<StartSuiteRunResult> {
+  const [server] = await db
+    .select()
+    .from(McpServerTable)
+    .where(eq(McpServerTable.id, input.mcpServerId))
+    .limit(1);
+
+  if (!server) {
+    throw new Error(`MCP server not found: ${input.mcpServerId}`);
+  }
+
+  const serverName = server.serverTitle || server.name;
+  const cases = await storage.listEnabledCasesForServerRun(input.mcpServerId);
+  const run = await storage.createRun({
+    mcpServerId: input.mcpServerId,
+    totalCount: cases.length,
+    triggeredBy: input.triggeredBy,
+  });
+
+  publishVerificationFrame(input.ownerId, {
+    topic: "verification_run",
+    kind: "run_started",
+    runId: run.id,
+    mcpServerId: input.mcpServerId,
+    serverName,
+    totalCount: cases.length,
+  });
+
+  if (cases.length === 0) {
+    await storage.finalizeRun({
+      runId: run.id,
+      status: "passed",
+      passedCount: 0,
+      failedCount: 0,
+      erroredCount: 0,
+      skippedCount: 0,
+    });
+    publishVerificationFrame(input.ownerId, {
+      topic: "verification_run",
+      kind: "run_finished",
+      runId: run.id,
+      status: "passed",
+      totalCount: 0,
+      passedCount: 0,
+      failedCount: 0,
+      erroredCount: 0,
+      skippedCount: 0,
+    });
+    return { runId: run.id, totalCount: 0 };
+  }
+
+  // 10 minutes global timeout for all server tools.
+  void executeSuiteLoop({
+    runId: run.id,
+    ownerId: input.ownerId,
+    timeoutSec: 600,
+    targetName: serverName,
+    category: "server",
+    cases,
+  });
+
+  return { runId: run.id, totalCount: cases.length };
 }
 
 /**
@@ -126,7 +204,8 @@ export async function startSuiteRun(
     runId: run.id,
     ownerId: input.ownerId,
     timeoutSec: suite.timeoutSec,
-    suiteName: suite.name,
+    targetName: suite.name,
+    category: "suite",
     cases,
   });
 
@@ -137,7 +216,8 @@ interface ExecuteSuiteLoopInput {
   runId: string;
   ownerId: string;
   timeoutSec: number;
-  suiteName: string;
+  targetName: string;
+  category: "suite" | "server";
   cases: Awaited<ReturnType<typeof storage.listEnabledCasesForRun>>;
 }
 
@@ -303,6 +383,11 @@ async function finaliseAndAnnounce(
     erroredCount: counters.erroredCount,
   });
 
+  const isServer = input.category === "server";
+  const title = isServer ? `Verification Server: ${input.targetName}` : `Verification: ${input.targetName}`;
+  const sourceLabel = isServer ? "Verification Server" : "Verification Suite";
+  const task = isServer ? `Run verification server '${input.targetName}'` : `Run verification suite '${input.targetName}'`;
+
   try {
     await storage.finalizeRun({
       runId: input.runId,
@@ -317,10 +402,10 @@ async function finaliseAndAnnounce(
       ownerId: input.ownerId,
       runId: input.runId,
       kind: finalStatus === "passed" ? "run_completed" : "run_failed",
-      title: `Verification: ${input.suiteName}`,
+      title,
       body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored, ${counters.skippedCount} Skipped`,
-      sourceLabel: "Verification Suite",
-      task: `Run verification suite '${input.suiteName}'`,
+      sourceLabel,
+      task,
       initiator: "verification",
     });
   } catch (err) {
@@ -368,6 +453,12 @@ async function handleSuiteLoopCrash(
     },
     "verification suite loop crashed; forcing errored terminal state",
   );
+
+  const isServer = input.category === "server";
+  const title = isServer ? `Verification Server: ${input.targetName}` : `Verification: ${input.targetName}`;
+  const sourceLabel = isServer ? "Verification Server" : "Verification Suite";
+  const task = isServer ? `Run verification server '${input.targetName}'` : `Run verification suite '${input.targetName}'`;
+
   try {
     await storage.finalizeRun({
       runId: input.runId,
@@ -382,10 +473,10 @@ async function handleSuiteLoopCrash(
       ownerId: input.ownerId,
       runId: input.runId,
       kind: "run_failed",
-      title: `Verification: ${input.suiteName}`,
+      title,
       body: `Crashed: ${err instanceof Error ? err.message : String(err)}`,
-      sourceLabel: "Verification Suite",
-      task: `Run verification suite '${input.suiteName}'`,
+      sourceLabel,
+      task,
       initiator: "verification",
     });
   } catch {

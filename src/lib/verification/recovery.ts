@@ -20,6 +20,7 @@ import { childLogger } from "@/lib/observability/logger";
 
 import {
   listEnabledCasesForRun,
+  listEnabledCasesForServerRun,
   listWrittenCaseIdsForRun,
   markStrandedAsErrored,
   selectStrandedRuns,
@@ -53,9 +54,8 @@ export async function recoverStrandedVerificationRuns(
   currentBootStartedAt: Date,
 ): Promise<void> {
   const stale = await selectStrandedRuns(currentBootStartedAt);
-
   if (stale.length === 0) {
-    log.debug(
+    log.info(
       {
         event: "verification_recovery_clean",
         bootStartedAt: currentBootStartedAt.toISOString(),
@@ -75,15 +75,12 @@ export async function recoverStrandedVerificationRuns(
 
     // Take the suite's currently enabled cases in the SAME
     // alphabetical order the orchestrator iterates, drop already-
-    // written ones, and fill the first `missingCount`. Approximation
-    // assumes the enabled-case set didn't drift between run start and
-    // crash; in practice both events happen on the same boot. If
-    // cases were added since, the trailing ones get dropped by
-    // `.slice` and never enter the filler set (no false positives).
-    // If unwritten cases were DELETED, candidates shrinks → we fill
-    // best-effort and the resulting count(case_result) < totalCount
-    // — UI must tolerate this drift.
-    const candidates = await listEnabledCasesForRun(run.suiteId);
+    // written ones, and fill the first `missingCount`.
+    const candidates = run.suiteId
+      ? await listEnabledCasesForRun(run.suiteId)
+      : run.mcpServerId
+        ? await listEnabledCasesForServerRun(run.mcpServerId)
+        : [];
     const writtenSet = new Set(writtenIds);
     const missingIds = candidates
       .filter((c) => !writtenSet.has(c.id))

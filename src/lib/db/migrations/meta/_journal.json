@@ -64,6 +64,13 @@
       "when": 1783195321039,
       "tag": "0008_remove-notification-run-id-fk",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783268793786,
+      "tag": "0009_update_verification_schema",
+      "breakpoints": true
     }
   ]
 }

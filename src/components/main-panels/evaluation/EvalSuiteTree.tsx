@@ -100,13 +100,29 @@ export function EvalSuiteTree({
     });
   }
 
+  const totalCases = useMemo(() => {
+    return Object.values(casesBySuite).reduce((sum, cases) => sum + cases.length, 0);
+  }, [casesBySuite]);
+
   return (
-    <ScrollArea className="flex-1 min-h-0">
-      {suites.length === 0 ? (
-        <div className="px-3 py-4 text-xs text-muted-foreground">
-          No evaluation suites yet.
-        </div>
-      ) : (
+    <div className="flex h-full flex-col border-r">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Test suite
+        </h2>
+        {totalCases > 0 && (
+          <span className="text-[10px] text-muted-foreground">
+            ({totalCases})
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-1.5" />
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        {suites.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-muted-foreground">
+            No evaluation suites yet.
+          </div>
+        ) : (
         suites.map((suite) => {
           const isCollapsed = collapsed.has(suite.id);
           const cases = casesBySuite[suite.id] ?? [];
@@ -243,6 +259,7 @@ export function EvalSuiteTree({
           );
         })
       )}
-    </ScrollArea>
+      </ScrollArea>
+    </div>
   );
 }

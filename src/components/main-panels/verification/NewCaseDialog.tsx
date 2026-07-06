@@ -1,27 +1,8 @@
 "use client";
 
-/**
- * NewCaseDialog — modal for creating a verification case under an
- * MCP suite. Cascading pickers:
- *
- *   MCP Server (from /api/mcp-servers, visibility-scoped to the user)
- *     └─ Tool (from `server.tools` snapshot, captured at last discover)
- *
- * Tool list freshness: we DO NOT trigger a discover here — the snapshot
- * on the row is the source of truth and is refreshed by McpPanel when
- * the admin clicks "Refresh tools". If a server has `tools = null`
- * (never discovered) we surface a hint so the user knows what to do.
- *
- * Initial `input` and `assertions` are EMPTY — that's a deliberate
- * "smoke test" case (docs/verification.md): empty assertions ⇒
- * passes iff the tool returns without error. Users edit afterwards.
- *
- * Workflow cases are V2-only; the parent gates by `suite.category`
- * and never opens this dialog for workflow suites.
- */
-
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -40,57 +21,66 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { McpToolSnapshot } from "@/lib/db/schema";
-import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
+import {
+  caseActions,
+  type VerificationCaseRow,
+} from "@/store/verification-cases";
+import { verificationActions } from "@/store/verification";
 
-// --- API row (subset we need) ----------------------------------------------
+// --- Helpers ----------------------------------------------------------------
 
-interface McpServerRow {
+interface ErrorEnvelope {
+  message?: string;
+  code?: string;
+}
+
+interface McpServerListItem {
   id: string;
   name: string;
+  serverTitle?: string | null;
   enabled: boolean;
-  tools: McpToolSnapshot[] | null;
+  tools?: Array<{ name: string }>;
 }
 
-// --- Hoisted fetcher (lint-clean: setState only fires in promise callbacks) -
+async function readApiError(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as ErrorEnvelope | null;
+  return body?.message ?? `${res.status} ${res.statusText}`;
+}
 
-async function fetchMcpServers(): Promise<McpServerRow[]> {
+async function fetchMcpServers(): Promise<McpServerListItem[]> {
   const res = await fetch("/api/mcp-servers");
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return (await res.json()) as McpServerRow[];
+  if (!res.ok) throw new Error(await readApiError(res));
+  return (await res.json()) as McpServerListItem[];
 }
-
-// --- Component --------------------------------------------------------------
 
 export interface NewCaseDialogProps {
-  suiteId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called after a successful create. Parent typically selects it. */
-  onCreated?: (row: VerificationCaseRow) => void;
+  onCreated: (created: VerificationCaseRow) => void;
+  serverId?: string; // Optional: when provided, locks selection to this server
+  defaultToolName?: string; // Optional: default tool selected
 }
 
 export function NewCaseDialog({
-  suiteId,
   open,
   onOpenChange,
   onCreated,
+  serverId,
+  defaultToolName,
 }: NewCaseDialogProps): ReactNode {
-  // Remote data
-  const [servers, setServers] = useState<McpServerRow[]>([]);
+  const [servers, setServers] = useState<McpServerListItem[]>([]);
   const [loadingServers, setLoadingServers] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Form state — reset on each open.
-  const [form, setForm] = useState({ name: "", mcpServerId: "", toolName: "" });
+  // Form state
+  const [form, setForm] = useState({
+    name: "",
+    mcpServerId: serverId ?? "",
+    toolName: defaultToolName ?? "",
+  });
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Fetch the server catalog on open. Cancellable so a rapid
-  // open/close doesn't fire stale setState. The setLoading/setError
-  // calls below are the canonical "fetch on mount/open" prelude; the
-  // lint's reachability analysis can't see through the .then/.catch
-  // boundary. Suppress per-call.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -100,8 +90,6 @@ export function NewCaseDialog({
     fetchMcpServers()
       .then((rows) => {
         if (cancelled) return;
-        // Only enabled servers can be targeted — disabled ones won't
-        // accept tool calls in the runner anyway.
         setServers(rows.filter((r) => r.enabled));
       })
       .catch((err: unknown) => {
@@ -116,52 +104,69 @@ export function NewCaseDialog({
     };
   }, [open]);
 
-  // Reset the form on each open (cheaper than unmounting).
-  // Use the "render-time detect prop change" pattern from McpPanel.
+  // Reset form when dialog opens
   const [lastOpen, setLastOpen] = useState<boolean>(open);
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
-      setForm({ name: "", mcpServerId: "", toolName: "" });
+      setForm({
+        name: "",
+        mcpServerId: serverId ?? "",
+        toolName: defaultToolName ?? "",
+      });
       setSubmitError(null);
     }
   }
 
-  // Tool list narrows to the selected server's snapshot.
-  const selectedServer = useMemo(
-    () => servers.find((s) => s.id === form.mcpServerId),
-    [servers, form.mcpServerId],
-  );
-  const tools = useMemo<McpToolSnapshot[]>(() => {
-    if (!selectedServer || !selectedServer.tools) return [];
-    return selectedServer.tools.filter((t) => t.enabled);
-  }, [selectedServer]);
+  // Derived tools list from active server metadata
+  const [tools, setTools] = useState<string[]>([]);
 
+  useEffect(() => {
+    const activeServerId = form.mcpServerId;
+    if (!activeServerId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTools([]);
+      return;
+    }
+    const server = servers.find((s) => s.id === activeServerId);
+    const list = (server?.tools ?? []).map((t) => t.name);
+    const sorted = [...list].sort();
+    setTools(sorted);
+  }, [form.mcpServerId, servers]);
+
+  const trimmedName = form.name.trim();
   const canSubmit =
-    form.name.trim().length > 0 &&
+    !submitting &&
+    trimmedName.length > 0 &&
     form.mcpServerId !== "" &&
-    form.toolName !== "" &&
-    !submitting;
+    form.toolName !== "";
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const created = await caseActions.create(suiteId, {
-        name: form.name.trim(),
+      const created = await caseActions.create({
+        name: trimmedName,
         mcpServerId: form.mcpServerId,
         toolName: form.toolName,
         input: {},
-        assertions: [],
       });
-      if (created) {
-        onOpenChange(false);
-        onCreated?.(created);
-      } else {
-        // The store sets its own error; surface it here too for visibility.
-        setSubmitError("Create failed. Please check the form and retry.");
+      if (!created) {
+        throw new Error("Failed to create case");
       }
+
+      // Refresh cases for this server to ensure the new case appears in the list
+      void caseActions.refreshForServer(form.mcpServerId);
+
+      // Trigger store refresh for verification left panel servers list
+      void verificationActions.refresh("mcp");
+
+      toast.success("Created verification case", {
+        description: `Case "${created.name}" is now ready.`,
+      });
+      onCreated(created);
+      onOpenChange(false);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -173,98 +178,101 @@ export function NewCaseDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New verification case</DialogTitle>
+          <DialogTitle>Add verification case</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
-          {/* Name */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+        <div className="space-y-4 py-2">
+          {/* Server Selector */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+            <Label htmlFor="case-server">
+              MCP Server <span className="text-destructive">*</span>
+            </Label>
+            {serverId ? (
+              <span className="text-sm font-mono truncate">
+                {servers.find((s) => s.id === serverId)?.serverTitle ||
+                  servers.find((s) => s.id === serverId)?.name ||
+                  serverId}
+              </span>
+            ) : (
+              <Select
+                value={form.mcpServerId}
+                onValueChange={(v) =>
+                  setForm((prev) => ({ ...prev, mcpServerId: v ?? "", toolName: "" }))
+                }
+                disabled={loadingServers}
+              >
+                <SelectTrigger id="case-server" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      loadingServers ? "Loading servers…" : "Select a server"
+                    }
+                  >
+                    {form.mcpServerId ? (
+                      servers.find((s) => s.id === form.mcpServerId)?.serverTitle ||
+                      servers.find((s) => s.id === form.mcpServerId)?.name ||
+                      "Unknown server"
+                    ) : null}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {servers.map((s) => (
+                    <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
+                      {s.serverTitle || s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Tool Selector */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+            <Label htmlFor="case-tool">
+              MCP Tool <span className="text-destructive">*</span>
+            </Label>
+            <Select
+              value={form.toolName}
+              onValueChange={(v) =>
+                setForm((prev) => ({ ...prev, toolName: v ?? "" }))
+              }
+              disabled={!form.mcpServerId}
+            >
+              <SelectTrigger id="case-tool" className="w-full">
+                <SelectValue
+                  placeholder={
+                    !form.mcpServerId
+                      ? "Select a server first"
+                      : "Select a tool"
+                  }
+                >
+                  {form.toolName ? form.toolName : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {tools.map((t) => (
+                  <SelectItem key={t} value={t} label={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Case Name */}
+          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
             <Label htmlFor="case-name">
-              Name <span className="text-destructive">*</span>
+              Case Name <span className="text-destructive">*</span>
             </Label>
             <Input
               id="case-name"
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              placeholder="e.g. search returns at least one hit"
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, name: e.target.value }))
+              }
+              placeholder="e.g. search returns results"
               autoFocus
             />
           </div>
-
-          {/* MCP Server */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-            <Label>
-              Server <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={form.mcpServerId}
-              items={servers.map((s) => ({ value: s.id, label: s.name }))}
-              onValueChange={(v) => {
-                // Clear tool selection — it's scoped to the prior server.
-                setForm((prev) => ({ ...prev, mcpServerId: v ?? "", toolName: "" }));
-              }}
-              disabled={loadingServers || servers.length === 0}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue
-                  placeholder={
-                    loadingServers
-                      ? "Loading servers…"
-                      : servers.length === 0
-                        ? "No enabled servers"
-                        : "Pick a server"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {servers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Tool */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-            <Label>
-              Tool <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={form.toolName}
-              onValueChange={(v) => setForm((prev) => ({ ...prev, toolName: v ?? "" }))}
-              disabled={!selectedServer || tools.length === 0}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue
-                  placeholder={
-                    !selectedServer
-                      ? "Pick a server first"
-                      : !selectedServer.tools
-                        ? "Discover tools in MCP panel first"
-                        : tools.length === 0
-                          ? "No enabled tools on this server"
-                          : "Pick a tool"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {tools.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {selectedServer && !selectedServer.tools && (
-            <p className="text-[11px] text-muted-foreground">
-              This server hasn&apos;t been discovered yet. Open the MCP panel
-              and refresh the tool catalog, then come back here.
-            </p>
-          )}
 
           {(loadError || submitError) && (
             <p className="text-xs text-destructive">

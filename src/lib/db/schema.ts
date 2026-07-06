@@ -1645,29 +1645,54 @@ export type ConfigEntity = typeof ConfigTable.$inferSelect;
  * visibility: "private" — visible to the creator only;
  *             "public"  — available to all users.
  */
-export const VerificationSuiteTable = pgTable("verification_suite", {
-  id: uuid("id").primaryKey().notNull().defaultRandom(),
-  name: text("name").notNull().unique(),
-  description: text("description"),
-  /** Left-panel tab + case target shape. */
-  category: text("category").notNull(), // "mcp" | "workflow"
-  enabled: boolean("enabled").notNull().default(true),
-  visibility: text("visibility").notNull().default("private"),
-  /** Suite-level wall-clock cap (seconds) for one `Run suite` invocation.
-   *  On expiry the orchestrator marks remaining cases `skipped` and the
-   *  run as `timeout`. Stored as seconds to keep the value human-readable
-   *  in DB inspectors (300 = 5 min); the runner multiplies by 1000 for
-   *  `setTimeout`. */
-  timeoutSec: integer("timeout_sec").notNull().default(300),
-  createdBy: uuid("created_by").references(() => UserTable.id, {
-    onDelete: "cascade",
-  }),
-  updatedBy: uuid("updated_by").references(() => UserTable.id, {
-    onDelete: "cascade",
-  }),
-  createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+export const VerificationSuiteTable = pgTable(
+  "verification_suite",
+  {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Left-panel tab + case target shape. */
+    category: text("category").notNull(), // "mcp" | "workflow"
+    // --- target (moved from case to suite in Server->Suite(Tool)->Case refactor) ---
+    mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
+      onDelete: "cascade",
+    }),
+    toolName: text("tool_name"),
+    workflowId: uuid("workflow_id"),
+
+    enabled: boolean("enabled").notNull().default(true),
+    visibility: text("visibility").notNull().default("private"),
+    /** Suite-level wall-clock cap (seconds) for one `Run suite` invocation.
+     *  On expiry the orchestrator marks remaining cases `skipped` and the
+     *  run as `timeout`. Stored as seconds to keep the value human-readable
+     *  in DB inspectors (300 = 5 min); the runner multiplies by 1000 for
+     *  `setTimeout`. */
+    timeoutSec: integer("timeout_sec").notNull().default(300),
+    createdBy: uuid("created_by").references(() => UserTable.id, {
+      onDelete: "cascade",
+    }),
+    updatedBy: uuid("updated_by").references(() => UserTable.id, {
+      onDelete: "cascade",
+    }),
+    createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    // Unique suite per MCP Tool
+    uniqueIndex("verification_suite_mcp_tool_unique_idx").on(t.mcpServerId, t.toolName),
+    // Unique suite per Workflow
+    uniqueIndex("verification_suite_workflow_unique_idx").on(t.workflowId),
+    // XOR target: MCP shape OR workflow shape, never both / neither.
+    check(
+      "verification_suite_target_xor",
+      sql`(
+        (${t.mcpServerId} IS NOT NULL AND ${t.toolName} IS NOT NULL AND ${t.workflowId} IS NULL)
+        OR
+        (${t.mcpServerId} IS NULL AND ${t.toolName} IS NULL AND ${t.workflowId} IS NOT NULL)
+      )`,
+    ),
+  ],
+);
 
 export type VerificationSuiteEntity =
   typeof VerificationSuiteTable.$inferSelect;
@@ -1697,21 +1722,6 @@ export const VerificationCaseTable = pgTable(
       .notNull()
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    // --- target (XOR by suite.category) ---
-    /** Set for MCP cases. CASCADE on server delete — removing an MCP
-     *  server removes its verification cases too, keeping the suite
-     *  consistent without orphan rows that violate the XOR CHECK. */
-    mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
-      onDelete: "cascade",
-    }),
-    /** Set for MCP cases — matches a tool name in McpServer.tools. */
-    toolName: text("tool_name"),
-    /** Set for Workflow cases (V2). FK to `workflow.id` deliberately
-     *  NOT added in V1: ON DELETE SET NULL would violate the XOR
-     *  CHECK below; CASCADE vs RESTRICT is a V2 product call when
-     *  the workflow runner lands. V1 never populates this column —
-     *  the CHECK forbids it through the suite-category gate. */
-    workflowId: uuid("workflow_id"),
     // --- payload ---
     input: jsonb("input").notNull().default(sql`'{}'::jsonb`),
     /** Array of assertion specs. See docs/verification.md. */
@@ -1729,19 +1739,6 @@ export const VerificationCaseTable = pgTable(
     uniqueIndex("verification_case_suite_name_idx").on(t.suiteId, t.name),
     // Suite list view ("show all cases in this suite").
     index("verification_case_suite_idx").on(t.suiteId),
-    // Reverse-lookup: "which cases test tool X on server Y" — used by
-    // the future MCP "Add to verification suite" affordance and by
-    // schedule-driven regressions.
-    index("verification_case_mcp_tool_idx").on(t.mcpServerId, t.toolName),
-    // XOR target: MCP shape OR workflow shape, never both / neither.
-    check(
-      "verification_case_target_xor",
-      sql`(
-        (${t.mcpServerId} IS NOT NULL AND ${t.toolName} IS NOT NULL AND ${t.workflowId} IS NULL)
-        OR
-        (${t.mcpServerId} IS NULL AND ${t.toolName} IS NULL AND ${t.workflowId} IS NOT NULL)
-      )`,
-    ),
   ],
 );
 
@@ -1764,8 +1761,10 @@ export const VerificationRunTable = pgTable(
   {
     id: uuid("id").primaryKey().notNull().defaultRandom(),
     suiteId: uuid("suite_id")
-      .notNull()
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
+    mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
+      onDelete: "cascade",
+    }),
     /** Lifecycle: running | passed | failed | errored | timeout.
      *  Precedence on close: timeout > errored > failed > passed. */
     status: text("status").notNull(),
@@ -1787,6 +1786,11 @@ export const VerificationRunTable = pgTable(
       t.suiteId,
       t.startedAt.desc(),
     ),
+    // Banner pagination — "5 newest / 5 older" runs of a given server.
+    index("verification_run_server_started_idx").on(
+      t.mcpServerId,
+      t.startedAt.desc(),
+    ),
     // Boot-epoch zombie sweep — find still-`running` rows from a prior
     // Node process. Partial index because `status` only has 5 enum
     // values (B-tree selectivity is poor — the planner would usually
@@ -1801,6 +1805,15 @@ export const VerificationRunTable = pgTable(
     index("verification_run_recovery_idx")
       .on(t.startedAt)
       .where(sql`${t.status} = 'running'`),
+    // XOR target: Suite (Tool) run OR Server run, never both / neither.
+    check(
+      "verification_run_target_xor",
+      sql`(
+        (${t.suiteId} IS NOT NULL AND ${t.mcpServerId} IS NULL)
+        OR
+        (${t.suiteId} IS NULL AND ${t.mcpServerId} IS NOT NULL)
+      )`,
+    ),
   ],
 );
 

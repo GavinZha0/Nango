@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { canEditResource } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
-import { VerificationCaseTable } from "@/lib/db/schema";
+import { VerificationCaseTable, VerificationSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadVisibleCase } from "@/lib/verification/access";
@@ -76,7 +76,21 @@ export const PATCH = withEditor<{ id: string }>(
         .set(updates)
         .where(eq(VerificationCaseTable.id, caseRow.id))
         .returning();
-      return NextResponse.json(row);
+      
+      // Join with suite to get mcpServerId for the response
+      const [suiteRow] = await db
+        .select()
+        .from(VerificationSuiteTable)
+        .where(eq(VerificationSuiteTable.id, row.suiteId))
+        .limit(1);
+      
+      const responseRow = {
+        ...row,
+        mcpServerId: suiteRow?.mcpServerId ?? null,
+        toolName: suiteRow?.toolName ?? null,
+      };
+      
+      return NextResponse.json(responseRow);
     } catch (err) {
       if (isUniqueViolation(err) && body.name) {
         throw new ApiError(
