@@ -94,8 +94,8 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "eval.threshold.excellent", value: "80", valueType: "number", description: "Score >= this is 'Excellent' (0-100)" },
   { key: "eval.threshold.pass", value: "60", valueType: "number", description: "Score >= this is 'Pass' (0-100)" },
   { key: "eval.threshold.poor", value: "40", valueType: "number", description: "Score >= this is 'Poor'; below is 'Fail' (0-100)" },
-  { key: "verification.payload_max_kb", value: "24", valueType: "number", description: "Max KB to save for verification result payload" },
-  { key: "mcp.test_snapshot_max_kb", value: "24", valueType: "number", description: "Max KB to save for MCP test snapshots" },
+  { key: "verification.payload_max_kb", value: "32", valueType: "number", description: "Max KB to save for verification result payload" },
+  { key: "mcp.test_snapshot_max_kb", value: "32", valueType: "number", description: "Max KB to save for MCP test snapshots" },
 ] as const;
 
 /** Lookup map for fast default resolution. */

@@ -14,7 +14,7 @@ const callToolSchema = z.object({
   args: z.record(z.string(), z.unknown()).optional(),
 });
 
-import { normalizeAndDeduplicateMcpResult } from "@/lib/mcp/tool-result-utils";
+import { normalizeMcpToolResult } from "@/lib/mcp/tool-result-utils";
 
 import { getConfigNumber } from "@/lib/config";
 
@@ -36,8 +36,8 @@ export const POST = withEditor<{ id: string }>(
         }),
     });
     return NextResponse.json({
-      result: normalizeAndDeduplicateMcpResult(raw, { parseForUi: true }),
-      snapshotMaxBytes: getConfigNumber("mcp.test_snapshot_max_kb", 24) * 1024,
+      result: normalizeMcpToolResult(raw, { parseForUi: true }),
+      snapshotMaxBytes: getConfigNumber("mcp.test_snapshot_max_kb", 32) * 1024,
     });
   },
 );

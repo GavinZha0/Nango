@@ -14,6 +14,7 @@
 import "server-only";
 
 import { mcpProviderPool } from "@/lib/mcp";
+import { normalizeMcpToolResult } from "@/lib/mcp/tool-result-utils";
 import {
   TOOL_FAILURE_CAUSE,
   type ToolFailureCause,
@@ -95,7 +96,8 @@ export async function runMcpCase(
     // CallToolResult.isError by the absence of `content`.
     let raw: unknown;
     try {
-      raw = await tool.execute(input.input);
+      const executed = await tool.execute(input.input);
+      raw = normalizeMcpToolResult(executed, { parseForUi: true });
     } catch (err) {
       // wrapToolExecute should have caught this, but defend in depth.
       return failedOutcome({

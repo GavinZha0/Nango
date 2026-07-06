@@ -6,7 +6,7 @@
  * Also optionally parses stringified JSON into real JS objects so that UI components
  * (like JsonView in the test page) can render them as interactive trees.
  */
-export function normalizeAndDeduplicateMcpResult(
+export function normalizeMcpToolResult(
   raw: unknown,
   options: { parseForUi: boolean }
 ): unknown {
@@ -28,7 +28,7 @@ export function normalizeAndDeduplicateMcpResult(
             (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
             (trimmed.startsWith("[") && trimmed.endsWith("]"));
 
-          if (looksLikeJson && trimmed.length > 50) {
+          if (looksLikeJson) {
             try {
               parsed = JSON.parse(trimmed);
               isParsedFromJsonString = true;
@@ -60,3 +60,14 @@ export function normalizeAndDeduplicateMcpResult(
     }),
   };
 }
+
+/**
+ * Legacy wrapper for backward compatibility with external references.
+ */
+export function normalizeAndDeduplicateMcpResult(
+  raw: unknown,
+  options: { parseForUi: boolean }
+): unknown {
+  return normalizeMcpToolResult(raw, options);
+}
+

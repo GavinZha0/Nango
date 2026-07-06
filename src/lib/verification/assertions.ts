@@ -130,7 +130,7 @@ function evaluateJsonSchema(
   // validation is an unusual need and can be expressed by writing the
   // schema to require those fields explicitly through a future
   // `scope: "envelope"` escape hatch (not yet implemented).
-  const target = extractStructured(payload);
+  const target = extractMcpStructuredData(payload);
   const ok = validate(target);
   if (ok) {
     return { index, type: "json_schema", ok: true };
@@ -210,7 +210,7 @@ function resolveJsonPathScope(
   if (rawPath.startsWith("$")) {
     return { json: payload, absolutePath: rawPath };
   }
-  const structured = extractStructured(payload);
+  const structured = extractMcpStructuredData(payload);
   // Build an absolute path that jsonpath-plus understands. Two cases:
   //   - bare identifiers / dotted    → "$." + rawPath
   //   - starts with `[` (array idx)  → "$" + rawPath
@@ -224,21 +224,24 @@ function resolveJsonPathScope(
  * Pull `structuredContent` off a CallToolResult-shaped payload. Falls
  * back to `{}` for any non-conforming shape so relative assertions
  * fail with "value mismatch" rather than throwing.
+ *
+ * Falls back to the envelope itself if content is empty or missing,
+ * preventing implicit undefined returns.
  */
-function extractStructured(payload: unknown): unknown {
+export function extractMcpStructuredData(payload: unknown): unknown {
   if (typeof payload !== "object" || payload === null) return {};
-  
+
+  const env = payload as { content?: unknown; structuredContent?: unknown };
+
   // 1. Prioritize structuredContent if present
-  const sc = (payload as { structuredContent?: unknown }).structuredContent;
-  if (sc !== undefined && sc !== null) {
-    return sc;
+  if (env.structuredContent !== undefined && env.structuredContent !== null) {
+    return env.structuredContent;
   }
 
   // 2. Fallback: If structuredContent is missing, scan the content array 
   // for the first item containing a JSON object or stringified JSON.
-  const content = (payload as { content?: unknown }).content;
-  if (Array.isArray(content) && content.length > 0) {
-    for (const item of content) {
+  if (Array.isArray(env.content) && env.content.length > 0) {
+    for (const item of env.content) {
       if (item && typeof item === "object" && "type" in item && item.type === "text" && "text" in item) {
         const text = item.text;
         if (typeof text === "object" && text !== null) {
@@ -262,10 +265,12 @@ function extractStructured(payload: unknown): unknown {
 
     // 3. If no content item contains parsable JSON, fallback to returning 
     // the content array itself. This allows users to query it via relative paths.
-    return content;
+    return env.content;
   }
 
-  return {};
+  // 4. Ultimate fallback: return the envelope itself to prevent implicit undefined,
+  // enabling absolute/root path checks to evaluate on the envelope fallback.
+  return payload;
 }
 
 // --- js_expression -----------------------------------------------------------
@@ -281,7 +286,7 @@ function evaluateJsExpression(
   try {
     const ok = runInNewContext(
       `(${spec.expression})`,
-      { result: extractStructured(payload), root: payload },
+      { result: extractMcpStructuredData(payload), root: payload },
       { timeout: JS_EXPRESSION_TIMEOUT_MS, displayErrors: false },
     );
     return {

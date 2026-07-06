@@ -473,7 +473,7 @@ function truncatePayload(raw: unknown): { truncatedPayload: unknown; truncated: 
     return { truncatedPayload: { __nonSerialisable: true, repr: String(raw) }, truncated: true };
   }
   const byteLength = Buffer.byteLength(serialised, "utf8");
-  const maxBytes = getConfigNumber("verification.payload_max_kb", 24) * 1024;
+  const maxBytes = getConfigNumber("verification.payload_max_kb", 32) * 1024;
   if (byteLength <= maxBytes) {
     return { truncatedPayload: raw, truncated: false };
   }
