@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/GavinZha0/Nango/compare/v0.6.0...v0.6.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* json view of verification ([3b7767a](https://github.com/GavinZha0/Nango/commit/3b7767a4a3ab3523549c28209a14f28ac5aec28d))
+
 ## [0.6.0](https://github.com/GavinZha0/Nango/compare/v0.5.0...v0.6.0) (2026-07-06)
 
 
