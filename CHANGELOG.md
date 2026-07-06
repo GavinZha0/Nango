@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/GavinZha0/Nango/compare/v0.5.0...v0.6.0) (2026-07-06)
+
+
+### Features
+
+* display background task's progress as badge on header ([9ff7423](https://github.com/GavinZha0/Nango/commit/9ff7423273ea3804183d6ea15ec9d19d9abfe3d3))
+
+
+### Bug Fixes
+
+* adding/editing suite/case issues of evaluation ([9379c7a](https://github.com/GavinZha0/Nango/commit/9379c7a1c30ede460ecce1a65da3ca58bfc4d69e))
+
 ## [0.5.0](https://github.com/GavinZha0/Nango/compare/v0.4.2...v0.5.0) (2026-07-03)
 
 
