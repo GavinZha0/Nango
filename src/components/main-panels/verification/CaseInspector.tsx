@@ -420,15 +420,7 @@ export function CaseInspector({
       {/* Top toolbar spans both columns so the four panes below share
           a single vertical baseline — OUTPUT lines up with INPUT and
           VERDICTS lines up with ASSERTIONS. */}
-      {/* Transport / orchestration error from `handleRunCase`. The
-          outcome-level error envelope is rendered separately inside
-          VERDICTS so it sits next to the assertion verdicts it
-          invalidated. */}
-      {runError && (
-        <p className="border-b border-destructive/40 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive">
-          {runError}
-        </p>
-      )}
+
 
       <div className="grid h-full grid-cols-2 overflow-hidden">
         {/* --- Left column: Input (top, 2fr) + Assertions (bottom, 3fr) --- */}
@@ -560,6 +552,7 @@ export function CaseInspector({
               outcome={displayedOutcome}
               running={running}
               readOnly={readOnly}
+              runError={runError}
               hideHeader
             />
             <VerdictsPane
@@ -697,6 +690,7 @@ interface OutputPaneProps {
   outcome: CaseExecutionOutcome | null;
   running: boolean;
   readOnly: boolean;
+  runError?: string | null;
   hideHeader?: boolean;
 }
 
@@ -706,7 +700,7 @@ interface OutputPaneProps {
  * envelope) once a run has produced one. Before that, shows an
  * in-frame placeholder so the box itself never disappears.
  */
-function OutputPane({ outcome, running, readOnly, hideHeader = false }: OutputPaneProps): ReactNode {
+function OutputPane({ outcome, running, readOnly, runError, hideHeader = false }: OutputPaneProps): ReactNode {
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
       {!hideHeader && (
@@ -717,7 +711,11 @@ function OutputPane({ outcome, running, readOnly, hideHeader = false }: OutputPa
         </div>
       )}
       <div className={cn("min-h-0 flex-1 px-3 pb-2", hideHeader && "pt-2")}>
-        {outcome && outcome.resultPayload !== null ? (
+        {runError ? (
+          <div className="h-full w-full overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive font-mono whitespace-pre-wrap">
+            {runError}
+          </div>
+        ) : outcome && outcome.resultPayload !== null ? (
           <div className="h-full w-full overflow-auto rounded-md border bg-muted/30 p-2">
             <JsonView data={outcome.resultPayload} defaultExpandDepth={3} />
           </div>

@@ -3,7 +3,6 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { loadVisibleCase } from "@/lib/verification/access";
 import { runMcpCase } from "@/lib/verification/runner-mcp";
@@ -28,24 +27,6 @@ export const POST = withEditor<{ id: string }>(
     }
     const caseId = idParse.data;
     const { caseRow, suite } = await loadVisibleCase(caseId, session);
-
-    // Editor-or-creator gate: running a case has the same side-effect
-    // exposure as editing — it really hits the upstream tool.
-    if (
-      !canEditResource(
-        {
-          visibility: suite.visibility as "private" | "public",
-          createdBy: suite.createdBy,
-        },
-        session,
-      )
-    ) {
-      throw new ApiError(
-        "FORBIDDEN",
-        403,
-        "You cannot run cases in this verification suite.",
-      );
-    }
 
     if (suite.category === "workflow") {
       throw new ApiError(

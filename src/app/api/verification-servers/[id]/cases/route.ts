@@ -55,7 +55,16 @@ export const GET = withEditor<{ id: string }>(
         VerificationSuiteTable,
         eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id)
       )
-      .where(eq(VerificationSuiteTable.mcpServerId, params.id));
+      .where(
+        and(
+          eq(VerificationSuiteTable.mcpServerId, params.id),
+          visibilitySql(
+            session,
+            VerificationSuiteTable.visibility,
+            VerificationSuiteTable.createdBy,
+          ),
+        ),
+      );
 
     return NextResponse.json(cases);
   }

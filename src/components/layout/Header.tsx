@@ -58,8 +58,7 @@ function UserMenu(): ReactNode {
 
   async function handleSignOut(): Promise<void> {
     await authClient.signOut();
-    router.push("/sign-in");
-    router.refresh();
+    window.location.href = "/sign-in";
   }
 
   return (

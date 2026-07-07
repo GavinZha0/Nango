@@ -195,48 +195,42 @@ function HistoryDropdown({ serverId, toolName, onLoad }: HistoryDropdownProps): 
     refresh();
   }
 
-  if (!toolName) return null;
+  if (!toolName || snapshots.length === 0) return null;
 
   return (
     <DropdownMenu onOpenChange={(open) => { if (open) refresh(); }}>
       <DropdownMenuTrigger
         className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        History
+        Recent
         {snapshots.length > 0 && (
           <span className="text-[10px] tabular-nums opacity-70">({snapshots.length})</span>
         )}
         <ChevronDown className="h-3 w-3" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-40">
-        {snapshots.length === 0 ? (
-          <div className="px-2 py-2 text-xs text-muted-foreground">
-            No history yet. Run the tool to record.
-          </div>
-        ) : (
-          snapshots.map((snap) => (
-            <DropdownMenuItem
-              key={snap.id}
-              onClick={() => onLoad(snap.args, snap.result)}
-              className="group flex items-center gap-1.5"
+        {snapshots.map((snap) => (
+          <DropdownMenuItem
+            key={snap.id}
+            onClick={() => onLoad(snap.args, snap.result)}
+            className="group flex items-center gap-1.5"
+          >
+            <span className={cn("flex-1 truncate text-xs", snap.pinned && "font-medium")}>{snap.name}</span>
+            <button
+              type="button"
+              onClick={(e) => handleTogglePin(e, snap.id)}
+              className={cn(
+                "shrink-0 transition-opacity",
+                snap.pinned
+                  ? "text-amber-500"
+                  : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-amber-500",
+              )}
+              title={snap.pinned ? "Unpin" : "Pin"}
             >
-              <span className={cn("flex-1 truncate text-xs", snap.pinned && "font-medium")}>{snap.name}</span>
-              <button
-                type="button"
-                onClick={(e) => handleTogglePin(e, snap.id)}
-                className={cn(
-                  "shrink-0 transition-opacity",
-                  snap.pinned
-                    ? "text-amber-500"
-                    : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-amber-500",
-                )}
-                title={snap.pinned ? "Unpin" : "Pin"}
-              >
-                <Star className={cn("h-3 w-3", snap.pinned && "fill-amber-500")} />
-              </button>
-            </DropdownMenuItem>
-          ))
-        )}
+              <Star className={cn("h-3 w-3", snap.pinned && "fill-amber-500")} />
+            </button>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -270,6 +264,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
   const [resultTab, setResultTab] = useState<"view" | "raw">("view");
   const [copied, setCopied] = useState<boolean>(false);
+  const [snapshotTrigger, setSnapshotTrigger] = useState<number>(0);
 
   /** Per-tool state cache so switching tools preserves input + result. */
   const toolStateCache = useRef<Map<string, { input: InputState; exec: ExecState }>>(new Map());
@@ -348,6 +343,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         setExec({ executing: false, result: data.result, execError: null, executedArgs: args });
         // Auto-save input args and result to history on successful execution.
         saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args, data.result, data.snapshotMaxBytes);
+        setSnapshotTrigger((prev) => prev + 1);
       }
     } catch (err) {
       setExec({ executing: false, result: null, execError: err instanceof Error ? err.message : "Unexpected error", executedArgs: null });
@@ -453,6 +449,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         {tool && (
           <div className="shrink-0 flex items-center">
             <HistoryDropdown
+              key={`${activeToolName}:${snapshotTrigger}`}
               serverId={serverId}
               toolName={activeToolName}
               onLoad={(args, result) => {

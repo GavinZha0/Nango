@@ -29,6 +29,8 @@ export interface VerificationServerRow {
   serverDescription: string | null;
   enabled: boolean;
   visibility: VerificationVisibility;
+  verificationVisibility: VerificationVisibility;
+  hasOwnSuites: boolean;
   createdBy: string;
   caseCount: number;
 }

@@ -46,119 +46,23 @@ Nango is a small-team **AI collaboration platform**. Instead of a one-off chatbo
 it positions an AI agent — also named **Nango** — as a *colleague* who sits in
 the team workspace, talks to users, picks up tasks, and works with the team to
 get things done. The product's current focus is the **data analysis** workflow:
-connect a database, ask a question, get a chart, save it, schedule it,
-share it.
+connect a database, ask a question, get a chart, save it, schedule it, share it.
 
-Nango is built around **two product pillars**:
+Nango's design is centered around two product pillars: **AI Engine** (intelligent collaboration) and **Artifact Engine** (artifact management), which work in tandem:
 
-| Pillar | What it does | Status |
-|---|---|---|
-| **AI Engine** — the AI teammate | Chat-driven agents that connect to data, run SQL, write code, call tools, and orchestrate sub-agents. | Production-ready |
-| **Artifact Engine** — the team's deliverables | Persist what the AI produced into a tree of artifacts, compose them into shareable dashboards, and *refresh* them later. | In active development |
-
-Together they answer the question that pure chat tools cannot:
-*"how do my team and I keep using what we just made with AI tomorrow?"*
-
-> **Runtime boundary.** Nango runs as a **single long-running Node process**
-> (Docker / VM / bare metal), targeting personal and small-team use. Heavy or
-> distributed agent work is delegated to external platforms; Nango stays lean
-> and stays in the team's hands.
+* **Multi-source intelligence & unified protocol**: Connect to external agent platforms (agno, Mastra, Dify) or build custom in-app agents on raw LLMs (OpenAI, DeepSeek, Ollama, etc.), normalizing all streams to the **AG-UI** protocol on the server to keep API keys away from the browser.
+* **Supervisor-specialist orchestration**: One built-in agent can act as the Supervisor (Nango itself) to orchestrate and delegate tasks to specialist agents using synchronous calls, tool routing, conversational handoffs, or fire-and-forget async runs.
+* **Extensible tool ecosystem**: Native bindings for **MCP (Model Context Protocol)** servers, database-resident **Skills (scripts)**, **SSH hosts**, and governed **Data Sources**.
+* **Credential lifecycle & security**: All third-party secrets (API keys, DB credentials, SSH private keys) are encrypted with **AES-256-GCM** on a versioned keyring, decrypted strictly server-side, and support zero-downtime key rotation.
+* **Governed data access & execution safety**: Enforce read-only flags and table-level allow/deny lists. SQL queries are parsed and validated before reaching the database, and results are cached as Columnar Parquet files for secure sharing and sandbox execution.
+* **Schedules, async runs & unified history**: Trigger agent runs on one-shot or recurring schedules, with async execution results pushed to a live notification inbox. All backend and built-in chat histories are persisted in PostgreSQL, with an admin forensics page to trace run execution timelines.
+* **Artifact library & save-from-chat**: Keep a folder-tree library to catalog AI-generated outputs (charts, code, HTML, PPT, reports), allowing users to save outputs from chat with full lineage trace back to the original workflow.
+* **Dashboard composition**: Combine multiple saved artifacts into responsive grid-layout dashboards and publish them with a stable URL.
+* **Workflow-driven refresh & re-creation**: Artifacts are backed by replayable workflows. Users can apply filters (time range, dimension slice) to charts, refresh them with live data by re-running the workflow, or use AI inside an editor to tweak the underlying query and save it as a new version.
 
 ---
 
-## Pillar 1 — AI Engine
-
-The AI side of Nango. Two complementary ways to bring intelligence into your workspace,
-plus everything around them to make it useful.
-
-### 1.1 Two ways to plug in intelligence
-
-Nango distinguishes **agent platforms** (mature multi-agent systems you connect to)
-from **LLM providers** (raw model endpoints you build agents *on top of*).
-They serve different purposes and are kept separate by design.
-
-**Connect external agent platforms** &nbsp;·&nbsp; *currently supported:*
-
-| Platform | Style |
-|---|---|
-| **[agno](https://github.com/agno-agi/agno)** | Python-based agent framework |
-| **[Mastra](https://mastra.ai)** | TypeScript agent framework |
-| **[Dify](https://dify.ai)** | LLM application platform |
-| **OpenAI-Compatible agent platforms** | FastGPT, AnythingLLM, Coze, … (per-platform adapter) |
-
-The list is intentionally short. Each platform has its own request shape and
-session model, so Nango ships a dedicated adapter per platform rather than a
-generic bridge. Every adapter normalises the upstream REST / SSE stream into
-the **AG-UI** protocol on the fly — the browser only ever sees AG-UI and
-secrets never leave the server. New adapters are welcome via PR.
-
-**Build your own agents on top of LLM providers** &nbsp;·&nbsp; *broad provider coverage:*
-
-| Category | Providers |
-|---|---|
-| **Hosted LLM APIs** | OpenAI, DeepSeek, Groq, xAI, OpenRouter, and any OpenAI-compatible endpoint |
-| **Self-hosted / local** | **Ollama**, **vLLM**, and any OpenAI-compatible local server |
-
-These are configured as credentials and used by **built-in agents** that you
-create in the Nango UI: pick a model, write a system prompt, attach tools,
-done. This is the right path whenever you have a *raw model endpoint* (a
-hosted API, a model you host yourself, a local Ollama) rather than a full
-agent platform.
-
-### 1.2 What you can build with it
-
-| Capability | Details |
-|---|---|
-| **Supervisor agent** | One built-in agent per user can be marked the *supervisor* — Nango itself. Other agents become its delegable specialists. Four orchestration modes cover synchronous calls, tool-style routing, conversational handoff, and fire-and-forget async work. |
-| **Tools & extensions** | First-class bindings for **MCP servers**, **Skills** (reusable, self-documenting capabilities), **Data sources** (governed SQL access), and **SSH** servers, plus a small built-in tool set for code, chart, and dataset operations. Wrap any REST API as an MCP server to expose it to an agent. |
-| **Governed data access** | A data source row = "agent can read this DB under this policy" (read-only flag, table allow / deny list). SQL is parsed and validated *before* it touches the cache, then results are cached as columnar files for cheap re-reads. |
-| **Schedules & async** | One-shot or recurring schedules trigger the same agents on a timer. Async runs and scheduled fires drop into a live notification inbox so the team sees what completed while they were away. |
-| **Unified chat history** | Built-in *and* external-platform agent threads share one Postgres-side source of truth. Refresh the page, switch agents, come back tomorrow — your conversation is still there. |
-| **Credentials & rotation** | All third-party secrets stored with AES-256-GCM encryption against a keyring; the active key is rotatable with zero downtime. Admin-only CRUD. |
-| **Roles for collaboration** | Three roles: **admin** (everything), **editor** (AI resource builder), **user** (consumer). The first sign-up is auto-admin; later sign-ups default to `user`. Soft-delete only; ownership of resources is preserved. |
-| **Observability & forensics** | Structured logs with automatic secret redaction; an admin run-forensics page shows the full dispatch tree and event timeline for every run. Optional Langfuse tracing for LLM calls. |
-
----
-
-## Pillar 2 — Artifact Management & Re-creation
-
-This is the *team* half of the product: turning AI output into shared,
-living deliverables. **Partially implemented and actively evolving.**
-
-| Capability | What it gives you | Status |
-|---|---|---|
-| **Artifact library** | A folder-tree library under per-type system categories (charts, dashboards, code, images, HTML, PPT, reports). Behaves like a file system for AI output. | Landed |
-| **Save-from-chat** | One-click save any chart, code, or report from the conversation into the artifact library, with origin trace back to the chat turn. | Landed |
-| **Dashboard composition** | Compose multiple artifacts into a grid-layout dashboard page. Publish to the team with visibility control. | In progress |
-| **Workflow-backed refresh** | Each savable artifact is paired with a frozen workflow — a captured, replayable description of how its data was produced. Refresh re-runs the workflow against live data: same artifact, fresh numbers. | In progress |
-| **Interactive filters** | Time range, dimension slicing, parameter prompts on saved charts — without going back to the agent. | Planned |
-| **Rich renderers** | First-class chart renderer, paginated PPT, report rendering, sandboxed HTML embedding. | Planned (placeholders today) |
-| **Re-creation flows** | Open any artifact in an editor, ask the AI to tweak it ("change to monthly buckets"), save as a new version or fork. | Planned |
-
-A single workflow can power **many** artifacts (1-to-N), so the same
-underlying query can appear as a chart on one dashboard, a table on
-another, and a weekly report exported via a third — all driven by one
-refreshable data pipeline.
-
----
-
-## A Day with Nango — typical data analysis flow
-
-1. **Admin** sets up a data source (Postgres / MySQL / Vertica / …) with a
-   read-only credential and a table allow-list.
-2. **User** asks Nango: *"How did East-China orders trend last week?"*
-3. Nango routes the task (or handles it itself), fetches the data, charts
-   the result, and shows it inline in the chat.
-4. User likes it — **Save** captures the chart as an artifact and freezes
-   the workflow behind it.
-5. User drops it onto a **dashboard**, hits **publish** — teammates see it
-   at a stable URL.
-6. The dashboard refreshes on its own (or on a schedule); team members can
-   apply filters; Nango can be asked to *modify* the underlying workflow
-   without starting over.
-7. Every run is durable and replayable for admin audit and replay.
-
----
+![Nango architecture diagram](public/image/nango-ui.png)
 
 ## Quick Start (Docker)
 
@@ -197,15 +101,6 @@ BETTER_AUTH_SECRET=<another-long-random-string>
 NO_HTTPS=1
 ```
 
-> **Changing the port** — only set `APP_PORT` (default `9300`). The auth
-> URL is derived from it automatically. Override `BETTER_AUTH_URL`
-> directly only when you front Nango with a reverse proxy or custom
-> domain (e.g. `BETTER_AUTH_URL=https://nango.example.com`).
-
-> Why two secrets? `BETTER_AUTH_SECRET` signs user sessions; the keyring
-> encrypts the **third-party credentials** stored in your database. They are
-> intentionally separate so leaking one does not compromise the other.
-
 ### 3. Bring everything up
 
 Pull the published multi-arch image from GitHub Container Registry:
@@ -238,14 +133,6 @@ Then open **http://localhost:9300**.
 The **first user to sign up becomes the admin** automatically. From the
 admin user-management page, you can promote teammates to `editor`
 (resource builders) or keep them as `user` (consumers).
-
-### 4. Manage the stack
-
-```bash
-docker compose logs -f nango-app   # tail app logs
-docker compose down                # stop everything (data is preserved)
-docker compose down -v             # stop AND wipe the DB volume
-```
 
 Compatible with **Podman**: replace `docker` with `podman` in every command.
 
@@ -280,31 +167,11 @@ pnpm db:migrate          # apply schema
 pnpm dev                 # Next.js with Turbopack on http://localhost:9300
 ```
 
-If you point at an existing Postgres instead of the bundled one, set
-`POSTGRES_URL` (or the discrete `POSTGRES_USER` / `POSTGRES_PASSWORD` /
-`POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` variables).
-
-All other scripts (lint, test, type-check, db tooling, sandbox image build,
-docker compose helpers) live in [`package.json`](package.json) — run
-`pnpm run` to list them.
-
 ---
 
 ## Architecture Overview
 
 ![Nango architecture diagram](docs/diagrams/architecture-diagram.png)
-
-> Source: [`docs/diagrams/architecture-diagram.html`](docs/diagrams/architecture-diagram.html) —
-> open in a browser for an interactive view with PNG / PDF export.
-> Full design notes live under [`docs/`](docs).
-
----
-
-## Documentation
-
-Long-form design notes, subsystem references, and architecture decisions
-live under [`docs/`](docs). Start with `docs/architecture.md` for the
-whole-system view, then drill into the subsystem you care about.
 
 ---
 

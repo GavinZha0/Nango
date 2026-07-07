@@ -62,8 +62,7 @@ export function canEditResource(
   if (resource.source === "builtin") return false;
   if (!isEditor(session)) return false;
   if (isAdmin(session)) return true;
-  if (resource.createdBy === session.user.id) return true;
-  return resource.visibility === "public";
+  return resource.createdBy === session.user.id;
 }
 
 /**

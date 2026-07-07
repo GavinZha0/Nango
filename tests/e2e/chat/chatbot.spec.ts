@@ -14,19 +14,33 @@ test.describe("Chat Panel", () => {
         JSON.stringify({ state: { leftPanelOpen: false, rightPanelOpen: true }, version: 0 }),
       );
     });
+  });
+
+  test("should display the right panel", async ({ page }) => {
     await page.goto("/");
     await page.waitForTimeout(3000);
     await page.evaluate(() => {
       document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
     });
-  });
-
-  test("should display the right panel", async ({ page }) => {
     // The right panel should be visible with its border-l class
     await expect(page.locator(".border-l").first()).toBeVisible({ timeout: 10000 });
   });
 
   test("should show agent selection prompt when no agent is configured", async ({ page }) => {
+    // Mock APIs to return empty lists, simulating no configured agents
+    await page.route("**/api/builtin-agents*", async (route) => {
+      await route.fulfill({ status: 200, json: [] });
+    });
+    await page.route("**/api/agent-credentials*", async (route) => {
+      await route.fulfill({ status: 200, json: [] });
+    });
+
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+    await page.evaluate(() => {
+      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
+    });
+
     // Without any agents configured, the panel shows the selection prompt
     await expect(
       page.getByText("Select an agent to start chatting."),

@@ -96,7 +96,7 @@ describe("canEditResource", () => {
   });
 
   it("editor can edit public resource they don't own", () => {
-    expect(canEditResource(resource({ source: "local", visibility: "public", createdBy: "other" }), session("editor", "user-1"))).toBe(true);
+    expect(canEditResource(resource({ source: "local", visibility: "public", createdBy: "other" }), session("editor", "user-1"))).toBe(false);
   });
 
   it("editor cannot edit private resource they don't own", () => {

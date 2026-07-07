@@ -167,6 +167,11 @@ function RightPanelToolbar(): ReactNode {
   const startFreshChat = useWorkspaceStore((s) => s.startFreshChat);
   const bumpHistoryRevision = useSidebarStore((s) => s.bumpHistoryRevision);
 
+  const { agent } = useAgent({ agentId: activeAgentId || undefined });
+  const hasUserMessage = agent
+    ? agent.messages.some((m) => m.role === "user")
+    : false;
+
   // Disabled-backend set — derived from localStorage via the shared
   // `useStoredValue` hook. SSR sees `SSR_EMPTY_SET`, and the real
   // value flows in on the first post-hydration render. Cross-tab
@@ -243,8 +248,9 @@ function RightPanelToolbar(): ReactNode {
             size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
             onClick={() => setEvalDialogOpen(true)}
+            disabled={!hasUserMessage}
             aria-label="Add to Eval"
-            title="Add to Eval"
+            title={hasUserMessage ? "Add to Eval" : "Add to Eval (send a message first)"}
           >
             <Hospital className="h-4 w-4" />
           </Button>
@@ -485,25 +491,25 @@ export function RightPanel(): ReactNode {
   }
 
   return (
-    <div
-      className="flex h-full flex-col border-l"
-      style={{ backgroundColor: "var(--panel-bg)" }}
+    <CopilotKitProvider
+      key={copilotKey}
+      runtimeUrl={runtimeUrl}
+      headers={headers}
+      // Stable refs — see STABLE_EMPTY_AGENTS comment at top.
+      properties={STABLE_EMPTY_PROPS}
+      agents__unsafe_dev_only={STABLE_EMPTY_AGENTS}
+      selfManagedAgents={STABLE_EMPTY_AGENTS}
     >
-      <RightPanelToolbar />
-
+      <ChatProviderHooks />
       <div
-        className="relative flex-1 overflow-hidden"
+        className="flex h-full flex-col border-l"
+        style={{ backgroundColor: "var(--panel-bg)" }}
       >
-        <CopilotKitProvider
-          key={copilotKey}
-          runtimeUrl={runtimeUrl}
-          headers={headers}
-          // Stable refs — see STABLE_EMPTY_AGENTS comment at top.
-          properties={STABLE_EMPTY_PROPS}
-          agents__unsafe_dev_only={STABLE_EMPTY_AGENTS}
-          selfManagedAgents={STABLE_EMPTY_AGENTS}
+        <RightPanelToolbar />
+
+        <div
+          className="relative flex-1 overflow-hidden"
         >
-          <ChatProviderHooks />
           <div
             id="right-tabpanel-chat"
             role="tabpanel"
@@ -525,8 +531,8 @@ export function RightPanel(): ReactNode {
           >
             <HistoryPanelBody />
           </div>
-        </CopilotKitProvider>
+        </div>
       </div>
-    </div>
+    </CopilotKitProvider>
   );
 }

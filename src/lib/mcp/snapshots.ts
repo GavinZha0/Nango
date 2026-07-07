@@ -83,8 +83,5 @@ export function togglePin(serverId: string, toolName: string, id: string): void 
   const list = loadSnapshots(serverId, toolName).map((s) =>
     s.id === id ? { ...s, pinned: !s.pinned } : s,
   );
-  // Re-sort: pinned first, then by original order (insertion order).
-  const pinned = list.filter((s) => s.pinned);
-  const unpinned = list.filter((s) => !s.pinned);
-  persist(serverId, toolName, [...pinned, ...unpinned]);
+  persist(serverId, toolName, list);
 }

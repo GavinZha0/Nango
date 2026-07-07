@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,7 +100,6 @@ async function submitSignUp(values: AuthFormValues): Promise<string | null> {
 }
 
 export function AuthForm({ mode }: AuthFormProps): ReactNode {
-  const router = useRouter();
   const [formValues, setFormValues] = useState<AuthFormValues>(INITIAL_FORM_VALUES);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -134,8 +132,7 @@ export function AuthForm({ mode }: AuthFormProps): ReactNode {
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    window.location.href = "/";
     setIsSubmitting(false);
   };
 
