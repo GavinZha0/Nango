@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* output issue of chatbot ([98ad438](https://github.com/GavinZha0/Nango/commit/98ad43897efa93e921a9f5d6182e194abf518fe9))
+* output issue of chatbot ([98ad438](https://github.com/GavinZha0/Nango/commit/98ad43897efa93e921a9f5d6182e194abf518fe9)) by @GavinZha0
 
 ## [0.6.2](https://github.com/GavinZha0/Nango/compare/v0.6.1...v0.6.2) (2026-07-08)
 
