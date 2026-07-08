@@ -56,6 +56,7 @@ import { cn } from "@/lib/utils";
 import { useRouter, usePathname } from "next/navigation";
 import { getProviderLabel } from "@/lib/constants/providers";
 import type { McpToolSnapshot } from "@/lib/db/schema";
+import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 
 // Types
 
@@ -399,7 +400,6 @@ interface ServerHeaderProps {
 function ServerHeader({
   active,
   server,
-  isOwner,
   refreshing,
   onSelect,
   onEdit,
@@ -408,6 +408,12 @@ function ServerHeader({
   onToggleVisibility,
   onDelete,
 }: ServerHeaderProps) {
+  const { canEdit, canDelete, canChangeVisibility } = useResourcePermissions({
+    source: "local" as const,
+    visibility: server.visibility as "private" | "public",
+    createdBy: server.createdBy,
+  });
+
   const toolCount = server.tools?.length ?? 0;
   const isPublic = server.visibility === "public";
 
@@ -459,7 +465,7 @@ function ServerHeader({
 
         <div className="ml-auto flex items-center gap-1.5">
         {/* Refresh tools */}
-        {isOwner && (
+        {canEdit && (
           <button
             type="button"
             onClick={onRefresh}
@@ -472,7 +478,7 @@ function ServerHeader({
         )}
 
         {/* Edit */}
-        {isOwner && (
+        {canEdit && (
           <button
             type="button"
             onClick={onEdit}
@@ -484,7 +490,7 @@ function ServerHeader({
         )}
 
         {/* Delete */}
-        {isOwner && (
+        {canDelete && (
           <button
             type="button"
             onClick={onDelete}
@@ -496,7 +502,7 @@ function ServerHeader({
         )}
 
         {/* Visibility */}
-        {isOwner ? (
+        {canChangeVisibility ? (
           <button
             type="button"
             onClick={() => onToggleVisibility(isPublic ? "private" : "public")}
@@ -515,7 +521,7 @@ function ServerHeader({
         )}
 
         {/* Active — green check: ok, red alert: error, slash: disabled */}
-        {isOwner ? (
+        {canChangeVisibility ? (
           <button
             type="button"
             onClick={() => onToggleEnabled(!server.enabled)}

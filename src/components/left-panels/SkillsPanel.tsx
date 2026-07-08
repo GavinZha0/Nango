@@ -38,6 +38,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 import { useStoredValue } from "@/hooks/useStoredValue";
 
 // localStorage key — namespaced so SkillsPanel's tab state stays
@@ -137,17 +138,20 @@ interface SkillRowProps {
 function SkillItem({
   row,
   active,
-  isOwner,
-  isAdmin,
   onEdit,
   onToggleEnabled,
   onToggleVisibility,
 }: SkillRowProps): ReactNode {
   const isPublic: boolean = row.visibility === "public";
-  const isBuiltin: boolean = row.source === "builtin";
-  const canEdit: boolean = isOwner && !isBuiltin;
-  const canToggleEnabled: boolean = isOwner || isAdmin;
-  const canToggleVisibility: boolean = isOwner; // creator self-decides
+
+  const { canEdit, canChangeVisibility } = useResourcePermissions({
+    source: row.source || "local",
+    visibility: row.visibility as "private" | "public",
+    createdBy: row.createdBy,
+  });
+
+  const canToggleEnabled: boolean = canChangeVisibility;
+  const canToggleVisibility: boolean = canChangeVisibility;
 
   return (
     <div

@@ -9,7 +9,30 @@
  */
 
 import { test as setup, expect } from "@playwright/test";
+import { config } from "dotenv";
+import pg from "pg";
+import { getPostgresUrl } from "@/lib/db/postgres-url";
 import { TEST_USERS } from "../constants/test-users";
+
+config();
+
+const { Client } = pg;
+
+async function forceUserRole(email: string, role: string) {
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+    await client.query(
+      `UPDATE "user" SET role = $1 WHERE email = $2`,
+      [role, email],
+    );
+    console.log(`  [E2E Setup] Forced user role for ${email} to ${role}.`);
+  } catch (err) {
+    console.error(`  [E2E Setup] Failed to force user role for ${email}:`, err);
+  } finally {
+    await client.end();
+  }
+}
 
 const ADMIN_STATE_PATH = "tests/e2e/.auth/admin.json";
 const EDITOR_STATE_PATH = "tests/e2e/.auth/editor.json";
@@ -64,36 +87,32 @@ async function signUpOrSignIn(
 }
 
 setup("create admin user", async ({ page }) => {
-  // Admin must be the FIRST user created (gets admin role automatically)
+  // Sign up
   await signUpOrSignIn(page, TEST_USERS.admin, ADMIN_STATE_PATH);
+  // Force promote via DB
+  await forceUserRole(TEST_USERS.admin.email, "admin");
+  // Log out and log back in to get a clean session cookie with the new role
+  await page.context().clearCookies();
+  await page.goto("/sign-in");
+  await page.getByLabel("Email").fill(TEST_USERS.admin.email);
+  await page.getByLabel("Password").fill(TEST_USERS.admin.password);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 10000 });
+  await page.context().storageState({ path: ADMIN_STATE_PATH });
 });
 
 setup("create editor user", async ({ page, context }) => {
+  // Sign up
   await signUpOrSignIn(page, TEST_USERS.editor, EDITOR_STATE_PATH);
-
-  // Promote to editor via admin API. Load admin auth state into a
-  // separate context so the admin cookie is available for the PATCH.
-  const adminCtx = await page.context().browser()!.newContext({
-    storageState: ADMIN_STATE_PATH,
-  });
-  const adminPage = await adminCtx.newPage();
-  try {
-    // Look up the editor user's id
-    const listRes = await adminPage.request.get(
-      `/api/admin/users?search=${encodeURIComponent(TEST_USERS.editor.email)}&limit=1`,
-    );
-    const listBody = await listRes.json() as { users: { id: string }[] };
-    const editorId = listBody.users?.[0]?.id;
-    if (editorId) {
-      await adminPage.request.patch(`/api/admin/users/${editorId}`, {
-        data: { role: "editor" },
-      });
-    }
-  } finally {
-    await adminCtx.close();
-  }
-
-  // Re-save editor state (session cookie unchanged, role updated server-side)
+  // Force promote via DB
+  await forceUserRole(TEST_USERS.editor.email, "editor");
+  // Log out and log back in to get a clean session cookie with the new role
+  await page.context().clearCookies();
+  await page.goto("/sign-in");
+  await page.getByLabel("Email").fill(TEST_USERS.editor.email);
+  await page.getByLabel("Password").fill(TEST_USERS.editor.password);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 10000 });
   await context.storageState({ path: EDITOR_STATE_PATH });
 });
 

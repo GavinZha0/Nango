@@ -15,6 +15,10 @@ vi.mock("@/lib/db/schema", () => ({
     visibility: "visibility",
     createdBy: "created_by",
   },
+  UserTable: {
+    id: "user_id",
+    role: "role",
+  },
 }));
 
 const { isAgentVisibleTo, listVisibleAgentIds } = await import(
@@ -97,12 +101,27 @@ describe("isAgentVisibleTo", () => {
  * (no limit clause — enumeration returns every match).
  */
 function mockAgentList(rows: Array<{ id: string }>): void {
-  vi.mocked(db.select).mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue(rows),
-    }),
-  } as unknown as ReturnType<typeof db.select>);
+  vi.mocked(db.select).mockImplementation((...args: unknown[]) => {
+    const projection = args[0] as Record<string, unknown>;
+
+    if ("role" in projection) {
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ role: "user" }]),
+          }),
+        }),
+      } as unknown as ReturnType<typeof db.select>;
+    }
+
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(rows),
+      }),
+    } as unknown as ReturnType<typeof db.select>;
+  });
 }
+
 
 describe("listVisibleAgentIds", () => {
   beforeEach(() => {

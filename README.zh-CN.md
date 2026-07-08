@@ -60,7 +60,7 @@
 ### 1. 克隆
 
 ```bash
-git clone <your-fork-or-this-repo>.git
+git clone https://github.com/GavinZha0/Nango.git
 cd nango
 ```
 

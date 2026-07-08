@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Loader2, Play, Trash2 } from "lucide-react";
+import { Loader2, Play, Trash2, Lock } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -99,22 +99,36 @@ function AgentRow({ item, active, onSelect, onRunAgent, onDeleteAgent }: AgentRo
           </span>
         )}
       </div>
-      <button
-        type="button"
-        onClick={onRunAgent}
-        title="Run all suites (except Drafts)"
-        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-green-500"
-      >
-        <Play className="h-3.5 w-3.5 fill-current" />
-      </button>
-      <button
-        type="button"
-        onClick={onDeleteAgent}
-        title="Delete all suites"
-        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
+
+      <div className="flex shrink-0 items-center gap-1.5 ml-2">
+        {/* 1. Visibility (Lock) — static Private for Evaluation */}
+        <div
+          className="p-1 shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed"
+          title="Evaluations are private-by-design and cannot be shared."
+        >
+          <Lock className="h-3.5 w-3.5" />
+        </div>
+
+        {/* 2. Run */}
+        <button
+          type="button"
+          onClick={onRunAgent}
+          title="Run all suites (except Drafts)"
+          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-green-500"
+        >
+          <Play className="h-3.5 w-3.5 fill-current" />
+        </button>
+
+        {/* 3. Delete */}
+        <button
+          type="button"
+          onClick={onDeleteAgent}
+          title="Delete all suites"
+          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

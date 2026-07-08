@@ -72,7 +72,7 @@ The fastest path to a running Nango. Requires only **Docker** (≥ 20.10) and
 ### 1. Clone
 
 ```bash
-git clone <your-fork-or-this-repo>.git
+git clone https://github.com/GavinZha0/Nango.git
 cd nango
 ```
 

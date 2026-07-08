@@ -103,7 +103,7 @@ function ServerRow({
             type="button"
             onClick={onToggleVisibility}
             disabled={visibilityUpdating}
-            className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground disabled:opacity-50 transition-colors shrink-0"
+            className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground disabled:opacity-50 transition-colors shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
             title="Visibility"
           >
             {visibilityUpdating ? (
@@ -116,7 +116,7 @@ function ServerRow({
           </button>
         ) : (
           <div
-            className="p-0.5 shrink-0 text-muted-foreground/40 cursor-not-allowed"
+            className="p-0.5 shrink-0 text-muted-foreground/40 cursor-not-allowed opacity-0 group-hover:opacity-100 transition-opacity"
             title="Only administrators or the owner can change the verification visibility of this server."
           >
             {row.verificationVisibility === "public" ? (
@@ -134,12 +134,12 @@ function ServerRow({
           disabled={running || !row.enabled}
           title={!row.enabled ? "Server disabled" : "Run all cases"}
           aria-label="Run server regression"
-          className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground disabled:opacity-50 transition-colors shrink-0"
+          className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-green-500 disabled:opacity-50 transition-colors shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         >
           {running ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
+            <Play className="h-3.5 w-3.5 fill-current" />
           )}
         </button>
 
@@ -149,7 +149,7 @@ function ServerRow({
           onClick={onDeleteRequest}
           title="Delete server & cases"
           aria-label="Delete verification data"
-          className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-destructive disabled:opacity-50 transition-colors shrink-0"
+          className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-destructive disabled:opacity-50 transition-colors shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>

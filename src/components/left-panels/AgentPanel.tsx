@@ -36,6 +36,7 @@ import { useStoredValue } from "@/hooks/useStoredValue";
 import { useRouter, usePathname } from "next/navigation";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 import { resolveAgentIcon } from "@/components/ui/emoji-picker";
+import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 
 // localStorage keys + parse/serialize helpers — values are read via
 // `useStoredValue` for an SSR-safe hydration (server snapshot is the
@@ -313,6 +314,12 @@ function BuiltinRow({
   const isOwner = row.createdBy === currentUserId;
   const isPublic = row.visibility === "public";
 
+  const { canChangeVisibility } = useResourcePermissions({
+    source: "local" as const,
+    visibility: row.visibility as "private" | "public",
+    createdBy: row.createdBy,
+  });
+
   const subtitle = row.description ?? row.prompt ?? null;
   return (
     <div
@@ -344,8 +351,8 @@ function BuiltinRow({
             {resolveAgentIcon(row.icon)}
           </span>
 
-          {/* Name — click to edit for owner, plain span otherwise. */}
-          {isOwner ? (
+          {/* Name — click to edit for owner or public resources, plain span otherwise. */}
+          {isOwner || isPublic ? (
             <button
               type="button"
               className="cursor-pointer truncate text-left text-base font-medium hover:underline hover:underline-offset-2"
@@ -372,8 +379,8 @@ function BuiltinRow({
         <div className="flex shrink-0 items-center gap-2">
           <ModelChip modelId={row.model} />
 
-          {/* Visibility — public/private. Click toggles for owner. */}
-          {isOwner ? (
+          {/* Visibility — public/private. Click toggles for owner or admin. */}
+          {canChangeVisibility ? (
             <button
               type="button"
               onClick={() => onToggleVisibility(row, isPublic ? "private" : "public")}
@@ -397,8 +404,8 @@ function BuiltinRow({
             </span>
           )}
 
-          {/* Enabled / disabled — click toggles for owner. */}
-          {isOwner ? (
+          {/* Enabled / disabled — click toggles for owner or admin. */}
+          {canChangeVisibility ? (
             <button
               type="button"
               onClick={() => onToggleEnabled(row, !row.enabled)}

@@ -25,6 +25,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
 
+  globalSetup: "./tests/e2e/lifecycle/setup.global.ts",
   globalTeardown: "./tests/e2e/lifecycle/teardown.global.ts",
 
   projects: [

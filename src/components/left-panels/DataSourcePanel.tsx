@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 
 // Row shape
 
@@ -69,16 +70,22 @@ interface DataSourceRowItemProps {
 function DataSourceRowItem({
   row,
   active,
-  isOwner,
-  isAdmin,
   onEdit,
   onToggleEnabled,
   onToggleVisibility,
 }: DataSourceRowItemProps): ReactNode {
   const isPublic = row.visibility === "public";
-  const canEdit = isOwner || isAdmin;
-  const canToggleEnabled = isOwner || isAdmin;
-  const canToggleVisibility = isOwner;
+
+  const { canEdit: hasEdit, canChangeVisibility } = useResourcePermissions({
+    source: "local" as const,
+    visibility: row.visibility as "private" | "public",
+    createdBy: row.createdBy,
+  });
+
+  const canClickName = hasEdit || isPublic;
+  const canToggleEnabled = canChangeVisibility;
+  const canToggleVisibility = canChangeVisibility;
+
   const target = `${row.host}:${row.port}/${row.database}`;
 
   return (
@@ -92,12 +99,12 @@ function DataSourceRowItem({
       {/* Line 1: name + provider chip + right-side icons */}
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          {canEdit ? (
+          {canClickName ? (
             <button
               type="button"
               onClick={() => onEdit(row)}
               className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2"
-              aria-label={`Edit ${row.name}`}
+              aria-label={hasEdit ? `Edit ${row.name}` : `View ${row.name}`}
             >
               {row.name}
             </button>
