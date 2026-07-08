@@ -160,6 +160,11 @@ function ChatViewShellBody({
   useInjectHandoffContext(agent);
   const onRegenerate = useOnRegenerate(agent);
 
+  // Ref-capture for stable callback — avoids re-creating the
+  // assistant message component on every streaming token.
+  const messagesRef = useRef(agent.messages);
+  useEffect(() => { messagesRef.current = agent.messages; });
+
   // Auto-focus input when chatbot input moves to bottom after first message
   const hasFocusedFirstMsgRef = useRef(false);
   useEffect(() => {
@@ -187,7 +192,7 @@ function ChatViewShellBody({
       // Determine if this is the last message of the assistant's current turn.
       // If there's another assistant message or tool call immediately after this one,
       // we hide the toolbar to avoid rendering multiple sets of action buttons.
-      const messages = agent.messages;
+      const messages = messagesRef.current;
       const index = messages.findIndex((m) => m.id === props.message.id);
       
       let isEndOfTurn = true;
@@ -208,7 +213,7 @@ function ChatViewShellBody({
         />
       );
     },
-    [onRegenerate, agent.messages],
+    [onRegenerate],
   );
 
   // `SlotValue<C>` requires `C` (a namespace component with static fields)
