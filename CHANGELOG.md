@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2](https://github.com/GavinZha0/Nango/compare/v0.6.1...v0.6.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* user role issue ([2d74f9d](https://github.com/GavinZha0/Nango/commit/2d74f9d0ad7ee4326f23e4bc1b389af08dc6217a))
+* visibility issue ([4ace808](https://github.com/GavinZha0/Nango/commit/4ace8089ae304ea5cc5b4e59feff3c1adb361c9f))
+
 ## [0.6.1](https://github.com/GavinZha0/Nango/compare/v0.6.0...v0.6.1) (2026-07-06)
 
 
