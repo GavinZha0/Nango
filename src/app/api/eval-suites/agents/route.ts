@@ -12,9 +12,6 @@ const ROUTE = "/api/eval-suites/agents";
 // with suite and case counts. Used by the left panel.
 
 export const GET = withEditor(ROUTE, async ({ session }) => {
-  const rows = await storage.listAgentsWithEval(
-    session.user.id,
-    session.user.role === "admin",
-  );
+  const rows = await storage.listAgentsWithEval(session);
   return NextResponse.json(rows);
 });

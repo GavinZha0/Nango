@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
+import { canDeleteResource, canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadCase, loadSuite } from "@/lib/evaluation/access";
@@ -34,6 +34,15 @@ export const PATCH = withEditor<{ id: string }>(
     }
     const body = await parseBody(req, updateSchema);
     const { caseRow, suite } = await loadCase(parsed.data, session);
+
+    const rbac = {
+      visibility: suite.visibility as "private" | "public",
+      createdBy: suite.createdBy,
+    };
+
+    if(!canEditResource(rbac, session)) {
+      throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval case.");
+    }
 
     if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval case.");
@@ -77,7 +86,13 @@ export const DELETE = withEditor<{ id: string }>(
     }
     const { caseRow, suite } = await loadCase(parsed.data, session);
 
-    if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
+    const rbac = {
+      visibility: suite.visibility as "private" | "public",
+      createdBy: suite.createdBy,
+    };
+
+
+    if (!canDeleteResource(rbac, session)) {
       throw new ApiError(
         "FORBIDDEN",
         403,

@@ -33,7 +33,7 @@ services:
       # so users only need to change APP_PORT to move the app to a different
       # port. Override BETTER_AUTH_URL directly when fronting Nango with a
       # reverse proxy or custom domain.
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${APP_PORT:-9300}}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:9300}
       CREDENTIAL_ENCRYPTION_KEYRING: ${CREDENTIAL_ENCRYPTION_KEYRING:?Set CREDENTIAL_ENCRYPTION_KEYRING in .env or environment (e.g. k1=<64-hex>)}
       CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID: ${CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID:?Set CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID in .env or environment (e.g. k1)}
       # POSTGRES_HOST is hardcoded to the Docker service name.

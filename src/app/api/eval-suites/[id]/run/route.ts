@@ -22,7 +22,7 @@ export const POST = withEditor<{ id: string }>(
 
     if (
       !canEditResource(
-        { visibility: "private", createdBy: suite.createdBy },
+        { visibility: suite.visibility as "private" | "public", createdBy: suite.createdBy },
         session,
       )
     ) {

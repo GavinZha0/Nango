@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -212,6 +212,22 @@ export function VerificationSuiteEditor({
     }
   };
 
+  const handleToggleSuiteVisibility = async (suiteId: string, next: "public" | "private"): Promise<void> => {
+    try {
+      const res = await fetch(`/api/verification-suites/${suiteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: next }),
+      });
+      if (!res.ok) {
+        void caseActions.refreshForServer(row.id);
+      }
+    }
+    catch (err) {
+      console.error("Failed to toggle suite visibility:", err);
+    }
+  };
+
   const inHistoryView: boolean = selectedRunId !== null;
 
   const selectedCaseResult = useMemo(
@@ -249,15 +265,6 @@ export function VerificationSuiteEditor({
           <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
             {displayName}
           </h1>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 gap-1 px-2 text-[10px]"
-            onClick={() => setNewCaseOpen(true)}
-          >
-            <Plus className="h-3 w-3" />
-            <span>New Case</span>
-          </Button>
         </div>
         <div className="shrink-0 flex items-center gap-2">
           <RecentRunsBanner
@@ -291,6 +298,7 @@ export function VerificationSuiteEditor({
             onRequestEditCase={setEditingCase}
             onRequestDeleteCase={setDeletingCase}
             onRunTool={handleRunTool}
+            onToggleSuiteVisibility={handleToggleSuiteVisibility}
             loading={casesLoading}
             error={casesError}
             readOnly={false}

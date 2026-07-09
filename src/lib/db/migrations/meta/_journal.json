@@ -71,6 +71,13 @@
       "when": 1783268793786,
       "tag": "0009_update_verification_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783623590521,
+      "tag": "0010_kind_pyro",
+      "breakpoints": true
     }
   ]
 }

@@ -40,6 +40,8 @@ export interface VerificationCaseRow {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  suiteVisibility?: "public" | "private";
+  suiteCreatedBy?: string;
 }
 
 // --- Store -----------------------------------------------------------------

@@ -2,7 +2,11 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
+import {
+  canChangeVisibility,
+  canDeleteResource,
+  canEditResource,
+} from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadSuite } from "@/lib/evaluation/access";
@@ -30,6 +34,7 @@ const updateSchema = z
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
     enabled: z.boolean().optional(),
+    visibility: z.enum(["private", "public"]).optional(),
   })
   .strict();
 
@@ -39,8 +44,27 @@ export const PATCH = withEditor<{ id: string }>(
     const body = await parseBody(req, updateSchema);
     const suite = await loadSuite(params.id, session);
 
-    if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
+    const rbac = {
+      visibility: suite.visibility as "private" | "public",
+      createdBy: suite.createdBy,
+    };
+
+    const contentEdit =
+      body.name !== undefined ||
+      body.description !== undefined ||
+      body.evaluatorAgentId !== undefined ||
+      body.dimensionIds !== undefined;
+
+    if (contentEdit && !canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval suite.");
+    }
+
+    const flagEdit =
+      body.enabled !== undefined ||
+      body.visibility !== undefined;
+
+    if (flagEdit && !canChangeVisibility(rbac, session)) {
+      throw new ApiError("FORBIDDEN", 403, "Only the creator or admin can change visibility / enabled.");
     }
 
     try {
@@ -66,7 +90,11 @@ export const DELETE = withEditor<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const suite = await loadSuite(params.id, session);
-    if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
+    const rbac = {
+      visibility: suite.visibility as "private" | "public",
+      createdBy: suite.createdBy,
+    };
+    if (!canDeleteResource(rbac, session)) {
       throw new ApiError(
         "FORBIDDEN",
         403,

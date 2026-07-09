@@ -1678,10 +1678,10 @@ export const VerificationSuiteTable = pgTable(
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    // Unique suite per MCP Tool
-    uniqueIndex("verification_suite_mcp_tool_unique_idx").on(t.mcpServerId, t.toolName),
-    // Unique suite per Workflow
-    uniqueIndex("verification_suite_workflow_unique_idx").on(t.workflowId),
+    // Unique suite per MCP Tool per user
+    uniqueIndex("verification_suite_mcp_tool_user_idx").on(t.mcpServerId, t.toolName, t.createdBy),
+    // Unique suite per Workflow per user
+    uniqueIndex("verification_suite_workflow_user_idx").on(t.workflowId, t.createdBy),
     // XOR target: MCP shape OR workflow shape, never both / neither.
     check(
       "verification_suite_target_xor",
@@ -1946,6 +1946,7 @@ export const EvalSuiteTable = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<string[]>(),
     enabled: boolean("enabled").notNull().default(true),
+    visibility: text("visibility").notNull().default("private"),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => UserTable.id, { onDelete: "cascade" }),

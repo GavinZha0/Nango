@@ -33,6 +33,7 @@ interface SaveToEvalDialogProps {
   onOpenChange: (open: boolean) => void;
   agentId: string;
   agentSource: string;
+  credentialId?: string | null;
   threadId: string;
 }
 
@@ -41,6 +42,7 @@ export function SaveToEvalDialog({
   onOpenChange,
   agentId,
   agentSource,
+  credentialId,
   threadId,
 }: SaveToEvalDialogProps): ReactNode {
   const [issue, setIssue] = useState("");
@@ -81,7 +83,7 @@ export function SaveToEvalDialog({
       if (currentTurn) turns.push(currentTurn);
 
       // 3. Ensure Drafts Suite exists
-      const suiteId = await evalActions.ensureDraftSuite(agentId, agentSource);
+      const suiteId = await evalActions.ensureDraftSuite(agentId, agentSource, credentialId ?? undefined);
       if (!suiteId) throw new Error("Failed to resolve Drafts suite");
 
       // 4. Create Eval Case

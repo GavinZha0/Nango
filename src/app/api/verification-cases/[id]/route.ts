@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { canEditResource } from "@/lib/auth/permissions";
+import { canDeleteResource, canEditResource } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { VerificationCaseTable, VerificationSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
@@ -117,7 +117,7 @@ export const DELETE = withEditor<{ id: string }>(
     const caseId = idParse.data;
     const { caseRow, suite } = await loadVisibleCase(caseId, session);
     if (
-      !canEditResource(
+      !canDeleteResource(
         {
           visibility: suite.visibility as "private" | "public",
           createdBy: suite.createdBy,
@@ -128,7 +128,7 @@ export const DELETE = withEditor<{ id: string }>(
       throw new ApiError(
         "FORBIDDEN",
         403,
-        "You cannot delete cases in this verification suite.",
+        "Only the creator or admin can delete case.",
       );
     }
     await db

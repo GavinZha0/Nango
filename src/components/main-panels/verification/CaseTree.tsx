@@ -9,12 +9,16 @@ import {
   CircleSlash,
   CircleX,
   Clock,
+  Globe,
+  Lock,
   Pencil,
   Play,
   Trash2,
+  SquarePlus,
 } from "lucide-react";
 
-
+import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { VerificationCaseResultStatus } from "@/lib/verification/types";
@@ -45,6 +49,8 @@ function VerdictBadge({ verdict }: { verdict: CaseVerdict | undefined }): ReactN
 interface ToolGroup {
   toolName: string;
   suiteId: string;
+  suiteVisibility: "public" | "private";
+  suiteCreatedBy: string;
   cases: VerificationCaseRow[];
 }
 
@@ -60,6 +66,8 @@ function buildTree(cases: VerificationCaseRow[]): ToolGroup[] {
   const out: ToolGroup[] = Array.from(byTool.entries()).map(([toolName, cs]) => ({
     toolName,
     suiteId: cs[0]?.suiteId ?? "",
+    suiteVisibility: (cs[0]?.suiteVisibility ?? "private") as "public" | "private",
+    suiteCreatedBy: cs[0]?.suiteCreatedBy ?? "",
     cases: cs.slice().sort((a, b) => a.name.localeCompare(b.name)),
   }));
   out.sort((a, b) => a.toolName.localeCompare(b.toolName));
@@ -76,6 +84,7 @@ export interface CaseTreeProps {
   onRequestEditCase?: (caseRow: VerificationCaseRow) => void;
   onRequestDeleteCase?: (caseRow: VerificationCaseRow) => void;
   onRunTool?: (suiteId: string) => void;
+  onToggleSuiteVisibility?: (suiteId: string, visibility: "public" | "private") => void;
   loading: boolean;
   error: string | null;
   readOnly?: boolean;
@@ -90,6 +99,7 @@ export function CaseTree({
   onRequestEditCase,
   onRequestDeleteCase,
   onRunTool,
+  onToggleSuiteVisibility,
   loading,
   error,
   readOnly = false,
@@ -107,7 +117,17 @@ export function CaseTree({
             ({cases.length})
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1.5" />
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            title="New case"
+            className="h-6 w-6 p-0"
+            onClick={onNewCase}
+          >
+            <SquarePlus className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -148,6 +168,7 @@ export function CaseTree({
                 onRequestEditCase={readOnly ? undefined : onRequestEditCase}
                 onRequestDeleteCase={readOnly ? undefined : onRequestDeleteCase}
                 onRunTool={onRunTool}
+                onToggleSuiteVisibility={onToggleSuiteVisibility}
                 readOnly={readOnly}
               />
             ))
@@ -166,6 +187,7 @@ interface ToolGroupNodeProps {
   onRequestEditCase?: (caseRow: VerificationCaseRow) => void;
   onRequestDeleteCase?: (caseRow: VerificationCaseRow) => void;
   onRunTool?: (suiteId: string) => void;
+  onToggleSuiteVisibility?: (suiteId: string, visibility: "public" | "private") => void;
   readOnly?: boolean;
 }
 
@@ -177,9 +199,17 @@ function ToolGroupNode({
   onRequestEditCase,
   onRequestDeleteCase,
   onRunTool,
+  onToggleSuiteVisibility,
   readOnly = false,
 }: ToolGroupNodeProps): ReactNode {
   const [expanded, setExpanded] = useState<boolean>(true);
+  const isPublic = tool.suiteVisibility === "public";
+  const { canChangeVisibility } = useResourcePermissions({
+    source: "local" as const,
+    visibility: tool.suiteVisibility,
+    createdBy: tool.suiteCreatedBy,
+  });
+
   return (
     <div className="px-1 py-0.5">
       <div className="group/tool-node flex items-center justify-between rounded px-1.5 py-0.5 hover:bg-muted/30">
@@ -195,6 +225,26 @@ function ToolGroupNode({
           )}
           <span className="min-w-0 truncate font-mono">{tool.toolName}</span>
         </button>
+
+        {!readOnly && canChangeVisibility && onToggleSuiteVisibility? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSuiteVisibility(tool.suiteId, isPublic ? "private" : "public");
+            }}
+            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 opacity-0 group-hover/tool-node:opacity-100 transition-opacity hover:text-foreground"
+            aria-label={isPublic ? "Make private" : "Make public"}
+          >
+            {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+          </button>
+        ): (
+          <span className="shrink-0 p-0.5 text-muted-foreground/70 opacity-0 group-hover/tool-node:opacity-100 transition-opacity" >
+            {
+              isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />
+            }
+          </span>
+        )}
 
         {!readOnly && onRunTool && tool.suiteId && (
           <button

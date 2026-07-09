@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Loader2, Play, Trash2, Lock } from "lucide-react";
+import { Loader2, Play, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -101,15 +101,7 @@ function AgentRow({ item, active, onSelect, onRunAgent, onDeleteAgent }: AgentRo
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5 ml-2">
-        {/* 1. Visibility (Lock) — static Private for Evaluation */}
-        <div
-          className="p-1 shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed"
-          title="Evaluations are private-by-design and cannot be shared."
-        >
-          <Lock className="h-3.5 w-3.5" />
-        </div>
-
-        {/* 2. Run */}
+        {/* Run */}
         <button
           type="button"
           onClick={onRunAgent}
@@ -216,12 +208,18 @@ export function EvaluationPanel(): ReactNode {
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     const key = agentKey(deleteTarget.agentId, deleteTarget.agentSource);
-    const suites = suitesByAgent[key] || [];
+
+    let suites = suitesByAgent[key];
+    if (!suites || suites.length ===0) {
+      await evalActions.refreshSuites(deleteTarget.agentId, deleteTarget.agentSource);
+      suites = useEvaluationStore.getState().suitesByAgent[key] || [];
+    }
     await Promise.all(suites.map((s) => evalActions.remove(s.id)));
     if (isRowActive(deleteTarget)) {
       router.push("/evaluation");
     }
     setDeleteTarget(null);
+    void evalActions.refreshAgents();
   };
 
   return (

@@ -52,7 +52,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       .where(
         and(
           eq(VerificationSuiteTable.mcpServerId, mcpServerId),
-          eq(VerificationSuiteTable.toolName, toolName)
+          eq(VerificationSuiteTable.toolName, toolName),
+          eq(VerificationSuiteTable.createdBy, session.user.id),
         )
       )
       .limit(1);
@@ -82,7 +83,12 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     const [existingSuite] = await db
       .select()
       .from(VerificationSuiteTable)
-      .where(eq(VerificationSuiteTable.workflowId, workflowId))
+      .where(
+        and(
+          eq(VerificationSuiteTable.workflowId, workflowId),
+          eq(VerificationSuiteTable.createdBy, session.user.id),
+        )
+      )
       .limit(1);
 
     if (existingSuite) {

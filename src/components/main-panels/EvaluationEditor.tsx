@@ -142,7 +142,7 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
   const [editingSuite, setEditingSuite] = useState<EvalSuiteRow | null>(null);
   const [isCreatingSuite, setIsCreatingSuite] = useState(false);
   const [editingCase, setEditingCase] = useState<EvalCaseRow | null>(null);
-  const [creatingCaseSuiteId, setCreatingCaseSuiteId] = useState<string | null>(null);
+  const [isCreatingCase, setIsCreatingCase] = useState(false);
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<
@@ -213,7 +213,6 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
   }
 
   async function handleCaseCreate(updated: { name: string; suiteId: string }): Promise<void> {
-    if (!creatingCaseSuiteId) return;
     const newCase = await evalCaseActions.create(updated.suiteId, {
       name: updated.name,
       turns: [],
@@ -222,7 +221,7 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
     if (newCase) {
       setSelectedCaseId(newCase.id);
     }
-    setCreatingCaseSuiteId(null);
+    setIsCreatingCase(false);
   }
 
   async function handleCaseSave(updated: { name: string; suiteId: string }): Promise<void> {
@@ -232,6 +231,10 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
       { name: updated.name, suiteId: updated.suiteId }
     );
     setEditingCase(null);
+  }
+
+  async function handleToggleVisibility(suiteId: string, next: "public" | "private"): Promise<void> {
+    await evalActions.patch(suiteId, { visibility: next });
   }
 
   // Delete handlers
@@ -325,8 +328,9 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
             onEditSuite={handleSuiteEdit}
             onDeleteSuite={handleDeleteSuiteRequest}
             onDeleteCase={handleDeleteCaseRequest}
-            onCreateCase={setCreatingCaseSuiteId}
+            onCreateCase={() => setIsCreatingCase(true)}
             onEditCase={setEditingCase}
+            onToggleVisibility={handleToggleVisibility}
           />
         </div>
 
@@ -339,7 +343,7 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
             liveRun={liveRun}
             onRunCase={(id) => handleRunCase(id, selected!.suite.id)}
             pinnedOutcome={pinnedOutcome}
-            pinnedRunId={selectedRunId}
+            pinnedRunId={selectedRunId ?? (isLiveTerminal ? activeRunId : null)}
             selectedRunSeq={selectedRunSeq}
           />
         ) : (
@@ -369,12 +373,12 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
       )}
 
       {/* Case create dialog */}
-      {creatingCaseSuiteId && (
+      {isCreatingCase && (
         <EvalCaseEditDialog
           open
-          onOpenChange={(open) => { if (!open) setCreatingCaseSuiteId(null); }}
+          onOpenChange={setIsCreatingCase}
           suites={suites}
-          defaultSuiteId={creatingCaseSuiteId}
+          defaultSuiteId={undefined}
           onSave={handleCaseCreate}
         />
       )}

@@ -19,8 +19,11 @@ import {
   CircleCheck,
   CircleX,
   CircleAlert,
-  Plus,
+  SquarePlus,
+  Globe,
+  Lock,
 } from "lucide-react";
+import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -64,6 +67,58 @@ interface EvalSuiteTreeProps {
   onDeleteCase: (caseId: number, suiteId: string) => void;
   onCreateCase: (suiteId: string) => void;
   onEditCase: (c: EvalCaseRow) => void;
+  onToggleVisibility: (suiteId: string, next: "public" | "private") => void;
+}
+
+function SuiteActions(
+  { suite, onEditSuite, onDeleteSuite, onToggleVisibility }: 
+  { 
+    suite: EvalSuiteRow; 
+    onEditSuite: (suiteId: string) => void; 
+    onDeleteSuite: (suiteId: string) => void; 
+    onToggleVisibility: (suiteId: string, next: "public" | "private") => void 
+  }): ReactNode {
+    const isPublic = suite.visibility === "public";
+    const { canChangeVisibility } = useResourcePermissions({source: "local" as const, visibility: suite.visibility, createdBy: suite.createdBy});
+    return (
+      <div className="flex items-center gap-0.5">
+      <Button
+        type="button"
+        variant="ghost"
+        title="Edit suite"
+        className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
+        onClick={() => onEditSuite(suite.id)}
+      >
+        <Pencil className="h-3 w-3" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        title="Delete suite"
+        className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
+        onClick={() => onDeleteSuite(suite.id)}
+      >
+        <Trash2 className="h-3 w-3" />
+      </Button>
+      {canChangeVisibility ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
+          onClick={() => onToggleVisibility(suite.id, isPublic ? "private" : "public")}
+          title={isPublic ? "Make private" : "Make public"}
+        >
+          {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+        </Button>
+      ) : (
+        <span className="sharink-0 p-0.5 text-muted-foreground/70">
+          {
+            isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />
+          }
+        </span>
+      )}
+      </div>
+    );
 }
 
 export function EvalSuiteTree({
@@ -80,6 +135,7 @@ export function EvalSuiteTree({
   onDeleteCase,
   onCreateCase,
   onEditCase,
+  onToggleVisibility,
 }: EvalSuiteTreeProps): ReactNode {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
@@ -115,7 +171,17 @@ export function EvalSuiteTree({
             ({totalCases})
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1.5" />
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            title="New case"
+            className="h-6 w-6 p-0"
+            onClick={() => onCreateCase("")}
+          >
+            <SquarePlus className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {suites.length === 0 ? (
@@ -157,30 +223,12 @@ export function EvalSuiteTree({
                 {!suite.enabled && (
                   <span title="Disabled"><CircleSlash className="h-3 w-3 shrink-0 text-muted-foreground" /></span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => onCreateCase(suite.id)}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
-                  title="Add case"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onEditSuite(suite.id)}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
-                  title="Edit suite"
-                >
-                  <Pencil className="h-3 w-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDeleteSuite(suite.id)}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                  title="Delete suite"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
+                <SuiteActions 
+                  suite={suite} 
+                  onEditSuite={onEditSuite}
+                  onDeleteSuite={onDeleteSuite}
+                  onToggleVisibility={onToggleVisibility}
+                />
                 {/* Live run status badge */}
                 {runningSuiteId === suite.id && liveRun.phase !== "idle" && liveRun.totals && (
                   <span className="shrink-0 text-[9px] font-mono tabular-nums text-muted-foreground">
@@ -227,13 +275,15 @@ export function EvalSuiteTree({
                         <div className="shrink-0 flex items-center justify-center">
                           <VerdictBadge verdict={verdict} />
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onSelectCase(c.id)}
-                          className="min-w-0 flex-1 truncate text-left text-xs"
-                        >
-                          {c.name}
-                        </button>
+                        <div className="min-w-0 flex-1 flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => onSelectCase(c.id)}
+                            className="max-w-full truncate text-left text-xs cursor-pointer hover:underline"
+                          >
+                            {c.name}
+                          </button>
+                        </div>
                          <button
                           type="button"
                           onClick={() => onEditCase(c)}

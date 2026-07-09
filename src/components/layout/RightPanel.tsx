@@ -255,6 +255,7 @@ function RightPanelToolbar(): ReactNode {
               onOpenChange={setEvalDialogOpen}
               agentId={activeAgentId}
               agentSource={activeAgentSource || "builtin"}
+              credentialId={activeCredentialId}
               threadId={runtimeThreadId}
             />
           )}

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 
-import { visibilitySql } from "@/lib/auth/permissions";
+import { canEditResource, visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { McpServerTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
@@ -33,6 +33,20 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
 
   if (body.suiteId) {
     const suite = await loadVisibleSuite(body.suiteId, session);
+
+    if (!canEditResource(
+      {
+        visibility: suite.visibility as "private" | "public",
+        createdBy: suite.createdBy,
+      },
+      session,
+    )) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "You cannot run suite.",
+      );
+    }
 
     if (!suite.enabled) {
       throw new ApiError(

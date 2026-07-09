@@ -27,8 +27,7 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
   const rows = await storage.listSuitesByAgentWithCaseCount(
     agentId,
     agentSource,
-    session.user.id,
-    session.user.role === "admin",
+    session,
   );
   return NextResponse.json(rows);
 });
@@ -45,6 +44,7 @@ const createSchema = z
     description: z.string().max(1000).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
     enabled: z.boolean().optional(),
+    visibility: z.enum(["private", "public"]).optional(),
   })
   .strict();
 

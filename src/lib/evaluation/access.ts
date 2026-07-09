@@ -3,7 +3,7 @@
 import "server-only";
 
 import { z } from "zod";
-
+import { canViewResource } from "@/lib/auth/permissions";
 import { ApiError, type Session } from "@/lib/http/route-handlers";
 import type { EvalCaseEntity, EvalSuiteEntity } from "@/lib/db/schema";
 
@@ -22,8 +22,9 @@ export async function loadSuite(
   if (!row) {
     throw new ApiError("NOT_FOUND", 404, "Eval suite not found.");
   }
-  // SECURITY: eval suites are scoped to creator (private by design).
-  if (row.createdBy !== session.user.id && session.user.role !== "admin") {
+  // SECURITY: unified visibility check - admin sees all, others see
+  // public suites + own private suites.
+  if (!canViewResource({ visibility: row.visibility as "public" | "private", createdBy: row.createdBy }, session)) {
     throw new ApiError("NOT_FOUND", 404, "Eval suite not found.");
   }
   return row;
@@ -46,7 +47,7 @@ export async function loadCase(
   if (!suite) {
     throw new ApiError("NOT_FOUND", 404, "Eval case not found.");
   }
-  if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
+  if (!canViewResource({ visibility: suite.visibility as "public" | "private", createdBy: suite.createdBy }, session)) {
     throw new ApiError("NOT_FOUND", 404, "Eval case not found.");
   }
   return { caseRow, suite };

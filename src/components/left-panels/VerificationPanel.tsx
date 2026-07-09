@@ -7,11 +7,8 @@ import {
   Play,
   Trash2,
   Loader2,
-  Globe,
-  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useRole } from "@/hooks/useRole";
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,9 +42,7 @@ interface ServerRowProps {
   onSelect: () => void;
   onStartRun: (e: React.MouseEvent) => void;
   onDeleteRequest: (e: React.MouseEvent) => void;
-  onToggleVisibility: (e: React.MouseEvent) => void;
   running: boolean;
-  visibilityUpdating: boolean;
 }
 
 function ServerRow({
@@ -56,12 +51,8 @@ function ServerRow({
   onSelect,
   onStartRun,
   onDeleteRequest,
-  onToggleVisibility,
   running,
-  visibilityUpdating,
 }: ServerRowProps): ReactNode {
-  const { isAdmin } = useRole();
-  const canModifyVisibility = isAdmin || row.hasOwnSuites;
 
   const displayName = row.serverTitle || row.name;
   return (
@@ -95,39 +86,9 @@ function ServerRow({
         )}
       </div>
 
-      {/* ── Right cluster: visibility + run + delete (always visible) ── */}
+      {/* ── Right cluster: run + delete (always visible) ── */}
       <div className="flex shrink-0 items-center gap-2 ml-2">
-        {/* 1. Visibility toggle */}
-        {canModifyVisibility ? (
-          <button
-            type="button"
-            onClick={onToggleVisibility}
-            disabled={visibilityUpdating}
-            className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground disabled:opacity-50 transition-colors shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Visibility"
-          >
-            {visibilityUpdating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : row.verificationVisibility === "public" ? (
-              <Globe className="h-3.5 w-3.5 text-primary fill-primary/10" />
-            ) : (
-              <Lock className="h-3.5 w-3.5" />
-            )}
-          </button>
-        ) : (
-          <div
-            className="p-0.5 shrink-0 text-muted-foreground/40 cursor-not-allowed opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Only administrators or the owner can change the verification visibility of this server."
-          >
-            {row.verificationVisibility === "public" ? (
-              <Globe className="h-3.5 w-3.5 text-muted-foreground/60" />
-            ) : (
-              <Lock className="h-3.5 w-3.5 text-muted-foreground/40" />
-            )}
-          </div>
-        )}
-
-        {/* 2. Start Run */}
+        {/* Start Run */}
         <button
           type="button"
           onClick={onStartRun}
@@ -208,7 +169,6 @@ export function VerificationPanel(): ReactNode {
 
   const [newCaseOpen, setNewCaseOpen] = useState(false);
   const [runningServerId, setRunningServerId] = useState<string | null>(null);
-  const [updatingVisibilityId, setUpdatingVisibilityId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<VerificationServerRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -239,30 +199,6 @@ export function VerificationPanel(): ReactNode {
       toast.error("Failed to start regression run");
     } finally {
       setRunningServerId(null);
-    }
-  };
-
-  const handleToggleServerVisibility = async (
-    serverId: string,
-    currentVisibility: string,
-    e: React.MouseEvent,
-  ): Promise<void> => {
-    e.stopPropagation();
-    const next = currentVisibility === "public" ? "private" : "public";
-    setUpdatingVisibilityId(serverId);
-    try {
-      const res = await fetch(`/api/verification-servers/${serverId}/visibility`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility: next }),
-      });
-      if (!res.ok) throw new Error(`${res.status}`);
-      toast.success(`Server verification visibility set to ${next}`);
-      void verificationActions.refresh("mcp");
-    } catch {
-      toast.error("Failed to update verification visibility");
-    } finally {
-      setUpdatingVisibilityId(null);
     }
   };
 
@@ -355,11 +291,7 @@ export function VerificationPanel(): ReactNode {
                   e.stopPropagation();
                   setDeleteTarget(row);
                 }}
-                onToggleVisibility={(e) =>
-                  void handleToggleServerVisibility(row.id, row.verificationVisibility, e)
-                }
                 running={runningServerId === row.id}
-                visibilityUpdating={updatingVisibilityId === row.id}
               />
             ))
           )}

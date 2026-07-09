@@ -320,11 +320,11 @@ function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
       type="button"
       onClick={onClick}
       className={cn(
-        "flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ring-1 ring-inset transition-colors",
-        v.ring,
+        "flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ring-[1.5px] ring-inset transition-colors",
+        "ring-border/70",
         selected
           ? "bg-accent text-foreground"
-          : cn(v.bg, "hover:brightness-110"),
+          : "bg-transparent hover:bg-muted/50",
       )}
       title={formatTimestamp(run.startedAt, tz)}
       aria-label={`Run ${label}, status ${run.status}`}

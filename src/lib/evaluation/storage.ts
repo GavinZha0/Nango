@@ -2,8 +2,9 @@
 
 import "server-only";
 
-import { asc, desc, eq, sql, inArray } from "drizzle-orm";
-
+import { asc, desc, eq, sql, and, inArray } from "drizzle-orm";
+import { visibilitySql } from "@/lib/auth/permissions";
+import type { Session } from "@/lib/http/route-handlers";
 import { db } from "@/lib/db";
 import {
   EvalCaseTable,
@@ -28,6 +29,7 @@ export interface CreateSuiteInput {
   description?: string | null;
   dimensionIds?: string[];
   enabled?: boolean;
+  visibility?: "public" | "private";
   createdBy: string;
 }
 
@@ -45,6 +47,7 @@ export async function createSuite(
       description: input.description ?? null,
       dimensionIds: input.dimensionIds ?? [],
       enabled: input.enabled ?? true,
+      visibility: input.visibility ?? "private",
       createdBy: input.createdBy,
       updatedBy: input.createdBy,
     })
@@ -82,6 +85,7 @@ export interface UpdateSuiteInput {
   evaluatorAgentId?: string | null;
   dimensionIds?: string[];
   enabled?: boolean;
+  visibility?: "public" | "private";
 }
 
 export async function updateSuite(
@@ -96,6 +100,7 @@ export async function updateSuite(
     updates.evaluatorAgentId = input.evaluatorAgentId;
   if (input.dimensionIds !== undefined) updates.dimensionIds = input.dimensionIds;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
+  if (input.visibility !== undefined) updates.visibility = input.visibility;
   updates.updatedAt = sql`CURRENT_TIMESTAMP`;
 
   const [row] = await db
@@ -220,10 +225,9 @@ export interface EvalAgentRow {
 }
 
 export async function listAgentsWithEval(
-  userId: string,
-  isAdmin: boolean = false,
+  session: Session
 ): Promise<EvalAgentRow[]> {
-  const query = db
+  const rows = await db
     .select({
       agentId: EvalSuiteTable.agentId,
       agentSource: EvalSuiteTable.agentSource,
@@ -232,13 +236,8 @@ export async function listAgentsWithEval(
       caseCount: sql<number>`count(${EvalCaseTable.id})::int`,
     })
     .from(EvalSuiteTable)
-    .leftJoin(EvalCaseTable, eq(EvalCaseTable.suiteId, EvalSuiteTable.id));
-
-  if (!isAdmin) {
-    query.where(eq(EvalSuiteTable.createdBy, userId));
-  }
-
-  const rows = await query
+    .leftJoin(EvalCaseTable, eq(EvalCaseTable.suiteId, EvalSuiteTable.id))
+    .where(visibilitySql(session, EvalSuiteTable.visibility, EvalSuiteTable.createdBy))
     .groupBy(EvalSuiteTable.agentId, EvalSuiteTable.agentSource)
     .orderBy(asc(EvalSuiteTable.agentId));
   return rows;
@@ -251,13 +250,8 @@ export interface EvalSuiteRow extends EvalSuiteEntity {
 export async function listSuitesByAgentWithCaseCount(
   agentId: string,
   agentSource: string,
-  userId: string,
-  isAdmin: boolean = false,
+  session: Session,
 ): Promise<EvalSuiteRow[]> {
-  const createdByClause = isAdmin
-    ? sql`true`
-    : sql`${EvalSuiteTable.createdBy} = ${userId}`;
-
   const rows = await db
     .select({
       id: EvalSuiteTable.id,
@@ -269,6 +263,7 @@ export async function listSuitesByAgentWithCaseCount(
       description: EvalSuiteTable.description,
       dimensionIds: EvalSuiteTable.dimensionIds,
       enabled: EvalSuiteTable.enabled,
+      visibility: EvalSuiteTable.visibility,
       createdBy: EvalSuiteTable.createdBy,
       updatedBy: EvalSuiteTable.updatedBy,
       createdAt: EvalSuiteTable.createdAt,
@@ -280,9 +275,11 @@ export async function listSuitesByAgentWithCaseCount(
     })
     .from(EvalSuiteTable)
     .where(
-      sql`${EvalSuiteTable.agentId} = ${agentId}
-        AND ${EvalSuiteTable.agentSource} = ${agentSource}
-        AND ${createdByClause}`,
+      and(
+        eq(EvalSuiteTable.agentId, agentId),
+        eq(EvalSuiteTable.agentSource, agentSource),
+        visibilitySql(session, EvalSuiteTable.visibility, EvalSuiteTable.createdBy),
+      )
     )
     .orderBy(asc(EvalSuiteTable.name));
   return rows;

@@ -26,6 +26,7 @@ export interface EvalSuiteRow {
   description: string | null;
   dimensionIds: string[];
   enabled: boolean;
+  visibility: "private" | "public";
   createdBy: string;
   updatedBy: string | null;
   createdAt: string;
@@ -148,6 +149,7 @@ export interface PatchSuiteInput {
   evaluatorAgentId?: string | null;
   dimensionIds?: string[];
   enabled?: boolean;
+  visibility?: "private" | "public";
 }
 
 async function readErrorMessage(res: Response): Promise<string> {
@@ -247,7 +249,7 @@ export const evalActions = {
     }
   },
 
-  async ensureDraftSuite(agentId: string, agentSource: string = "builtin"): Promise<string | null> {
+  async ensureDraftSuite(agentId: string, agentSource: string = "builtin", credentialId?: string): Promise<string | null> {
     const key = agentKey(agentId, agentSource);
     const store = useEvaluationStore.getState();
     if (!store.suitesLoaded[key]) {
@@ -266,8 +268,9 @@ export const evalActions = {
     const newSuite = await this.create({
       agentId,
       agentSource,
+      credentialId: credentialId ?? null,
       name: "Drafts",
-      dimensionIds: [], // Empty default dimensions
+      dimensionIds: [],
       description: "Auto-generated suite for capturing conversational feedback.",
     });
     
