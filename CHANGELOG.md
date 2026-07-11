@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/GavinZha0/Nango/compare/v0.7.0...v0.7.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* max/min issue of outcomes ([8ece39f](https://github.com/GavinZha0/Nango/commit/8ece39f41c95d7445a2cfb7aec66491fa1faff3c))
+
 ## [0.7.0](https://github.com/GavinZha0/Nango/compare/v0.6.4...v0.7.0) (2026-07-11)
 
 
