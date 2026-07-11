@@ -26,9 +26,10 @@ interface Props {
 }
 
 export function ChartBlockRenderer({ block, size = "compact" }: Props): ReactElement {
-  const heightClass = size === "large" ? "h-[480px]" : "h-[400px]";
+  const isLarge = size === "large";
+  const heightClass = isLarge ? "flex-1 h-full min-h-[480px]" : "h-[400px]";
   return (
-    <div className={`${heightClass} w-full`}>
+    <div className={`${heightClass} w-full flex flex-col`}>
       <EChartsRenderer option={block.option} />
     </div>
   );

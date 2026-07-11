@@ -14,7 +14,7 @@ import {
 import {
   ChevronRight,
   Loader2,
-  Pencil,
+  SquarePen,
   RefreshCw,
   Save,
   Settings,
@@ -125,7 +125,7 @@ function ValueCell({
           className="shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
           aria-label={`Edit ${row.key}`}
         >
-          <Pencil className="h-3 w-3 text-muted-foreground" />
+          <SquarePen className="h-3 w-3 text-muted-foreground" />
         </button>
       </div>
     );

@@ -13,7 +13,7 @@ import {
   ChevronRight,
   CircleSlash,
   Loader2,
-  Pencil,
+  SquarePen,
   Play,
   Trash2,
   CircleCheck,
@@ -89,7 +89,7 @@ function SuiteActions(
         className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
         onClick={() => onEditSuite(suite.id)}
       >
-        <Pencil className="h-3 w-3" />
+        <SquarePen className="h-3 w-3" />
       </Button>
       <Button
         type="button"
@@ -290,7 +290,7 @@ export function EvalSuiteTree({
                           className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-foreground mr-0.5"
                           title="Edit case"
                         >
-                          <Pencil className="h-2.5 w-2.5" />
+                          <SquarePen className="h-2.5 w-2.5" />
                         </button>
                         <button
                           type="button"

@@ -139,11 +139,13 @@ export function OutcomeCard({
         if (isEnlarged) return; // collapse is disabled in enlarged mode
         toggleCollapse(outcome.outcomeId);
       }}
+      className={cn(isEnlarged && "h-full flex flex-col")}
     >
       <Card
         ref={cardRef}
         className={cn(
           "overflow-hidden transition-shadow",
+          isEnlarged && "h-full flex flex-col",
           // Selected = the user just clicked "View in Outcomes" on this
           // card's preview. Ring fades out naturally once the user
           // clicks another preview (selectedId changes).
@@ -267,8 +269,8 @@ export function OutcomeCard({
           </button>
         </CardHeader>
 
-        <CollapsibleContent>
-          <CardContent className="px-3 pb-3 pt-0">
+        <CollapsibleContent className={cn(isEnlarged && "flex-grow flex flex-col min-h-0 overflow-hidden")}>
+          <CardContent className={cn("px-3 pb-3 pt-0", isEnlarged && "flex-grow flex flex-col min-h-0 overflow-hidden")}>
             {/* Body is content-sized — each block owns its own height
                 contract. The error boundary catches throws from any
                 block renderer (e.g. ECharts mis-configuration) and

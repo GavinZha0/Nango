@@ -24,15 +24,16 @@ interface Props {
 }
 
 export function HtmlBlockRenderer({ block, size = "compact" }: Props): ReactElement {
-  const heightClass = size === "large" ? "h-[480px]" : "h-[400px]";
+  const isLarge = size === "large";
+  const heightClass = isLarge ? "flex-1 h-full min-h-[480px]" : "h-[400px]";
   return (
-    <div className={`${heightClass} w-full`}>
+    <div className={`${heightClass} w-full flex flex-col`}>
       <iframe
         srcDoc={block.html}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
         title="Generated HTML page"
-        className="h-full w-full rounded border border-border bg-white"
+        className="h-full w-full rounded border border-border bg-white flex-1"
       />
     </div>
   );

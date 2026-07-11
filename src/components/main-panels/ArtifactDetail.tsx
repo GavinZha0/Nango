@@ -30,7 +30,7 @@ import {
   Loader2,
   MoreHorizontal,
   Move,
-  Pencil,
+  SquarePen,
   RefreshCw,
   Sparkles,
   Trash2,
@@ -708,7 +708,7 @@ function ActionBar({
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuItem onClick={onRename}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />
+              <SquarePen className="mr-2 h-3.5 w-3.5" />
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onMove}>

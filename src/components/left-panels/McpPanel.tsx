@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  Pencil,
+  SquarePen,
   X,
   Globe,
   Lock,
@@ -485,7 +485,7 @@ function ServerHeader({
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground"
             aria-label="Edit server"
           >
-            <Pencil className="h-3 w-3" />
+            <SquarePen className="h-3 w-3" />
           </button>
         )}
 

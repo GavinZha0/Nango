@@ -70,7 +70,7 @@ function UserMenu(): ReactNode {
         <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground select-none">
           {userInitial}
         </div>
-        <span className="hidden text-sm font-medium text-foreground sm:inline">
+        <span className="hidden text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground sm:inline">
           {userName}
         </span>
         <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -167,15 +167,15 @@ function ChatToggleButton(): ReactNode {
           "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
           rightPanelOpen
             ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            : "text-foreground hover:bg-accent hover:text-accent-foreground"
         )}
         aria-label="Toggle chat panel"
         aria-pressed={rightPanelOpen}
       >
-        <BotMessageSquare className="h-4 w-4" />
+        <BotMessageSquare className="h-5 w-5" />
       </TooltipTrigger>
       <TooltipContent side="bottom">
-        <p>{rightPanelOpen ? "Close chat" : "Open chat"}</p>
+        <p>Chatbot</p>
       </TooltipContent>
     </Tooltip>
   );

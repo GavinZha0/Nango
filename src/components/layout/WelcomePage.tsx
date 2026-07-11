@@ -29,9 +29,6 @@ export function WelcomePage(): ReactNode {
         <h1 className="text-2xl font-bold tracking-tight">
           Welcome to Nango
         </h1>
-        <p className="text-muted-foreground">
-          Your AI-powered workbench — all in one place.
-        </p>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -64,7 +61,7 @@ export function WelcomePage(): ReactNode {
       </div>
 
       <p className="mt-6 text-xs text-muted-foreground">
-        Open the Chat panel on the right to get started
+        Your AI-powered workbench
       </p>
     </div>
   );

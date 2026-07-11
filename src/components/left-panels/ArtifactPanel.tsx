@@ -27,7 +27,7 @@ import {
   FolderPlus,
   Loader2,
   MoreHorizontal,
-  Pencil,
+  SquarePen,
   RefreshCw,
   Search,
   Sparkles,
@@ -430,7 +430,7 @@ function NodeRow({
                 <DropdownMenuItem
                   onClick={() => onMenuAction("rename", { node, isSeed })}
                 >
-                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                  <SquarePen className="mr-2 h-3.5 w-3.5" />
                   Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem

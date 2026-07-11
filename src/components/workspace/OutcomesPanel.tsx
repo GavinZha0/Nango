@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { LayoutDashboard, RotateCcw } from "lucide-react";
+import { Sprout, RotateCcw } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspace";
 import { useOutcomeStore } from "@/store/outcome-store";
@@ -64,7 +64,7 @@ export function OutcomesPanel(): ReactNode {
             />
           ))}
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-grow flex flex-col p-4 h-full overflow-hidden">
           <OutcomeCard
             outcome={enlargedOutcome}
             viewState="enlarged"
@@ -111,13 +111,9 @@ function PanelEmpty(): ReactNode {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
-        <LayoutDashboard className="h-6 w-6 text-primary" />
+        <Sprout className="h-6 w-6 text-primary" />
       </div>
       <p className="text-sm font-medium">No outcomes in this conversation yet</p>
-      <p className="max-w-prose text-xs">
-        Ask your agent to chart data from one of your data sources — the chart
-        will appear here as a card you can collapse, save, or remove.
-      </p>
     </div>
   );
 }

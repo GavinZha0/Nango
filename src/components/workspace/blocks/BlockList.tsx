@@ -42,8 +42,9 @@ export function BlockList({ blocks, size = "compact" }: BlockListProps): ReactEl
   // `space-y-3` between blocks; padding lives on the outer OutcomeCard
   // body. Inner blocks render edge-to-edge so a single block (e.g. a
   // chart) doesn't get an awkward extra inset.
+  const isLarge = size === "large";
   return (
-    <div className="space-y-3">
+    <div className={`space-y-3 ${isLarge ? "flex-grow flex flex-col min-h-0" : ""}`}>
       {blocks.map((b, i) => (
         <BlockSwitch key={i} block={b} size={size} />
       ))}

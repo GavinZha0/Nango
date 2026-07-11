@@ -11,7 +11,7 @@ import {
   Clock,
   Globe,
   Lock,
-  Pencil,
+  SquarePen,
   Play,
   Trash2,
   SquarePlus,
@@ -325,7 +325,7 @@ function CaseRow({
             "opacity-0 group-hover/case-row:opacity-100 group-focus-within/case-row:opacity-100 focus-visible:opacity-100",
           )}
         >
-          <Pencil className="h-3 w-3" />
+          <SquarePen className="h-3 w-3" />
         </button>
       )}
       {onRequestDelete && (
