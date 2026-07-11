@@ -65,7 +65,7 @@ export function NameField({ initial }: NameFieldProps): ReactNode {
             setJustSaved(false);
           }}
           placeholder="Your name"
-          className="max-w-xs"
+          className="max-w-[300px]"
           aria-invalid={error !== null || undefined}
         />
         <Button

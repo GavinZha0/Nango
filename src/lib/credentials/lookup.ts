@@ -74,6 +74,13 @@ export interface ObservabilityCredentialConfig {
   secretKey: string | null;
 }
 
+export interface VoiceCredentialConfig {
+  id: string;
+  provider: string;
+  host: string | null;
+  apiKey: string | null;
+}
+
 // Helpers
 
 function decryptPayloadSafely(encryptedPayload: string): Record<string, unknown> | null {
@@ -120,12 +127,14 @@ const credTtlMs = (): number => getConfigMs("cache.credential.ttl", DEFAULT_TTL_
 
 /** Wrapper so lru-cache can store a "checked but none found" sentinel (value.config === null). */
 interface ObservabilityCacheEntry { config: ObservabilityCredentialConfig | null; }
+interface VoiceCacheEntry { config: VoiceCredentialConfig | null; }
 
 interface CredentialCacheHolder {
   configById: LRUCache<string, CredentialFullConfig>;
   fieldsById: LRUCache<string, CredentialFieldsConfig>;
   agentCredentials: LRUCache<string, CredentialFullConfig[]>;
   observabilityCredential: LRUCache<string, ObservabilityCacheEntry>;
+  voiceCredential: LRUCache<string, VoiceCacheEntry>;
   /** Pinned with the caches so dev-time HMR ordering between this
    *  module and `observability/langfuse.ts` can't drop the subscription. */
   invalidationSubscribers: Array<() => void>;
@@ -141,13 +150,19 @@ const credentialCacheHolder: CredentialCacheHolder =
     fieldsById: new LRUCache<string, CredentialFieldsConfig>({ max: 200, ttl: credTtlMs() }),
     agentCredentials: new LRUCache<string, CredentialFullConfig[]>({ max: 1, ttl: credTtlMs() }),
     observabilityCredential: new LRUCache<string, ObservabilityCacheEntry>({ max: 1, ttl: credTtlMs() }),
+    voiceCredential: new LRUCache<string, VoiceCacheEntry>({ max: 4, ttl: credTtlMs() }),
     invalidationSubscribers: [],
   });
+
+if (!credentialCacheHolder.voiceCredential) {
+  credentialCacheHolder.voiceCredential = new LRUCache<string, VoiceCacheEntry>({ max: 4, ttl: credTtlMs() });
+}
 
 const configByIdCache = credentialCacheHolder.configById;
 const fieldsByIdCache = credentialCacheHolder.fieldsById;
 const agentCredentialsCache = credentialCacheHolder.agentCredentials;
 const observabilityCredentialCache = credentialCacheHolder.observabilityCredential;
+const voiceCredentialCache = credentialCacheHolder.voiceCredential;
 
 /** Subscribers notified on `invalidateCredentialCache()`. Used by
  *  downstream caches that key off credential data (Langfuse client
@@ -168,6 +183,7 @@ export function invalidateCredentialCache(): void {
   agentCredentialsCache.clear();
   fieldsByIdCache.clear();
   observabilityCredentialCache.clear();
+  voiceCredentialCache.clear();
   for (const cb of cacheInvalidationSubscribers) {
     try {
       cb();
@@ -194,12 +210,14 @@ export function _cacheSizes(): {
   fields: number;
   agents: number;
   observability: number;
+  voice: number;
 } {
   return {
     config: configByIdCache.size,
     fields: fieldsByIdCache.size,
     agents: agentCredentialsCache.size,
     observability: observabilityCredentialCache.size,
+    voice: voiceCredentialCache.size,
   };
 }
 
@@ -485,5 +503,50 @@ export async function getEnabledObservabilityCredential(): Promise<Observability
   };
 
   observabilityCredentialCache.set(SINGLETON, { config });
+  return config;
+}
+
+export async function getEnabledVoiceCredential(provider: string): Promise<VoiceCredentialConfig | null> {
+  const cacheKey = `voice:provider:${provider}`;
+  const cached: VoiceCacheEntry | undefined = voiceCredentialCache.get(cacheKey);
+  if (cached) return cached.config;
+
+  const rows = await db
+  .select({
+    id: CredentialTable.id,
+    encryptedPayload: CredentialTable.encryptedPayload,
+    restUrl: CredentialTable.restUrl,
+    provider: CredentialTable.provider,
+  })
+  .from(CredentialTable)
+  .where(
+    and(
+      eq(CredentialTable.serviceType, "voice"),
+      eq(CredentialTable.provider, provider),
+      eq(CredentialTable.enabled, true),
+    ),
+  )
+  .orderBy(desc(CredentialTable.createdAt))
+  .limit(1);
+
+  const match = rows[0];
+
+  if(!match) {
+    voiceCredentialCache.set(cacheKey, { config: null });
+    return null;
+  }
+  
+  const fields = decryptPayloadSafely(match.encryptedPayload) ?? {};
+  const apiKey = typeof fields.apiKey === "string" ? fields.apiKey 
+    : typeof fields.token === "string" ? fields.token : null;
+    
+  const config: VoiceCredentialConfig = {
+    id: match.id,
+    provider: match.provider ?? "",
+    host: match.restUrl ?? null,
+    apiKey: apiKey,
+  };
+  
+  voiceCredentialCache.set(cacheKey, { config });
   return config;
 }

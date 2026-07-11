@@ -12,6 +12,7 @@ import {
 import type {
   AbstractAgent,
   AgentRunner,
+  TranscriptionService,
 } from "@/lib/copilot/index.server";
 
 import { childLogger } from "@/lib/observability/logger";
@@ -80,6 +81,7 @@ export interface RunWithAgentsInput {
   trimMessages: boolean;
   entitySource: EntitySource;
   diag?: RunWithAgentsDiag;
+  transcriptionService?: TranscriptionService;
 }
 
 /**
@@ -104,6 +106,7 @@ export async function runWithAgents(
   const runtime = new CopilotRuntime({
     agents: input.agents,
     ...(input.runner ? { runner: input.runner } : {}),
+    ...(input.transcriptionService ? { transcriptionService: input.transcriptionService } : {}),
   });
 
   const handler = createCopilotRuntimeHandler({

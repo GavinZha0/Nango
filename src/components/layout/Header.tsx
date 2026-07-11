@@ -9,7 +9,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Bot, FlaskConical, Medal, MessagesSquare, LogOut, UserRound, ChevronDown, Sun, Moon } from "lucide-react";
+import { Bot, FlaskConical, Medal, BotMessageSquare, LogOut, UserRound, ChevronDown, Sun, Moon } from "lucide-react";
 import { useActiveTasksStore, type ActiveTask } from "@/store/active-tasks";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -172,7 +172,7 @@ function ChatToggleButton(): ReactNode {
         aria-label="Toggle chat panel"
         aria-pressed={rightPanelOpen}
       >
-        <MessagesSquare className="h-4 w-4" />
+        <BotMessageSquare className="h-4 w-4" />
       </TooltipTrigger>
       <TooltipContent side="bottom">
         <p>{rightPanelOpen ? "Close chat" : "Open chat"}</p>

@@ -237,3 +237,8 @@ body[style*="color-scheme: dark"] {
     @apply font-sans overflow-hidden;
   }
 }
+
+/* Hide CopilotKit built-in tooltips on toolbar buttons */
+[data-copilotkit][data-slot="tooltip-content"] {
+  display: none !important;
+}

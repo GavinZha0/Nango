@@ -502,6 +502,7 @@ const PROVIDER_TABS: ReadonlyArray<{
   { service: "integration", label: "Integration" },
   { service: "datasource", label: "Datasource" },
   { service: "calendar", label: "Calendar" },
+  { service: "voice", label: "Voice" },
 ];
 
 function ProviderPicker({ value, onChange }: ProviderPickerProps): ReactNode {

@@ -9,12 +9,13 @@
  */
 
 import { useState, type ReactNode } from "react";
-import { Loader2, Eye, EyeOff } from "lucide-react";
+import { Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
 
 import { authClient } from "@/lib/auth/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -96,105 +97,119 @@ export function PasswordField(): ReactNode {
   }
 
   return (
-    <form
-      className="space-y-3"
-      onSubmit={(e) => { e.preventDefault(); void save(); }}
-    >
-      <div className="grid gap-3">
-        {/* Current password */}
-        <div className="space-y-1">
-          <Label htmlFor="pw-current" className="text-xs">
-            Current password
-          </Label>
-          <div className="relative">
-            <Input
-              id="pw-current"
-              type={showCurrent ? "text" : "password"}
-              value={form.currentPassword}
-              onChange={(e) => { update("currentPassword", e.target.value); clearState(); }}
-              placeholder="Enter current password"
-              autoComplete="current-password"
-            />
-            <button
-              type="button"
-              aria-label={showCurrent ? "Hide current password" : "Show current password"}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setShowCurrent(!showCurrent)}
-              tabIndex={-1}
-            >
-              {showCurrent
-                ? <EyeOff className="h-3.5 w-3.5" />
-                : <Eye className="h-3.5 w-3.5" />}
-            </button>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div className="flex items-center gap-2">
+          <div className="rounded-md bg-primary/10 p-1.5">
+            <KeyRound className="h-4 w-4 text-primary" />
           </div>
+          <CardTitle className="text-base">Password</CardTitle>
         </div>
-
-        {/* New password */}
-        <div className="space-y-1">
-          <Label htmlFor="pw-new" className="text-xs">
-            New password
-          </Label>
-          <div className="relative">
-            <Input
-              id="pw-new"
-              type={showNew ? "text" : "password"}
-              value={form.newPassword}
-              onChange={(e) => { update("newPassword", e.target.value); clearState(); }}
-              placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
-              autoComplete="new-password"
-            />
-            <button
-              type="button"
-              aria-label={showNew ? "Hide new password" : "Show new password"}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setShowNew(!showNew)}
-              tabIndex={-1}
-            >
-              {showNew
-                ? <EyeOff className="h-3.5 w-3.5" />
-                : <Eye className="h-3.5 w-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Confirm new password */}
-        <div className="space-y-1">
-          <Label htmlFor="pw-confirm" className="text-xs">
-            Confirm new password
-          </Label>
-          <Input
-            id="pw-confirm"
-            type="password"
-            value={form.confirmPassword}
-            onChange={(e) => { update("confirmPassword", e.target.value); clearState(); }}
-            placeholder="Re-enter new password"
-            autoComplete="new-password"
-          />
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
         <Button
-          type="submit"
           size="sm"
-          disabled={!canSubmit}
+          disabled={!canSubmit || saving}
+          onClick={() => void save()}
+          className="h-8 px-3 text-xs"
         >
           {saving ? (
             <Loader2 className="h-3 w-3 animate-spin" />
           ) : (
-            "Change Password"
+            "Save"
           )}
         </Button>
-        {success && (
-          <span className="text-[11px] text-emerald-500">
-            Password changed successfully.
-          </span>
-        )}
-      </div>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => { e.preventDefault(); void save(); }}
+        >
+          <div className="grid gap-3">
+            {/* Current password */}
+            <div className="space-y-1">
+              <Label htmlFor="pw-current" className="text-xs">
+                Current password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="pw-current"
+                  type={showCurrent ? "text" : "password"}
+                  value={form.currentPassword}
+                  onChange={(e) => { update("currentPassword", e.target.value); clearState(); }}
+                  placeholder="Enter current password"
+                  autoComplete="current-password"
+                  className="h-8 text-xs"
+                />
+                <button
+                  type="button"
+                  aria-label={showCurrent ? "Hide current password" : "Show current password"}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowCurrent(!showCurrent)}
+                  tabIndex={-1}
+                >
+                  {showCurrent
+                    ? <EyeOff className="h-3.5 w-3.5" />
+                    : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
 
-      {error && (
-        <p className="text-xs text-destructive">{error}</p>
-      )}
-    </form>
+            {/* New password */}
+            <div className="space-y-1">
+              <Label htmlFor="pw-new" className="text-xs">
+                New password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="pw-new"
+                  type={showNew ? "text" : "password"}
+                  value={form.newPassword}
+                  onChange={(e) => { update("newPassword", e.target.value); clearState(); }}
+                  placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+                  autoComplete="new-password"
+                  className="h-8 text-xs"
+                />
+                <button
+                  type="button"
+                  aria-label={showNew ? "Hide new password" : "Show new password"}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowNew(!showNew)}
+                  tabIndex={-1}
+                >
+                  {showNew
+                    ? <EyeOff className="h-3.5 w-3.5" />
+                    : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Confirm new password */}
+            <div className="space-y-1">
+              <Label htmlFor="pw-confirm" className="text-xs">
+                Confirm new password
+              </Label>
+              <Input
+                id="pw-confirm"
+                type="password"
+                value={form.confirmPassword}
+                onChange={(e) => { update("confirmPassword", e.target.value); clearState(); }}
+                placeholder="Re-enter new password"
+                autoComplete="new-password"
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          {success && (
+            <p className="text-[11px] text-emerald-500 pt-1">
+              Password changed successfully.
+            </p>
+          )}
+
+          {error && (
+            <p className="text-xs text-destructive pt-1">{error}</p>
+          )}
+        </form>
+      </CardContent>
+    </Card>
   );
 }

@@ -59,7 +59,7 @@ beforeEach(() => {
 describe("run_skill_script", () => {
   it("rejects an unknown skill name with the available list", async () => {
     const tool = findTool("run_skill_script");
-    const r = (await tool.execute({ name: "nope", filename: "a.py" })) as {
+    const r = (await tool.execute!({ name: "nope", filename: "a.py" })) as {
       ok: false;
       error: string;
       available: string[];
@@ -71,7 +71,7 @@ describe("run_skill_script", () => {
 
   it("rejects an unsupported extension before touching storage", async () => {
     const tool = findTool("run_skill_script");
-    const r = (await tool.execute({
+    const r = (await tool.execute!({
       name: "csv_summarize",
       filename: "weird.exe",
     })) as { ok: false; error: string };
@@ -84,7 +84,7 @@ describe("run_skill_script", () => {
   it("returns 'not found' when the script row is missing", async () => {
     readFileMock.mockResolvedValue(null);
     const tool = findTool("run_skill_script");
-    const r = (await tool.execute({
+    const r = (await tool.execute!({
       name: "csv_summarize",
       filename: "missing.py",
     })) as { ok: false; error: string };
@@ -97,14 +97,14 @@ describe("run_skill_script", () => {
   it("normalises a bare filename to scripts/<filename>", async () => {
     readFileMock.mockResolvedValue(null);
     const tool = findTool("run_skill_script");
-    await tool.execute({ name: "csv_summarize", filename: "analyze.py" });
+    await tool.execute!({ name: "csv_summarize", filename: "analyze.py" });
     expect(readFileMock).toHaveBeenCalledWith("skill-uuid-1", "scripts/analyze.py");
   });
 
   it("accepts an explicit scripts/ prefix unchanged", async () => {
     readFileMock.mockResolvedValue(null);
     const tool = findTool("run_skill_script");
-    await tool.execute({
+    await tool.execute!({
       name: "csv_summarize",
       filename: "scripts/nested/inner.py",
     });
@@ -130,7 +130,7 @@ describe("run_skill_script", () => {
     });
 
     const tool = findTool("run_skill_script");
-    const r = (await tool.execute({
+    const r = (await tool.execute!({
       name: "csv_summarize",
       filename: "analyze.py",
       datasets: ["sales_q1"],
@@ -169,7 +169,7 @@ describe("run_skill_script", () => {
     });
 
     const tool = findTool("run_skill_script");
-    await tool.execute({ name: "csv_summarize", filename: "run.sh" });
+    await tool.execute!({ name: "csv_summarize", filename: "run.sh" });
     expect(adapterRunMock.mock.calls[0][0].command).toEqual(["bash", "-"]);
   });
 

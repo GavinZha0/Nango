@@ -39,7 +39,7 @@ describe("buildRunInSandboxTool", () => {
       durationMs: 12,
     });
     const tool = buildRunInSandboxTool();
-    const result = await tool.execute({
+    const result = await tool.execute!({
       language: "python",
       code_text: "print('hello')",
     });
@@ -74,7 +74,7 @@ describe("buildRunInSandboxTool", () => {
       durationMs: 5,
     });
     const tool = buildRunInSandboxTool();
-    await tool.execute({
+    await tool.execute!({
       language: "python",
       code_text: "print(1)",
       datasets: ["sales_q1"],
@@ -100,7 +100,7 @@ describe("buildRunInSandboxTool", () => {
       termination: "timeout",
     });
     const tool = buildRunInSandboxTool();
-    const result = await tool.execute({
+    const result = await tool.execute!({
       language: "python",
       code_text: "import time; time.sleep(999)",
     });

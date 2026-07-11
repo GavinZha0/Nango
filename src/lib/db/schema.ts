@@ -69,6 +69,12 @@ export const UserTable = pgTable(
      *  `timezone` is a fixed value set by the user on the Profile page.
      *  Defaults to true for new users and existing users (migration). */
     timezoneFollowBrowser: boolean("timezone_follow_browser").notNull().default(true),
+    sttLanguage: text("stt_language"),
+    sttProvider: text("stt_provider"),
+    sttModel: text("stt_model"),
+    ttsVoice: text("tts_voice"),
+    ttsProvider: text("tts_provider"),
+    ttsModel: text("tts_model"),
     /** Soft-delete timestamp; null = active. See docs/rbac.md. */
     deletedAt: timestamp("deleted_at"),
     deletedBy: uuid("deleted_by").references((): AnyPgColumn => UserTable.id, {
@@ -669,6 +675,7 @@ export const CREDENTIAL_SERVICE_TYPES = [
   "integration",
   "datasource",
   "calendar",
+  "voice",
   "other",
 ] as const;
 

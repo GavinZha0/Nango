@@ -3,6 +3,7 @@
 import "@copilotkit/react-ui/v2/styles.css";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import {
   CopilotChat,
   CopilotChatAssistantMessage,
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/store/workspace";
 import { NangoSlotButton } from "@/components/right-panels/NangoSlotButton";
 import { useInjectHandoffContext } from "@/hooks/useHandoff";
+import { authClient } from "@/lib/auth/client";
 
 /**
  * ChatPanel — v2 CopilotKit chat surface (body only).
@@ -39,6 +41,70 @@ const NANGO_INPUT_SLOT = { addMenuButton: NangoSlotButton } as const;
 
 /** No-op for unimplemented toolbar buttons (thumbs up/down/read-aloud). v2 still renders the slot. */
 const noop = () => {};
+
+let activeAudio: HTMLAudioElement | null = null;
+let activeMessageId: string | null = null;
+
+async function readAloud(message: {id?: string; content?: string}): Promise<void> {
+  if (activeAudio && activeMessageId === (message.id ?? null)) {
+    activeAudio.pause();
+    activeAudio = null;
+    activeMessageId = null;
+    return;
+  }
+
+  if (activeAudio) {
+    activeAudio.pause();
+    activeAudio = null;
+    activeMessageId = null;
+  }
+
+  const text = typeof message.content === 'string' ? message.content.trim() : '';
+  if (!text) return;
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: text.slice(0, 5000) }),
+    });
+
+    if (!res.ok) {
+      let errorMsg = 'Failed to generate audio';
+      try {
+        const data = await res.json();
+        if (data?.message) {
+          errorMsg = data.message;
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(errorMsg);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+
+    audio.addEventListener('ended', () => {
+      URL.revokeObjectURL(url);
+      if (activeAudio === audio) {
+        activeAudio = null;
+        activeMessageId = null;
+      }
+    });
+    
+    activeAudio = audio;
+    activeMessageId = message.id ?? null;
+    await audio.play();
+  } catch (error) {
+    activeAudio = null;
+    activeMessageId = null;
+    console.error('Failed to generate audio:', error);
+    toast.error(error instanceof Error ? error.message : 'Failed to generate TTS audio');
+  }
+}
 
 // Regeneration logic
 
@@ -156,6 +222,10 @@ function ChatViewShellBody({
   // the CopilotChat UI is rendering, regardless of the outer threadId prop.
   const { agent } = useAgent({ agentId });
 
+  const { data: session } = authClient.useSession();
+  const userFields = session?.user as { ttsProvider?: string | null } | undefined;
+  const hasTts = !!userFields?.ttsProvider;
+
   // Drain pending handoff context as the first user message.
   useInjectHandoffContext(agent);
   const onRegenerate = useOnRegenerate(agent);
@@ -209,11 +279,11 @@ function ChatViewShellBody({
           onRegenerate={isEndOfTurn ? onRegenerate : undefined}
           onThumbsUp={isEndOfTurn ? noop : undefined}
           onThumbsDown={isEndOfTurn ? noop : undefined}
-          onReadAloud={isEndOfTurn ? noop : undefined}
+          onReadAloud={isEndOfTurn && hasTts ? readAloud : undefined}
         />
       );
     },
-    [onRegenerate],
+    [onRegenerate, hasTts],
   );
 
   // `SlotValue<C>` requires `C` (a namespace component with static fields)
@@ -266,6 +336,40 @@ const MemoChat = memo(function MemoChat({
 export function ChatPanelBody(): ReactNode {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
   const explicitThreadId = useWorkspaceStore((s) => s.explicitThreadId);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+
+    const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+
+    navigator.mediaDevices.getUserMedia = async function (constraints) {
+      try {
+        return await originalGetUserMedia(constraints);
+      } catch (err) {
+        if (constraints?.audio) {
+          let friendlyMsg = "Failed to access microphone.";
+          if (err instanceof Error) {
+            if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+              friendlyMsg = "No microphone device found on your system.";
+            } else if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+              friendlyMsg = "Microphone permission was denied by the browser.";
+            } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+              friendlyMsg = "Microphone is already in use by another application.";
+            } else if (err.message) {
+              friendlyMsg = err.message;
+            }
+          }
+
+          toast.error(friendlyMsg);
+        }
+        throw err;
+      }
+    };
+
+    return () => {
+      navigator.mediaDevices.getUserMedia = originalGetUserMedia;
+    };
+  }, []);
 
   if (!activeAgentId) return null;
 

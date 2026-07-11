@@ -96,6 +96,36 @@ const options = {
         required: false,
         input: true,
       },
+      sttLanguage: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      sttProvider: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      sttModel: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      ttsVoice: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      ttsProvider: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      ttsModel: {
+        type: "string",
+        required: false,
+        input: true,
+      },
     },
   },
 

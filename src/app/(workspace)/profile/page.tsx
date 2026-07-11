@@ -1,32 +1,14 @@
-import { KeyRound, UserRound } from "lucide-react";
 import { getSession } from "@/lib/auth/auth-instance";
-import { NameField } from "./NameField";
+import { db } from "@/lib/db";
+import { CredentialTable } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
+
+export const dynamic = "force-dynamic";
+import { BasicInfoField } from "./BasicInfoField";
 import { PasswordField } from "./PasswordField";
-import { TimezoneField } from "./TimezoneField";
+import { VoiceSettingsField } from "./VoiceSettingsField";
 import { StatsDashboard } from "./StatsDashboard";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
-interface ReadOnlyFieldProps {
-  label: string;
-  value: string;
-}
-
-function ReadOnlyField({ label, value }: ReadOnlyFieldProps): React.ReactNode {
-  return (
-    <div className="space-y-1">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="truncate text-sm font-medium text-foreground">{value}</p>
-    </div>
-  );
-}
 
 function formatRole(role: string | null | undefined): string {
   if (!role) {
@@ -37,59 +19,69 @@ function formatRole(role: string | null | undefined): string {
 
 export default async function ProfilePage(): Promise<React.ReactNode> {
   const session = await getSession();
+  const enabledVoiceCreds = await db
+    .select({
+      provider: CredentialTable.provider,
+    })
+    .from(CredentialTable)
+    .where(
+      and(
+        eq(CredentialTable.serviceType, "voice"),
+        eq(CredentialTable.enabled, true),
+      )
+    );
+  const enabledProviders = enabledVoiceCreds
+    .map((c) => c.provider)
+    .filter(Boolean) as string[];
   const userName: string = session?.user?.name ?? "Unknown";
   const userEmail: string = session?.user?.email ?? "";
   const userRole: string = formatRole(session?.user?.role);
   // better-auth additionalFields are present at runtime but TS doesn't
   // narrow the session type to include them here; cast locally.
   const userFields = session?.user as
-    | { timezone?: string | null; timezoneFollowBrowser?: boolean | null }
+    | { 
+        timezone?: string | null; 
+        timezoneFollowBrowser?: boolean | null; 
+        sttLanguage?: string | null; 
+        sttProvider?: string | null;
+        sttModel?: string | null;
+        ttsVoice?: string | null; 
+        ttsProvider?: string | null;
+        ttsModel?: string | null;
+      }
     | undefined;
   const userTimezone: string | null = userFields?.timezone ?? null;
   const userFollowBrowser: boolean = userFields?.timezoneFollowBrowser ?? true;
 
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 md:p-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 md:p-8">
         {/* Page heading */}
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
         </div>
 
-        {/* Two-column: Basic Info | Password */}
-        <div className="grid items-stretch gap-6 md:grid-cols-2">
-          {/* Basic Info card */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <div className="rounded-md bg-primary/10 p-1.5">
-                  <UserRound className="h-4 w-4 text-primary" />
-                </div>
-                <CardTitle>Basic Info</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <NameField initial={userName} />
-              <ReadOnlyField label="Email" value={userEmail || "-"} />
-              <ReadOnlyField label="Role" value={userRole} />
-              <TimezoneField initial={userTimezone} initialFollowBrowser={userFollowBrowser} />
-            </CardContent>
-          </Card>
+        {/* Three-column: Basic Info | Password | Voice Settings */}
+        <div className="grid items-start gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+          <BasicInfoField
+            userName={userName}
+            userEmail={userEmail}
+            userRole={userRole}
+            initialTimezone={userTimezone}
+            initialFollowBrowser={userFollowBrowser}
+          />
 
-          {/* Password card */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <div className="rounded-md bg-primary/10 p-1.5">
-                  <KeyRound className="h-4 w-4 text-primary" />
-                </div>
-                <CardTitle>Password</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <PasswordField />
-            </CardContent>
-          </Card>
+          <PasswordField />
+
+          <VoiceSettingsField 
+            initialSttProvider={userFields?.sttProvider ?? null}
+            initialSttModel={userFields?.sttModel ?? null}
+            initialSttLanguage={userFields?.sttLanguage ?? null} 
+            initialTtsProvider={userFields?.ttsProvider ?? null}
+            initialTtsModel={userFields?.ttsModel ?? null}
+            initialTtsVoice={userFields?.ttsVoice ?? null} 
+            enabledProviders={enabledProviders}
+          />
         </div>
 
         {/* Divider */}

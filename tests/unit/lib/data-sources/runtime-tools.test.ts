@@ -153,7 +153,7 @@ describe("extract_dataset_by_sql tool — argument validation", () => {
   });
 
   it("returns INVALID_NAME for malformed cache keys", async () => {
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       ...baseArgs,
       dataset_name: "../escape",
     })) as {
@@ -171,7 +171,7 @@ describe("extract_dataset_by_sql tool — argument validation", () => {
       error: "NOT_FOUND",
       message: "Data source not found.",
     });
-    const result = (await tool.execute(baseArgs)) as {
+    const result = (await tool.execute!(baseArgs)) as {
       ok: false;
       error: { code: string; message: string };
     };
@@ -185,7 +185,7 @@ describe("extract_dataset_by_sql tool — argument validation", () => {
       error: "DISABLED",
       message: "Disabled.",
     });
-    const result = (await tool.execute(baseArgs)) as {
+    const result = (await tool.execute!(baseArgs)) as {
       ok: false;
       error: { code: string };
     };
@@ -209,7 +209,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
     // Test invokes `tool.execute` directly (bypassing the zod
     // parser), so `row_limit` is undefined and the tool returns
     // `rows: []`. The test focuses on metadata + schema.
-    const result = (await tool.execute({ ...baseArgs, row_limit: 5 })) as {
+    const result = (await tool.execute!({ ...baseArgs, row_limit: 5 })) as {
       cache_hit: boolean;
       dataset_name: string;
       total_rows: number;
@@ -235,9 +235,9 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
 
   it("returns cache_hit on the second call with the same name + query", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
-    await tool.execute(baseArgs);
+    await tool.execute!(baseArgs);
     mockExtract.mockClear();
-    const second = (await tool.execute(baseArgs)) as {
+    const second = (await tool.execute!(baseArgs)) as {
       cache_hit: boolean;
       total_rows: number;
     };
@@ -250,7 +250,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
   it("on same-name + different-query, replaces the prior snapshot and sets replaced_prior:true", async () => {
     // First call seeds "users_dev" with the 100-row query.
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
-    const first = (await tool.execute(baseArgs)) as {
+    const first = (await tool.execute!(baseArgs)) as {
       cache_hit: boolean;
       replaced_prior?: boolean;
       total_rows: number;
@@ -266,7 +266,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
       { id: 2, name: "bob" },
       { id: 3, name: "carol" },
     ]);
-    const second = (await tool.execute({
+    const second = (await tool.execute!({
       ...baseArgs,
       sql_text: "SELECT * FROM users LIMIT 200",
     })) as {
@@ -282,7 +282,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
     // SAME new query hits cache, a call with the ORIGINAL query
     // would re-extract and replace again.
     mockExtract.mockClear();
-    const third = (await tool.execute({
+    const third = (await tool.execute!({
       ...baseArgs,
       sql_text: "SELECT * FROM users LIMIT 200",
     })) as { cache_hit: boolean; replaced_prior?: boolean };
@@ -293,10 +293,10 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
 
   it("does NOT set replaced_prior on force_refresh of an identical query", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
-    await tool.execute(baseArgs);
+    await tool.execute!(baseArgs);
 
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
-    const refresh = (await tool.execute({
+    const refresh = (await tool.execute!({
       ...baseArgs,
       force_refresh: true,
     })) as { cache_hit: boolean; replaced_prior?: boolean };
@@ -307,7 +307,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
 
   it("does NOT set replaced_prior on first-ever extract (no prior to replace)", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       ...baseArgs,
       dataset_name: "fresh_slot",
       data_source_name: "fresh_slot",
@@ -319,7 +319,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
   it("on adapter failure, returns EXTRACT_FAILED and aborts the slot", async () => {
     mockResolveByName.mockResolvedValue({ ok: true, resolved: fakeResolved() });
     mockExtract.mockRejectedValue(new Error("connection refused"));
-    const result = (await tool.execute(baseArgs)) as {
+    const result = (await tool.execute!(baseArgs)) as {
       ok: false;
       error: { code: string };
     };
@@ -339,7 +339,7 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
         policy: { readOnly: true, tableAllowlist: null, tableDenylist: [] },
       }),
     });
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "audit_writes",
       data_source_name: "users_dev",
       sql_text: "INSERT INTO users (id) VALUES (1)",
@@ -359,7 +359,7 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
         },
       }),
     });
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "pii_grab",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users_pii",
@@ -379,7 +379,7 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
         },
       }),
     });
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "secret_grab",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM secrets",
@@ -398,7 +398,7 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
         },
       },
     );
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
@@ -409,7 +409,7 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
 
   it("invalid SQL surfaces PARSE_ERROR", async () => {
     mockResolveByName.mockResolvedValue({ ok: true, resolved: fakeResolved() });
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "bad_sql",
       data_source_name: "users_dev",
       sql_text: "SELEKT garble FRUM nowhere",
@@ -426,7 +426,7 @@ describe("extract_dataset_by_sql — row_limit", () => {
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
     ]);
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
@@ -445,7 +445,7 @@ describe("extract_dataset_by_sql — row_limit", () => {
       { id: 5, name: "eve" },
     ];
     arrangeSuccessfulExtract(rows);
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
@@ -463,7 +463,7 @@ describe("extract_dataset_by_sql — row_limit", () => {
 
   it("returned_rows == total_rows when row_limit >= total_rows", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
@@ -480,7 +480,7 @@ describe("extract_dataset_by_sql — row_limit", () => {
 
   it("returns empty rows on empty datasets even when row_limit is set", async () => {
     arrangeSuccessfulExtract([]);
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
@@ -501,7 +501,7 @@ describe("extract_dataset_by_sql — row_limit", () => {
       name: `u${i}`,
     }));
     arrangeSuccessfulExtract(rows);
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
@@ -521,13 +521,13 @@ describe("extract_dataset_by_sql — row_limit", () => {
       { id: 1, name: "alice" },
       { id: 2, name: "bob" },
     ]);
-    await tool.execute({
+    await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",
     });
     mockExtract.mockClear();
-    const result = (await tool.execute({
+    const result = (await tool.execute!({
       dataset_name: "users_dev",
       data_source_name: "users_dev",
       sql_text: "SELECT * FROM users",

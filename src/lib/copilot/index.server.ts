@@ -29,6 +29,8 @@ export {
   type AgentRunnerConnectRequest,
   type AgentRunnerIsRunningRequest,
   type AgentRunnerStopRequest,
+  TranscriptionService,
+  type TranscribeFileOptions,
 } from "@copilotkit/runtime/v2";
 
 // @ag-ui/client (protocol layer)

@@ -20,6 +20,7 @@ export interface ProviderEntry {
    *  source-of-truth). Omitted for providers with no public
    *  default (self-hosted agent platforms, SSH, MCP, data sources). */
   defaultRestUrl?: string;
+  capability?: string[];
 }
 
 export const PROVIDERS: ProviderEntry[] = [
@@ -90,6 +91,11 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "ics",              label: "ICS",       service: "calendar" },
   { value: "google",  label: "Google",    service: "calendar" },
   { value: "outlook",          label: "Outlook",   service: "calendar" },
+
+  { value: "openai",                label: "OpenAI",         service: "voice", capability: ["stt", "tts"] },
+  { value: "deepgram",              label: "Deepgram",       service: "voice", capability: ["stt"], defaultRestUrl: "https://api.deepgram.com" },
+  { value: "local-stt",             label: "Local STT",      service: "voice", capability: ["stt"] },
+  { value: "elevenlabs",            label: "ElevenLabs",     service: "voice", capability: ["tts"] },
 ];
 
 /** Lookup map: provider slug → ProviderEntry. */
@@ -106,6 +112,11 @@ export function getProviderService(slug: string): CredentialServiceType | null {
   return PROVIDER_MAP.get(slug)?.service ?? null;
 }
 
+/** CONTRACT: returns null for unknown slugs. */
+export function getProviderCapability(slug: string): string[] | null {
+  return PROVIDER_MAP.get(slug)?.capability ?? null;
+}
+
 /** Service category labels for display. */
 export const SERVICE_LABELS: Record<CredentialServiceType, string> = {
   llm: "LLM",
@@ -115,5 +126,6 @@ export const SERVICE_LABELS: Record<CredentialServiceType, string> = {
   integration: "Integration",
   datasource: "Data Source",
   calendar: "Calendar",
+  voice: "Voice",
   other: "Other",
 };

@@ -51,6 +51,7 @@ import { injectServerUserId } from "./inject-user-id";
 import { PersistingAgent } from "./persisting-agent";
 import { PersistedAgentRunner } from "@/lib/copilot/persisted-agent-runner";
 import { publish } from "./event-bus";
+import { resolveTranscriptionService } from "@/lib/voice/transcription.server";
 import { db } from "@/lib/db";
 import { BuiltinAgentTable } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -317,6 +318,8 @@ class RunnerImpl implements Runner {
       }
     }
 
+    const transcriptionService = await resolveTranscriptionService(userId);
+
     // Fast path: bookkeeping doesn't need MCP / skills / catalog —
     // build a stub runtime and return early.
     if (!classified) {
@@ -331,6 +334,7 @@ class RunnerImpl implements Runner {
           // No runner — bookkeeping skips persistence and replay.
           trimMessages: false,
           entitySource: "builtin",
+          transcriptionService,
           diag: { userId },
         });
       } catch (err) {
@@ -513,6 +517,7 @@ class RunnerImpl implements Runner {
           // their own session memory trim instead.
           trimMessages: false,
           entitySource: "builtin",
+          transcriptionService,
           diag: {
             agentId: classified?.agentId,
             userId,
