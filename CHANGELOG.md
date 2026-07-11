@@ -5,7 +5,7 @@
 
 ### Features
 
-* STT and TTS ([f30d0a8](https://github.com/GavinZha0/Nango/commit/f30d0a8930814c3784de5011c18b07daf62f9878))
+* STT and TTS ([f30d0a8](https://github.com/GavinZha0/Nango/commit/f30d0a8930814c3784de5011c18b07daf62f9878)) by @GavinZha0
 
 ## [0.6.4](https://github.com/GavinZha0/Nango/compare/v0.6.3...v0.6.4) (2026-07-09)
 
