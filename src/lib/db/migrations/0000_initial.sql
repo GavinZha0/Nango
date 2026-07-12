@@ -6,12 +6,12 @@ CREATE TABLE "account" (
 	"access_token" text,
 	"refresh_token" text,
 	"id_token" text,
-	"access_token_expires_at" timestamp,
-	"refresh_token_expires_at" timestamp,
+	"access_token_expires_at" timestamp with time zone,
+	"refresh_token_expires_at" timestamp with time zone,
 	"scope" text,
 	"password" text,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "artifact" (
@@ -29,18 +29,18 @@ CREATE TABLE "artifact" (
 	"workflow_id" uuid,
 	"workflow_output_field" text,
 	"snapshot" jsonb,
-	"snapshot_at" timestamp,
+	"snapshot_at" timestamp with time zone,
 	"view_mode" text DEFAULT 'snapshot' NOT NULL,
 	"created_by" uuid NOT NULL,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "backend_thread_state" (
 	"credential_id" uuid NOT NULL,
 	"thread_id" text NOT NULL,
 	"state" jsonb NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	CONSTRAINT "backend_thread_state_credential_id_thread_id_pk" PRIMARY KEY("credential_id","thread_id")
 );
 --> statement-breakpoint
@@ -64,8 +64,8 @@ CREATE TABLE "builtin_agent" (
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "builtin_agent_tool" (
@@ -78,6 +78,7 @@ CREATE TABLE "builtin_agent_tool" (
 	"builtin_tool" text,
 	"data_source_id" uuid,
 	"ssh_server_id" uuid,
+	"calendar_credential_id" uuid,
 	"order" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
@@ -90,8 +91,8 @@ CREATE TABLE "config" (
 	"prev_value" text,
 	"description" text,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	CONSTRAINT "config_key_unique" UNIQUE("key")
 );
 --> statement-breakpoint
@@ -108,8 +109,8 @@ CREATE TABLE "credential" (
 	"agui_url" text,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "dashboard_artifact" (
@@ -121,7 +122,7 @@ CREATE TABLE "dashboard_artifact" (
 	"grid_w" integer NOT NULL,
 	"grid_h" integer NOT NULL,
 	"display_order" integer DEFAULT 0 NOT NULL,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "dashboard" (
@@ -132,12 +133,12 @@ CREATE TABLE "dashboard" (
 	"description" text,
 	"slug" text,
 	"layout" jsonb,
-	"published_at" timestamp,
+	"published_at" timestamp with time zone,
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"display_order" integer DEFAULT 0 NOT NULL,
 	"created_by" uuid NOT NULL,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "data_source" (
@@ -157,8 +158,8 @@ CREATE TABLE "data_source" (
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "entity_run_event" (
@@ -166,7 +167,7 @@ CREATE TABLE "entity_run_event" (
 	"seq" integer NOT NULL,
 	"type" text NOT NULL,
 	"payload" jsonb NOT NULL,
-	"ts" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"ts" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	CONSTRAINT "entity_run_event_run_id_seq_pk" PRIMARY KEY("run_id","seq")
 );
 --> statement-breakpoint
@@ -190,11 +191,100 @@ CREATE TABLE "entity_run" (
 	"error_message" text,
 	"error_details" jsonb,
 	"owner_id" uuid NOT NULL,
-	"started_at" timestamp,
-	"finished_at" timestamp,
-	"deadline" timestamp,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"started_at" timestamp with time zone,
+	"finished_at" timestamp with time zone,
+	"deadline" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	"created_by" uuid NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "eval_agent_run" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"agent_id" text NOT NULL,
+	"status" text NOT NULL,
+	"score" integer,
+	"total_count" integer NOT NULL,
+	"passed_count" integer DEFAULT 0 NOT NULL,
+	"failed_count" integer DEFAULT 0 NOT NULL,
+	"errored_count" integer DEFAULT 0 NOT NULL,
+	"triggered_by" text NOT NULL,
+	"created_by" uuid NOT NULL,
+	"started_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp with time zone
+);
+--> statement-breakpoint
+CREATE TABLE "eval_case_result" (
+	"run_id" uuid NOT NULL,
+	"case_id" bigint NOT NULL,
+	"status" text NOT NULL,
+	"score" integer,
+	"dimension_scores" jsonb,
+	"criteria_score" integer,
+	"criteria_results" jsonb,
+	"feedback" text,
+	"thread_id" uuid,
+	"evaluator_thread_id" uuid,
+	"error" jsonb,
+	"ttft_ms" integer,
+	"duration_ms" integer,
+	"output_tokens" integer,
+	"tool_call_count" integer,
+	"started_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp with time zone,
+	CONSTRAINT "eval_case_result_run_id_case_id_pk" PRIMARY KEY("run_id","case_id")
+);
+--> statement-breakpoint
+CREATE TABLE "eval_case" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "eval_case_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"suite_id" uuid NOT NULL,
+	"name" text NOT NULL,
+	"turns" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"criteria" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "eval_run" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"suite_id" uuid NOT NULL,
+	"agent_run_id" uuid,
+	"status" text NOT NULL,
+	"score" integer,
+	"total_count" integer NOT NULL,
+	"passed_count" integer DEFAULT 0 NOT NULL,
+	"failed_count" integer DEFAULT 0 NOT NULL,
+	"errored_count" integer DEFAULT 0 NOT NULL,
+	"triggered_by" text NOT NULL,
+	"started_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp with time zone
+);
+--> statement-breakpoint
+CREATE TABLE "eval_suite" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"agent_id" text NOT NULL,
+	"agent_source" text DEFAULT 'builtin' NOT NULL,
+	"credential_id" uuid,
+	"evaluator_agent_id" uuid,
+	"name" text NOT NULL,
+	"description" text,
+	"dimension_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"visibility" text DEFAULT 'private' NOT NULL,
+	"created_by" uuid NOT NULL,
+	"updated_by" uuid,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "login_event" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "login_event_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"user_id" uuid,
+	"event_type" text NOT NULL,
+	"ip_address" text,
+	"user_agent" text,
+	"detail" text,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "mcp_server" (
@@ -216,8 +306,8 @@ CREATE TABLE "mcp_server" (
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "notification" (
@@ -230,13 +320,14 @@ CREATE TABLE "notification" (
 	"source_label" text,
 	"task" text,
 	"run_id" uuid,
-	"read_at" timestamp,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"initiator" text,
+	"read_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "process_boot" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "process_boot_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
-	"started_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"started_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	"hostname" text,
 	"pid" integer
 );
@@ -251,24 +342,24 @@ CREATE TABLE "schedule" (
 	"source_label" text NOT NULL,
 	"name" text,
 	"task" text NOT NULL,
-	"start_at" timestamp NOT NULL,
-	"end_at" timestamp,
+	"start_at" timestamp with time zone NOT NULL,
+	"end_at" timestamp with time zone,
 	"interval_value" integer,
 	"interval_unit" text,
 	"timezone" text DEFAULT 'UTC' NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
-	"last_triggered_at" timestamp,
+	"last_triggered_at" timestamp with time zone,
 	"last_error" text,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "session" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"expires_at" timestamp NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
 	"token" text NOT NULL,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	"ip_address" text,
 	"user_agent" text,
 	"user_id" uuid NOT NULL,
@@ -283,7 +374,7 @@ CREATE TABLE "skill_file" (
 	"content" "bytea" NOT NULL,
 	"size" integer NOT NULL,
 	"content_type" text,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "skill" (
@@ -298,8 +389,8 @@ CREATE TABLE "skill" (
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "ssh_server" (
@@ -317,8 +408,8 @@ CREATE TABLE "ssh_server" (
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "user" (
@@ -331,14 +422,22 @@ CREATE TABLE "user" (
 	"role" text DEFAULT 'user' NOT NULL,
 	"banned" boolean,
 	"ban_reason" text,
-	"ban_expires" timestamp,
+	"ban_expires" timestamp with time zone,
 	"org" text,
 	"im_accounts" jsonb,
 	"timezone" text,
-	"deleted_at" timestamp,
+	"timezone_follow_browser" boolean DEFAULT true NOT NULL,
+	"stt_language" text,
+	"stt_credential_id" text,
+	"stt_model" text,
+	"tts_voice" text,
+	"tts_credential_id" text,
+	"tts_model" text,
+	"deleted_at" timestamp with time zone,
 	"deleted_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"must_change_password" boolean DEFAULT false NOT NULL,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "verification_case_result" (
@@ -353,32 +452,25 @@ CREATE TABLE "verification_case_result" (
 	"assertion_results" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"error" jsonb,
 	"duration_ms" integer,
-	"started_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"finished_at" timestamp
+	"started_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "verification_case" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "verification_case_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
 	"suite_id" uuid NOT NULL,
 	"name" text NOT NULL,
-	"mcp_server_id" uuid,
-	"tool_name" text,
-	"workflow_id" uuid,
 	"input" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"assertions" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	CONSTRAINT "verification_case_target_xor" CHECK ((
-        ("verification_case"."mcp_server_id" IS NOT NULL AND "verification_case"."tool_name" IS NOT NULL AND "verification_case"."workflow_id" IS NULL)
-        OR
-        ("verification_case"."mcp_server_id" IS NULL AND "verification_case"."tool_name" IS NULL AND "verification_case"."workflow_id" IS NOT NULL)
-      ))
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "verification_run" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"suite_id" uuid NOT NULL,
+	"suite_id" uuid,
+	"mcp_server_id" uuid,
 	"status" text NOT NULL,
 	"total_count" integer NOT NULL,
 	"passed_count" integer DEFAULT 0 NOT NULL,
@@ -386,8 +478,13 @@ CREATE TABLE "verification_run" (
 	"errored_count" integer DEFAULT 0 NOT NULL,
 	"skipped_count" integer DEFAULT 0 NOT NULL,
 	"triggered_by" text NOT NULL,
-	"started_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"finished_at" timestamp
+	"started_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"finished_at" timestamp with time zone,
+	CONSTRAINT "verification_run_target_xor" CHECK ((
+        ("verification_run"."suite_id" IS NOT NULL AND "verification_run"."mcp_server_id" IS NULL)
+        OR
+        ("verification_run"."suite_id" IS NULL AND "verification_run"."mcp_server_id" IS NOT NULL)
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE "verification_suite" (
@@ -395,23 +492,30 @@ CREATE TABLE "verification_suite" (
 	"name" text NOT NULL,
 	"description" text,
 	"category" text NOT NULL,
+	"mcp_server_id" uuid,
+	"tool_name" text,
+	"workflow_id" uuid,
 	"enabled" boolean DEFAULT true NOT NULL,
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"timeout_sec" integer DEFAULT 300 NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	CONSTRAINT "verification_suite_name_unique" UNIQUE("name")
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	CONSTRAINT "verification_suite_target_xor" CHECK ((
+        ("verification_suite"."mcp_server_id" IS NOT NULL AND "verification_suite"."tool_name" IS NOT NULL AND "verification_suite"."workflow_id" IS NULL)
+        OR
+        ("verification_suite"."mcp_server_id" IS NULL AND "verification_suite"."tool_name" IS NULL AND "verification_suite"."workflow_id" IS NOT NULL)
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE "verification" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"identifier" text NOT NULL,
 	"value" text NOT NULL,
-	"expires_at" timestamp NOT NULL,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP
 );
 --> statement-breakpoint
 CREATE TABLE "workflow" (
@@ -422,8 +526,8 @@ CREATE TABLE "workflow" (
 	"visibility" text DEFAULT 'private' NOT NULL,
 	"created_by" uuid,
 	"updated_by" uuid,
-	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -439,6 +543,7 @@ ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_mcp_server_i
 ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_skill_id_skill_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."skill"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_data_source_id_data_source_id_fk" FOREIGN KEY ("data_source_id") REFERENCES "public"."data_source"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_ssh_server_id_ssh_server_id_fk" FOREIGN KEY ("ssh_server_id") REFERENCES "public"."ssh_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_calendar_credential_id_credential_id_fk" FOREIGN KEY ("calendar_credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "config" ADD CONSTRAINT "config_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "credential" ADD CONSTRAINT "credential_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "credential" ADD CONSTRAINT "credential_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -453,11 +558,21 @@ ALTER TABLE "entity_run_event" ADD CONSTRAINT "entity_run_event_run_id_entity_ru
 ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "entity_run" ADD CONSTRAINT "entity_run_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_agent_run" ADD CONSTRAINT "eval_agent_run_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_case_result" ADD CONSTRAINT "eval_case_result_run_id_eval_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."eval_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_case_result" ADD CONSTRAINT "eval_case_result_case_id_eval_case_id_fk" FOREIGN KEY ("case_id") REFERENCES "public"."eval_case"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_case" ADD CONSTRAINT "eval_case_suite_id_eval_suite_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."eval_suite"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_run" ADD CONSTRAINT "eval_run_suite_id_eval_suite_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."eval_suite"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_run" ADD CONSTRAINT "eval_run_agent_run_id_eval_agent_run_id_fk" FOREIGN KEY ("agent_run_id") REFERENCES "public"."eval_agent_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_suite" ADD CONSTRAINT "eval_suite_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_suite" ADD CONSTRAINT "eval_suite_evaluator_agent_id_builtin_agent_id_fk" FOREIGN KEY ("evaluator_agent_id") REFERENCES "public"."builtin_agent"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_suite" ADD CONSTRAINT "eval_suite_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "eval_suite" ADD CONSTRAINT "eval_suite_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "login_event" ADD CONSTRAINT "login_event_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mcp_server" ADD CONSTRAINT "mcp_server_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification" ADD CONSTRAINT "notification_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notification" ADD CONSTRAINT "notification_run_id_entity_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."entity_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "schedule" ADD CONSTRAINT "schedule_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "schedule" ADD CONSTRAINT "schedule_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "schedule" ADD CONSTRAINT "schedule_credential_id_credential_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -473,8 +588,9 @@ ALTER TABLE "verification_case_result" ADD CONSTRAINT "verification_case_result_
 ALTER TABLE "verification_case_result" ADD CONSTRAINT "verification_case_result_case_id_verification_case_id_fk" FOREIGN KEY ("case_id") REFERENCES "public"."verification_case"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "verification_case_result" ADD CONSTRAINT "verification_case_result_entity_run_id_entity_run_id_fk" FOREIGN KEY ("entity_run_id") REFERENCES "public"."entity_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "verification_case" ADD CONSTRAINT "verification_case_suite_id_verification_suite_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."verification_suite"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "verification_case" ADD CONSTRAINT "verification_case_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "verification_run" ADD CONSTRAINT "verification_run_suite_id_verification_suite_id_fk" FOREIGN KEY ("suite_id") REFERENCES "public"."verification_suite"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_run" ADD CONSTRAINT "verification_run_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verification_suite" ADD CONSTRAINT "verification_suite_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "verification_suite" ADD CONSTRAINT "verification_suite_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "verification_suite" ADD CONSTRAINT "verification_suite_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workflow" ADD CONSTRAINT "workflow_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -493,6 +609,7 @@ CREATE INDEX "builtin_agent_tool_mcp_tool_idx" ON "builtin_agent_tool" USING btr
 CREATE INDEX "builtin_agent_tool_skill_idx" ON "builtin_agent_tool" USING btree ("skill_id");--> statement-breakpoint
 CREATE INDEX "builtin_agent_tool_data_source_idx" ON "builtin_agent_tool" USING btree ("data_source_id");--> statement-breakpoint
 CREATE INDEX "builtin_agent_tool_ssh_server_idx" ON "builtin_agent_tool" USING btree ("ssh_server_id");--> statement-breakpoint
+CREATE INDEX "builtin_agent_tool_calendar_credential_idx" ON "builtin_agent_tool" USING btree ("calendar_credential_id");--> statement-breakpoint
 CREATE INDEX "credential_type_idx" ON "credential" USING btree ("type");--> statement-breakpoint
 CREATE INDEX "credential_provider_idx" ON "credential" USING btree ("provider");--> statement-breakpoint
 CREATE INDEX "dashboard_artifact_dashboard_idx" ON "dashboard_artifact" USING btree ("dashboard_id");--> statement-breakpoint
@@ -509,6 +626,17 @@ CREATE INDEX "entity_run_status_idx" ON "entity_run" USING btree ("status");--> 
 CREATE INDEX "entity_run_created_at_idx" ON "entity_run" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "entity_run_schedule_idx" ON "entity_run" USING btree ("schedule_id","created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "entity_run_workflow_lookup_idx" ON "entity_run" USING btree ("entity_kind","entity_source","entity_id") WHERE "entity_run"."entity_kind" = 'workflow' AND "entity_run"."entity_source" = 'builtin';--> statement-breakpoint
+CREATE INDEX "eval_agent_run_agent_idx" ON "eval_agent_run" USING btree ("agent_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "eval_case_result_case_started_idx" ON "eval_case_result" USING btree ("case_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "eval_case_suite_idx" ON "eval_case" USING btree ("suite_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "eval_case_suite_name_unique_idx" ON "eval_case" USING btree ("suite_id","name");--> statement-breakpoint
+CREATE INDEX "eval_run_suite_started_idx" ON "eval_run" USING btree ("suite_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "eval_run_agent_run_idx" ON "eval_run" USING btree ("agent_run_id");--> statement-breakpoint
+CREATE INDEX "eval_run_recovery_idx" ON "eval_run" USING btree ("started_at") WHERE "eval_run"."status" = 'running';--> statement-breakpoint
+CREATE INDEX "eval_suite_agent_idx" ON "eval_suite" USING btree ("agent_id","agent_source");--> statement-breakpoint
+CREATE UNIQUE INDEX "eval_suite_name_unique_idx" ON "eval_suite" USING btree ("agent_id","agent_source","name");--> statement-breakpoint
+CREATE INDEX "login_event_user_idx" ON "login_event" USING btree ("user_id","created_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "login_event_created_at_idx" ON "login_event" USING btree ("created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "notification_owner_idx" ON "notification" USING btree ("owner_id","created_at");--> statement-breakpoint
 CREATE INDEX "notification_owner_unread_idx" ON "notification" USING btree ("owner_id","read_at");--> statement-breakpoint
 CREATE INDEX "schedule_owner_idx" ON "schedule" USING btree ("owner_id");--> statement-breakpoint
@@ -523,9 +651,11 @@ CREATE INDEX "verification_case_result_case_started_idx" ON "verification_case_r
 CREATE UNIQUE INDEX "verification_case_result_run_case_idx" ON "verification_case_result" USING btree ("run_id","case_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "verification_case_suite_name_idx" ON "verification_case" USING btree ("suite_id","name");--> statement-breakpoint
 CREATE INDEX "verification_case_suite_idx" ON "verification_case" USING btree ("suite_id");--> statement-breakpoint
-CREATE INDEX "verification_case_mcp_tool_idx" ON "verification_case" USING btree ("mcp_server_id","tool_name");--> statement-breakpoint
 CREATE INDEX "verification_run_suite_started_idx" ON "verification_run" USING btree ("suite_id","started_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "verification_run_server_started_idx" ON "verification_run" USING btree ("mcp_server_id","started_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "verification_run_recovery_idx" ON "verification_run" USING btree ("started_at") WHERE "verification_run"."status" = 'running';--> statement-breakpoint
+CREATE UNIQUE INDEX "verification_suite_mcp_tool_user_idx" ON "verification_suite" USING btree ("mcp_server_id","tool_name","created_by");--> statement-breakpoint
+CREATE UNIQUE INDEX "verification_suite_workflow_user_idx" ON "verification_suite" USING btree ("workflow_id","created_by");--> statement-breakpoint
 CREATE INDEX "workflow_created_by_idx" ON "workflow" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX "workflow_visibility_idx" ON "workflow" USING btree ("visibility") WHERE "workflow"."visibility" = 'public';--> statement-breakpoint
 CREATE INDEX "workflow_spec_gin_idx" ON "workflow" USING gin ("spec" jsonb_path_ops);

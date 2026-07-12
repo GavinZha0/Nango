@@ -1,3 +1,0 @@
-ALTER TABLE "builtin_agent_tool" ADD COLUMN "calendar_credential_id" uuid;--> statement-breakpoint
-ALTER TABLE "builtin_agent_tool" ADD CONSTRAINT "builtin_agent_tool_calendar_credential_id_credential_id_fk" FOREIGN KEY ("calendar_credential_id") REFERENCES "public"."credential"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "builtin_agent_tool_calendar_credential_idx" ON "builtin_agent_tool" USING btree ("calendar_credential_id");
