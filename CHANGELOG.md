@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* user register and password reset issue ([30f8160](https://github.com/GavinZha0/Nango/commit/30f81609d061a98983c4a2acdbe8a7f43b766482))
+* user register and password reset issue ([30f8160](https://github.com/GavinZha0/Nango/commit/30f81609d061a98983c4a2acdbe8a7f43b766482)) by @GavinZha0
 
 ## [0.7.2](https://github.com/GavinZha0/Nango/compare/v0.7.1...v0.7.2) (2026-07-12)
 
