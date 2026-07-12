@@ -31,6 +31,21 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     setUserId(userId);
   }, [userId, setUserId]);
 
+  const userFields = sessionData?.user as
+    | {
+        timezone?: string | null;
+        timezoneFollowBrowser?: boolean | null;
+        mustChangePassword?: boolean | null;
+      }
+    | undefined;
+
+  const mustChangePassword = userFields?.mustChangePassword === true;
+  useEffect(() => {
+    if (mustChangePassword && window.location.pathname !== "/profile") {
+      window.location.replace("/profile");
+    }
+  }, [mustChangePassword]);
+
   // Timezone sync — two modes controlled by `timezoneFollowBrowser`:
   //
   //   followBrowser = true (default):
@@ -46,10 +61,6 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   // First-visit (timezone is null, regardless of followBrowser):
   //   Always seed from the browser so `timezone` has a value.
   const tzSyncedRef = useRef(false);
-  const userFields =
-    sessionData?.user as
-    | { timezone?: string | null; timezoneFollowBrowser?: boolean | null }
-    | undefined;
   const currentTz = userFields?.timezone ?? null;
   const followBrowser = userFields?.timezoneFollowBrowser ?? true;
   useEffect(() => {

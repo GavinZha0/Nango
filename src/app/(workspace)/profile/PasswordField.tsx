@@ -89,6 +89,11 @@ export function PasswordField(): ReactNode {
 
     setForm(EMPTY_FORM);
     setSuccess(true);
+    // Force refetch session bypassing cookieCache to sync latest mustChangePassword status
+    void authClient.getSession({ query: { disableCookieCache: true } });
+    setTimeout(() => {
+      window.location.reload();
+    }, 1500);
   };
 
   function clearState(): void {

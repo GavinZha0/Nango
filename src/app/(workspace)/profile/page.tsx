@@ -67,10 +67,12 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
         ttsVoice?: string | null; 
         ttsCredentialId?: string | null;
         ttsModel?: string | null;
+        mustChangePassword?: boolean | null;
       }
     | undefined;
   const userTimezone: string | null = userFields?.timezone ?? null;
   const userFollowBrowser: boolean = userFields?.timezoneFollowBrowser ?? true;
+  const mustChange = userFields?.mustChangePassword === true;
 
   return (
     <ScrollArea className="h-full">
@@ -82,33 +84,39 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
 
         {/* Three-column: Basic Info | Password | Voice Settings */}
         <div className="grid items-start gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-          <BasicInfoField
-            userName={userName}
-            userEmail={userEmail}
-            userRole={userRole}
-            initialTimezone={userTimezone}
-            initialFollowBrowser={userFollowBrowser}
-          />
+          <div className={mustChange ? "pointer-events-none opacity-40 select-none" : ""}>
+            <BasicInfoField
+              userName={userName}
+              userEmail={userEmail}
+              userRole={userRole}
+              initialTimezone={userTimezone}
+              initialFollowBrowser={userFollowBrowser}
+            />
+          </div>
 
-          <PasswordField />
+          <div className={mustChange ? "ring-2 ring-destructive ring-offset-2 rounded-lg" : ""}>
+            <PasswordField />
+          </div>
 
-          <VoiceSettingsField 
-            initialSttCredentialId={userFields?.sttCredentialId ?? null}
-            initialSttModel={userFields?.sttModel ?? null}
-            initialSttLanguage={userFields?.sttLanguage ?? null} 
-            initialTtsCredentialId={userFields?.ttsCredentialId ?? null}
-            initialTtsModel={userFields?.ttsModel ?? null}
-            initialTtsVoice={userFields?.ttsVoice ?? null} 
-            sttCredentials={sttCredentials}
-            ttsCredentials={ttsCredentials}
-          />
+          <div className={mustChange ? "pointer-events-none opacity-40 select-none" : ""}>
+            <VoiceSettingsField 
+              initialSttCredentialId={userFields?.sttCredentialId ?? null}
+              initialSttModel={userFields?.sttModel ?? null}
+              initialSttLanguage={userFields?.sttLanguage ?? null} 
+              initialTtsCredentialId={userFields?.ttsCredentialId ?? null}
+              initialTtsModel={userFields?.ttsModel ?? null}
+              initialTtsVoice={userFields?.ttsVoice ?? null} 
+              sttCredentials={sttCredentials}
+              ttsCredentials={ttsCredentials}
+            />
+          </div>
         </div>
 
         {/* Divider */}
         <hr className="border-border" />
 
         {/* Resource stats */}
-        <div className="space-y-3">
+        <div className={mustChange ? "pointer-events-none opacity-40 select-none space-y-3" : "space-y-3"}>
           <h2 className="text-sm font-medium text-muted-foreground">Resource usage (last 30 days)</h2>
           <StatsDashboard />
         </div>

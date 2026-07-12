@@ -4,6 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { admin as adminPlugin } from "better-auth/plugins";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
+import { createAuthMiddleware } from "better-auth/api";
 import {
   UserTable,
   SessionTable,
@@ -54,6 +55,21 @@ function recordLoginEvent(
 const options = {
   secret: process.env.BETTER_AUTH_SECRET!,
   baseURL: process.env.BETTER_AUTH_URL,
+
+  hooks: {
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path.includes("change-password")) {
+        const userId = ctx.context?.session?.user?.id || ctx.context?.user?.id;
+        if (userId) {
+          console.log("[auth hook] change-password success, resetting mustChangePassword. userId:", userId);
+          await db
+            .update(UserTable)
+            .set({ mustChangePassword: false })
+            .where(eq(UserTable.id, userId));
+        }
+      }
+    }),
+  },
 
   plugins: [
     adminPlugin({
@@ -125,6 +141,11 @@ const options = {
         type: "string",
         required: false,
         input: true,
+      },
+      mustChangePassword: {
+        type: "boolean",
+        required: false,
+        input: false,
       },
     },
   },

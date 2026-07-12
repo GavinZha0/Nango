@@ -26,7 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { LogOut, Trash2 } from "lucide-react";
+import { LogOut, Trash2, KeyRound } from "lucide-react";
 
 export interface UserRow {
   id: string;
@@ -168,8 +168,9 @@ export function StatusBadge({ user, onRefresh }: StatusBadgeProps): ReactNode {
   );
 }
 
+
 // ---------------------------------------------------------------------------
-// UserActions — Revoke Sessions + Delete buttons (with confirmation)
+// UserActions — Revoke Sessions + Delete + Reset Password buttons (with confirmation)
 // ---------------------------------------------------------------------------
 
 interface UserActionsProps {
@@ -177,12 +178,14 @@ interface UserActionsProps {
   onRefresh: () => void;
 }
 
-type PendingAction = "revoke" | "delete" | null;
+type PendingAction = "revoke" | "delete" | "reset_password" | null;
 
 export function UserActions({ user, onRefresh }: UserActionsProps): ReactNode {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [tempPassword, setTempPassword] = useState("");
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
 
   async function confirm(): Promise<void> {
     if (!pendingAction) return;
@@ -195,14 +198,34 @@ export function UserActions({ user, onRefresh }: UserActionsProps): ReactNode {
           setActionError(await readErrorMessage(res, "Failed to delete user"));
           return;
         }
+        setPendingAction(null);
+        onRefresh();
+      } else if (pendingAction === "reset_password") {
+        const res = await fetch(`/api/admin/users/${user.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resetPassword: true }),
+        });
+        if (!res.ok) {
+          setActionError(await readErrorMessage(res, "Failed to reset password"));
+          return;
+        }
+        const data = (await res.json()) as { tempPassword?: string };
+        if (data.tempPassword) {
+          setTempPassword(data.tempPassword);
+          setSuccessDialogOpen(true);
+        } else {
+          onRefresh();
+        }
+        setPendingAction(null);
       } else {
         const response: AdminActionResponse =
           await authClient.admin.revokeUserSessions({ userId: user.id });
         const err = resolveErrorMessage(response, "Failed to revoke sessions");
         if (err) { setActionError(err); return; }
+        setPendingAction(null);
+        onRefresh();
       }
-      setPendingAction(null);
-      onRefresh();
     } catch {
       setActionError("Unexpected error");
     } finally {
@@ -213,11 +236,13 @@ export function UserActions({ user, onRefresh }: UserActionsProps): ReactNode {
   const labels: Record<NonNullable<PendingAction>, string> = {
     revoke: "Revoke all sessions",
     delete: "Delete user",
+    reset_password: "Reset user password",
   };
 
   const descriptions: Record<NonNullable<PendingAction>, string> = {
     revoke: `Sign out ${user.name} from all active sessions?`,
     delete: `Delete ${user.name} (${user.email})? They will be signed out immediately and lose access. Resources are preserved and the email becomes available for re-use.`,
+    reset_password: `Generate a temporary password for ${user.name}? This will invalidate their current password. They will be forced to change it on their next login.`,
   };
 
   return (
@@ -237,6 +262,22 @@ export function UserActions({ user, onRefresh }: UserActionsProps): ReactNode {
             }
           />
           <TooltipContent>Revoke Sessions</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => { setActionError(""); setPendingAction("reset_password"); }}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <span className="sr-only">Reset Password</span>
+              </Button>
+            }
+          />
+          <TooltipContent>Reset Password</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -279,6 +320,42 @@ export function UserActions({ user, onRefresh }: UserActionsProps): ReactNode {
               className={pendingAction === "delete" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}
             >
               {working ? "Working…" : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={successDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) { setSuccessDialogOpen(false); setTempPassword(""); onRefresh(); }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Password Reset Successfully</AlertDialogTitle>
+            <AlertDialogDescription>
+              A temporary password has been generated for <strong>{user.name}</strong>. 
+              Please copy and send it to the user. They will be forced to change it upon login:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="my-4 flex items-center justify-between gap-2 rounded bg-muted p-3 font-mono text-lg text-foreground">
+            <span className="select-all tracking-wider">{tempPassword}</span>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                navigator.clipboard.writeText(tempPassword);
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => { setSuccessDialogOpen(false); setTempPassword(""); onRefresh(); }}>
+              Done
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

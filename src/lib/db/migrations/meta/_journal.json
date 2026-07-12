@@ -92,6 +92,13 @@
       "when": 1783822448536,
       "tag": "0012_rename_stt_tts_provider_to_credential_id",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783883059207,
+      "tag": "0013_add_must_change_password",
+      "breakpoints": true
     }
   ]
 }

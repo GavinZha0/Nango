@@ -80,6 +80,7 @@ export const UserTable = pgTable(
     deletedBy: uuid("deleted_by").references((): AnyPgColumn => UserTable.id, {
       onDelete: "cascade",
     }),
+    mustChangePassword: boolean("must_change_password").default(false).notNull(),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
