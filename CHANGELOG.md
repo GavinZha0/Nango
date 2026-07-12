@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* voice credential issue ([ec8f26b](https://github.com/GavinZha0/Nango/commit/ec8f26b76e43b804b9ed23a1704a713924576e71))
+* voice credential issue ([ec8f26b](https://github.com/GavinZha0/Nango/commit/ec8f26b76e43b804b9ed23a1704a713924576e71)) by @GavinZha0
 
 ## [0.7.1](https://github.com/GavinZha0/Nango/compare/v0.7.0...v0.7.1) (2026-07-11)
 
