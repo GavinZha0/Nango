@@ -1,7 +1,8 @@
 import { getSession } from "@/lib/auth/auth-instance";
 import { db } from "@/lib/db";
 import { CredentialTable } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { getProviderCapability } from "@/lib/constants/providers";
+import { and, desc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 import { BasicInfoField } from "./BasicInfoField";
@@ -21,7 +22,9 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
   const session = await getSession();
   const enabledVoiceCreds = await db
     .select({
+      id: CredentialTable.id,
       provider: CredentialTable.provider,
+      name: CredentialTable.name,
     })
     .from(CredentialTable)
     .where(
@@ -29,10 +32,26 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
         eq(CredentialTable.serviceType, "voice"),
         eq(CredentialTable.enabled, true),
       )
-    );
-  const enabledProviders = enabledVoiceCreds
-    .map((c) => c.provider)
-    .filter(Boolean) as string[];
+    ).orderBy(desc(CredentialTable.createdAt));
+  
+  type VoiceCredentialOption = {value: string, label: string, provider: string};
+  const sttCredentials: VoiceCredentialOption[] = [];
+  const ttsCredentials: VoiceCredentialOption[] = [];
+  for (const cred of enabledVoiceCreds) {
+    const option = {
+      value: cred.id,
+      label: cred.name,
+      provider: cred.provider ?? "",
+    };
+    const capability = getProviderCapability(option.provider) ?? [];
+    if (capability.includes("stt")) {
+      sttCredentials.push(option);
+    }
+    if (capability.includes("tts")) {
+      ttsCredentials.push(option);
+    }
+  }
+  
   const userName: string = session?.user?.name ?? "Unknown";
   const userEmail: string = session?.user?.email ?? "";
   const userRole: string = formatRole(session?.user?.role);
@@ -43,10 +62,10 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
         timezone?: string | null; 
         timezoneFollowBrowser?: boolean | null; 
         sttLanguage?: string | null; 
-        sttProvider?: string | null;
+        sttCredentialId?: string | null;
         sttModel?: string | null;
         ttsVoice?: string | null; 
-        ttsProvider?: string | null;
+        ttsCredentialId?: string | null;
         ttsModel?: string | null;
       }
     | undefined;
@@ -74,13 +93,14 @@ export default async function ProfilePage(): Promise<React.ReactNode> {
           <PasswordField />
 
           <VoiceSettingsField 
-            initialSttProvider={userFields?.sttProvider ?? null}
+            initialSttCredentialId={userFields?.sttCredentialId ?? null}
             initialSttModel={userFields?.sttModel ?? null}
             initialSttLanguage={userFields?.sttLanguage ?? null} 
-            initialTtsProvider={userFields?.ttsProvider ?? null}
+            initialTtsCredentialId={userFields?.ttsCredentialId ?? null}
             initialTtsModel={userFields?.ttsModel ?? null}
             initialTtsVoice={userFields?.ttsVoice ?? null} 
-            enabledProviders={enabledProviders}
+            sttCredentials={sttCredentials}
+            ttsCredentials={ttsCredentials}
           />
         </div>
 

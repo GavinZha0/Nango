@@ -1,6 +1,6 @@
 import "server-only";
 
-import {getEnabledVoiceCredential, type VoiceCredentialConfig} from "@/lib/credentials/lookup";
+import {getEnabledVoiceCredentialById, type VoiceCredentialConfig} from "@/lib/credentials/lookup";
 import {getUserVoiceSettings} from "@/lib/voice/user-voice-settings";
 import {childLogger} from "@/lib/observability/logger";
 
@@ -92,12 +92,12 @@ function resolveElevenLabsVoice(userVoice: string | null): string {
 
 export async function synthesizeSpeech(text: string, userId: string): Promise<Response | null> {
     const settings = await getUserVoiceSettings(userId);
-    if (!settings.ttsProvider) {
+    if (!settings.ttsCredentialId) {
         return null;
     }
-    const cred = await getEnabledVoiceCredential(settings.ttsProvider);
+    const cred = await getEnabledVoiceCredentialById(settings.ttsCredentialId);
     if (!cred) {
-        log.warn({ provider: settings.ttsProvider }, "No enabled credential found for user TTS provider");
+        log.warn({ credentialId: settings.ttsCredentialId }, "No enabled credential found for user TTS credential");
         return null;
     }
     switch (cred.provider) {

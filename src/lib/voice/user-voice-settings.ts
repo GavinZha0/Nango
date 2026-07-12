@@ -7,20 +7,20 @@ import { childLogger } from "@/lib/observability/logger";
 const log = childLogger({ component: "user-voice-settings" });
 
 export interface UserVoiceSettings {
-    sttProvider: string | null;
+    sttCredentialId: string | null;
     sttModel: string | null;
     sttLanguage: string | null;
-    ttsProvider: string | null;
+    ttsCredentialId: string | null;
     ttsModel: string | null;
     ttsVoice: string | null;
 }
 
 
 const EMPTY: UserVoiceSettings = {
-    sttProvider: null,
+    sttCredentialId: null,
     sttModel: null,
     sttLanguage: null,
-    ttsProvider: null,
+    ttsCredentialId: null,
     ttsModel: null,
     ttsVoice: null,
 };
@@ -34,10 +34,10 @@ export async function getUserVoiceSettings(userId: string | undefined): Promise<
 
     try {
         const [row] = await db.select({
-            sttProvider: UserTable.sttProvider,
+            sttCredentialId: UserTable.sttCredentialId,
             sttModel: UserTable.sttModel,
             sttLanguage: UserTable.sttLanguage,
-            ttsProvider: UserTable.ttsProvider,
+            ttsCredentialId: UserTable.ttsCredentialId,
             ttsModel: UserTable.ttsModel,
             ttsVoice: UserTable.ttsVoice,
         }).from(UserTable).where(eq(UserTable.id, userId)).limit(1);
@@ -45,10 +45,10 @@ export async function getUserVoiceSettings(userId: string | undefined): Promise<
             return EMPTY;
         }
         return {
-            sttProvider: row.sttProvider,
+            sttCredentialId: row.sttCredentialId,
             sttModel: row.sttModel,
             sttLanguage: row.sttLanguage,
-            ttsProvider: row.ttsProvider,
+            ttsCredentialId: row.ttsCredentialId,
             ttsModel: row.ttsModel,
             ttsVoice: row.ttsVoice,
         };

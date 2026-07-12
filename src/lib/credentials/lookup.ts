@@ -122,6 +122,7 @@ import { getConfigMs } from "@/lib/config";
 
 const DEFAULT_TTL_S = 600;
 const SINGLETON = "__singleton__";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const credTtlMs = (): number => getConfigMs("cache.credential.ttl", DEFAULT_TTL_S);
 
@@ -506,10 +507,19 @@ export async function getEnabledObservabilityCredential(): Promise<Observability
   return config;
 }
 
-export async function getEnabledVoiceCredential(provider: string): Promise<VoiceCredentialConfig | null> {
-  const cacheKey = `voice:provider:${provider}`;
+export async function getEnabledVoiceCredentialById(credentialId: string): Promise<VoiceCredentialConfig | null> {
+  if (!UUID_RE.test(credentialId)) {
+    return null;
+  }
+  const cacheKey = `voice:id:${credentialId}`;
   const cached: VoiceCacheEntry | undefined = voiceCredentialCache.get(cacheKey);
-  if (cached) return cached.config;
+  if (cached) {
+    if (cached.config && !cached.config.apiKey) {
+      voiceCredentialCache.delete(cacheKey);
+    } else {
+      return cached.config;
+    }
+  }
 
   const rows = await db
   .select({
@@ -522,11 +532,10 @@ export async function getEnabledVoiceCredential(provider: string): Promise<Voice
   .where(
     and(
       eq(CredentialTable.serviceType, "voice"),
-      eq(CredentialTable.provider, provider),
+      eq(CredentialTable.id, credentialId),
       eq(CredentialTable.enabled, true),
     ),
   )
-  .orderBy(desc(CredentialTable.createdAt))
   .limit(1);
 
   const match = rows[0];
@@ -537,8 +546,13 @@ export async function getEnabledVoiceCredential(provider: string): Promise<Voice
   }
   
   const fields = decryptPayloadSafely(match.encryptedPayload) ?? {};
-  const apiKey = typeof fields.apiKey === "string" ? fields.apiKey 
-    : typeof fields.token === "string" ? fields.token : null;
+  const apiKey: string | null = typeof fields.apiKey === "string"
+  ? fields.apiKey
+  : typeof fields.token === "string"
+  ? fields.token
+  : typeof fields.key === "string"
+  ? fields.key
+  : null;
     
   const config: VoiceCredentialConfig = {
     id: match.id,

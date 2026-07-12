@@ -223,8 +223,8 @@ function ChatViewShellBody({
   const { agent } = useAgent({ agentId });
 
   const { data: session } = authClient.useSession();
-  const userFields = session?.user as { ttsProvider?: string | null } | undefined;
-  const hasTts = !!userFields?.ttsProvider;
+  const userFields = session?.user as { ttsCredentialId?: string | null } | undefined;
+  const hasTts = !!userFields?.ttsCredentialId;
 
   // Drain pending handoff context as the first user message.
   useInjectHandoffContext(agent);

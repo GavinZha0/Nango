@@ -1,7 +1,7 @@
 import "server-only";
 
 import { TranscriptionService, type TranscribeFileOptions } from "@/lib/copilot/index.server";
-import { getEnabledVoiceCredential, type VoiceCredentialConfig } from "@/lib/credentials/lookup";
+import { getEnabledVoiceCredentialById, type VoiceCredentialConfig } from "@/lib/credentials/lookup";
 import { getUserVoiceSettings } from "@/lib/voice/user-voice-settings";
 import { childLogger } from "@/lib/observability/logger";
 
@@ -139,15 +139,15 @@ function createTranscriptionService(
 
 export async function resolveTranscriptionService(userId: string): Promise<TranscriptionService | undefined> {
     const settings = await getUserVoiceSettings(userId);
-    if (!settings.sttProvider) {
+    if (!settings.sttCredentialId) {
         // Microphone will be hidden automatically when this returns undefined
         return undefined;
     }
-    const cred = await getEnabledVoiceCredential(settings.sttProvider);
+    const cred = await getEnabledVoiceCredentialById(settings.sttCredentialId);
     if (!cred) {
-        log.warn({ provider: settings.sttProvider }, "No enabled credential found for user STT provider");
+        log.warn({ credentialId: settings.sttCredentialId }, "No enabled credential found for user STT credential");
         return undefined;
     }
     log.info({ provider: cred.provider, model: settings.sttModel, language: settings.sttLanguage }, "STT transcription service resolved");
     return createTranscriptionService(cred, settings.sttLanguage, settings.sttModel);
-}
+}

@@ -70,10 +70,10 @@ export const UserTable = pgTable(
      *  Defaults to true for new users and existing users (migration). */
     timezoneFollowBrowser: boolean("timezone_follow_browser").notNull().default(true),
     sttLanguage: text("stt_language"),
-    sttProvider: text("stt_provider"),
+    sttCredentialId: text("stt_credential_id"),
     sttModel: text("stt_model"),
     ttsVoice: text("tts_voice"),
-    ttsProvider: text("tts_provider"),
+    ttsCredentialId: text("tts_credential_id"),
     ttsModel: text("tts_model"),
     /** Soft-delete timestamp; null = active. See docs/rbac.md. */
     deletedAt: timestamp("deleted_at"),

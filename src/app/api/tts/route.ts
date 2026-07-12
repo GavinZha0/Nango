@@ -19,7 +19,7 @@ export const POST = withSession(ROUTE, async ({req, session}) => {
     try {
         const upstream = await synthesizeSpeech(text, session.user.id);
         if (!upstream) {
-            return NextResponse.json({ error: "No TTS service configured." }, { status: 503 });
+            return NextResponse.json({ message: "No TTS service configured." }, { status: 503 });
         }
 
         return new Response(upstream.body, {

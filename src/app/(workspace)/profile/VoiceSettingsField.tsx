@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Volume2, Loader2 } from "lucide-react";
 
 import { authClient } from "@/lib/auth/client";
@@ -24,90 +24,90 @@ const LANGUAGE_OPTIONS = [
   { value: "ko", label: "Korean" },
 ];
 
-const STT_ALL_PROVIDERS = [
-  { value: "openai", label: "OpenAI" },
-  { value: "deepgram", label: "Deepgram" },
-  { value: "local-stt", label: "Local STT" },
-];
-
-const TTS_ALL_PROVIDERS = [
-  { value: "openai", label: "OpenAI" },
-  { value: "elevenlabs", label: "ElevenLabs" },
-];
+const DISABLED = "disabled";
+type CredOption = { value: string; label: string, provider: string };
+type SelectItem = { value: string; label: string };
 
 interface VoiceSettingsFieldProps {
-  initialSttProvider: string | null;
+  initialSttCredentialId: string | null;
   initialSttModel: string | null;
   initialSttLanguage: string | null;
-  initialTtsProvider: string | null;
+  initialTtsCredentialId: string | null;
   initialTtsModel: string | null;
   initialTtsVoice: string | null;
-  enabledProviders: string[];
+  sttCredentials: CredOption[];
+  ttsCredentials: CredOption[];
+}
+
+function buildSelect(credentials: CredOption[], savedId: string | null): {
+  providerById: Map<string, string>;
+  options: SelectItem[];
+  items: SelectItem[];
+} {
+  const providerById = new Map(credentials.map((c) => [c.value, c.provider]));
+  const options: SelectItem[] = [{ value: DISABLED, label: "Disabled" }, ...credentials.map((c) => ({ value: c.value, label: c.label }))];
+  const items = [...options];
+  if (savedId && !providerById.has(savedId)) {
+    items.push({ value: savedId, label: "Unknown" });
+  }
+  return { providerById, options, items };
 }
 
 export function VoiceSettingsField({
-  initialSttProvider,
+  initialSttCredentialId,
   initialSttModel,
   initialSttLanguage,
-  initialTtsProvider,
+  initialTtsCredentialId,
   initialTtsModel,
   initialTtsVoice,
-  enabledProviders = [],
+  sttCredentials = [],
+  ttsCredentials = [],
 }: VoiceSettingsFieldProps): ReactNode {
   // Saved reference states (updated upon successful save)
-  const [refSttProvider, setRefSttProvider] = useState(initialSttProvider || "disabled");
+  const [refSttCredentialId, setRefSttCredentialId] = useState(initialSttCredentialId || DISABLED);
   const [refSttModel, setRefSttModel] = useState(initialSttModel || "");
   const [refSttLanguage, setRefSttLanguage] = useState(initialSttLanguage || "auto");
-  const [refTtsProvider, setRefTtsProvider] = useState(initialTtsProvider || "disabled");
+  const [refTtsCredentialId, setRefTtsCredentialId] = useState(initialTtsCredentialId || DISABLED);
   const [refTtsModel, setRefTtsModel] = useState(initialTtsModel || "");
   const [refTtsVoice, setRefTtsVoice] = useState(initialTtsVoice || "");
 
   // Editable form states
-  const [sttProviderVal, setSttProviderVal] = useState(initialSttProvider || "disabled");
+  const [sttCredentialVal, setSttCredentialVal] = useState(initialSttCredentialId || DISABLED);
   const [sttModelVal, setSttModelVal] = useState(initialSttModel || "");
   const [sttLanguageVal, setSttLanguageVal] = useState(initialSttLanguage || "auto");
-  const [ttsProviderVal, setTtsProviderVal] = useState(initialTtsProvider || "disabled");
+  const [ttsCredentialVal, setTtsCredentialVal] = useState(initialTtsCredentialId || DISABLED);
   const [ttsModelVal, setTtsModelVal] = useState(initialTtsModel || "");
   const [ttsVoiceVal, setTtsVoiceVal] = useState(initialTtsVoice || "");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const stt = useMemo(() => buildSelect(sttCredentials, initialSttCredentialId), [sttCredentials, initialSttCredentialId]);
+  const tts = useMemo(() => buildSelect(ttsCredentials, initialTtsCredentialId), [ttsCredentials, initialTtsCredentialId]);
+
   const dirty = 
-    sttProviderVal !== refSttProvider ||
+    sttCredentialVal !== refSttCredentialId ||
     sttModelVal !== refSttModel ||
     sttLanguageVal !== refSttLanguage ||
-    ttsProviderVal !== refTtsProvider ||
+    ttsCredentialVal !== refTtsCredentialId ||
     ttsModelVal !== refTtsModel ||
     ttsVoiceVal !== refTtsVoice;
 
-  const sttDisabled = sttProviderVal === "disabled";
-  const ttsDisabled = ttsProviderVal === "disabled";
+  const sttDisabled = sttCredentialVal === DISABLED;
+  const ttsDisabled = ttsCredentialVal === DISABLED;
 
-  // Filter providers to only display enabled ones, or preserve currently saved provider
-  const sttProviders = [
-    { value: "disabled", label: "Disabled" },
-    ...STT_ALL_PROVIDERS.filter(
-      (p) => p.value === initialSttProvider || enabledProviders.includes(p.value)
-    ),
-  ];
-
-  const ttsProviders = [
-    { value: "disabled", label: "Disabled" },
-    ...TTS_ALL_PROVIDERS.filter(
-      (p) => p.value === initialTtsProvider || enabledProviders.includes(p.value)
-    ),
-  ];
+  const sttProvider = stt.providerById.get(sttCredentialVal) ?? "";
+  const ttsProvider = tts.providerById.get(ttsCredentialVal) ?? "";
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     
     const updates = {
-      sttProvider: sttProviderVal === "disabled" ? null : sttProviderVal,
+      sttCredentialId: sttCredentialVal === DISABLED ? null : sttCredentialVal,
       sttModel: sttModelVal.trim() || null,
       sttLanguage: sttLanguageVal === "auto" ? null : sttLanguageVal,
-      ttsProvider: ttsProviderVal === "disabled" ? null : ttsProviderVal,
+      ttsCredentialId: ttsCredentialVal === DISABLED ? null : ttsCredentialVal,
       ttsModel: ttsModelVal.trim() || null,
       ttsVoice: ttsVoiceVal.trim() || null,
     };
@@ -126,10 +126,10 @@ export function VoiceSettingsField({
     }
 
     // Commit local references to clear dirty status
-    setRefSttProvider(sttProviderVal);
+    setRefSttCredentialId(sttCredentialVal);
     setRefSttModel(sttModelVal);
     setRefSttLanguage(sttLanguageVal);
-    setRefTtsProvider(ttsProviderVal);
+    setRefTtsCredentialId(ttsCredentialVal);
     setRefTtsModel(ttsModelVal);
     setRefTtsVoice(ttsVoiceVal);
   };
@@ -163,15 +163,16 @@ export function VoiceSettingsField({
               </Label>
               <div className="flex-1 flex items-center">
                 <Select
-                  value={sttProviderVal}
-                  onValueChange={(v) => setSttProviderVal(v ?? "disabled")}
+                items={stt.items}
+                  value={sttCredentialVal}
+                  onValueChange={(v) => setSttCredentialVal(v ?? DISABLED)}
                   disabled={saving}
                 >
                   <SelectTrigger id="stt-provider-select" className="w-full h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {sttProviders.map((p) => (
+                    {stt.options.map((p) => (
                       <SelectItem key={p.value} value={p.value} className="text-xs">
                         {p.label}
                       </SelectItem>
@@ -194,7 +195,7 @@ export function VoiceSettingsField({
                   id="stt-model-input"
                   value={sttModelVal}
                   onChange={(e) => setSttModelVal(e.target.value)}
-                  placeholder={sttProviderVal === "openai" ? "whisper-1" : sttProviderVal === "deepgram" ? "nova-3" : "base"}
+                  placeholder={sttProvider === "openai" ? "whisper-1" : sttProvider === "deepgram" ? "nova-3" : "base"}
                   disabled={sttDisabled || saving}
                   className="w-full h-8 text-xs"
                 />
@@ -211,6 +212,7 @@ export function VoiceSettingsField({
               </Label>
               <div className="flex-1 flex items-center">
                 <Select
+                  items={LANGUAGE_OPTIONS}
                   value={sttLanguageVal}
                   onValueChange={(v) => setSttLanguageVal(v ?? "auto")}
                   disabled={sttDisabled || saving}
@@ -241,15 +243,16 @@ export function VoiceSettingsField({
               </Label>
               <div className="flex-1 flex items-center">
                 <Select
-                  value={ttsProviderVal}
-                  onValueChange={(v) => setTtsProviderVal(v ?? "disabled")}
+                  items={tts.options}
+                  value={ttsCredentialVal}
+                  onValueChange={(v) => setTtsCredentialVal(v ?? DISABLED)}
                   disabled={saving}
                 >
                   <SelectTrigger id="tts-provider-select" className="w-full h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ttsProviders.map((p) => (
+                    {tts.options.map((p) => (
                       <SelectItem key={p.value} value={p.value} className="text-xs">
                         {p.label}
                       </SelectItem>
@@ -272,7 +275,7 @@ export function VoiceSettingsField({
                   id="tts-model-input"
                   value={ttsModelVal}
                   onChange={(e) => setTtsModelVal(e.target.value)}
-                  placeholder={ttsProviderVal === "openai" ? "tts-1" : "eleven_flash_v2_5"}
+                  placeholder={ttsProvider === "openai" ? "tts-1" : "eleven_flash_v2_5"}
                   disabled={ttsDisabled || saving}
                   className="w-full h-8 text-xs"
                 />
@@ -292,7 +295,7 @@ export function VoiceSettingsField({
                   id="tts-voice-input"
                   value={ttsVoiceVal}
                   onChange={(e) => setTtsVoiceVal(e.target.value)}
-                  placeholder={ttsProviderVal === "openai" ? "alloy" : "Voice ID"}
+                  placeholder={ttsProvider === "openai" ? "alloy" : "Voice ID"}
                   disabled={ttsDisabled || saving}
                   className="w-full h-8 text-xs"
                 />

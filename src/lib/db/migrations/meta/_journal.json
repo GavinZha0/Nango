@@ -85,6 +85,13 @@
       "when": 1783789479600,
       "tag": "0011_add-voice-provider-model-fields",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783822448536,
+      "tag": "0012_rename_stt_tts_provider_to_credential_id",
+      "breakpoints": true
     }
   ]
 }

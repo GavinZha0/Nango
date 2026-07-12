@@ -101,7 +101,7 @@ const options = {
         required: false,
         input: true,
       },
-      sttProvider: {
+      sttCredentialId: {
         type: "string",
         required: false,
         input: true,
@@ -116,7 +116,7 @@ const options = {
         required: false,
         input: true,
       },
-      ttsProvider: {
+      ttsCredentialId: {
         type: "string",
         required: false,
         input: true,
