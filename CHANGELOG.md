@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/GavinZha0/Nango/compare/v0.7.3...v0.7.4) (2026-07-13)
+
+
+### Bug Fixes
+
+* html display issue ([bee7d01](https://github.com/GavinZha0/Nango/commit/bee7d01c23e86e11d14dfbd8023c561ae7fce5a0))
+
 ## [0.7.3](https://github.com/GavinZha0/Nango/compare/v0.7.2...v0.7.3) (2026-07-12)
 
 
