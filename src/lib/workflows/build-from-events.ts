@@ -174,6 +174,11 @@ function isChartInvocation(inv: ToolInvocation): boolean {
   return chartRendererFromToolName(inv.toolName) !== null;
 }
 
+const HTML_PAGE_TOOL_NAME = "generate_html_page";
+function isHtmlPageInvocation(inv: ToolInvocation): boolean {
+  return inv.toolName === HTML_PAGE_TOOL_NAME;
+}
+
 /**
  * SQL extraction tool's operational fields — present on tool
  * results but not part of any spec node's output contract. Strategy
@@ -251,7 +256,9 @@ export function buildWorkflowSpecFromRunEvents(
   // render_markdown, …) produces final rendered output rather than
   // a replayable data operation and is stripped from the pipeline.
   const artifactCreatorIsChart = isChartInvocation(artifactCreator);
-  const dataInvocations = artifactCreatorIsChart
+  const artifactCreatorIsHtmlPage = isHtmlPageInvocation(artifactCreator);
+  const artifactCreatorIsFirstClass = artifactCreatorIsChart || artifactCreatorIsHtmlPage;
+  const dataInvocations = artifactCreatorIsFirstClass
     ? successful
     : successful.filter((i) => i.callId !== artifactCreatingCallId);
 
@@ -278,6 +285,8 @@ export function buildWorkflowSpecFromRunEvents(
   // `{ option: "@nodes.<chartNodeId>.option" }`.
   const outputs = artifactCreatorIsChart
     ? buildChartOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
+    : artifactCreatorIsHtmlPage
+    ? buildHtmlOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : buildOutputsMap(
         reconciled.rewrittenArtifactInput,
         reconciled.nodes,
@@ -1306,6 +1315,34 @@ function buildChartOutputsMap(
   }
   return { option: `@nodes.${chartNode.id}.option` };
 }
+
+function buildHtmlOutputsMap(
+  dataInvocations: ReadonlyArray<ToolInvocation>,
+  nodes: ReadonlyArray<LLMNode>,
+  artifactCreatingCallId: string,
+): Record<string, string> {
+  const idx = dataInvocations.findIndex((inv) => inv.callId === artifactCreatingCallId);
+  if (idx < 0) {
+    throw new Error(
+      `buildHtmlOutputsMap: html callId '${artifactCreatingCallId}' ` +
+      `is not present in dataInvocations (was it a failed tool call?). ` +
+      `Cannot build spec.outputs without a html node.`,
+    );
+  }
+  const htmlNode = nodes[idx];
+  if (htmlNode === undefined || htmlNode.type !== "tool") {
+    throw new Error(
+      `buildHtmlOutputsMap: expected a html node at index ${idx} ` +
+      `(callId '${artifactCreatingCallId}') but got ` +
+      `${htmlNode === undefined ? "undefined" : `type="${htmlNode.type}"`}. ` +
+      `This indicates a bug in the assembleNode dispatch table.`,
+    );
+  }
+  return { html: `@nodes.${htmlNode.id}.html` };
+}
+
+
+
 
 function placeholderNoOpNode(): LLMToolNode {
   // Degenerate spec — frontend_tool called with no data deps. The

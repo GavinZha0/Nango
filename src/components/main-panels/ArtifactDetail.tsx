@@ -431,19 +431,31 @@ function ArtifactScrollBody({
   router,
   data,
 }: ArtifactScrollBodyProps): ReactElement {
-  return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
-        {node.description && (
-          <p className="text-sm text-muted-foreground">{node.description}</p>
-        )}
-        {node.kind === "folder" ? (
+  if (node.kind === "folder") {
+    return (
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
+          {node.description && (
+            <p className="text-sm text-muted-foreground">{node.description}</p>
+          )}
           <FolderBody node={node} tree={tree} router={router} />
-        ) : (
-          <ArtifactBody node={node} data={data} />
-        )}
+        </div>
+      </ScrollArea>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-6">
+      {node.description && (
+        <p className="shrink-0 text-sm text-muted-foreground">
+          {node.description}
+        </p>
+      )}
+      <div className="min-h-0 w-full flex-1">
+        <ArtifactBody node={node} data={data} />
       </div>
-    </ScrollArea>
+    </div>
+
   );
 }
 
@@ -499,12 +511,14 @@ function WorkflowBackedLayout({
           defaultSize={60}
           minSize={20}
         >
+          <div className="flex h-full flex-col">
           <ArtifactScrollBody
             node={node}
             tree={tree}
             router={router}
             data={data}
           />
+          </div>
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel
@@ -809,13 +823,11 @@ function ArtifactBody({
   // the body always reflects the latest workflow execution.
   if (node.type === "chart" && isChartOption(data)) {
     return (
-      <div className="flex flex-col gap-2">
-        <ChartErrorBoundary resetKey={node.id}>
-          <div className="h-[480px] w-full">
-            <EChartsRenderer option={data as Record<string, unknown>} />
-          </div>
-        </ChartErrorBoundary>
-      </div>
+      <ChartErrorBoundary resetKey={node.id}>
+        <div className="h-full min-h-0 w-full">
+          <EChartsRenderer option={data as Record<string, unknown>} />
+        </div>
+      </ChartErrorBoundary>
     );
   }
 
@@ -823,7 +835,7 @@ function ArtifactBody({
   // the generate_html_page tool. Render via sandboxed iframe.
   if (node.type === "html" && isHtmlContent(data)) {
     return (
-      <div className="h-[480px] w-full">
+      <div className="h-full min-h-0 w-full">
         <iframe
           srcDoc={data as string}
           sandbox="allow-scripts"
