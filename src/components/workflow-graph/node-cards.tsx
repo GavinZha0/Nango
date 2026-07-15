@@ -10,21 +10,6 @@
  *   - `CodeNodeCard`  (emerald) — code nodes  (`type: "code"`)
  *   - `SqlNodeCard`   (sky)     — sql nodes   (`type: "sql"`)
  *
- * All four share the same chrome (`NodeCardShell`) and differ
- * only in icon, accent colour, and the per-type summary lines.
- *
- * Layout: fixed 200×100 (kept in sync with `layout.ts` constants).
- * Three logical rows:
- *
- *   Row 1: small coloured icon block + bold title + #id · type chip
- *   Row 2: first input/code summary (truncated)
- *   Row 3: second input/output-schema summary (truncated)
- *
- * Connection handles (the dots from which edges spring) are
- * preserved so dagre + ReactFlow draw edges at the correct
- * positions, but rendered invisible — V1 has no edit affordances,
- * so the user never needs to interact with them. `isConnectable`
- * is `false` everywhere.
  */
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
@@ -145,25 +130,10 @@ function truncateStr(s: string, max: number): string {
 }
 
 function summarizeCode(node: CanonicalCodeNode): NodeSummary {
-  // Datasets binding is the most operationally relevant input —
-  // it's what the engine bind-mounts into the sandbox.
   const datasets: unknown = node.inputs.datasets;
   const datasetList: string[] = Array.isArray(datasets)
     ? datasets.filter((d): d is string => typeof d === "string")
     : [];
-
-  // First non-empty, non-comment line of the snippet — gives a
-  // sense of what the code does at a glance. `code_file` nodes
-  // surface the file path instead.
-  let snippetLine: string | undefined;
-  if (node.inputs.code_text !== undefined) {
-    snippetLine = node.inputs.code_text
-      .split("\n")
-      .map((s) => s.trim())
-      .find((s) => s.length > 0 && !s.startsWith("#"));
-  } else if (node.inputs.code_file !== undefined) {
-    snippetLine = `code_file: ${node.inputs.code_file}`;
-  }
 
   return {
     title: node.inputs.language,
@@ -171,7 +141,6 @@ function summarizeCode(node: CanonicalCodeNode): NodeSummary {
       datasetList.length > 0
         ? `datasets: ${datasetList.join(", ")}`
         : undefined,
-    line2: snippetLine,
   };
 }
 
@@ -211,30 +180,12 @@ function pickChartTypeLine(
 }
 
 function summarizeSql(node: CanonicalSqlNode): NodeSummary {
-  // Title prefers the output dataset name (what downstream code /
-  // chart nodes ref via @nodes.X.dataset_name) — that's what the
-  // workflow actually produces. Fall back to data_source_name
-  // when dataset_name is omitted (engine derives a slug at
-  // runtime in that case).
-  const title: string =
-    node.inputs.dataset_name ?? node.inputs.data_source_name;
-
-  // First non-empty line of the SQL — gives a glance-able sense
-  // of the query without needing to open the drawer. Strip --
-  // SQL line comments at the start of a line; in-line comments
-  // (mid-line `--`) are kept as-is since trimming them out is
-  // unreliable without a real SQL tokenizer.
-  const firstSqlLine: string | undefined = node.inputs.sql_text
-    .split("\n")
-    .map((s) => s.trim())
-    .find((s) => s.length > 0 && !s.startsWith("--"));
+  const title: string = node.inputs.data_source_name;
+  const datasetLine: string = node.inputs.dataset_name !== undefined ? `dataset: ${node.inputs.dataset_name}` : `dataset: (runtime-derived)`;
 
   return {
     title,
-    // line 1: data source slug — answers "where does this come from"
-    line1: `source: ${node.inputs.data_source_name}`,
-    // line 2: SQL snippet — answers "what's the query"
-    line2: firstSqlLine,
+    line1: datasetLine,
   };
 }
 

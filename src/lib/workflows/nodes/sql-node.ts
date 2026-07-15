@@ -101,12 +101,7 @@ export async function executeSqlNode(
         });
       }
 
-      // Engine policy decides how many rows the tool should
-      // materialise inline. The tool itself caps this at its own
-      // preview row cap (200 by default); requesting more than
-      // that comes back as a `returned_rows < total_rows`
-      // truncation flag.
-      const inlineMaxRows = getConfigNumber(
+      const inlineMaxRows = node.inputs.row_limit ?? getConfigNumber(
         "sql.inline_max_rows",
         DEFAULT_SQL_INLINE_MAX_ROWS,
       );

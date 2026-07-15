@@ -97,10 +97,8 @@ export const BASE_NODE_SCHEMA: JSONSchemaObject = {
     },
     description: {
       type: "string",
-      minLength: 1,
       description:
-        "Human-readable description of what this node does. Required. " +
-        "Used by modify_workflow to locate the right node by intent.",
+        "Optional human-readable description of what this node does.",
     },
     depends_on: {
       type: "array",
@@ -127,7 +125,7 @@ export const BASE_NODE_SCHEMA: JSONSchemaObject = {
       description: "Per-node timeout. Overrides the spec-level execution.timeout_seconds.",
     },
   },
-  required: ["id", "type", "schema_version", "description", "depends_on"],
+  required: ["id", "type", "schema_version", "depends_on"],
 };
 
 // ─── Helper ────────────────────────────────────────────────────────────

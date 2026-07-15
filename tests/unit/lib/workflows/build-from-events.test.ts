@@ -263,7 +263,7 @@ describe("buildWorkflowSpecFromRunEvents — node bucket + ids", () => {
 // ─── Step 8: descriptions ─────────────────────────────────────────────
 
 describe("buildWorkflowSpecFromRunEvents — descriptions", () => {
-  it("includes a short input snippet in node.description", () => {
+  it("does not synthesize a node.description (reserved for authoring)", () => {
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({
@@ -276,45 +276,7 @@ describe("buildWorkflowSpecFromRunEvents — descriptions", () => {
       ],
       artifactCreatingCallId: "c2",
     });
-    const desc = out.spec.nodes[0]!.description;
-    expect(desc).toContain("fetch_data_table");
-    expect(desc).toContain("sql=");
-    expect(desc).toContain("limit=100");
-  });
-
-  it("truncates very long input string values", () => {
-    const longSql = "select * from orders ".repeat(20);
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        inv({
-          callId: "c1",
-          toolName: "fetch_data_table",
-          seq: 1,
-          inputs: { sql: longSql },
-        }),
-        inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
-      ],
-      artifactCreatingCallId: "c2",
-    });
-    const desc = out.spec.nodes[0]!.description;
-    expect(desc).toMatch(/…$/); // ends with ellipsis
-    expect(desc.length).toBeLessThan(longSql.length + 40);
-  });
-
-  it("falls back to bare tool name when input has no scalar fields", () => {
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        inv({
-          callId: "c1",
-          toolName: "complex_tool",
-          seq: 1,
-          inputs: { nested: { x: 1 } }, // only object values
-        }),
-        inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
-      ],
-      artifactCreatingCallId: "c2",
-    });
-    expect(out.spec.nodes[0]!.description).toBe("complex_tool");
+    expect(out.spec.nodes[0]!.description).toBeUndefined();
   });
 });
 
@@ -1427,10 +1389,10 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     // the SQL node — the test just confirms the shape stays
     // closed by asserting the only surviving keys.
     expect(Object.keys(node).sort()).toEqual(
-      ["depends_on", "description", "id", "inputs", "type"].sort(),
+      ["depends_on", "id", "inputs", "type"].sort(),
     );
     expect(Object.keys(node.inputs).sort()).toEqual(
-      ["data_source_name", "dataset_name", "sql_text"].sort(),
+      ["data_source_name", "dataset_name", "row_limit", "sql_text"].sort(),
     );
   });
 
@@ -1560,7 +1522,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     expect(node.inputs.sql_text).toBe("SELECT 2");
   });
 
-  it("SQL node description includes the tool name + input snippet", () => {
+  it("SQL node has no synthesized description", () => {
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({
@@ -1579,7 +1541,7 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
       artifactCreatingCallId: "c2",
     });
     const node = out.spec.nodes[0]!;
-    expect(node.description).toContain("extract_dataset_by_sql");
+    expect(node.description).toBeUndefined();
   });
 
   it("output spec still parses LLMWorkflowSpecSchema after SQL rewrite", () => {

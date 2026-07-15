@@ -61,7 +61,7 @@ export const ExecutionConfigSchema = z.object({
 /** Fields present on every node regardless of type. */
 const NodeBaseSchema = z.object({
   id: z.number().int().nonnegative(),
-  description: z.string().min(1),
+  description: z.string().optional(),
   depends_on: z.array(z.number().int().nonnegative()),
   retries: RetriesSchema.optional(),
   timeout_seconds: z.number().int().positive().optional(),
@@ -127,6 +127,7 @@ export const LLMSqlNodeSchema = NodeBaseSchema.extend({
     data_source_name: z.string().min(1),
     sql_text: z.string().min(1),
     dataset_name: z.string().min(1).optional(),
+    row_limit: z.number().int().min(0).max(200).optional(),
   }),
 });
 
@@ -319,6 +320,9 @@ export const CanonicalSqlInputsSchema = z.object({
     "read-only at ./data/<name>/ in sandbox cwd. Optional — engine derives " +
     "a deterministic name from (workflowId, nodeId) when omitted. " +
     "Last-write-wins: re-running with the same name replaces the cached dataset.",
+  ),
+  row_limit: z.number().int().min(0).max(200).optional().describe(
+    "Maximum number of rows for preview. Defaults to 200 if not specified.",
   ),
 });
 

@@ -7,7 +7,7 @@
  *   1. Refs in `inputs.sql_text` / `inputs.data_source_name` /
  *      `inputs.dataset_name` resolve before the underlying
  *      `extract_dataset_by_sql` tool is invoked.
- *   2. `row_limit` (driven by `sql.inline_max_rows`) +
+ *   2. `row_limit` (per-node `inputs.row_limit`) +
  *      `force_refresh: false` are ALWAYS passed — chat affordances
  *      are pinned, not exposed on the SQL node.
  *   3. Success envelope is projected to `{ dataset_name,
@@ -80,6 +80,7 @@ function sqlNode(
       sql_text:
         inputsOverride?.sql_text ?? "SELECT id, total FROM orders",
       ...(datasetName !== undefined && { dataset_name: datasetName }),
+      ...(inputsOverride?.row_limit !== undefined && { row_limit: inputsOverride.row_limit }),
     },
   };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { GripVertical } from "lucide-react";
+import { Grip } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { GroupProps, SeparatorProps } from "react-resizable-panels";
 import { cn } from "@/lib/utils";
@@ -27,14 +27,7 @@ const ResizablePanel = Panel;
 
 /**
  * Resize handle. Orientation-aware via `aria-orientation` set by
- * the underlying `Separator` from `react-resizable-panels`:
- *
- *   - horizontal group (default) → vertical bar (1px wide, full height)
- *   - vertical group              → horizontal bar (full width, 1px tall),
- *                                    grip rotated 90°.
- *
- * The hit area is enlarged ±4px in the cross-axis via the `::after`
- * pseudo so users don't need pixel-perfect cursor placement.
+ * the underlying `Separator` from `react-resizable-panels`.
  */
 function ResizableHandle({
   withHandle,
@@ -63,20 +56,13 @@ function ResizableHandle({
       {withHandle && (
         <div
           className={cn(
-            "z-10 flex h-4 w-3 items-center justify-center rounded-sm border bg-border",
-            // swap aspect ratio when the separator is horizontal
-            // (i.e. inside a vertical group)
-            "[[aria-orientation=horizontal]_&]:h-3 [[aria-orientation=horizontal]_&]:w-4",
+            "z-10 flex items-center justify-center gap-0.5 rounded-sm border bg-border",
+            "h-7 w-3 flex-col",
+            "[[aria-orientation=horizontal]_&]:h-3 [[aria-orientation=horizontal]_&]:w-7 [[aria-orientation=horizontal]_&]:flex-row",
           )}
         >
-          <GripVertical
-            className={cn(
-              "h-2.5 w-2.5",
-              // rotate grip 90° when separator is horizontal so the
-              // dots line up across the bar
-              "[[aria-orientation=horizontal]_&]:rotate-90",
-            )}
-          />
+          <Grip className="h-2.5 w-2.5" />
+          <Grip className="h-2.5 w-2.5" />
         </div>
       )}
     </Separator>

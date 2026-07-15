@@ -24,7 +24,6 @@ import {
   Camera,
   ChevronDown,
   ChevronRight as ChevronRightCrumb,
-  ChevronUp,
   Columns2,
   Folder,
   Loader2,
@@ -39,13 +38,12 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useMemo,
-  useRef,
   useState,
   type ReactElement,
 } from "react";
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
-import { useDefaultLayout, type PanelImperativeHandle } from "react-resizable-panels";
+import { useDefaultLayout } from "react-resizable-panels";
 
 import { ArtifactFolderTreeSelect } from "@/components/library/ArtifactFolderTreeSelect";
 import {
@@ -149,13 +147,7 @@ interface SnapshotInfo {
 const VERTICAL_LAYOUT_ID = "nango:artifact-detail:vertical";
 
 /**
- * Default share of the bottom (workflow) panel when newly mounting
- * AND when the user clicks the "Show workflow" reveal button. The
- * latter is critical: `PanelImperativeHandle.expand()` restores the
- * panel to its "most recent size" — which after a drag-collapse is
- * usually a few percent — so calling `expand()` only nudges the
- * panel back up a sliver. We pass this explicit size via `resize()`
- * instead to give a predictable substantial reveal.
+ * Default share of the bottom (workflow) panel when newly mounting.
  */
 const WORKFLOW_PANEL_DEFAULT_SIZE = 40;
 
@@ -474,10 +466,6 @@ interface WorkflowBackedLayoutProps {
  * (`useDefaultLayout`) under a single shared key so the user's
  * "how much space for the workflow" preference carries across
  * artifacts.
- *
- * The bottom panel is `collapsible` (drag-to-bottom hides it).
- * When collapsed, a sticky "Show workflow" pill anchors to the
- * bottom-right and re-expands the panel via `panelRef.expand()`.
  */
 function WorkflowBackedLayout({
   node,
@@ -486,12 +474,6 @@ function WorkflowBackedLayout({
   spec,
   data,
 }: WorkflowBackedLayoutProps): ReactElement {
-  const lowerPanelRef = useRef<PanelImperativeHandle | null>(null);
-  // Track the lower panel's current size (asPercentage). The
-  // initial value is conservative — onResize fires on mount so
-  // this is immediately corrected.
-  const [lowerSize, setLowerSize] = useState<number>(40);
-
   const storage = typeof window !== "undefined" ? window.localStorage : undefined;
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: VERTICAL_LAYOUT_ID,
@@ -527,34 +509,10 @@ function WorkflowBackedLayout({
           minSize={0}
           collapsible
           collapsedSize={0}
-          panelRef={lowerPanelRef}
-          onResize={(size) => setLowerSize(size.asPercentage)}
         >
           <WorkflowGraph spec={spec} />
         </ResizablePanel>
       </ResizablePanelGroup>
-
-      {/* Reveal hook — visible only when the bottom panel is
-          collapsed (or near-collapsed). Anchored bottom-right so it
-          doesn't fight the resize handle's hit area.
-
-          We call `resize("N%")` rather than `expand()` here on
-          purpose: see WORKFLOW_PANEL_DEFAULT_SIZE doc-comment —
-          `expand()` only restores the few-percent size the panel
-          had right before collapsing, which is barely a reveal. */}
-      {lowerSize < 2 && (
-        <Button
-          variant="secondary"
-          size="sm"
-          className="absolute bottom-3 right-4 z-20 h-7 gap-1 px-2.5 text-xs shadow"
-          onClick={() =>
-            lowerPanelRef.current?.resize(`${WORKFLOW_PANEL_DEFAULT_SIZE}%`)
-          }
-        >
-          <ChevronUp className="h-3 w-3" />
-          Show workflow
-        </Button>
-      )}
     </div>
   );
 }

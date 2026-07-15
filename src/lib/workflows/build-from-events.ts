@@ -331,7 +331,6 @@ function assembleToolNode(invocation: ToolInvocation, id: number): LLMToolNode {
   return {
     id,
     type: "tool",
-    description: deriveDescription(invocation),
     depends_on: [],
     inputs: {
       name: invocation.toolName,
@@ -365,7 +364,6 @@ function assembleAgentNode(
   return {
     id,
     type: "agent",
-    description: deriveDescription(invocation),
     depends_on: [],
     inputs,
   };
@@ -410,7 +408,6 @@ function assembleCodeNode(
   const node: LLMCodeNode = {
     id,
     type: "code",
-    description: deriveDescription(invocation),
     depends_on: [],
     inputs,
   };
@@ -427,8 +424,7 @@ function assembleCodeNode(
  *   - `args.data_source_name`  → `inputs.data_source_name`
  *   - `args.sql_text`          → `inputs.sql_text`
  *   - `args.dataset_name`      → `inputs.dataset_name` (optional)
- *   - `args.row_limit`         → DROPPED (engine-side policy)
- *   - `args.force_refresh`     → DROPPED (artifact-level concern)
+ *   - `args.row_limit`         → `inputs.row_limit` (optional)
  */
 function assembleSqlNode(invocation: ToolInvocation, id: number): LLMSqlNode {
   const dataSourceName = readStringField(invocation.inputs, "data_source_name");
@@ -451,10 +447,13 @@ function assembleSqlNode(invocation: ToolInvocation, id: number): LLMSqlNode {
   if (datasetName !== undefined && datasetName.length > 0) {
     inputs.dataset_name = datasetName;
   }
+  const rowLimit = readNumberField(invocation.inputs, "row_limit");
+  if (rowLimit !== undefined) {
+    inputs.row_limit = rowLimit;
+  }
   return {
     id,
     type: "sql",
-    description: deriveDescription(invocation),
     depends_on: [],
     inputs,
   };
@@ -504,7 +503,6 @@ function assembleChartNode(
   return {
     id,
     type: "chart",
-    description: deriveDescription(invocation),
     depends_on: [],
     inputs: {
       renderer,
@@ -534,28 +532,6 @@ function readNumberField(
 ): number | undefined {
   const v = obj[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-
-function deriveDescription(invocation: ToolInvocation): string {
-  const sample = describeInputSnippet(invocation.inputs);
-  return sample.length > 0
-    ? `${invocation.toolName} — ${sample}`
-    : invocation.toolName;
-}
-
-function describeInputSnippet(input: Record<string, unknown>): string {
-  // Pick the first one or two string/number-valued keys for a
-  // human-readable suffix. Skip object/array values.
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(input)) {
-    if (parts.length >= 2) break;
-    if (typeof value === "string") {
-      parts.push(`${key}=${truncate(value, 32)}`);
-    } else if (typeof value === "number" || typeof value === "boolean") {
-      parts.push(`${key}=${String(value)}`);
-    }
-  }
-  return parts.join(", ");
 }
 
 function truncate(s: string, max: number): string {

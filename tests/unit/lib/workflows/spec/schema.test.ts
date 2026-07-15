@@ -101,13 +101,17 @@ describe("LLMWorkflowSpecSchema", () => {
     ).toThrow();
   });
 
-  it("requires node.description per D7", () => {
+  it("allows an empty or omitted node.description", () => {
     expect(() =>
       LLMWorkflowSpecSchema.parse({
         ...baseLLMSpec,
         nodes: [{ ...toolNode, description: "" }],
       }),
-    ).toThrow();
+    ).not.toThrow();
+    const { description: _omit, ...noDesc } = toolNode;
+    expect(() =>
+      LLMWorkflowSpecSchema.parse({ ...baseLLMSpec, nodes: [noDesc] }),
+    ).not.toThrow();
   });
 
   it("rejects an agent node missing the required inputs.task field", () => {

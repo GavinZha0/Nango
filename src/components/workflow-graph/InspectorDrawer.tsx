@@ -8,21 +8,6 @@
  * scrollable body composed of per-type sections (description,
  * type-specific "main body", input, output schema, outputs,
  * depends_on), all rendered as a single ScrollArea.
- *
- * V1 design notes:
- *   - The drawer is intentionally NOT a Sheet / Dialog — it lives
- *     inside the workflow panel's horizontal `ResizablePanelGroup`
- *     so the graph stays visible alongside the detail (the user
- *     can compare adjacent nodes by clicking through without
- *     overlapping the chart panel above).
- *   - "Copy as JSON" writes the FULL canonical node (including
- *     bucket-specific fields) to the clipboard. Useful when
- *     asking the LLM to "tweak this node" via chat.
- *   - Code / SQL bodies render as plain `<pre><code>` — a future
- *     highlighter can layer on without a structural change.
- *
- * See docs/workflow-architecture.md. for canonical node shapes
- *      and `src/lib/workflows/spec/schema.ts` for the types.
  */
 
 import {
@@ -124,7 +109,7 @@ function nodeTitle(node: CanonicalNode): string {
     case "code":
       return node.inputs.language;
     case "sql":
-      return node.inputs.dataset_name ?? node.inputs.data_source_name;
+      return node.inputs.data_source_name;
     case "chart":
       return node.inputs.renderer;
   }
@@ -198,12 +183,25 @@ export function InspectorDrawer({
       {/* Body — scrollable per-type sections */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 px-3 py-3 text-xs">
-          {node.description && <DescriptionSection node={node} />}
+          {node.type === "sql" && (
+            <div className="flex flex-col gap-1 text-foreground">
+              <KV label="tool" value="extract_dataset_by_sql" mono/>
+            </div>
+          )}
 
-          {/* Per-type body — the meaningful "what this node does"
-              block (tool name, agent identity, code body, SQL
-              query). */}
-          {node.type === "tool" && <ToolBody node={node} />}
+          {node.type === "code" && (
+            <div className="flex flex-col gap-1 text-foreground">
+              <KV label="tool" value="run_code_in_sandbox" mono/>
+            </div>
+          )}
+
+          {node.type === "chart" && (
+            <div className="flex flex-col gap-1 text-foreground">
+              <KV label="tool" value="generate_echarts_config" mono/>
+            </div>
+          )}
+
+          <DescriptionSection node={node} />
           {node.type === "agent" && <AgentBody node={node} />}
           {node.type === "code" && <CodeBody node={node} />}
           {node.type === "sql" && <SqlBody node={node} />}
@@ -232,12 +230,6 @@ export function InspectorDrawer({
             </Section>
           )}
 
-          {node.type !== "chart" && node.depends_on.length > 0 && (
-            <Section title="Depends on">
-              <ChipList items={node.depends_on.map((n) => `#${n}`)} />
-            </Section>
-          )}
-
           <RuntimeMetaSection node={node} />
         </div>
       </ScrollArea>
@@ -246,15 +238,6 @@ export function InspectorDrawer({
 }
 
 // ── Per-type body sections ───────────────────────────────────────────
-
-function ToolBody({ node }: { node: CanonicalToolNode }): ReactElement {
-  return (
-    <Section title="Tool">
-      <CodeInline value={node.inputs.name} />
-    </Section>
-  );
-}
-
 function AgentBody({ node }: { node: CanonicalAgentNode }): ReactElement {
   return (
     <>
@@ -272,8 +255,18 @@ function CodeBody({ node }: { node: CanonicalCodeNode }): ReactElement {
   const language = node.inputs.language;
   const codeText = node.inputs.code_text;
   const codeFile = node.inputs.code_file;
+  const datasetNames = Array.isArray(node.inputs.datasets) ? node.inputs.datasets.filter((d): d is string => typeof d === "string") : [];
   return (
     <>
+      {datasetNames.length > 0 && (
+        <Section title="Datasets">
+          <div className="flex flex-col gap-1">
+            {datasetNames.map((name, i) => (
+              <CodeInline key={i} value={name} />
+            ))}
+          </div>
+        </Section>
+      )}
       {codeText !== undefined && (
         <Section title="Code">
           <CodeBlock language={language} value={codeText} />
@@ -292,23 +285,7 @@ function SqlBody({ node }: { node: CanonicalSqlNode }): ReactElement {
   // Pretty-print the query for readability. The saved spec stores
   // SQL as the LLM emitted it — frequently a single long line.
   // `sql-formatter` reflows that into indented multi-line SQL.
-  //
-  // `language: "duckdb"` is correct for V1: queries don't run
-  // directly against the underlying MariaDB / Vertica data source
-  // — they go through DuckDB's scanner extensions, which expose a
-  // DuckDB SQL surface that translates downward. The dialect
-  // therefore stays "duckdb" regardless of the `dataSourceName`
-  // the node points at.
-  //
-  // `keywordCase: "preserve"` keeps whatever case the LLM emitted
-  // (upper / lower / mixed) — formatting reflows the layout
-  // without rewriting tokens. Less surprising than forcing UPPER.
-  //
-  // The try/catch is defensive: sql-formatter is tokenizer-based
-  // and tolerant of most inputs, but DuckDB-specific tokens it
-  // doesn't recognise could in principle bubble an exception. In
-  // that case the user sees the raw query — same as if formatting
-  // wasn't applied — instead of an empty drawer.
+
   const sqlText = node.inputs.sql_text;
   const formattedQuery: string = useMemo(() => {
     try {
@@ -327,14 +304,18 @@ function SqlBody({ node }: { node: CanonicalSqlNode }): ReactElement {
       <Section title="Data source">
         <CodeInline value={node.inputs.data_source_name} />
       </Section>
-      <Section title="Data source ID">
-        <CodeInline value={node.inputs.data_source_id} subtle />
-      </Section>
       {node.inputs.dataset_name && (
         <Section title="Dataset name">
           <CodeInline value={node.inputs.dataset_name} />
         </Section>
       )}
+      <Section title="Preview limit">
+        {node.inputs.row_limit !== undefined ? (
+          <CodeInline value={String(node.inputs.row_limit)} />
+        ) : (
+          <CodeInline value="200 (default)" subtle />
+        )}
+      </Section>
       <Section title="Query">
         <CodeBlock language="sql" value={formattedQuery} />
       </Section>
@@ -343,10 +324,25 @@ function SqlBody({ node }: { node: CanonicalSqlNode }): ReactElement {
 }
 
 function ChartBody({ node }: { node: CanonicalChartNode }): ReactElement {
+  const dataset = node.inputs.dataset;
+  const dataRefs: string[] = dataset === undefined ? [] : Array.isArray(dataset) ? dataset : [dataset];
   return (
-    <Section title="Config">
-      <JsonView data={node.inputs.config} defaultExpandDepth={2} />
-    </Section>
+    <>
+      <Section title="Data">
+        {dataRefs.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            {dataRefs.map((ref, i) => (
+              <CodeInline key={i} value={ref} />
+            ))}
+          </div>
+        ) : (
+          <CodeInline value="inline literal" subtle />
+        )}
+      </Section>
+      <Section title="Config">
+        <JsonView data={node.inputs.config} defaultExpandDepth={2} />
+      </Section>
+    </>
   );
 }
 
@@ -355,29 +351,14 @@ function RuntimeMetaSection({
 }: {
   node: CanonicalNode;
 }): ReactElement | null {
-  const rows: Array<[string, string]> = [];
-  if (node.timeout_seconds !== undefined) {
-    rows.push(["Timeout", `${node.timeout_seconds}s`]);
+  if (node.timeout_seconds === undefined) {
+    return null;
   }
-  if (node.retries !== undefined) {
-    const { attempts, delay_seconds, backoff } = node.retries;
-    rows.push([
-      "Retries",
-      `${attempts} attempt${attempts === 1 ? "" : "s"}, ${delay_seconds}s delay${backoff !== undefined ? ` (${backoff})` : ""}`,
-    ]);
-  }
-  if (rows.length === 0) return null;
   return (
-    <Section title="Runtime">
-      <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1">
-        {rows.map(([k, v]) => (
-          <span key={k} className="contents">
-            <dt className="text-muted-foreground">{k}</dt>
-            <dd className="truncate font-mono text-foreground">{v}</dd>
-          </span>
-        ))}
-      </dl>
-    </Section>
+    <div className="grid grid-cols-[5rem_1fr] gap-x-3">
+      <span className="text-muted-foreground">Timeout</span>
+      <span className="truncate font-mono text-foreground">{node.timeout_seconds}s</span>
+    </div>
   );
 }
 
@@ -413,31 +394,11 @@ function Section({ title, children }: SectionProps): ReactElement {
 }
 
 function DescriptionSection({ node }: { node: CanonicalNode }): ReactElement {
-  switch (node.type) {
-    case "code":
-      return (
-        <div className="flex flex-col gap-1 text-foreground">
-          <KV label="tool" value="run_code_in_sandbox" mono />
-          <KV label="language" value={node.inputs.language} />
-          {node.inputs.datasets && node.inputs.datasets.length > 0 && (
-            <KV label="datasets" value={String(node.inputs.datasets.length)} />
-          )}
-        </div>
-      );
-    case "chart":
-      return (
-        <div className="flex flex-col gap-1 text-foreground">
-          <KV label="tool" value="generate_echarts_config" mono />
-          <KV label="renderer" value={node.inputs.renderer} />
-        </div>
-      );
-    default:
-      return (
-        <Section title="Description">
-          <p className="whitespace-pre-wrap text-foreground">{node.description}</p>
-        </Section>
-      );
-  }
+  return (
+    <Section title="Description">
+      <p className="whitespace-pre-wrap text-foreground">{node.description}</p>
+    </Section>
+  );
 }
 
 function KV({ label, value, mono }: { label: string; value: string; mono?: boolean }): ReactElement {

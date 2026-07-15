@@ -742,13 +742,16 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                   <p className="text-xs text-destructive">{exec.execError}</p>
                 </div>
               ) : exec.result !== null ? (
-                resultTab === "view" ? (
-                  <JsonView data={exec.result} defaultExpandDepth={3} />
-                ) : (
-                  <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
-                    {JSON.stringify(exec.result, null, 2)}
-                  </pre>
-                )
+                <>
+                  <div className={cn(resultTab !== "view" && "hidden")}>
+                    <JsonView data={exec.result} defaultExpandDepth={3} />
+                  </div>
+                  <div className={cn(resultTab !== "raw" && "hidden")}>
+                    <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                      {JSON.stringify(exec.result, null, 2)}
+                    </pre>
+                  </div>
+                </>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   Click Execute to run the tool.
