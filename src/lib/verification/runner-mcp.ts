@@ -19,7 +19,7 @@ import {
   TOOL_FAILURE_CAUSE,
   type ToolFailureCause,
 } from "@/lib/runner/tool-failure";
-
+import { resolveInput } from "./resolve-input";
 import { runAssertions } from "./assertions";
 import { classifyMcpError } from "./error-source";
 import type {
@@ -51,8 +51,10 @@ export interface RunMcpCaseInput {
  */
 export async function runMcpCase(
   input: RunMcpCaseInput,
+  runContext?: Record<string, unknown>,
 ): Promise<CaseExecutionOutcome> {
   const startedAt: number = Date.now();
+  const resolvedInput: Record<string, unknown> = resolveInput(input.input, runContext);
 
   // Borrow → tools → execute. All wrapped in try/finally so the
   // refcount is always released, even on internal throws.
@@ -64,6 +66,7 @@ export async function runMcpCase(
       startedAt,
       durationMs: Date.now() - startedAt,
       error: classifyMcpError(err),
+      resolvedInput,
     });
   }
 
@@ -87,6 +90,7 @@ export async function runMcpCase(
           message: `tool not found on server: ${input.toolName}`,
           details: { mcpServerId: input.mcpServerId, toolName: input.toolName },
         },
+        resolvedInput,
       });
     }
 
@@ -96,7 +100,7 @@ export async function runMcpCase(
     // CallToolResult.isError by the absence of `content`.
     let raw: unknown;
     try {
-      const executed = await tool.execute(input.input);
+      const executed = await tool.execute(resolvedInput);
       raw = normalizeMcpToolResult(executed, { parseForUi: true });
     } catch (err) {
       // wrapToolExecute should have caught this, but defend in depth.
@@ -104,6 +108,7 @@ export async function runMcpCase(
         startedAt,
         durationMs: Date.now() - startedAt,
         error: classifyMcpError(err),
+        resolvedInput,
       });
     }
 
@@ -134,11 +139,12 @@ export async function runMcpCase(
         startedAt,
         durationMs: Date.now() - startedAt,
         error: classifyMcpError(synthetic),
+        resolvedInput,
       });
     }
 
     const mcpIsError = isMcpIsError(raw);
-    const assertionResults = runAssertions(raw, input.assertions);
+    const assertionResults = runAssertions(raw, input.assertions, resolvedInput, runContext);
     const allAssertionsPassed = assertionResults.every((r) => r.ok);
     const passed = !mcpIsError && allAssertionsPassed;
 
@@ -168,6 +174,7 @@ export async function runMcpCase(
 
     return {
       status: passed ? "passed" : "failed",
+      resolvedInput,
       resultPayload: raw,
       resultTruncated: false,
       assertionResults,
@@ -188,6 +195,7 @@ function failedOutcome(args: {
   startedAt: number;
   durationMs: number;
   error: ErrorEnvelope;
+  resolvedInput?: Record<string, unknown>;
 }): CaseExecutionOutcome {
   return {
     status: "errored",
@@ -197,6 +205,7 @@ function failedOutcome(args: {
     error: args.error,
     startedAt: args.startedAt,
     durationMs: args.durationMs,
+    resolvedInput: args.resolvedInput,
   };
 }
 

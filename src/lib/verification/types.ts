@@ -124,6 +124,7 @@ export interface CaseExecutionOutcome {
   status: VerificationCaseResultStatus;
   /** Tool / workflow output. NULL for cases that never produced one
    *  (transport throw, skipped). */
+  resolvedInput?: Record<string, unknown>;
   resultPayload: unknown;
   resultTruncated: boolean;
   assertionResults: AssertionResult[];

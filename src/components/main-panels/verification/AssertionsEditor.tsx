@@ -127,7 +127,7 @@ export function AssertionsEditor({
   readOnly,
   overrideText = null,
 }: AssertionsEditorProps): ReactNode {
-  const [subTab, setSubTab] = useState<TabType>("expression");
+  const [subTab, setSubTab] = useState<TabType>("path_match");
 
   const formState = useMemo(() => {
     try {
@@ -197,7 +197,7 @@ export function AssertionsEditor({
       const item = nextMatches[idx];
       if (!item) return prev;
       if (field === "path") {
-        nextMatches[idx] = { ...item, path: val };
+        nextMatches[idx] = { ...item, path: val.trim() };
       } else {
         let parsed: unknown;
         try {
@@ -262,8 +262,8 @@ export function AssertionsEditor({
 
   const TABS = (
     [
-      { id: "expression", label: "JS Expression", hasDot: hasExpressions },
       { id: "path_match", label: "JSONPath", hasDot: hasPathMatches },
+      { id: "expression", label: "JS Expression", hasDot: hasExpressions },
       { id: "schema", label: "Schema", hasDot: hasSchema },
       { id: "json", label: "JSON", hasDot: false },
     ] as const
@@ -357,7 +357,8 @@ export function AssertionsEditor({
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground block">
                   • Paths starting with <code className="text-amber-500 font-semibold">$</code> query the full tool output root (e.g. $.isError).<br />
-                  • Paths without a prefix query under <code className="text-amber-500 font-semibold">structuredContent(content)</code> directly (e.g. items[0].id).
+                  • Paths without a prefix query under <code className="text-amber-500 font-semibold">structuredContent(content)</code> directly (e.g. items[0].id).<br />
+                  • Expected value supports <code className="text-amber-500 font-semibold">{"{{ input.path }}"}</code> templates to reference resolved inputs.
                 </Label>
               </div>
               {!readOnly && (
@@ -413,7 +414,7 @@ export function AssertionsEditor({
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground">
-                  • Bindings: <code className="font-semibold text-amber-500">result</code> (structuredContent or content), <code className="font-semibold text-amber-500">root</code> (full output).
+                  • Bindings: <code className="font-semibold text-amber-500">result</code> (structuredContent or content), <code className="font-semibold text-amber-500">root</code> (full output), <code className="font-semibold text-amber-500">input</code> (resolved input).
                 </Label>
               </div>
               {!readOnly && (

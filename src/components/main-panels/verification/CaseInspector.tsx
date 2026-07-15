@@ -767,7 +767,7 @@ function VerdictsPane({
       <div className="min-h-0 flex-1 px-3 pb-2">
         {hasContent ? (
           <div className="h-full space-y-2 overflow-auto rounded-md border bg-muted/30 p-2">
-            {error && <ErrorView err={error} />}
+            {error && error.source !== "assertion" && <ErrorView err={error} />}
             {verdicts.length > 0 && (
               <ul className="space-y-1">
                 {verdicts.map((r, i) => (
@@ -872,6 +872,15 @@ function AssertionVerdictRow({
   verdict: AssertionResult;
   spec?: AssertionSpec;
 }): ReactNode {
+  const renderActualValue = (val: unknown): string => {
+    if (val === undefined) return "";
+    try {
+      return JSON.stringify(val);
+    } catch {
+      return String(val);
+    }
+  };
+
   return (
     <li className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]">
       <span
@@ -885,11 +894,18 @@ function AssertionVerdictRow({
         {verdict.ok ? "✓" : "✗"}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-muted-foreground">
-          #{verdict.index + 1} · {getConditionDescription(verdict, spec)}
-        </p>
-        {verdict.message && (
-          <p className="break-words text-[10px]">{verdict.message}</p>
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-muted-foreground break-all">
+            #{verdict.index + 1} · {getConditionDescription(verdict, spec)}
+          </span>
+          {!verdict.ok && verdict.actual !== undefined && (
+            <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
+              ({renderActualValue(verdict.actual)})
+            </span>
+          )}
+        </div>
+        {verdict.message && verdict.message !== "value mismatch" && (
+          <p className="break-words text-[10px] text-destructive/80 mt-0.5">{verdict.message}</p>
         )}
       </div>
     </li>

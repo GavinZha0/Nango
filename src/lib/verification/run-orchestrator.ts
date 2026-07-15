@@ -27,6 +27,7 @@ import { publishVerificationFrame } from "./event-bus-channel";
 import { runMcpCase } from "./runner-mcp";
 import * as storage from "./storage";
 import { timeoutError } from "./error-source";
+import { normalizeCaseName } from "@/lib/verification/resolve-input";
 import type {
   AssertionSpec,
   CaseExecutionOutcome,
@@ -270,6 +271,7 @@ async function runSuiteCases(
 ): Promise<void> {
   const suiteStartedAt: number = Date.now();
   const timeoutMs: number = input.timeoutSec * 1000;
+  const suiteContext: Record<string, unknown> = {};
 
   for (const c of input.cases) {
     // Wall-clock check before each case — keeps the "remaining
@@ -280,6 +282,7 @@ async function runSuiteCases(
       counters.timedOut = true;
       const skippedOutcome: CaseExecutionOutcome = {
         status: "skipped",
+        resolvedInput: (c.input ?? {}) as Record<string, unknown>,
         resultPayload: null,
         resultTruncated: false,
         assertionResults: [],
@@ -292,7 +295,6 @@ async function runSuiteCases(
         runId: input.runId,
         caseId: c.id,
         outcome: skippedOutcome,
-        inputSnapshot: c.input,
       });
       counters.skippedCount += 1;
       continue;
@@ -304,6 +306,7 @@ async function runSuiteCases(
       // in depth: if a row violates it, mark errored, don't crash.
       const outcome: CaseExecutionOutcome = {
         status: "errored",
+        resolvedInput: (c.input ?? {}) as Record<string, unknown>,
         resultPayload: null,
         resultTruncated: false,
         assertionResults: [],
@@ -320,7 +323,6 @@ async function runSuiteCases(
         runId: input.runId,
         caseId: c.id,
         outcome,
-        inputSnapshot: c.input,
       });
       counters.erroredCount += 1;
       continue;
@@ -339,13 +341,14 @@ async function runSuiteCases(
       runId: input.runId,
       caseId: c.id,
       perCaseCapMs,
+      rawInput: (c.input ?? {}) as Record<string, unknown>,
       runner: () =>
         runMcpCase({
           mcpServerId: c.mcpServerId!,
           toolName: c.toolName!,
           input: (c.input ?? {}) as Record<string, unknown>,
           assertions: (c.assertions ?? []) as readonly AssertionSpec[],
-        }),
+        }, { cases: suiteContext }),
     });
 
     await persistAndPublish({
@@ -353,8 +356,14 @@ async function runSuiteCases(
       runId: input.runId,
       caseId: c.id,
       outcome,
-      inputSnapshot: c.input,
     });
+
+    // 记录本次运行输出，将 case 名字经过规范化后作为 Key
+    const normalizedKey = normalizeCaseName(c.name);
+    suiteContext[normalizedKey] = {
+      input: outcome.resolvedInput ?? {},
+      output: outcome.resultPayload ?? {},
+    };
 
     if (outcome.status === "passed") counters.passedCount += 1;
     else if (outcome.status === "failed") counters.failedCount += 1;
@@ -513,6 +522,7 @@ async function runCaseWithCap(args: {
   runId: string;
   caseId: number;
   perCaseCapMs: number;
+  rawInput: Record<string, unknown>;
   runner: () => Promise<CaseExecutionOutcome>;
 }): Promise<CaseExecutionOutcome> {
   const startedAt = Date.now();
@@ -547,6 +557,7 @@ async function runCaseWithCap(args: {
       );
       resolve({
         status: "errored",
+        resolvedInput: args.rawInput,
         resultPayload: null,
         resultTruncated: false,
         assertionResults: [],
@@ -582,7 +593,6 @@ interface PersistAndPublishInput {
   runId: string;
   caseId: number;
   outcome: CaseExecutionOutcome;
-  inputSnapshot: unknown;
 }
 
 async function persistAndPublish(input: PersistAndPublishInput): Promise<void> {
@@ -591,7 +601,7 @@ async function persistAndPublish(input: PersistAndPublishInput): Promise<void> {
       runId: input.runId,
       caseId: input.caseId,
       outcome: input.outcome,
-      inputSnapshot: input.inputSnapshot,
+      inputSnapshot: input.outcome.resolvedInput,
     });
   } catch (err) {
     // Persistence failure is ops-grade — log and continue so the

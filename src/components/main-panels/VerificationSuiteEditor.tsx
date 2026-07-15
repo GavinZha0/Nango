@@ -166,6 +166,7 @@ export function VerificationSuiteEditor({
     if (!row) return undefined;
     return {
       status: row.status as VerificationCaseResultStatus,
+      resolvedInput: (row.inputSnapshot ?? {}) as Record<string, unknown>,
       resultPayload: row.resultPayload,
       resultTruncated: row.resultTruncated,
       assertionResults: row.assertionResults as AssertionResult[],

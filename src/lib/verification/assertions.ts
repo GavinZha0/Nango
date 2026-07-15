@@ -23,6 +23,7 @@
  *     js_expression bindings:
  *       `result`               ⇒ structuredContent (or `{}` when absent)
  *       `root`                 ⇒ full CallToolResult
+ *       `input`                ⇒ resolved input snapshot
  *
  *   `isError` handling is OUTSIDE assertion scope — the runner already
  *   marks the case `failed` when `root.isError === true`, so users
@@ -37,7 +38,7 @@ import { runInNewContext } from "node:vm";
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import { JSONPath } from "jsonpath-plus";
-
+import { substituteInputTemplates } from "./resolve-input";
 import type {
   AssertionResult,
   AssertionSpec,
@@ -74,22 +75,26 @@ const JS_EXPRESSION_TIMEOUT_MS: number = 250;
 export function runAssertions(
   payload: unknown,
   assertions: readonly AssertionSpec[],
+  input: unknown = {},
+  runContext?: Record<string, unknown>
 ): AssertionResult[] {
-  return assertions.map((spec, index) => evaluateOne(spec, payload, index));
+  return assertions.map((spec, index) => evaluateOne(spec, payload, index, input, runContext));
 }
 
 function evaluateOne(
   spec: AssertionSpec,
   payload: unknown,
   index: number,
+  input: unknown,
+  runContext?: Record<string, unknown>
 ): AssertionResult {
   switch (spec.type) {
     case "json_schema":
       return evaluateJsonSchema(spec, payload, index);
     case "jsonpath_equals":
-      return evaluateJsonPathEquals(spec, payload, index);
+      return evaluateJsonPathEquals(spec, payload, index, input, runContext);
     case "js_expression":
-      return evaluateJsExpression(spec, payload, index);
+      return evaluateJsExpression(spec, payload, index, input, runContext);
     default: {
       // Defensive — caught at the type-system level, but DB rows can
       // contain anything historical.
@@ -153,7 +158,10 @@ function evaluateJsonPathEquals(
   spec: JsonPathEqualsAssertion,
   payload: unknown,
   index: number,
+  input: unknown,
+  runContext?: Record<string, unknown>,
 ): AssertionResult {
+  const expected = substituteInputTemplates(spec.expected, input, runContext);
   const { json, absolutePath } = resolveJsonPathScope(spec.path, payload);
   let actualList: unknown[];
   try {
@@ -183,13 +191,13 @@ function evaluateJsonPathEquals(
     actualList.length === 1 && !absolutePath.includes("[*]")
       ? actualList[0]
       : actualList;
-  const ok = deepEqual(actual, spec.expected);
+  const ok = deepEqual(actual, expected);
   return {
     index,
     type: "jsonpath_equals",
     ok,
     path: spec.path,
-    expected: spec.expected,
+    expected,
     actual,
     message: ok ? undefined : "value mismatch",
   };
@@ -279,6 +287,8 @@ function evaluateJsExpression(
   spec: JsExpressionAssertion,
   payload: unknown,
   index: number,
+  input: unknown,
+  runContext: Record<string, unknown> = {},
 ): AssertionResult {
   // Security boundary is the `node:vm` context, not the string wrap.
   // Before "hardening" `(${expr})`, read the security model in
@@ -286,7 +296,7 @@ function evaluateJsExpression(
   try {
     const ok = runInNewContext(
       `(${spec.expression})`,
-      { result: extractMcpStructuredData(payload), root: payload },
+      { result: extractMcpStructuredData(payload), root: payload, input, ...runContext },
       { timeout: JS_EXPRESSION_TIMEOUT_MS, displayErrors: false },
     );
     return {

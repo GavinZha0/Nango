@@ -12,6 +12,7 @@ import {
   assertionsArraySchema,
   caseInputSchema,
 } from "@/lib/verification/wire-schemas";
+import { normalizeCaseName } from "@/lib/verification/resolve-input";
 
 const ROUTE = "/api/verification-cases";
 
@@ -116,7 +117,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       .insert(VerificationCaseTable)
       .values({
         suiteId,
-        name: body.name,
+        name: normalizeCaseName(body.name),
         input: body.input ?? {},
         assertions: (body.assertions ?? []) as unknown,
         enabled: body.enabled ?? true,
@@ -142,7 +143,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       throw new ApiError(
         "CONFLICT",
         409,
-        `A case named "${body.name}" already exists for this tool.`,
+        `A case named "${normalizeCaseName(body.name)}" already exists for this tool.`,
       );
     }
     throw err;

@@ -14,6 +14,7 @@ import {
   assertionsArraySchema,
   caseInputSchema,
 } from "@/lib/verification/wire-schemas";
+import { normalizeCaseName } from "@/lib/verification/resolve-input";
 
 const ROUTE = "/api/verification-cases/[id]";
 
@@ -63,7 +64,7 @@ export const PATCH = withEditor<{ id: string }>(
     const updates: Record<string, unknown> = {
       updatedAt: sql`CURRENT_TIMESTAMP`,
     };
-    if (body.name !== undefined) updates.name = body.name;
+    if (body.name !== undefined) updates.name = normalizeCaseName(body.name);
     if (body.input !== undefined) updates.input = body.input;
     if (body.assertions !== undefined) {
       updates.assertions = body.assertions as unknown;
@@ -96,7 +97,7 @@ export const PATCH = withEditor<{ id: string }>(
         throw new ApiError(
           "CONFLICT",
           409,
-          `A case named "${body.name}" already exists in this suite.`,
+          `A case named "${normalizeCaseName(body.name)}" already exists in this suite.`,
         );
       }
       throw err;
