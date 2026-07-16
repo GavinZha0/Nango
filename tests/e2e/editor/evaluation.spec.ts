@@ -9,10 +9,10 @@ test.describe("Evaluation Page", () => {
     await page.evaluate(() => {
       document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
     });
-    await expect(page.getByText(/evaluation/i).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Evaluation" }).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("should display the evaluation page", async ({ page }) => {
-    await expect(page.getByText(/evaluation/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Evaluation" }).first()).toBeVisible();
   });
 });

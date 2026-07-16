@@ -135,6 +135,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         input: body.input ?? {},
         assertions: (body.assertions ?? []) as unknown,
         enabled: body.enabled ?? true,
+        createdBy: session.user.id,
       })
       .returning();
 

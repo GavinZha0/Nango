@@ -52,6 +52,7 @@ export const GET = withEditor<{ id: string }>(
         suiteVisibility: VerificationSuiteTable.visibility,
         suiteCreatedBy: VerificationSuiteTable.createdBy,
         suiteName: VerificationSuiteTable.name,
+        createdBy: VerificationCaseTable.createdBy,
       })
       .from(VerificationCaseTable)
       .innerJoin(

@@ -43,6 +43,7 @@ export interface EvalCaseRow {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  createdBy?: string;
 }
 
 /** Left-panel row — one per agent that has eval suites. */
@@ -246,6 +247,7 @@ export const evalActions = {
       useEvaluationStore
         .getState()
         .setError(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   },
 

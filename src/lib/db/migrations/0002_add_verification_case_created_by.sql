@@ -1,0 +1,3 @@
+ALTER TABLE "verification_case" ADD COLUMN "created_by" uuid;--> statement-breakpoint
+ALTER TABLE "verification_case" ADD CONSTRAINT "verification_case_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+UPDATE "verification_case" c SET "created_by" = s.created_by FROM "verification_suite" s WHERE c.suite_id = s.id;

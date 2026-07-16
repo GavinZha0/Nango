@@ -18,6 +18,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { ArrowLeft, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { EvalSuiteTree } from "@/components/main-panels/evaluation/EvalSuiteTree";
@@ -249,21 +250,26 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
     if (c) setDeleteTarget({ kind: "case", id: caseId, suiteId, name: c.name });
   }
 
-  function handleDeleteConfirm(): void {
+  async function handleDeleteConfirm(): Promise<void> {
     if (!deleteTarget) return;
-    if (deleteTarget.kind === "suite") {
-      void evalActions.remove(deleteTarget.id);
-      if (selectedCaseId !== null) {
-        const suiteCases = casesBySuite[deleteTarget.id] ?? [];
-        if (suiteCases.some((c) => c.id === selectedCaseId)) {
-          setSelectedCaseId(null);
+    try {
+      if (deleteTarget.kind === "suite") {
+        await evalActions.remove(deleteTarget.id);
+        useEvalCasesStore.getState().setItemsFor(deleteTarget.id, []);
+        if (selectedCaseId !== null) {
+          const suiteCases = casesBySuite[deleteTarget.id] ?? [];
+          if (suiteCases.some((c) => c.id === selectedCaseId)) {
+            setSelectedCaseId(null);
+          }
         }
+      } else {
+        await evalCaseActions.remove({ id: deleteTarget.id, suiteId: deleteTarget.suiteId });
+        if (selectedCaseId === deleteTarget.id) setSelectedCaseId(null);
       }
-    } else {
-      void evalCaseActions.remove({ id: deleteTarget.id, suiteId: deleteTarget.suiteId });
-      if (selectedCaseId === deleteTarget.id) setSelectedCaseId(null);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete resource");
     }
-    setDeleteTarget(null);
   }
 
   const activeSuiteId = selected?.suite.id ?? (suites[0]?.id ?? null);

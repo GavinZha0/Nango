@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadSuite } from "@/lib/evaluation/access";
@@ -39,7 +40,11 @@ export const POST = withEditor<{ id: string }>(
     const body = await parseBody(req, createSchema);
     const suite = await loadSuite(params.id, session);
 
-    if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
+    const rbac = {
+      visibility: suite.visibility as "private" | "public",
+      createdBy: suite.createdBy,
+    };
+    if (!canEditResource(rbac, session)) {
       throw new ApiError(
         "FORBIDDEN",
         403,
@@ -50,6 +55,7 @@ export const POST = withEditor<{ id: string }>(
     try {
       const row = await storage.createCase({
         suiteId: suite.id,
+        createdBy: session.user.id,
         ...body,
       });
       return NextResponse.json(row, { status: 201 });

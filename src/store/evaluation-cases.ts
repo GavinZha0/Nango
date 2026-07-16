@@ -183,6 +183,7 @@ export const evalCaseActions = {
           caseRow.suiteId,
           err instanceof Error ? err.message : String(err),
         );
+      throw err;
     }
   },
 };

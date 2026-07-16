@@ -131,6 +131,7 @@ export interface CreateCaseInput {
   turns?: unknown[];
   criteria?: Record<string, unknown>;
   enabled?: boolean;
+  createdBy?: string;
 }
 
 export async function createCase(
@@ -144,6 +145,7 @@ export async function createCase(
       turns: (input.turns ?? []) as unknown,
       criteria: (input.criteria ?? {}) as unknown,
       enabled: input.enabled ?? true,
+      createdBy: input.createdBy,
     })
     .returning();
   return row;

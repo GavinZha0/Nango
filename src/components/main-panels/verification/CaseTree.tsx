@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+import { useRole } from "@/hooks/useRole";
+import { authClient } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -250,17 +252,23 @@ function ToolGroupNode({
         )}
 
         {!readOnly && onDeleteSuite && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteSuite(tool.suiteId);
-            }}
-            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 group-hover/tool-node:opacity-100 transition-opacity hover:text-destructive"
-            title="Delete suite"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
+          canChangeVisibility ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteSuite(tool.suiteId);
+              }}
+              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 group-hover/tool-node:opacity-100 transition-opacity hover:text-destructive"
+              title="Delete suite"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          ) : (
+            <span className="shrink-0 p-0.5 text-muted-foreground/70 opacity-0 group-hover/tool-node:opacity-100 transition-opacity">
+              <Trash2 className="h-3 w-3" />
+            </span>
+          )
         )}
 
         {!readOnly && canChangeVisibility && onToggleSuiteVisibility? (
@@ -334,6 +342,13 @@ function CaseRow({
   onRequestEdit,
   onRequestDelete,
 }: CaseRowProps): ReactNode {
+  const session = authClient.useSession();
+  const { isAdmin } = useRole();
+  const currentUserId = session.data?.user.id ?? null;
+  const isSuiteOwner = caseRow.suiteCreatedBy === currentUserId;
+  const isCaseOwner = caseRow.createdBy === currentUserId;
+  const canDeleteCase = isAdmin || isSuiteOwner || isCaseOwner;
+
   return (
     <div
       className={cn(
@@ -365,14 +380,20 @@ function CaseRow({
             </button>
           )}
           {onRequestDelete && (
-            <button
-              type="button"
-              onClick={onRequestDelete}
-              aria-label={`Delete ${caseRow.name}`}
-              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
+            canDeleteCase ? (
+              <button
+                type="button"
+                onClick={onRequestDelete}
+                aria-label={`Delete ${caseRow.name}`}
+                className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : (
+              <span className="shrink-0 p-0.5 text-muted-foreground/70 opacity-0 group-hover/case-row:opacity-100 transition-opacity">
+                <Trash2 className="h-3 w-3" />
+              </span>
+            )
           )}
         </div>
       )}

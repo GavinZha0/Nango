@@ -1728,6 +1728,9 @@ export const VerificationCaseTable = pgTable(
     suiteId: uuid("suite_id")
       .notNull()
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => UserTable.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     toolName: text("tool_name"),
     // --- payload ---
@@ -1990,6 +1993,9 @@ export const EvalCaseTable = pgTable(
     suiteId: uuid("suite_id")
       .notNull()
       .references(() => EvalSuiteTable.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => UserTable.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     turns: jsonb("turns").notNull().default(sql`'[]'::jsonb`),
     criteria: jsonb("criteria").notNull().default(sql`'{}'::jsonb`),

@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { canDeleteResource, canEditResource } from "@/lib/auth/permissions";
+import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { loadCase, loadSuite } from "@/lib/evaluation/access";
@@ -40,11 +40,7 @@ export const PATCH = withEditor<{ id: string }>(
       createdBy: suite.createdBy,
     };
 
-    if(!canEditResource(rbac, session)) {
-      throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval case.");
-    }
-
-    if (suite.createdBy !== session.user.id && session.user.role !== "admin") {
+    if (!canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval case.");
     }
 
@@ -86,17 +82,17 @@ export const DELETE = withEditor<{ id: string }>(
     }
     const { caseRow, suite } = await loadCase(parsed.data, session);
 
-    const rbac = {
-      visibility: suite.visibility as "private" | "public",
-      createdBy: suite.createdBy,
-    };
 
+    const isOwner =
+      (caseRow.createdBy && caseRow.createdBy === session.user.id) ||
+      (suite.createdBy && suite.createdBy === session.user.id);
+    const isAdminUser = session.user.role === "admin";
 
-    if (!canDeleteResource(rbac, session)) {
+    if (!isAdminUser && !isOwner) {
       throw new ApiError(
         "FORBIDDEN",
         403,
-        "Only the creator or an admin can delete this eval case.",
+        "Only the creator of this case, the suite creator, or an admin can delete this case.",
       );
     }
 

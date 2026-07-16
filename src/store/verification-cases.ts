@@ -43,6 +43,7 @@ export interface VerificationCaseRow {
   suiteVisibility?: "public" | "private";
   suiteCreatedBy?: string;
   suiteName?: string;
+  createdBy?: string;
 }
 
 // --- Store -----------------------------------------------------------------
@@ -240,6 +241,7 @@ export const caseActions = {
           caseRow.suiteId,
           err instanceof Error ? err.message : String(err),
         );
+      throw err;
     }
   },
 };

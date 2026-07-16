@@ -15,6 +15,20 @@
       "when": 1784152196108,
       "tag": "0001_migrate_toolname_to_case",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784212460743,
+      "tag": "0002_add_verification_case_created_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784214641661,
+      "tag": "0003_add_eval_case_created_by",
+      "breakpoints": true
     }
   ]
 }

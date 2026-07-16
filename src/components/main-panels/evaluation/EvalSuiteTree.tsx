@@ -24,6 +24,8 @@ import {
   Lock,
 } from "lucide-react";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+import { useRole } from "@/hooks/useRole";
+import { authClient } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -87,7 +89,7 @@ function SuiteActions(
     isSuiteRunning: boolean;
   }): ReactNode {
     const isPublic = suite.visibility === "public";
-    const { canChangeVisibility } = useResourcePermissions({source: "local" as const, visibility: suite.visibility, createdBy: suite.createdBy});
+    const { canDelete, canChangeVisibility } = useResourcePermissions({source: "local" as const, visibility: suite.visibility, createdBy: suite.createdBy});
     return (
       <div className={cn(
         "flex items-center gap-0.5 shrink-0 transition-opacity",
@@ -105,18 +107,24 @@ function SuiteActions(
       >
         <SquarePen className="h-3 w-3" />
       </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        title="Delete suite"
-        className="shrink-0 text-muted-foreground hover:text-foreground h-[22px] w-[22px] p-0"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDeleteSuite(suite.id);
-        }}
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
+      {canDelete ? (
+        <Button
+          type="button"
+          variant="ghost"
+          title="Delete suite"
+          className="shrink-0 text-muted-foreground hover:text-foreground h-[22px] w-[22px] p-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteSuite(suite.id);
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      ) : (
+        <span className="shrink-0 p-1 text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Trash2 className="h-3 w-3" />
+        </span>
+      )}
       {canChangeVisibility ? (
         <Button
           type="button"
@@ -131,7 +139,7 @@ function SuiteActions(
           {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
         </Button>
       ) : (
-        <span className="shrink-0 p-0.5 text-muted-foreground/70">
+        <span className="shrink-0 p-0.5 text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity">
           {
             isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />
           }
@@ -181,6 +189,10 @@ export function EvalSuiteTree({
   onEditCase,
   onToggleVisibility,
 }: EvalSuiteTreeProps): ReactNode {
+  const session = authClient.useSession();
+  const { isAdmin } = useRole();
+  const currentUserId = session.data?.user.id ?? null;
+
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const evaluators = useMemo(() => {
@@ -285,6 +297,10 @@ export function EvalSuiteTree({
                 <div>
                   {cases.map((c) => {
                     const verdict = verdictByCaseId.get(c.id);
+                    const isSuiteOwner = suite.createdBy === currentUserId;
+                    const isCaseOwner = c.createdBy === currentUserId;
+                    const canDeleteCase = isAdmin || isSuiteOwner || isCaseOwner;
+
                     return (
                       <div
                         key={c.id}
@@ -316,14 +332,20 @@ export function EvalSuiteTree({
                           >
                             <SquarePen className="h-3 w-3" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteCase(c.id, suite.id)}
-                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive"
-                            title="Delete case"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
+                          {canDeleteCase ? (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteCase(c.id, suite.id)}
+                              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive"
+                              title="Delete case"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          ) : (
+                            <span className="shrink-0 p-0.5 text-muted-foreground/70 opacity-0 group-hover/case:opacity-100 transition-opacity">
+                              <Trash2 className="h-3 w-3" />
+                            </span>
+                          )}
                         </div>
                       </div>
                     );

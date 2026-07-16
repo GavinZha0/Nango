@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   AlertDialog,
@@ -139,6 +140,7 @@ export function VerificationSuiteEditor({
   const handleSuiteDeleteConfirm = async (): Promise<void> => {
     if (!deletingSuiteId) return;
     await verificationActions.remove(deletingSuiteId);
+    useCasesStore.getState().setItemsFor(deletingSuiteId, []);
     void caseActions.refreshForServer(row.id);
     setDeletingSuiteId(null);
   };
@@ -233,7 +235,7 @@ export function VerificationSuiteEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ visibility: next }),
       });
-      if (!res.ok) {
+      if (res.ok) {
         void caseActions.refreshForServer(row.id);
       }
     }
@@ -421,10 +423,15 @@ function DeleteCaseDialog({
   async function handleConfirm(): Promise<void> {
     if (!caseRow) return;
     setDeleting(true);
-    await caseActions.remove(caseRow);
-    setDeleting(false);
-    onDeleted(caseRow.id);
-    onClose();
+    try {
+      await caseActions.remove(caseRow);
+      onDeleted(caseRow.id);
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete case");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
