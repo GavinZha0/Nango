@@ -12,13 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+
 
 interface UserFormDialogProps {
   open: boolean;
@@ -30,7 +24,7 @@ interface FormValues {
   name: string;
   email: string;
   password: string;
-  role: "admin" | "user";
+  role: "admin" | "editor" | "user";
   org: string;
 }
 
@@ -54,7 +48,7 @@ export function UserFormDialog({ open, onOpenChange, onSuccess }: UserFormDialog
       name: values.name,
       email: values.email,
       password: values.password,
-      role: values.role,
+      role: values.role as "user" | "admin",
       data: { org: values.org || null },
     });
     setSubmitting(false);
@@ -97,15 +91,25 @@ export function UserFormDialog({ open, onOpenChange, onSuccess }: UserFormDialog
 
           <div className="space-y-1.5">
             <Label>Role</Label>
-            <Select value={values.role} onValueChange={(v) => setValues((prev) => ({ ...prev, role: v as "admin" | "user" }))}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex rounded-md bg-muted p-1 w-full border border-border/50">
+              {(["user", "editor", "admin"] as const).map((r) => {
+                const active = values.role === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setValues((prev) => ({ ...prev, role: r }))}
+                    className={`flex-1 rounded-sm py-1.5 text-xs font-medium transition-all text-center cursor-pointer ${
+                      active
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/20"
+                    }`}
+                  >
+                    {r === "admin" ? "Admin" : r === "editor" ? "Editor" : "User"}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}

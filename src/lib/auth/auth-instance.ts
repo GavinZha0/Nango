@@ -177,7 +177,10 @@ const options = {
       create: {
         before: async (user: Record<string, unknown>) => {
           const isFirstUser = await getIsFirstUser();
-          const role = isFirstUser ? "admin" : "user";
+          let role = isFirstUser ? "admin" : "user";
+          if (!isFirstUser && typeof user.role === "string" && ["admin", "editor", "user"].includes(user.role)) {
+            role = user.role;
+          }
           return { data: { ...user, role } };
         },
         after: async (user: Record<string, unknown>) => {

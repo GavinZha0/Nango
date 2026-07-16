@@ -51,7 +51,12 @@ export default function AdminUserPage(): ReactNode {
         <TabButton label="Login Events" active={tab === "login-events"} onClick={() => setTab("login-events")} />
       </div>
 
-      {tab === "users" ? <UserManagement /> : <LoginEvents />}
+      <div className={cn(tab !== "users" && "hidden")}>
+        <UserManagement />
+      </div>
+      <div className={cn(tab !== "login-events" && "hidden")}>
+        <LoginEvents />
+      </div>
     </div>
   );
 }
