@@ -5,7 +5,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type FormEvent,
   type ReactNode,
 } from "react";
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
@@ -21,15 +20,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useRunSnapshot } from "@/hooks/useRunSnapshot";
 import { useVerificationRunStream } from "@/hooks/useVerificationRunStream";
 import { CaseInspector } from "@/components/main-panels/verification/CaseInspector";
@@ -45,7 +35,8 @@ import {
 } from "@/components/main-panels/verification/CaseTree";
 import { NewCaseDialog } from "@/components/main-panels/verification/NewCaseDialog";
 import { RecentRunsBanner } from "@/components/main-panels/RecentRunsBanner";
-import { type VerificationServerRow } from "@/store/verification";
+import { type VerificationServerRow, verificationActions } from "@/store/verification";
+import { VerificationSuiteEditDialog } from "@/components/main-panels/verification/VerificationSuiteEditDialog";
 import {
   caseActions,
   useCasesStore,
@@ -75,6 +66,9 @@ export function VerificationSuiteEditor({
   }, []);
 
   const [bannerRefreshKey, setBannerRefreshKey] = useState<number>(0);
+
+  const [editingSuite, setEditingSuite] = useState<{ id: string; name: string } | null>(null);
+  const [deletingSuiteId, setDeletingSuiteId] = useState<string | null>(null);
 
   // Subscribe to all cases in the store, then filter for this server.
   const bySuite = useCasesStore((s) => s.bySuite);
@@ -129,6 +123,25 @@ export function VerificationSuiteEditor({
       cancelled = true;
     };
   }, []);
+
+  const handleEditSuiteRequest = (suiteId: string) => {
+    const matchedCase = cases.find((c) => c.suiteId === suiteId);
+    const suiteName = matchedCase?.suiteName || "Suite";
+    setEditingSuite({ id: suiteId, name: suiteName });
+  };
+
+  const handleSuiteSave = async (name: string): Promise<void> => {
+    if (!editingSuite) return;
+    await verificationActions.patch(editingSuite.id, { name });
+    void caseActions.refreshForServer(row.id);
+  };
+
+  const handleSuiteDeleteConfirm = async (): Promise<void> => {
+    if (!deletingSuiteId) return;
+    await verificationActions.remove(deletingSuiteId);
+    void caseActions.refreshForServer(row.id);
+    setDeletingSuiteId(null);
+  };
 
   const [newCaseOpen, setNewCaseOpen] = useState<boolean>(false);
 
@@ -188,7 +201,7 @@ export function VerificationSuiteEditor({
     liveRun.phase,
     useCallback(() => {
       setBannerRefreshKey((k) => k + 1);
-    }, []),
+    }, [setBannerRefreshKey]),
   );
 
   const handleRunTool = async (suiteId: string): Promise<void> => {
@@ -300,6 +313,8 @@ export function VerificationSuiteEditor({
             onRequestDeleteCase={setDeletingCase}
             onRunTool={handleRunTool}
             onToggleSuiteVisibility={handleToggleSuiteVisibility}
+            onEditSuite={handleEditSuiteRequest}
+            onDeleteSuite={setDeletingSuiteId}
             loading={casesLoading}
             error={casesError}
             readOnly={false}
@@ -329,9 +344,17 @@ export function VerificationSuiteEditor({
         onCreated={(created) => setSelectedCaseId(created.id)}
       />
 
-      <RenameCaseDialog
+      <NewCaseDialog
+        serverId={row.id}
+        open={editingCase !== null}
+        onOpenChange={(o) => { if (!o) setEditingCase(null); }}
         caseRow={editingCase}
-        onClose={() => setEditingCase(null)}
+        onCreated={(updated) => {
+          if (selectedCaseId === updated.id) {
+            setSelectedCaseId(null);
+            queueMicrotask(() => setSelectedCaseId(updated.id));
+          }
+        }}
       />
 
       <DeleteCaseDialog
@@ -341,101 +364,47 @@ export function VerificationSuiteEditor({
           if (selectedCaseId === deletedId) setSelectedCaseId(null);
         }}
       />
+
+
+      <VerificationSuiteEditDialog
+        open={editingSuite !== null}
+        onOpenChange={(o) => { if (!o) setEditingSuite(null); }}
+        serverName={displayName}
+        suite={editingSuite}
+        onSave={handleSuiteSave}
+      />
+
+      <AlertDialog
+        open={deletingSuiteId !== null}
+        onOpenChange={(o) => { if (!o) setDeletingSuiteId(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete suite</AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently delete this verification suite and all its cases? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleSuiteDeleteConfirm();
+              }}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" />
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-function RenameCaseDialog({
-  caseRow,
-  onClose,
-}: {
-  caseRow: VerificationCaseRow | null;
-  onClose: () => void;
-}): ReactNode {
-  const open = caseRow !== null;
-  const [name, setName] = useState<string>("");
-  const [submitting, setSubmitting] = useState<boolean>(false);
-  const [error, setError] = useState<string>("");
 
-  const seedKey = `${open ? 1 : 0}:${caseRow?.id ?? ""}`;
-  const [lastSeedKey, setLastSeedKey] = useState<string>(seedKey);
-  if (seedKey !== lastSeedKey) {
-    setLastSeedKey(seedKey);
-    if (open) {
-      setName(caseRow.name);
-      setError("");
-      setSubmitting(false);
-    }
-  }
-
-  async function handleSubmit(e: FormEvent): Promise<void> {
-    e.preventDefault();
-    if (!caseRow) return;
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setError("Name is required.");
-      return;
-    }
-    if (trimmed === caseRow.name) {
-      onClose();
-      return;
-    }
-    setSubmitting(true);
-    const updated = await caseActions.patch(caseRow, { name: trimmed });
-    setSubmitting(false);
-    if (!updated) {
-      setError("Failed to save case.");
-      return;
-    }
-    onClose();
-  }
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o && !submitting) onClose();
-      }}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Rename case</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-3 py-2">
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-            <Label htmlFor="case-name">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="case-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoFocus
-            />
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={submitting}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting && (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              )}
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function DeleteCaseDialog({
   caseRow,

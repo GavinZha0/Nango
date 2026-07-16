@@ -5,7 +5,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { VerificationCaseTable, VerificationSuiteTable } from "@/lib/db/schema";
+import { VerificationCaseTable, VerificationSuiteTable, McpServerTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import {
@@ -20,6 +20,7 @@ const mcpCaseSchema = z.object({
   mcpServerId: z.string().uuid(),
   toolName: z.string().min(1).max(200),
   name: z.string().trim().min(1).max(120),
+  suiteId: z.string().uuid().optional(),
   input: caseInputSchema.optional(),
   assertions: assertionsArraySchema.optional(),
   enabled: z.boolean().optional(),
@@ -44,39 +45,51 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   let suiteId: string;
 
   if (isMcp) {
-    const { mcpServerId, toolName } = body;
+    const { mcpServerId, suiteId: reqSuiteId } = body as z.infer<typeof mcpCaseSchema>;
 
-    // 1. Find if a suite already exists for this mcpServerId & toolName
-    const [existingSuite] = await db
-      .select()
-      .from(VerificationSuiteTable)
-      .where(
-        and(
-          eq(VerificationSuiteTable.mcpServerId, mcpServerId),
-          eq(VerificationSuiteTable.toolName, toolName),
-          eq(VerificationSuiteTable.createdBy, session.user.id),
-        )
-      )
-      .limit(1);
-
-    if (existingSuite) {
-      suiteId = existingSuite.id;
+    if (reqSuiteId) {
+      suiteId = reqSuiteId;
     } else {
+      // 1. Find if a suite already exists for this mcpServerId
+      const [existingSuite] = await db
+        .select()
+        .from(VerificationSuiteTable)
+        .where(
+          and(
+            eq(VerificationSuiteTable.mcpServerId, mcpServerId),
+            eq(VerificationSuiteTable.createdBy, session.user.id),
+          )
+        )
+        .limit(1);
+
+      if (existingSuite) {
+        suiteId = existingSuite.id;
+      } else {
+      // Try to fetch server title/name for suite name
+      const [server] = await db
+        .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
+        .from(McpServerTable)
+        .where(eq(McpServerTable.id, mcpServerId))
+        .limit(1);
+
+      const serverName = server?.serverTitle || server?.name || "MCP Server";
+      const suiteName = `${serverName} Suite`;
+
       // 2. If not, auto-create a suite on-the-fly
       const [newSuite] = await db
         .insert(VerificationSuiteTable)
         .values({
-          name: toolName, // Automatically name the suite after the tool
-          description: `Automatically created verification suite for tool ${toolName}`,
+          name: suiteName,
+          description: `Automatically created verification suite for ${serverName}`,
           category: "mcp",
           mcpServerId,
-          toolName,
           visibility: "private",
           createdBy: session.user.id,
           updatedBy: session.user.id,
         })
         .returning();
       suiteId = newSuite.id;
+      }
     }
   } else {
     // Workflow validation is coming in V2, but we placeholder the lazy-suite creation here.
@@ -118,6 +131,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       .values({
         suiteId,
         name: normalizeCaseName(body.name),
+        toolName: isMcp ? (body as z.infer<typeof mcpCaseSchema>).toolName : null,
         input: body.input ?? {},
         assertions: (body.assertions ?? []) as unknown,
         enabled: body.enabled ?? true,
@@ -134,7 +148,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     const responseRow = {
       ...row,
       mcpServerId: suiteRow?.mcpServerId ?? null,
-      toolName: suiteRow?.toolName ?? null,
+      toolName: row.toolName ?? null,
     };
 
     return NextResponse.json(responseRow, { status: 201 });
@@ -143,7 +157,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       throw new ApiError(
         "CONFLICT",
         409,
-        `A case named "${normalizeCaseName(body.name)}" already exists for this tool.`,
+        `A case named "${normalizeCaseName(body.name)}" already exists in this suite.`,
       );
     }
     throw err;

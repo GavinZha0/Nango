@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useMemo, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import {
   caseActions,
+  useCasesStore,
   type VerificationCaseRow,
 } from "@/store/verification-cases";
 import { verificationActions } from "@/store/verification";
@@ -59,6 +60,7 @@ export interface NewCaseDialogProps {
   onCreated: (created: VerificationCaseRow) => void;
   serverId?: string; // Optional: when provided, locks selection to this server
   defaultToolName?: string; // Optional: default tool selected
+  caseRow?: VerificationCaseRow | null; // Optional: when provided, runs in edit mode
 }
 
 export function NewCaseDialog({
@@ -67,6 +69,7 @@ export function NewCaseDialog({
   onCreated,
   serverId,
   defaultToolName,
+  caseRow,
 }: NewCaseDialogProps): ReactNode {
   const [servers, setServers] = useState<McpServerListItem[]>([]);
   const [loadingServers, setLoadingServers] = useState<boolean>(false);
@@ -77,9 +80,29 @@ export function NewCaseDialog({
     name: "",
     mcpServerId: serverId ?? "",
     toolName: defaultToolName ?? "",
+    suiteId: "",
+    newSuiteName: "",
   });
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Subscribe to store cases to derive existing suites on-the-fly
+  const bySuite = useCasesStore((s) => s.bySuite);
+  const serverCases = useMemo(() => {
+    const targetId = form.mcpServerId || serverId || caseRow?.mcpServerId;
+    if (!targetId) return [];
+    return Object.values(bySuite).flat().filter((c) => c.mcpServerId === targetId);
+  }, [bySuite, form.mcpServerId, serverId, caseRow?.mcpServerId]);
+
+  const suitesList = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of serverCases) {
+      if (c.suiteId && c.suiteName) {
+        map.set(c.suiteId, c.suiteName);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [serverCases]);
 
   useEffect(() => {
     if (!open) return;
@@ -109,11 +132,24 @@ export function NewCaseDialog({
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
-      setForm({
-        name: "",
-        mcpServerId: serverId ?? "",
-        toolName: defaultToolName ?? "",
-      });
+      if (caseRow) {
+        setForm({
+          name: caseRow.name,
+          mcpServerId: caseRow.mcpServerId ?? "",
+          toolName: caseRow.toolName || "",
+          suiteId: caseRow.suiteId,
+          newSuiteName: "",
+        });
+      } else {
+        const defaultSuiteId = suitesList[0]?.id || "";
+        setForm({
+          name: "",
+          mcpServerId: serverId ?? "",
+          toolName: defaultToolName ?? "",
+          suiteId: defaultSuiteId,
+          newSuiteName: "",
+        });
+      }
       setSubmitError(null);
     }
   }
@@ -135,25 +171,69 @@ export function NewCaseDialog({
   }, [form.mcpServerId, servers]);
 
   const trimmedName = form.name.trim();
+  const isNewSuite = form.suiteId === "NEW_SUITE";
+  const hasValidSuite = isNewSuite
+    ? form.newSuiteName.trim().length > 0
+    : form.suiteId !== "";
+
   const canSubmit =
     !submitting &&
     trimmedName.length > 0 &&
     form.mcpServerId !== "" &&
-    form.toolName !== "";
+    form.toolName !== "" &&
+    hasValidSuite;
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const created = await caseActions.create({
-        name: trimmedName,
-        mcpServerId: form.mcpServerId,
-        toolName: form.toolName,
-        input: {},
-      });
-      if (!created) {
-        throw new Error("Failed to create case");
+      let suiteIdToUse = form.suiteId;
+
+      // Create new suite on the fly if needed
+      if (isNewSuite) {
+        const newSuite = await verificationActions.create({
+          name: form.newSuiteName.trim(),
+          category: "mcp",
+          mcpServerId: form.mcpServerId,
+        });
+        if (!newSuite) {
+          throw new Error("Failed to create verification suite");
+        }
+        suiteIdToUse = newSuite.id;
+      }
+
+      let resultRow: VerificationCaseRow;
+
+      if (caseRow) {
+        // Edit mode
+        const updated = await caseActions.patch(caseRow, {
+          name: trimmedName,
+          suiteId: suiteIdToUse,
+        });
+        if (!updated) {
+          throw new Error("Failed to update case");
+        }
+        resultRow = updated;
+        toast.success("Updated verification case", {
+          description: `Case "${updated.name}" updated successfully.`,
+        });
+      } else {
+        // Create mode
+        const created = await caseActions.create({
+          name: trimmedName,
+          mcpServerId: form.mcpServerId,
+          toolName: form.toolName,
+          suiteId: suiteIdToUse,
+          input: {},
+        });
+        if (!created) {
+          throw new Error("Failed to create case");
+        }
+        resultRow = created;
+        toast.success("Created verification case", {
+          description: `Case "${created.name}" is now ready.`,
+        });
       }
 
       // Refresh cases for this server to ensure the new case appears in the list
@@ -162,10 +242,7 @@ export function NewCaseDialog({
       // Trigger store refresh for verification left panel servers list
       void verificationActions.refresh("mcp");
 
-      toast.success("Created verification case", {
-        description: `Case "${created.name}" is now ready.`,
-      });
-      onCreated(created);
+      onCreated(resultRow);
       onOpenChange(false);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
@@ -177,128 +254,211 @@ export function NewCaseDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add verification case</DialogTitle>
-        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSubmit();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{caseRow ? "Edit verification case" : "Add verification case"}</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          {/* Server Selector */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-            <Label htmlFor="case-server">
-              MCP Server <span className="text-destructive">*</span>
-            </Label>
-            {serverId ? (
-              <span className="text-sm font-mono truncate">
-                {servers.find((s) => s.id === serverId)?.serverTitle ||
-                  servers.find((s) => s.id === serverId)?.name ||
-                  serverId}
-              </span>
-            ) : (
+          <div className="space-y-4 py-4">
+            {/* Server Selector */}
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+              <Label htmlFor="case-server">
+                MCP Server <span className="text-destructive">*</span>
+              </Label>
+              {serverId || caseRow ? (
+                <span className="text-sm font-mono truncate">
+                  {servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))?.serverTitle ||
+                    servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))?.name ||
+                    (caseRow?.mcpServerId || serverId)}
+                </span>
+              ) : (
+                <Select
+                  value={form.mcpServerId}
+                  onValueChange={(v) => {
+                    const nextServerId = v ?? "";
+                    const nextCases = Object.values(bySuite).flat().filter((c) => c.mcpServerId === nextServerId);
+                    const map = new Map<string, string>();
+                    for (const c of nextCases) {
+                      if (c.suiteId && c.suiteName) map.set(c.suiteId, c.suiteName);
+                    }
+                    const nextSuites = Array.from(map.keys());
+                    const defaultSuiteId = nextSuites[0] || "";
+                    setForm((prev) => ({
+                      ...prev,
+                      mcpServerId: nextServerId,
+                      toolName: "",
+                      suiteId: defaultSuiteId,
+                      newSuiteName: "",
+                    }));
+                  }}
+                  disabled={loadingServers}
+                >
+                  <SelectTrigger id="case-server" className="w-full">
+                    <SelectValue
+                      placeholder={
+                        loadingServers ? "Loading servers…" : "Select a server"
+                      }
+                    >
+                      {form.mcpServerId ? (
+                        servers.find((s) => s.id === form.mcpServerId)?.serverTitle ||
+                        servers.find((s) => s.id === form.mcpServerId)?.name ||
+                        "Unknown server"
+                      ) : null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {servers.map((s) => (
+                      <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
+                        {s.serverTitle || s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* Suite Selector */}
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+              <Label htmlFor="case-suite">
+                Suite <span className="text-destructive">*</span>
+              </Label>
               <Select
-                value={form.mcpServerId}
+                value={form.suiteId}
                 onValueChange={(v) =>
-                  setForm((prev) => ({ ...prev, mcpServerId: v ?? "", toolName: "" }))
+                  setForm((prev) => ({ ...prev, suiteId: v ?? "", newSuiteName: "" }))
                 }
-                disabled={loadingServers}
+                disabled={!form.mcpServerId}
               >
-                <SelectTrigger id="case-server" className="w-full">
+                <SelectTrigger id="case-suite" className="w-full">
                   <SelectValue
                     placeholder={
-                      loadingServers ? "Loading servers…" : "Select a server"
+                      !form.mcpServerId
+                        ? "Select a server first"
+                        : "Select a suite"
                     }
                   >
-                    {form.mcpServerId ? (
-                      servers.find((s) => s.id === form.mcpServerId)?.serverTitle ||
-                      servers.find((s) => s.id === form.mcpServerId)?.name ||
-                      "Unknown server"
-                    ) : null}
+                    {form.suiteId === "NEW_SUITE" ? (
+                      <span className="text-primary font-semibold">+ Create new suite...</span>
+                    ) : (
+                      suitesList.find((s) => s.id === form.suiteId)?.name || null
+                    )}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {servers.map((s) => (
-                    <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
-                      {s.serverTitle || s.name}
+                  {suitesList.map((s) => (
+                    <SelectItem key={s.id} value={s.id} label={s.name}>
+                      {s.name}
                     </SelectItem>
                   ))}
+                  <SelectItem value="NEW_SUITE" className="text-primary font-semibold">
+                    + Create new suite...
+                  </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* New Suite Name Input */}
+            {isNewSuite && (
+              <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+                <Label htmlFor="new-suite-name">
+                  Suite Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="new-suite-name"
+                  value={form.newSuiteName}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, newSuiteName: e.target.value }))
+                  }
+                  placeholder="e.g. Google Search Suite"
+                  maxLength={120}
+                  required
+                />
+              </div>
+            )}
+
+            {/* Tool Selector */}
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+              <Label htmlFor="case-tool">
+                MCP Tool <span className="text-destructive">*</span>
+              </Label>
+              {caseRow ? (
+                <span className="text-sm font-mono truncate">{caseRow.toolName}</span>
+              ) : (
+                <Select
+                  value={form.toolName}
+                  onValueChange={(v) =>
+                    setForm((prev) => ({ ...prev, toolName: v ?? "" }))
+                  }
+                  disabled={!form.mcpServerId}
+                >
+                  <SelectTrigger id="case-tool" className="w-full">
+                    <SelectValue
+                      placeholder={
+                        !form.mcpServerId
+                          ? "Select a server first"
+                          : "Select a tool"
+                      }
+                    >
+                      {form.toolName ? form.toolName : null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tools.map((t) => (
+                      <SelectItem key={t} value={t} label={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* Case Name */}
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+              <Label htmlFor="case-name">
+                Case Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="case-name"
+                value={form.name}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, name: e.target.value }))
+                }
+                placeholder="e.g. search returns results"
+                required
+              />
+            </div>
+
+            {(loadError || submitError) && (
+              <p className="text-xs text-destructive">
+                {submitError ?? loadError}
+              </p>
             )}
           </div>
 
-          {/* Tool Selector */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-            <Label htmlFor="case-tool">
-              MCP Tool <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={form.toolName}
-              onValueChange={(v) =>
-                setForm((prev) => ({ ...prev, toolName: v ?? "" }))
-              }
-              disabled={!form.mcpServerId}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={submitting}
             >
-              <SelectTrigger id="case-tool" className="w-full">
-                <SelectValue
-                  placeholder={
-                    !form.mcpServerId
-                      ? "Select a server first"
-                      : "Select a tool"
-                  }
-                >
-                  {form.toolName ? form.toolName : null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {tools.map((t) => (
-                  <SelectItem key={t} value={t} label={t}>
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Case Name */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-            <Label htmlFor="case-name">
-              Case Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="case-name"
-              value={form.name}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, name: e.target.value }))
-              }
-              placeholder="e.g. search returns results"
-              autoFocus
-            />
-          </div>
-
-          {(loadError || submitError) && (
-            <p className="text-xs text-destructive">
-              {submitError ?? loadError}
-            </p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void handleSubmit()}
-            disabled={!canSubmit}
-          >
-            {submitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-            Create
-          </Button>
-        </DialogFooter>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+            >
+              {submitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              {caseRow ? "Save" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

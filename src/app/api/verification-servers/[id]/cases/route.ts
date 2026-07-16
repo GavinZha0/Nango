@@ -47,10 +47,11 @@ export const GET = withEditor<{ id: string }>(
         enabled: VerificationCaseTable.enabled,
         createdAt: VerificationCaseTable.createdAt,
         updatedAt: VerificationCaseTable.updatedAt,
-        toolName: VerificationSuiteTable.toolName,
+        toolName: VerificationCaseTable.toolName,
         mcpServerId: VerificationSuiteTable.mcpServerId,
         suiteVisibility: VerificationSuiteTable.visibility,
         suiteCreatedBy: VerificationSuiteTable.createdBy,
+        suiteName: VerificationSuiteTable.name,
       })
       .from(VerificationCaseTable)
       .innerJoin(

@@ -75,6 +75,8 @@ const createSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
     category: z.enum(["mcp", "workflow"]),
+    mcpServerId: z.string().uuid().optional().nullable(),
+    workflowId: z.string().uuid().optional().nullable(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),
   })
@@ -92,6 +94,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         name: body.name,
         description: body.description ?? null,
         category: body.category,
+        mcpServerId: body.mcpServerId ?? null,
+        workflowId: body.workflowId ?? null,
         visibility: body.visibility ?? "private",
         timeoutSec: body.timeoutSec ?? 300,
         createdBy: session.user.id,

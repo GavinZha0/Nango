@@ -28,6 +28,7 @@ const idSchema = z.coerce.number().int().positive();
 const patchSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
+    suiteId: z.string().uuid().optional(),
     input: caseInputSchema.optional(),
     assertions: assertionsArraySchema.optional(),
     enabled: z.boolean().optional(),
@@ -65,6 +66,43 @@ export const PATCH = withEditor<{ id: string }>(
       updatedAt: sql`CURRENT_TIMESTAMP`,
     };
     if (body.name !== undefined) updates.name = normalizeCaseName(body.name);
+    if (body.suiteId !== undefined) {
+      const [newSuite] = await db
+        .select()
+        .from(VerificationSuiteTable)
+        .where(eq(VerificationSuiteTable.id, body.suiteId))
+        .limit(1);
+
+      if (!newSuite) {
+        throw new ApiError("BAD_REQUEST", 400, "Target verification suite not found.");
+      }
+
+      if (
+        !canEditResource(
+          {
+            visibility: newSuite.visibility as "private" | "public",
+            createdBy: newSuite.createdBy,
+          },
+          session,
+        )
+      ) {
+        throw new ApiError(
+          "FORBIDDEN",
+          403,
+          "You cannot move cases to this verification suite.",
+        );
+      }
+
+      if (suite.mcpServerId !== newSuite.mcpServerId) {
+        throw new ApiError(
+          "BAD_REQUEST",
+          400,
+          "Cannot move case to a suite belonging to a different MCP server.",
+        );
+      }
+
+      updates.suiteId = body.suiteId;
+    }
     if (body.input !== undefined) updates.input = body.input;
     if (body.assertions !== undefined) {
       updates.assertions = body.assertions as unknown;
@@ -88,7 +126,7 @@ export const PATCH = withEditor<{ id: string }>(
       const responseRow = {
         ...row,
         mcpServerId: suiteRow?.mcpServerId ?? null,
-        toolName: suiteRow?.toolName ?? null,
+        toolName: row.toolName ?? null,
       };
       
       return NextResponse.json(responseRow);

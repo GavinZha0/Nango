@@ -55,17 +55,16 @@ interface ToolGroup {
 }
 
 function buildTree(cases: VerificationCaseRow[]): ToolGroup[] {
-  const byTool = new Map<string, VerificationCaseRow[]>();
+  const bySuite = new Map<string, VerificationCaseRow[]>();
   for (const c of cases) {
-    if (!c.toolName) continue;
-    const bucket = byTool.get(c.toolName) ?? [];
+    const bucket = bySuite.get(c.suiteId) ?? [];
     bucket.push(c);
-    byTool.set(c.toolName, bucket);
+    bySuite.set(c.suiteId, bucket);
   }
 
-  const out: ToolGroup[] = Array.from(byTool.entries()).map(([toolName, cs]) => ({
-    toolName,
-    suiteId: cs[0]?.suiteId ?? "",
+  const out: ToolGroup[] = Array.from(bySuite.entries()).map(([suiteId, cs]) => ({
+    toolName: cs[0]?.suiteName || "Suite",
+    suiteId,
     suiteVisibility: (cs[0]?.suiteVisibility ?? "private") as "public" | "private",
     suiteCreatedBy: cs[0]?.suiteCreatedBy ?? "",
     cases: cs.slice().sort((a, b) => a.name.localeCompare(b.name)),
@@ -85,6 +84,8 @@ export interface CaseTreeProps {
   onRequestDeleteCase?: (caseRow: VerificationCaseRow) => void;
   onRunTool?: (suiteId: string) => void;
   onToggleSuiteVisibility?: (suiteId: string, visibility: "public" | "private") => void;
+  onEditSuite?: (suiteId: string) => void;
+  onDeleteSuite?: (suiteId: string) => void;
   loading: boolean;
   error: string | null;
   readOnly?: boolean;
@@ -100,6 +101,8 @@ export function CaseTree({
   onRequestDeleteCase,
   onRunTool,
   onToggleSuiteVisibility,
+  onEditSuite,
+  onDeleteSuite,
   loading,
   error,
   readOnly = false,
@@ -169,6 +172,8 @@ export function CaseTree({
                 onRequestDeleteCase={readOnly ? undefined : onRequestDeleteCase}
                 onRunTool={onRunTool}
                 onToggleSuiteVisibility={onToggleSuiteVisibility}
+                onEditSuite={onEditSuite}
+                onDeleteSuite={onDeleteSuite}
                 readOnly={readOnly}
               />
             ))
@@ -188,6 +193,8 @@ interface ToolGroupNodeProps {
   onRequestDeleteCase?: (caseRow: VerificationCaseRow) => void;
   onRunTool?: (suiteId: string) => void;
   onToggleSuiteVisibility?: (suiteId: string, visibility: "public" | "private") => void;
+  onEditSuite?: (suiteId: string) => void;
+  onDeleteSuite?: (suiteId: string) => void;
   readOnly?: boolean;
 }
 
@@ -200,6 +207,8 @@ function ToolGroupNode({
   onRequestDeleteCase,
   onRunTool,
   onToggleSuiteVisibility,
+  onEditSuite,
+  onDeleteSuite,
   readOnly = false,
 }: ToolGroupNodeProps): ReactNode {
   const [expanded, setExpanded] = useState<boolean>(true);
@@ -225,6 +234,34 @@ function ToolGroupNode({
           )}
           <span className="min-w-0 truncate font-mono">{tool.toolName}</span>
         </button>
+
+        {!readOnly && onEditSuite && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditSuite(tool.suiteId);
+            }}
+            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 group-hover/tool-node:opacity-100 transition-opacity hover:text-foreground"
+            title="Edit suite"
+          >
+            <SquarePen className="h-3 w-3" />
+          </button>
+        )}
+
+        {!readOnly && onDeleteSuite && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteSuite(tool.suiteId);
+            }}
+            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 group-hover/tool-node:opacity-100 transition-opacity hover:text-destructive"
+            title="Delete suite"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
 
         {!readOnly && canChangeVisibility && onToggleSuiteVisibility? (
           <button
@@ -315,31 +352,29 @@ function CaseRow({
           {caseRow.name}
         </button>
       </div>
-      {onRequestEdit && (
-        <button
-          type="button"
-          onClick={onRequestEdit}
-          aria-label={`Edit ${caseRow.name}`}
-          className={cn(
-            "shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-opacity hover:text-foreground",
-            "opacity-0 group-hover/case-row:opacity-100 group-focus-within/case-row:opacity-100 focus-visible:opacity-100",
+      {(onRequestEdit || onRequestDelete) && (
+        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/case-row:opacity-100 group-focus-within/case-row:opacity-100 focus-within:opacity-100 transition-opacity">
+          {onRequestEdit && (
+            <button
+              type="button"
+              onClick={onRequestEdit}
+              aria-label={`Edit ${caseRow.name}`}
+              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <SquarePen className="h-3 w-3" />
+            </button>
           )}
-        >
-          <SquarePen className="h-3 w-3" />
-        </button>
-      )}
-      {onRequestDelete && (
-        <button
-          type="button"
-          onClick={onRequestDelete}
-          aria-label={`Delete ${caseRow.name}`}
-          className={cn(
-            "shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-opacity hover:text-destructive",
-            "opacity-0 group-hover/case-row:opacity-100 group-focus-within/case-row:opacity-100 focus-visible:opacity-100",
+          {onRequestDelete && (
+            <button
+              type="button"
+              onClick={onRequestDelete}
+              aria-label={`Delete ${caseRow.name}`}
+              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
           )}
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
+        </div>
       )}
     </div>
   );

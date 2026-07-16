@@ -137,7 +137,7 @@ export async function listEnabledCasesForRun(
       createdAt: VerificationCaseTable.createdAt,
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
-      toolName: VerificationSuiteTable.toolName,
+      toolName: VerificationCaseTable.toolName,
       workflowId: VerificationSuiteTable.workflowId,
     })
     .from(VerificationCaseTable)
@@ -170,7 +170,7 @@ export async function listEnabledCasesForServerRun(
       createdAt: VerificationCaseTable.createdAt,
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
-      toolName: VerificationSuiteTable.toolName,
+      toolName: VerificationCaseTable.toolName,
       workflowId: VerificationSuiteTable.workflowId,
     })
     .from(VerificationCaseTable)
@@ -184,7 +184,7 @@ export async function listEnabledCasesForServerRun(
         eq(VerificationCaseTable.enabled, true),
       ),
     )
-    .orderBy(VerificationSuiteTable.toolName, VerificationCaseTable.name);
+    .orderBy(VerificationCaseTable.toolName, VerificationCaseTable.name);
   return rows;
 }
 

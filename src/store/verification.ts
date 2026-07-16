@@ -132,6 +132,7 @@ export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   category: VerificationCategory;
+  mcpServerId?: string | null;
   visibility?: VerificationVisibility;
   timeoutSec?: number;
 }

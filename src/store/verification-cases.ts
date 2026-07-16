@@ -42,6 +42,7 @@ export interface VerificationCaseRow {
   updatedAt: string;
   suiteVisibility?: "public" | "private";
   suiteCreatedBy?: string;
+  suiteName?: string;
 }
 
 // --- Store -----------------------------------------------------------------
@@ -108,12 +109,14 @@ export interface CreateMcpCaseInput {
   name: string;
   mcpServerId: string;
   toolName: string;
+  suiteId?: string;
   input?: Record<string, unknown>;
   assertions?: AssertionSpec[];
 }
 
 export interface PatchCaseInput {
   name?: string;
+  suiteId?: string;
   input?: Record<string, unknown>;
   assertions?: AssertionSpec[];
   enabled?: boolean;
@@ -201,6 +204,9 @@ export const caseActions = {
       });
       if (!res.ok) throw new Error(await readError(res));
       const row = (await res.json()) as VerificationCaseRow;
+      if (patch.suiteId && patch.suiteId !== caseRow.suiteId) {
+        useCasesStore.getState().remove(caseRow.suiteId, caseRow.id);
+      }
       useCasesStore.getState().upsert(row);
       return row;
     } catch (err) {

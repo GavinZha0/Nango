@@ -71,23 +71,37 @@ interface EvalSuiteTreeProps {
 }
 
 function SuiteActions(
-  { suite, onEditSuite, onDeleteSuite, onToggleVisibility }: 
-  { 
+  {
+    suite,
+    onEditSuite,
+    onDeleteSuite,
+    onToggleVisibility,
+    onRunSuite,
+    isSuiteRunning,
+  }: { 
     suite: EvalSuiteRow; 
     onEditSuite: (suiteId: string) => void; 
     onDeleteSuite: (suiteId: string) => void; 
-    onToggleVisibility: (suiteId: string, next: "public" | "private") => void 
+    onToggleVisibility: (suiteId: string, next: "public" | "private") => void;
+    onRunSuite: (suiteId: string) => void;
+    isSuiteRunning: boolean;
   }): ReactNode {
     const isPublic = suite.visibility === "public";
     const { canChangeVisibility } = useResourcePermissions({source: "local" as const, visibility: suite.visibility, createdBy: suite.createdBy});
     return (
-      <div className="flex items-center gap-0.5">
+      <div className={cn(
+        "flex items-center gap-0.5 shrink-0 transition-opacity",
+        isSuiteRunning ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+      )}>
       <Button
         type="button"
         variant="ghost"
         title="Edit suite"
-        className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
-        onClick={() => onEditSuite(suite.id)}
+        className="shrink-0 text-muted-foreground hover:text-foreground h-[22px] w-[22px] p-0"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEditSuite(suite.id);
+        }}
       >
         <SquarePen className="h-3 w-3" />
       </Button>
@@ -95,8 +109,11 @@ function SuiteActions(
         type="button"
         variant="ghost"
         title="Delete suite"
-        className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
-        onClick={() => onDeleteSuite(suite.id)}
+        className="shrink-0 text-muted-foreground hover:text-foreground h-[22px] w-[22px] p-0"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDeleteSuite(suite.id);
+        }}
       >
         <Trash2 className="h-3 w-3" />
       </Button>
@@ -104,19 +121,46 @@ function SuiteActions(
         <Button
           type="button"
           variant="ghost"
-          className="sharink-0 text-muted-foreground hover:text-foreground h-6 w-6 p-0"
-          onClick={() => onToggleVisibility(suite.id, isPublic ? "private" : "public")}
+          className="shrink-0 text-muted-foreground hover:text-foreground h-[22px] w-[22px] p-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleVisibility(suite.id, isPublic ? "private" : "public");
+          }}
           title={isPublic ? "Make private" : "Make public"}
         >
           {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
         </Button>
       ) : (
-        <span className="sharink-0 p-0.5 text-muted-foreground/70">
+        <span className="shrink-0 p-0.5 text-muted-foreground/70">
           {
             isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />
           }
         </span>
       )}
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-[22px] w-[22px] p-0 shrink-0 text-muted-foreground hover:text-foreground"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRunSuite(suite.id);
+        }}
+        title={
+          !suite.evaluatorAgentId
+            ? "Evaluator Agent is required to run"
+            : isSuiteRunning
+              ? "A run is in progress"
+              : "Run suite"
+        }
+        disabled={!suite.evaluatorAgentId || isSuiteRunning}
+      >
+        {isSuiteRunning ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <Play className={cn("h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
+        )}
+      </Button>
       </div>
     );
 }
@@ -220,41 +264,20 @@ export function EvalSuiteTree({
                     {suite.dimensionIds.length} dim
                   </span>
                 </div>
-                {!suite.enabled && (
-                  <span title="Disabled"><CircleSlash className="h-3 w-3 shrink-0 text-muted-foreground" /></span>
-                )}
-                <SuiteActions 
-                  suite={suite} 
-                  onEditSuite={onEditSuite}
-                  onDeleteSuite={onDeleteSuite}
-                  onToggleVisibility={onToggleVisibility}
-                />
                 {/* Live run status badge */}
                 {runningSuiteId === suite.id && liveRun.phase !== "idle" && liveRun.totals && (
                   <span className="shrink-0 text-[9px] font-mono tabular-nums text-muted-foreground">
                     {liveRun.totals.passedCount}/{liveRun.totals.totalCount}
                   </span>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 shrink-0"
-                  onClick={() => onRunSuite(suite.id)}
-                  title={
-                    !suite.evaluatorAgentId
-                      ? "Evaluator Agent is required to run"
-                      : isSuiteRunning
-                        ? "A run is in progress"
-                        : "Run suite"
-                  }
-                  disabled={!suite.evaluatorAgentId || isSuiteRunning}
-                >
-                  {isSuiteRunning && runningSuiteId === suite.id ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Play className={cn("h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
-                  )}
-                </Button>
+                <SuiteActions 
+                  suite={suite} 
+                  onEditSuite={onEditSuite}
+                  onDeleteSuite={onDeleteSuite}
+                  onToggleVisibility={onToggleVisibility}
+                  onRunSuite={onRunSuite}
+                  isSuiteRunning={isSuiteRunning}
+                />
               </div>
 
               {/* Case list */}
@@ -266,7 +289,7 @@ export function EvalSuiteTree({
                       <div
                         key={c.id}
                         className={cn(
-                          "group/case flex w-full items-center gap-2 px-3 py-1.5 transition-colors",
+                          "group/case flex w-full items-center gap-2 pl-7 pr-3 py-1.5 transition-colors",
                           selectedCaseId === c.id
                             ? "bg-accent"
                             : "hover:bg-muted/30",
@@ -284,22 +307,24 @@ export function EvalSuiteTree({
                             {c.name}
                           </button>
                         </div>
-                         <button
-                          type="button"
-                          onClick={() => onEditCase(c)}
-                          className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-foreground mr-0.5"
-                          title="Edit case"
-                        >
-                          <SquarePen className="h-2.5 w-2.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteCase(c.id, suite.id)}
-                          className="shrink-0 opacity-0 group-hover/case:opacity-100 text-muted-foreground hover:text-destructive"
-                          title="Delete case"
-                        >
-                          <Trash2 className="h-2.5 w-2.5" />
-                        </button>
+                        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/case:opacity-100 group-focus-within/case:opacity-100 focus-within:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => onEditCase(c)}
+                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground"
+                            title="Edit case"
+                          >
+                            <SquarePen className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteCase(c.id, suite.id)}
+                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive"
+                            title="Delete case"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
                       </div>
                     );
                   })}

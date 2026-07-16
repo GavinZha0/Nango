@@ -1665,7 +1665,6 @@ export const VerificationSuiteTable = pgTable(
     mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
       onDelete: "cascade",
     }),
-    toolName: text("tool_name"),
     workflowId: uuid("workflow_id"),
 
     enabled: boolean("enabled").notNull().default(true),
@@ -1686,17 +1685,17 @@ export const VerificationSuiteTable = pgTable(
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    // Unique suite per MCP Tool per user
-    uniqueIndex("verification_suite_mcp_tool_user_idx").on(t.mcpServerId, t.toolName, t.createdBy),
+    // Unique suite per MCP Server per name per user
+    uniqueIndex("verification_suite_mcp_user_name_idx").on(t.mcpServerId, t.name, t.createdBy),
     // Unique suite per Workflow per user
     uniqueIndex("verification_suite_workflow_user_idx").on(t.workflowId, t.createdBy),
     // XOR target: MCP shape OR workflow shape, never both / neither.
     check(
       "verification_suite_target_xor",
       sql`(
-        (${t.mcpServerId} IS NOT NULL AND ${t.toolName} IS NOT NULL AND ${t.workflowId} IS NULL)
+        (${t.mcpServerId} IS NOT NULL AND ${t.workflowId} IS NULL)
         OR
-        (${t.mcpServerId} IS NULL AND ${t.toolName} IS NULL AND ${t.workflowId} IS NOT NULL)
+        (${t.mcpServerId} IS NULL AND ${t.workflowId} IS NOT NULL)
       )`,
     ),
   ],
@@ -1730,6 +1729,7 @@ export const VerificationCaseTable = pgTable(
       .notNull()
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    toolName: text("tool_name"),
     // --- payload ---
     input: jsonb("input").notNull().default(sql`'{}'::jsonb`),
     /** Array of assertion specs. See docs/verification.md. */

@@ -100,13 +100,13 @@ function AgentRow({ item, active, onSelect, onRunAgent, onDeleteAgent }: AgentRo
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 ml-2">
+      <div className="flex shrink-0 items-center gap-0.5 ml-2">
         {/* Run */}
         <button
           type="button"
           onClick={onRunAgent}
           title="Run all suites (except Drafts)"
-          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-green-500"
+          className="shrink-0 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-green-500"
         >
           <Play className="h-3.5 w-3.5 fill-current" />
         </button>
@@ -116,7 +116,7 @@ function AgentRow({ item, active, onSelect, onRunAgent, onDeleteAgent }: AgentRo
           type="button"
           onClick={onDeleteAgent}
           title="Delete all suites"
-          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
+          className="shrink-0 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
