@@ -5,13 +5,13 @@
 
 ### Features
 
-* add dynamic variable generation and cross-tool case context to verification ([e978d10](https://github.com/GavinZha0/Nango/commit/e978d1095d416d07f6da8028b19e30ea28524b9b))
-* reorganize verification cases into suite-based structure with cross-tool support ([3bd3d79](https://github.com/GavinZha0/Nango/commit/3bd3d79dddfe130aec7ba2b97caa383b058bc33e))
+* add dynamic variable generation and cross-tool case context to verification ([e978d10](https://github.com/GavinZha0/Nango/commit/e978d1095d416d07f6da8028b19e30ea28524b9b)) by @GavinZha0
+* reorganize verification cases into suite-based structure with cross-tool support ([3bd3d79](https://github.com/GavinZha0/Nango/commit/3bd3d79dddfe130aec7ba2b97caa383b058bc33e)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* node issue of workflow ([6855849](https://github.com/GavinZha0/Nango/commit/6855849585d3aba0c7579e30e8c4d86eaf7d2369))
+* node issue of workflow ([6855849](https://github.com/GavinZha0/Nango/commit/6855849585d3aba0c7579e30e8c4d86eaf7d2369)) by @GavinZha0
 
 ## [0.7.4](https://github.com/GavinZha0/Nango/compare/v0.7.3...v0.7.4) (2026-07-13)
 
