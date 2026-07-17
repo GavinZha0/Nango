@@ -5,12 +5,12 @@
 
 ### Features
 
-* implement case ownership and fine-grained deletion gates ([6023670](https://github.com/GavinZha0/Nango/commit/6023670248c0fae6c54e4d3f813b300dcdefcdd7))
+* implement case ownership and fine-grained deletion gates ([6023670](https://github.com/GavinZha0/Nango/commit/6023670248c0fae6c54e4d3f813b300dcdefcdd7)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* user creation issue ([0849ed4](https://github.com/GavinZha0/Nango/commit/0849ed473b218c82dc7d921810a26b210e3618cd))
+* user creation issue ([0849ed4](https://github.com/GavinZha0/Nango/commit/0849ed473b218c82dc7d921810a26b210e3618cd)) by @GavinZha0
 
 ## [0.8.0](https://github.com/GavinZha0/Nango/compare/v0.7.4...v0.8.0) (2026-07-16)
 
