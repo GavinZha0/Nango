@@ -18,6 +18,7 @@ import { publish } from "@/lib/runner/event-bus";
 import { runEvalCase, type RunEvalCaseResult } from "./eval-runner";
 import { recordRunNotification } from "@/lib/runner/notifications";
 import * as storage from "./storage";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import type { EvalCriteria, EvalTurn } from "./types";
 
 const log = childLogger({ component: "eval-orchestrator" });
@@ -66,6 +67,7 @@ export async function startEvalSuiteRun(
     input.caseIds && input.caseIds.length > 0
       ? await storage.listCasesByIds(input.caseIds)
       : await storage.listEnabledCasesForRun(input.suiteId);
+  cases.sort((a, b) => alphabeticCompare(a.name, b.name));
 
   const run = await storage.createRun({
     suiteId: input.suiteId,
@@ -351,6 +353,7 @@ export async function startEvalAgentAllRuns(
     for (const suite of runnable) {
       try {
         const cases = await storage.listEnabledCasesForRun(suite.id);
+        cases.sort((a, b) => alphabeticCompare(a.name, b.name));
         if (cases.length === 0) continue;
 
         const run = await storage.createRun({

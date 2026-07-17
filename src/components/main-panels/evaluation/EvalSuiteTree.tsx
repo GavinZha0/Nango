@@ -29,6 +29,7 @@ import { authClient } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import { useWorkspaceStore } from "@/store/workspace";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import type { EvaluationRunLiveState } from "@/hooks/useEvaluationRunStream";
@@ -216,6 +217,10 @@ export function EvalSuiteTree({
     return Object.values(casesBySuite).reduce((sum, cases) => sum + cases.length, 0);
   }, [casesBySuite]);
 
+  const sortedSuites = useMemo(() => {
+    return [...suites].sort((a, b) => alphabeticCompare(a.name, b.name));
+  }, [suites]);
+
   return (
     <div className="flex h-full flex-col border-r">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
@@ -240,14 +245,15 @@ export function EvalSuiteTree({
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        {suites.length === 0 ? (
+        {sortedSuites.length === 0 ? (
           <div className="px-3 py-4 text-xs text-muted-foreground">
             No evaluation suites yet.
           </div>
         ) : (
-        suites.map((suite) => {
+        sortedSuites.map((suite) => {
           const isCollapsed = collapsed.has(suite.id);
           const cases = casesBySuite[suite.id] ?? [];
+          const sortedCases = [...cases].sort((a, b) => alphabeticCompare(a.name, b.name));
           const isSuiteRunning = liveRun.phase === "running" && runningSuiteId === suite.id;
           return (
             <div key={suite.id} className="border-b border-border/40">
@@ -295,7 +301,7 @@ export function EvalSuiteTree({
               {/* Case list */}
               {!isCollapsed && (
                 <div>
-                  {cases.map((c) => {
+                  {sortedCases.map((c) => {
                     const verdict = verdictByCaseId.get(c.id);
                     const isSuiteOwner = suite.createdBy === currentUserId;
                     const isCaseOwner = c.createdBy === currentUserId;

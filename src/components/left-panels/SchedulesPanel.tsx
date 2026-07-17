@@ -17,7 +17,7 @@
  * SshServerEditor convention and keeps stray hover trash off the list.
  */
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   Calendar,
@@ -37,6 +37,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import {
   scheduleActions,
   useSchedulesStore,
@@ -195,6 +196,9 @@ export function SchedulesPanel(): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
   const items = useSchedulesStore((s) => s.items);
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => alphabeticCompare(a.name || "", b.name || ""));
+  }, [items]);
   const loaded = useSchedulesStore((s) => s.loaded);
   const loading = useSchedulesStore((s) => s.loading);
   const error = useSchedulesStore((s) => s.error);
@@ -215,9 +219,9 @@ export function SchedulesPanel(): ReactNode {
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <Calendar className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">Schedules</h2>
-        {items.length > 0 && (
+        {sortedItems.length > 0 && (
           <span className="text-[10px] text-muted-foreground">
-            ({items.length})
+            ({sortedItems.length})
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
@@ -254,7 +258,7 @@ export function SchedulesPanel(): ReactNode {
           )}
           {!loaded && loading ? (
             <p className="px-4 py-4 text-xs text-muted-foreground">Loading…</p>
-          ) : items.length === 0 ? (
+          ) : sortedItems.length === 0 ? (
             <div className="px-4 py-4 text-xs text-muted-foreground">
               No schedules yet.{" "}
               <button
@@ -266,7 +270,7 @@ export function SchedulesPanel(): ReactNode {
               </button>
             </div>
           ) : (
-            items.map((row) => (
+            sortedItems.map((row) => (
               <ScheduleRow
                 key={row.id}
                 row={row}

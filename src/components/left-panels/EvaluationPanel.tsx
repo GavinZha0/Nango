@@ -13,6 +13,7 @@ import { Loader2, Play, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import { useWorkspaceStore } from "@/store/workspace";
 import {
   useEvaluationStore,
@@ -166,18 +167,26 @@ export function EvaluationPanel(): ReactNode {
     if (!agentsLoaded) void evalActions.refreshAgents();
   }, [agentsLoaded]);
 
-  const enriched: EvalAgentItem[] = agents.map((a) => {
-    const resolved = agentNames[a.agentId];
-    return {
-      ...a,
-      agentName: resolved?.name ?? a.agentName ?? a.agentId,
-      agentIcon: resolved?.icon ?? a.agentIcon,
-    };
-  });
+  const enriched = useMemo<EvalAgentItem[]>(() => {
+    return agents.map((a) => {
+      const resolved = agentNames[a.agentId];
+      return {
+        ...a,
+        agentName: resolved?.name ?? a.agentName ?? a.agentId,
+        agentIcon: resolved?.icon ?? a.agentIcon,
+      };
+    });
+  }, [agents, agentNames]);
 
-  const filtered = enriched.filter((a) =>
-    activeTab === "builtin" ? a.agentSource === "builtin" : a.agentSource === "backend",
-  );
+  const sortedFiltered = useMemo(() => {
+    const filtered = enriched.filter((a) =>
+      activeTab === "builtin" ? a.agentSource === "builtin" : a.agentSource === "backend",
+    );
+    return [...filtered].sort((a, b) =>
+      alphabeticCompare(a.agentName || a.agentId, b.agentName || b.agentId)
+    );
+  }, [enriched, activeTab]);
+
   const builtinCount = enriched.filter((a) => a.agentSource === "builtin").length;
   const externalCount = enriched.filter((a) => a.agentSource === "backend").length;
 
@@ -244,14 +253,14 @@ export function EvaluationPanel(): ReactNode {
           <div className="flex items-center justify-center py-6">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : sortedFiltered.length === 0 ? (
           <div className="px-4 py-3 text-xs text-muted-foreground">
             {activeTab === "builtin"
               ? "No built-in agent evaluations yet."
               : "No external agent evaluations yet."}
           </div>
         ) : (
-          filtered.map((item) => (
+          sortedFiltered.map((item) => (
             <AgentRow
               key={`${item.agentId}:${item.agentSource}`}
               item={item}

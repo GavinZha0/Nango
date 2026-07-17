@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useMemo, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   RefreshCw,
@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import {
   useVerificationStore,
   verificationActions,
@@ -160,7 +161,12 @@ export function VerificationPanel(): ReactNode {
 
   const category = useVerificationStore((s) => s.category);
   const mcpItems = useVerificationStore((s) => s.items.mcp) as unknown as VerificationServerRow[];
-  const items = category === "mcp" ? mcpItems : [];
+  const sortedItems = useMemo(() => {
+    const list = category === "mcp" ? mcpItems : [];
+    return [...list].sort((a, b) =>
+      alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name)
+    );
+  }, [mcpItems, category]);
   const loadedForCategory = useVerificationStore(
     (s) => s.loaded[s.category],
   );
@@ -268,7 +274,7 @@ export function VerificationPanel(): ReactNode {
             </p>
           ) : !loadedForCategory && loading ? (
             <p className="px-4 py-4 text-xs text-muted-foreground">Loading…</p>
-          ) : items.length === 0 ? (
+          ) : sortedItems.length === 0 ? (
             <div className="p-6 text-center text-xs text-muted-foreground">
               No verification case yet.{" "}
               <button
@@ -280,7 +286,7 @@ export function VerificationPanel(): ReactNode {
               </button>
             </div>
           ) : (
-            items.map((row) => (
+            sortedItems.map((row) => (
               <ServerRow
                 key={row.id}
                 row={row}

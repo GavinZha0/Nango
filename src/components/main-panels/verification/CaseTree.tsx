@@ -23,6 +23,7 @@ import { authClient } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import type { VerificationCaseResultStatus } from "@/lib/verification/types";
 import type { VerificationCaseRow } from "@/store/verification-cases";
 
@@ -69,9 +70,9 @@ function buildTree(cases: VerificationCaseRow[]): ToolGroup[] {
     suiteId,
     suiteVisibility: (cs[0]?.suiteVisibility ?? "private") as "public" | "private",
     suiteCreatedBy: cs[0]?.suiteCreatedBy ?? "",
-    cases: cs.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    cases: cs.slice().sort((a, b) => alphabeticCompare(a.name, b.name)),
   }));
-  out.sort((a, b) => a.toolName.localeCompare(b.toolName));
+  out.sort((a, b) => alphabeticCompare(a.toolName, b.toolName));
   return out;
 }
 

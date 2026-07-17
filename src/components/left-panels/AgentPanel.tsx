@@ -32,6 +32,7 @@ import type { BackendCredentialInfo, BackendId } from "@/lib/backends/facade";
 import type { EntityKind } from "@/lib/backends/types";
 import { useWorkspaceStore } from "@/store/workspace";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import { useStoredValue } from "@/hooks/useStoredValue";
 import { useRouter, usePathname } from "next/navigation";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
@@ -707,18 +708,10 @@ export function AgentPanel(): ReactNode {
     );
   }, [agents, teams, workflows]);
 
-  // Supervisor first (one per user, the routing entry point), then by
-  // name. Keeps the user's primary agent at the top of the flat list.
+  // Purely alphabetical by name.
   const sortedBuiltinAgents = useMemo(
     () =>
-      [...builtinAgents].sort((a, b) => {
-        // Supervisor pinned to top; everything else by name.
-        const aIsSup = a.role === "supervisor";
-        const bIsSup = b.role === "supervisor";
-        if (aIsSup && !bIsSup) return -1;
-        if (!aIsSup && bIsSup) return 1;
-        return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
-      }),
+      [...builtinAgents].sort((a, b) => alphabeticCompare(a.name, b.name)),
     [builtinAgents]
   );
 
