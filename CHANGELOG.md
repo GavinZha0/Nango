@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/GavinZha0/Nango/compare/v0.9.0...v0.9.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* numeric-aware alphabetical sorting issue of panels and run execution ([dbef6c4](https://github.com/GavinZha0/Nango/commit/dbef6c4f4d2dcac969878da7586d34ba0b325742))
+
 ## [0.9.0](https://github.com/GavinZha0/Nango/compare/v0.8.0...v0.9.0) (2026-07-16)
 
 
