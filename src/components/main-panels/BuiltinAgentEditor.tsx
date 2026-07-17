@@ -14,7 +14,7 @@ import {
   type ReactNode,
   type ChangeEvent,
 } from "react";
-import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, Trash2, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,6 +67,7 @@ function Section({
   defaultOpen = true,
   count,
   actions,
+  headerClassName,
 }: {
   title: string;
   children: ReactNode;
@@ -79,11 +80,12 @@ function Section({
    *  for System Prompt). Sits OUTSIDE the toggle button so clicking an
    *  action does not collapse/expand the section. */
   actions?: ReactNode;
+  headerClassName?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border-b border-border/40">
-      <div className="flex items-center gap-1.5 px-4 py-2.5">
+      <div className={cn("flex items-center gap-1.5 px-4 py-2.5", headerClassName)}>
         <button
           type="button"
           className="flex flex-1 items-center gap-1.5 text-left"
@@ -127,7 +129,7 @@ function CheckList<T extends { id: string; name: string; description?: string | 
     return <p className="text-xs text-muted-foreground">{emptyText}</p>;
   }
   return (
-    <div className="space-y-1.5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
       {items.map((item) => (
         <label
           key={item.id}
@@ -380,6 +382,52 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   // Delete state — destructive action, gated by a confirm dialog.
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
+
+  // Tab states for tool grouping
+  type TabId = "skills" | "mcp" | "builtin" | "ssh" | "datasource" | "calendar" | "knowledge";
+  const [activeTab, setActiveTab] = useState<TabId>("mcp");
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = useCallback(() => {
+    const el = tabListRef.current;
+    if (el) {
+      setCanScrollLeft(el.scrollLeft > 1);
+      setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
+    }
+  }, []);
+
+  const handleTabScroll = useCallback((direction: "left" | "right") => {
+    const el = tabListRef.current;
+    if (el) {
+      const scrollAmount = 120;
+      el.scrollBy({
+        left: direction === "left" ? -scrollAmount : scrollAmount,
+        behavior: "smooth",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = tabListRef.current;
+    if (el) {
+      el.addEventListener("scroll", checkScroll);
+      window.addEventListener("resize", checkScroll);
+      checkScroll();
+    }
+    return () => {
+      if (el) {
+        el.removeEventListener("scroll", checkScroll);
+      }
+      window.removeEventListener("resize", checkScroll);
+    };
+  }, [checkScroll]);
+
+  useEffect(() => {
+    const timer = setTimeout(checkScroll, 100);
+    return () => clearTimeout(timer);
+  }, [activeTab, skills, mcpServers, builtinToolCatalog, sshServers, dataSources, calendars, checkScroll]);
 
   // Load
   const load = useCallback(async () => {
@@ -683,7 +731,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               are owned by Section's own `px-4`. */}
           <div className="lg:pr-3">
             {/* ── Basic info — single-line per field ── */}
-            <Section title="Basic">
+            <Section title="Basic" headerClassName="bg-muted/30">
               <div className="flex items-center gap-2">
                 <Label className="w-20 shrink-0 text-xs">Name</Label>
                 <Input
@@ -859,128 +907,193 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
               </div>
             </Section>
 
-            {/* ── Tools — all six sections, full-width inside left col ── */}
-            <Section
-              title="Skills"
-              defaultOpen={false}
-              count={{ selected: tools.skills.size, total: skills.length }}
-            >
-              <CheckList
-                items={skills}
-                selected={tools.skills}
-                onToggle={(id) => toggleTool("skills", id)}
-                emptyText="No skills available."
-              />
-            </Section>
+            {/* ── Tabs-based Tool Selection ── */}
+            {(() => {
+              const tabsConfig = [
+                {
+                  id: "mcp" as const,
+                  label: "MCP",
+                  count: { selected: tools.mcp.size, total: mcpServers.length },
+                },
+                {
+                  id: "builtin" as const,
+                  label: "Tool",
+                  count: {
+                    selected: [...tools.builtinTools].filter((n) =>
+                      builtinToolCatalog.some((t) => t.name === n),
+                    ).length,
+                    total: builtinToolCatalog.length,
+                  },
+                },
+                {
+                  id: "skills" as const,
+                  label: "Skill",
+                  count: { selected: tools.skills.size, total: skills.length },
+                },
+                {
+                  id: "ssh" as const,
+                  label: "SSH",
+                  count: { selected: tools.sshServers.size, total: sshServers.length },
+                },
+                {
+                  id: "datasource" as const,
+                  label: "Datasource",
+                  count: { selected: tools.dataSources.size, total: dataSources.length },
+                },
+                {
+                  id: "calendar" as const,
+                  label: "Calendar",
+                  count: { selected: tools.calendars.size, total: calendars.length },
+                },
+                {
+                  id: "knowledge" as const,
+                  label: "Knowledge",
+                },
+              ];
+              
+              return (
+                <>
+                  <div className="relative flex items-center mt-4 mx-4 p-1 rounded-lg bg-muted/40 border border-border/40">
+                    {canScrollLeft && (
+                      <div className="absolute left-1 z-10 flex items-center pr-2 bg-gradient-to-r from-muted/95 to-transparent">
+                        <button
+                          type="button"
+                          onClick={() => handleTabScroll("left")}
+                          className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm backdrop-blur-sm hover:bg-muted"
+                          aria-label="Scroll tabs left"
+                        >
+                          <ChevronLeft className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    
+                    <div
+                      ref={tabListRef}
+                      className="flex flex-1 gap-1 overflow-x-auto scrollbar-none scroll-smooth"
+                    >
+                      {tabsConfig.map((tab) => {
+                        const active = activeTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setActiveTab(tab.id)}
+                            className={cn(
+                              "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                              active
+                                ? "bg-background text-foreground shadow-xs"
+                                : "text-muted-foreground hover:bg-background/40 hover:text-foreground"
+                            )}
+                          >
+                            <span>{tab.label}</span>
+                            {tab.count && (
+                              <span
+                                className={cn(
+                                  "rounded px-1 text-[10px] tabular-nums font-semibold",
+                                  active
+                                    ? "bg-primary/10 text-primary"
+                                    : "bg-muted-foreground/10 text-muted-foreground/70"
+                                )}
+                              >
+                                {tab.count.selected}/{tab.count.total}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
 
-            <Section
-              title="MCP Servers"
-              defaultOpen={false}
-              count={{ selected: tools.mcp.size, total: mcpServers.length }}
-            >
-              <CheckList
-                items={mcpServers.map((s) => ({
-                  ...s,
-                  description: s.description || s.serverDescription || s.serverInstructions || s.url,
-                }))}
-                selected={tools.mcp}
-                onToggle={(id) => toggleTool("mcp", id)}
-                emptyText="No MCP servers configured."
-              />
-            </Section>
+                    {canScrollRight && (
+                      <div className="absolute right-1 z-10 flex items-center pl-2 bg-gradient-to-l from-muted/95 to-transparent">
+                        <button
+                          type="button"
+                          onClick={() => handleTabScroll("right")}
+                          className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm backdrop-blur-sm hover:bg-muted"
+                          aria-label="Scroll tabs right"
+                        >
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-            <Section
-              title="Built-in Tools"
-              defaultOpen={false}
-              count={{
-                // Intersect selection with catalog so supervisor self-
-                // injected tools (absent from /api/builtin-tools) don't
-                // inflate the numerator.
-                selected: [...tools.builtinTools].filter((n) =>
-                  builtinToolCatalog.some((t) => t.name === n),
-                ).length,
-                total: builtinToolCatalog.length,
-              }}
-            >
-              <CheckList
-                items={builtinToolCatalog.map((t) => ({
-                  id: t.name,
-                  name: t.displayName,
-                  description: t.description,
-                }))}
-                selected={tools.builtinTools}
-                onToggle={(id) => toggleTool("builtinTools", id)}
-                emptyText="No built-in tools available."
-              />
-            </Section>
-
-            <Section
-              title="SSH Hosts"
-              defaultOpen={false}
-              count={{ selected: tools.sshServers.size, total: sshServers.length }}
-            >
-              <CheckList
-                items={sshServers.map((s) => ({
-                  id: s.id,
-                  name: s.name,
-                  description:
-                    s.description ?? `${s.username}@${s.host}`,
-                }))}
-                selected={tools.sshServers}
-                onToggle={(id) => toggleTool("sshServers", id)}
-                emptyText="No enabled SSH servers. Create one from the SSH Hosts panel."
-              />
-            </Section>
-
-            <Section
-              title="Data Sources"
-              defaultOpen={false}
-              count={{ selected: tools.dataSources.size, total: dataSources.length }}
-            >
-              <CheckList
-                items={dataSources.map((d) => ({
-                  id: d.id,
-                  name: d.name,
-                  description: d.description ?? d.provider,
-                }))}
-                selected={tools.dataSources}
-                onToggle={(id) => toggleTool("dataSources", id)}
-                emptyText="No enabled data sources. Create one from the Data Sources panel."
-              />
-            </Section>
-
-            <Section
-              title="Calendars"
-              defaultOpen={false}
-              count={{ selected: tools.calendars.size, total: calendars.length }}
-            >
-              <CheckList
-                items={calendars.map((c) => ({
-                  id: c.id,
-                  name: c.name,
-                  description: c.description ?? c.provider ?? "ICS",
-                }))}
-                selected={tools.calendars}
-                onToggle={(id) => toggleTool("calendars", id)}
-                emptyText="No calendar credentials. Create one with service type 'Calendar' in Credentials."
-              />
-            </Section>
-
-            {/* Knowledge Base (placeholder) */}
-            <Section title="Knowledge Base" defaultOpen={false}>
-              <label className={cn("flex cursor-pointer items-center gap-2.5 rounded-md px-1 py-1 hover:bg-muted/40")}>
-                <Checkbox
-                  checked={form.kbEnabled}
-                  onCheckedChange={(v: boolean | "indeterminate") => update("kbEnabled", v === true)}
-                />
-                <div>
-                  <p className="text-xs font-medium">Enable knowledge base</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Knowledge base support is coming soon.
-                  </p>
-                </div>
-              </label>
-            </Section>
+                  <div className="px-4 py-3 min-h-[220px]">
+                    {activeTab === "skills" && (
+                      <CheckList
+                        items={skills}
+                        selected={tools.skills}
+                        onToggle={(id) => toggleTool("skills", id)}
+                        emptyText="No skills available."
+                      />
+                    )}
+                    {activeTab === "mcp" && (
+                      <CheckList
+                        items={mcpServers.map((s) => ({
+                          ...s,
+                          description: s.description || s.serverDescription || s.serverInstructions || s.url,
+                        }))}
+                        selected={tools.mcp}
+                        onToggle={(id) => toggleTool("mcp", id)}
+                        emptyText="No MCP servers configured."
+                      />
+                    )}
+                    {activeTab === "builtin" && (
+                      <CheckList
+                        items={builtinToolCatalog.map((t) => ({
+                          id: t.name,
+                          name: t.displayName,
+                          description: t.description,
+                        }))}
+                        selected={tools.builtinTools}
+                        onToggle={(id) => toggleTool("builtinTools", id)}
+                        emptyText="No built-in tools available."
+                      />
+                    )}
+                    {activeTab === "ssh" && (
+                      <CheckList
+                        items={sshServers.map((s) => ({
+                          id: s.id,
+                          name: s.name,
+                          description: s.description ?? `${s.username}@${s.host}`,
+                        }))}
+                        selected={tools.sshServers}
+                        onToggle={(id) => toggleTool("sshServers", id)}
+                        emptyText="No enabled SSH servers. Create one from the SSH Hosts panel."
+                      />
+                    )}
+                    {activeTab === "datasource" && (
+                      <CheckList
+                        items={dataSources.map((d) => ({
+                          id: d.id,
+                          name: d.name,
+                          description: d.description ?? d.provider,
+                        }))}
+                        selected={tools.dataSources}
+                        onToggle={(id) => toggleTool("dataSources", id)}
+                        emptyText="No enabled data sources. Create one from the Data Sources panel."
+                      />
+                    )}
+                    {activeTab === "calendar" && (
+                      <CheckList
+                        items={calendars.map((c) => ({
+                          id: c.id,
+                          name: c.name,
+                          description: c.description ?? c.provider ?? "ICS",
+                        }))}
+                        selected={tools.calendars}
+                        onToggle={(id) => toggleTool("calendars", id)}
+                        emptyText="No calendar credentials. Create one with service type 'Calendar' in Credentials."
+                      />
+                    )}
+                    {activeTab === "knowledge" && (
+                      <p className="text-xs text-muted-foreground py-2">
+                        Knowledge base support is coming soon.
+                      </p>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {/* RIGHT COLUMN: System Prompt. `lg:sticky` so it stays
