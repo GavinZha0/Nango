@@ -135,6 +135,17 @@ export type GenerateEchartsConfigResult =
  */
 export const HTML_PAGE_HARD_CAP_BYTES = 524_288; // 512 KB
 
+export function normalizePageId(val: string): string {
+  return val
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]+/g, "")
+    .replace(/-+/g, "-")
+    .replace(/_+/g, "_")
+    .replace(/^[-_]+|[-_]+$/g, "");
+}
+
 /**
  * Parameter schema for the `generate_html_page` server tool.
  *
@@ -146,16 +157,16 @@ export const generateHtmlPageSchema = z.object({
   page_id: z
     .string()
     .regex(
-      /^[a-z0-9-]+$/,
-      "page_id must be lowercase kebab-case (letters, numbers, hyphens only)",
+      /^[a-zA-Z0-9-_\s]+$/,
+      "page_id must contain only letters, numbers, spaces, hyphens, and underscores",
     )
     .min(1, "page_id cannot be empty")
     .max(64, "page_id max 64 characters")
     .describe(
       "Stable per-thread identifier; re-calling with the same id " +
-        "overwrites the previous page. Pick a short kebab-case slug " +
-        "like 'landing-page' or 'dashboard-preview'. Lowercase " +
-        "letters, numbers, and hyphens only.",
+        "overwrites the previous page. Pick a short kebab-case or snake_case slug " +
+        "like 'landing-page', 'dashboard-preview', or 'poetry_comparison'. " +
+        "Letters, numbers, spaces, hyphens, and underscores only.",
     ),
   title: z
     .string()
@@ -201,6 +212,7 @@ export interface GenerateHtmlPageSuccess {
   title: string;
   description?: string;
   html: string;
+  message?: string;
 }
 
 /**

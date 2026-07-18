@@ -42,7 +42,6 @@ import {
   ArrowUpRight,
   BarChart3,
   Loader2,
-  AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, type ReactElement } from "react";
@@ -55,6 +54,8 @@ import type {
   GenerateEchartsConfigArgs,
   GenerateEchartsConfigResult,
 } from "@/lib/outcomes/schema";
+import { detectToolResultStatus } from "@/lib/copilot/detect-tool-result-status";
+import { WildcardToolRenderer } from "@/components/copilotkit/WildcardToolRenderer";
 
 // props
 
@@ -161,20 +162,15 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
   // complete: inspect server result envelope.
   const parsed = parseServerResult(props.result);
 
-  if (parsed !== null && parsed.ok === false) {
-    return (
-      <CardShell variant="error">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden />
-          <span className="text-sm font-medium text-destructive">
-            Chart rejected
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {parsed.message ?? "The agent's chart option was rejected."}
-        </p>
-      </CardShell>
-    );
+  const detected = detectToolResultStatus(props.result);
+  const isFailed =
+    detected === "failure" ||
+    (props.result !== undefined &&
+      props.result.trim().length > 0 &&
+      parsed === null);
+
+  if (isFailed) {
+    return <WildcardToolRenderer {...props} />;
   }
 
   return <SuccessCard args={args} onView={onView} />;

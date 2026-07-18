@@ -24,6 +24,7 @@ import {
   generateHtmlPageSchema,
   type GenerateHtmlPageArgs,
   type GenerateHtmlPageResult,
+  normalizePageId,
 } from "./schema";
 
 /**
@@ -184,14 +185,20 @@ export function buildGenerateHtmlPageTool(): ToolDefinition {
         };
       }
 
+      const originalPageId = args.page_id;
+      const finalPageId = normalizePageId(originalPageId);
+
       return {
         ok: true,
-        page_id: args.page_id,
+        page_id: finalPageId,
         title: args.title,
         ...(args.description !== undefined && {
           description: args.description,
         }),
         html: args.html,
+        ...(originalPageId !== finalPageId && {
+          message: `The page_id was normalized from "${originalPageId}" to "${finalPageId}". Please use "${finalPageId}" for subsequent updates.`,
+        }),
       };
     },
   });

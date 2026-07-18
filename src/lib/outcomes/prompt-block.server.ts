@@ -75,6 +75,7 @@ export const HTML_PAGE_PROMPT_BLOCKS = {
     "- The page renders inside a sandboxed iframe IMMEDIATELY on success — do NOT paste HTML source into your chat reply.",
     "- Only call this tool when you have concrete content to render. If the user just asks a question, reply in text.",
     "- Re-calling with the same page_id OVERWRITES the previous page.",
+    "- page_id MUST contain only letters, numbers, spaces, hyphens, and underscores. Try to use clean kebab-case or snake_case (e.g., 'poetry-comparison' or 'poetry_comparison').",
   ].join("\n"),
 } as const;
 

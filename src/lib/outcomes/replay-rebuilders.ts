@@ -35,6 +35,7 @@ import {
   type GenerateEchartsConfigArtifactArgs,
   type GenerateHtmlPageArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
+import { normalizePageId } from "./schema";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
 
@@ -303,10 +304,11 @@ export function rebuildHtmlPageOutcome(
     );
     return null;
   }
+  const finalPageId = normalizePageId(args.page_id);
   return {
-    id: args.page_id,
+    id: finalPageId,
     outcome: {
-      outcomeId: args.page_id,
+      outcomeId: finalPageId,
       kind: "report",
       title: args.title,
       description: args.description,
