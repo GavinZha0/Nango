@@ -13,6 +13,7 @@ import "server-only";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import {
   VerificationCaseResultTable,
   VerificationCaseTable,
@@ -121,8 +122,7 @@ export interface VerificationCaseRunItem {
   workflowId: string | null;
 }
 
-/** Enabled cases of a suite, in name order — the canonical iteration
- *  order for `Run suite` (see docs/verification.md). */
+/** Enabled cases of a suite, sorted in natural numeric-aware name order. */
 export async function listEnabledCasesForRun(
   suiteId: string,
 ): Promise<VerificationCaseRunItem[]> {
@@ -152,10 +152,10 @@ export async function listEnabledCasesForRun(
       ),
     )
     .orderBy(VerificationCaseTable.name);
-  return rows;
+  return rows.sort((a, b) => alphabeticCompare(a.name, b.name));
 }
 
-/** Enabled cases of an entire MCP server, in toolName and case name order. */
+/** Enabled cases of an entire MCP server, sorted in natural numeric-aware toolName and case name order. */
 export async function listEnabledCasesForServerRun(
   mcpServerId: string,
 ): Promise<VerificationCaseRunItem[]> {
@@ -185,7 +185,11 @@ export async function listEnabledCasesForServerRun(
       ),
     )
     .orderBy(VerificationCaseTable.toolName, VerificationCaseTable.name);
-  return rows;
+  return rows.sort((a, b) => {
+    const cmpTool = alphabeticCompare(a.toolName || "", b.toolName || "");
+    if (cmpTool !== 0) return cmpTool;
+    return alphabeticCompare(a.name, b.name);
+  });
 }
 
 // --- Runs -------------------------------------------------------------------

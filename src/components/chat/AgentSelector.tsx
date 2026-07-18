@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useState } from "react";
+import { Fragment, useCallback, useState, useMemo } from "react";
 import type { ReactNode } from "react";
 import { Bot, ChevronDown, ChevronRight, Sparkles, Users } from "lucide-react";
 
@@ -15,6 +15,7 @@ import {
 import { agentKey } from "@/lib/backends/facade";
 import type { EntityKind } from "@/lib/backends/types";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 
 /**
@@ -97,8 +98,11 @@ export function AgentSelector({
   );
   // System-role agents are hidden from the picker but kept in lookup
   // for active-name resolution.
-  const enabledBuiltin = builtinAgents.filter((b) => b.enabled);
-  const visibleBuiltin = enabledBuiltin.filter((b) => !b.role);
+  const enabledBuiltin = useMemo(() => builtinAgents.filter((b) => b.enabled), [builtinAgents]);
+  const visibleBuiltin = useMemo(() => enabledBuiltin.filter((b) => !b.role), [enabledBuiltin]);
+  const sortedVisibleBuiltin = useMemo(() => {
+    return [...visibleBuiltin].sort((a, b) => alphabeticCompare(a.name, b.name));
+  }, [visibleBuiltin]);
 
   const backendEntries = [
     ...visibleAgents.map((a) => ({
@@ -229,7 +233,7 @@ export function AgentSelector({
 
       <DropdownMenuContent align="start" side="bottom" className="w-52">
         {[...backendGroups.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
+          .sort(([a], [b]) => alphabeticCompare(a, b))
           .map(([groupName, entries], gi) => (
           <Fragment key={groupName}>
             {gi > 0 && <DropdownMenuSeparator />}
@@ -240,7 +244,9 @@ export function AgentSelector({
                 expanded={expanded[groupName] ?? false}
                 onToggle={() => toggle(groupName)}
               />
-              {expanded[groupName] && entries.map((e) => {
+              {expanded[groupName] && [...entries]
+                .sort((a, b) => alphabeticCompare(a.name, b.name))
+                .map((e) => {
                 const key = agentKey(e.credentialId, e.id);
                 const isActive =
                   activeAgentId === e.id &&
@@ -273,11 +279,11 @@ export function AgentSelector({
             <DropdownMenuGroup>
               <GroupHeader
                 label="BuiltIn"
-                count={visibleBuiltin.length}
+                count={sortedVisibleBuiltin.length}
                 expanded={expanded["__builtin__"] ?? false}
                 onToggle={() => toggle("__builtin__")}
               />
-              {expanded["__builtin__"] && visibleBuiltin.map((b) => (
+              {expanded["__builtin__"] && sortedVisibleBuiltin.map((b) => (
                 <DropdownMenuItem
                   key={b.id}
                   className={cn(

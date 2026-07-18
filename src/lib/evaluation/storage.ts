@@ -6,6 +6,7 @@ import { asc, desc, eq, sql, and, inArray } from "drizzle-orm";
 import { visibilitySql } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/http/route-handlers";
 import { db } from "@/lib/db";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import {
   EvalCaseTable,
   EvalCaseResultTable,
@@ -460,11 +461,11 @@ export async function markStrandedAsErrored(
   return result.length;
 }
 
-/** List enabled cases for a suite run (alphabetical order). */
+/** List enabled cases for a suite run (natural numeric-aware alphabetical order). */
 export async function listEnabledCasesForRun(
   suiteId: string,
 ): Promise<EvalCaseEntity[]> {
-  return db
+  const rows = await db
     .select()
     .from(EvalCaseTable)
     .where(
@@ -472,16 +473,18 @@ export async function listEnabledCasesForRun(
         AND ${EvalCaseTable.enabled} = true`,
     )
     .orderBy(asc(EvalCaseTable.name));
+  return rows.sort((a, b) => alphabeticCompare(a.name, b.name));
 }
 
-/** List cases by their IDs (alphabetical order, ignoring enabled status). */
+/** List cases by their IDs (natural numeric-aware alphabetical order, ignoring enabled status). */
 export async function listCasesByIds(
   ids: number[],
 ): Promise<EvalCaseEntity[]> {
   if (ids.length === 0) return [];
-  return db
+  const rows = await db
     .select()
     .from(EvalCaseTable)
     .where(inArray(EvalCaseTable.id, ids))
     .orderBy(asc(EvalCaseTable.name));
+  return rows.sort((a, b) => alphabeticCompare(a.name, b.name));
 }

@@ -28,7 +28,6 @@ import { runMcpCase } from "./runner-mcp";
 import * as storage from "./storage";
 import { timeoutError } from "./error-source";
 import { normalizeCaseName } from "@/lib/verification/resolve-input";
-import { alphabeticCompare } from "@/lib/utils/sort";
 import type {
   AssertionSpec,
   CaseExecutionOutcome,
@@ -88,11 +87,6 @@ export async function startServerRun(
 
   const serverName = server.serverTitle || server.name;
   const cases = await storage.listEnabledCasesForServerRun(input.mcpServerId);
-  cases.sort((a, b) => {
-    const cmpTool = alphabeticCompare(a.toolName || "", b.toolName || "");
-    if (cmpTool !== 0) return cmpTool;
-    return alphabeticCompare(a.name, b.name);
-  });
   const run = await storage.createRun({
     mcpServerId: input.mcpServerId,
     totalCount: cases.length,
@@ -164,7 +158,6 @@ export async function startSuiteRun(
   }
 
   const cases = await storage.listEnabledCasesForRun(input.suiteId);
-  cases.sort((a, b) => alphabeticCompare(a.name, b.name));
   const run = await storage.createRun({
     suiteId: input.suiteId,
     totalCount: cases.length,
