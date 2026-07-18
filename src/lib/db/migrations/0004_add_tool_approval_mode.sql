@@ -1,0 +1,2 @@
+ALTER TABLE "builtin_agent" ADD COLUMN "tool_approval_mode" text DEFAULT 'never' NOT NULL;--> statement-breakpoint
+ALTER TABLE "ssh_server" ADD COLUMN "command_approve" jsonb DEFAULT '[]'::jsonb NOT NULL;

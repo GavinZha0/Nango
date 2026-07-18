@@ -47,6 +47,7 @@ export interface SshServerDetail {
   port: number;
   knownHostFingerprint: string;
   commandAllow: string[] | null;
+  commandApprove: string[];
   commandDeny: string[];
   loginShell: boolean;
   enabled: boolean;
@@ -92,6 +93,7 @@ interface FormState {
   port: string;
   fingerprint: string;
   commandAllowText: string;
+  commandApproveText: string;
   commandDenyText: string;
   loginShell: boolean;
 }
@@ -105,6 +107,7 @@ function buildInitialForm(detail: SshServerDetail | undefined): FormState {
     port: String(detail?.port ?? 22),
     fingerprint: detail?.knownHostFingerprint ?? "",
     commandAllowText: formatCommandList(detail?.commandAllow ?? null),
+    commandApproveText: formatCommandList(detail?.commandApprove ?? []),
     commandDenyText: formatCommandList(detail?.commandDeny ?? []),
     loginShell: detail?.loginShell ?? true,
   };
@@ -244,6 +247,7 @@ export function SshServerEditor({
 
   function buildPayload(forCreate: boolean): Record<string, unknown> {
     const allowParsed = parseCommandList(form.commandAllowText);
+    const approveParsed = parseCommandList(form.commandApproveText);
     const denyParsed = parseCommandList(form.commandDenyText);
     const fp = form.fingerprint.trim();
     const base: Record<string, unknown> = {
@@ -253,7 +257,8 @@ export function SshServerEditor({
       port: Number(form.port),
       // Omit the field entirely when blank.
       ...(fp ? { knownHostFingerprint: fp } : {}),
-      commandAllow: allowParsed.length > 0 ? allowParsed : null,
+      commandAllow: allowParsed,
+      commandApprove: approveParsed,
       commandDeny: denyParsed,
       loginShell: form.loginShell,
     };
@@ -723,6 +728,19 @@ export function SshServerEditor({
                 onChange={(e) => update("commandAllowText", e.target.value)}
                 placeholder={"^ls\n^cat\n^tail\n// One regex per line. Anchor with ^ for prefix matches."}
                 rows={5}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ssh-approve">
+                Require Approval List (Auto Mode)
+              </Label>
+              <Textarea
+                id="ssh-approve"
+                value={form.commandApproveText}
+                onChange={(e) => update("commandApproveText", e.target.value)}
+                placeholder={"^rm\n^drop"}
+                rows={3}
                 className="font-mono text-xs"
               />
             </div>

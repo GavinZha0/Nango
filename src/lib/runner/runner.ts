@@ -430,7 +430,7 @@ class RunnerImpl implements Runner {
     let supervisorRunHolders: Map<string, ParentRunIdHolder>;
     try {
       ({ agents, borrowed, degradations, supervisorRunHolders } =
-        await buildBuiltinAgents(agentIds, requestLog, { userId, mode }));
+        await buildBuiltinAgents(agentIds, requestLog, { userId, mode, runId: runId ?? undefined }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await finalizeIfCreated(`agent_build_threw: ${message}`);

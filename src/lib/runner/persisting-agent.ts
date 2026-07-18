@@ -14,6 +14,7 @@ import { Observable } from "rxjs";
 import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventType, EntityRunStatus } from "@/lib/db/schema";
 import { recordEvent, finalizeRun } from "./event-store";
+import { RunSequenceRegistry } from "./sequence-registry";
 
 const log = childLogger({ component: "persisting-agent" });
 
@@ -74,6 +75,9 @@ export class PersistingAgent extends AbstractAgent {
     let finalized = false;
 
     const runId = this.cfg.runId;
+    if (runId) {
+      RunSequenceRegistry.set(runId, seq);
+    }
 
     // Streaming triplets (TEXT / REASONING / TOOL_CALL_*) are
     // buffered here and flushed as one row at the natural boundary.
@@ -98,8 +102,11 @@ export class PersistingAgent extends AbstractAgent {
       payload: unknown,
       ts?: Date,
     ): void => {
-      const seqNow = seq;
-      seq += 1;
+      const seqNow = runId ? (RunSequenceRegistry.get(runId) ?? seq) : seq;
+      seq = seqNow + 1;
+      if (runId) {
+        RunSequenceRegistry.set(runId, seq);
+      }
       const p = recordEvent(runId, seqNow, type, payload, ts).catch(
         (err: unknown) => {
           droppedEvents += 1;
@@ -151,6 +158,9 @@ export class PersistingAgent extends AbstractAgent {
     ): Promise<void> => {
       if (finalized) return;
       finalized = true;
+      if (runId) {
+        RunSequenceRegistry.delete(runId);
+      }
       flushPending();
 
       const drain = (async (): Promise<void> => {

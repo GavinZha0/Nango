@@ -43,6 +43,7 @@ export const createSshServerSchema = z.object({
   // Enforced at runtime by `lib/ssh/policy.ts`. `commandAllow ===
   // null` is "no constraint"; an empty array is "deny all".
   commandAllow: commandList.nullable().optional(),
+  commandApprove: commandList.optional(),
   commandDeny: commandList.optional(),
 
   /** Wrap commands in `bash -lc '...'`. Defaults to true server-side. */
@@ -63,6 +64,7 @@ export const updateSshServerSchema = z
     knownHostFingerprint: sshFingerprint.optional(),
 
     commandAllow: commandList.nullable().optional(),
+    commandApprove: commandList.optional(),
     commandDeny: commandList.optional(),
 
     loginShell: z.boolean().optional(),

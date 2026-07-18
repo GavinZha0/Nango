@@ -386,6 +386,7 @@ function fakeSpec(agentId: string): AgentSpec {
     temperature: null,
     maxTokens: null,
     toolChoice: "auto",
+    toolApprovalMode: "never",
     maxSteps: 5,
     apiKey: "sk-fake",
     restUrl: null,

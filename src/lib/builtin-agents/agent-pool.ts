@@ -18,7 +18,7 @@ import {
 } from "@/lib/db/schema";
 import { getCredentialConfigById } from "@/lib/credentials/lookup";
 
-import type { AgentSpec, AgentToolChoice, AgentToolRef } from "./agent-spec";
+import type { AgentSpec, AgentToolChoice, AgentToolApprovalMode, AgentToolRef } from "./agent-spec";
 
 export interface AgentPoolOptions {
   /** Max entries; protects against pathological agent-row growth. */
@@ -110,6 +110,7 @@ interface AgentRow {
   maxTokens: number | null;
   maxSteps: number;
   toolChoice: string;
+  toolApprovalMode: string;
   credentialId: string;
 }
 
@@ -140,6 +141,7 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
       maxTokens: BuiltinAgentTable.maxTokens,
       maxSteps: BuiltinAgentTable.maxSteps,
       toolChoice: BuiltinAgentTable.toolChoice,
+      toolApprovalMode: BuiltinAgentTable.toolApprovalMode,
       credentialId: BuiltinAgentTable.credentialId,
     })
     .from(BuiltinAgentTable)
@@ -188,6 +190,7 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
     temperature: agent.temperature !== null ? parseFloat(agent.temperature) : null,
     maxTokens: agent.maxTokens,
     toolChoice: agent.toolChoice as AgentToolChoice,
+    toolApprovalMode: agent.toolApprovalMode as AgentToolApprovalMode,
     maxSteps: agent.maxSteps,
     apiKey: credential.token,
     restUrl: credential.restUrl,

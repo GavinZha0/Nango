@@ -74,12 +74,33 @@ export interface EvaluationRunEvent {
   };
 }
 
+export interface ToolApprovalResolvedEvent {
+  kind: "tool_approval_resolved";
+  runId: string;
+  approvalId: string;
+  approved: boolean;
+}
+
+export interface ToolApprovalRequestedEvent {
+  kind: "tool_approval_requested";
+  runId: string;
+  approvalId: string;
+  toolName: string;
+  args: unknown;
+  message: string;
+  /** AG-UI toolCallId for precise frontend card matching. Empty string when
+   *  the ID cannot be resolved from the event history (e.g. first call). */
+  toolCallId: string;
+}
+
 export type RunnerEvent =
   | RunStartedEvent
   | RunFinalizedEvent
   | NotificationCreatedEvent
   | VerificationRunEvent
-  | EvaluationRunEvent;
+  | EvaluationRunEvent
+  | ToolApprovalResolvedEvent
+  | ToolApprovalRequestedEvent;
 
 type Subscriber = (event: RunnerEvent) => void;
 

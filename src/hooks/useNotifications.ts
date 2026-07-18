@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useNotificationsStore } from "@/store/notifications";
 import { useActiveTasksStore } from "@/store/active-tasks";
+import { useWorkspaceStore } from "@/store/workspace";
 import type { NotificationEntity } from "@/lib/db/schema";
 
 type BroadcastMessage =
@@ -124,6 +125,16 @@ export function useStartNotifications(): void {
         if (event.kind === "notification") {
           prepend(event.notification);
           broadcast({ kind: "added", item: event.notification });
+        } else if (event.kind === "tool_approval_requested") {
+          useWorkspaceStore.getState().addPendingApproval({
+            runId: event.runId,
+            approvalId: event.approvalId,
+            toolCallId: event.toolCallId || "",
+            toolName: event.toolName,
+            args: event.args,
+          });
+        } else if (event.kind === "tool_approval_resolved") {
+          useWorkspaceStore.getState().removePendingApproval(event.approvalId);
         } else if (event.kind === "run_started") {
           useActiveTasksStore.getState().addTask({
             id: event.runId,

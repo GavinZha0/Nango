@@ -17,6 +17,7 @@
 import { useRenderTool } from "@/lib/copilot/client";
 import { ChartPreviewCard } from "@/components/right-panels/ChartPreviewCard";
 import { HtmlPreviewCard } from "@/components/right-panels/HtmlPreviewCard";
+import { withToolApproval } from "@/components/copilotkit/withToolApproval";
 import {
   generateEchartsConfigSchema,
   generateHtmlPageSchema,
@@ -26,12 +27,12 @@ export function useOutcomeTools(): void {
   useRenderTool({
     name: "generate_echarts_config",
     parameters: generateEchartsConfigSchema,
-    render: ChartPreviewCard,
+    render: withToolApproval(ChartPreviewCard),
   });
 
   useRenderTool({
     name: "generate_html_page",
     parameters: generateHtmlPageSchema,
-    render: HtmlPreviewCard,
+    render: withToolApproval(HtmlPreviewCard),
   });
 }

@@ -29,7 +29,7 @@ import type { ReactElement } from "react";
 import { cn } from "@/lib/utils";
 import type { ToolResultStatus } from "@/lib/copilot/detect-tool-result-status";
 
-export type BadgeStatus = "running" | "done" | "warning" | "error";
+export type BadgeStatus = "running" | "done" | "warning" | "error" | "waiting";
 
 /**
  * Combine CopilotKit's per-tool-call lifecycle status with the
@@ -68,6 +68,12 @@ const BADGE_CONFIG: Record<
     dotClass: "bg-amber-500",
     pillClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
     pulse: true,
+  },
+  waiting: {
+    label: "Waiting",
+    dotClass: "bg-amber-500",
+    pillClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    pulse: false,
   },
   done: {
     label: "Done",

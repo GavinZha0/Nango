@@ -86,6 +86,7 @@ export const PATCH = withEditor<{ id: string }>(
       || body.port !== undefined
       || body.knownHostFingerprint !== undefined
       || body.commandAllow !== undefined
+      || body.commandApprove !== undefined
       || body.commandDeny !== undefined
       || body.loginShell !== undefined;
     if (editsContent && !canEditResource(rbac, session)) {
@@ -155,6 +156,7 @@ export const PATCH = withEditor<{ id: string }>(
       updates.knownHostFingerprint = body.knownHostFingerprint;
     }
     if (body.commandAllow !== undefined) updates.commandAllow = body.commandAllow;
+    if (body.commandApprove !== undefined) updates.commandApprove = body.commandApprove;
     if (body.commandDeny !== undefined) updates.commandDeny = body.commandDeny;
     if (body.loginShell !== undefined) updates.loginShell = body.loginShell;
     if (body.enabled !== undefined) updates.enabled = body.enabled;

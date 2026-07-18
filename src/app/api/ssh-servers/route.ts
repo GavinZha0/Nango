@@ -128,6 +128,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       port: body.port ?? 22,
       knownHostFingerprint: pinnedFingerprint,
       commandAllow: body.commandAllow ?? null,
+      commandApprove: body.commandApprove ?? [],
       commandDeny: body.commandDeny ?? [],
       loginShell: body.loginShell ?? true,
       enabled: body.enabled ?? true,

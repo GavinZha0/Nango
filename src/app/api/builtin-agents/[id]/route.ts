@@ -137,6 +137,7 @@ const updateSchema = z
     maxTokens: z.number().int().positive().nullable().optional(),
     maxSteps: z.number().int().positive().optional(),
     toolChoice: z.enum(["auto", "required", "none"]).optional(),
+    toolApprovalMode: z.enum(["always", "auto", "never"]).optional(),
     memoryEnabled: z.boolean().optional(),
     memoryWindowSize: z.number().int().positive().nullable().optional(),
     enabled: z.boolean().optional(),
@@ -269,6 +270,7 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.credentialId !== undefined) updates.credentialId = body.credentialId;
     if (body.prompt !== undefined) updates.prompt = body.prompt;
     if (body.toolChoice !== undefined) updates.toolChoice = body.toolChoice;
+    if (body.toolApprovalMode !== undefined) updates.toolApprovalMode = body.toolApprovalMode;
     if (body.temperature !== undefined) updates.temperature = body.temperature != null ? String(body.temperature) : null;
     if (body.maxTokens !== undefined) updates.maxTokens = body.maxTokens;
     if (body.maxSteps !== undefined) updates.maxSteps = body.maxSteps;

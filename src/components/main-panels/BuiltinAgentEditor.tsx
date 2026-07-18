@@ -165,6 +165,7 @@ interface FormState {
   credentialId: string | null;
   prompt: string;
   toolChoice: string;
+  toolApprovalMode: string;
   maxSteps: number;
   temperature: number;
   role: AgentRole | null;
@@ -180,6 +181,7 @@ const EMPTY_FORM: FormState = {
   credentialId: null,
   prompt: "",
   toolChoice: "auto",
+  toolApprovalMode: "never",
   maxSteps: 5,
   temperature: 0.3,
   role: null,
@@ -196,6 +198,7 @@ function formFromDetail(data: AgentDetail): FormState {
     credentialId: data.credentialId ?? null,
     prompt: data.prompt ?? "",
     toolChoice: data.toolChoice ?? "auto",
+    toolApprovalMode: data.toolApprovalMode ?? "never",
     maxSteps: data.maxSteps ?? 5,
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
@@ -550,6 +553,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         credentialId: form.credentialId,
         prompt: form.prompt.trim() || null,
         toolChoice: form.toolChoice,
+        toolApprovalMode: form.toolApprovalMode,
         maxSteps: form.maxSteps,
         temperature: form.temperature,
         tools: toolList,
@@ -879,6 +883,22 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 />
               </div>
               <div className="flex items-center gap-2">
+                <Label className="w-20 shrink-0 text-xs">Tool Approval</Label>
+                <Select
+                  value={form.toolApprovalMode}
+                  onValueChange={(v: string | null) => update("toolApprovalMode", v ?? "never")}
+                >
+                  <SelectTrigger className="h-8 flex-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always" className="text-xs">Always (ask for all)</SelectItem>
+                    <SelectItem value="auto" className="text-xs">Auto (ask for sensitive)</SelectItem>
+                    <SelectItem value="never" className="text-xs">Never (skip all)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
                 <Label className="w-20 shrink-0 text-xs">Tool Choice</Label>
                 <Select
                   value={form.toolChoice}
@@ -888,9 +908,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto" className="text-xs">Auto</SelectItem>
-                    <SelectItem value="required" className="text-xs">Required</SelectItem>
-                    <SelectItem value="none" className="text-xs">None</SelectItem>
+                    <SelectItem value="auto" className="text-xs">Auto (model decides)</SelectItem>
+                    <SelectItem value="required" className="text-xs">Required (force tool call)</SelectItem>
+                    <SelectItem value="none" className="text-xs">None (disable tools)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

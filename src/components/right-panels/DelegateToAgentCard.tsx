@@ -22,6 +22,7 @@ import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { useState, type ReactElement } from "react";
 
 import { cn } from "@/lib/utils";
+import { useWorkspaceStore } from "@/store/workspace";
 import {
   detectToolResultStatus,
   extractErrorMessage,
@@ -94,7 +95,21 @@ export function DelegateToAgentCard(props: DelegateRenderProps): ReactElement {
   const targetName = (args?.agent ?? "agent").trim() || "agent";
 
   const detected = detectToolResultStatus(result);
-  const badgeStatus = deriveBadgeStatus(status, detected);
+  
+  const pendingApprovals = useWorkspaceStore((s) => s.pendingApprovals);
+  // Helper to compare parameters
+  const matchesArgs = (a: unknown, b: unknown): boolean => {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return false;
+    }
+  };
+  const pendingApproval = pendingApprovals.find(
+    (a) => a.toolName === "delegate_to_agent" && matchesArgs(a.args, args)
+  );
+
+  const badgeStatus = pendingApproval ? "waiting" : deriveBadgeStatus(status, detected);
   const elapsed = useElapsedSeconds(toolCallId, badgeStatus === "running");
 
   // Both `error` and `warning` carry an `isError: true` envelope with

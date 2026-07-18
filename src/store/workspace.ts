@@ -105,6 +105,21 @@ interface WorkspaceState {
   lastChatError: ChatError | null;
   setChatError: (err: ChatError) => void;
   clearChatError: () => void;
+  pendingApprovals: Array<{
+    runId: string;
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+  }>;
+  addPendingApproval: (item: {
+    runId: string;
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+  }) => void;
+  removePendingApproval: (approvalId: string) => void;
 }
 
 /** Lightweight chat-active agent snapshot captured before jumping
@@ -350,6 +365,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       lastChatError: null,
       setChatError: (err) => set({ lastChatError: err }),
       clearChatError: () => set({ lastChatError: null }),
+
+      // Pending Approvals
+      pendingApprovals: [],
+      addPendingApproval: (item) =>
+        set((state) => ({
+          pendingApprovals: [
+            ...state.pendingApprovals.filter((a) => a.approvalId !== item.approvalId),
+            item,
+          ],
+        })),
+      removePendingApproval: (approvalId) =>
+        set((state) => ({
+          pendingApprovals: state.pendingApprovals.filter((a) => a.approvalId !== approvalId),
+        })),
     }),
     {
       name: "workspace-store",

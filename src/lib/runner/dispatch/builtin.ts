@@ -36,11 +36,16 @@ import {
   type SupervisorRuntime,
 } from "../supervisor-tools.server";
 import { ERROR_POLICY_BLOCK, wrapToolExecute } from "../tool-failure";
+import { wrapToolApproval, createApprovalWrappedMcpProvider } from "../tool-approval";
 import {
   resolveOrchestrationMode,
   type OrchestrationModeId,
 } from "@/lib/orchestration/modes";
-import { SAFETY_POLICY_BLOCK } from "@/lib/constants/safety";
+import {
+  SAFETY_POLICY_BLOCK,
+  AUTO_APPROVAL_POLICY_BLOCK,
+  ALWAYS_APPROVAL_POLICY_BLOCK,
+} from "@/lib/constants/safety";
 
 /** Classify a CopilotKit URL: `{agentId, action}` for user-perceived
  *  dispatches; `null` for bookkeeping calls. */
@@ -93,6 +98,7 @@ export interface BuiltinAgentsMap {
 
 export interface BuiltinBuildContext {
   userId: string;
+  runId?: string;
   /** Active orchestration mode. Only consulted for supervisor agents. */
   mode?: OrchestrationModeId;
   /** Context for programmatic run start (e.g. expectedDimensionIds for evaluator tools). */
@@ -399,6 +405,12 @@ export async function buildBuiltinAgents(
         parts.push(ERROR_POLICY_BLOCK);
       }
 
+      if (spec.toolApprovalMode === "auto") {
+        parts.push(AUTO_APPROVAL_POLICY_BLOCK);
+      } else if (spec.toolApprovalMode === "always") {
+        parts.push(ALWAYS_APPROVAL_POLICY_BLOCK);
+      }
+
       return parts.length === 0 ? undefined : parts.join("\n\n");
     })();
 
@@ -426,6 +438,27 @@ export async function buildBuiltinAgents(
       continue;
     }
 
+    /** Tools that must never be gated by the approval interceptor. */
+    const APPROVAL_EXEMPT_TOOLS = new Set([
+      // Supervisor orchestration — blocking these would deadlock sub-runs
+      "delegate_to_agent",
+      "delegate_async",
+      "get_agent_details",
+      "create_schedule",
+      "list_schedules",
+      "update_schedule",
+      "delete_schedule",
+      // Evaluator system tool
+      "submit_evaluation_scores",
+      // Ambient read-only
+      "get_current_datetime",
+      "list_ssh_hosts",
+      // Skill system tools (read-only metadata)
+      "get_skill",
+      "get_skill_file",
+      "run_skill_script",
+    ]);
+
     // Wrap server tools so an uncaught throw becomes
     // `{ isError: true, ... }` instead of an AI SDK `tool-error`
     // that CopilotKit 1.56 drops. MCP tools are already wrapped at
@@ -439,7 +472,13 @@ export async function buildBuiltinAgents(
       ...sshTools,
       ...calendarTools,
       ...ambientTools,
-    ].map((t) => wrapToolExecute(t, t.name, log, "server_tool_failed"));
+    ].map((t) => {
+      let wrapped = wrapToolExecute(t, t.name, log, "server_tool_failed");
+      if (ctx?.runId && !APPROVAL_EXEMPT_TOOLS.has(t.name)) {
+        wrapped = wrapToolApproval(wrapped, t.name, spec.toolApprovalMode, ctx.runId, ctx.userId);
+      }
+      return wrapped;
+    });
 
     agents[agentId] = new BuiltInAgent({
       model: resolvedModel.model,
@@ -457,7 +496,11 @@ export async function buildBuiltinAgents(
       // strand a tool call on the result.
       maxSteps: hasTools ? Math.max(spec.maxSteps, 2) : 1,
       // mcpClients (user-managed lifecycle) — pool owns connections.
-      ...(providers.length > 0 ? { mcpClients: providers } : {}),
+      ...((providers.length > 0) ? {
+        mcpClients: (ctx?.runId && spec.toolApprovalMode !== "never")
+          ? providers.map(p => createApprovalWrappedMcpProvider(p, spec.toolApprovalMode as "always" | "auto", ctx.runId!, ctx.userId))
+          : providers
+      } : {}),
       ...(serverTools.length > 0 ? { tools: serverTools } : {}),
     });
   }

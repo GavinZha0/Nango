@@ -87,6 +87,9 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "runner.sync_timeout", value: "300", valueType: "number", description: "Sync (delegate_to_agent) run timeout in seconds" },
   { key: "runner.async_timeout", value: "1800", valueType: "number", description: "Async (delegate_async / schedule) run timeout in seconds" },
 
+  // ── agent ────────────────────────────────────────────────────────
+  { key: "agent.approval_timeout", value: "300", valueType: "number", description: "Tool approval wait timeout in seconds (treat-as-rejected on expiry)" },
+
   // ── observability ─────────────────────────────────────────────────
   { key: "observability.langfuse.targets", value: "builtin,frontend,proxy_errors", valueType: "string", description: "Comma-separated Langfuse trace targets: builtin, frontend, proxy_errors" },
 

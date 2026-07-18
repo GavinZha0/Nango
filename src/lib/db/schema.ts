@@ -494,6 +494,11 @@ export const SshServerTable = pgTable("ssh_server", {
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'::jsonb`),
+  /** Regex patterns for commands that require user approval. Anchor with `^` for prefix matches. */
+  commandApprove: jsonb("command_approve")
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
 
   // Execution
   /** When true (default), commands are wrapped as `bash -lc '...'`
@@ -920,6 +925,8 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
 
   /** Tool choice strategy: "auto" | "required" | "none". Default "auto". */
   toolChoice: text("tool_choice").notNull().default("auto"),
+  /** Tool execution approval mode: "always" | "auto" | "never". Default "never". */
+  toolApprovalMode: text("tool_approval_mode").notNull().default("never"),
 
   /** Whether conversation memory is enabled (reserved for future use). */
   memoryEnabled: boolean("memory_enabled").notNull().default(false),
@@ -1319,6 +1326,9 @@ export type EntityRunEventType =
   | "tool_call_result"
   | "finished"
   | "error"
+  | "approval_requested"
+  | "tool_call_approved"
+  | "tool_call_rejected"
   /** Build-time capability skip — the agent attempted to bind some
    *  capability (MCP server, model, supervisor catalog, …) and the
    *  runtime degraded gracefully (logged + continued without it).

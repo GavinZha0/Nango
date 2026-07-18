@@ -7,6 +7,9 @@
 /** Tool-choice strategy mirroring `builtin_agent.tool_choice`. */
 export type AgentToolChoice = "auto" | "required" | "none";
 
+/** Tool-execution approval mode mirroring `builtin_agent.tool_approval_mode`. */
+export type AgentToolApprovalMode = "always" | "auto" | "never";
+
 /** CONTRACT: discriminated union mirroring `builtin_agent_tool` —
  *  keep in sync with `BuiltinAgentToolTable` in `db/schema.ts` and
  *  the `AgentToolType` union exported there. */
@@ -39,6 +42,7 @@ export interface AgentSpec {
   temperature: number | null;
   maxTokens: number | null;
   toolChoice: AgentToolChoice;
+  toolApprovalMode: AgentToolApprovalMode;
   /** Always >= 1; defaults to 5 in schema. */
   maxSteps: number;
   /** SECURITY: decrypted LLM API key. Memory-only, never persisted /
