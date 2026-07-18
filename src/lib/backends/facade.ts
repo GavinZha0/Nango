@@ -8,8 +8,8 @@ import { isSupportedBackend } from "./types";
 import type {
   BackendCapabilities,
   EntityDescriptor,
+  EntityFetchError,
   EntityKind,
-  FetchResult,
   BackendId,
 } from "./types";
 
@@ -19,6 +19,7 @@ export type { FetchResult, BackendId } from "./types";
 export { agentKey } from "./types";
 export type {
   EntityDescriptor,
+  EntityFetchError,
   EntityKind,
   BackendCapabilities,
 } from "./types";
@@ -51,25 +52,33 @@ export interface GetEntitiesOptions {
   force?: boolean;
 }
 
+export interface CredentialEntityStatus {
+  credentialId: string;
+  name: string;
+  ok: boolean;
+  errors: EntityFetchError[];
+}
+
 /** CONTRACT: per-credential errors so a single bad backend doesn't
  *  blank the others. */
 interface EntitiesResponse {
   entities: EntityDescriptor[];
-  errors: { credentialId: string; message: string }[];
+  credentials: CredentialEntityStatus[];
 }
 
-/**
- * Fetch every entity from the given credentials via `GET /api/entities`.
- * Per-credential errors are joined into one string; callers needing
- * per-credential attribution can hit `/api/entities` directly.
- * See docs/backend-integration.md.
- */
+export interface GetEntitiesResult {
+  data: EntityDescriptor[] | null;
+  error: string | null;
+  credentials: CredentialEntityStatus[];
+}
+
+
 export async function getEntities(
-  credentials: BackendCredentialInfo[],
+  credentials: readonly { credentialId: string }[],
   options?: GetEntitiesOptions,
-): Promise<FetchResult<EntityDescriptor[]>> {
+): Promise<GetEntitiesResult> {
   if (credentials.length === 0) {
-    return { data: [], error: null };
+    return { data: [], error: null, credentials: [] };
   }
 
   const params = new URLSearchParams();
@@ -87,30 +96,26 @@ export async function getEntities(
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
-      return { data: null, error: `HTTP ${res.status} ${res.statusText}` };
+      return { data: null, error: `HTTP ${res.status} ${res.statusText}`, credentials: [] };
     }
     const body = (await res.json()) as EntitiesResponse;
 
-    if (body.errors.length > 0 && body.entities.length === 0) {
-      return {
-        data: null,
-        error: body.errors
-          .map((e) => `[${e.credentialId}] ${e.message}`)
-          .join("; "),
-      };
-    }
-    return { data: body.entities, error: null };
+    const failed = body.credentials.filter((c) => !c.ok);
+    const error = failed.length > 0 
+      ? failed.map((c) => `[${c.name}] ${c.errors.map((e) => e.message).join(", ") || "unavailable"}`).join("; ") 
+      : null;
+    return { data: body.entities, error, credentials: body.credentials };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { data: null, error: message };
+    return { data: null, error: message, credentials: [] };
   }
 }
 
 /** Convenience wrapper for a single kind. */
 export function getEntitiesOfKind(
-  credentials: BackendCredentialInfo[],
+  credentials: readonly { credentialId: string }[],
   kind: EntityKind,
-): Promise<FetchResult<EntityDescriptor[]>> {
+): Promise<GetEntitiesResult> {
   return getEntities(credentials, { kinds: [kind] });
 }
 

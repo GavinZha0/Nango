@@ -179,12 +179,41 @@ export interface IBackendChatHandler {
   buildAgent(ctx: ChatContext): Promise<import("@/lib/copilot/index.server").AbstractAgent | Response>;
 }
 
+export interface EntityFetchError {
+  source?: string;
+  status?: number;
+  message: string;
+}
+
+export interface EntityFetchResult {
+  entities: EntityDescriptor[];
+  errors: EntityFetchError[];
+}
+
+export function describeFetchStatus(status: number): string {
+  switch (status) {
+    case 401:
+    case 403:
+      return "Authentication failed";
+    case 404:
+      return "Endpoint not found";
+    case 429:
+      return "Rate limit exceeded";
+    case 500:
+      return "Upstream server error";
+    case 503:
+      return "Service unavailable";
+    default:
+      return "Request failed";
+  }
+}
+
 /** Server-only entity-discovery fetcher used by `EntityCatalog`. */
 export type EntityFetcher = (
   credId: string,
   restUrl: string,
   token: string,
-) => Promise<EntityDescriptor[]>;
+) => Promise<EntityFetchResult>;
 
 /**
  * Single-entry provider registration. Aggregates capabilities,

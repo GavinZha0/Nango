@@ -5,7 +5,8 @@
 import "server-only";
 
 import { childLogger } from "@/lib/observability/logger";
-import type { EntityDescriptor } from "../types";
+import { describeFetchStatus } from "../types";
+import type { EntityFetchResult } from "../types";
 
 const log = childLogger({ component: "dify-entity-fetcher" });
 
@@ -22,7 +23,7 @@ export async function fetchDifyEntitiesServer(
   credentialId: string,
   baseUrl: string,
   token: string,
-): Promise<EntityDescriptor[]> {
+): Promise<EntityFetchResult> {
   try {
     const res = await fetch(`${baseUrl}/info`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -34,18 +35,14 @@ export async function fetchDifyEntitiesServer(
       );
       // Still surface the app under a placeholder name — the credential
       // is configured, so the user must be able to open settings to fix it.
-      return [
-        {
-          id: DIFY_AGENT_ID,
-          kind: "agent",
-          name: "Dify App",
-          provider: "dify",
-          credentialId,
-        },
-      ];
+      return {
+          entities: [],
+          errors: [{source: "/info", status: res.status, message: describeFetchStatus(res.status)}]
+        };
     }
     const info = (await res.json()) as DifyAppInfo;
-    return [
+    return {
+      entities: [
       {
         id: DIFY_AGENT_ID,
         kind: "agent",
@@ -54,16 +51,22 @@ export async function fetchDifyEntitiesServer(
         provider: "dify",
         credentialId,
       },
-    ];
+    ], 
+    errors: []
+    };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     log.warn(
       {
         event: "dify_info_failed",
         credentialId,
-        err: err instanceof Error ? err.message : String(err),
+        err: message,
       },
       "dify /info threw",
     );
-    return [];
+    return {
+      entities: [],
+      errors: [{source: "/info", message: `Unreachable: ${message}`}]
+    };
   }
 }

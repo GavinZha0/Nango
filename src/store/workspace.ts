@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
+import type { CredentialEntityStatus } from "@/lib/backends/facade";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
 import {
   DEFAULT_ORCHESTRATION_MODE,
@@ -14,10 +15,13 @@ interface WorkspaceState {
   teams: EntityDescriptor[];
   workflows: EntityDescriptor[];
   builtinAgents: BuiltinAgentRow[];
+  backendCredentials: CredentialEntityStatus[];
   /** True after at least one entity source has finished loading. */
   agentsLoaded: boolean;
   /** Replace the entire entity list across all kinds / credentials. */
   setEntities: (entities: EntityDescriptor[]) => void;
+  setBackendCredentials: (credentials: CredentialEntityStatus[]) => void;
+  replaceBackendCredentialsFor: (credentialIds: ReadonlySet<string>, fresh: CredentialEntityStatus[]) => void;
   /** Replace entities for given credentialIds (optionally filtered by kinds). Outside entries stay untouched. */
   replaceEntitiesForCredentials: (
     credentialIds: ReadonlySet<string>,
@@ -150,6 +154,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       teams: [],
       workflows: [],
       builtinAgents: [],
+      backendCredentials: [],
       agentsLoaded: false,
       setEntities: (entities) =>
         set({
@@ -158,6 +163,17 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           workflows: entities.filter((e) => e.kind === "workflow"),
           agentsLoaded: true,
         }),
+      setBackendCredentials: (credentials) =>
+        set({
+          backendCredentials: credentials,
+        }),
+      replaceBackendCredentialsFor: (credentialIds, fresh) =>
+        set((state) => ({
+          backendCredentials: [
+            ...state.backendCredentials.filter((c) => !credentialIds.has(c.credentialId)),
+            ...fresh,
+          ]
+        })),
       replaceEntitiesForCredentials: (credentialIds, fresh, kinds) =>
         set((state) => {
           const targetKinds = kinds ?? (["agent", "team", "workflow"] as const);

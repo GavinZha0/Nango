@@ -12,7 +12,7 @@ import { CredentialTable } from "@/lib/db/schema";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { CREDENTIAL_ID_PATTERN } from "@/lib/http/chat-headers";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
-import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
+import type { EntityDescriptor, EntityFetchError, EntityKind } from "@/lib/backends/types";
 import { ALL_ENTITY_KINDS } from "@/lib/backends/types";
 
 export const dynamic = "force-dynamic";
@@ -55,14 +55,16 @@ interface CredentialRow {
   name: string;
 }
 
-interface PerCredentialError {
+interface CredentialStatus {
   credentialId: string;
-  message: string;
+  name: string;
+  ok: boolean;
+  errors: EntityFetchError[];
 }
 
 interface EntitiesResponse {
   entities: EntityDescriptor[];
-  errors: PerCredentialError[];
+  credentials: CredentialStatus[];
 }
 
 export const GET = withSession(ROUTE, async ({ req }: { req: NextRequest }) => {
@@ -74,46 +76,31 @@ export const GET = withSession(ROUTE, async ({ req }: { req: NextRequest }) => {
   // SECURITY: always intersect with (enabled=true, serviceType=agent)
   // so an outdated UI can't sneak disabled / non-agent credentials in
   // via the URL.
-  let credentialsQuery = db
+  const baseConditions = [
+    eq(CredentialTable.serviceType, "agent"),
+    eq(CredentialTable.enabled, true),
+  ];
+  const credentials: CredentialRow[] = await db
     .select({
       id: CredentialTable.id,
       name: CredentialTable.name,
     })
     .from(CredentialTable)
-    .where(
-      and(
-        eq(CredentialTable.serviceType, "agent"),
-        eq(CredentialTable.enabled, true),
-      ),
-    );
-  if (credentialIds) {
-    credentialsQuery = db
-      .select({
-        id: CredentialTable.id,
-        name: CredentialTable.name,
-      })
-      .from(CredentialTable)
-      .where(
-        and(
-          eq(CredentialTable.serviceType, "agent"),
-          eq(CredentialTable.enabled, true),
-          inArray(CredentialTable.id, credentialIds),
-        ),
-      );
-  }
-  const credentials: CredentialRow[] = await credentialsQuery;
+    .where(and(...baseConditions, ...(credentialIds ? [inArray(CredentialTable.id, credentialIds)] : [])));
 
-  const errors: PerCredentialError[] = [];
+  const statuses: CredentialStatus[] = [];
   const tables = await Promise.all(
     credentials.map(async (cred): Promise<EntityDescriptor[]> => {
       if (force) EntityCatalog.invalidate(cred.id);
       try {
-        const table = await EntityCatalog.list(cred.id);
-        if (table === null) return [];
-        return table.map((e) => ({ ...e, credentialName: cred.name }));
+        const result = await EntityCatalog.listWithStatus(cred.id);
+        const errors: EntityFetchError[] = result?.errors ?? [];
+        statuses.push({ credentialId: cred.id, name: cred.name, ok: errors.length === 0, errors });
+        if (result === null) return [];
+        return result.entities.map((e) => ({ ...e, credentialName: cred.name }));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        errors.push({ credentialId: cred.id, message });
+        statuses.push({ credentialId: cred.id, name: cred.name, ok: false, errors: [{ message }] });
         return [];
       }
     }),
@@ -127,6 +114,6 @@ export const GET = withSession(ROUTE, async ({ req }: { req: NextRequest }) => {
     entities = entities.filter((e) => kindsFilter.includes(e.kind));
   }
 
-  const response: EntitiesResponse = { entities, errors };
+  const response: EntitiesResponse = { entities, credentials: statuses };
   return NextResponse.json(response);
 });

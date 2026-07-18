@@ -12,23 +12,25 @@ import { getCredentialConfigById } from "@/lib/credentials/lookup";
 import { childLogger } from "@/lib/observability/logger";
 import { BACKENDS } from "./registry.server";
 import { isSupportedBackend } from "./types";
-import type { EntityDescriptor } from "./types";
+import type { EntityDescriptor, EntityFetchResult } from "./types";
 
 const log = childLogger({ component: "entity-catalog" });
 
+type CatalogEntry = EntityFetchResult;
+
 // HMR-survival via globalThis — keeps the cache hot across dev saves.
 declare global {
-  var __nangoEntityCatalogCache: LRUCache<string, EntityDescriptor[]> | undefined;
+  var __nangoEntityCatalogCache: LRUCache<string, CatalogEntry> | undefined;
 }
 
-const cache: LRUCache<string, EntityDescriptor[]> = (globalThis.__nangoEntityCatalogCache ??= new LRUCache<string, EntityDescriptor[]>({
+const cache: LRUCache<string, CatalogEntry> = (globalThis.__nangoEntityCatalogCache ??= new LRUCache<string, CatalogEntry>({
   max: getConfigNumber("cache.entity_catalog.max", 100),
   ttl: getConfigMs("cache.entity_catalog.ttl", 600),
   // Let in-flight fetches complete even when the key is deleted by
   // invalidate(). DO NOT add allowStaleOnFetchAbort — that resolves
   // waiting callers with undefined instead of the result.
   ignoreFetchAbort: true,
-  fetchMethod: async (credentialId: string): Promise<EntityDescriptor[] | undefined> => {
+  fetchMethod: async (credentialId: string): Promise<CatalogEntry | undefined> => {
     const cfg = await getCredentialConfigById(credentialId);
     if (!cfg) return undefined; // undefined → not cached → retry on next call
 
@@ -37,7 +39,7 @@ const cache: LRUCache<string, EntityDescriptor[]> = (globalThis.__nangoEntityCat
         { event: "unsupported_provider", credentialId, provider: cfg.provider },
         "credential provider is not registered; entity table left empty",
       );
-      return [];
+      return { entities: [], errors: [{message: `Unsupported provider: ${cfg.provider ?? 'unknown'}`}] };
     }
 
     if (!cfg.restUrl || !cfg.token) {
@@ -45,7 +47,7 @@ const cache: LRUCache<string, EntityDescriptor[]> = (globalThis.__nangoEntityCat
         { event: "missing_credential_fields", credentialId, provider: cfg.provider },
         "credential missing restUrl or token; cannot resolve entity table",
       );
-      return [];
+      return { entities: [], errors: [{message: "Credential missing restUrl or token"}] };
     }
 
     const fetchEntities = BACKENDS[cfg.provider].controlPlane.fetchEntities;
@@ -62,10 +64,15 @@ const cache: LRUCache<string, EntityDescriptor[]> = (globalThis.__nangoEntityCat
  * Returns `[]` when credential is valid but has no entities (cached).
  * Concurrent callers for the same credentialId share one fetch.
  */
-async function list(credentialId: string): Promise<EntityDescriptor[] | null> {
-  const result = await cache.fetch(credentialId);
-  return result ?? null;
-}
+  async function list(credentialId: string): Promise<EntityDescriptor[] | null> {
+    const result = await cache.fetch(credentialId);
+    return result?.entities ?? null;
+  }
+
+  async function listWithStatus(credentialId: string): Promise<EntityFetchResult | null> {
+    const result = await cache.fetch(credentialId);
+    return result ?? null;
+  }
 
 /**
  * Drop a credential's row, or clear the whole cache when called
@@ -86,6 +93,7 @@ function _cacheSize(): number {
 
 export const EntityCatalog = {
   list,
+  listWithStatus,
   invalidate,
   _cacheSize,
 } as const;

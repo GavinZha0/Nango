@@ -139,7 +139,7 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
     setRefreshing(true);
     try {
       const result = await getEntities(
-        [{ credentialId: entity.credentialId, name: entity.credentialName ?? "", provider: entity.provider }],
+        [{ credentialId: entity.credentialId}],
         { force: true },
       );
       if (result.data) {
@@ -151,7 +151,7 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
     } finally {
       setRefreshing(false);
     }
-  }, [entity.credentialId, entity.credentialName, entity.provider, replaceEntitiesForCredentials]);
+  }, [entity.credentialId, entity.provider, replaceEntitiesForCredentials]);
 
   // After refresh, the route's lookup will pick up the new entity by
   // (credentialId, id) — so we don't need a local entity state copy.

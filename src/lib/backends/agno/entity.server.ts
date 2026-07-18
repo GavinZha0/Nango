@@ -5,7 +5,8 @@
 import "server-only";
 
 import { childLogger } from "@/lib/observability/logger";
-import type { EntityDescriptor, EntityKind } from "../types";
+import { describeFetchStatus } from "../types";
+import type { EntityDescriptor, EntityKind, EntityFetchError, EntityFetchResult } from "../types";
 
 const log = childLogger({ component: "agno-entity-fetcher" });
 
@@ -134,8 +135,9 @@ export async function fetchAgnoEntitiesServer(
   credentialId: string,
   baseUrl: string,
   token: string,
-): Promise<EntityDescriptor[]> {
+): Promise<EntityFetchResult> {
   const headers: HeadersInit = { Authorization: `Bearer ${token}` };
+  const errors: EntityFetchError[] = [];
 
   const safeFetch = async <T>(path: string): Promise<T[] | null> => {
     try {
@@ -145,20 +147,30 @@ export async function fetchAgnoEntitiesServer(
           { event: "agno_list_failed", path, status: res.status, credentialId },
           "agno upstream list returned non-2xx",
         );
+        errors.push({
+          source: path,
+          status: res.status,
+          message: describeFetchStatus(res.status),
+        });
         return null;
       }
       const json = (await res.json()) as unknown;
       return Array.isArray(json) ? (json as T[]) : null;
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       log.warn(
         {
           event: "agno_list_failed",
           path,
           credentialId,
-          err: err instanceof Error ? err.message : String(err),
+          err: message,
         },
         "agno upstream list threw",
       );
+      errors.push({
+        source: path,
+        message: `Unreachable: ${message}`,
+      });
       return null;
     }
   };
@@ -182,5 +194,5 @@ export async function fetchAgnoEntitiesServer(
   for (const w of workflows ?? []) {
     out.push(projectWorkflow(w, credentialId));
   }
-  return out;
+  return { entities: out, errors };
 }

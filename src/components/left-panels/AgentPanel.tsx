@@ -28,8 +28,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { agentKey, getEntities } from "@/lib/backends/facade";
-import type { BackendCredentialInfo, BackendId } from "@/lib/backends/facade";
-import type { EntityKind } from "@/lib/backends/types";
+import type { BackendId } from "@/lib/backends/facade";
+import type { EntityKind, EntityFetchError } from "@/lib/backends/types";
 import { useWorkspaceStore } from "@/store/workspace";
 import { cn } from "@/lib/utils";
 import { alphabeticCompare } from "@/lib/utils/sort";
@@ -129,15 +129,20 @@ function TabButton({ label, count, active, onClick }: TabButtonProps): ReactNode
 
 // Section header (div, mirrors MCP panel pattern)
 
+type SectionTone = "normal" | "warn" | "error";
+
 interface SectionHeaderProps {
   label: string;
   count: number;
   open: boolean;
   onToggle: () => void;
   action?: ReactNode;
+  tone?: SectionTone;
 }
 
-function SectionHeader({ label, count, open, onToggle, action }: SectionHeaderProps) {
+function SectionHeader({ label, count, open, onToggle, action, tone = "normal" }: SectionHeaderProps) {
+  const failed = tone === "error";
+  const warn = tone === "warn";
   return (
     <div className="flex items-center gap-1 border-t border-border/60 first:border-t-0 bg-muted/40 px-2 py-1.5">
       <button
@@ -150,7 +155,7 @@ function SectionHeader({ label, count, open, onToggle, action }: SectionHeaderPr
         ) : (
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className={cn("text-xs font-semibold uppercase tracking-wider", failed ? "text-destructive" : warn ? "text-warning" : "text-muted-foreground")}>
           {label}
         </span>
         <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
@@ -160,6 +165,12 @@ function SectionHeader({ label, count, open, onToggle, action }: SectionHeaderPr
       {action}
     </div>
   );
+}
+
+function formatFetchError(e: EntityFetchError) {
+  const status = e.status ? `(${e.status})` : "";
+  const source = e.source ? `(${e.source})` : "";
+  return `${e.message} ${status} ${source}`;
 }
 
 // Backend agent row (agno / Mastra)
@@ -445,15 +456,16 @@ export function AgentPanel(): ReactNode {
     teams,
     workflows,
     builtinAgents,
+    backendCredentials,
     agentsLoaded,
     mergeBuiltinAgents,
     replaceEntitiesForCredentials,
+    replaceBackendCredentialsFor,
   } = useWorkspaceStore();
   /** Set of credentialIds currently being refreshed. Multiple groups can
    *  spin independently. A group's spinner / disabled state is derived
    *  by checking whether any of its credentialIds is in this set. */
   const [refreshingCredIds, setRefreshingCredIds] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
 
   // Backend disabled set (localStorage). Read via `useStoredValue`
   // so SSR returns the empty set (default) and the stored value
@@ -553,7 +565,7 @@ export function AgentPanel(): ReactNode {
   // Per-group backend refresh
   // Refreshes slice of entities belonging to the given credentials in parallel.
   const loadBackendCredentials = useCallback(
-    async (creds: BackendCredentialInfo[]) => {
+    async (creds: { credentialId: string }[]) => {
       if (creds.length === 0) return;
       const credIdSet = new Set(creds.map((c) => c.credentialId));
 
@@ -569,7 +581,9 @@ export function AgentPanel(): ReactNode {
       // Replace across all kinds.
       replaceEntitiesForCredentials(credIdSet, loaded);
 
-      setError(result.error);
+      if (result.credentials.length > 0) {
+        replaceBackendCredentialsFor(credIdSet, result.credentials);
+      }
 
       setRefreshingCredIds((prev) => {
         const next = new Set(prev);
@@ -577,7 +591,7 @@ export function AgentPanel(): ReactNode {
         return next;
       });
     },
-    [replaceEntitiesForCredentials],
+    [replaceEntitiesForCredentials, replaceBackendCredentialsFor],
   );
 
   // Refresh BuiltIn agents (manual refresh button)
@@ -622,91 +636,89 @@ export function AgentPanel(): ReactNode {
   interface BackendGroup {
     credentialName: string;
     entries: BackendEntry[];
-    /**
-     * (credentialId, provider) pairs covered by this group. Used by the
-     * per-group refresh button. Two credentials sharing the same name
-     * legitimately collapse into one display group, so this can hold
-     * more than one entry.
-     */
-    creds: BackendCredentialInfo[];
+    creds: { credentialId: string }[];
+    errors: EntityFetchError[];
+    ok: boolean;
   }
 
   const backendGroups = useMemo<BackendGroup[]>(() => {
-    const entries: BackendEntry[] = [
-      ...agents.map<BackendEntry>((a) => ({
+    const entriesByCred = new Map<string, BackendEntry[]>();
+    const indexEntry = (e: BackendEntry): void => {
+      if (!e.credentialName) return;
+      const list = entriesByCred.get(e.credentialName);
+      if (list) list.push(e);
+      else entriesByCred.set(e.credentialName, [e]);
+    };
+    for (const a of agents) {
+        indexEntry({
         id: a.id,
         name: a.name ?? a.id,
         subtitle: a.description,
         modelId: a.model?.id,
         toolCount: a.toolCount,
         kind: "agent",
-        memberCount: undefined,
         version: a.version,
         credentialId: a.credentialId,
         credentialName: a.credentialName ?? "Backend",
         provider: a.provider,
-      })),
-      ...teams.map<BackendEntry>((t) => ({
-        id: t.id,
-        name: t.name ?? t.id,
-        subtitle: t.description,
-        modelId: t.model?.id,
-        toolCount: t.toolCount,
-        kind: "team",
-        memberCount: t.memberCount,
-        version: t.version,
-        credentialId: t.credentialId,
-        credentialName: t.credentialName ?? "Backend",
-        provider: t.provider,
-      })),
-      // Workflows render as placeholders until orchestrated.
-      ...workflows.map<BackendEntry>((w) => ({
-        id: w.id,
-        name: w.name ?? w.id,
-        subtitle: w.description,
-        kind: "workflow",
-        version: w.version,
-        credentialId: w.credentialId,
-        credentialName: w.credentialName ?? "Backend",
-        provider: w.provider,
-      })),
-    ];
-
-    // Group by credentialName
-    const groupMap = new Map<string, BackendEntry[]>();
-    for (const e of entries) {
-      const key = e.credentialName;
-      const list = groupMap.get(key);
-      if (list) list.push(e);
-      else groupMap.set(key, [e]);
+      });
+    }
+    for (const t of teams) {
+      indexEntry({
+      id: t.id,
+      name: t.name ?? t.id,
+      subtitle: t.description,
+      modelId: t.model?.id,
+      toolCount: t.toolCount,
+      kind: "team",
+      memberCount: t.memberCount,
+      version: t.version,
+      credentialId: t.credentialId,
+      credentialName: t.credentialName ?? "Backend",
+      provider: t.provider,
+      })
+    }
+    // Workflows render as placeholders until orchestrated.
+    for (const w of workflows) {
+      indexEntry({
+      id: w.id,
+      name: w.name ?? w.id,
+      subtitle: w.description,
+      kind: "workflow",
+      version: w.version,
+      credentialId: w.credentialId,
+      credentialName: w.credentialName ?? "Backend",
+      provider: w.provider,
+      });
     }
 
-    const groups: BackendGroup[] = [];
-    for (const [credName, groupEntries] of groupMap) {
-      // Collect unique (credentialId, provider) pairs in this group.
-      const credsMap = new Map<string, BackendCredentialInfo>();
-      for (const e of groupEntries) {
-        if (e.credentialId && e.provider && !credsMap.has(e.credentialId)) {
-          credsMap.set(e.credentialId, {
-            credentialId: e.credentialId,
-            name: credName,
-            provider: e.provider,
-          });
-        }
+    // Group by credentialName
+    const groupMap = new Map<string, BackendGroup>();
+    for (const cred of backendCredentials) {
+      let group = groupMap.get(cred.name)
+      if (!group) {
+        group = {credentialName: cred.name, entries: [], creds: [], errors: [], ok: true };
+        groupMap.set(cred.name, group);
       }
-      groups.push({
-        credentialName: credName,
-        entries: groupEntries.sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
-        ),
-        creds: Array.from(credsMap.values()),
-      });
+      group.entries.push(...(entriesByCred.get(cred.name) ?? []))
+      group.creds.push({credentialId: cred.credentialId });
+      if(!cred.ok) {
+        group.ok = false;
+        group.errors.push(...(cred.errors));
+      }
+    }
+
+    const groups = Array.from(groupMap.values());
+    for(const group of groups) {
+      group.entries.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
+      );
     }
 
     return groups.sort((a, b) =>
       a.credentialName.localeCompare(b.credentialName, undefined, { sensitivity: "base" })
     );
-  }, [agents, teams, workflows]);
+  }, [agents, teams, workflows, backendCredentials]);
 
   // Purely alphabetical by name.
   const sortedBuiltinAgents = useMemo(
@@ -860,7 +872,7 @@ export function AgentPanel(): ReactNode {
                 <div className="px-4 py-3 text-xs text-muted-foreground">
                   {loading
                     ? "Loading…"
-                    : "No external backends. Add a credential with serviceType=\"agent\" to connect Agno / Mastra / Dify."}
+                    : "No external backends. Add a credential with serviceType=\"agent\" first."}
                 </div>
               ) : (
                 backendGroups.map((backendGroup) => {
@@ -869,6 +881,7 @@ export function AgentPanel(): ReactNode {
                   const groupRefreshing = backendGroup.creds.some((c) =>
                     refreshingCredIds.has(c.credentialId),
                   );
+                  const tone: SectionTone = backendGroup.ok ? "normal" : backendGroup.entries.length === 0 ? "error" : "warn";
                   return (
                     <Fragment key={sectionKey}>
                       <SectionHeader
@@ -876,6 +889,7 @@ export function AgentPanel(): ReactNode {
                         count={backendGroup.entries.length}
                         open={isOpen}
                         onToggle={() => toggleSection(sectionKey)}
+                        tone={tone}
                         action={
                           <button
                             type="button"
@@ -893,14 +907,32 @@ export function AgentPanel(): ReactNode {
 
                       {isOpen && (
                         <Fragment>
+                          {
+                            backendGroup.errors.length > 0&& (
+                              <div className="border-b border-border/60 px-4 py-2">
+                                <div className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Unavailable
+                                </div>
+                                <ul className="space-y-0.5">
+                                  {backendGroup.errors.map((err, i) => (
+                                    <li key={i} className="text-xs text-muted-foreground">
+                                      {formatFetchError(err)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )
+                          }
                           {loading && backendGroup.entries.length === 0 ? (
                             <div className="px-4 py-2 text-xs text-muted-foreground">
                               Loading…
                             </div>
                           ) : backendGroup.entries.length === 0 ? (
-                            <div className="px-4 py-2 text-xs text-muted-foreground">
-                              No agents. Check that the backend is running.
-                            </div>
+                            backendGroup.errors.length === 0 ? (
+                              <div className="px-4 py-2 text-xs text-muted-foreground">
+                                No agents. Check that the backend is running.
+                              </div>
+                            ) : null
                           ) : (
                             backendGroup.entries.map((e) => {
                               const key = agentKey(e.credentialId, e.id);
@@ -933,11 +965,6 @@ export function AgentPanel(): ReactNode {
                                 />
                               );
                             })
-                          )}
-                          {error && (
-                            <div className="px-4 py-2 text-xs text-destructive">
-                              {error}
-                            </div>
                           )}
                         </Fragment>
                       )}

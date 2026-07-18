@@ -5,7 +5,8 @@
 import "server-only";
 
 import { childLogger } from "@/lib/observability/logger";
-import type { EntityDescriptor } from "../types";
+import { describeFetchStatus } from "../types";
+import type { EntityDescriptor, EntityFetchResult } from "../types";
 
 const log = childLogger({ component: "mastra-entity-fetcher" });
 
@@ -56,7 +57,7 @@ export async function fetchMastraEntitiesServer(
   credentialId: string,
   baseUrl: string,
   token: string,
-): Promise<EntityDescriptor[]> {
+): Promise<EntityFetchResult> {
   try {
     const res = await fetch(`${baseUrl}/agents`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -66,7 +67,10 @@ export async function fetchMastraEntitiesServer(
         { event: "mastra_list_failed", status: res.status, credentialId },
         "mastra /agents returned non-2xx",
       );
-      return [];
+      return {
+        entities: [],
+        errors: [{source: "/agents", status: res.status, message: describeFetchStatus(res.status)}]
+      };
     }
     const json = (await res.json()) as unknown;
     if (!json || typeof json !== "object" || Array.isArray(json)) {
@@ -74,20 +78,29 @@ export async function fetchMastraEntitiesServer(
         { event: "mastra_list_invalid", credentialId },
         "mastra /agents response is not the expected object map",
       );
-      return [];
+      return {
+        entities: [],
+        errors: [{source: "/agents", message: "Unexpected response shape"}]
+      };
     }
-    return Object.values(json as Record<string, MastraAgentRaw>).map((a) =>
-      projectMastraAgent(a, credentialId),
-    );
+    const entities = Object.values(json as Record<string, MastraAgentRaw>).map((a) => projectMastraAgent(a, credentialId));
+    return {
+      entities,
+      errors: []
+    };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     log.warn(
       {
         event: "mastra_list_failed",
         credentialId,
-        err: err instanceof Error ? err.message : String(err),
+        err: message,
       },
       "mastra /agents threw",
     );
-    return [];
+    return {
+      entities: [],
+      errors: [{source: "/agents", message: `Unreachable: ${message}`}]
+    };
   }
 }

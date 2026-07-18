@@ -67,7 +67,7 @@ describe("EntityCatalog.list — singleflight", () => {
 
   it("dedupes N concurrent misses into one upstream fetch", async () => {
     getCredentialConfigById.mockResolvedValue(CRED);
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("a", CRED_ID)]);
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("a", CRED_ID)], errors: [] });
 
     const results = await Promise.all([
       EntityCatalog.list(CRED_ID),
@@ -86,7 +86,7 @@ describe("EntityCatalog.list — singleflight", () => {
 
   it("the second call after the first resolved hits the cache (no new fetch)", async () => {
     getCredentialConfigById.mockResolvedValue(CRED);
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("a", CRED_ID)]);
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("a", CRED_ID)], errors: [] });
 
     await EntityCatalog.list(CRED_ID);
     await EntityCatalog.list(CRED_ID);
@@ -112,7 +112,7 @@ describe("EntityCatalog.list — singleflight", () => {
     expect(fetchEntitiesMock).toHaveBeenCalledTimes(1);
 
     // The failed in-flight must be cleared so a follow-up call retries.
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("b", CRED_ID)]);
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("b", CRED_ID)], errors: [] });
     const next = await EntityCatalog.list(CRED_ID);
     expect(next).toEqual([makeEntity("b", CRED_ID)]);
     expect(fetchEntitiesMock).toHaveBeenCalledTimes(2);
@@ -123,8 +123,8 @@ describe("EntityCatalog.list — singleflight", () => {
 
     // Pre-create the hanging Promise so `releaseFetch` is bound
     // before fetchEntitiesMock is ever consulted.
-    let releaseFetch: (rows: EntityDescriptor[]) => void = () => {};
-    const hangingFetch = new Promise<EntityDescriptor[]>((resolve) => {
+    let releaseFetch: (result: { entities: EntityDescriptor[]; errors: unknown[] }) => void = () => {};
+    const hangingFetch = new Promise<{ entities: EntityDescriptor[]; errors: unknown[] }>((resolve) => {
       releaseFetch = resolve;
     });
     fetchEntitiesMock.mockReturnValueOnce(hangingFetch);
@@ -138,10 +138,10 @@ describe("EntityCatalog.list — singleflight", () => {
     // where both callers shared a fetch that started before the edit.
     EntityCatalog.invalidate(CRED_ID);
 
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("d", CRED_ID)]);
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("d", CRED_ID)], errors: [] });
     const p2 = EntityCatalog.list(CRED_ID);
 
-    releaseFetch([makeEntity("c", CRED_ID)]);
+    releaseFetch({ entities: [makeEntity("c", CRED_ID)], errors: [] });
     const [r1, r2] = await Promise.all([p1, p2]);
 
     // p1 gets the result from the original in-flight fetch.
@@ -188,8 +188,8 @@ describe("EntityCatalog.list — singleflight", () => {
 
   it("invalidate() without argument clears the entire cache", async () => {
     getCredentialConfigById.mockResolvedValue(CRED);
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("a", CRED_ID)]);
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("b", CRED_ID)]);
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("a", CRED_ID)], errors: [] });
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("b", CRED_ID)], errors: [] });
 
     await EntityCatalog.list(CRED_ID);
     EntityCatalog.invalidate(); // no arg = clear all
@@ -202,7 +202,7 @@ describe("EntityCatalog.list — singleflight", () => {
 
   it("_cacheSize() reports current entry count", async () => {
     getCredentialConfigById.mockResolvedValue(CRED);
-    fetchEntitiesMock.mockResolvedValueOnce([makeEntity("a", CRED_ID)]);
+    fetchEntitiesMock.mockResolvedValueOnce({ entities: [makeEntity("a", CRED_ID)], errors: [] });
 
     expect(EntityCatalog._cacheSize()).toBe(0);
     await EntityCatalog.list(CRED_ID);

@@ -24,6 +24,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const userId = sessionData?.user.id;
   const setActiveAgent = useWorkspaceStore((s) => s.setActiveAgent);
   const setEntities = useWorkspaceStore((s) => s.setEntities);
+  const setBackendCredentials = useWorkspaceStore((s) => s.setBackendCredentials);
   const mergeBuiltinAgents = useWorkspaceStore((s) => s.mergeBuiltinAgents);
   const setUserId = useWorkspaceStore((s) => s.setUserId);
 
@@ -170,6 +171,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         if (unmounted) return;
         const entities = result.data ?? [];
         setEntities(entities);
+        setBackendCredentials(result.credentials);
         // Auto-select the first agent (workflows can't be chatted with
         // and teams are a fallback if no agent exists).
         const firstAgent =
