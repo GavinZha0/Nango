@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.0](https://github.com/GavinZha0/Nango/compare/v0.9.0...v0.10.0) (2026-07-18)
+
+
+### Features
+
+* add error reporting for external agent fetch failures ([baf7cbb](https://github.com/GavinZha0/Nango/commit/baf7cbb3111495b4447f768864e9fc9ba7a11319))
+
+
+### Bug Fixes
+
+* agents sorting issue ([c855359](https://github.com/GavinZha0/Nango/commit/c8553593bc55c909e0abbf7b1b5994f000089b3a))
+* chart id issue ([e7cfd34](https://github.com/GavinZha0/Nango/commit/e7cfd3488e5b93b323aec2c819a4de6a724f389e))
+* improve error handling for HTML and chart tool failures ([30bb37d](https://github.com/GavinZha0/Nango/commit/30bb37dfe87f012ffa5746bdc99ee32235acf0bb))
+* numeric-aware alphabetical sorting issue of panels and run execution ([dbef6c4](https://github.com/GavinZha0/Nango/commit/dbef6c4f4d2dcac969878da7586d34ba0b325742))
+
 ## [0.9.0](https://github.com/GavinZha0/Nango/compare/v0.8.0...v0.9.0) (2026-07-16)
 
 
