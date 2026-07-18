@@ -25,6 +25,7 @@ import {
   type GenerateHtmlPageArgs,
   type GenerateHtmlPageResult,
   normalizePageId,
+  normalizeChartId,
 } from "./schema";
 
 /**
@@ -67,6 +68,10 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
     execute: async (
       args: GenerateEchartsConfigArgs,
     ): Promise<GenerateEchartsConfigResult> => {
+      const normalized = normalizeChartId(args.chart_id);
+      const isModified = normalized !== args.chart_id;
+      const finalId = normalized;
+
       // size cap — measured on the serialized option
       const serialized = JSON.stringify(args.option);
       if (serialized.length > ECHARTS_OPTION_HARD_CAP_BYTES) {
@@ -116,13 +121,19 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
 
       return {
         ok: true,
-        chart_id: args.chart_id,
+        chart_id: finalId,
         title: args.title,
         ...(args.description !== undefined && {
           description: args.description,
         }),
         option: args.option,
         ...(args.dataset_id !== undefined && { dataset_id: args.dataset_id }),
+        ...(isModified && {
+          message:
+            `Note: The chart_id was normalized to '${finalId}' (converted to ` +
+            `lowercase, replaced spaces with hyphens, and stripped disallowed chars) ` +
+            `to ensure it complies with storage regulations. Use '${finalId}' to update this chart in future turns.`,
+        }),
       };
     },
   });

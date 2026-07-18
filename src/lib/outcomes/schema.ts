@@ -22,6 +22,8 @@ export const ECHARTS_OPTION_HARD_CAP_BYTES = 64_000;
 
 // ─── generate_echarts_config ────────────────────────────────────────
 
+export const normalizeChartId = normalizePageId;
+
 /**
  * Parameter schema for the `generate_echarts_config` server tool.
  *
@@ -33,16 +35,16 @@ export const generateEchartsConfigSchema = z.object({
   chart_id: z
     .string()
     .regex(
-      /^[a-z0-9-]+$/,
-      "chart_id must be lowercase kebab-case (letters, numbers, hyphens only)",
+      /^[a-zA-Z0-9-_\s]+$/,
+      "chart_id must contain only letters, numbers, spaces, hyphens, and underscores",
     )
     .min(1, "chart_id cannot be empty")
     .max(64, "chart_id max 64 characters")
     .describe(
       "Stable per-thread identifier; re-calling with the same id " +
-        "overwrites the previous chart. Pick a short kebab-case slug " +
-        "like 'sales-pie' or 'q3-revenue'. Lowercase letters, " +
-        "numbers, and hyphens only.",
+        "overwrites the previous chart. Pick a short kebab-case or snake_case slug " +
+        "like 'sales-pie', 'q3-revenue', or 'sales_pie'. Letters, " +
+        "numbers, spaces, hyphens, and underscores only.",
     ),
   title: z
     .string()
@@ -107,6 +109,7 @@ export interface GenerateEchartsConfigSuccess {
   description?: string;
   option: Record<string, unknown>;
   dataset_id?: string;
+  message?: string;
 }
 
 /**

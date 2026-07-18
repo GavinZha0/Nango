@@ -80,9 +80,15 @@ function useResolveTarget(): (
 export function useHandoffTools(): void {
   const enterAgent = useWorkspaceStore((s) => s.enterAgent);
   const resolveTarget = useResolveTarget();
+  const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+
+  const activeAgent = builtinAgents.find((a) => a.id === activeAgentId);
+  const isSupervisor = activeAgent?.role === "supervisor";
 
   useValidatedFrontendTool<SwitchAgentWithContextArgs>({
     name: "switch_agent_with_context",
+    available: isSupervisor,
     description:
       "Hand the user's conversation off to a specialist. Pass the specialist's `agent` exactly as listed under 'Available specialists' in this prompt, and write a self-contained briefing as `contextSummary` so they can continue without the original transcript. After this returns, the user is no longer with you — wrap up briefly.",
     parameters: switchAgentWithContextArgsSchema,
