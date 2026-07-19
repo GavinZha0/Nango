@@ -50,6 +50,74 @@ interface EChartsRendererProps {
  *
  * See docs/data-visualization.md.
  */
+
+/**
+ * Recursively parse stringified functions in the ECharts option object.
+ * LLMs often hallucinate formatter functions as strings (e.g., `valueFormatter: "(val) => val + '%'"`)
+ * which crash ECharts tooltip rendering if passed directly as strings.
+ */
+function parseFunctions(obj: unknown, parentKey?: string): unknown {
+  if (obj === null || typeof obj !== "object") {
+    if (typeof obj === "string") {
+      const str = obj.trim();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let parsedFn: ((...args: any[]) => any) | undefined;
+      if (
+        str.startsWith("function") ||
+        (str.startsWith("(") && str.includes("=>")) ||
+        /^[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>/.test(str)
+      ) {
+        try {
+          parsedFn = new Function("return " + str)();
+        } catch {
+          // fallback below
+        }
+      }
+
+      if (parsedFn) {
+        // Auto-heal LLM hallucinations where it writes `formatter: (val) => val + '...'`
+        // but ECharts passes a complex `params` object, resulting in `[object Object]...`
+        if (parentKey === "formatter") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return function (params: any, ...args: any[]) {
+            const res = parsedFn!(params, ...args);
+            if (
+              typeof res === "string" &&
+              res.includes("[object Object]") &&
+              params &&
+              typeof params === "object" &&
+              "value" in params
+            ) {
+              return parsedFn!(params.value, ...args);
+            }
+            return res;
+          };
+        }
+        return parsedFn;
+      }
+
+      // ECharts fatal crash prevention: `valueFormatter` MUST be a function.
+      // If the LLM hallucinated a string template (e.g. "{c} 亿人"), it will crash ECharts.
+      // We convert it into a safe formatting function to preserve the unit.
+      if (parentKey === "valueFormatter") {
+        return (val: unknown) => {
+          if (str.includes("{c}")) return str.replace(/{c}/g, String(val));
+          return String(val) + (str.startsWith(" ") ? "" : " ") + str;
+        };
+      }
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => parseFunctions(item, parentKey));
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = parseFunctions(value, key);
+  }
+  return result;
+}
+
 export function EChartsRenderer({ option, style }: EChartsRendererProps): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
@@ -104,7 +172,8 @@ export function EChartsRenderer({ option, style }: EChartsRendererProps): ReactN
     const inst = instanceRef.current;
     if (!inst) return;
     try {
-      inst.setOption(option, true /* notMerge */, true /* lazyUpdate */);
+      const parsedOption = parseFunctions(option) as echarts.EChartsOption;
+      inst.setOption(parsedOption, true /* notMerge */, true /* lazyUpdate */);
     } catch (err) {
       console.error("[EChartsRenderer] setOption failed:", err, "option:", option);
       throw err; // ChartErrorBoundary catches and renders fallback UI.

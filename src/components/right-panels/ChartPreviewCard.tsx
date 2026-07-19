@@ -49,6 +49,7 @@ import { useEffect, type ReactElement } from "react";
 import { cn } from "@/lib/utils";
 import { useOutcomeStore } from "@/store/outcome-store";
 import { useWorkspaceStore } from "@/store/workspace";
+import { useToolApproval, ToolApprovalButtons, ToolApprovalBadge } from "@/hooks/useToolApproval";
 
 import type {
   GenerateEchartsConfigArgs,
@@ -83,6 +84,13 @@ export interface ChartPreviewProps {
 export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
   const router = useRouter();
   const select = useOutcomeStore((s) => s.select);
+  
+  const approval = useToolApproval(props.toolCallId, props.name, props.parameters);
+  const actions = approval.showButtons ? (
+    <ToolApprovalButtons state={approval} />
+  ) : (
+    <ToolApprovalBadge state={approval} />
+  );
 
   // Side-effect: when the server tool completes successfully, upsert
   // the chart into the Outcomes store. Keyed by toolCallId so each
@@ -131,9 +139,9 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
   if (props.status === "inProgress") {
     const partial = props.parameters as Partial<GenerateEchartsConfigArgs>;
     return (
-      <CardShell>
+      <CardShell actions={actions}>
         <div className="flex items-center gap-2">
-          <BarChart3
+          <Loader2
             className="h-4 w-4 animate-pulse text-muted-foreground"
             aria-hidden
           />
@@ -150,7 +158,7 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
 
   if (props.status === "executing") {
     return (
-      <CardShell>
+      <CardShell actions={actions}>
         <div className="flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin text-blue-500" aria-hidden />
           <span className="text-sm font-medium">{args.title}</span>
@@ -173,7 +181,7 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
     return <WildcardToolRenderer {...props} />;
   }
 
-  return <SuccessCard args={args} onView={onView} />;
+  return <SuccessCard args={args} onView={onView} actions={actions} />;
 }
 
 // helpers
@@ -184,12 +192,14 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
 function SuccessCard({
   args,
   onView,
+  actions,
 }: {
   args: GenerateEchartsConfigArgs;
   onView: (chartId: string) => void;
+  actions?: React.ReactNode;
 }): ReactElement {
   return (
-    <CardShell>
+    <CardShell actions={actions}>
       <div className="flex items-center gap-2">
         <BarChart3 className="h-4 w-4 text-blue-500" aria-hidden />
         <button
@@ -214,18 +224,23 @@ function SuccessCard({
 function CardShell({
   variant = "default",
   children,
+  actions,
 }: {
   variant?: "default" | "error";
   children: React.ReactNode;
+  actions?: React.ReactNode;
 }): ReactElement {
   return (
     <div
       className={cn(
-        "my-2 rounded-lg border bg-card p-3",
+        "my-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3 min-w-0",
         variant === "error" && "border-destructive/40 bg-destructive/5",
       )}
     >
-      {children}
+      <div className="flex flex-col w-full flex-1 min-w-0">
+        {children}
+      </div>
+      {actions && <div className="ml-auto shrink-0 flex items-center">{actions}</div>}
     </div>
   );
 }

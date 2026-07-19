@@ -20,6 +20,7 @@ import type {
 } from "@/lib/web-search/schema";
 import { useOutcomeStore, type CardListItem } from "@/store/outcome-store";
 import { useWorkspaceStore } from "@/store/workspace";
+import { useToolApproval, ToolApprovalButtons, ToolApprovalBadge } from "@/hooks/useToolApproval";
 
 // props (matches CopilotKit v2 RenderToolProps shape)
 
@@ -39,6 +40,13 @@ export function WebSearchInlinePreview(
   const router = useRouter();
   const addOutcome = useOutcomeStore((s) => s.addOutcome);
   const select = useOutcomeStore((s) => s.select);
+  
+  const approval = useToolApproval(props.toolCallId, props.name, props.parameters);
+  const actions = approval.showButtons ? (
+    <ToolApprovalButtons state={approval} />
+  ) : (
+    <ToolApprovalBadge state={approval} />
+  );
 
   // Parse once per result change — the useEffect and the render
   // path share the same Result reference, so we avoid double-parsing.
@@ -96,7 +104,7 @@ export function WebSearchInlinePreview(
   if (props.status === "inProgress") {
     const partial = props.parameters as Partial<WebSearchArgs>;
     return (
-      <CardShell>
+      <CardShell actions={actions}>
         <Globe className="size-4 animate-pulse text-muted-foreground" aria-hidden />
         <span className="text-sm text-muted-foreground">
           {partial.query ? `Searching for "${partial.query}"…` : "Searching the web…"}
@@ -109,7 +117,7 @@ export function WebSearchInlinePreview(
 
   if (props.status === "executing") {
     return (
-      <CardShell>
+      <CardShell actions={actions}>
         <Loader2 className="size-4 animate-spin text-blue-500" aria-hidden />
         <span className="text-sm font-medium">Searching for &quot;{args.query}&quot;…</span>
       </CardShell>
@@ -119,7 +127,7 @@ export function WebSearchInlinePreview(
   // status === "complete"
   if (!parsed) {
     return (
-      <CardShell>
+      <CardShell actions={actions}>
         <AlertTriangle className="size-4 text-destructive" aria-hidden />
         <span className="text-sm font-medium text-destructive">
           Search response could not be parsed
@@ -129,7 +137,7 @@ export function WebSearchInlinePreview(
   }
   if (!parsed.ok) {
     return (
-      <CardShell>
+      <CardShell actions={actions}>
         <AlertTriangle className="size-4 text-destructive" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-destructive">Search failed</p>
@@ -142,7 +150,7 @@ export function WebSearchInlinePreview(
   }
 
   return (
-    <CardShell>
+    <CardShell actions={actions}>
       <Globe className="size-4 text-blue-500" aria-hidden />
       <button
         type="button"
@@ -168,14 +176,17 @@ export function WebSearchInlinePreview(
  *  background or border) to avoid double-signalling. */
 function CardShell({
   children,
+  actions,
 }: {
   children: React.ReactNode;
+  actions?: React.ReactNode;
 }): ReactElement {
   return (
     <div
-      className="my-2 flex items-center gap-2 rounded-lg border bg-card px-3 py-2"
+      className="my-2 flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 min-w-0"
     >
       {children}
+      {actions && <div className="ml-auto shrink-0 flex items-center">{actions}</div>}
     </div>
   );
 }

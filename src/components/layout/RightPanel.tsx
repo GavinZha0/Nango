@@ -332,7 +332,6 @@ function RightPanelToolbar(): ReactNode {
  * frontend-tool registration, custom tool-call renderers, and
  * threadId eager-capture. Renders nothing.
  */
-import { withToolApproval } from "@/components/copilotkit/withToolApproval";
 
 function ChatProviderHooks(): ReactNode {
   useOutcomeTools();
@@ -342,14 +341,14 @@ function ChatProviderHooks(): ReactNode {
   useRenderTool({
     name: "delegate_to_agent",
     parameters: delegateToAgentArgsSchema,
-    render: withToolApproval(DelegateToAgentCard),
+    render: DelegateToAgentCard,
   });
   // web_search renders an inline preview AND writes a Report
   // outcome via useEffect — see WebSearchInlinePreview.
   useRenderTool({
     name: "web_search",
     parameters: webSearchArgsSchema,
-    render: withToolApproval(WebSearchInlinePreview),
+    render: WebSearchInlinePreview,
   });
   useHandoffTools();
   useInteractiveTools();

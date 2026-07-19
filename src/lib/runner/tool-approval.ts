@@ -232,8 +232,12 @@ export function wrapToolApproval(
 
       // 2. Trigger manual approval flow
       const approvalId = crypto.randomUUID();
-      // Resolve toolCallId from persisted event history for precise frontend matching.
-      const toolCallId = await resolveToolCallId(runId, toolName);
+      
+      // AI SDK passes { toolCallId, messages } as the second argument to `execute`.
+      // Prefer this exact toolCallId to avoid race conditions with DB event flushing,
+      // which causes old toolCallIds to be incorrectly matched on agent retries.
+      const execOptions = args[1] as { toolCallId?: string } | undefined;
+      const toolCallId = execOptions?.toolCallId || await resolveToolCallId(runId, toolName);
 
       try {
         const seqNow = await RunSequenceRegistry.getAndIncrement(runId);
