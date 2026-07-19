@@ -366,8 +366,7 @@ function RuntimeMetaSection({
 
 /**
  * True when the node carries an `inputs` object the drawer can
- * render as JSON. SQL still has no `inputs` field; chart's `inputs`
- * is rendered by its own dedicated body section.
+ * render as JSON. SQL/code/chart have their own dedicated sections.
  */
 function hasInputMap(
   node: CanonicalNode,

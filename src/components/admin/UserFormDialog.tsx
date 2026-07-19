@@ -48,7 +48,10 @@ export function UserFormDialog({ open, onOpenChange, onSuccess }: UserFormDialog
       name: values.name,
       email: values.email,
       password: values.password,
-      role: values.role as "user" | "admin",
+      // better-auth admin plugin type only accepts "admin" | "user" by default.
+      // Our project uses custom RBAC with "editor" role (see src/lib/auth/permissions.ts).
+      // Type assertion is safe since our database schema and auth hooks support all three roles.
+      role: values.role as "admin" | "user",
       data: { org: values.org || null },
     });
     setSubmitting(false);

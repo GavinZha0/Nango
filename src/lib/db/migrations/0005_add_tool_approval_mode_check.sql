@@ -1,0 +1,1 @@
+ALTER TABLE "builtin_agent" ADD CONSTRAINT "builtin_agent_tool_approval_mode_check" CHECK ("builtin_agent"."tool_approval_mode" IN ('always', 'auto', 'never'));

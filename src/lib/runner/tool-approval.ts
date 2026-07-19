@@ -179,6 +179,13 @@ async function waitForApproval(runId: string, approvalId: string, userId: string
           approvalId,
           reason: "timeout",
         });
+
+        publish(userId, {
+          kind: "tool_approval_resolved",
+          runId,
+          approvalId,
+          approved: false,
+        });
       } catch (err) {
         log.error({ runId, err }, "failed to write tool_call_rejected event on timeout");
       }

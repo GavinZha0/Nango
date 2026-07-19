@@ -538,7 +538,7 @@ export type DashboardEntity = typeof DashboardTable.$inferSelect;
 export type DashboardArtifactEntity = typeof DashboardArtifactTable.$inferSelect;
 export type DashboardKind = "folder" | "dashboard";
 export type VisibilityType = "private" | "shared";
-export type UserRole = "admin" | "user";
+export type UserRole = "admin" | "editor" | "user";
 
 /** Built-in agent system-role enum. `null` = regular user-authored
  *  agent. See AGENTS.md ("Supervisor + agent role enum"). */
@@ -955,6 +955,7 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   uniqueIndex("builtin_agent_one_secretary_per_user_idx")
     .on(t.createdBy)
     .where(sql`${t.role} = 'secretary'`),
+  check("builtin_agent_tool_approval_mode_check", sql`${t.toolApprovalMode} IN ('always', 'auto', 'never')`),
 ]);
 
 /**

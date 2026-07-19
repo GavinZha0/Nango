@@ -36,6 +36,13 @@
       "when": 1784400908333,
       "tag": "0004_add_tool_approval_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784477444810,
+      "tag": "0005_add_tool_approval_mode_check",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, X } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/store/workspace";
 
@@ -58,7 +59,7 @@ export function useToolApproval(
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to approve tool execution.");
+      toast.error("Failed to approve tool execution.");
     } finally {
       setApproving(false);
     }
@@ -83,7 +84,7 @@ export function useToolApproval(
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to reject tool execution.");
+      toast.error("Failed to reject tool execution.");
     } finally {
       setRejecting(false);
     }

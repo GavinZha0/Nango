@@ -358,7 +358,6 @@ async function runSuiteCases(
       outcome,
     });
 
-    // 记录本次运行输出，将 case 名字经过规范化后作为 Key
     const normalizedKey = normalizeCaseName(c.name);
     suiteContext[normalizedKey] = {
       input: outcome.resolvedInput ?? {},
