@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/GavinZha0/Nango/compare/v0.10.0...v0.10.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* polish HITL edge cases and constraints ([4cbcccc](https://github.com/GavinZha0/Nango/commit/4cbccccb6fdd2afae065a156393c4b7d6cb973c9))
+
 ## [0.10.0](https://github.com/GavinZha0/Nango/compare/v0.9.0...v0.10.0) (2026-07-19)
 
 
