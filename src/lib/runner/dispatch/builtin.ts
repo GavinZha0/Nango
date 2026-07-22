@@ -36,8 +36,7 @@ import {
   type SupervisorRuntime,
 } from "../supervisor-tools.server";
 import { ERROR_POLICY_BLOCK } from "../tool-failure";
-import { createApprovalWrappedMcpProvider } from "../tool-approval";
-import { composeToolPipeline } from "@/lib/agent-pipeline/compose";
+import { composePipelinedMcpProvider, composeToolPipeline } from "@/lib/agent-pipeline/compose";
 import { buildServerToolMiddlewares } from "@/lib/agent-pipeline/middlewares";
 import {
   resolveOrchestrationMode,
@@ -465,24 +464,21 @@ export async function buildBuiltinAgents(
     // `{ isError: true, ... }` instead of an AI SDK `tool-error`
     // that CopilotKit 1.56 drops. MCP tools are already wrapped at
     // borrow time, so providers[] is left untouched.
-    // Agent-pipeline (N1-A): ordered middleware chain replaces the ad-hoc
-    // wrapToolExecute→wrapToolApproval nesting. Approval (order 40) gates
-    // outside error-handling (order 50); its internal guards reproduce the
-    // previous conditional-wrap behavior (no runId / never / exempt).
-    const toolPipeline = composeToolPipeline(
-      buildServerToolMiddlewares({
-        approvalMode: spec.toolApprovalMode,
-        exemptTools: APPROVAL_EXEMPT_TOOLS,
-        log,
-      }),
-      {
-        runId: ctx?.runId,
-        userId: ctx?.userId ?? "",
-        agentId,
-        isHeadless: false,
-        metadata: {},
-      },
-    );
+    // Agent-pipeline (P0): ordered middleware chain applies to BOTH
+    // server-side tools and MCP providers identically.
+    const pipelineMiddlewares = buildServerToolMiddlewares({
+      approvalMode: spec.toolApprovalMode,
+      exemptTools: APPROVAL_EXEMPT_TOOLS,
+      log,
+    });
+    const pipelineCtx = {
+      runId: ctx?.runId,
+      userId: ctx?.userId ?? "",
+      agentId,
+      isHeadless: false,
+      metadata: {},
+    };
+    const toolPipeline = composeToolPipeline(pipelineMiddlewares, pipelineCtx);
     const serverTools: ToolDefinition[] = [
       ...skillsRuntime.tools,
       ...supervisorTools,
@@ -510,11 +506,14 @@ export async function buildBuiltinAgents(
       // strand a tool call on the result.
       maxSteps: hasTools ? Math.max(spec.maxSteps, 2) : 1,
       // mcpClients (user-managed lifecycle) — pool owns connections.
-      ...((providers.length > 0) ? {
-        mcpClients: (ctx?.runId && spec.toolApprovalMode !== "never")
-          ? providers.map(p => createApprovalWrappedMcpProvider(p, spec.toolApprovalMode as "always" | "auto", ctx.runId!, ctx.userId))
-          : providers
-      } : {}),
+      // Pipeline wraps MCP tools identically to serverTools.
+      ...(providers.length > 0
+        ? {
+            mcpClients: providers.map((p) =>
+              composePipelinedMcpProvider(p, pipelineMiddlewares, pipelineCtx),
+            ),
+          }
+        : {}),
       ...(serverTools.length > 0 ? { tools: serverTools } : {}),
     });
   }

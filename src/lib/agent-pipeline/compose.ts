@@ -6,6 +6,7 @@
 
 import "server-only";
 
+import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
 import type {
   MiddlewareContext,
   ToolCall,
@@ -97,3 +98,27 @@ export function composeToolPipeline(
     } as T;
   };
 }
+
+/**
+ * Wrap a {@link GracefulMcpProvider} so every tool returned by its `tools()`
+ * method is passed through {@link composeToolPipeline}.
+ */
+export function composePipelinedMcpProvider(
+  provider: GracefulMcpProvider,
+  middlewares: readonly ToolMiddleware[],
+  ctx: MiddlewareContext,
+): GracefulMcpProvider {
+  const wrap = composeToolPipeline(middlewares, ctx);
+  return {
+    ...provider,
+    async tools() {
+      const rawTools = (await provider.tools()) as Record<string, unknown>;
+      const result: Record<string, unknown> = {};
+      for (const [name, tool] of Object.entries(rawTools)) {
+        result[name] = wrap(tool as ToolLike);
+      }
+      return result as never;
+    },
+  };
+}
+

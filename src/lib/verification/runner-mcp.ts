@@ -13,6 +13,8 @@
 
 import "server-only";
 
+import { composePipelinedMcpProvider } from "@/lib/agent-pipeline/compose";
+import { toolErrorHandlingMiddleware } from "@/lib/agent-pipeline/middlewares";
 import { mcpProviderPool } from "@/lib/mcp";
 import { normalizeMcpToolResult } from "@/lib/mcp/tool-result-utils";
 import {
@@ -71,7 +73,12 @@ export async function runMcpCase(
   }
 
   try {
-    const tools: Record<string, unknown> = (await provider.tools()) as Record<
+    const pipelinedProvider = composePipelinedMcpProvider(
+      provider,
+      [toolErrorHandlingMiddleware(undefined, "mcp_verification_failed")],
+      { userId: "", isHeadless: true, metadata: {} },
+    );
+    const tools: Record<string, unknown> = (await pipelinedProvider.tools()) as Record<
       string,
       unknown
     >;

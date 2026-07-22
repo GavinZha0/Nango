@@ -26,7 +26,6 @@ import type { MCPClientProvider } from "@/lib/copilot/index.server";
 
 import { getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
-import { wrapToolExecute } from "@/lib/runner/tool-failure";
 
 const DEFAULT_DISCOVERY_TIMEOUT_S = 5;
 
@@ -254,7 +253,7 @@ function timeout(ms: number): Promise<typeof TIMEOUT> {
 function wrapTools(
   rawTools: readonly RawMcpTool[],
   client: Client,
-  log: ReturnType<typeof childLogger>,
+  _log: ReturnType<typeof childLogger>,
 ): RawToolSet {
   const wrapped: RawToolSet = {};
   for (const raw of rawTools) {
@@ -276,7 +275,7 @@ function wrapTools(
         return normalizeAndDeduplicateMcpResult(result, { parseForUi: false });
       },
     });
-    wrapped[raw.name] = wrapToolExecute(baseTool, raw.name, log, "mcp_tool_call_failed");
+    wrapped[raw.name] = baseTool;
   }
   return wrapped;
 }
