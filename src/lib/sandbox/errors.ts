@@ -34,6 +34,20 @@ export class BackendUnavailableError extends SandboxError {
   }
 }
 
+/**
+ * Fail-closed refusal (BUG-11): code execution is *intentionally*
+ * disabled because no isolated sandbox is configured — NOT a
+ * misconfiguration. A subclass of BackendUnavailableError so existing
+ * `instanceof BackendUnavailableError` handling (tool envelope) still
+ * applies, but boot can log it softly instead of as an error.
+ */
+export class SandboxDisabledError extends BackendUnavailableError {
+  constructor(message: string) {
+    super("subprocess", message);
+    this.name = "SandboxDisabledError";
+  }
+}
+
 export class InvalidSandboxInputError extends SandboxError {
   constructor(message: string) {
     super("INVALID_INPUT", message);

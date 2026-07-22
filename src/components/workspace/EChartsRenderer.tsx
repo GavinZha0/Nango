@@ -51,69 +51,86 @@ interface EChartsRendererProps {
  * See docs/data-visualization.md.
  */
 
+/** Marks a value the sanitizer removed so its key falls back to the
+ *  ECharts default (used for unexecutable function strings). */
+const REMOVE_UNSAFE = Symbol("remove-unsafe-value");
+
+/** ECharts function-valued keys the LLM may hallucinate as strings. A
+ *  bare `startsWith("(")+"=>"` / `function` / `ident =>` heuristic —
+ *  identical to what the old eval path gated on. */
+function looksLikeFunctionString(str: string): boolean {
+  return (
+    str.startsWith("function") ||
+    (str.startsWith("(") && str.includes("=>")) ||
+    /^[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>/.test(str)
+  );
+}
+
+/** `valueFormatter` MUST be a function or ECharts crashes. Convert a
+ *  hallucinated string into a SAFE function by substitution only —
+ *  never by executing the string. */
+function safeValueFormatter(str: string): (val: unknown) => string {
+  if (str.includes("{c}")) {
+    return (val: unknown) => str.replace(/{c}/g, String(val));
+  }
+  if (looksLikeFunctionString(str)) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        '[EChartsRenderer] valueFormatter function string is not executed; ' +
+          'use a template like "{c}%" or pre-format upstream:',
+        str,
+      );
+    }
+    return (val: unknown) => String(val);
+  }
+  // Plain unit suffix, e.g. " 亿人".
+  return (val: unknown) => String(val) + (str.startsWith(" ") ? "" : " ") + str;
+}
+
 /**
- * Recursively parse stringified functions in the ECharts option object.
- * LLMs often hallucinate formatter functions as strings (e.g., `valueFormatter: "(val) => val + '%'"`)
- * which crash ECharts tooltip rendering if passed directly as strings.
+ * Sanitize an ECharts option before `setOption`.
+ *
+ * SECURITY: never execute LLM-authored strings. The previous version
+ * used `new Function("return "+str)()` to "heal" formatter strings —
+ * that is arbitrary JS in the app origin (BUG-8). Instead we keep
+ * ECharts-native string templates as-is, convert `valueFormatter`
+ * strings to a safe non-eval function, and drop any other
+ * JS-function-looking string so ECharts falls back to its default.
+ * Custom formatting logic belongs upstream (SQL/transform), not here.
  */
-function parseFunctions(obj: unknown, parentKey?: string): unknown {
+function sanitizeChartOption(obj: unknown, parentKey?: string): unknown {
   if (obj === null || typeof obj !== "object") {
     if (typeof obj === "string") {
       const str = obj.trim();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let parsedFn: ((...args: any[]) => any) | undefined;
-      if (
-        str.startsWith("function") ||
-        (str.startsWith("(") && str.includes("=>")) ||
-        /^[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>/.test(str)
-      ) {
-        try {
-          parsedFn = new Function("return " + str)();
-        } catch {
-          // fallback below
-        }
-      }
-
-      if (parsedFn) {
-        // Auto-heal LLM hallucinations where it writes `formatter: (val) => val + '...'`
-        // but ECharts passes a complex `params` object, resulting in `[object Object]...`
-        if (parentKey === "formatter") {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return function (params: any, ...args: any[]) {
-            const res = parsedFn!(params, ...args);
-            if (
-              typeof res === "string" &&
-              res.includes("[object Object]") &&
-              params &&
-              typeof params === "object" &&
-              "value" in params
-            ) {
-              return parsedFn!(params.value, ...args);
-            }
-            return res;
-          };
-        }
-        return parsedFn;
-      }
-
-      // ECharts fatal crash prevention: `valueFormatter` MUST be a function.
-      // If the LLM hallucinated a string template (e.g. "{c} 亿人"), it will crash ECharts.
-      // We convert it into a safe formatting function to preserve the unit.
       if (parentKey === "valueFormatter") {
-        return (val: unknown) => {
-          if (str.includes("{c}")) return str.replace(/{c}/g, String(val));
-          return String(val) + (str.startsWith(" ") ? "" : " ") + str;
-        };
+        return safeValueFormatter(str);
+      }
+      // `formatter` templates ("{b}: {c}") are valid ECharts strings and
+      // pass through. A function-looking string (here or on renderItem,
+      // symbolSize, etc.) is dropped — never executed.
+      if (looksLikeFunctionString(str)) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(
+            `[EChartsRenderer] dropped unexecuted function string at "${parentKey ?? "?"}":`,
+            str,
+          );
+        }
+        return REMOVE_UNSAFE;
       }
     }
     return obj;
   }
   if (Array.isArray(obj)) {
-    return obj.map((item) => parseFunctions(item, parentKey));
+    return obj
+      .map((item) => sanitizeChartOption(item, parentKey))
+      .filter((item) => item !== REMOVE_UNSAFE);
   }
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    result[key] = parseFunctions(value, key);
+    const sanitized = sanitizeChartOption(value, key);
+    if (sanitized !== REMOVE_UNSAFE) {
+      result[key] = sanitized;
+    }
   }
   return result;
 }
@@ -172,7 +189,7 @@ export function EChartsRenderer({ option, style }: EChartsRendererProps): ReactN
     const inst = instanceRef.current;
     if (!inst) return;
     try {
-      const parsedOption = parseFunctions(option) as echarts.EChartsOption;
+      const parsedOption = sanitizeChartOption(option) as echarts.EChartsOption;
       inst.setOption(parsedOption, true /* notMerge */, true /* lazyUpdate */);
     } catch (err) {
       console.error("[EChartsRenderer] setOption failed:", err, "option:", option);

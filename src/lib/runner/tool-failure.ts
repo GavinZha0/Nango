@@ -93,6 +93,63 @@ interface PossiblyWrapped {
  * instances would lose their prototype chain. Use `Object.create` +
  * `Object.assign` if class-based tools are ever introduced.
  */
+/**
+ * Convert a thrown tool error into the LLM-facing {@link ToolExecutionFailure}
+ * envelope, stashing in-process classification hints under
+ * {@link TOOL_FAILURE_CAUSE}. Single source of truth shared by
+ * {@link wrapToolExecute} and the agent-pipeline error-handling middleware.
+ */
+export function toToolFailure(
+  err: unknown,
+  toolName: string,
+  log?: ReturnType<typeof childLogger>,
+  logEvent: string = "tool_execute_failed",
+): ToolExecutionFailure {
+  const message = err instanceof Error ? err.message : String(err);
+  if (log) {
+    log.warn(
+      {
+        event: logEvent,
+        toolName,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message, stack: err.stack }
+            : { name: "Unknown", message: String(err) },
+      },
+      "tool execute threw; returning structured isError result",
+    );
+  }
+  const failure: ToolExecutionFailure = { isError: true, message, toolName };
+  // Stash classification hints from the original Error under a
+  // non-enumerable Symbol-keyed property. Invisible to JSON.stringify
+  // (so the LLM-facing payload stays a clean three-field POJO) but
+  // readable in-process by callers like the verification subsystem.
+  if (err instanceof Error) {
+    const cause: ToolFailureCause = { name: err.name, stack: err.stack };
+    const rawCode = (err as { code?: unknown }).code;
+    if (typeof rawCode === "string") cause.code = rawCode;
+    const rawStatus =
+      (err as { status?: unknown }).status ??
+      (err as { statusCode?: unknown }).statusCode;
+    if (typeof rawStatus === "number") cause.httpStatus = rawStatus;
+    const rawHeaders = (err as { headers?: unknown }).headers;
+    if (rawHeaders && typeof rawHeaders === "object") {
+      cause.headers = rawHeaders as ToolFailureCause["headers"];
+    }
+    const rawAddr = (err as { address?: unknown }).address;
+    if (typeof rawAddr === "string") cause.address = rawAddr;
+    const rawPort = (err as { port?: unknown }).port;
+    if (typeof rawPort === "number") cause.port = rawPort;
+    Object.defineProperty(failure, TOOL_FAILURE_CAUSE, {
+      value: cause,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+  }
+  return failure;
+}
+
 export function wrapToolExecute<T>(
   tool: T,
   toolName: string,
@@ -112,58 +169,7 @@ export function wrapToolExecute<T>(
       try {
         return await original.apply(tool, args);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (log) {
-          log.warn(
-            {
-              event: logEvent,
-              toolName,
-              err:
-                err instanceof Error
-                  ? { name: err.name, message: err.message, stack: err.stack }
-                  : { name: "Unknown", message: String(err) },
-            },
-            "tool execute threw; returning structured isError result",
-          );
-        }
-        const failure: ToolExecutionFailure = {
-          isError: true,
-          message,
-          toolName,
-        };
-        // Stash classification hints from the original Error under a
-        // non-enumerable Symbol-keyed property. Invisible to
-        // JSON.stringify (so the LLM-facing payload stays a clean
-        // three-field POJO) but readable in-process by callers like
-        // the verification subsystem that need to classify the
-        // failure beyond "isError: true".
-        if (err instanceof Error) {
-          const cause: ToolFailureCause = {
-            name: err.name,
-            stack: err.stack,
-          };
-          const rawCode = (err as { code?: unknown }).code;
-          if (typeof rawCode === "string") cause.code = rawCode;
-          const rawStatus =
-            (err as { status?: unknown }).status ??
-            (err as { statusCode?: unknown }).statusCode;
-          if (typeof rawStatus === "number") cause.httpStatus = rawStatus;
-          const rawHeaders = (err as { headers?: unknown }).headers;
-          if (rawHeaders && typeof rawHeaders === "object") {
-            cause.headers = rawHeaders as ToolFailureCause["headers"];
-          }
-          const rawAddr = (err as { address?: unknown }).address;
-          if (typeof rawAddr === "string") cause.address = rawAddr;
-          const rawPort = (err as { port?: unknown }).port;
-          if (typeof rawPort === "number") cause.port = rawPort;
-          Object.defineProperty(failure, TOOL_FAILURE_CAUSE, {
-            value: cause,
-            enumerable: false,
-            writable: false,
-            configurable: false,
-          });
-        }
-        return failure;
+        return toToolFailure(err, toolName, log, logEvent);
       }
     },
   };

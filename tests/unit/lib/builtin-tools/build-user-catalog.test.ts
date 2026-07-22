@@ -2,6 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+// buildUserToolCatalog now queries owner-visible data sources (BUG-1)
+// to scope the extract_dataset_by_sql allowed set. Stub the DB read.
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve([] as Array<{ id: string }>),
+      }),
+    }),
+  },
+}));
+
 import { buildUserToolCatalog } from "@/lib/builtin-tools/build-user-catalog";
 import { BUILTIN_TOOLS } from "@/lib/builtin-tools/catalog";
 
@@ -51,9 +63,9 @@ describe("buildUserToolCatalog — catalog tools", () => {
 
 describe("buildUserToolCatalog — binding-implied tools", () => {
   it("includes extract_dataset_by_sql even with no agent bindings", async () => {
-    // Per the V1 design, this tool is global at the catalog layer.
-    // Permission gating happens INSIDE the tool via
-    // resolveDataSourceByName.
+    // The tool is always present at the catalog layer; authorization is
+    // enforced INSIDE the tool via its allowed-id set (BUG-1), here
+    // scoped to the owner-visible data sources.
     const catalog = await buildUserToolCatalog("user-1");
     expect(catalog.has("extract_dataset_by_sql")).toBe(true);
   });

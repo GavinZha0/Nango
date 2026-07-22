@@ -158,10 +158,17 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
 /**
  * 查询单个任务的执行状态、进度和结果。
  * 供 Agent 工具后续追踪特定任务结果并向用户汇报。
+ *
+ * SECURITY: scoped to the run's owner (`isAdmin` bypasses). agent runs
+ * filter by `EntityRunTable.ownerId`; verification/evaluation runs have
+ * no owner column, so they filter by the suite's `createdBy` — mirroring
+ * `getActiveTasks`. Without this a caller could read any run by id.
  */
 export async function getTaskProgress(
   runId: string,
-  kind: "agent" | "verification" | "evaluation"
+  kind: "agent" | "verification" | "evaluation",
+  userId: string,
+  isAdmin = false
 ): Promise<TaskProgressDetail | null> {
   try {
     if (kind === "agent") {
@@ -176,7 +183,11 @@ export async function getTaskProgress(
           outputSummary: EntityRunTable.outputSummary,
         })
         .from(EntityRunTable)
-        .where(eq(EntityRunTable.id, runId))
+        .where(
+          isAdmin
+            ? eq(EntityRunTable.id, runId)
+            : and(eq(EntityRunTable.id, runId), eq(EntityRunTable.ownerId, userId))
+        )
         .limit(1);
 
       if (!row) return null;
@@ -211,7 +222,14 @@ export async function getTaskProgress(
           VerificationSuiteTable,
           eq(VerificationRunTable.suiteId, VerificationSuiteTable.id)
         )
-        .where(eq(VerificationRunTable.id, runId))
+        .where(
+          isAdmin
+            ? eq(VerificationRunTable.id, runId)
+            : and(
+                eq(VerificationRunTable.id, runId),
+                eq(VerificationSuiteTable.createdBy, userId)
+              )
+        )
         .limit(1);
 
       if (!row) return null;
@@ -250,7 +268,11 @@ export async function getTaskProgress(
           EvalSuiteTable,
           eq(EvalRunTable.suiteId, EvalSuiteTable.id)
         )
-        .where(eq(EvalRunTable.id, runId))
+        .where(
+          isAdmin
+            ? eq(EvalRunTable.id, runId)
+            : and(eq(EvalRunTable.id, runId), eq(EvalSuiteTable.createdBy, userId))
+        )
         .limit(1);
 
       if (!row) return null;

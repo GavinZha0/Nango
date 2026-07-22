@@ -145,4 +145,49 @@ describe("wrapToolApproval", () => {
     expect(originalExecute).not.toHaveBeenCalled();
   });
 
+  // BUG-9 regression: write-SQL detection must read the real tool param
+  // `sql_text`. A previous version read `sql`, so this check never fired.
+  it("intercepts a write SQL in 'auto' mode via the sql_text param", async () => {
+    const originalExecute = vi.fn().mockResolvedValue({ total_rows: 0 });
+    const tool: ToolDefinition = {
+      name: "extract_dataset_by_sql",
+      description: "sql tool",
+      parameters: { type: "object", properties: {} } as unknown as ToolDefinition["parameters"],
+      execute: originalExecute,
+    };
+
+    const wrapped = wrapToolApproval(tool, "extract_dataset_by_sql", "auto", "run123", "user123");
+    const execPromise = wrapped.execute!({ sql_text: "DELETE FROM users WHERE id = 1" });
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockRecordEvent).toHaveBeenCalled();
+    const approvalId = (mockRecordEvent.mock.calls[0][3] as Record<string, unknown>).approvalId as string;
+
+    mockPublish("user123", { kind: "tool_approval_resolved", runId: "run123", approvalId, approved: false });
+
+    const res = await execPromise;
+    expect(res).toEqual({
+      isError: true,
+      message: "Tool execution was rejected or timed out by the user.",
+    });
+    expect(originalExecute).not.toHaveBeenCalled();
+  });
+
+  it("passes through a read-only SELECT in 'auto' mode without approval", async () => {
+    const originalExecute = vi.fn().mockResolvedValue({ total_rows: 3 });
+    const tool: ToolDefinition = {
+      name: "extract_dataset_by_sql",
+      description: "sql tool",
+      parameters: { type: "object", properties: {} } as unknown as ToolDefinition["parameters"],
+      execute: originalExecute,
+    };
+
+    const wrapped = wrapToolApproval(tool, "extract_dataset_by_sql", "auto", "run123", "user123");
+    const res = await wrapped.execute!({ sql_text: "SELECT id, name FROM users" });
+
+    expect(res).toEqual({ total_rows: 3 });
+    expect(originalExecute).toHaveBeenCalled();
+    expect(mockRecordEvent).not.toHaveBeenCalled();
+  });
+
 });

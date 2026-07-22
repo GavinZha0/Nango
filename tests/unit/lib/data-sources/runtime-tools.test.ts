@@ -140,7 +140,7 @@ function arrangeSuccessfulExtract(
 }
 
 describe("extract_dataset_by_sql tool — argument validation", () => {
-  const tool = buildExtractDatasetTool();
+  const tool = buildExtractDatasetTool(["ds-uuid-1"]);
   const baseArgs = {
     dataset_name: "users_dev",
     data_source_name: "users_dev",
@@ -191,10 +191,28 @@ describe("extract_dataset_by_sql tool — argument validation", () => {
     };
     expect(result.error.code).toBe("DISABLED");
   });
+
+  // BUG-1 regression: the binding is the authorization boundary. A
+  // source that resolves by name but is NOT in the allowed set must be
+  // rejected as NOT_FOUND (no existence leak), before any extract.
+  it("rejects a source outside the allowed binding set (BUG-1)", async () => {
+    mockResolveByName.mockResolvedValue({
+      ok: true,
+      resolved: fakeResolved({ id: "ds-not-bound" }),
+    });
+    const scopedTool = buildExtractDatasetTool(["ds-uuid-1"]);
+    const result = (await scopedTool.execute!(baseArgs)) as {
+      ok: false;
+      error: { code: string };
+    };
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe("NOT_FOUND");
+    expect(mockExtract).not.toHaveBeenCalled();
+  });
 });
 
 describe("extract_dataset_by_sql tool — extraction path", () => {
-  const tool = buildExtractDatasetTool();
+  const tool = buildExtractDatasetTool(["ds-uuid-1"]);
   const baseArgs = {
     dataset_name: "users_dev",
     data_source_name: "users_dev",
@@ -330,7 +348,7 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
 });
 
 describe("extract_dataset_by_sql tool — policy enforcement", () => {
-  const tool = buildExtractDatasetTool();
+  const tool = buildExtractDatasetTool(["ds-uuid-1"]);
 
   it("readOnly policy rejects INSERT before hitting the cache", async () => {
     mockResolveByName.mockResolvedValue({
@@ -419,7 +437,7 @@ describe("extract_dataset_by_sql tool — policy enforcement", () => {
 });
 
 describe("extract_dataset_by_sql — row_limit", () => {
-  const tool = buildExtractDatasetTool();
+  const tool = buildExtractDatasetTool(["ds-uuid-1"]);
 
   it("returns [] rows when row_limit is 0", async () => {
     arrangeSuccessfulExtract([

@@ -151,12 +151,23 @@ export async function register(): Promise<void> {
   // selection in the per-process cache and emits a single line
   // operators can grep for.
   const { getActiveAdapter } = await import("@/lib/sandbox/registry.server");
+  const { SandboxDisabledError } = await import("@/lib/sandbox/errors");
   try {
     const active = await getActiveAdapter();
     console.log(
       `[nango] sandbox active backend: ${active.backend}`,
     );
   } catch (err) {
-    console.error("[nango] sandbox bootstrap failed:", err);
+    if (err instanceof SandboxDisabledError) {
+      // Expected fail-closed state (fresh install / no isolation opted in):
+      // code execution is intentionally OFF, not misconfigured.
+      console.warn(
+        "[nango] code execution is disabled — no sandbox configured. " +
+          "Set sandbox.mode=local-docker (recommended) or " +
+          "sandbox.allow_insecure=true to enable run_code_in_sandbox / skill scripts.",
+      );
+    } else {
+      console.error("[nango] sandbox bootstrap failed:", err);
+    }
   }
 }

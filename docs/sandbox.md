@@ -153,13 +153,14 @@ The first `pnpm dev` (or `pnpm start`) calls `scripts/ensure-sandbox-image.ts` w
 
 ### 3.3 Backend selection — always explicit
 
-Selection is controlled by `SANDBOX_MODE`. **There is no auto-probe and no silent fallback.** When unset the default is `subprocess` so a fresh checkout boots without external prerequisites; production deployments must opt in to isolation explicitly.
+Selection is controlled by `sandbox.mode`. **There is no auto-probe and no silent fallback.** The `subprocess` backend has no isolation, so it is **fail-closed by default** (BUG-11): when the resolved mode is `subprocess`, code execution is **refused** (`SandboxDisabledError`) unless the operator explicitly opts in via `sandbox.allow_insecure=true`. A fresh install therefore boots with code execution *disabled* (boot logs a soft warning, not an error) until an operator configures isolation.
 
-| `SANDBOX_MODE` | Status | Behaviour |
+| `sandbox.mode` | `sandbox.allow_insecure` | Behaviour |
 |---|---|---|
-| unset / `subprocess` | ✅ shipped | Subprocess mode — **no isolation**. Always works. |
-| `local-docker` | ✅ shipped | Local Docker daemon. Boot fails if `docker info` fails or the sandbox image is missing. |
-| `remote-docker` | ⏳ reserved | Remote Docker daemon over TCP/SSH. Not implemented yet — selecting it throws `BackendUnavailableError` at boot. |
+| unset / `subprocess` | `false` (default) | **Code execution disabled** — `getActiveAdapter` throws `SandboxDisabledError`; `run_code_in_sandbox` / `run_skill_script` return a structured "disabled" envelope. |
+| `subprocess` | `true` | Subprocess mode — **no isolation**. Explicitly accepted degraded mode (dev / trusted internal). |
+| `local-docker` | — | Local Docker daemon. Boot fails if `docker info` fails or the sandbox image is missing. |
+| `remote-docker` | — | ⏳ reserved. Not implemented yet — selecting it throws `BackendUnavailableError` at boot. |
 | anything else | — | Throws `SandboxError("INVALID_INPUT")` at boot (typo guard). |
 
 **Why no auto-probe**: silent fallback is a security footgun. An operator who set `SANDBOX_MODE=local-docker` in production must NOT silently degrade to `subprocess` (no network or filesystem isolation) just because Docker happened to be down. Failing loudly at boot — with the precise reason — is the only safe default.

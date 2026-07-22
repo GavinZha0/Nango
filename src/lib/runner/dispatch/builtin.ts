@@ -35,8 +35,10 @@ import {
   type ParentRunIdHolder,
   type SupervisorRuntime,
 } from "../supervisor-tools.server";
-import { ERROR_POLICY_BLOCK, wrapToolExecute } from "../tool-failure";
-import { wrapToolApproval, createApprovalWrappedMcpProvider } from "../tool-approval";
+import { ERROR_POLICY_BLOCK } from "../tool-failure";
+import { createApprovalWrappedMcpProvider } from "../tool-approval";
+import { composeToolPipeline } from "@/lib/agent-pipeline/compose";
+import { buildServerToolMiddlewares } from "@/lib/agent-pipeline/middlewares";
 import {
   resolveOrchestrationMode,
   type OrchestrationModeId,
@@ -251,7 +253,7 @@ export async function buildBuiltinAgents(
     // catalog deliberately omits it; routing through there would drop
     // the slug on lookup miss.
     const dataSourceTools: ToolDefinition[] = dataSourceIds.length > 0
-      ? [buildExtractDatasetTool()]
+      ? [buildExtractDatasetTool(dataSourceIds)]
       : [];
 
     // Binding any ssh_server auto-mounts run_ssh_command + list_ssh_hosts.
@@ -463,6 +465,24 @@ export async function buildBuiltinAgents(
     // `{ isError: true, ... }` instead of an AI SDK `tool-error`
     // that CopilotKit 1.56 drops. MCP tools are already wrapped at
     // borrow time, so providers[] is left untouched.
+    // Agent-pipeline (N1-A): ordered middleware chain replaces the ad-hoc
+    // wrapToolExecute→wrapToolApproval nesting. Approval (order 40) gates
+    // outside error-handling (order 50); its internal guards reproduce the
+    // previous conditional-wrap behavior (no runId / never / exempt).
+    const toolPipeline = composeToolPipeline(
+      buildServerToolMiddlewares({
+        approvalMode: spec.toolApprovalMode,
+        exemptTools: APPROVAL_EXEMPT_TOOLS,
+        log,
+      }),
+      {
+        runId: ctx?.runId,
+        userId: ctx?.userId ?? "",
+        agentId,
+        isHeadless: false,
+        metadata: {},
+      },
+    );
     const serverTools: ToolDefinition[] = [
       ...skillsRuntime.tools,
       ...supervisorTools,
@@ -472,13 +492,7 @@ export async function buildBuiltinAgents(
       ...sshTools,
       ...calendarTools,
       ...ambientTools,
-    ].map((t) => {
-      let wrapped = wrapToolExecute(t, t.name, log, "server_tool_failed");
-      if (ctx?.runId && !APPROVAL_EXEMPT_TOOLS.has(t.name)) {
-        wrapped = wrapToolApproval(wrapped, t.name, spec.toolApprovalMode, ctx.runId, ctx.userId);
-      }
-      return wrapped;
-    });
+    ].map((t) => toolPipeline(t));
 
     agents[agentId] = new BuiltInAgent({
       model: resolvedModel.model,

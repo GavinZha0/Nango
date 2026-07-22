@@ -333,6 +333,8 @@ export interface StartAgentAllRunsInput {
   agentSource: string;
   credentialId?: string | null;
   ownerId: string;
+  /** Admin bypasses suite visibility scoping (default false). */
+  isAdmin?: boolean;
   triggeredBy: "manual" | "schedule";
 }
 
@@ -342,7 +344,13 @@ export interface StartAgentAllRunsInput {
 export async function startEvalAgentAllRuns(
   input: StartAgentAllRunsInput,
 ): Promise<void> {
-  const allSuites = await storage.listSuitesByAgent(input.agentId, input.agentSource);
+  // SECURITY: only the effective owner's visible suites run (BUG-3).
+  const allSuites = await storage.listSuitesByAgent(
+    input.agentId,
+    input.agentSource,
+    input.ownerId,
+    input.isAdmin ?? false,
+  );
   const runnable = allSuites.filter((s) => s.enabled && s.evaluatorAgentId);
   if (runnable.length === 0) return;
 

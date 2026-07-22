@@ -32,7 +32,10 @@ interface SshArgs {
 }
 
 interface SqlArgs {
-  sql?: string;
+  // CONTRACT: must match the `extract_dataset_by_sql` tool param name
+  // (`sql_text` in data-sources/runtime-tools.ts) or write detection
+  // silently never fires.
+  sql_text?: string;
 }
 
 /**
@@ -126,7 +129,7 @@ async function evaluateApprovalNeeded(
   // 2. Database writes (extract_dataset_by_sql)
   if (toolName === "extract_dataset_by_sql" && args && typeof args === "object") {
     const sqlArgs = args as SqlArgs;
-    const sqlQuery = sqlArgs.sql;
+    const sqlQuery = sqlArgs.sql_text;
     if (typeof sqlQuery === "string") {
       const writeSqlPatterns = [
         /\binsert\b/i,
@@ -206,8 +209,77 @@ async function waitForApproval(runId: string, approvalId: string, userId: string
   });
 }
 
+/** Outcome of {@link runToolApprovalGate}. `proceed:false` carries the
+ *  exact LLM-facing envelope to return in place of executing. */
+export type ApprovalGateResult =
+  | { proceed: true }
+  | { proceed: false; result: { isError: true; message: string } };
+
 /**
- * Wrap a tool definition with approval interception logic.
+ * The approval decision, factored out of {@link wrapToolApproval} so both
+ * the legacy wrapper (MCP path) and the agent-pipeline ToolApprovalMiddleware
+ * share ONE implementation (identical events / envelopes).
+ *
+ * Returns `{ proceed: true }` when no approval is needed OR the user
+ * approved; `{ proceed: false, result }` when rejected / timed out /
+ * registration failed.
+ *
+ * CONTRACT: caller skips system/exempt tools before calling this
+ * (see `APPROVAL_EXEMPT_TOOLS`).
+ */
+export async function runToolApprovalGate(params: {
+  toolName: string;
+  args: unknown;
+  /** AI SDK toolCallId (execute's args[1].toolCallId) — preferred over
+   *  event lookup to avoid retry race conditions. */
+  toolCallId?: string;
+  approvalMode: "always" | "auto" | "never";
+  runId: string;
+  userId: string;
+}): Promise<ApprovalGateResult> {
+  const { toolName, args: toolArgs, approvalMode, runId, userId } = params;
+  if (approvalMode === "never") return { proceed: true };
+
+  const needsApproval = await evaluateApprovalNeeded(toolName, toolArgs, approvalMode);
+  if (!needsApproval) return { proceed: true };
+
+  const approvalId = crypto.randomUUID();
+  const toolCallId = params.toolCallId || (await resolveToolCallId(runId, toolName));
+
+  try {
+    const seqNow = await RunSequenceRegistry.getAndIncrement(runId);
+    log.info({ runId, toolName, approvalId, toolCallId, seq: seqNow }, "triggering manual tool approval gate");
+    await recordEvent(runId, seqNow, "approval_requested", {
+      approvalId,
+      toolName,
+      arguments: toolArgs,
+      toolCallId,
+      message: `Approval required: Agent is requesting permission to execute tool '${toolName}'.`,
+    });
+    publish(userId, {
+      kind: "tool_approval_requested",
+      runId,
+      approvalId,
+      toolName,
+      args: toolArgs,
+      toolCallId,
+      message: `Approval required for tool '${toolName}'`,
+    });
+  } catch (e) {
+    log.error({ runId, toolName, err: e }, "failed to write approval_requested event or publish approval request");
+    return { proceed: false, result: { isError: true, message: `Tool approval registration failed: ${String(e)}` } };
+  }
+
+  const approved = await waitForApproval(runId, approvalId, userId);
+  if (!approved) {
+    return { proceed: false, result: { isError: true, message: `Tool execution was rejected or timed out by the user.` } };
+  }
+  return { proceed: true };
+}
+
+/**
+ * Wrap a tool definition with approval interception logic. Thin wrapper
+ * over {@link runToolApprovalGate} — retained for the MCP provider path.
  *
  * CONTRACT: does nothing when `approvalMode === "never"`.
  * CONTRACT: caller is responsible for skipping system/exempt tools before
@@ -229,56 +301,15 @@ export function wrapToolApproval(
   return {
     ...tool,
     execute: async (...args: unknown[]) => {
-      const toolArgs = args[0];
-
-      // 1. Evaluate if this tool execution requires approval
-      const needsApproval = await evaluateApprovalNeeded(toolName, toolArgs, approvalMode);
-      if (!needsApproval) {
-        return originalExecuteTyped.apply(tool, args);
-      }
-
-      // 2. Trigger manual approval flow
-      const approvalId = crypto.randomUUID();
-      
-      // AI SDK passes { toolCallId, messages } as the second argument to `execute`.
-      // Prefer this exact toolCallId to avoid race conditions with DB event flushing,
-      // which causes old toolCallIds to be incorrectly matched on agent retries.
-      const execOptions = args[1] as { toolCallId?: string } | undefined;
-      const toolCallId = execOptions?.toolCallId || await resolveToolCallId(runId, toolName);
-
-      try {
-        const seqNow = await RunSequenceRegistry.getAndIncrement(runId);
-
-        log.info({ runId, toolName, approvalId, toolCallId, seq: seqNow }, "triggering manual tool approval gate");
-        await recordEvent(runId, seqNow, "approval_requested", {
-          approvalId,
-          toolName,
-          arguments: toolArgs,
-          toolCallId,
-          message: `Approval required: Agent is requesting permission to execute tool '${toolName}'.`,
-        });
-
-        publish(userId, {
-          kind: "tool_approval_requested",
-          runId,
-          approvalId,
-          toolName,
-          args: toolArgs,
-          toolCallId,
-          message: `Approval required for tool '${toolName}'`,
-        });
-      } catch (e) {
-        log.error({ runId, toolName, err: e }, "failed to write approval_requested event or publish approval request");
-        return { isError: true, message: `Tool approval registration failed: ${String(e)}` };
-      }
-
-      // Wait for user manual approval
-      const approved = await waitForApproval(runId, approvalId, userId);
-      if (!approved) {
-        return { isError: true, message: `Tool execution was rejected or timed out by the user.` };
-      }
-
-      // 3. Continue execution if approved
+      const gate = await runToolApprovalGate({
+        toolName,
+        args: args[0],
+        toolCallId: (args[1] as { toolCallId?: string } | undefined)?.toolCallId,
+        approvalMode,
+        runId,
+        userId,
+      });
+      if (!gate.proceed) return gate.result;
       return originalExecuteTyped.apply(tool, args);
     },
   };

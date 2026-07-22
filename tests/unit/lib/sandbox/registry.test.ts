@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 let mockSandboxMode = "subprocess";
+let mockAllowInsecure = true;
 vi.mock("@/lib/config", () => ({
   getConfig: (key: string, defaultValue: string) => {
     if (key === "sandbox.mode") return mockSandboxMode;
@@ -10,7 +11,8 @@ vi.mock("@/lib/config", () => ({
   },
   getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
   getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-  getConfigBoolean: (_key: string, defaultValue: boolean) => defaultValue,
+  getConfigBoolean: (key: string, defaultValue: boolean) =>
+    key === "sandbox.allow_insecure" ? mockAllowInsecure : defaultValue,
 }));
 
 import {
@@ -24,6 +26,7 @@ import { SANDBOX_BACKENDS } from "@/lib/sandbox/types";
 beforeEach(() => {
   _resetActiveAdapterCache();
   mockSandboxMode = "subprocess";
+  mockAllowInsecure = true;
 });
 
 afterEach(() => {
@@ -45,13 +48,19 @@ describe("sandbox registry — adapter table", () => {
 });
 
 describe("sandbox registry — sandbox.mode selection (always explicit)", () => {
-  it("defaults to subprocess", async () => {
-    const a = await getActiveAdapter();
-    expect(a.backend).toBe("subprocess");
+  // BUG-11: subprocess is degraded (no isolation) → fail-closed unless
+  // explicitly opted into via sandbox.allow_insecure.
+  it("subprocess without opt-in is refused (fail-closed)", async () => {
+    mockSandboxMode = "subprocess";
+    mockAllowInsecure = false;
+    await expect(getActiveAdapter()).rejects.toBeInstanceOf(
+      BackendUnavailableError,
+    );
   });
 
-  it("sandbox.mode=subprocess → subprocess adapter", async () => {
+  it("sandbox.mode=subprocess + allow_insecure → subprocess adapter", async () => {
     mockSandboxMode = "subprocess";
+    mockAllowInsecure = true;
     const a = await getActiveAdapter();
     expect(a.backend).toBe("subprocess");
   });

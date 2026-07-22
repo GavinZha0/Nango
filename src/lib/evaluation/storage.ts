@@ -2,7 +2,7 @@
 
 import "server-only";
 
-import { asc, desc, eq, sql, and, inArray } from "drizzle-orm";
+import { asc, desc, eq, sql, and, or, inArray } from "drizzle-orm";
 import { visibilitySql } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/http/route-handlers";
 import { db } from "@/lib/db";
@@ -67,15 +67,32 @@ export async function getSuiteById(
   return rows[0] ?? null;
 }
 
+/**
+ * SECURITY: scoped to suites visible to the effective owner — public,
+ * own, or admin (BUG-3). Works headless (schedule) without a Session,
+ * unlike `visibilitySql`. Running another editor's PRIVATE suite is not
+ * allowed; running shared/public suites is intended.
+ */
 export async function listSuitesByAgent(
   agentId: string,
-  agentSource: string = "builtin",
+  agentSource: string,
+  ownerId: string,
+  isAdmin = false,
 ): Promise<EvalSuiteEntity[]> {
   return db
     .select()
     .from(EvalSuiteTable)
     .where(
-      sql`${EvalSuiteTable.agentId} = ${agentId} AND ${EvalSuiteTable.agentSource} = ${agentSource}`,
+      and(
+        eq(EvalSuiteTable.agentId, agentId),
+        eq(EvalSuiteTable.agentSource, agentSource),
+        isAdmin
+          ? undefined
+          : or(
+              eq(EvalSuiteTable.visibility, "public"),
+              eq(EvalSuiteTable.createdBy, ownerId),
+            ),
+      ),
     )
     .orderBy(asc(EvalSuiteTable.name));
 }

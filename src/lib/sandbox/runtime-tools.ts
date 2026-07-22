@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { getActiveAdapter } from "./registry.server";
 import { assembleCodeOutput } from "./code-output";
+import { BackendUnavailableError } from "./errors";
 
 const RunInSandboxArgs = z.object({
   /** Interpreter to execute `code_text` in. Maps to a fixed
@@ -123,7 +124,28 @@ export function buildRunInSandboxTool(): ToolDefinition {
       "Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: RunInSandboxArgs,
     execute: async (args) => {
-      const adapter = await getActiveAdapter();
+      let adapter;
+      try {
+        adapter = await getActiveAdapter();
+      } catch (err) {
+        // SECURITY (BUG-11): fail-closed — surface the "no isolated
+        // sandbox configured" refusal as a structured envelope instead
+        // of executing or throwing a raw error.
+        if (err instanceof BackendUnavailableError) {
+          return {
+            ok: false,
+            duration_ms: 0,
+            rows: null,
+            row_count: null,
+            row_schema: null,
+            message: null,
+            files: null,
+            error: err.message,
+            backend: null,
+          };
+        }
+        throw err;
+      }
       const command = LANGUAGE_COMMAND[args.language];
       // QUIRK: `params` is accepted at the tool boundary but not
       // yet plumbed into the sandbox env — the SandboxInput

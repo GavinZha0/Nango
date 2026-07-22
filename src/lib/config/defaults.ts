@@ -26,6 +26,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "sandbox.tmpfs_size_mb", value: "512", valueType: "number", description: "Tmpfs size in MB" },
   { key: "sandbox.stdout_max_chars", value: "20000", valueType: "number", description: "Max stdout chars before truncation" },
   { key: "sandbox.stderr_max_chars", value: "10000", valueType: "number", description: "Max stderr chars before truncation" },
+  { key: "sandbox.allow_insecure", value: "false", valueType: "boolean", description: "Allow the degraded subprocess sandbox (no fs/network isolation) to execute code. Leave false in production; set true only to explicitly accept unisolated execution when Docker is unavailable." },
 
   // ── cache ─────────────────────────────────────────────────────────
   { key: "cache.agent_pool.ttl", value: "600", valueType: "number", description: "Agent pool TTL in seconds" },

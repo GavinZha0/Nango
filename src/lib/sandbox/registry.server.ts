@@ -8,8 +8,8 @@ import "server-only";
 
 import type { ISandboxAdapter, SandboxBackend } from "./types";
 import { SANDBOX_BACKENDS } from "./types";
-import { BackendUnavailableError, SandboxError } from "./errors";
-import { getConfig } from "@/lib/config";
+import { BackendUnavailableError, SandboxDisabledError, SandboxError } from "./errors";
+import { getConfig, getConfigBoolean } from "@/lib/config";
 
 import { SubprocessAdapter } from "./adapters/subprocess/adapter.server";
 import { LocalDockerAdapter } from "./adapters/local-docker/adapter.server";
@@ -40,6 +40,21 @@ export async function getActiveAdapter(): Promise<ISandboxAdapter> {
   if (cachedActive) return cachedActive;
 
   const mode = parseSandboxMode(getConfig("sandbox.mode", "subprocess"));
+
+  // SECURITY (BUG-11): fail-closed. The `subprocess` backend provides no
+  // filesystem/network isolation, so it must be *explicitly* opted into
+  // — never the silent default. Refuse code execution unless the
+  // operator has acknowledged the risk via `sandbox.allow_insecure`.
+  // `local-docker` / `remote-docker` are unaffected.
+  if (mode === "subprocess" && !getConfigBoolean("sandbox.allow_insecure", false)) {
+    throw new SandboxDisabledError(
+      "Code execution is disabled: no isolated sandbox is configured. " +
+        "Set sandbox.mode=local-docker (recommended), or — to accept the " +
+        "degraded, unisolated subprocess backend — set " +
+        "sandbox.allow_insecure=true explicitly.",
+    );
+  }
+
   const adapter = ADAPTERS[mode];
   if (!adapter) {
     throw new BackendUnavailableError(

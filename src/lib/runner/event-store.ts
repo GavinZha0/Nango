@@ -6,7 +6,7 @@
 
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -20,6 +20,7 @@ import {
   type EntityRunStatus,
 } from "@/lib/db/schema";
 import type { EntityKind } from "@/lib/backends/types";
+import { admitRun } from "./admission";
 
 /** DB row seed for `entity_run`; Runner derives `entityKind` /
  *  `entitySource` server-side before calling. */
@@ -80,6 +81,10 @@ async function recursionDepth(parentRunId: string | undefined): Promise<number> 
  * `running` state on success.
  */
 export async function recordRunStart(seed: RunRowSeed): Promise<EntityRunEntity> {
+  // SECURITY (BUG-4): authorization invariant — must run first, before
+  // any row is created. Non-bypassable by construction (every run-start
+  // path funnels through here).
+  await admitRun(seed);
   const depth = await recursionDepth(seed.parentRunId);
   if (depth > MAX_RECURSION_DEPTH) {
     throw new RecursionDepthExceeded(depth);
@@ -164,10 +169,14 @@ export async function recordEvent(
   });
 }
 
-/** Read the full event timeline of a run (oldest → newest). */
+/** Read the full event timeline of a run (oldest → newest).
+ *  CONTRACT: ordered by `seq` ascending — callers (approval toolCallId
+ *  resolution, chat-history reconstruction, trace metrics) rely on this;
+ *  Postgres does not guarantee insertion order without ORDER BY. */
 export async function readEvents(runId: string): Promise<EntityRunEventEntity[]> {
   return db
     .select()
     .from(EntityRunEventTable)
-    .where(eq(EntityRunEventTable.runId, runId));
+    .where(eq(EntityRunEventTable.runId, runId))
+    .orderBy(asc(EntityRunEventTable.seq));
 }

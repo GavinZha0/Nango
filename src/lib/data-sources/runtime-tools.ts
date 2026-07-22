@@ -109,7 +109,17 @@ export interface ExtractDatasetResult {
 
 // Tool
 
-export function buildExtractDatasetTool(): ToolDefinition {
+/**
+ * @param allowedDataSourceIds - the caller's approved binding set. The
+ *   tool resolves data sources by global name, so this Set is the
+ *   authorization boundary (BUG-1): agent path passes the agent's bound
+ *   `dataSourceIds`; workflow path passes the owner-visible ids. Mirrors
+ *   the SSH `allowedIds` pattern.
+ */
+export function buildExtractDatasetTool(
+  allowedDataSourceIds: readonly string[],
+): ToolDefinition {
+  const allowed = new Set(allowedDataSourceIds);
   return defineTool({
     name: "extract_dataset_by_sql",
     description:
@@ -160,6 +170,20 @@ export function buildExtractDatasetTool(): ToolDefinition {
         };
       }
       const resolved = lookup.resolved;
+
+      // SECURITY (BUG-1): the editor/admin-approved binding is the
+      // authorization boundary. The name lookup is global, so reject any
+      // source outside the caller's allowed set. Return NOT_FOUND (not
+      // "forbidden") so we don't leak the existence of unbound sources.
+      if (!allowed.has(resolved.id)) {
+        return {
+          ok: false,
+          error: {
+            code: "NOT_FOUND",
+            message: `Data source "${args.data_source_name}" not found.`,
+          },
+        };
+      }
 
       // Policy gate: parse the SQL and reject before touching the
       // cache so writes / disallowed tables fail fast. The adapter

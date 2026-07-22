@@ -186,6 +186,7 @@ For the complete, authoritative list of keys, their default values, and descript
 | `sandbox.stdout_max_chars` | 20000 | number | Max stdout chars before truncation |
 | `sandbox.stderr_max_chars` | 10000 | number | Max stderr chars before truncation |
 | `sandbox.mode` | subprocess | enum | `subprocess` / `local-docker` / `remote-docker` |
+| `sandbox.allow_insecure` | false | boolean | Explicit opt-in to the degraded, unisolated `subprocess` backend. When false (default), `subprocess` mode is fail-closed — code execution is disabled. Leave false in production. |
 | `sandbox.runtime` | docker | enum | `docker` / `podman` |
 | `sandbox.image` | sandbox-runner:latest | string | Container image for local-docker backend |
 
