@@ -17,6 +17,7 @@ import { toToolFailure } from "@/lib/runner/tool-failure";
 import { runToolApprovalGate } from "@/lib/runner/tool-approval";
 
 import { defineToolMiddleware } from "./compose";
+import { evaluateToolRisk } from "./risk-registry";
 import type { ToolMiddleware } from "./types";
 
 /** order 50 — innermost: turn any throw into the structured isError envelope. */
@@ -38,7 +39,8 @@ export function toolErrorHandlingMiddleware(
 }
 
 /** order 40 — outer: HITL approval gate. No-op without a runId or for
- *  exempt tools (matches the previous dispatch-site guards). */
+ *  exempt tools (matches the previous dispatch-site guards). Also enforces
+ *  G20 Headless Deny when ctx.isHeadless is true. */
 export function toolApprovalMiddleware(opts: {
   approvalMode: "always" | "auto" | "never";
   exemptTools: ReadonlySet<string>;
@@ -47,8 +49,23 @@ export function toolApprovalMiddleware(opts: {
     name: "tool-approval",
     order: 40,
     beforeToolCall: async (ctx, call) => {
-      if (!ctx.runId) return { action: "pass" };
       if (opts.exemptTools.has(call.toolName)) return { action: "pass" };
+
+      // G20 Headless Deny — immediately reject tools requiring manual approval in no-user runs
+      if (ctx.isHeadless) {
+        const risk = evaluateToolRisk(call.toolName, call.args);
+        if (risk.requiresApproval || !risk.headlessAllowed) {
+          return {
+            action: "block",
+            result: {
+              isError: true,
+              message: `Headless execution denied for tool requiring manual approval: ${call.toolName}`,
+            },
+          };
+        }
+      }
+
+      if (!ctx.runId) return { action: "pass" };
       const gate = await runToolApprovalGate({
         toolName: call.toolName,
         args: call.args,

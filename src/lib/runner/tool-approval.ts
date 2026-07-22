@@ -11,6 +11,7 @@ import { recordEvent, readEvents } from "@/lib/runner/event-store";
 import { subscribe, publish, type RunnerEvent } from "@/lib/runner/event-bus";
 import { RunSequenceRegistry } from "./sequence-registry";
 import { getConfigMs } from "@/lib/config";
+import { evaluateToolRisk } from "@/lib/agent-pipeline/risk-registry";
 import { childLogger } from "@/lib/observability/logger";
 
 const log = childLogger({ component: "tool-approval" });
@@ -29,13 +30,6 @@ interface ToolCallPayload {
 interface SshArgs {
   serverName?: string;
   command?: string;
-}
-
-interface SqlArgs {
-  // CONTRACT: must match the `extract_dataset_by_sql` tool param name
-  // (`sql_text` in data-sources/runtime-tools.ts) or write detection
-  // silently never fires.
-  sql_text?: string;
 }
 
 /**
@@ -67,7 +61,7 @@ async function resolveToolCallId(runId: string, toolName: string): Promise<strin
 }
 
 /**
- * Determine if approval is needed based on mode, toolName, and arguments.
+ * Determine if approval is needed based on mode, toolName, arguments, and ToolRiskRegistry.
  */
 async function evaluateApprovalNeeded(
   toolName: string,
@@ -77,82 +71,38 @@ async function evaluateApprovalNeeded(
   if (approvalMode === "never") return false;
   if (approvalMode === "always") return true;
 
-  // Auto mode checks
+  // Auto mode evaluation via Tool Risk Registry
+  const evalResult = evaluateToolRisk(toolName, args, undefined, "lenient");
+  if (evalResult.requiresApproval) {
+    log.info({ toolName, reason: evalResult.reason, riskLevel: evalResult.riskLevel }, "auto approval triggered: tool risk registry evaluation");
+    return true;
+  }
 
-  // 1. SSH Command checks
+  // Per-SSH-server commandApprove list matching
   if (toolName === "run_ssh_command" && args && typeof args === "object") {
     const sshArgs = args as SshArgs;
     const command = sshArgs.command;
     const serverName = sshArgs.serverName;
-    if (typeof command === "string") {
-      // (a) Global dangerous pattern checks
-      const dangerousPatterns = [
-        /\brm\b/i,
-        /\bdelete\b/i,
-        /\bdrop\b/i,
-        /\bmv\b/i,
-        /\btruncate\b/i,
-        /\bformat\b/i,
-        /\bshutdown\b/i,
-        /\breboot\b/i,
-        /\bkill\b/i,
-      ];
-      if (dangerousPatterns.some((pattern) => pattern.test(command))) {
-        log.info({ toolName, command }, "auto approval triggered: global dangerous ssh pattern matched");
-        return true;
-      }
-
-      // (b) Per-server commandApprove list matching
-      if (typeof serverName === "string") {
-        try {
-          const servers = await db
-            .select()
-            .from(SshServerTable)
-            .where(eq(SshServerTable.name, serverName))
-            .limit(1);
-          const server = servers[0] ?? null;
-          if (server && server.commandApprove && Array.isArray(server.commandApprove)) {
-            for (const pattern of server.commandApprove) {
-              if (pattern && new RegExp(pattern, "i").test(command)) {
-                log.info({ toolName, command, pattern }, "auto approval triggered: ssh server specific pattern matched");
-                return true;
-              }
+    if (typeof command === "string" && typeof serverName === "string") {
+      try {
+        const servers = await db
+          .select()
+          .from(SshServerTable)
+          .where(eq(SshServerTable.name, serverName))
+          .limit(1);
+        const server = servers[0] ?? null;
+        if (server && server.commandApprove && Array.isArray(server.commandApprove)) {
+          for (const pattern of server.commandApprove) {
+            if (pattern && new RegExp(pattern, "i").test(command)) {
+              log.info({ toolName, command, pattern }, "auto approval triggered: ssh server specific pattern matched");
+              return true;
             }
           }
-        } catch (e) {
-          log.error({ serverName, err: e }, "failed to read SshServerTable for commandApprove checks");
         }
+      } catch (e) {
+        log.error({ serverName, err: e }, "failed to read SshServerTable for commandApprove checks");
       }
     }
-  }
-
-  // 2. Database writes (extract_dataset_by_sql)
-  if (toolName === "extract_dataset_by_sql" && args && typeof args === "object") {
-    const sqlArgs = args as SqlArgs;
-    const sqlQuery = sqlArgs.sql_text;
-    if (typeof sqlQuery === "string") {
-      const writeSqlPatterns = [
-        /\binsert\b/i,
-        /\bupdate\b/i,
-        /\bdelete\b/i,
-        /\bdrop\b/i,
-        /\balter\b/i,
-        /\bcreate\b/i,
-        /\btruncate\b/i,
-        /\breplace\b/i,
-      ];
-      if (writeSqlPatterns.some((pattern) => pattern.test(sqlQuery))) {
-        log.info({ toolName, sqlQuery }, "auto approval triggered: sql write operation detected");
-        return true;
-      }
-    }
-  }
-
-  // 3. Generic write/destructive keyword checks (MCP tools, skills, etc.)
-  const writeKeywords = ["write", "delete", "remove", "update", "create", "save", "upload", "drop", "destroy", "rm"];
-  if (writeKeywords.some((kw) => toolName.toLowerCase().includes(kw))) {
-    log.info({ toolName }, "auto approval triggered: tool name contains write keyword");
-    return true;
   }
 
   return false;
