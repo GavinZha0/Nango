@@ -17,8 +17,13 @@ import { toToolFailure } from "@/lib/runner/tool-failure";
 import { runToolApprovalGate } from "@/lib/runner/tool-approval";
 
 import { defineToolMiddleware } from "./compose";
+import { loopDetectionMiddleware } from "./loop-detection";
 import { evaluateToolRisk } from "./risk-registry";
+import { toolResultSanitizationMiddleware } from "./sanitizer";
 import type { ToolMiddleware } from "./types";
+
+export { loopDetectionMiddleware } from "./loop-detection";
+export { toolResultSanitizationMiddleware } from "./sanitizer";
 
 /** order 50 — innermost: turn any throw into the structured isError envelope. */
 export function toolErrorHandlingMiddleware(
@@ -80,17 +85,20 @@ export function toolApprovalMiddleware(opts: {
 }
 
 /**
- * The server-tool middleware chain applied in built-in dispatch. Approval
- * is always included; its internal guards (no runId / never mode / exempt
- * tool) reproduce the previous conditional-wrap behavior exactly.
+ * The server-tool middleware chain applied in built-in dispatch.
+ * Includes HITL approval (order 40), error handling (order 50),
+ * result sanitization (order 55), and loop detection (order 60).
  */
 export function buildServerToolMiddlewares(opts: {
   approvalMode: "always" | "auto" | "never";
   exemptTools: ReadonlySet<string>;
   log?: ReturnType<typeof childLogger>;
+  loopThreshold?: number;
 }): ToolMiddleware[] {
   return [
     toolApprovalMiddleware({ approvalMode: opts.approvalMode, exemptTools: opts.exemptTools }),
     toolErrorHandlingMiddleware(opts.log, "server_tool_failed"),
+    toolResultSanitizationMiddleware(),
+    loopDetectionMiddleware(opts.loopThreshold ?? 3),
   ];
 }

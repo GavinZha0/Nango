@@ -13,6 +13,7 @@ import { Observable } from "rxjs";
 
 import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventType, EntityRunStatus } from "@/lib/db/schema";
+import { redactSensitiveText } from "@/lib/agent-pipeline/output-redaction";
 import { recordEvent, finalizeRun } from "./event-store";
 import { RunSequenceRegistry } from "./sequence-registry";
 
@@ -128,14 +129,14 @@ export class PersistingAgent extends AbstractAgent {
     const flushMessage = (): void => {
       if (!pendingMessage) return;
       const { messageId, role, text, startTs } = pendingMessage;
-      persist("message", { messageId, role, text }, startTs);
+      persist("message", { messageId, role, text: redactSensitiveText(text) }, startTs);
       pendingMessage = null;
     };
 
     const flushReasoning = (): void => {
       if (!pendingReasoning) return;
       const { messageId, text, startTs } = pendingReasoning;
-      persist("reasoning", { messageId, text }, startTs);
+      persist("reasoning", { messageId, text: redactSensitiveText(text) }, startTs);
       pendingReasoning = null;
     };
 
@@ -166,7 +167,10 @@ export class PersistingAgent extends AbstractAgent {
       const drain = (async (): Promise<void> => {
         await Promise.allSettled(pendingWrites);
         try {
-          await finalizeRun(runId, status, fields);
+          const cleanFields = fields.errorMessage
+            ? { ...fields, errorMessage: redactSensitiveText(fields.errorMessage) }
+            : fields;
+          await finalizeRun(runId, status, cleanFields);
         } catch (e: unknown) {
           log.error(
             { runId, err: e instanceof Error ? e.message : String(e) },
