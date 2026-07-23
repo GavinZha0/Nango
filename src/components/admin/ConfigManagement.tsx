@@ -294,9 +294,6 @@ export function ConfigManagement(): ReactNode {
         <Settings className="h-6 w-6 text-muted-foreground" />
         <div className="flex-1">
           <h1 className="text-xl font-bold tracking-tight">Configuration</h1>
-          <p className="text-sm text-muted-foreground">
-            {rows.length} parameters across {grouped.size} groups
-          </p>
         </div>
         <Button
           variant="outline"

@@ -23,8 +23,8 @@ import { eq } from "drizzle-orm";
 export const DEFAULT_SAFETY_POLICIES = [
   {
     name: "llm_api_key_redact",
-    displayName: "通用大模型 API Key 擦除",
-    description: "自动识别并擦除 OpenAI, Anthropic, DeepSeek, Moonshot 等通用 LLM API Key",
+    displayName: "LLM API Key Secret Redaction",
+    description: "Automatically detects and redacts OpenAI, Anthropic, DeepSeek, and Moonshot API keys.",
     category: "secret_leak",
     policyType: "regex",
     action: "redact",
@@ -38,8 +38,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "cloud_credential_redact",
-    displayName: "通用云凭证与私钥擦除",
-    description: "自动识别并擦除 AWS, GCP, Azure 访问凭证及 SSH 私钥",
+    displayName: "Cloud Credential & Private Key Redaction",
+    description: "Automatically detects and redacts AWS, GCP, Azure access keys and SSH private keys.",
     category: "secret_leak",
     policyType: "regex",
     action: "redact",
@@ -53,8 +53,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "bearer_token_redact",
-    displayName: "通用 Auth Bearer Token 擦除",
-    description: "自动识别并擦除 HTTP Header 中的 Bearer 认证 Token",
+    displayName: "Auth Bearer Token Redaction",
+    description: "Automatically detects and redacts HTTP Bearer authentication tokens in headers and text.",
     category: "secret_leak",
     policyType: "regex",
     action: "redact",
@@ -68,8 +68,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "chinese_phone_redact",
-    displayName: "中国大陆手机号脱敏",
-    description: "自动将 11 位手机号中间 4 位替换为掩码",
+    displayName: "Mobile Phone Number PII Masking",
+    description: "Automatically masks 11-digit mobile phone numbers with asterisks.",
     category: "output_redaction",
     policyType: "regex",
     action: "redact",
@@ -83,8 +83,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "id_card_redact",
-    displayName: "身份证件号脱敏",
-    description: "自动将 18 位身份证件号中间 8 位替换为掩码",
+    displayName: "National Identity Number Masking",
+    description: "Automatically masks 18-digit identity numbers and passport identifiers.",
     category: "output_redaction",
     policyType: "regex",
     action: "redact",
@@ -98,8 +98,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "email_redact",
-    displayName: "电子邮箱掩码脱敏",
-    description: "自动将电子邮箱前缀部分字符掩码处理",
+    displayName: "Email Address PII Redaction",
+    description: "Automatically masks email username prefixes before output rendering.",
     category: "output_redaction",
     policyType: "regex",
     action: "redact",
@@ -113,8 +113,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "system_tag_injection_block",
-    displayName: "框架系统控制标签防护",
-    description: "自动转义或阻断伪装成系统提示词的 HTML/Control 标签",
+    displayName: "System Control Tag Injection Guard",
+    description: "Blocks and escapes malicious control tags mimicking framework system prompts.",
     category: "input_injection",
     policyType: "regex",
     action: "block",
@@ -127,8 +127,8 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "default_prohibited_terms",
-    displayName: "通用高危敏感词与危险命令拦截",
-    description: "拦截包含全盘擦除、格式化等极具毁灭性的系统底层命令",
+    displayName: "Destructive System Command Guard",
+    description: "Blocks destructive OS commands like 'rm -rf /' and disk format commands.",
     category: "topic_guard",
     policyType: "regex",
     action: "block",

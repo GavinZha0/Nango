@@ -14,3 +14,6 @@
 // vitest output. Provide a dummy value to silence it. The actual value
 // is irrelevant — no test makes auth callbacks.
 process.env.BETTER_AUTH_URL ??= "http://localhost:9300";
+
+import { vi } from "vitest";
+vi.mock("server-only", () => ({}));

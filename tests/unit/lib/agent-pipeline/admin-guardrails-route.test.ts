@@ -55,10 +55,12 @@ vi.mock("@/lib/agent-pipeline/guardrail-service", () => ({
   getToolRiskOverride: vi.fn().mockReturnValue(undefined),
   invalidateGuardrailCache: vi.fn(),
   generateCustomRuleName: vi.fn().mockReturnValue("custom_rule_abc123"),
+  DEFAULT_SAFETY_POLICIES: [],
 }));
 
 vi.mock("@/lib/config", () => ({
   updateConfig: vi.fn().mockResolvedValue(undefined),
+  invalidateConfigCache: vi.fn(),
 }));
 
 describe("API /api/admin/guardrails", () => {
@@ -71,7 +73,13 @@ describe("API /api/admin/guardrails", () => {
   });
 
   it("GET returns posture, builtin tools, and interception logs", async () => {
-    const mockSelectChain = {
+    // First db.select call: configs query — from() resolves directly to []
+    const mockConfigsChain = {
+      from: vi.fn().mockResolvedValue([]),
+    };
+
+    // Second db.select call: interception logs query — from → orderBy → limit
+    const mockLogsChain = {
       from: vi.fn().mockReturnValue({
         orderBy: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue([
@@ -91,7 +99,9 @@ describe("API /api/admin/guardrails", () => {
       }),
     };
 
-    vi.mocked(db.select).mockReturnValue(mockSelectChain as unknown as ReturnType<typeof db.select>);
+    vi.mocked(db.select)
+      .mockReturnValueOnce(mockConfigsChain as unknown as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(mockLogsChain as unknown as ReturnType<typeof db.select>);
 
     const req = new NextRequest("http://localhost:9300/api/admin/guardrails");
     const res = await GET(req, { params: Promise.resolve({}) });

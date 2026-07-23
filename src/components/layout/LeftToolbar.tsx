@@ -13,6 +13,7 @@ import {
   Settings,
   BellRing,
   Activity,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LeftPanelId } from "@/store/sidebar";
@@ -82,6 +83,7 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   // Admin group
   { kind: "route", id: "user", label: "Users", icon: Users, href: "/admin/user", role: "admin" },
   { kind: "route", id: "credential", label: "Credentials", icon: KeyRound, href: "/admin/credential", role: "admin" },
+  { kind: "route", id: "guardrails", label: "Guardrails", icon: ShieldAlert, href: "/admin/guardrails", role: "admin" },
   { kind: "route", id: "config", label: "Config", icon: Settings, href: "/admin/config", role: "admin" },
 ];
 

@@ -13,6 +13,7 @@ import { z } from "zod";
 import { getActiveAdapter } from "./registry.server";
 import { assembleCodeOutput } from "./code-output";
 import { BackendUnavailableError } from "./errors";
+import { scanCodeStatic } from "./static-scan";
 
 const RunInSandboxArgs = z.object({
   /** Interpreter to execute `code_text` in. Maps to a fixed
@@ -124,6 +125,22 @@ export function buildRunInSandboxTool(): ToolDefinition {
       "Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: RunInSandboxArgs,
     execute: async (args) => {
+      // Node 9: Pre-execution Static Security Scan (AST & pattern inspection)
+      const scanResult = scanCodeStatic(args.code_text, args.language);
+      if (!scanResult.passed) {
+        return {
+          ok: false,
+          duration_ms: 0,
+          rows: null,
+          row_count: null,
+          row_schema: null,
+          message: null,
+          files: null,
+          error: `[Node 9 Static Security Scan Failed]: ${scanResult.violations.map((v) => v.message).join("; ")}`,
+          backend: null,
+        };
+      }
+
       let adapter;
       try {
         adapter = await getActiveAdapter();

@@ -20,3 +20,5 @@ export {
   BackendUnavailableError,
   InvalidSandboxInputError,
 } from "./errors";
+export { scanCodeStatic } from "./static-scan";
+export type { StaticScanResult, StaticScanViolation } from "./static-scan";
