@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/GavinZha0/Nango/compare/v0.10.1...v0.11.0) (2026-07-23)
+
+
+### Features
+
+* add decoupled security interception audit log table ([f1f6e34](https://github.com/GavinZha0/Nango/commit/f1f6e34dd8f897f64d9d3c805b8bbd657577e24d))
+* add guardrails admin control plane UI with 15-node pipeline visualizer ([bf4dd3c](https://github.com/GavinZha0/Nango/commit/bf4dd3cd34002c5063f1323f44eb717aa651342e))
+* complete agent middleware pipeline with MCP tool unification ([ba338e6](https://github.com/GavinZha0/Nango/commit/ba338e654abac23733591dbb43c8be0e29c825be))
+* implement agent middleware pipeline and fix critical security bugs ([ecdd2ab](https://github.com/GavinZha0/Nango/commit/ecdd2abfcbdda20cf6f90dabe379aaaac6dfc115))
+* implement content & output guardrails middleware ([40f7f76](https://github.com/GavinZha0/Nango/commit/40f7f768eb45a7e42bde48bde87975d28c02fcb2))
+
+
+### Bug Fixes
+
+* resolve guardrails UI bugs and type inconsistencies ([d7b7597](https://github.com/GavinZha0/Nango/commit/d7b759703c72ef2a49b255d8acad7b1a763b20d2))
+
 ## [0.10.1](https://github.com/GavinZha0/Nango/compare/v0.10.0...v0.10.1) (2026-07-19)
 
 
