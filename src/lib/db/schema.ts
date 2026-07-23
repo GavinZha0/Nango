@@ -542,7 +542,7 @@ export type UserRole = "admin" | "editor" | "user";
 
 /** Built-in agent system-role enum. `null` = regular user-authored
  *  agent. See AGENTS.md ("Supervisor + agent role enum"). */
-export type AgentRole = "supervisor" | "secretary" | "evaluator";
+export type AgentRole = "supervisor" | "secretary" | "evaluator" | "security";
 export type ImAccounts = { teams?: string; dingtalk?: string; wechat?: string; slack?: string };
 
 // BuiltIn Agent tables
@@ -2153,3 +2153,123 @@ export type EvalCaseResultStatus =
   | "failed"
   | "errored"
   | "skipped";
+
+// Security Admin Guardrails — Policy & Tool Risk Tables
+
+/**
+ * ToolRiskOverrideTable — admin per-tool risk & approval policy overrides.
+ *
+ * Primary key: `bigint generated always as identity`.
+ * Business unique index: (source, mcp_server_id, tool_name) ensures no duplicate
+ * rules for the same tool per server.
+ */
+export const ToolRiskOverrideTable = pgTable(
+  "tool_risk_override",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    source: text("source").notNull(), // 'builtin' | 'mcp'
+    mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
+      onDelete: "cascade",
+    }),
+    toolName: text("tool_name").notNull(),
+    riskLevel: text("risk_level"), // 'low' | 'medium' | 'high' | 'critical'
+    requireApproval: text("require_approval").notNull().default("inherit"), // 'inherit' | 'always' | 'never'
+    headlessAllowed: boolean("headless_allowed"),
+    enabled: boolean("enabled").notNull().default(true),
+
+    createdBy: uuid("created_by").references(() => UserTable.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedBy: uuid("updated_by").references(() => UserTable.id, {
+      onDelete: "set null",
+    }),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    uniqueIndex("tool_risk_override_source_server_tool_idx").on(
+      t.source,
+      t.mcpServerId,
+      t.toolName,
+    ),
+  ],
+);
+
+export type ToolRiskOverrideEntity = typeof ToolRiskOverrideTable.$inferSelect;
+
+/**
+ * SafetyPolicyTable — dynamic pattern & model evaluation guardrail rules.
+ *
+ * Covers PII redaction, secret leak prevention, prompt injection, topic guard,
+ * and AI Model Evaluation rules.
+ */
+export const SafetyPolicyTable = pgTable(
+  "safety_policy",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    name: text("name").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    description: text("description"),
+    category: text("category").notNull(), // 'input_injection' | 'output_redaction' | 'secret_leak' | 'topic_guard'
+    policyType: text("policy_type").notNull().default("regex"), // 'regex' | 'model_eval' | 'keyword_list'
+    action: text("action").notNull().default("redact"), // 'redact' | 'block' | 'warn'
+    severity: text("severity").notNull().default("medium"), // 'low' | 'medium' | 'high' | 'critical'
+    scope: text("scope").notNull().default("global"), // 'global' | 'input' | 'output'
+    enabled: boolean("enabled").notNull().default(true),
+    policyConfig: jsonb("policy_config").notNull().default({}),
+
+    createdBy: uuid("created_by").references(() => UserTable.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedBy: uuid("updated_by").references(() => UserTable.id, {
+      onDelete: "set null",
+    }),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    index("safety_policy_cat_enabled_idx").on(t.category, t.enabled),
+  ],
+);
+
+export type SafetyPolicyEntity = typeof SafetyPolicyTable.$inferSelect;
+
+/**
+ * SafetyInterceptionLogTable — decoupled security audit trail for guardrail interceptions.
+ *
+ * Stores domain-level audit events without cascading run deletion.
+ */
+export const SafetyInterceptionLogTable = pgTable(
+  "safety_interception_log",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    runId: uuid("run_id"), // Plain UUID without cascade FK so audit logs survive run deletion
+    userId: text("user_id"),
+    stage: text("stage").notNull(), // 'input' | 'llm_call' | 'tool_call' | 'tool_result' | 'output'
+    category: text("category").notNull(), // 'input_injection' | 'secret_leak' | 'loop_detection' | 'tool_risk' | 'output_redaction' | 'model_eval'
+    policyId: bigint("policy_id", { mode: "number" }),
+    policyName: text("policy_name"),
+    policyType: text("policy_type"), // 'regex' | 'model_eval' | 'keyword_list' | 'builtin_rule'
+    toolName: text("tool_name"),
+    action: text("action").notNull(), // 'block' | 'redact' | 'warn' | 'require_approval'
+    severity: text("severity").notNull(), // 'low' | 'medium' | 'high' | 'critical'
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    index("safety_log_created_at_idx").on(t.createdAt),
+    index("safety_log_stage_cat_idx").on(t.stage, t.category),
+  ],
+);
+
+export type SafetyInterceptionLogEntity = typeof SafetyInterceptionLogTable.$inferSelect;

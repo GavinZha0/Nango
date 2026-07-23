@@ -10,11 +10,15 @@
 
 import "server-only";
 
+import { getToolRiskOverride } from "./guardrail-service";
+
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type SideEffects = "none" | "read" | "write" | "destructive";
 export type McpDefaultPolicy = "lenient" | "annotation" | "require";
 
 export interface ToolRiskMeta {
+  /** MCP Server ID for scoped risk evaluation */
+  readonly mcpServerId?: string;
   /** MCP Standard Annotation: Read-only operation without side-effects */
   readonly readOnlyHint?: boolean;
   /** MCP Standard Annotation: Destructive operation (data deletion/drop/irreversible) */
@@ -176,8 +180,28 @@ export function evaluateToolRisk(
     }
   }
 
-  // Approval required when risk is high or critical
-  const requiresApproval = riskLevel === "high" || riskLevel === "critical";
+  // 4. Apply DB tool risk overrides if present
+  const source = builtinMeta ? "builtin" : "mcp";
+  const override = getToolRiskOverride(source, meta?.mcpServerId, toolName);
+  if (override && override.enabled) {
+    if (override.riskLevel) {
+      riskLevel = override.riskLevel as RiskLevel;
+    }
+    if (typeof override.headlessAllowed === "boolean") {
+      headlessAllowed = override.headlessAllowed;
+    }
+    reason = "admin database override applied";
+  }
+
+  // Approval required when risk is high/critical, or overridden by admin
+  let requiresApproval = riskLevel === "high" || riskLevel === "critical";
+  if (override && override.enabled) {
+    if (override.requireApproval === "always") {
+      requiresApproval = true;
+    } else if (override.requireApproval === "never") {
+      requiresApproval = false;
+    }
+  }
 
   return {
     riskLevel,

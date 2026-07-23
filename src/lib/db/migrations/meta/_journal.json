@@ -43,6 +43,20 @@
       "when": 1784477444810,
       "tag": "0005_add_tool_approval_mode_check",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784757681507,
+      "tag": "0006_guardrails_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784758699336,
+      "tag": "0007_safety_interception_log",
+      "breakpoints": true
     }
   ]
 }

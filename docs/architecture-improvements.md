@@ -297,23 +297,25 @@ without gating the normal editor workflow.
 
 ```sql
 CREATE TABLE safety_policy (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  scope      text NOT NULL DEFAULT 'global', -- 'global' | 'per_user' | 'per_agent'
-  scope_ref  uuid,            -- user/agent id when scope != global
-  category   text NOT NULL,   -- 'input_guard' | 'output_guard' | 'topic_block' | 'pii_pattern'
-  name       text NOT NULL,
-  pattern    text,            -- regex / keyword
-  action     text NOT NULL DEFAULT 'block',  -- 'block' | 'warn' | 'redact' | 'log'
-  severity   text NOT NULL DEFAULT 'medium',
-  enabled    boolean NOT NULL DEFAULT true,
-  config     jsonb NOT NULL DEFAULT '{}',
-  created_by uuid REFERENCES "user"(id),
-  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+  id            bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  name          text NOT NULL UNIQUE,            -- unique slug (e.g. 'llm_api_key_redact')
+  display_name  text NOT NULL,
+  description   text,
+  category      text NOT NULL,                   -- 'input_injection' | 'output_redaction' | 'secret_leak' | 'topic_guard'
+  policy_type   text NOT NULL DEFAULT 'regex',   -- 'regex' | 'model_eval' | 'keyword_list'
+  action        text NOT NULL DEFAULT 'redact',  -- 'redact' | 'block' | 'warn'
+  severity      text NOT NULL DEFAULT 'medium',  -- 'low' | 'medium' | 'high' | 'critical'
+  scope         text NOT NULL DEFAULT 'global',  -- 'global' | 'input' | 'output'
+  enabled       boolean NOT NULL DEFAULT true,
+  policy_config jsonb NOT NULL DEFAULT '{}',     -- { pattern, replacement } or { credentialId, agentId, threshold }
+  created_by    uuid REFERENCES "user"(id) ON DELETE SET NULL,
+  created_at    timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by    uuid REFERENCES "user"(id) ON DELETE SET NULL,
+  updated_at    timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-Seeded with baseline injection/PII/secret/topic patterns; admin edits via UI.
+Seeded with 8 baseline PII/secret/injection/topic policies; model-eval rules bind Moderation API credentials or Security Role Agents (`AgentRole = 'security'`). Admin edits via single-page UI `/admin/guardrails`.
 
 **2. Tool Risk Registry.** Each tool declares fixed risk metadata; this — not
 regex-on-name — is the source of truth for auto-approval (structurally
@@ -501,49 +503,24 @@ observe-only at the Nango boundary.
 
 ### 4. Admin page `/admin/guardrails` (`withAdmin`)
 
-Information architecture (sections, not necessarily separate pages):
+Single-page admin workspace at `src/app/(workspace)/admin/guardrails/page.tsx` containing 4 Tab components:
 
-1. **Posture overview** — dashboard: each configurable guardrail on/off at a
-   glance; current sandbox mode; recent block/approval counts. **Invariants
-   listed read-only** with "enforced — not configurable" badges (G1/G5/G15 and
-   the enforcement of G2/G3/G4).
-2. **Approval & tool risk** — approval defaults; **tool risk table**: every
-   built-in/mounted tool (from its co-located `risk` default) + *seen* MCP tools,
-   columns `tool · source · effective risk · side-effects · require-approval ·
-   headless`, each row overridable. **MCP default policy** selector
-   (`require` / `annotation` / `lenient`). No pre-registration of MCP tools.
-3. **Content guardrails** — toggles + params: result sanitization,
-   untrusted-context wrapping, loop detection (threshold), token budget (cap),
-   output redaction (pattern list).
-4. **Input guardrails** — rate limits (per-user / global rpm), input length
-   caps, injection patterns (enable + `safety_policy` rows), inspector binding.
-5. **Execution policy (mostly read-only)** — sandbox mode + `allow_insecure`;
-   **deep-links** to each data-source's SQL policy and each ssh_server's command
-   policy (edited on the resource, surfaced here for visibility); skill-scan
-   toggle.
-6. **Audit** — who changed which guardrail when (config change log) + recent
-   blocks/denials/approvals (from `entity_run_event`).
-
-**Interactions:** toggle / edit threshold / per-tool override → save → invalidate
-the guardrail cache; every write is audited (`updated_by`). **Not on this page:**
-RunAdmission / credential / binding invariants (read-only), and the per-resource
-SQL/SSH lists (edited on the resource pages, deep-linked here).
+1. **Tab 1: Posture Overview & 14-Node Serpentine Pipeline Visualizer** —
+   Dashboard featuring the **14-Node Serpentine Dynamic Pipeline Visualizer** (connecting input entry -> G1 RunAdmission -> M1/M2 Input Moderation -> G18 Input Regex -> G5 Credential Confinement -> G11 Loop Detection -> G7 Tool Risk Registry -> G6 HITL Tool Approval -> G2/G3/G4 Sandbox & SQL/SSH Policy -> G9/G10 Tool Result Sanitization -> G12 Token Budget -> G13 Output Redaction -> M1/M2 Output Moderation -> Output Exit). Nodes display real-time enabled state and open interactive Drawer configuration cards on click.
+2. **Tab 2: Tool Risk Table** —
+   Micro entity table for every Built-in & MCP tool, displaying `source · mcpServerId · toolName · riskLevel · requireApproval (inherit/always/never) · headlessAllowed · enabled`. Allows row-level overrides.
+3. **Tab 3: Content & Model Safety Rules Table** —
+   Micro entity table for `safety_policy` rules (Regex patterns & AI Model Evaluation rules), displaying `name · displayName · category · policyType (regex/model_eval) · action · severity · scope · enabled · policyConfig`.
+4. **Tab 4: Security Interception Audit Logs Table** —
+   Decoupled audit trail streamed from `safety_interception_log`, displaying timestamp, stage, category, policyName, toolName, action, severity, and payload context drawer.
 
 ### 5. Config & data model
 
-- **Global toggles + thresholds** → reuse the existing `config` table (admin
-  config infra + cache + `invalidateConfigCache`): `guardrail.approval.enabled`,
-  `guardrail.approval.mcp_default`, `guardrail.loop_detection.enabled|threshold`,
-  `guardrail.result_sanitization.enabled`, `guardrail.rate_limit.per_user_rpm`,
-  `guardrail.token_budget.max`, … (one key per toggle/param).
-- **Per-tool risk override** → new `tool_risk_override(tool_name, source,
-  risk_level?, require_approval('inherit'|'always'|'never'), headless_allowed?,
-  enabled, updated_by, updated_at)`.
-- **Pattern rules** → `safety_policy` table (P1) for injection / PII / topic /
-  output-redaction patterns (`category, pattern, action, severity, scope`).
-- **Cache** → `guardrailConfigCache` (effective toggles + per-tool overrides),
-  invalidated on any guardrail write. Middlewares read the cached accessor, never
-  the DB directly.
+- **Global toggles + thresholds** → reuse existing `config` table (admin config infra + cache + `invalidateConfigCache`): `guardrail.approval.enabled`, `guardrail.approval.mcp_default`, `guardrail.loop_detection.enabled|threshold`, `guardrail.result_sanitization.enabled`, `guardrail.rate_limit.per_user_rpm`, …
+- **Per-tool risk override** → `tool_risk_override(id bigint, source, mcp_server_id?, tool_name, risk_level?, require_approval, headless_allowed?, enabled, updated_by, updated_at)`. Composite unique index on `(source, mcp_server_id, tool_name)`.
+- **Pattern & Model rules** → `safety_policy(id bigint, name unique, display_name, category, policy_type, action, severity, scope, enabled, policy_config)`.
+- **Decoupled Audit Logs** → `safety_interception_log(id bigint, run_id uuid, user_id, stage, category, policy_id, policy_name, policy_type, tool_name, action, severity, payload, created_at)`. Independent of `entity_run` cascade deletion.
+- **Cache** → `globalThis.__nango_guardrail_state` (effective toggles + per-tool overrides + safety policies), invalidated via `invalidateGuardrailCache()`.
 
 ### 6. What is NOT configurable (invariants — read-only on the page)
 
@@ -556,12 +533,9 @@ bypassable.")
 ### 7. Phasing
 
 - **N1-B.1** — code-declared risk defaults + registry + risk-based approval +
-  fail-closed + `assessArgs` + headless deny. No UI. (G6/G7/G20)
-- **N1-B.2** — `tool_risk_override` table + `config` toggles + `/admin/guardrails`
-  §1–2 + cache/invalidation. Turns hardcoded defaults admin-tunable.
-- **P1 waves** — content guardrails (G9/G10/G11/G13), input guardrails
-  (G16/G17/G18), inspector (G19), skill scan (G21) — each ships its middleware
-  **and** its page section together, so the control plane grows with the engine.
+  fail-closed + `assessArgs` + headless deny. No UI. (G6/G7/G20) ✅
+- **P1 Wave 1 (Sub-step 3.1 & 3.2)** — `tool_risk_override`, `safety_policy`, `safety_interception_log` DB tables, `AgentRole = 'security'`, core `guardrail-service.ts`, `/api/admin/guardrails` API route. ✅
+- **P1 Wave 2 (Sub-step 3.3)** — Single-page `/admin/guardrails` UI (4 Tabs, 14-Node Serpentine Pipeline Visualizer with Drawer cards, Micro Tool Risk Table, Micro Content/Model Rules Table, Audit Log Table). 🔧 (In Progress)
 
 ---
 
