@@ -24,7 +24,7 @@ interface GuardrailDashboardProps {
   onDeleteOverride?: (item: ToolRiskItem) => Promise<void>;
   onSavePolicy?: (policy: SafetyPolicyItem) => Promise<void>;
   onDeletePolicy?: (policyId: number) => Promise<void>;
-  onToggleConfig?: (key: string, enabled: boolean) => void;
+  onToggleConfig?: (key: string, enabled: boolean) => Promise<void>;
 }
 
 export function GuardrailDashboard({

@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 
 export interface SafetyPolicyItem {
   id?: number;
@@ -70,6 +71,9 @@ export function ContentSafetyTable({
 }: ContentSafetyTableProps) {
   const [editingPolicy, setEditingPolicy] = useState<Partial<SafetyPolicyItem> | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingPolicy, setDeletingPolicy] = useState<SafetyPolicyItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleCreateNew = () => {
     setEditingPolicy({
@@ -109,6 +113,23 @@ export function ContentSafetyTable({
       setEditingPolicy(null);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteClick = (policy: SafetyPolicyItem) => {
+    setDeletingPolicy(policy);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingPolicy?.id || !onDeletePolicy) return;
+    setDeleting(true);
+    try {
+      await onDeletePolicy(deletingPolicy.id);
+      setDeleteConfirmOpen(false);
+      setDeletingPolicy(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -200,7 +221,7 @@ export function ContentSafetyTable({
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5 text-destructive"
-                          onClick={() => onDeletePolicy(p.id!)}
+                          onClick={() => handleDeleteClick(p)}
                         >
                           <Trash2 className="h-2.5 w-2.5" />
                         </Button>
@@ -213,6 +234,21 @@ export function ContentSafetyTable({
           </TableBody>
         </Table>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        title="Delete safety policy"
+        description={
+          <span>
+            Are you sure you want to delete the safety policy{" "}
+            <strong className="font-mono">{deletingPolicy?.displayName}</strong>? This action cannot be undone.
+          </span>
+        }
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        onConfirm={handleDeleteConfirm}
+        deleting={deleting}
+      />
 
       {/* Policy Edit / Create Modal */}
       <Dialog open={!!editingPolicy} onOpenChange={(open) => !open && setEditingPolicy(null)}>

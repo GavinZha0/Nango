@@ -4,7 +4,7 @@
  * GuardrailsClientShell — Main single-page interactive client workspace.
  *
  * Manages URL query param `?tab=config` (default) vs `?tab=logs`,
- * global emergency bypass toggle, SWR data fetching, and PATCH updates.
+ * direct data fetching from /api/admin/guardrails API, and PATCH updates.
  * Uses sonner `toast` for clean notification messages.
  */
 

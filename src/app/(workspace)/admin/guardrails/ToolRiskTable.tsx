@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 
 export interface ToolRiskItem {
   id?: number;
@@ -52,6 +53,9 @@ interface ToolRiskTableProps {
 export function ToolRiskTable({ items, onSaveOverride, onDeleteOverride }: ToolRiskTableProps) {
   const [editingItem, setEditingItem] = useState<ToolRiskItem | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingItem, setDeletingItem] = useState<ToolRiskItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleCreateNew = () => {
     setEditingItem({
@@ -80,6 +84,23 @@ export function ToolRiskTable({ items, onSaveOverride, onDeleteOverride }: ToolR
   const handleToggleEnabled = async (item: ToolRiskItem, checked: boolean) => {
     if (!onSaveOverride) return;
     await onSaveOverride({ ...item, enabled: checked });
+  };
+
+  const handleDeleteClick = (item: ToolRiskItem) => {
+    setDeletingItem(item);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingItem || !onDeleteOverride) return;
+    setDeleting(true);
+    try {
+      await onDeleteOverride(deletingItem);
+      setDeleteConfirmOpen(false);
+      setDeletingItem(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -170,7 +191,7 @@ export function ToolRiskTable({ items, onSaveOverride, onDeleteOverride }: ToolR
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5 text-destructive"
-                          onClick={() => onDeleteOverride(item)}
+                          onClick={() => handleDeleteClick(item)}
                         >
                           <Trash2 className="h-2.5 w-2.5" />
                         </Button>
@@ -183,6 +204,21 @@ export function ToolRiskTable({ items, onSaveOverride, onDeleteOverride }: ToolR
           </TableBody>
         </Table>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        title="Delete tool risk rule"
+        description={
+          <span>
+            Are you sure you want to delete the risk rule for{" "}
+            <strong className="font-mono">{deletingItem?.toolName}</strong>? This action cannot be undone.
+          </span>
+        }
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        onConfirm={handleDeleteConfirm}
+        deleting={deleting}
+      />
 
       {/* Edit / Create Modal */}
       <Dialog open={!!editingItem} onOpenChange={(open) => !open && setEditingItem(null)}>

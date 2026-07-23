@@ -346,7 +346,7 @@ interface GuardrailPipelineVisualizerProps {
   }>;
   safetyPolicies?: SafetyPolicyItem[];
   onSavePolicy?: (policy: SafetyPolicyItem) => Promise<void>;
-  onToggleConfig?: (key: string, enabled: boolean) => void;
+  onToggleConfig?: (key: string, enabled: boolean) => Promise<void>;
 }
 
 export function GuardrailPipelineVisualizer({
@@ -734,11 +734,15 @@ export function GuardrailPipelineVisualizer({
                         <Switch
                           id="node-toggle"
                           checked={selectedNode.enabled}
-                          onCheckedChange={(checked) => {
+                          onCheckedChange={async (checked) => {
                             if (selectedNode.configKey && onToggleConfig) {
-                              onToggleConfig(selectedNode.configKey, checked);
+                              try {
+                                await onToggleConfig(selectedNode.configKey, checked);
+                                setSelectedNode({ ...selectedNode, enabled: checked });
+                              } catch {
+                                // Keep original state, toast already shown in handler
+                              }
                             }
-                            setSelectedNode({ ...selectedNode, enabled: checked });
                           }}
                         />
                       </div>

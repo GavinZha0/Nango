@@ -14,6 +14,7 @@ import {
   SafetyInterceptionLogTable,
   SafetyPolicyTable,
   ToolRiskOverrideTable,
+  ConfigTable,
 } from "@/lib/db/schema";
 import { withAdmin, ApiError } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
@@ -26,7 +27,6 @@ import {
 } from "@/lib/agent-pipeline/guardrail-service";
 import { BUILTIN_TOOL_RISK_MAP, evaluateToolRisk } from "@/lib/agent-pipeline/risk-registry";
 import { invalidateConfigCache } from "@/lib/config";
-import { ConfigTable } from "@/lib/db/schema";
 
 const ROUTE = "/api/admin/guardrails";
 
