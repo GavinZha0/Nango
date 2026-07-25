@@ -100,6 +100,12 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "eval.threshold.poor", value: "40", valueType: "number", description: "Score >= this is 'Poor'; below is 'Fail' (0-100)" },
   { key: "verification.payload_max_kb", value: "32", valueType: "number", description: "Max KB to save for verification result payload" },
   { key: "mcp.test_snapshot_max_kb", value: "32", valueType: "number", description: "Max KB to save for MCP test snapshots" },
+
+  // ── guardrails ───────────────────────────────────────────────────
+  { key: "guardrail.input_safety.enabled", value: "true", valueType: "boolean", description: "Enable input safety policy middleware (regex rules on tool arguments)" },
+  { key: "guardrail.result_sanitization.enabled", value: "true", valueType: "boolean", description: "Enable tool result sanitization middleware (neutralize framework tags in external tool outputs)" },
+  { key: "guardrail.loop_detection.enabled", value: "true", valueType: "boolean", description: "Enable loop detection middleware (break consecutive identical tool calls)" },
+  { key: "guardrail.loop_detection.threshold", value: "3", valueType: "number", description: "Number of consecutive identical tool calls before blocking" },
 ] as const;
 
 /** Lookup map for fast default resolution. */

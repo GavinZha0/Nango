@@ -58,7 +58,7 @@ export interface ToolMiddleware {
 
 /** Decision returned by a `beforeToolCall` hook. */
 export type BeforeDecision =
-  | { action: "pass" }
+  | { action: "pass"; modifiedArgs?: unknown }
   | { action: "block"; result: unknown };
 
 /**

@@ -57,6 +57,13 @@
       "when": 1784758699336,
       "tag": "0007_safety_interception_log",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785005423852,
+      "tag": "0008_guardrails_fix",
+      "breakpoints": true
     }
   ]
 }

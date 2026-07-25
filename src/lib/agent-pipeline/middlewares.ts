@@ -15,11 +15,14 @@ import "server-only";
 import type { childLogger } from "@/lib/observability/logger";
 import { toToolFailure } from "@/lib/runner/tool-failure";
 import { runToolApprovalGate } from "@/lib/runner/tool-approval";
+import { getConfigBoolean, getConfigNumber } from "@/lib/config";
 
 import { defineToolMiddleware } from "./compose";
 import { loopDetectionMiddleware } from "./loop-detection";
+import { toolSafetyPolicyMiddleware } from "./tool-safety";
 import { evaluateToolRisk } from "./risk-registry";
 import { toolResultSanitizationMiddleware } from "./sanitizer";
+import { getGuardrailConfigCache, recordInterceptionLog } from "./guardrail-service";
 import type { ToolMiddleware } from "./types";
 
 export { loopDetectionMiddleware } from "./loop-detection";
@@ -60,6 +63,22 @@ export function toolApprovalMiddleware(opts: {
       if (ctx.isHeadless) {
         const risk = evaluateToolRisk(call.toolName, call.args);
         if (risk.requiresApproval || !risk.headlessAllowed) {
+          // Log the Headless Deny event
+          if (ctx.runId) {
+            await recordInterceptionLog({
+              runId: ctx.runId,
+              userId: ctx.userId,
+              stage: "input",
+              category: "tool_risk",
+              policyName: "G20 - Headless Deny",
+              policyType: "builtin_rule",
+              toolName: call.toolName,
+              action: "block",
+              severity: risk.riskLevel === "critical" || risk.riskLevel === "high" ? risk.riskLevel : "medium",
+              payload: { reason: "Tool requires manual approval but was executed headlessly", riskLevel: risk.riskLevel },
+            });
+          }
+
           return {
             action: "block",
             result: {
@@ -86,8 +105,11 @@ export function toolApprovalMiddleware(opts: {
 
 /**
  * The server-tool middleware chain applied in built-in dispatch.
- * Includes HITL approval (order 40), error handling (order 50),
- * result sanitization (order 55), and loop detection (order 60).
+ * Includes HITL approval (order 35-40), error handling (order 50),
+ * result sanitization (order 55), loop detection (order 60),
+ * and input safety policy (order 35).
+ *
+ * Middlewares are conditionally added based on guardrail.* config toggles.
  */
 export function buildServerToolMiddlewares(opts: {
   approvalMode: "always" | "auto" | "never";
@@ -95,10 +117,40 @@ export function buildServerToolMiddlewares(opts: {
   log?: ReturnType<typeof childLogger>;
   loopThreshold?: number;
 }): ToolMiddleware[] {
-  return [
-    toolApprovalMiddleware({ approvalMode: opts.approvalMode, exemptTools: opts.exemptTools }),
-    toolErrorHandlingMiddleware(opts.log, "server_tool_failed"),
-    toolResultSanitizationMiddleware(),
-    loopDetectionMiddleware(opts.loopThreshold ?? 3),
-  ];
+  const middlewares: ToolMiddleware[] = [];
+
+  // Order 35: Input safety policy (if enabled and rules exist)
+  const inputSafetyEnabled = getConfigBoolean("guardrail.input_safety.enabled", true);
+  if (inputSafetyEnabled) {
+    const cache = getGuardrailConfigCache();
+    const inputRules = cache.safetyPolicies.filter(
+      (p) => p.enabled && (p.scope === "input" || p.scope === "global")
+    ) as import("./tool-safety").SafetyPolicyRule[];
+    if (inputRules.length > 0) {
+      middlewares.push(toolSafetyPolicyMiddleware(inputRules));
+    }
+  }
+
+  // Order 40: HITL approval gate (always present)
+  middlewares.push(
+    toolApprovalMiddleware({ approvalMode: opts.approvalMode, exemptTools: opts.exemptTools })
+  );
+
+  // Order 50: Error handling (always present)
+  middlewares.push(toolErrorHandlingMiddleware(opts.log, "server_tool_failed"));
+
+  // Order 55: Result sanitization (if enabled)
+  const sanitizationEnabled = getConfigBoolean("guardrail.result_sanitization.enabled", true);
+  if (sanitizationEnabled) {
+    middlewares.push(toolResultSanitizationMiddleware());
+  }
+
+  // Order 60: Loop detection (if enabled)
+  const loopDetectionEnabled = getConfigBoolean("guardrail.loop_detection.enabled", true);
+  if (loopDetectionEnabled) {
+    const threshold = getConfigNumber("guardrail.loop_detection.threshold", 3);
+    middlewares.push(loopDetectionMiddleware(threshold));
+  }
+
+  return middlewares;
 }

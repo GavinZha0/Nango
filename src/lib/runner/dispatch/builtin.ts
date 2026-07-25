@@ -42,6 +42,7 @@ import {
   resolveOrchestrationMode,
   type OrchestrationModeId,
 } from "@/lib/orchestration/modes";
+import type { EntityRunMode, EntityRunInitiator } from "../types";
 import {
   SAFETY_POLICY_BLOCK,
   AUTO_APPROVAL_POLICY_BLOCK,
@@ -101,7 +102,8 @@ export interface BuiltinBuildContext {
   userId: string;
   runId?: string;
   /** Active orchestration mode. Only consulted for supervisor agents. */
-  mode?: OrchestrationModeId;
+  mode?: OrchestrationModeId | EntityRunMode;
+  initiator?: EntityRunInitiator;
   /** Context for programmatic run start (e.g. expectedDimensionIds for evaluator tools). */
   context?: Record<string, unknown>;
 }
@@ -471,11 +473,18 @@ export async function buildBuiltinAgents(
       exemptTools: APPROVAL_EXEMPT_TOOLS,
       log,
     });
+    // G20 Headless Deny: Infer headless mode from context
+    // Headless runs include async mode, scheduled runs, and evaluator-initiated runs
+    const isHeadless =
+      ctx?.mode === "async" ||
+      ctx?.initiator === "schedule" ||
+      ctx?.initiator === "evaluator";
+
     const pipelineCtx = {
       runId: ctx?.runId,
       userId: ctx?.userId ?? "",
       agentId,
-      isHeadless: false,
+      isHeadless,
       metadata: {},
     };
     const toolPipeline = composeToolPipeline(pipelineMiddlewares, pipelineCtx);

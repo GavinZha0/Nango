@@ -5,7 +5,7 @@ vi.mock("server-only", () => ({}));
 import { loopDetectionMiddleware } from "@/lib/agent-pipeline/loop-detection";
 import { sanitizeToolResultText, toolResultSanitizationMiddleware } from "@/lib/agent-pipeline/sanitizer";
 import { UNTRUSTED_START_MARKER } from "@/lib/agent-pipeline/untrusted-context";
-import { redactSensitiveText, SlidingWindowRedactor } from "@/lib/agent-pipeline/output-redaction";
+import { redactSensitiveText, SlidingWindowRedactor } from "@/lib/agent-pipeline/output-safety";
 import type { MiddlewareContext } from "@/lib/agent-pipeline/types";
 
 describe("G11 LoopDetectionMiddleware", () => {

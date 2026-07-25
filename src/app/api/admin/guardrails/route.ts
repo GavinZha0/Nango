@@ -8,6 +8,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
+import vm from "node:vm";
 
 import { db } from "@/lib/db";
 import {
@@ -107,7 +108,7 @@ const patchSchema = z
     configs: z
       .array(
         z.object({
-          key: z.string().min(1),
+          key: z.string().regex(/^guardrail\.[a-zA-Z0-9_.-]+$/, "Config key must start with guardrail."),
           value: z.string(),
         }),
       )
@@ -236,6 +237,23 @@ export const PATCH = withAdmin(ROUTE, async ({ req, session }) => {
     // 3. Upsert Safety Policy if provided
     if (body.safetyPolicy) {
       const p = body.safetyPolicy;
+      
+      // Validate regex pattern against ReDoS if it's a regex policy
+      if (p.policyType === "regex" && p.policyConfig.pattern) {
+        try {
+          const testText = "a".repeat(100000) + "X!"; // Dummy long string that might trigger catastrophic backtracking
+          const context = vm.createContext({ text: testText });
+          const script = new vm.Script(`new RegExp(${JSON.stringify(p.policyConfig.pattern)}, 'gi').test(text)`);
+          script.runInContext(context, { timeout: 100 });
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('timeout')) {
+            throw new ApiError("BAD_REQUEST", 400, `Regex pattern is vulnerable to ReDoS (execution timeout)`);
+          } else {
+            throw new ApiError("BAD_REQUEST", 400, `Invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+
       if (p.id) {
         await db
           .update(SafetyPolicyTable)

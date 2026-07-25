@@ -19,8 +19,30 @@ interface ToolCallRecord {
   argsHash: string;
 }
 
+/**
+ * Stable JSON stringify that sorts object keys to ensure consistent hashing
+ * for semantically identical objects regardless of key order.
+ */
+function stableStringify(obj: unknown): string {
+  if (obj === undefined) return "undefined";
+  if (obj === null) return "null";
+  if (typeof obj !== "object") return JSON.stringify(obj);
+
+  if (Array.isArray(obj)) {
+    return `[${obj.map(item => stableStringify(item)).join(",")}]`;
+  }
+
+  const sortedKeys = Object.keys(obj as object).sort();
+  const pairs = sortedKeys.map(k => {
+    const val = (obj as Record<string, unknown>)[k];
+    return `${JSON.stringify(k)}:${stableStringify(val)}`;
+  });
+
+  return `{${pairs.join(",")}}`;
+}
+
 function computeArgsHash(toolName: string, args: unknown): string {
-  const str = `${toolName}:${JSON.stringify(args ?? {})}`;
+  const str = `${toolName}:${stableStringify(args ?? {})}`;
   return crypto.createHash("md5").update(str).digest("hex");
 }
 
@@ -59,7 +81,11 @@ export function loopDetectionMiddleware(threshold = 3): ToolMiddleware {
         }
       }
 
-      // Record this call
+      // Record this call with memory leak prevention
+      const maxHistoryLength = threshold * 10;
+      if (history.length >= maxHistoryLength) {
+        history.shift(); // Remove oldest entry to prevent unbounded growth
+      }
       history.push({ toolName: call.toolName, argsHash: currentHash });
       return { action: "pass" };
     },

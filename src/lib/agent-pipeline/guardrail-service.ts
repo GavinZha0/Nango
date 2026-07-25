@@ -82,6 +82,36 @@ export const DEFAULT_SAFETY_POLICIES = [
     },
   },
   {
+    name: "us_phone_redact",
+    displayName: "US Phone Number Masking",
+    description: "Automatically masks US 10-digit phone numbers with asterisks.",
+    category: "output_redaction",
+    policyType: "regex",
+    action: "redact",
+    severity: "medium",
+    scope: "output",
+    enabled: true,
+    policyConfig: {
+      pattern: "\\b(?:\\+?1[-.\\s]?)?\\(?(\\d{3})\\)?[-.\\s]?(\\d{3})[-.\\s]?(\\d{4})\\b",
+      replacement: "($1) ***-$3",
+    },
+  },
+  {
+    name: "credit_card_redact",
+    displayName: "Credit Card Number Masking",
+    description: "Automatically masks 16-digit credit card numbers, retaining only first and last 4 digits.",
+    category: "output_redaction",
+    policyType: "regex",
+    action: "redact",
+    severity: "high",
+    scope: "output",
+    enabled: true,
+    policyConfig: {
+      pattern: "\\b(\\d{4})[-.\\s]?\\d{4}[-.\\s]?\\d{4}[-.\\s]?(\\d{4})\\b",
+      replacement: "$1-****-****-$2",
+    },
+  },
+  {
     name: "id_card_redact",
     displayName: "National Identity Number Masking",
     description: "Automatically masks 18-digit identity numbers and passport identifiers.",
@@ -274,7 +304,8 @@ export interface InterceptionLogInput {
     | "loop_detection"
     | "tool_risk"
     | "output_redaction"
-    | "model_eval";
+    | "model_eval"
+    | "topic_guard";
   policyId?: number | null;
   policyName?: string | null;
   policyType?: "regex" | "model_eval" | "keyword_list" | "builtin_rule" | null;

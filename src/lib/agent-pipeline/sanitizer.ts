@@ -15,6 +15,23 @@ import { wrapUntrustedContext } from "./untrusted-context";
 import { defineToolMiddleware } from "./compose";
 import type { ToolMiddleware } from "./types";
 
+/**
+ * Decode encoded angle brackets to prevent encoding-based bypass of system tags.
+ * Only targets < and > to avoid corrupting legitimate text/unicode sequences.
+ * Handles: &#60;, &#x3C;, \u003C, \x3C, &lt;, and their uppercase/> equivalents.
+ */
+function decodeHtmlEntities(text: string): string {
+  let decoded = text;
+
+  // Replace various encoded forms of '<'
+  decoded = decoded.replace(/(?:&#60;|&#x3[cC];|&lt;|\\u003[cC]|\\x3[cC])/g, "<");
+  
+  // Replace various encoded forms of '>'
+  decoded = decoded.replace(/(?:&#62;|&#x3[eE];|&gt;|\\u003[eE]|\\x3[eE])/g, ">");
+
+  return decoded;
+}
+
 /** Known system framework tags commonly used in prompt injection. */
 const DANGEROUS_FRAMEWORK_TAGS = [
   /<system-reminder>/gi,
@@ -33,10 +50,16 @@ const DANGEROUS_FRAMEWORK_TAGS = [
 
 /**
  * Sanitize framework tags in raw text.
+ * First decodes HTML entities and Unicode escapes to prevent encoding-based bypass,
+ * then neutralizes dangerous framework tags.
  */
 export function sanitizeToolResultText(text: string): string {
   if (!text) return text;
-  let cleaned = text;
+
+  // SECURITY: Decode encoded tags first to prevent bypass attacks
+  const decoded = decodeHtmlEntities(text);
+
+  let cleaned = decoded;
   for (const tagPattern of DANGEROUS_FRAMEWORK_TAGS) {
     cleaned = cleaned.replace(tagPattern, (match) => {
       return match.replace("<", "&lt;").replace(">", "&gt;");
@@ -80,14 +103,15 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
       // If object result containing text/content fields
       if (rawResult && typeof rawResult === "object") {
         const resObj = rawResult as Record<string, unknown>;
+        // Return new object to avoid mutating the original reference
         if (typeof resObj.text === "string") {
-          resObj.text = wrapUntrustedContext(sanitizeToolResultText(resObj.text));
+          return { ...resObj, text: wrapUntrustedContext(sanitizeToolResultText(resObj.text)) };
         } else if (typeof resObj.content === "string") {
-          resObj.content = wrapUntrustedContext(sanitizeToolResultText(resObj.content));
+          return { ...resObj, content: wrapUntrustedContext(sanitizeToolResultText(resObj.content)) };
         } else if (typeof resObj.output === "string") {
-          resObj.output = wrapUntrustedContext(sanitizeToolResultText(resObj.output));
+          return { ...resObj, output: wrapUntrustedContext(sanitizeToolResultText(resObj.output)) };
         }
-        return resObj;
+        return rawResult;
       }
 
       return rawResult;

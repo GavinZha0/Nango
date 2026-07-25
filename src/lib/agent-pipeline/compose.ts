@@ -39,12 +39,16 @@ export function defineToolMiddleware(spec: ToolMiddlewareSpec): ToolMiddleware {
     name: spec.name,
     order: spec.order,
     wrapToolCall: async (ctx, call, next) => {
+      let currentCall = call;
       if (beforeToolCall) {
-        const decision = await beforeToolCall(ctx, call);
+        const decision = await beforeToolCall(ctx, currentCall);
         if (decision.action === "block") return decision.result;
+        if ("modifiedArgs" in decision && decision.modifiedArgs !== undefined) {
+          currentCall = { ...currentCall, args: decision.modifiedArgs };
+        }
       }
-      const result = await next(call);
-      return afterToolResult ? afterToolResult(ctx, call, result) : result;
+      const result = await next(currentCall);
+      return afterToolResult ? afterToolResult(ctx, currentCall, result) : result;
     },
   };
 }
@@ -55,9 +59,9 @@ export function defineToolMiddleware(spec: ToolMiddlewareSpec): ToolMiddleware {
  * ascending `order`). Idempotent; non-tool inputs pass through unchanged.
  *
  * NOTE (N1-A): the innermost `next` invokes the original execute with the
- * ORIGINAL variadic args (preserving the AI SDK calling convention), so
- * middlewares can inspect `call.args` but cannot yet mutate the args the
- * tool receives. Arg rewriting is a later enhancement.
+ * ORIGINAL variadic args (preserving the AI SDK calling convention), EXCEPT
+ * the first argument which is replaced by the final `call.args`. This allows
+ * middlewares to mutate the arguments the tool receives.
  */
 export function composeToolPipeline(
   middlewares: readonly ToolMiddleware[],
@@ -79,8 +83,13 @@ export function composeToolPipeline(
         args: rawArgs[0],
         toolCallId: (rawArgs[1] as { toolCallId?: string } | undefined)?.toolCallId,
       };
-      // Innermost continuation → original execute with the original args.
-      const base: ToolNext = async () => original(...rawArgs);
+      // Innermost continuation → original execute with the original args,
+      // EXCEPT the first arg is replaced by the potentially mutated args.
+      const base: ToolNext = async (finalCall) => {
+        const finalArgs = [...rawArgs];
+        finalArgs[0] = finalCall.args;
+        return original(...finalArgs);
+      };
       // Fold middlewares inner→outer so `ordered[0]` runs first inbound.
       let next: ToolNext = base;
       for (let i = ordered.length - 1; i >= 0; i--) {

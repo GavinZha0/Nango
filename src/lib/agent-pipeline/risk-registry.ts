@@ -113,6 +113,14 @@ const WRITE_SQL_PATTERNS = [
   /\breplace\b/i,
 ];
 
+/** Risk level ordering for comparison (higher value = higher risk) */
+const RISK_ORDER: Record<RiskLevel, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  critical: 3,
+};
+
 /**
  * Evaluate the effective risk and approval requirement for a tool call.
  * Combines static metadata, MCP standard annotations, global MCP fallback policy,
@@ -181,11 +189,17 @@ export function evaluateToolRisk(
   }
 
   // 4. Apply DB tool risk overrides if present
+  // SECURITY: Override cannot lower dynamically-escalated risk from parameter analysis
   const source = builtinMeta ? "builtin" : "mcp";
   const override = getToolRiskOverride(source, meta?.mcpServerId, toolName);
   if (override && override.enabled) {
     if (override.riskLevel) {
-      riskLevel = override.riskLevel as RiskLevel;
+      // Only allow override if it does not lower the current risk level
+      const overrideLevel = override.riskLevel as RiskLevel;
+      if (RISK_ORDER[overrideLevel] >= RISK_ORDER[riskLevel]) {
+        riskLevel = overrideLevel;
+      }
+      // If override tries to lower risk, ignore the riskLevel change but keep other overrides
     }
     if (typeof override.headlessAllowed === "boolean") {
       headlessAllowed = override.headlessAllowed;

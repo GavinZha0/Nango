@@ -14,9 +14,15 @@ export const UNTRUSTED_END_MARKER = "<<<END_UNTRUSTED_SOURCE_DATA>>>";
 
 /**
  * Wrap untrusted external data within boundary delimiters.
+ *
+ * SECURITY: Pre-existing marker characters are escaped to prevent bypass
+ * where attackers embed markers in controlled content to skip wrapping.
  */
 export function wrapUntrustedContext(data: string): string {
   if (!data) return data;
-  if (data.includes(UNTRUSTED_START_MARKER)) return data; // Avoid double wrapping
-  return `${UNTRUSTED_START_MARKER}\n${data}\n${UNTRUSTED_END_MARKER}`;
+  // Escape any pre-existing marker characters to prevent bypass
+  const escaped = data
+    .replaceAll(UNTRUSTED_START_MARKER, "<<<[ESCAPED]UNTRUSTED_SOURCE_DATA>>>")
+    .replaceAll(UNTRUSTED_END_MARKER, "<<<[ESCAPED]END_UNTRUSTED_SOURCE_DATA>>>");
+  return `${UNTRUSTED_START_MARKER}\n${escaped}\n${UNTRUSTED_END_MARKER}`;
 }

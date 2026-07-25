@@ -1091,7 +1091,7 @@ class RunnerImpl implements Runner {
       // back to the server timezone. Safe re: supervisor side-effects:
       // catalog excludes system-role agents, so the supervisor branch
       // in buildBuiltinAgents never fires on this path.
-      { userId: input.ownerId, context: input.context },
+      { userId: input.ownerId, mode: input.mode, initiator: input.initiator, context: input.context },
     );
     const builtinAgent = agents[input.entityId];
     if (!builtinAgent) {

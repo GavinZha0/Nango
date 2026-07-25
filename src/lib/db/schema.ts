@@ -2191,11 +2191,12 @@ export const ToolRiskOverrideTable = pgTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    uniqueIndex("tool_risk_override_source_server_tool_idx").on(
-      t.source,
-      t.mcpServerId,
-      t.toolName,
-    ),
+    uniqueIndex("tool_risk_override_builtin_idx")
+      .on(t.source, t.toolName)
+      .where(sql`${t.mcpServerId} IS NULL`),
+    uniqueIndex("tool_risk_override_mcp_idx")
+      .on(t.source, t.mcpServerId, t.toolName)
+      .where(sql`${t.mcpServerId} IS NOT NULL`),
   ],
 );
 

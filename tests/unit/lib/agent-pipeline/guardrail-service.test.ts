@@ -26,8 +26,8 @@ describe("guardrail-service", () => {
     vi.clearAllMocks();
   });
 
-  it("defines 8 baseline seed policies", () => {
-    expect(DEFAULT_SAFETY_POLICIES.length).toBe(8);
+  it("defines 10 baseline seed policies", () => {
+    expect(DEFAULT_SAFETY_POLICIES.length).toBe(10);
     const names = DEFAULT_SAFETY_POLICIES.map((p) => p.name);
     expect(names).toContain("llm_api_key_redact");
     expect(names).toContain("chinese_phone_redact");
@@ -47,7 +47,7 @@ describe("guardrail-service", () => {
 
     await seedSafetyPolicies();
 
-    expect(db.insert).toHaveBeenCalledTimes(8);
+    expect(db.insert).toHaveBeenCalledTimes(10);
   });
 
   it("loads and caches tool overrides and safety policies", async () => {

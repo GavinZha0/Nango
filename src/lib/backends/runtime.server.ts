@@ -16,6 +16,9 @@ import type {
 } from "@/lib/copilot/index.server";
 
 import { childLogger } from "@/lib/observability/logger";
+import { scanIncomingPrompt } from "@/lib/agent-pipeline/input-safety";
+import { SseStreamRedactor, type RedactionRule } from "@/lib/agent-pipeline/output-safety";
+import { recordInterceptionLog } from "@/lib/agent-pipeline/guardrail-service";
 
 /** Discriminates dispatch lineage in logs. */
 export type EntitySource = "backend" | "builtin";
@@ -67,6 +70,7 @@ export interface RunWithAgentsDiag {
   agentId?: string;
   credentialId?: string;
   userId?: string;
+  runId?: string;
 }
 
 /** CONTRACT: every chat dispatch (backend + built-in) flows through here. */
@@ -114,9 +118,71 @@ export async function runWithAgents(
     basePath: input.endpoint,
   });
 
+  // INBOUND PROMPT SCAN
+  let scanReq = request;
+  if (request.method === "POST" && /\/agent\/[^/]+\/run\b/.test(new URL(request.url).pathname)) {
+    try {
+      const body = await request.clone().json() as { messages?: { role?: string, content?: string }[] };
+      const messages = body?.messages;
+      if (Array.isArray(messages) && messages.length > 0) {
+        let lastUserIdx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i]?.role === "user") {
+            lastUserIdx = i;
+            break;
+          }
+        }
+        
+        if (lastUserIdx >= 0) {
+          const lastMsg = messages[lastUserIdx];
+          if (lastMsg && typeof lastMsg.content === "string") {
+            const scanResult = await scanIncomingPrompt(lastMsg.content, input.diag?.userId, input.diag?.agentId); // Using agentId since runId isn't on diag
+            if (scanResult.action === "block") {
+              log.warn({ event: "prompt_blocked" }, "Incoming prompt blocked by guardrails");
+              const messageId = `msg-blocked-${Date.now()}`;
+              const errorMessage = `🚨 [Guardrails] ${scanResult.message || "Request blocked by safety policy."}`;
+              
+              const runId = input.diag?.runId || `run-${Date.now()}`;
+              // Try to extract threadId if possible, else fallback
+              const threadId = (body as Record<string, unknown>)?.threadId as string || `thread-${Date.now()}`;
+              
+              const sse = [
+                `data: ${JSON.stringify({ type: "RUN_STARTED", threadId, runId })}\n\n`,
+                `data: ${JSON.stringify({ type: "TEXT_MESSAGE_START", messageId, role: "assistant" })}\n\n`,
+                `data: ${JSON.stringify({ type: "TEXT_MESSAGE_CONTENT", messageId, delta: errorMessage })}\n\n`,
+                `data: ${JSON.stringify({ type: "TEXT_MESSAGE_END", messageId })}\n\n`,
+                `data: ${JSON.stringify({ type: "RUN_FINISHED", threadId, runId })}\n\n`
+              ].join("");
+
+              return new Response(sse, {
+                status: 200,
+                headers: {
+                  "Content-Type": "text/event-stream",
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive"
+                }
+              });
+            } else if (scanResult.action === "redact" && scanResult.result) {
+              messages[lastUserIdx].content = scanResult.result;
+              const newHeaders = new Headers(request.headers);
+              newHeaders.delete("content-length");
+              scanReq = new Request(request.url, {
+                method: request.method,
+                headers: newHeaders,
+                body: JSON.stringify(body)
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      log.warn({ err: e }, "Failed to parse request for prompt scanning");
+    }
+  }
+
   const finalReq = input.trimMessages
-    ? await trimHistoricalMessages(request)
-    : request;
+    ? await trimHistoricalMessages(scanReq)
+    : scanReq;
   const start = Date.now();
   try {
     const res = await handler(finalReq);
@@ -128,6 +194,50 @@ export async function runWithAgents(
       },
       "runtime dispatch ok",
     );
+    
+    // OUTBOUND SSE INTERCEPTION
+    if (res.body && res.headers.get("content-type")?.includes("text/event-stream")) {
+      const redactor = new SseStreamRedactor(null, (rule: RedactionRule, snippet: string) => {
+        recordInterceptionLog({
+          runId: input.diag?.runId ?? null,
+          userId: input.diag?.userId ?? null,
+          stage: "output",
+          category: "output_redaction",
+          policyId: 0,
+          policyName: rule.name,
+          policyType: "regex",
+          action: "redact",
+          severity: "high",
+          payload: { snippet: snippet.slice(0, 100) },
+        }).catch(err => log.error({err}, "Failed to record redaction log"));
+      });
+      const textDecoder = new TextDecoder();
+      const textEncoder = new TextEncoder();
+      
+      const transform = new TransformStream<unknown, Uint8Array>({
+        transform(chunk, controller) {
+          const textChunk = typeof chunk === "string" ? chunk : textDecoder.decode(chunk as Uint8Array, { stream: true });
+          const flushed = redactor.processChunk(textChunk);
+          if (flushed) controller.enqueue(textEncoder.encode(flushed));
+        },
+        flush(controller) {
+          const tail = textDecoder.decode();
+          let finalFlushed = "";
+          if (tail) finalFlushed += redactor.processChunk(tail);
+          finalFlushed += redactor.flush();
+          if (finalFlushed) controller.enqueue(textEncoder.encode(finalFlushed));
+        }
+      });
+      
+      const newBody = res.body.pipeThrough(transform);
+        
+      return new Response(newBody, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
+    }
+
     return res;
   } catch (err) {
     log.error(

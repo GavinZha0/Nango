@@ -13,7 +13,7 @@ import { Observable } from "rxjs";
 
 import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventType, EntityRunStatus } from "@/lib/db/schema";
-import { redactSensitiveText } from "@/lib/agent-pipeline/output-redaction";
+import { redactSensitiveText } from "@/lib/agent-pipeline/output-safety";
 import { recordEvent, finalizeRun } from "./event-store";
 import { RunSequenceRegistry } from "./sequence-registry";
 

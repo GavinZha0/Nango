@@ -1,0 +1,3 @@
+DROP INDEX "tool_risk_override_source_server_tool_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_risk_override_builtin_idx" ON "tool_risk_override" USING btree ("source","tool_name") WHERE "tool_risk_override"."mcp_server_id" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_risk_override_mcp_idx" ON "tool_risk_override" USING btree ("source","mcp_server_id","tool_name") WHERE "tool_risk_override"."mcp_server_id" IS NOT NULL;

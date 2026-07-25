@@ -383,12 +383,19 @@ export function GuardrailPipelineVisualizer({
   }, []);
 
   // Compute 24h counts per node category
-  const countForCategory = (category?: string, stage?: string) => {
+  const countForCategory = (category?: string | string[], stage?: string) => {
     if (!category && !stage) return 0;
     return interceptionLogs.filter((log) => {
-      if (category && log.category === category) return true;
-      if (stage && log.stage === stage) return true;
-      return false;
+      let match = true;
+      if (category) {
+        if (Array.isArray(category)) {
+          if (!category.includes(log.category)) match = false;
+        } else {
+          if (log.category !== category) match = false;
+        }
+      }
+      if (stage && log.stage !== stage) match = false;
+      return match;
     }).length;
   };
 
@@ -406,7 +413,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-1",
         num: 1,
         name: "1. User input & context",
-        shortName: "1. User input & context",
+        shortName: "1. Input & Context",
         stage: "input",
         isBoundary: true,
         isInvariant: true,
@@ -419,11 +426,11 @@ export function GuardrailPipelineVisualizer({
         id: "node-2",
         num: 2,
         name: "2. Identity & Access Guard",
-        shortName: "2. Identity & Access Guard",
+        shortName: "2. Identity Auth",
         stage: "input",
         isInvariant: true,
         enabled: true,
-        interceptionCount: countForCategory(undefined, "input"),
+        interceptionCount: countForCategory("identity", "input"),
         description: "Verifies user RBAC role privileges, entity visibility (isAgentVisibleTo), parent run ownership, and credential enablement.",
         icon: Lock,
       },
@@ -431,11 +438,11 @@ export function GuardrailPipelineVisualizer({
         id: "node-3",
         num: 3,
         name: "3. Injection Pattern Guard",
-        shortName: "3. Injection Pattern Guard",
+        shortName: "3. Injection Detection",
         stage: "input",
         category: "input_injection",
         enabled: isNodeEnabled("guardrail.input_injection.enabled"),
-        interceptionCount: countForCategory("input_injection"),
+        interceptionCount: countForCategory(["input_injection", "topic_guard", "secret_leak"], "input"),
         description: "Matches safety_policy regex rules against system tag injection, jailbreak prompts, and malicious commands. (Fast Fail)",
         icon: ShieldAlert,
         configKey: "guardrail.input_injection.enabled",
@@ -444,7 +451,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-4",
         num: 4,
         name: "4. AI Moderation Guard",
-        shortName: "4. AI Moderation Guard",
+        shortName: "4. AI Moderation",
         stage: "input",
         category: "model_eval",
         enabled: isNodeEnabled("guardrail.model_eval.input.enabled"),
@@ -469,7 +476,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-6",
         num: 6,
         name: "6. Tool Loop Guard",
-        shortName: "6. Tool Loop Guard",
+        shortName: "6. Loop Detection",
         stage: "tool_call",
         category: "loop_detection",
         enabled: isNodeEnabled("guardrail.loop_detection.enabled"),
@@ -482,7 +489,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-7",
         num: 7,
         name: "7. Tool Risk Guard",
-        shortName: "7. Tool Risk Guard",
+        shortName: "7. Risk Guard",
         stage: "tool_call",
         category: "tool_risk",
         enabled: isNodeEnabled("guardrail.tool_risk.enabled"),
@@ -508,7 +515,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-9",
         num: 9,
         name: "9. Static Security Scan",
-        shortName: "9. Static Security Scan",
+        shortName: "9. Static Code Scan",
         stage: "tool_call",
         isInvariant: true,
         enabled: true,
@@ -532,7 +539,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-11",
         num: 11,
         name: "11. Tool Result Sanitization",
-        shortName: "11. Tool Result Sanitization",
+        shortName: "11. Result Sanitization",
         stage: "tool_result",
         category: "result_sanitization",
         enabled: isNodeEnabled("guardrail.result_sanitization.enabled"),
@@ -571,7 +578,7 @@ export function GuardrailPipelineVisualizer({
         id: "node-14",
         num: 14,
         name: "14. AI Moderation Guard",
-        shortName: "14. AI Moderation Guard",
+        shortName: "14. AI Moderation",
         stage: "output",
         category: "model_eval",
         enabled: isNodeEnabled("guardrail.model_eval.output.enabled"),
