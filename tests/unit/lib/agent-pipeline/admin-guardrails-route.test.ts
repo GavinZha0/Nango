@@ -78,10 +78,12 @@ describe("API /api/admin/guardrails", () => {
       from: vi.fn().mockResolvedValue([]),
     };
 
-    // Second db.select call: interception logs query — from → orderBy → limit
+    // Second db.select call: interception logs query — from → leftJoin* → orderBy → limit
     const mockLogsChain = {
-      from: vi.fn().mockReturnValue({
-        orderBy: vi.fn().mockReturnValue({
+      from: vi.fn().mockImplementation(() => {
+        const chain: Record<string, unknown> = {};
+        chain.leftJoin = vi.fn().mockReturnValue(chain);
+        chain.orderBy = vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue([
             {
               id: 1,
@@ -93,9 +95,12 @@ describe("API /api/admin/guardrails", () => {
               toolName: "run_ssh_command",
               payload: { command: "rm -rf /" },
               createdAt: new Date(),
+              agentName: "Search Agent",
+              userName: "Admin",
             },
           ]),
-        }),
+        });
+        return chain;
       }),
     };
 

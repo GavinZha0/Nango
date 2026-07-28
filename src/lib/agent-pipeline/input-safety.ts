@@ -92,7 +92,8 @@ function applyKeywordRule(text: string, rule: SafetyPolicyRule): { matched: bool
 export async function scanIncomingPrompt(
   text: string,
   userId?: string,
-  runId?: string
+  runId?: string,
+  agentId?: string,
 ): Promise<ScanResult> {
   const cache = getGuardrailConfigCache();
   const activeRules = cache.safetyPolicies.filter(
@@ -145,7 +146,7 @@ export async function scanIncomingPrompt(
           policyType: rule.policyType,
           action: "warn",
           severity: rule.severity,
-          payload: { snippet: text.slice(0, 100) },
+          payload: { snippet: text.slice(0, 100), ...(agentId ? { agentId } : {}) },
         });
       }
     }
@@ -162,7 +163,7 @@ export async function scanIncomingPrompt(
       policyType: blockingRule.policyType,
       action: "block",
       severity: blockingRule.severity,
-      payload: { snippet: text.slice(0, 100) },
+      payload: { snippet: text.slice(0, 100), ...(agentId ? { agentId } : {}) },
     });
 
     return {

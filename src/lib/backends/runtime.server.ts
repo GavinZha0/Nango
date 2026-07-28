@@ -136,7 +136,7 @@ export async function runWithAgents(
         if (lastUserIdx >= 0) {
           const lastMsg = messages[lastUserIdx];
           if (lastMsg && typeof lastMsg.content === "string") {
-            const scanResult = await scanIncomingPrompt(lastMsg.content, input.diag?.userId, input.diag?.agentId); // Using agentId since runId isn't on diag
+            const scanResult = await scanIncomingPrompt(lastMsg.content, input.diag?.userId, input.diag?.runId, input.diag?.agentId);
             if (scanResult.action === "block") {
               log.warn({ event: "prompt_blocked" }, "Incoming prompt blocked by guardrails");
               const messageId = `msg-blocked-${Date.now()}`;

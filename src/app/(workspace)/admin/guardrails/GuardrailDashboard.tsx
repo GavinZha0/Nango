@@ -8,6 +8,7 @@
  * Right Column (60%): Top 50% ToolRiskTable + Bottom 50% ContentSafetyTable
  */
 
+import { useState, useMemo } from "react";
 import { ShieldCheck, ShieldAlert, Clock } from "lucide-react";
 import {
   GuardrailPipelineVisualizer,
@@ -19,7 +20,7 @@ interface GuardrailDashboardProps {
   configs: Record<string, string>;
   toolOverrides: ToolRiskItem[];
   safetyPolicies: SafetyPolicyItem[];
-  interceptionLogs: Array<{ stage: string; category: string; action: string }>;
+  interceptionLogs: Array<{ stage: string; category: string; action: string; createdAt?: string }>;
   onSaveOverride?: (item: ToolRiskItem) => Promise<void>;
   onDeleteOverride?: (item: ToolRiskItem) => Promise<void>;
   onSavePolicy?: (policy: SafetyPolicyItem) => Promise<void>;
@@ -58,6 +59,16 @@ export function GuardrailDashboard({
   ).length;
   const pipelineActiveCount = PIPELINE_INVARIANT_COUNT + activeConfigurableCount;
 
+  const [now] = useState(() => Date.now());
+  const count24h = useMemo(() => {
+    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
+    return interceptionLogs.filter((log) => {
+      if (!log.createdAt) return false;
+      const logTime = new Date(log.createdAt).getTime();
+      return !isNaN(logTime) && logTime >= twentyFourHoursAgo;
+    }).length;
+  }, [interceptionLogs, now]);
+
   return (
     <div className="flex h-full w-full overflow-hidden">
       {/* LEFT COLUMN (40% width) */}
@@ -86,7 +97,7 @@ export function GuardrailDashboard({
           <div className="flex items-center gap-1">
             <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
             <span className="text-muted-foreground font-medium text-[11px]">24h:</span>
-            <span className="font-bold text-foreground text-[11px]">{interceptionLogs.length}</span>
+            <span className="font-bold text-foreground text-[11px]">{count24h}</span>
           </div>
         </div>
 

@@ -16,6 +16,9 @@ import {
   SafetyPolicyTable,
   ToolRiskOverrideTable,
   ConfigTable,
+  EntityRunTable,
+  BuiltinAgentTable,
+  UserTable,
 } from "@/lib/db/schema";
 import { withAdmin, ApiError } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
@@ -60,8 +63,42 @@ export const GET = withAdmin(ROUTE, async () => {
   let interceptionEvents: unknown[] = [];
   try {
     interceptionEvents = await db
-      .select()
+      .select({
+        id: SafetyInterceptionLogTable.id,
+        runId: SafetyInterceptionLogTable.runId,
+        userId: SafetyInterceptionLogTable.userId,
+        stage: SafetyInterceptionLogTable.stage,
+        category: SafetyInterceptionLogTable.category,
+        policyId: SafetyInterceptionLogTable.policyId,
+        policyName: SafetyInterceptionLogTable.policyName,
+        policyType: SafetyInterceptionLogTable.policyType,
+        toolName: SafetyInterceptionLogTable.toolName,
+        action: SafetyInterceptionLogTable.action,
+        severity: SafetyInterceptionLogTable.severity,
+        payload: SafetyInterceptionLogTable.payload,
+        createdAt: SafetyInterceptionLogTable.createdAt,
+        agentName: sql<string | null>`COALESCE(
+          ${BuiltinAgentTable.name},
+          ${EntityRunTable.entityId},
+          ${SafetyInterceptionLogTable.payload}->>'agentId',
+          ${SafetyInterceptionLogTable.payload}->>'agent_id'
+        )`,
+        userName: sql<string | null>`COALESCE(
+          ${UserTable.name},
+          ${UserTable.email},
+          ${SafetyInterceptionLogTable.userId}
+        )`,
+      })
       .from(SafetyInterceptionLogTable)
+      .leftJoin(EntityRunTable, eq(SafetyInterceptionLogTable.runId, EntityRunTable.id))
+      .leftJoin(
+        BuiltinAgentTable,
+        sql`${BuiltinAgentTable.id}::text = ${EntityRunTable.entityId} OR ${BuiltinAgentTable.id}::text = (${SafetyInterceptionLogTable.payload}->>'agentId')`,
+      )
+      .leftJoin(
+        UserTable,
+        sql`(${SafetyInterceptionLogTable.userId} IS NOT NULL AND ${SafetyInterceptionLogTable.userId} = ${UserTable.id}::text) OR (${EntityRunTable.ownerId} = ${UserTable.id})`,
+      )
       .orderBy(desc(SafetyInterceptionLogTable.createdAt))
       .limit(50);
   } catch (err) {

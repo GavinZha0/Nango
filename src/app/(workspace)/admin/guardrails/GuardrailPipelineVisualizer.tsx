@@ -343,6 +343,7 @@ interface GuardrailPipelineVisualizerProps {
     stage: string;
     category: string;
     action: string;
+    createdAt?: string;
   }>;
   safetyPolicies?: SafetyPolicyItem[];
   onSavePolicy?: (policy: SafetyPolicyItem) => Promise<void>;
@@ -382,10 +383,21 @@ export function GuardrailPipelineVisualizer({
     return () => observer.disconnect();
   }, []);
 
+  const [now] = useState(() => Date.now());
+  const twentyFourHoursAgo = useMemo(() => now - 24 * 60 * 60 * 1000, [now]);
+
   // Compute 24h counts per node category
   const countForCategory = (category?: string | string[], stage?: string) => {
     if (!category && !stage) return 0;
+
     return interceptionLogs.filter((log) => {
+      // 24h Time Filter (Timezone Safe via epoch timestamp ms comparison)
+      if (log.createdAt) {
+        const logTime = new Date(log.createdAt).getTime();
+        if (isNaN(logTime) || logTime < twentyFourHoursAgo) {
+          return false;
+        }
+      }
       let match = true;
       if (category) {
         if (Array.isArray(category)) {

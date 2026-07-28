@@ -23,7 +23,7 @@ import { eq } from "drizzle-orm";
 export const DEFAULT_SAFETY_POLICIES = [
   {
     name: "llm_api_key_redact",
-    displayName: "LLM API Key Secret Redaction",
+    displayName: "API Key Redaction",
     description: "Automatically detects and redacts OpenAI, Anthropic, DeepSeek, and Moonshot API keys.",
     category: "secret_leak",
     policyType: "regex",
@@ -38,7 +38,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "cloud_credential_redact",
-    displayName: "Cloud Credential & Private Key Redaction",
+    displayName: "Credential Redaction",
     description: "Automatically detects and redacts AWS, GCP, Azure access keys and SSH private keys.",
     category: "secret_leak",
     policyType: "regex",
@@ -53,7 +53,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "bearer_token_redact",
-    displayName: "Auth Bearer Token Redaction",
+    displayName: "Auth Token Redaction",
     description: "Automatically detects and redacts HTTP Bearer authentication tokens in headers and text.",
     category: "secret_leak",
     policyType: "regex",
@@ -68,7 +68,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "chinese_phone_redact",
-    displayName: "Mobile Phone Number PII Masking",
+    displayName: "Chinese Phone Number Masking",
     description: "Automatically masks 11-digit mobile phone numbers with asterisks.",
     category: "output_redaction",
     policyType: "regex",
@@ -113,7 +113,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "id_card_redact",
-    displayName: "National Identity Number Masking",
+    displayName: "National Identity Masking",
     description: "Automatically masks 18-digit identity numbers and passport identifiers.",
     category: "output_redaction",
     policyType: "regex",
@@ -128,7 +128,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "email_redact",
-    displayName: "Email Address PII Redaction",
+    displayName: "Email Address Redaction",
     description: "Automatically masks email username prefixes before output rendering.",
     category: "output_redaction",
     policyType: "regex",
@@ -143,7 +143,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "system_tag_injection_block",
-    displayName: "System Control Tag Injection Guard",
+    displayName: "System Tag Injection Guard",
     description: "Blocks and escapes malicious control tags mimicking framework system prompts.",
     category: "input_injection",
     policyType: "regex",
@@ -157,7 +157,7 @@ export const DEFAULT_SAFETY_POLICIES = [
   },
   {
     name: "default_prohibited_terms",
-    displayName: "Destructive System Command Guard",
+    displayName: "Destructive Command Guard",
     description: "Blocks destructive OS commands like 'rm -rf /' and disk format commands.",
     category: "topic_guard",
     policyType: "regex",
