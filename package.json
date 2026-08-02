@@ -103,7 +103,7 @@
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.12.4",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "^8.20.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.1.10",
