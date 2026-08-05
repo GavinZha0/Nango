@@ -5,18 +5,18 @@
 
 ### Features
 
-* add decoupled security interception audit log table ([f1f6e34](https://github.com/GavinZha0/Nango/commit/f1f6e34dd8f897f64d9d3c805b8bbd657577e24d))
-* add guardrails admin control plane UI with 15-node pipeline visualizer ([bf4dd3c](https://github.com/GavinZha0/Nango/commit/bf4dd3cd34002c5063f1323f44eb717aa651342e))
-* complete agent middleware pipeline with MCP tool unification ([ba338e6](https://github.com/GavinZha0/Nango/commit/ba338e654abac23733591dbb43c8be0e29c825be))
-* implement agent middleware pipeline and fix critical security bugs ([ecdd2ab](https://github.com/GavinZha0/Nango/commit/ecdd2abfcbdda20cf6f90dabe379aaaac6dfc115))
-* implement comprehensive telemetry logging and fix UI metrics aggregation ([eede7b1](https://github.com/GavinZha0/Nango/commit/eede7b15f6a34332bb1abd2f36112b71a4beba48))
-* implement content & output guardrails middleware ([40f7f76](https://github.com/GavinZha0/Nango/commit/40f7f768eb45a7e42bde48bde87975d28c02fcb2))
-* migrate to VAD-driven HTTP architecture and integrate SenseVoice ASR ([2ba5551](https://github.com/GavinZha0/Nango/commit/2ba5551f608263014e05629004efce7dec0a832f))
+* add decoupled security interception audit log table ([f1f6e34](https://github.com/GavinZha0/Nango/commit/f1f6e34dd8f897f64d9d3c805b8bbd657577e24d)) by @GavinZha0
+* add guardrails admin control plane UI with 15-node pipeline visualizer ([bf4dd3c](https://github.com/GavinZha0/Nango/commit/bf4dd3cd34002c5063f1323f44eb717aa651342e)) by @GavinZha0
+* complete agent middleware pipeline with MCP tool unification ([ba338e6](https://github.com/GavinZha0/Nango/commit/ba338e654abac23733591dbb43c8be0e29c825be)) by @GavinZha0
+* implement agent middleware pipeline and fix critical security bugs ([ecdd2ab](https://github.com/GavinZha0/Nango/commit/ecdd2abfcbdda20cf6f90dabe379aaaac6dfc115)) by @GavinZha0
+* implement comprehensive telemetry logging and fix UI metrics aggregation ([eede7b1](https://github.com/GavinZha0/Nango/commit/eede7b15f6a34332bb1abd2f36112b71a4beba48)) by @GavinZha0
+* implement content & output guardrails middleware ([40f7f76](https://github.com/GavinZha0/Nango/commit/40f7f768eb45a7e42bde48bde87975d28c02fcb2)) by @GavinZha0
+* migrate to VAD-driven HTTP architecture and integrate SenseVoice ASR ([2ba5551](https://github.com/GavinZha0/Nango/commit/2ba5551f608263014e05629004efce7dec0a832f)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* resolve guardrails UI bugs and type inconsistencies ([d7b7597](https://github.com/GavinZha0/Nango/commit/d7b759703c72ef2a49b255d8acad7b1a763b20d2))
+* resolve guardrails UI bugs and type inconsistencies ([d7b7597](https://github.com/GavinZha0/Nango/commit/d7b759703c72ef2a49b255d8acad7b1a763b20d2)) by @GavinZha0
 
 ## [0.10.1](https://github.com/GavinZha0/Nango/compare/v0.10.0...v0.10.1) (2026-07-19)
 
