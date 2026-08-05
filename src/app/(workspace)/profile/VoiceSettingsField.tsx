@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const LANGUAGE_OPTIONS = [
-  { value: "auto", label: "Auto-detect" },
+  { value: "auto", label: "Auto" },
   { value: "en", label: "English" },
   { value: "es", label: "Spanish" },
   { value: "fr", label: "French" },

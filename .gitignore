@@ -64,3 +64,4 @@ next-env.d.ts
 #   .cache/datasource/.write-slots/          Per-call staging dirs
 # See `src/lib/data-sources/cache-root.ts` and `docs/sandbox.md` §3.
 /.cache/
+/docker/funasr/funasr-models/

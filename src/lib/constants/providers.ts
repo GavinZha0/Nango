@@ -94,7 +94,8 @@ export const PROVIDERS: ProviderEntry[] = [
 
   { value: "openai",                label: "OpenAI",         service: "voice", capability: ["stt", "tts"] },
   { value: "deepgram",              label: "Deepgram",       service: "voice", capability: ["stt"], defaultRestUrl: "https://api.deepgram.com" },
-  { value: "local-stt",             label: "Local STT",      service: "voice", capability: ["stt"] },
+  { value: "funasr",                label: "FunASR",         service: "voice", capability: ["stt"] },
+  { value: "sensevoice",            label: "SenseVoice",     service: "voice", capability: ["stt"] },
   { value: "elevenlabs",            label: "ElevenLabs",     service: "voice", capability: ["tts"] },
 ];
 

@@ -1,0 +1,12 @@
+services:
+  sensevoice:
+    image: markgzhou/sensevoice-asr-server:latest
+    container_name: sensevoice
+    ports:
+      - "10085:8000"
+    environment:
+      - SENSEVOICE_API_KEY=MySuperSafeApiKey
+      - SENSEVOICE_TIMEOUT=60
+    restart: unless-stopped
+    # If the image supports environment variables for config, add them here.
+    # By default, this lightweight image starts a FastAPI server on port 8000.

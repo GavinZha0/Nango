@@ -36,11 +36,50 @@ const CHAT_LABELS = {
   chatInputPlaceholder: "Message the agent…",
 } as const;
 
-/** Slot config: replaces CopilotKit's default `+` with Nango entry-point. Hoisted for referential stability. */
-const NANGO_INPUT_SLOT = { addMenuButton: NangoSlotButton } as const;
+import { StreamingMicButton } from "@/components/right-panels/StreamingMicButton";
 
 /** No-op for unimplemented toolbar buttons (thumbs up/down/read-aloud). v2 still renders the slot. */
 const noop = () => {};
+
+function InputSlotWrapper(props: React.ComponentProps<typeof NangoSlotButton>) {
+  const { data: session } = authClient.useSession();
+  const userFields = session?.user as { sttModel?: string | null, sttCredentialId?: string | null } | undefined;
+  
+  // We now use our custom Client-VAD HTTP architecture for ALL models.
+  const useContinuousVoice = !!userFields?.sttCredentialId;
+
+  // Use the real getUserMedia natively, no proxying needed.
+  const realGetUserMedia = typeof navigator !== "undefined" && navigator.mediaDevices 
+    ? navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices) 
+    : undefined;
+
+  return (
+    <div className="flex items-center gap-1">
+      <NangoSlotButton {...props} />
+      {useContinuousVoice && realGetUserMedia && (
+        <>
+          <StreamingMicButton 
+            getUserMedia={realGetUserMedia} 
+          />
+          {/* Robust CSS hack: Hide CopilotKit mic completely but exclude our own streaming mic */}
+          <style>{`
+            /* Force the input container to be a relative anchor for our absolute mic */
+            .copilotKitInput {
+              position: relative !important;
+            }
+            /* Find any button that contains the microphone SVG but NOT our custom class, and nuke it */
+            .copilotKitInput button:has(svg.lucide-mic):not(.streaming-mic-button) {
+               display: none !important;
+            }
+          `}</style>
+        </>
+      )}
+    </div>
+  );
+}
+
+const NANGO_INPUT_SLOT = { addMenuButton: InputSlotWrapper } as const;
+
 
 let activeAudio: HTMLAudioElement | null = null;
 let activeMessageId: string | null = null;

@@ -80,5 +80,16 @@ services:
       retries: 5
     restart: unless-stopped
 
+  sensevoice:
+    image: markgzhou/sensevoice-asr-server:latest
+    container_name: sensevoice
+    ports:
+      - "10085:8000"
+    environment:
+      - SENSEVOICE_API_KEY=MySuperSafeApiKey
+      - SENSEVOICE_TIMEOUT=60
+    restart: unless-stopped
+
+
 volumes:
   nango-db-data:

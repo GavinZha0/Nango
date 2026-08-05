@@ -32,7 +32,7 @@ interface NangoSlotButtonProps
 const PURPLE_BTN_BASE =
   "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium "
   + "transition-colors focus-visible:outline-none focus-visible:ring-1 "
-  + "focus-visible:ring-purple-400";
+  + "focus-visible:ring-purple-400 cursor-pointer";
 
 // Amber = chatting with Nango; purple = can switch to Nango.
 const NANGO_ACTIVE =
@@ -79,14 +79,12 @@ export function NangoSlotButton(_props: NangoSlotButtonProps): ReactNode {
               className={cn(PURPLE_BTN_BASE, PURPLE_DISABLED)}
               aria-label="Ask Nango (no supervisor configured)"
             >
-              <Sparkles className="h-3.5 w-3.5" />
               Ask Nango
             </button>
           }
         />
         <TooltipContent>
-          No Nango configured. Designate a built-in agent as your
-          supervisor in the Agent panel to enable this shortcut.
+          No Nango configured. 
         </TooltipContent>
       </Tooltip>
     );
@@ -99,9 +97,7 @@ export function NangoSlotButton(_props: NangoSlotButtonProps): ReactNode {
         type="button"
         onClick={() => enterNango({ id: supervisor.id })}
         className={cn(PURPLE_BTN_BASE, PURPLE_GHOST)}
-        title={`Switch to ${supervisor.name} — your supervisor agent`}
       >
-        <Sparkles className="h-3.5 w-3.5" />
         Ask Nango
       </button>
     );
