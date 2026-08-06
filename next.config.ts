@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import packageJson from "./package.json";
 
 const nextConfig: NextConfig = {
   // Turbopack is default in Next.js 16 — no flag needed
@@ -48,6 +49,7 @@ const nextConfig: NextConfig = {
 
   env: {
     NO_HTTPS: process.env.NO_HTTPS,
+    NEXT_PUBLIC_APP_VERSION: packageJson.version,
   },
 };
 

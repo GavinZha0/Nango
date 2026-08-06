@@ -5,10 +5,10 @@
  */
 
 import type { ReactNode } from "react";
+import { MCPIcon } from "@/components/icons/mcp-icon";
 import {
   Bot,
   BicepsFlexed,
-  Plug,
   Terminal,
   Database,
   Loader2,
@@ -64,7 +64,7 @@ export function StatsDashboard(): ReactNode {
         top={data.skills.top}
       />
       <ResourceStatsCard
-        icon={Plug}
+        icon={MCPIcon}
         label="MCP"
         total={data.mcp.total}
         top={data.mcp.top}

@@ -41,7 +41,17 @@ export default function RootLayout({
           {/* Sonner toaster — used by useSaveOutcome and future flows.
               `richColors` follows the app theme; `closeButton` lets
               users dismiss persistent notices. */}
-          <Toaster richColors closeButton position="bottom-right" />
+          <Toaster
+            richColors
+            closeButton
+            position="top-center"
+            duration={10000}
+            toastOptions={{
+              style: {
+                width: "560px",
+              },
+            }}
+          />
         </ThemeProvider>
       </body>
     </html>

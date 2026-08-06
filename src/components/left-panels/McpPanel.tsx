@@ -4,8 +4,8 @@
  * McpPanel — MCP server management in the left sidebar.
  */
 
+import { MCPIcon } from "@/components/icons/mcp-icon";
 import {
-  Plug,
   RefreshCw,
   Plus,
   Trash2,
@@ -787,7 +787,7 @@ export function McpPanel(): ReactNode {
 
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-4 py-3">
-          <Plug className="h-4 w-4 text-muted-foreground" />
+          <MCPIcon className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">MCP Servers</h2>
           <div className="ml-auto flex items-center gap-1">
             <Button

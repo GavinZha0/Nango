@@ -27,6 +27,7 @@ import {
   useNotificationsStore,
 } from "@/store/notifications";
 import { notificationActions } from "@/hooks/useNotifications";
+import { APP_VERSION } from "@/lib/constants/version";
 import {
   Tooltip,
   TooltipContent,
@@ -141,7 +142,7 @@ export function LeftToolbar(): ReactNode {
       <div className="flex h-full w-12 flex-shrink-0 flex-col items-center border-r bg-background py-2">
         {groups.map((group, gi) => (
           <Fragment key={`g-${gi}`}>
-            {gi > 0 && <div className="my-2 h-px w-6 bg-border" />}
+            {gi > 0 && <div className="my-2 h-[1.5px] w-full bg-muted-foreground/30" />}
             <nav className="flex flex-col items-center gap-1">
               {group.map((item) => renderItem(item, {
                 pathname,
@@ -157,9 +158,13 @@ export function LeftToolbar(): ReactNode {
         ))}
 
         {/* Spacer keeps the bottom of the toolbar free for future
-            footer content (currently nothing — user menu lives in
-            Header). */}
+            footer content. */}
         <div className="flex-1" />
+
+        {/* Version footer */}
+        <div className="mt-auto pt-2 cursor-default select-none px-1 font-mono text-[9px] font-medium text-muted-foreground/60">
+          v{APP_VERSION}
+        </div>
       </div>
     </TooltipProvider>
   );

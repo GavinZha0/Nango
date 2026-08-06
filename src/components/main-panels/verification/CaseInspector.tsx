@@ -44,6 +44,19 @@ import type {
 } from "@/lib/verification/types";
 import { AssertionsEditor } from "./AssertionsEditor";
 
+const INPUT_PLACEHOLDER = `// Dynamic generator variables:
+// {{$uuid}}             - Standard random UUID v4 string
+// {{$uuidv7}}           - Time-ordered UUID v7 string
+// {{$timestamp}}        - Current Unix timestamp in ms (number)
+// {{$isoTimestamp}}     - Current ISO 8601 date-time string
+// {{$int(min, max)}}    - Random integer within range (number)
+// {{$randomString(len)}} - Random alphanumeric string (e.g. len=16)
+// {{$counter}}          - Auto-incrementing counter (number)
+
+{
+  "exampleKey": "{{$uuid}}"
+}`;
+
 // --- Props ------------------------------------------------------------------
 
 export interface CaseInspectorProps {
@@ -425,14 +438,22 @@ export function CaseInspector({
       <div className="grid h-full grid-cols-2 overflow-hidden">
         {/* --- Left column: Input (top, 2fr) + Assertions (bottom, 3fr) --- */}
         <div className="flex min-h-0 flex-col border-r min-w-0">
-          <div className="flex h-8 shrink-0 items-center border-b border-l bg-muted/40 px-3">
-            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="flex h-8 shrink-0 items-center border-b border-l bg-muted/40 px-3 min-w-0">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground shrink-0">
               Input
             </span>
             {inputDraft.saving && (
-              <Loader2 className="ml-2 h-3 w-3 animate-spin text-muted-foreground" />
+              <Loader2 className="ml-2 h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
             )}
-            <div className="ml-auto flex items-center gap-1">
+            {inputDraft.parseError && inputOverrideText === null && (
+              <span
+                className="mx-2 flex-1 truncate font-mono text-[11px] font-medium text-destructive"
+                title={inputDraft.parseError}
+              >
+                {inputDraft.parseError}
+              </span>
+            )}
+            <div className="ml-auto flex shrink-0 items-center gap-1">
               <Button
                 size="sm"
                 variant="ghost"
@@ -463,7 +484,7 @@ export function CaseInspector({
               </Button>
             </div>
           </div>
-          
+
           <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
             <JsonPane
               label="Input"
@@ -473,6 +494,7 @@ export function CaseInspector({
               readOnly={readOnly}
               ariaLabel="Case input JSON"
               overrideText={inputOverrideText}
+              placeholder={INPUT_PLACEHOLDER}
             />
             <AssertionsEditor
               draft={assertionsDraft}
@@ -658,9 +680,6 @@ function JsonPane({
             </pre>
           )}
         </div>
-        {draft.parseError && overrideText === null && (
-          <p className="text-[11px] text-destructive">{draft.parseError}</p>
-        )}
         {hint ? (
           <p className="text-[10px] text-muted-foreground">{hint}</p>
         ) : null}

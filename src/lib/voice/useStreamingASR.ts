@@ -89,7 +89,24 @@ async function sendAudioChunk(samples: Int16Array) {
         });
         
         if (!res.ok) {
-            console.error("Transcription error", await res.text());
+            let errorMsg = "";
+            try {
+                const data = await res.json();
+                errorMsg = data?.message || data?.code || `HTTP ${res.status}`;
+            } catch {
+                errorMsg = await res.text().catch(() => `HTTP ${res.status}`);
+            }
+            
+            console.error("Transcription error:", errorMsg);
+            
+            // CONTRACT: Stop recording on STT backend errors to prevent continuous failed chunk dispatches
+            stopGlobalRecording();
+
+            const displayMsg = (errorMsg.includes("fetch failed") || res.status === 502)
+                ? `Failed to connect to speech recognition service (${errorMsg}).`
+                : `Speech recognition failed: ${errorMsg}`;
+
+            toast.error(displayMsg);
             return;
         }
         
@@ -99,6 +116,8 @@ async function sendAudioChunk(samples: Int16Array) {
         }
     } catch (e) {
         console.error("Failed to send audio chunk", e);
+        stopGlobalRecording();
+        toast.error(`Speech recognition request error: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
 
@@ -123,7 +142,7 @@ async function startGlobalRecording(
     // Yield to let the lock callback execute
     await new Promise(r => setTimeout(r, 10));
     if (!lockAcquired) {
-       toast.error("麦克风已在另一个标签页中开启，请先将其关闭。");
+       toast.error("Microphone is active in another tab. Please close it first.");
        return;
     }
   }
@@ -281,7 +300,7 @@ export function useStreamingASR({
 
   const startRecording = useCallback(() => {
     if (!getUserMedia) {
-      toast.error("Browser microphone API is not provided or unsupported.");
+      toast.error("Browser microphone API is missing or unsupported.");
       return;
     }
     startGlobalRecording(getUserMedia);

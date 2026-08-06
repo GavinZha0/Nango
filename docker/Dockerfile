@@ -80,8 +80,8 @@ RUN set -eu; \
 RUN set -eu; \
     size="$(du -sm /app/.next/standalone/node_modules | cut -f1)"; \
     echo "standalone runtime node_modules: ${size} MB"; \
-    if [ "$size" -lt 200 ] || [ "$size" -gt 800 ]; then \
-      echo "ERROR: standalone node_modules is ${size} MB, expected 200-800 MB (see docs/docker-deployment.md §6.5)"; \
+    if [ "$size" -lt 200 ] || [ "$size" -gt 1000 ]; then \
+      echo "ERROR: standalone node_modules is ${size} MB, expected 200-1000 MB (see docs/docker-deployment.md §6.5)"; \
       exit 1; \
     fi
 

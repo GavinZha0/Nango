@@ -15,6 +15,7 @@ export interface ToolExecutionSnapshot {
   name: string;
   args: Record<string, unknown>;
   result?: unknown;
+  durationMs?: number;
   pinned?: boolean;
 }
 
@@ -53,6 +54,7 @@ export function saveSnapshot(
   name: string,
   args: Record<string, unknown>,
   result: unknown,
+  durationMs?: number,
   maxBytes: number = 24576,
 ): ToolExecutionSnapshot {
   let finalResult = result;
@@ -65,7 +67,13 @@ export function saveSnapshot(
     finalResult = { truncated_preview: "Unserializable result" };
   }
 
-  const entry: ToolExecutionSnapshot = { id: crypto.randomUUID(), name, args, result: finalResult };
+  const entry: ToolExecutionSnapshot = {
+    id: crypto.randomUUID(),
+    name,
+    args,
+    result: finalResult,
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
   const existing = loadSnapshots(serverId, toolName);
   const list = [entry, ...existing];
   // Evict oldest unpinned entries beyond the cap.

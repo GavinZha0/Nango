@@ -5,11 +5,11 @@
  */
 
 import type { ComponentType } from "react";
+import { MCPIcon } from "@/components/icons/mcp-icon";
 import {
   LayoutDashboard,
   Fan,
   Bot,
-  Plug,
   BicepsFlexed,
   Calendar1,
   Database,
@@ -101,7 +101,7 @@ export const SIDEBAR_PANEL_REGISTRY: Record<LeftPanelId, SidebarPanelDefinition>
   mcp: {
     id: "mcp",
     label: "MCP",
-    icon: Plug,
+    icon: MCPIcon,
     component: McpPanel,
     href: "/mcp",
     requiredRole: "editor",

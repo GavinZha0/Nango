@@ -5,8 +5,7 @@
  * top-5 most-used items (last 30 days) in a compact card.
  */
 
-import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import type { ReactNode, ComponentType } from "react";
 
 import {
   Card,
@@ -22,7 +21,7 @@ interface TopItem {
 }
 
 interface ResourceStatsCardProps {
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   total: number;
   top: TopItem[];

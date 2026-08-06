@@ -155,6 +155,7 @@ interface ExecState {
   result: unknown | null;
   execError: string | null;
   executedArgs: Record<string, unknown> | null;
+  durationMs: number | null;
 }
 
 const IDLE_EXEC: ExecState = {
@@ -162,6 +163,7 @@ const IDLE_EXEC: ExecState = {
   result: null,
   execError: null,
   executedArgs: null,
+  durationMs: null,
 };
 
 // History dropdown — auto-saved on each successful execution
@@ -169,7 +171,7 @@ const IDLE_EXEC: ExecState = {
 interface HistoryDropdownProps {
   serverId: string;
   toolName: string | null;
-  onLoad: (args: Record<string, unknown>, result?: unknown) => void;
+  onLoad: (args: Record<string, unknown>, result?: unknown, durationMs?: number) => void;
 }
 
 function HistoryDropdown({ serverId, toolName, onLoad }: HistoryDropdownProps): ReactNode {
@@ -212,10 +214,15 @@ function HistoryDropdown({ serverId, toolName, onLoad }: HistoryDropdownProps): 
         {snapshots.map((snap) => (
           <DropdownMenuItem
             key={snap.id}
-            onClick={() => onLoad(snap.args, snap.result)}
+            onClick={() => onLoad(snap.args, snap.result, snap.durationMs)}
             className="group flex items-center gap-1.5"
           >
             <span className={cn("flex-1 truncate text-xs", snap.pinned && "font-medium")}>{snap.name}</span>
+            {snap.durationMs !== undefined && (
+              <span className="text-[10px] tabular-nums text-muted-foreground/70 shrink-0">
+                {snap.durationMs < 1000 ? `${snap.durationMs} ms` : `${(snap.durationMs / 1000).toFixed(1)} s`}
+              </span>
+            )}
             <button
               type="button"
               onClick={(e) => handleTogglePin(e, snap.id)}
@@ -313,7 +320,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const activeToolName: string | null = tool?.name ?? null;
   const handleExecute = useCallback(async () => {
     if (activeToolName === null) return;
-    setExec({ executing: true, result: null, execError: null, executedArgs: null });
+    setExec({ executing: true, result: null, execError: null, executedArgs: null, durationMs: null });
 
     let args: Record<string, unknown>;
     if (input.activeTab === "json") {
@@ -328,6 +335,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       args = input.formData;
     }
 
+    const startTime = performance.now();
     try {
       const res = await fetch(`/api/mcp-servers/${serverId}/call-tool`, {
         method: "POST",
@@ -335,18 +343,35 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         body: JSON.stringify({ toolName: activeToolName, args }),
       });
       const data = await res.json();
+      const durationMs = Math.round(performance.now() - startTime);
+
       if (!res.ok) {
         const baseErr = data.message ?? data.error ?? "Execution failed";
         const execError = data.code ? `[${data.code}] ${baseErr}` : baseErr;
-        setExec({ executing: false, result: null, execError, executedArgs: null });
+        setExec({ executing: false, result: null, execError, executedArgs: null, durationMs });
       } else {
-        setExec({ executing: false, result: data.result, execError: null, executedArgs: args });
-        // Auto-save input args and result to history on successful execution.
-        saveSnapshot(serverId, activeToolName, formatTimestamp(new Date(), tz, "datetimePrecise"), args, data.result, data.snapshotMaxBytes);
+        setExec({ executing: false, result: data.result, execError: null, executedArgs: args, durationMs });
+        // Auto-save input args, result, and durationMs to history on successful execution.
+        saveSnapshot(
+          serverId,
+          activeToolName,
+          formatTimestamp(new Date(), tz, "datetimePrecise"),
+          args,
+          data.result,
+          durationMs,
+          data.snapshotMaxBytes,
+        );
         setSnapshotTrigger((prev) => prev + 1);
       }
     } catch (err) {
-      setExec({ executing: false, result: null, execError: err instanceof Error ? err.message : "Unexpected error", executedArgs: null });
+      const durationMs = Math.round(performance.now() - startTime);
+      setExec({
+        executing: false,
+        result: null,
+        execError: err instanceof Error ? err.message : "Unexpected error",
+        executedArgs: null,
+        durationMs,
+      });
     }
   }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz]);
 
@@ -385,6 +410,12 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     }
   }, []);
   useCopilotDraft({ resourceType: "mcp", getCurrentData, applyDraft });
+
+  const durationStr = useMemo(() => {
+    if (exec.durationMs === null) return null;
+    if (exec.durationMs < 1000) return `${exec.durationMs} ms`;
+    return `${(exec.durationMs / 1000).toFixed(2)} s`;
+  }, [exec.durationMs]);
 
   const resultSizeStr = useMemo(() => {
     if (exec.result === null) return null;
@@ -446,16 +477,16 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         <h2 className="text-sm font-semibold shrink-0 truncate flex-1">
           {tool ? `${serverName} / ${tool.name}` : (serverName || "Select a tool")}
         </h2>
-        {tool && (
+          {tool && (
           <div className="shrink-0 flex items-center">
             <HistoryDropdown
               key={`${activeToolName}:${snapshotTrigger}`}
               serverId={serverId}
               toolName={activeToolName}
-              onLoad={(args, result) => {
+              onLoad={(args, result, durationMs) => {
                 setInput((prev) => ({ ...prev, formData: args, jsonInput: JSON.stringify(args, null, 2) }));
                 if (result !== undefined) {
-                  setExec({ executing: false, result, execError: null, executedArgs: args });
+                  setExec({ executing: false, result, execError: null, executedArgs: args, durationMs: durationMs ?? null });
                 } else {
                   setExec(IDLE_EXEC);
                 }
@@ -711,9 +742,9 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
             {/* Right: Copy */}
             <div className="flex items-center gap-2">
-              {resultSizeStr && (
+              {(durationStr || resultSizeStr) && (
                 <span className="text-[10px] tabular-nums text-muted-foreground">
-                  {resultSizeStr}
+                  {[durationStr, resultSizeStr].filter(Boolean).join(" | ")}
                 </span>
               )}
               <Button
