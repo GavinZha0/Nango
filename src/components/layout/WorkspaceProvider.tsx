@@ -127,26 +127,23 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     return unsubscribe;
   }, []);
 
-  // Load all agent sources in parallel exactly once on mount. Each
-  // source merges into the store as it arrives; the first source
-  // with results auto-selects the default chat agent.
-  const didLoad = useRef(false);
-
+  // Load all agent sources in parallel on mount. Each source merges into
+  // the store as it arrives; the first source with results auto-selects
+  // the default chat agent. Uses AbortController to support React StrictMode
+  // in development (pnpm dev).
   useEffect(() => {
-    if (didLoad.current) return;
-    didLoad.current = true;
-
-    let unmounted = false;
+    const controller = new AbortController();
 
     async function loadAllSources() {
       let creds: BackendCredentialInfo[] = [];
       try {
-        const res = await fetch("/api/agent-credentials");
+        const res = await fetch("/api/agent-credentials", { signal: controller.signal });
         if (res.ok) {
           const data = await res.json();
           creds = toBackendCredentials(data);
         }
-      } catch {
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
         // no credentials configured — will show empty backend list
       }
 
@@ -168,7 +165,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       // Each adapter dispatches whatever upstream calls it needs and
       // tags every descriptor with `kind`.
       const entitiesP = getEntities(creds).then((result) => {
-        if (unmounted) return;
+        if (controller.signal.aborted) return;
         const entities = result.data ?? [];
         setEntities(entities);
         setBackendCredentials(result.credentials);
@@ -197,11 +194,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       // setting the active agent unconditionally here once the
       // supervisor row arrives. Falls back to the first enabled normal
       // agent only when no supervisor exists.
-      const builtinP = fetch("/api/builtin-agents")
+      const builtinP = fetch("/api/builtin-agents", { signal: controller.signal })
         .then((res) => (res.ok ? res.json() as Promise<BuiltinAgentRow[]> : []))
-        .catch(() => [] as BuiltinAgentRow[])
+        .catch((err) => {
+          if ((err as Error).name === "AbortError") return null;
+          return [] as BuiltinAgentRow[];
+        })
         .then((rows) => {
-          if (unmounted) return;
+          if (!rows || controller.signal.aborted) return;
           mergeBuiltinAgents(rows);
           const supervisor = rows.find(
             (r) => r.enabled && r.role === "supervisor",
@@ -223,7 +223,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
 
     void loadAllSources();
-    return () => { unmounted = true; };
+    return () => {
+      controller.abort();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, []);
 

@@ -39,6 +39,7 @@
 </divNango 的功能设计围绕 **AI Engine（智能协作）** 与 **Artifact Engine（交付物管理）** 两大产品支柱展开，它们相辅相成：
 
 * **多源智能接入与协议统一**：支持桥接外部代理平台（agno, Mastra, Dify）或直接基于 raw LLM（OpenAI, DeepSeek, Ollama 等）构建内置代理，并在服务端统一转换为 **AG-UI 协议** 输送至前端，保持一致的交互体验。
+* **内置语音识别与常开麦 (SenseVoice / OpenAI / Deepgram / FunASR)**：原生支持基于前端 Client-VAD 的连续语音活动检测与快捷键触发（`Ctrl+Shift+M` / `Cmd+Shift+M`）。预置集成 **SenseVoice ASR**（`markgzhou/sensevoice-asr-server`）本地离线语音识别服务。
 * **多代理编排协作 (Supervisor-Specialist)**：主管代理（Nango）能自动编排、分发或移交任务给其他专家代理，支持同步调用、工具路由和异步处理。
 * **丰富的工具生态**：原生支持并将 **MCP（Model Context Protocol）** 服务、数据库常驻 **Skills（脚本技能）**、**SSH 主机连接** 以及 **数据源 (Data Sources)** 作为扩展工具绑定至代理。
 * **Credential 凭证统一管理与安全使用**：所有第三方服务凭证（如 API 密钥、数据库账密、SSH 密钥等）在后台使用 **AES-256-GCM** 加密存储，仅在服务端解密使用，支持零停机密钥轮转，保证敏感凭证绝不暴露给浏览器或客户端。
@@ -115,8 +116,14 @@ docker compose pull && docker compose up -d
 |---|---|---|
 | `nango-app` | Nango Next.js 服务器（启动时自动运行 DB 迁移） | `9300` |
 | `nango-db`  | PostgreSQL 18 | `5433` → `5432` |
+| `sensevoice`| SenseVoice ASR 语音识别服务 | `10085` → `8000` |
 
 然后打开 **http://localhost:9300**。
+
+> 💡 **语音识别 (Voice / STT) 设置说明**：
+> 在 Nango 中添加 **SenseVoice** 凭证时（设置 -> 凭证管理）：
+> - **Docker Compose 模式**（App 与 SenseVoice 均运行在 Docker 容器内）：**Base URL** 设置为 `http://sensevoice:8000`（使用 Docker 内部网络和服务端口 `8000`）。
+> - **本地开发模式**（在宿主机运行 `pnpm dev`）：**Base URL** 设置为 `http://localhost:10085`。
 
 **第一个注册的用户自动成为管理员**。从
 管理员用户管理页面，你可以将队友提升为 `editor`

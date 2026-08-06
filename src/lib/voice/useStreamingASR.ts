@@ -17,7 +17,9 @@ function notifySubscribers() {
 // Global DOM updater
 function appendResultToInput(text: string) {
   if (!text) return;
-  const textarea = document.querySelector(".copilotKitInput textarea") as HTMLTextAreaElement | null;
+  const textarea = (document.querySelector(".copilotKitInput textarea") ||
+    document.querySelector(".copilotKitChat textarea") ||
+    document.querySelector("textarea")) as HTMLTextAreaElement | null;
   if (!textarea) return;
 
   const currentVal = textarea.value.trim();
@@ -35,6 +37,11 @@ function appendResultToInput(text: string) {
   }
 
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+  // Auto-focus the input and place cursor at the end so Enter key sends immediately
+  textarea.focus();
+  const len = textarea.value.length;
+  textarea.setSelectionRange(len, len);
 }
 
 function encodeWAV(samples: Int16Array, sampleRate: number): Blob {
@@ -134,8 +141,10 @@ async function startGlobalRecording(
 class VadProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
-        this.SILENCE_THRESHOLD = 0.01;
+        // Lower threshold for better mic sensitivity
+        this.SILENCE_THRESHOLD = 0.005;
         this.silenceFrames = 0;
+        this.speechDetected = false;
         this.pcmBuffer = [];
         this.bufferLength = 0;
     }
@@ -157,15 +166,21 @@ class VadProcessor extends AudioWorkletProcessor {
         this.pcmBuffer.push(pcmData);
         this.bufferLength += pcmData.length;
 
-        if (average < this.SILENCE_THRESHOLD) {
-            this.silenceFrames++;
-        } else {
+        if (average >= this.SILENCE_THRESHOLD) {
+            this.speechDetected = true;
             this.silenceFrames = 0;
+        } else {
+            this.silenceFrames++;
         }
 
-        const TARGET_SILENCE_FRAMES = 125; // 1 second = 16000 / 128 = 125 frames
+        // 100 frames = ~0.8s silence pause after speech
+        const TARGET_SILENCE_FRAMES = 100;
+        const MAX_BUFFER_SAMPLES = 240000; // 15 seconds max chunk
 
-        if (this.silenceFrames >= TARGET_SILENCE_FRAMES && this.bufferLength > 16000) {
+        const shouldFlushSilence = this.speechDetected && this.silenceFrames >= TARGET_SILENCE_FRAMES && this.bufferLength > 8000;
+        const shouldFlushMax = this.bufferLength >= MAX_BUFFER_SAMPLES;
+
+        if (shouldFlushSilence || shouldFlushMax) {
             const combined = new Int16Array(this.bufferLength);
             let offset = 0;
             for (const chunk of this.pcmBuffer) {
@@ -177,6 +192,12 @@ class VadProcessor extends AudioWorkletProcessor {
             this.pcmBuffer = [];
             this.bufferLength = 0;
             this.silenceFrames = 0;
+            this.speechDetected = false;
+        } else if (!this.speechDetected && this.bufferLength > 8000) {
+            // Discard pure background silence when no speech was ever detected
+            const keepChunks = this.pcmBuffer.slice(-4);
+            this.pcmBuffer = keepChunks;
+            this.bufferLength = keepChunks.reduce((acc, c) => acc + c.length, 0);
         }
 
         return true;

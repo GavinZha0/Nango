@@ -30,7 +30,7 @@ interface NangoSlotButtonProps
 }
 
 const PURPLE_BTN_BASE =
-  "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium "
+  "inline-flex h-8 items-center gap-1 rounded-full px-2 text-xs font-medium "
   + "transition-colors focus-visible:outline-none focus-visible:ring-1 "
   + "focus-visible:ring-purple-400 cursor-pointer";
 

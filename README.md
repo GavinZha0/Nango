@@ -51,6 +51,7 @@ connect a database, ask a question, get a chart, save it, schedule it, share it.
 Nango's design is centered around two product pillars: **AI Engine** (intelligent collaboration) and **Artifact Engine** (artifact management), which work in tandem:
 
 * **Multi-source intelligence & unified protocol**: Connect to external agent platforms (agno, Mastra, Dify) or build custom in-app agents on raw LLMs (OpenAI, DeepSeek, Ollama, etc.), normalizing all streams to the **AG-UI** protocol on the server to keep API keys away from the browser.
+* **Built-in Voice Recognition & Continuous Mic (SenseVoice / OpenAI / Deepgram / FunASR)**: Native Client-VAD streaming voice activity detection with keybindings (`Ctrl+Shift+M` / `Cmd+Shift+M`). Includes pre-configured **SenseVoice ASR** (`markgzhou/sensevoice-asr-server`) integration for local offline speech recognition.
 * **Supervisor-specialist orchestration**: One built-in agent can act as the Supervisor (Nango itself) to orchestrate and delegate tasks to specialist agents using synchronous calls, tool routing, conversational handoffs, or fire-and-forget async runs.
 * **Extensible tool ecosystem**: Native bindings for **MCP (Model Context Protocol)** servers, database-resident **Skills (scripts)**, **SSH hosts**, and governed **Data Sources**.
 * **Credential lifecycle & security**: All third-party secrets (API keys, DB credentials, SSH private keys) are encrypted with **AES-256-GCM** on a versioned keyring, decrypted strictly server-side, and support zero-downtime key rotation.
@@ -127,8 +128,14 @@ This starts:
 |---|---|---|
 | `nango-app` | Nango Next.js server (auto-runs DB migrations on boot) | `9300` |
 | `nango-db`  | PostgreSQL 18 | `5433` → `5432` |
+| `sensevoice`| SenseVoice ASR speech-to-text service | `10085` → `8000` |
 
 Then open **http://localhost:9300**.
+
+> 💡 **Voice / Speech Recognition Setup**:
+> When adding a **SenseVoice** credential in Nango (`Settings -> Credentials`):
+> - **In Docker Compose Mode** (Nango App and SenseVoice both running in Docker): Set **Base URL** to `http://sensevoice:8000` (uses internal container network and port `8000`).
+> - **In Local Dev Mode** (`pnpm dev` on host machine): Set **Base URL** to `http://localhost:10085`.
 
 The **first user to sign up becomes the admin** automatically. From the
 admin user-management page, you can promote teammates to `editor`

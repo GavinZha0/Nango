@@ -1,17 +1,3 @@
-# Nango Frontend — Docker Compose
-#
-# Usage (Docker):
-#   docker compose up -d                 # Start all (pull pre-built image)
-#   docker compose up -d --build         # Build locally and start all
-#   docker compose up -d nango-db        # Start DB only (for local dev)
-#   docker compose down                  # Stop all
-#   docker compose logs -f nango-app     # Follow app logs
-#
-# Usage (Podman):
-#   podman compose up -d                 # Same commands, replace 'docker' with 'podman'
-#   podman compose up -d --build
-#   podman compose up -d nango-db
-
 name: nango
 
 services:
@@ -31,8 +17,7 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-secret-change-me-32chars}
       # Nested expansion: if BETTER_AUTH_URL isn't set, derive it from APP_PORT
       # so users only need to change APP_PORT to move the app to a different
-      # port. Override BETTER_AUTH_URL directly when fronting Nango with a
-      # reverse proxy or custom domain.
+      # port.
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:9300}
       CREDENTIAL_ENCRYPTION_KEYRING: ${CREDENTIAL_ENCRYPTION_KEYRING:?Set CREDENTIAL_ENCRYPTION_KEYRING in .env or environment (e.g. k1=<64-hex>)}
       CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID: ${CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID:?Set CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID in .env or environment (e.g. k1)}
@@ -69,9 +54,6 @@ services:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       # PG 18+ uses major-version subdirectories under /var/lib/postgresql
-      # (per https://github.com/docker-library/postgres/pull/1259). Mount the
-      # parent directory, NOT /var/lib/postgresql/data — the latter is the
-      # legacy ≤17 layout and the entrypoint rejects it on 18+.
       - nango-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nango}"]
@@ -83,8 +65,8 @@ services:
   sensevoice:
     image: markgzhou/sensevoice-asr-server:latest
     container_name: sensevoice
-    ports:
-      - "10085:8000"
+    # ports:
+    #   - "10085:8000"
     environment:
       - SENSEVOICE_API_KEY=MySuperSafeApiKey
       - SENSEVOICE_TIMEOUT=60
