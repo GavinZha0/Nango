@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/GavinZha0/Nango/compare/v0.11.0...v0.12.0) (2026-08-07)
+
+
+### Features
+
+* UI enhancements and bug fixes ([6eb7501](https://github.com/GavinZha0/Nango/commit/6eb75014717c2026caa30aba8d3cf3ffd16918b1))
+* **voice:** add Edge TTS and Kokoro providers, remove Deepgram and ElevenLabs ([3881c77](https://github.com/GavinZha0/Nango/commit/3881c7752462c2c7a0c0a6883a1d0a0776f2833e))
+
+
+### Bug Fixes
+
+* VAD issue and dev issue ([530d7b5](https://github.com/GavinZha0/Nango/commit/530d7b589017ae78080bd8bfdd363fc583472bc8))
+
 ## [0.11.0](https://github.com/GavinZha0/Nango/compare/v0.10.1...v0.11.0) (2026-08-05)
 
 
