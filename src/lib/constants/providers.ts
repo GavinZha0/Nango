@@ -93,10 +93,10 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "outlook",          label: "Outlook",   service: "calendar" },
 
   { value: "openai",                label: "OpenAI",         service: "voice", capability: ["stt", "tts"] },
-  { value: "deepgram",              label: "Deepgram",       service: "voice", capability: ["stt"], defaultRestUrl: "https://api.deepgram.com" },
+  { value: "edge-tts",              label: "Edge TTS",       service: "voice", capability: ["tts"], defaultRestUrl: "http://localhost:5050/v1" },
+  { value: "kokoro",                label: "Kokoro",         service: "voice", capability: ["tts"], defaultRestUrl: "http://localhost:8880/v1" },
   { value: "funasr",                label: "FunASR",         service: "voice", capability: ["stt"] },
   { value: "sensevoice",            label: "SenseVoice",     service: "voice", capability: ["stt"] },
-  { value: "elevenlabs",            label: "ElevenLabs",     service: "voice", capability: ["tts"] },
 ];
 
 /** Lookup map: provider slug → ProviderEntry. */

@@ -275,7 +275,7 @@ export function VoiceSettingsField({
                   id="tts-model-input"
                   value={ttsModelVal}
                   onChange={(e) => setTtsModelVal(e.target.value)}
-                  placeholder={ttsProvider === "openai" ? "tts-1" : "eleven_flash_v2_5"}
+                  placeholder={ttsProvider === "edge-tts" || ttsProvider === "kokoro" || ttsProvider === "openai" ? "tts-1" : "tts-1"}
                   disabled={ttsDisabled || saving}
                   className="w-full h-8 text-xs"
                 />
@@ -295,7 +295,7 @@ export function VoiceSettingsField({
                   id="tts-voice-input"
                   value={ttsVoiceVal}
                   onChange={(e) => setTtsVoiceVal(e.target.value)}
-                  placeholder={ttsProvider === "openai" ? "alloy" : "Voice ID"}
+                  placeholder={ttsProvider === "edge-tts" ? "zh-CN-XiaoxiaoNeural" : ttsProvider === "kokoro" ? "zf_xiaobei" : "alloy"}
                   disabled={ttsDisabled || saving}
                   className="w-full h-8 text-xs"
                 />

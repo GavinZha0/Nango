@@ -1,0 +1,9 @@
+services:
+  edge-tts:
+    image: travisvn/openai-edge-tts:latest
+    container_name: edge-tts-api
+    ports:
+      - "5050:5050"
+    environment:
+      - API_KEY=my-local-tts-secret
+    restart: unless-stopped

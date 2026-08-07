@@ -1,0 +1,9 @@
+services:
+  kokoro:
+    image: hwdsl2/kokoro-server
+    container_name: kokoro-hwdsl2
+    ports:
+      - "8880:8880"
+    environment:
+      - KOKORO_API_KEY=my-local-tts-secret
+    restart: unless-stopped

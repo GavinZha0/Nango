@@ -80,10 +80,7 @@ const OPENAI_DEFAULT_VOICE = "alloy";
 const ELEVENLABS_DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM";
 
 function resolveOpenAIVoice(userVoice: string | null): string {
-    if (userVoice && OPENAI_TTS_VOICES.has(userVoice)) {
-        return userVoice;
-    }
-    return OPENAI_DEFAULT_VOICE;
+    return userVoice?.trim() || OPENAI_DEFAULT_VOICE;
 }
 
 function resolveElevenLabsVoice(userVoice: string | null): string {
@@ -101,10 +98,10 @@ export async function synthesizeSpeech(text: string, userId: string): Promise<Re
         return null;
     }
     switch (cred.provider) {
-        case "openai": // Merged voice provider
+        case "openai":
+        case "edge-tts":
+        case "kokoro":
             return synthesizeOpenAI(cred, text, resolveOpenAIVoice(settings.ttsVoice), settings.ttsModel);
-        case "elevenlabs":
-            return synthesizeElevenLabs(cred, text, resolveElevenLabsVoice(settings.ttsVoice), settings.ttsModel);
         default:
             log.warn(`Unknown or unsupported TTS provider: ${cred.provider}`);
             return null;
