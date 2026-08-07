@@ -52,7 +52,7 @@ The chart-data-flow design is documented in `Section 10`.
 ┌─────────────────────────────────────────────────────────────────┐
 │  Engine dependencies  (DI — engine never imports these)         │
 │    runAgent       → runner.start (refresh path only)            │
-│    runCode        → sandbox adapter (subprocess / local-docker) │
+│    runCode        → sandbox adapter (subprocess / service)      │
 │    getTool        → user tool catalog (builtin-tools/...)       │
 │    emitEvent      → recorder.emit or noop                       │
 └─────────────────────────────────────────────────────────────────┘

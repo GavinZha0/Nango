@@ -73,8 +73,9 @@ export const PROVIDERS: ProviderEntry[] = [
   // Integration providers (MCP, SSH, …)
   // Agent-callable external systems whose tool surface differs per provider.
   // See docs/ssh.md
-  { value: "mcp",       label: "MCP Server",   service: "integration" },
-  { value: "ssh",       label: "SSH Server",   service: "integration" },
+  { value: "mcp",          label: "MCP Server",    service: "integration" },
+  { value: "ssh",          label: "SSH Server",    service: "integration" },
+  { value: "dify-sandbox", label: "Dify Sandbox",  service: "integration", defaultRestUrl: "http://dify-sandbox:8194" },
 
   // Data sources
   // Specific implementation per credential row; the data-source adapter

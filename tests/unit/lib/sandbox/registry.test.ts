@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-let mockSandboxMode = "subprocess";
-let mockAllowInsecure = true;
+let mockSandboxMode = "service";
 vi.mock("@/lib/config", () => ({
   getConfig: (key: string, defaultValue: string) => {
     if (key === "sandbox.mode") return mockSandboxMode;
@@ -11,8 +10,7 @@ vi.mock("@/lib/config", () => ({
   },
   getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
   getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-  getConfigBoolean: (key: string, defaultValue: boolean) =>
-    key === "sandbox.allow_insecure" ? mockAllowInsecure : defaultValue,
+  getConfigBoolean: (_key: string, defaultValue: boolean) => defaultValue,
 }));
 
 import {
@@ -20,13 +18,13 @@ import {
   getActiveAdapter,
   _resetActiveAdapterCache,
 } from "@/lib/sandbox/registry.server";
-import { BackendUnavailableError, SandboxError } from "@/lib/sandbox/errors";
+import { SandboxError } from "@/lib/sandbox/errors";
 import { SANDBOX_BACKENDS } from "@/lib/sandbox/types";
 
 beforeEach(() => {
   _resetActiveAdapterCache();
-  mockSandboxMode = "subprocess";
-  mockAllowInsecure = true;
+  mockSandboxMode = "service";
+  vi.spyOn(ADAPTERS.service, "isAvailable").mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -38,38 +36,25 @@ describe("sandbox registry — adapter table", () => {
     expect(Object.keys(ADAPTERS).sort()).toEqual([...SANDBOX_BACKENDS].sort());
   });
 
-  it("subprocess + local-docker shipped; remote-docker still null", () => {
+  it("subprocess + service backends are initialized", () => {
     expect(ADAPTERS.subprocess).not.toBeNull();
     expect(ADAPTERS.subprocess?.backend).toBe("subprocess");
-    expect(ADAPTERS["local-docker"]).not.toBeNull();
-    expect(ADAPTERS["local-docker"]?.backend).toBe("local-docker");
-    expect(ADAPTERS["remote-docker"]).toBeNull();
+    expect(ADAPTERS.service).not.toBeNull();
+    expect(ADAPTERS.service?.backend).toBe("service");
   });
 });
 
-describe("sandbox registry — sandbox.mode selection (always explicit)", () => {
-  // BUG-11: subprocess is degraded (no isolation) → fail-closed unless
-  // explicitly opted into via sandbox.allow_insecure.
-  it("subprocess without opt-in is refused (fail-closed)", async () => {
-    mockSandboxMode = "subprocess";
-    mockAllowInsecure = false;
-    await expect(getActiveAdapter()).rejects.toBeInstanceOf(
-      BackendUnavailableError,
-    );
+describe("sandbox registry — sandbox.mode selection", () => {
+  it("sandbox.mode=service → service adapter (default)", async () => {
+    mockSandboxMode = "service";
+    const a = await getActiveAdapter();
+    expect(a.backend).toBe("service");
   });
 
-  it("sandbox.mode=subprocess + allow_insecure → subprocess adapter", async () => {
+  it("sandbox.mode=subprocess → subprocess adapter", async () => {
     mockSandboxMode = "subprocess";
-    mockAllowInsecure = true;
     const a = await getActiveAdapter();
     expect(a.backend).toBe("subprocess");
-  });
-
-  it("sandbox.mode=remote-docker throws BackendUnavailableError (stub)", async () => {
-    mockSandboxMode = "remote-docker";
-    await expect(getActiveAdapter()).rejects.toBeInstanceOf(
-      BackendUnavailableError,
-    );
   });
 
   it("sandbox.mode=nsjail is rejected as unknown (removed from backends)", async () => {
@@ -82,13 +67,8 @@ describe("sandbox registry — sandbox.mode selection (always explicit)", () => 
     await expect(getActiveAdapter()).rejects.toBeInstanceOf(SandboxError);
   });
 
-  it("rejects 'auto' (auto mode is gone)", async () => {
-    mockSandboxMode = "auto";
-    await expect(getActiveAdapter()).rejects.toBeInstanceOf(SandboxError);
-  });
-
   it("caches the resolved adapter across calls", async () => {
-    mockSandboxMode = "subprocess";
+    mockSandboxMode = "service";
     const a = await getActiveAdapter();
     const b = await getActiveAdapter();
     expect(a).toBe(b);

@@ -47,7 +47,7 @@ The `config` table stores the configuration parameters:
 - **`value` stored as text**, parsed by typed getters at read time.
   Keeps the schema simple; type safety lives in the application layer.
 - **`options` as JSONB array** for enum configs (e.g.
-  `["subprocess", "local-docker"]`). NULL means free input. The UI
+  `["subprocess", "service"]`). NULL means free input. The UI
   renders a dropdown when options is non-null.
 - **`prev_value`** provides single-level undo. Sufficient for the
   rare "just changed it, want to revert" scenario. Full audit history
@@ -185,10 +185,8 @@ For the complete, authoritative list of keys, their default values, and descript
 | `sandbox.tmpfs_size_mb` | 512 | number | Tmpfs size in MB |
 | `sandbox.stdout_max_chars` | 20000 | number | Max stdout chars before truncation |
 | `sandbox.stderr_max_chars` | 10000 | number | Max stderr chars before truncation |
-| `sandbox.mode` | subprocess | enum | `subprocess` / `local-docker` / `remote-docker` |
-| `sandbox.allow_insecure` | false | boolean | Explicit opt-in to the degraded, unisolated `subprocess` backend. When false (default), `subprocess` mode is fail-closed — code execution is disabled. Leave false in production. |
-| `sandbox.runtime` | docker | enum | `docker` / `podman` |
-| `sandbox.image` | sandbox-runner:latest | string | Container image for local-docker backend |
+| `sandbox.mode` | service | enum | `subprocess` / `service` |
+| `sandbox.subprocess.python_path` | "" | string | Python interpreter path for subprocess mode |
 
 ### cache (10)
 

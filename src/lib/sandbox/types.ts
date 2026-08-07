@@ -11,34 +11,11 @@
  * never auto-probes. `remote-docker` is reserved — the registry
  * carries a null stub for it that rejects with `BackendUnavailableError`.
  */
-export const SANDBOX_BACKENDS = [
-  "subprocess",
-  "local-docker",
-  "remote-docker",
-] as const;
+export const SANDBOX_BACKENDS = ["subprocess", "service"] as const;
 export type SandboxBackend = (typeof SANDBOX_BACKENDS)[number];
 
-// Container runtime
-
-/**
- * Container runtime used by LocalDockerAdapter. Podman's CLI is
- * Docker-compatible, so the only difference is the binary name.
- * Controlled via config key `sandbox.runtime` (default: "docker").
- */
-import { getConfig } from "@/lib/config";
-
-export const CONTAINER_RUNTIMES = ["docker", "podman"] as const;
-export type ContainerRuntime = (typeof CONTAINER_RUNTIMES)[number];
-
-/** Resolve the container runtime binary from config. */
-export function resolveContainerRuntime(): ContainerRuntime {
-  const raw = getConfig("sandbox.runtime", "docker").trim().toLowerCase();
-  if (raw === "docker") return "docker";
-  if (raw === "podman") return "podman";
-  throw new Error(
-    `Unknown sandbox.runtime=${raw}. Expected one of: ${CONTAINER_RUNTIMES.join(", ")}.`,
-  );
-}
+export const SERVICE_SANDBOX_PROVIDERS = ["dify", "opensandbox"] as const;
+export type ServiceSandboxProvider = (typeof SERVICE_SANDBOX_PROVIDERS)[number];
 
 // ─── Shared env-var key constants ──────────────────────────────────
 
@@ -63,6 +40,9 @@ export const SANDBOX_PARAMS_ENV_KEY = "__PARAMS__" as const;
 // ─── Input / output shapes ──────────────────────────────────────────
 
 export interface SandboxInput {
+  /** Optional high-level language identifier for HTTP sandbox services ("python3" | "javascript"). */
+  language?: "python3" | "javascript";
+
   /** argv array — never a shell string. argv[0] must be a runtime in
    *  the rootfs ("python3", "node", "bash"). */
   command: string[];

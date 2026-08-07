@@ -42,7 +42,7 @@ const SKILLS_ROOT: string = path.join(REPO_ROOT, "skills");
 const REQUIREMENTS_PATH: string = path.join(
   REPO_ROOT,
   "docker",
-  "sandbox",
+  "dify-sandbox",
   "requirements.txt",
 );
 
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     }
     if (onDisk !== generated) {
       process.stderr.write(
-        `[collect-skill-deps] DRIFT: docker/sandbox/requirements.txt is out of date.\n` +
+        `[collect-skill-deps] DRIFT: docker/dify-sandbox/requirements.txt is out of date.\n` +
           `Run \`pnpm sandbox:build\` to regenerate, then commit the result.\n`,
       );
       process.exit(1);

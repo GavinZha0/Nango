@@ -84,6 +84,7 @@ describe("buildRunInSandboxTool", () => {
       timeout_seconds: 5,
     });
     expect(mockRun).toHaveBeenCalledWith({
+      language: "python3",
       command: ["python3", "-"],
       stdin: "print(1)",
       datasets: ["sales_q1"],

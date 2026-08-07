@@ -35,7 +35,7 @@ pnpm test:e2e     # Playwright E2E
 pnpm db:generate  # Drizzle migration from schema diff (commit BOTH .sql + meta/*.json)
 pnpm db:migrate   # Apply pending migrations
 pnpm build:skills # Bake builtin skills directory tree → dist/builtin-skills.json
-pnpm sandbox:build  # Aggregate per-skill python deps → docker/sandbox/requirements.txt
+pnpm sandbox:build  # Aggregate per-skill python deps → docker/dify-sandbox/requirements.txt
 pnpm sandbox:check  # Guard CI against drift between SKILL.md deps and requirements.txt
 pnpm comments:check:all   # Run comment guard sweep on src/ and scripts/
 ```

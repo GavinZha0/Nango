@@ -233,7 +233,6 @@ function createTranscriptionService(
 export async function resolveTranscriptionService(userId: string): Promise<TranscriptionService | undefined> {
     const settings = await getUserVoiceSettings(userId);
     if (!settings.sttCredentialId) {
-        // Microphone will be hidden automatically when this returns undefined
         return undefined;
     }
     const cred = await getEnabledVoiceCredentialById(settings.sttCredentialId);

@@ -494,9 +494,8 @@ dependencies-python: ["scikit-learn>=1.3", "scipy"]
 ```
 
 **Commands:**
-- `pnpm sandbox:build`: Regenerate `docker/sandbox/requirements.txt` and rebuild image.
+- `pnpm sandbox:build`: Regenerate `docker/dify-sandbox/requirements.txt`.
 - `pnpm sandbox:check`: CI drift check.
-- `pnpm sandbox:deps`: Just regenerate `requirements.txt`.
 
 The build pipeline aggregates `dependencies-python` from all built-in `SKILL.md` files, merges them with core packages, detects version conflicts (hard-failing the build), and writes a unified `requirements.txt`.
 

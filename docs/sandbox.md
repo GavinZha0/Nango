@@ -5,7 +5,7 @@
 
 The sandbox integration layer is one of the three peer integration layers in Nango (`docs/architecture.md` §3.3). It hides OS-level isolation diversity behind a single typed contract and exposes a uniform `run` operation to the agent runtime. Its consumers are agents that need to execute generated Python (and later Node.js / shell) for data analysis. Its inputs are the agent's command + Parquet datasets prepared by the data-source layer.
 
-**Status:** Shipped — code lives under `src/lib/sandbox/` (`types.ts`, `errors.ts`, `path-mapper.ts`, `output.ts`, `registry.server.ts`, `runtime-tools.ts`, `index.ts` plus `adapters/{subprocess, local-docker}/`). Two backends are available: **SubprocessAdapter** (degraded fallback, no isolation) and **LocalDockerAdapter** (Docker-based isolation for both dev and production). This document is the as-built reference.
+**Status:** Shipped — code lives under `src/lib/sandbox/` (`types.ts`, `errors.ts`, `path-mapper.ts`, `output.ts`, `registry.server.ts`, `runtime-tools.ts`, `index.ts` plus `adapters/{subprocess, service}/`). Two backends are available: **SubprocessAdapter** (degraded fallback, no isolation) and **ServiceSandboxAdapter** (decoupled external service execution, defaulting to `dify-sandbox`). This document is the as-built reference.
 
 ---
 
@@ -14,15 +14,14 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 ### Goals
 
 - One uniform interface (`ISandboxAdapter`) so the agent tool surface is identical regardless of the underlying isolation tech.
-- Two local backends in V1: **Subprocess** (degraded fallback, dev only) and **LocalDocker** (Docker-based isolation for dev and production). Selected explicitly via `SANDBOX_MODE` env var.
-- A **cwd-relative path contract** (`./data/<name>/`) so agent-generated code never sees host filesystem paths AND works identically across backends. Both adapters surface declared datasets under the sandbox's working directory — subprocess via symlink, docker via bind mount (`--workdir /work`).
+- Two local backends in V1: **Subprocess** (degraded fallback, dev only) and **Service** (external service-based execution via `dify-sandbox`). Selected explicitly via `SANDBOX_MODE` env var.
+- A **cwd-relative path contract** (`./data/<name>/`) so agent-generated code never sees host filesystem paths AND works identically across backends. Both adapters surface declared datasets under the sandbox's working directory — subprocess via symlink, service via volume mount (`.cache/datasource/parquet:/work/data:ro`).
 - Hard limits: timeout, memory, CPU. Each backend enforces them with the strongest mechanism it has.
 - Output truncation + path masking so a noisy or hostile script cannot flood the agent context or leak host paths.
-- Configurable image / rootfs so the data-analysis stack (`python3`, `duckdb`, `pandas`, `numpy`) is one switch away from a multi-language stack later.
+- Configurable service endpoint (`sandbox.service.url`, `sandbox.service.api_key`) and provider selection (`sandbox.service.provider`).
 
 ### Non-goals (V1)
 
-- Remote sandbox SaaS (E2B, Daytona, AIO). The Parquet shared-cache architecture (`docs/data-sources.md` §4) requires data locality; remote sandboxes break it. Reconsidered post-V1 only if a use case explicitly justifies remote execution.
 - Persistent / session-level sandboxes. Every `run()` is ephemeral: process exits → namespace destroyed → tmp cleared. The shared cache is the only persistence mechanism.
 - Inter-sandbox communication. Sandboxes never see each other; if two analyses need to share an intermediate, the orchestration is in the agent's sequence of `run` calls, not inside the sandbox.
 - Sandboxed script execution as a user-facing primitive ("upload code and run it"). V1's threat model is *agent-generated code* (LLM-controlled, mostly trusted but might have bugs). User-uploaded untrusted code raises the security bar significantly and would force Nsjail / Docker as the only allowed backends.
@@ -32,7 +31,7 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 
 ## 2. The contract
 
-**`SandboxBackend`**: `"subprocess" | "local-docker" | "remote-docker"`
+**`SandboxBackend`**: `"subprocess" | "service"`
 
 **`SandboxInput`**
 | Field | Type | Description |
@@ -74,31 +73,30 @@ Three things the contract makes explicit:
 src/lib/sandbox/
   types.ts                          # ISandboxAdapter, SandboxInput, SandboxOutput
   registry.server.ts                # ADAPTERS satisfies Record<SandboxBackend, …>
-                                    # explicit selection via SANDBOX_MODE
+                                    # explicit selection via sandbox.mode
   path-mapper.ts                    # virtual ↔ host path resolution + output masking
   output.ts                         # truncate, mask, structured error mapping
   errors.ts                         # SandboxError, BackendUnavailableError, ...
   adapters/
     subprocess/
       adapter.server.ts             # spawn + RSS poll + timer, no isolation
-    local-docker/
-      adapter.server.ts             # `docker run` argv assembly + image check
-docker/sandbox/
-  Dockerfile                        # python:3.12-slim + duckdb + pandas + numpy
-scripts/
-  ensure-sandbox-image.ts           # called from predev / prestart
+    service/
+      adapter.server.ts             # REST API bridge to dify-sandbox (/v1/sandbox/run)
+docker/dify-sandbox/
+  Dockerfile                        # dify-sandbox service Dockerfile
+  requirements.txt                  # aggregated skill python dependencies
 ```
 
 ### 3.1 SubprocessAdapter
 
-Pure `child_process.spawn`, no kernel isolation. Used only when Docker is not available (development without Docker Desktop).
+Pure `child_process.spawn`, no kernel isolation. Used only when service sandbox is not available (local development fallback).
 
-- **Path layout**: child cwd is a fresh `mkdtemp` dir. For each declared dataset, the adapter creates `<tmpHostDir>/data/<name>` as a directory symlink to `<cacheRoot>/parquet/<name>/`. In-sandbox code reads `./data/<name>/...` — identical to docker, just realised in user-land instead of kernel-mediated bind mounts.
-- **Read-only is unenforced**. Subprocess mode is "degraded" by design — symlinks honour the target dir's permissions, and shared cache dirs default to user-writable. LLM code that writes through `./data/<name>/...` *will* pollute the shared cache. The `local-docker` backend is the only mode that enforces read-only at the kernel level.
+- **Path layout**: child cwd is a fresh `mkdtemp` dir. For each declared dataset, the adapter creates `<tmpHostDir>/data/<name>` as a directory symlink to `<cacheRoot>/parquet/<name>/`. In-sandbox code reads `./data/<name>/...` — identical to service sandbox, just realised in user-land instead of volume mounts.
+- **Read-only is unenforced**. Subprocess mode is "degraded" by design — symlinks honour the target dir's permissions, and shared cache dirs default to user-writable.
 - Memory limit via 500 ms RSS polling + SIGKILL on overshoot.
 - Timeout via `setTimeout` + SIGKILL.
 - Network: clear `http_proxy` / `https_proxy` env vars (a hint to well-behaved libraries; not enforced).
-- **Loud at startup**: the registry logs `[sandbox] running in DEGRADED mode — no security boundary` so the operator cannot miss it.
+- **Loud at startup**: the registry logs `[sandbox] running in DEGRADED mode (subprocess)` so the operator cannot miss it.
 
 #### Subprocess venv selection
 
@@ -124,57 +122,33 @@ Injection mechanism mirrors `source <venv>/bin/activate`: spawn env gets `VIRTUA
 
 This is a development quality-of-life feature, not a production option.
 
-### 3.2 LocalDockerAdapter
+### 3.2 ServiceSandboxAdapter (dify-sandbox)
 
-macOS / Linux dev backend. Each call shells out to:
+Service mode connects to an external REST-based code execution sandbox (`dify-sandbox`).
 
-```bash
-docker run --rm \
-  --network=none \
-  --read-only \
-  --memory=256m --cpus=0.8 \
-  --tmpfs /tmp:exec,size=512m \
-  --workdir /work \
-  --mount type=bind,src=<tmpHostDir>,dst=/work \
-  --mount type=bind,src=<cacheRoot>/parquet/<name>,dst=/work/data/<name>,readonly \
-  sandbox-runner:latest \
-  python3 -
-```
-
-`--workdir /work` makes `/work` the container's cwd, so the LLM-generated Python sees `os.getcwd() == "/work"` and `./data/<name>/...` resolves through the dataset bind mount. The `/work` bind itself is **writable** — LLM can save intermediate files (plots, scratch Parquets) alongside the read-only `./data/<name>/` dirs, matching subprocess parity where `tmpHostDir` is the writable cwd directly. Each declared dataset is bind-mounted with the `readonly` flag, kernel-enforced.
-
-The image is configurable via `SANDBOX_IMAGE` (default `sandbox-runner:latest`). The default Dockerfile builds a minimal Debian-slim image with python3 + the package set in `docker/sandbox/requirements.txt` (~270 MB at the V1 baseline of `duckdb / pandas / numpy`). Operators wanting multi-language support can swap in OpenSandbox's image or a derived image without changing any code.
-
-**Container runtime.** The `local-docker` backend supports both Docker and [Podman](https://podman.io/). Podman's CLI is Docker-compatible; the only difference is the binary name. Set `SANDBOX_RUNTIME=podman` to use Podman instead of Docker. Default is `docker`.
-
-The first `pnpm dev` (or `pnpm start`) calls `scripts/ensure-sandbox-image.ts` which builds the image if absent (using whichever runtime `SANDBOX_RUNTIME` specifies). Subsequent runs are no-ops.
-
-**Python deps are skill-driven.** `requirements.txt` is generated from builtin skills' frontmatter `dependencies-python: [...]` declarations by `pnpm sandbox:build` (which runs `scripts/collect-skill-deps.ts`). Authors who need a new package add it to the relevant `skills/<name>/SKILL.md`, run `pnpm sandbox:build`, and commit the regenerated `requirements.txt` together with the skill change. CI guards against drift via `pnpm sandbox:check`. Do NOT add inline `pip install pkg` lines to the Dockerfile. See `docs/skills.md` §9.x for the design rationale and conflict-detection semantics.
+- **Endpoint**: `POST /v1/sandbox/run` with `X-Api-Key` authentication header.
+- **Credentials**: Automatically looked up from `CredentialTable` (provider: `dify-sandbox`, serviceType: `integration`).
+- **Python deps are skill-driven**: `docker/dify-sandbox/requirements.txt` is generated from builtin skills' frontmatter `dependencies-python: [...]` declarations by `pnpm sandbox:build` (which runs `scripts/collect-skill-deps.ts`). Authors who need a new package add it to the relevant `skills/<name>/SKILL.md`, run `pnpm sandbox:build`, and commit the regenerated `requirements.txt` together with the skill change. CI guards against drift via `pnpm sandbox:check`.
 
 ### 3.3 Backend selection — always explicit
 
-Selection is controlled by `sandbox.mode`. **There is no auto-probe and no silent fallback.** The `subprocess` backend has no isolation, so it is **fail-closed by default** (BUG-11): when the resolved mode is `subprocess`, code execution is **refused** (`SandboxDisabledError`) unless the operator explicitly opts in via `sandbox.allow_insecure=true`. A fresh install therefore boots with code execution *disabled* (boot logs a soft warning, not an error) until an operator configures isolation.
+Selection is controlled by `sandbox.mode`. **There is no auto-probe and no silent fallback.** Supported modes are `service` (default, dify-sandbox) and `subprocess` (local degraded fallback).
 
-| `sandbox.mode` | `sandbox.allow_insecure` | Behaviour |
-|---|---|---|
-| unset / `subprocess` | `false` (default) | **Code execution disabled** — `getActiveAdapter` throws `SandboxDisabledError`; `run_code_in_sandbox` / `run_skill_script` return a structured "disabled" envelope. |
-| `subprocess` | `true` | Subprocess mode — **no isolation**. Explicitly accepted degraded mode (dev / trusted internal). |
-| `local-docker` | — | Local Docker daemon. Boot fails if `docker info` fails or the sandbox image is missing. |
-| `remote-docker` | — | ⏳ reserved. Not implemented yet — selecting it throws `BackendUnavailableError` at boot. |
-| anything else | — | Throws `SandboxError("INVALID_INPUT")` at boot (typo guard). |
-
-**Why no auto-probe**: silent fallback is a security footgun. An operator who set `SANDBOX_MODE=local-docker` in production must NOT silently degrade to `subprocess` (no network or filesystem isolation) just because Docker happened to be down. Failing loudly at boot — with the precise reason — is the only safe default.
+| `sandbox.mode` | Behaviour |
+|---|---|
+| `service` (default) | Service mode — connects to external sandbox service (`dify-sandbox`). |
+| `subprocess` | Subprocess mode — local process execution (dev / fallback). |
+| anything else | Throws `SandboxError("INVALID_INPUT")` at boot (typo guard). |
 
 Boot emits one log line so the choice is grep-able:
 ```
-[nango] sandbox active backend: local-docker (SANDBOX_MODE=local-docker)
+[nango] sandbox active backend: service
 ```
 
 `isAvailable()` checks per backend:
 
 - `subprocess`: always true.
-- `local-docker`: `docker info` succeeds.
-- `remote-docker`: stub adapter (returns null at registry lookup).
+- `service`: queries sandbox service health/reachability.
 
 The choice is made once at boot (in `instrumentation.ts`); the active adapter is cached for the process lifetime — `_resetActiveAdapterCache()` exists for tests only.
 

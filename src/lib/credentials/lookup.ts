@@ -546,14 +546,14 @@ export async function getEnabledVoiceCredentialById(credentialId: string): Promi
   }
   
   const fields = decryptPayloadSafely(match.encryptedPayload) ?? {};
-  const apiKey: string | null = typeof fields.apiKey === "string"
-  ? fields.apiKey
-  : typeof fields.token === "string"
-  ? fields.token
-  : typeof fields.key === "string"
-  ? fields.key
-  : null;
-    
+  const apiKey: string | null =
+    typeof fields.apiKey === "string"
+      ? fields.apiKey
+      : typeof fields.token === "string"
+        ? fields.token
+        : typeof fields.key === "string"
+          ? fields.key
+          : null;
   const config: VoiceCredentialConfig = {
     id: match.id,
     provider: match.provider ?? "",
@@ -563,4 +563,52 @@ export async function getEnabledVoiceCredentialById(credentialId: string): Promi
   
   voiceCredentialCache.set(cacheKey, { config });
   return config;
+}
+
+export interface InfrastructureCredentialConfig {
+  id: string;
+  provider: string;
+  host: string | null;
+  apiKey: string | null;
+}
+
+/** Lookup the first enabled credential matching a provider slug (e.g. "dify-sandbox" or "sensevoice"). */
+export async function getEnabledInfrastructureCredentialByProvider(
+  provider: string,
+): Promise<InfrastructureCredentialConfig | null> {
+  const rows = await db
+    .select({
+      id: CredentialTable.id,
+      encryptedPayload: CredentialTable.encryptedPayload,
+      restUrl: CredentialTable.restUrl,
+      provider: CredentialTable.provider,
+    })
+    .from(CredentialTable)
+    .where(
+      and(
+        eq(CredentialTable.provider, provider),
+        eq(CredentialTable.enabled, true),
+      ),
+    )
+    .orderBy(desc(CredentialTable.createdAt))
+    .limit(1);
+
+  if (rows.length === 0) return null;
+
+  const row = rows[0];
+  const fields = decryptPayloadSafely(row.encryptedPayload) ?? {};
+  const host = typeof fields.host === "string" ? fields.host : row.restUrl;
+  const apiKey =
+    typeof fields.apiKey === "string"
+      ? fields.apiKey
+      : typeof fields.token === "string"
+        ? fields.token
+        : null;
+
+  return {
+    id: row.id,
+    provider: row.provider ?? provider,
+    host: host ?? null,
+    apiKey: apiKey ?? null,
+  };
 }

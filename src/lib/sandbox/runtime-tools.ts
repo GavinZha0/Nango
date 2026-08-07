@@ -171,7 +171,9 @@ export function buildRunInSandboxTool(): ToolDefinition {
       // executor has the same limitation. Wiring lands when the
       // sandbox adapters grow an `env?: Record<string, string>`
       // slot.
+      const targetLanguage = args.language === "python" ? "python3" : "javascript";
       const out = await adapter.run({
+        language: targetLanguage,
         command: [...command],
         stdin: args.code_text,
         datasets: args.datasets,

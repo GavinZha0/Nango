@@ -192,7 +192,7 @@ Implications:
 - **In-flight extractions across boot are not preserved.** If Node restarts mid-extraction, the half-written `.tmp-<name>-<uuid>/` directory is swept along with everything else. The next call starts fresh — which is what an idempotent extract should do anyway.
 - **Cache hits within a session still work as before.** TTL governs the in-session refresh decision; the boot sweep only governs what survives a Node restart (answer: nothing).
 - **Multi-process deployments are NOT supported** by this design. Nango is a single-node multi-tenant runtime (see `docs/architecture.md` §"Runtime boundary"); two Node workers sharing one cache_root would race the boot sweep and clobber each other's freshly-written datasets. If you need to run multiple workers, give each its own `datasource.cache_root` config — but you should first read the runtime-boundary section about why that's not a supported topology in V1.
-- **Docker sandbox mode is unaffected.** The cache is a host filesystem path; both subprocess (symlink) and local-docker (bind-mount) adapters resolve `./data/<name>/` to the same swept directory.
+- **Docker sandbox mode is unaffected.** The cache is a host filesystem path; both subprocess (symlink) and service sandbox (mount) adapters resolve `./data/<name>/` to the same directory.
 
 ### 4.4 Metadata: file convention vs `cache_meta.duckdb`
 

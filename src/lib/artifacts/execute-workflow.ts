@@ -174,7 +174,9 @@ async function runCodeViaSandbox(
   // followed by either the inline code text or a preamble+exec-wrapper
   // that executes the sandbox-resident file in the current scope.
   const stdin = buildSandboxStdin(req.language, req.datasets, req.env, req.code, req.codeFile);
+  const targetLanguage = req.language === "python" ? "python3" : "javascript";
   const result = await adapter.run({
+    language: targetLanguage,
     command,
     stdin,
     datasets: req.datasets,

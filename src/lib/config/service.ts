@@ -70,13 +70,16 @@ export async function loadAllConfigs(): Promise<void> {
 export async function seedDefaults(): Promise<void> {
   try {
     const existingRows = await db
-      .select({ key: ConfigTable.key })
+      .select({
+        key: ConfigTable.key,
+        value: ConfigTable.value,
+        options: ConfigTable.options,
+      })
       .from(ConfigTable);
-    const existingKeys = new Set(existingRows.map((r) => r.key));
-    const missing = CONFIG_DEFAULTS.filter((d) => !existingKeys.has(d.key));
+    const existingMap = new Map(existingRows.map((r) => [r.key, r]));
 
-    if (missing.length === 0) return;
-
+    // 1. Insert missing defaults
+    const missing = CONFIG_DEFAULTS.filter((d) => !existingMap.has(d.key));
     for (const def of missing) {
       await db.insert(ConfigTable).values({
         key: def.key,
@@ -86,7 +89,32 @@ export async function seedDefaults(): Promise<void> {
         options: def.options ?? null,
       });
     }
-    console.log(`[config] seeded ${missing.length} new default(s)`);
+
+    // 2. Reconcile existing keys' options, descriptions, and invalid values
+    for (const def of CONFIG_DEFAULTS) {
+      const existing = existingMap.get(def.key);
+      if (!existing) continue;
+
+      const optionsChanged =
+        JSON.stringify(existing.options) !== JSON.stringify(def.options ?? null);
+      const isInvalidValue =
+        def.options && existing.value && !def.options.includes(existing.value);
+
+      if (optionsChanged || isInvalidValue) {
+        await db
+          .update(ConfigTable)
+          .set({
+            options: def.options ?? null,
+            description: def.description,
+            ...(isInvalidValue ? { value: def.value } : {}),
+          })
+          .where(eq(ConfigTable.key, def.key));
+      }
+    }
+
+    if (missing.length > 0) {
+      console.log(`[config] seeded ${missing.length} missing default(s)`);
+    }
   } catch (err) {
     console.warn(
       `[config] seed failed: ${err instanceof Error ? err.message : String(err)}`,

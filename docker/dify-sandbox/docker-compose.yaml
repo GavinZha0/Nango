@@ -1,0 +1,18 @@
+name: nango-dify-sandbox
+
+services:
+  dify-sandbox:
+    image: langgenius/dify-sandbox:latest
+    container_name: nango-dify-sandbox
+    restart: always
+    ports:
+      - "8194:8194"
+    volumes:
+      # mount config.yaml
+      - ./config.yaml:/conf/config.yaml:ro
+      # mount requirements.txt
+      - ./requirements.txt:/dependencies/python-requirements.txt:ro
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
