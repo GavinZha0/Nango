@@ -15,7 +15,7 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 
 - One uniform interface (`ISandboxAdapter`) so the agent tool surface is identical regardless of the underlying isolation tech.
 - Single backend in V1: **Service** (external service-based execution via `dify-sandbox`).
-- A **cwd-relative path contract** (`./data/<name>/`) so agent-generated code never sees host filesystem paths. The service adapter surfaces declared datasets under the sandbox's working directory via volume mount (`.cache/datasource/parquet:/opt/python/lib/python3.14/site-packages/data:ro`).
+- A **cwd-relative path contract** (`./tmp/data/<name>/`) so agent-generated code never sees host filesystem paths. The service adapter surfaces declared datasets under the sandbox's working directory via volume mount (`.cache/datasource/parquet:/var/sandbox/sandbox-python/tmp/data:ro`).
 - Hard limits: timeout, memory, CPU. The backend enforces them with the strongest mechanism it has.
 - Output truncation + path masking so a noisy or hostile script cannot flood the agent context or leak host paths.
 - Configurable service endpoint (`sandbox.service.url`, `sandbox.service.api_key`) and provider selection (`sandbox.service.provider`).
@@ -38,7 +38,7 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 |---|---|---|
 | `command` | `string[]` | argv array — never a shell string. |
 | `stdin` | `string?` | Optional content piped to stdin. |
-| `datasets` | `string[]?` | Dataset names to expose read-only at `./data/<name>/` in cwd. |
+| `datasets` | `string[]?` | Dataset names to expose read-only at `./tmp/data/<name>/` in cwd. |
 | `inputFiles` | `Record<string, Buffer>?` | Extra files written to cwd before execution. |
 | `timeoutMs` | `number?` | Hard timeout (default: 30000). |
 | `maxMemoryMb` | `number?` | Memory cap (default: 256). |
@@ -112,7 +112,7 @@ The agent never sees host paths. Everything is **cwd-relative**:
 
 | In-sandbox path | Realised by | Access |
 |---|---|---|
-| `./data/<name>/` | service: bind mount `<cacheRoot>/parquet/<name>/` → `/opt/python/lib/python3.14/site-packages/data/<name>` | read-only (enforced by container) |
+| `./tmp/data/<name>/` | service: bind mount `<cacheRoot>/parquet/<name>/` → `/var/sandbox/sandbox-python/tmp/data/<name>` | read-only (enforced by container) |
 | `./` (cwd itself) | service: container working directory | read-write, cleared on exit |
 | `/tmp/` (container only) | tmpfs | read-write, cleared on exit |
 
@@ -122,7 +122,7 @@ The agent never sees host paths. Everything is **cwd-relative**:
 - `resolveDatasetHostDir(name) → host path` — adapter mount-source
 - `maskOutput(text, mapping) → text` — rewrites any host / container absolute paths leaked into stdout / stderr back to cwd-relative form
 
-Reasoning for masking: even a well-behaved Python script that prints a `FileNotFoundError` exposes the absolute path it tried. We unify the LLM's view to `./data/<name>/...` at the output boundary so error feedback round-trips into the next call without translation.
+Reasoning for masking: even a well-behaved Python script that prints a `FileNotFoundError` exposes the absolute path it tried. We unify the LLM's view to `./tmp/data/<name>/...` at the output boundary so error feedback round-trips into the next call without translation.
 
 ---
 
@@ -145,9 +145,9 @@ Pure string replace, applied longest-prefix-first to avoid nested-substitution c
 
 | Found in stderr / stdout | Rewritten to |
 |---|---|
-| `<cacheRoot>/parquet/<name>/...` | `./data/<name>/...` |
-| `/opt/python/lib/python3.14/site-packages/data/<name>/...` (container absolute) | `./data/<name>/...` |
-| `<cacheRoot>/parquet/...` (fallback, undeclared dataset) | `./data/...` |
+| `<cacheRoot>/parquet/<name>/...` | `./tmp/data/<name>/...` |
+| `/var/sandbox/sandbox-python/tmp/data/<name>/...` (container absolute) | `./tmp/data/<name>/...` |
+| `<cacheRoot>/parquet/...` (fallback, undeclared dataset) | `./tmp/data/...` |
 | `/opt/python/lib/python3.14/site-packages/...` (container cwd) | `./...` |
 
 ### 5.3 Termination → structured error
@@ -173,14 +173,14 @@ run_code_in_sandbox({
   command: ["python3", "-"],
   stdin:
     "import duckdb\n" +
-    "df = duckdb.read_parquet('./data/sales_q1_2025/**/*.parquet').df()\n" +
+    "df = duckdb.read_parquet('./tmp/data/sales_q1_2025/**/*.parquet').df()\n" +
     "print(df.head().to_json())",
   datasets: ["sales_q1_2025"],
   timeoutMs: 30000,
 }) → SandboxOutput
 ```
 
-The dataset is exposed at `./data/sales_q1_2025/` — relative to the sandbox's cwd.
+The dataset is exposed at `./tmp/data/sales_q1_2025/` — relative to the sandbox's cwd.
 
 Design notes:
 

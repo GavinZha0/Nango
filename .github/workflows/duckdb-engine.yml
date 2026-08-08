@@ -46,7 +46,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/duckdb-engine
           flavor: |
-            latest=auto
+            latest=true
           tags: |
             type=ref,event=branch
             type=sha,format=short

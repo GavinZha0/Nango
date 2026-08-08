@@ -56,7 +56,7 @@ export async function buildDataSourcesPromptBlock(
     "access — to read data you MUST first call extract_dataset_by_sql " +
     "(materialises a Parquet snapshot), then pass the same `name` as " +
     "`datasets[]` to run_code_in_sandbox; the file becomes available " +
-    "at ./data/<name>/ in the sandbox's current working directory. Do NOT attempt to `import duckdb` or any " +
+    "at ./tmp/data/<name>/ in the sandbox's current working directory. Do NOT attempt to `import duckdb` or any " +
     "other DB driver inside the sandbox — there are no credentials there.\n\n" +
     "Cross-schema queries: for mysql / mariadb / postgres sources, if a " +
     "query against an unqualified table name returns a 'Catalog Error' or " +

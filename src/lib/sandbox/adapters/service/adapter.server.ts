@@ -76,15 +76,14 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
     if (language === "python3") {
       let preamble =
         `import os as __nango_os, sys as __nango_sys\n` +
-        `__nango_data_root = __nango_os.path.join(__nango_sys.prefix, 'lib', f'python{__nango_sys.version_info.major}.{__nango_sys.version_info.minor}', 'site-packages', 'data')\n` +
+        `__nango_data_root = '/tmp/data'\n` +
         `DATA_DIR = __nango_data_root\n`;
 
       if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
         const rawParams = input.env[SANDBOX_PARAMS_ENV_KEY];
         preamble += `__nango_os.environ['${SANDBOX_PARAMS_ENV_KEY}'] = ${JSON.stringify(rawParams)}\n`;
       }
-      const mappedCode = code.replace(/(['"])\.\/data\//g, `$1/opt/python/lib/python3.14/site-packages/data/`);
-      code = preamble + mappedCode;
+      code = preamble + code;
     } else if (language === "javascript") {
       if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
         const rawParams = input.env[SANDBOX_PARAMS_ENV_KEY];

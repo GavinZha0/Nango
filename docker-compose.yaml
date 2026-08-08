@@ -2,6 +2,7 @@ name: nango
 
 services:
   nango-app:
+    container_name: nango-app
     image: ghcr.io/gavinzha0/nango:latest
     pull_policy: missing
     build:
@@ -49,6 +50,7 @@ services:
     restart: unless-stopped
 
   nango-db:
+    container_name: nango-db
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nango}
@@ -75,7 +77,8 @@ services:
     volumes:
       - ./docker/dify-sandbox/config.yaml:/conf/config.yaml:ro
       - ./docker/dify-sandbox/requirements.txt:/dependencies/python-requirements.txt:ro
-      - .cache/datasource/parquet:/opt/python-3.14.4/lib/python3.14/site-packages/data:ro
+      # read only volume mount for shared datasets
+      - .cache/datasource/parquet:/var/sandbox/sandbox-python/tmp/data:ro
     cap_add:
       - SYS_ADMIN
     security_opt:

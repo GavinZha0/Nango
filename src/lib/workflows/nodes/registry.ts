@@ -173,7 +173,7 @@ const SQL_NODE_SCHEMA: JSONSchemaObject = {
           type: "string",
           description:
             "Parquet dataset slug. Reference in downstream code nodes via " +
-            "@nodes.X.dataset_name; engine mounts it at ./data/<name>/.",
+            "@nodes.X.dataset_name; engine mounts it at ./tmp/data/<name>/.",
         },
         total_rows: {
           type: "integer",

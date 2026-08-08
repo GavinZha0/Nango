@@ -50,7 +50,7 @@ const ExtractDatasetArgs = z.object({
     .min(1)
     .max(128)
     .describe(
-      "Stable cache key for this dataset. Pick a name that clearly identifies the slice (source + scope + time), e.g. 'sales_q1_2025' or 'users_dev'. Reusing the same name + same query is cheap (cache hit). Inside run_code_in_sandbox, the dataset appears at ./data/<name>/ (relative to the sandbox's current working directory).",
+      "Stable cache key for this dataset. Pick a name that clearly identifies the slice (source + scope + time), e.g. 'sales_q1_2025' or 'users_dev'. Reusing the same name + same query is cheap (cache hit). Inside run_code_in_sandbox, the dataset appears at ./tmp/data/<name>/ (relative to the sandbox's current working directory).",
     ),
   data_source_name: z
     .string()
@@ -146,7 +146,7 @@ export function buildExtractDatasetTool(
       "sql_text returns the cached snapshot (cache_hit: true). " +
       "To run analysis on the full dataset, pass `dataset_name` to " +
       "run_code_in_sandbox.datasets[]; the Parquet files become " +
-      "readable at ./data/<dataset_name>/ in the sandbox's working " +
+      "readable at ./tmp/data/<dataset_name>/ in the sandbox's working " +
       "directory.",
     parameters: ExtractDatasetArgs,
     execute: async (args) => {

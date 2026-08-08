@@ -159,7 +159,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const runSkillScript = defineTool({
     name: "run_skill_script",
     description:
-      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
+      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: z.object({
       name: z.string().describe("Skill name."),
       filename: z
@@ -171,7 +171,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         .array(z.string())
         .optional()
         .describe(
-          "Cached dataset names (from extract_dataset_by_sql) to expose read-only at ./data/<name>/ in the sandbox cwd.",
+          "Cached dataset names (from extract_dataset_by_sql) to expose read-only at ./tmp/data/<name>/ in the sandbox cwd.",
         ),
     }),
     execute: async ({ name, filename, datasets }) => {
@@ -243,7 +243,7 @@ function renderPromptBlock(specs: SkillSpec[]): string {
   const lines: string[] = [];
   lines.push("## Available Skills");
   lines.push(
-    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill (references/, scripts/, assets/, evals/) are reachable via `get_skill_file(name, filename)`.  Scripts under `scripts/` can be executed with `run_skill_script(name, filename)` (V1: .py and .sh) — pass `datasets: [...]` for cached Parquet input at ./data/<name>/ in the sandbox cwd.",
+    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill (references/, scripts/, assets/, evals/) are reachable via `get_skill_file(name, filename)`.  Scripts under `scripts/` can be executed with `run_skill_script(name, filename)` (V1: .py and .sh) — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd.",
   );
   lines.push("");
   for (const spec of specs) {

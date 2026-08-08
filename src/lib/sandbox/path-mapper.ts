@@ -8,8 +8,8 @@ import * as path from "node:path";
 import { resolveCacheRoot } from "@/lib/data-sources/cache-root";
 
 /** Subdirectory under the sandbox cwd where declared datasets are
- *  exposed. Reads as `./data/<name>/` from in-sandbox code. */
-export const SANDBOX_DATA_DIR = "data";
+ *  exposed. Reads as `./tmp/data/<name>/` from in-sandbox code. */
+export const SANDBOX_DATA_DIR = "tmp/data";
 
 /** Container working directory set via `--workdir /work` on
  *  `docker run`. Kept short to minimise collision with user paths. */
@@ -77,15 +77,9 @@ function collectReplacements(mapping: PathMapping): Array<[string, string]> {
   for (const [name, hostDir] of Object.entries(mapping.datasetHostDirs)) {
     const dataRelative = `./${SANDBOX_DATA_DIR}/${name}`;
     r.push([hostDir, dataRelative]);
-    r.push([path.join(mapping.tmpHostDir, SANDBOX_DATA_DIR, name), dataRelative]);
-    r.push([
-      `/opt/python-3.14.4/lib/python3.14/site-packages/${SANDBOX_DATA_DIR}/${name}`,
-      dataRelative,
-    ]);
-    r.push([
-      `${DOCKER_CONTAINER_WORKDIR}/${SANDBOX_DATA_DIR}/${name}`,
-      dataRelative,
-    ]);
+    r.push([path.join(mapping.tmpHostDir, "data", name), dataRelative]);
+    r.push([`/tmp/data/${name}`, dataRelative]);
+    r.push([`${DOCKER_CONTAINER_WORKDIR}/data/${name}`, dataRelative]);
   }
 
   // Cache-root fallback for undeclared datasets (e.g. an error

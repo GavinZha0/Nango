@@ -36,20 +36,20 @@ const RunInSandboxArgs = z.object({
         "the script body; the runtime reads it via `python3 -`. " +
         "Data the script needs at runtime should go through " +
         "`params` (env vars) or the dataset files exposed under " +
-        "./data/<name>/.",
+        "./tmp/data/<name>/.",
     ),
-  /** Datasets to expose read-only under `./data/<name>/` in the
+  /** Datasets to expose read-only under `./tmp/data/<name>/` in the
    *  sandbox's current working directory. The data-source layer
    *  must already have materialised them via `extract_dataset_by_sql`.
    *
    *  Backend mechanism (transparent to the LLM):
-   *    service: datasets mounted at `site-packages/data/<name>` (readonly)
-   *  In-sandbox code reads `./data/<name>/...`. */
+   *    service: datasets mounted at `/tmp/data/<name>` (readonly)
+   *  In-sandbox code reads `./tmp/data/<name>/...`. */
   datasets: z
     .array(z.string().min(1))
     .optional()
     .describe(
-      "Cached dataset names to expose read-only at ./data/<name>/ (relative to the sandbox's current working directory). Materialise them first with extract_dataset_by_sql.",
+      "Cached dataset names to expose read-only at ./tmp/data/<name>/ (relative to the sandbox's current working directory). Materialise them first with extract_dataset_by_sql.",
     ),
   /** Free-form parameters serialised into the sandbox process'
    *  env vars. Use for small typed inputs the code reads via
@@ -111,9 +111,9 @@ export function buildRunInSandboxTool(): ToolDefinition {
       "`params` (env vars; read with `os.environ['<KEY>']` in " +
       "Python or `process.env['<KEY>']` in JavaScript); do not " +
       "embed secrets there. Each name passed in `datasets` appears " +
-      "read-only at `./data/<name>/` in the sandbox's current " +
+      "read-only at `./tmp/data/<name>/` in the sandbox's current " +
       "working directory — construct paths in your script as " +
-      "`./data/<name>/**/*.parquet` and read with " +
+      "`./tmp/data/<name>/**/*.parquet` and read with " +
       "`duckdb.read_parquet(...)`. The cwd is also writable, so " +
       "intermediate files (plots, intermediate Parquets, etc.) can " +
       "be saved next to the data with `./output.png`, " +

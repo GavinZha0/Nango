@@ -31,7 +31,7 @@ describe("path resolution", () => {
   });
 
   it("exposes the in-sandbox cwd-relative subdir name", () => {
-    expect(SANDBOX_DATA_DIR).toBe("data");
+    expect(SANDBOX_DATA_DIR).toBe("tmp/data");
   });
 
   it("exposes the docker container's working directory", () => {
@@ -52,13 +52,13 @@ describe("maskOutput", () => {
     );
   });
 
-  it("rewrites a declared dataset's host path (symlink-target form) to ./data/<name>", () => {
+  it("rewrites a declared dataset's host path (symlink-target form) to ../tmp/data/<name>", () => {
     const m = buildMapping(TMP_DIR, ["sales_q1"]);
     const out = maskOutput(
       `read from ${path.join(CACHE_ROOT, "parquet", "sales_q1", "part-001.parquet")}`,
       m
     );
-    expect(normalizeSlashes(out)).toBe("read from ./data/sales_q1/part-001.parquet");
+    expect(normalizeSlashes(out)).toBe("read from ../tmp/data/sales_q1/part-001.parquet");
   });
 
   it("rewrites a declared dataset's work-dir path form (in-cwd absolute)", () => {
@@ -68,17 +68,17 @@ describe("maskOutput", () => {
       m
     );
     expect(normalizeSlashes(out)).toBe(
-      "FileNotFoundError: './data/sales_q1/x.parquet'"
+      "FileNotFoundError: '../tmp/data/sales_q1/x.parquet'"
     );
   });
 
-  it("rewrites docker container-path form (/work/data/<name>) to ./data/<name>", () => {
+  it("rewrites docker container-path form (/work/data/<name>) to ../tmp/data/<name>", () => {
     const m = buildMapping(TMP_DIR, ["sales_q1"]);
     const out = maskOutput(
       "duckdb: /work/data/sales_q1/part-001.parquet not found",
       m
     );
-    expect(out).toBe("duckdb: ./data/sales_q1/part-001.parquet not found");
+    expect(out).toBe("duckdb: ../tmp/data/sales_q1/part-001.parquet not found");
   });
 
   it("rewrites the docker container's cwd /work to `.`", () => {
@@ -94,17 +94,17 @@ describe("maskOutput", () => {
       m
     );
     expect(normalizeSlashes(out)).toBe(
-      "loaded ./data/sales_q1/part-001.parquet from ./script.py"
+      "loaded ../tmp/data/sales_q1/part-001.parquet from ./script.py"
     );
   });
 
-  it("falls back to ./data when an UNDECLARED dataset is mentioned", () => {
+  it("falls back to ./tmp/data when an UNDECLARED dataset is mentioned", () => {
     const m = buildMapping(TMP_DIR, []);
     const out = maskOutput(
       `found ${path.join(CACHE_ROOT, "parquet", "sales_q1", "x.parquet")}`,
       m
     );
-    expect(normalizeSlashes(out)).toBe("found ./data/sales_q1/x.parquet");
+    expect(normalizeSlashes(out)).toBe("found ./tmp/data/sales_q1/x.parquet");
   });
 
   it("longest-host-path wins (declared dataset path over cache-root fallback)", () => {
@@ -113,6 +113,6 @@ describe("maskOutput", () => {
       `x ${path.join(CACHE_ROOT, "parquet", "sales_q1")} y`,
       m
     );
-    expect(normalizeSlashes(out)).toBe("x ./data/sales_q1 y");
+    expect(normalizeSlashes(out)).toBe("x ../tmp/data/sales_q1 y");
   });
 });

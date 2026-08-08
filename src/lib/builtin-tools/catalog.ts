@@ -50,7 +50,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     name: "run_code_in_sandbox",
     displayName: "Run code in sandbox",
     description:
-      "Execute Python/JavaScript in an isolated sandbox with read-only datasets at ./data/<name>/.",
+      "Execute Python/JavaScript in an isolated sandbox with read-only datasets at ./tmp/data/<name>/.",
     category: "sandbox",
     build: buildRunInSandboxTool,
   },

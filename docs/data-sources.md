@@ -133,7 +133,7 @@ preview byte budget). When `returned_rows < total_rows` the
 result was truncated — agents read the full dataset from the
 parquet handle via `run_code_in_sandbox.datasets[]`.
 
-The tool is implemented in the data-sources layer; it consults the cache (§4), invokes the adapter on cache miss, and returns the **virtual** mount path (`./data/...`) so the agent's next call to `run_in_sandbox` can mount it without leaking the host path.
+The tool is implemented in the data-sources layer; it consults the cache (§4), invokes the adapter on cache miss, and returns the **virtual** mount path (`./tmp/data/...`) so the agent's next call to `run_in_sandbox` can mount it without leaking the host path.
 
 ---
 
@@ -157,7 +157,7 @@ The cache is a host-filesystem region under `<repoRoot>/.cache/datasource/` owne
   cache_meta.duckdb                     ← optional, see §4.4
 ```
 
-`datasetName` may map to either layout. Adapters writing partitioned output emit one Parquet file per partition; adapters writing scalar results emit a single file. The mount path the sandbox sees is always the **directory**, so DuckDB's `read_parquet('./data/<name>/**/*.parquet')` works regardless.
+`datasetName` may map to either layout. Adapters writing partitioned output emit one Parquet file per partition; adapters writing scalar results emit a single file. The mount path the sandbox sees is always the **directory**, so DuckDB's `read_parquet('./tmp/data/<name>/**/*.parquet')` works regardless.
 
 ### 4.2 Naming and uniqueness — name is a SLOT
 
@@ -166,7 +166,7 @@ The cache is a host-filesystem region under `<repoRoot>/.cache/datasource/` owne
 - **A name is a slot, not an identifier.** Re-extracting under the same name with a DIFFERENT query is a slot reassignment, not an error. The cache stores the canonicalised `query_hash`; on hash mismatch the new snapshot replaces the prior bytes on disk via `commitWriteSlot`'s atomic `rm -rf + rename`. The tool result returns `replaced_prior: true` so the agent knows the prior data is gone.
 - Re-extracting with the SAME query is a cache hit (`cache_hit: true`, no source roundtrip) — same as before.
 - **Why slot semantics?** LLMs treat names as variables (`customers`, `recent_orders`), not as durable identifiers; the alternative (fail-fast on hash mismatch) traps the LLM after a restart when it has no memory of prior session names, and trapped the agent mid-conversation when it naturally wanted to "rebind" a slug to a refined query. The slot-reassignment model matches every programming language's variable semantics — no concept to learn.
-- **Defence still in place:** in-flight readers of `./data/<name>/...` in another sandbox process keep their bytes via the OS's open-FD and page-cache semantics (POSIX: a deleted file referenced by an open FD stays alive); only NEW sandbox runs see the replaced bytes. Atomic `rename(tmp, final)` means there's no half-state window for fresh readers either.
+- **Defence still in place:** in-flight readers of `./tmp/data/<name>/...` in another sandbox process keep their bytes via the OS's open-FD and page-cache semantics (POSIX: a deleted file referenced by an open FD stays alive); only NEW sandbox runs see the replaced bytes. Atomic `rename(tmp, final)` means there's no half-state window for fresh readers either.
 
 ### 4.3 TTL and invalidation
 
@@ -193,7 +193,7 @@ Implications:
 - **In-flight extractions across boot are not preserved.** If Node restarts mid-extraction, the half-written `.tmp-<name>-<uuid>/` directory is swept along with everything else. The next call starts fresh — which is what an idempotent extract should do anyway.
 - **Cache hits within a session still work as before.** TTL governs the in-session refresh decision; the boot sweep only governs what survives a Node restart (answer: nothing).
 - **Multi-process deployments are NOT supported** by this design. Nango is a single-node multi-tenant runtime (see `docs/architecture.md` §"Runtime boundary"); two Node workers sharing one cache_root would race the boot sweep and clobber each other's freshly-written datasets. If you need to run multiple workers, give each its own `datasource.cache_root` config — but you should first read the runtime-boundary section about why that's not a supported topology in V1.
-- **Service sandbox mode is unaffected.** The cache is a host filesystem path; the service sandbox (mount) adapter resolves `./data/<name>/` to the same directory.
+- **Service sandbox mode is unaffected.** The cache is a host filesystem path; the service sandbox (mount) adapter resolves `./tmp/data/<name>/` to the same directory.
 
 ### 4.4 Metadata: file convention vs `cache_meta.duckdb`
 

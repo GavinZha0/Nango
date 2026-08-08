@@ -425,7 +425,7 @@ Runs a DuckDB query against a data source, materialises a Parquet snapshot, and 
 
 | Field | Type | Description |
 |---|---|---|
-| `dataset_name` | string | Parquet slot name; downstream code/chart nodes mount at `./data/<name>/` |
+| `dataset_name` | string | Parquet slot name; downstream code/chart nodes mount at `./tmp/data/<name>/` |
 | `total_rows` | integer | Full result-set count |
 | `returned_rows` | integer | Rows delivered inline (≤ total_rows) |
 | `rows` | array | Inline row objects — column names vary by query |
@@ -465,8 +465,8 @@ Runs Python or JavaScript in an isolated sandbox with optional dataset mounts an
   "id": 2, "type": "code", "description": "Aggregate to hourly means", "depends_on": [0],
   "inputs": {
     "language":  "python",
-    "code_text": "# read ./data/{datasets[0]}, resample 1H, print json.dumps({'rows': [...], 'message': '...'})",
-    "datasets":  ["@nodes.0.dataset_name"],   // Parquet mounts at ./data/<name>/
+    "code_text": "# read ./tmp/data/{datasets[0]}, resample 1H, print json.dumps({'rows': [...], 'message': '...'})",
+    "datasets":  ["@nodes.0.dataset_name"],   // Parquet mounts at ./tmp/data/<name>/
     "params":    { "threshold": 100 }          // injected as NANGO_PARAMS env var
   }
 }

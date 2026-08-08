@@ -274,7 +274,7 @@ export const CanonicalCodeInputsSchema = z.object({
   ),
   datasets: z.array(z.unknown()).optional().describe(
     "Dataset names or @nodes.X.dataset_name refs. Mounted read-only " +
-    "at ./data/<name>/ in sandbox cwd. Python only.",
+    "at ./tmp/data/<name>/ in sandbox cwd. Python only.",
   ),
   params: z.record(z.string(), z.unknown()).optional().describe(
     "Runtime parameters. Serialized into NANGO_PARAMS env var; " +
@@ -317,7 +317,7 @@ export const CanonicalSqlInputsSchema = z.object({
   ),
   dataset_name: z.string().min(1).optional().describe(
     "Parquet cache slot name. Downstream code/chart nodes mount the result " +
-    "read-only at ./data/<name>/ in sandbox cwd. Optional — engine derives " +
+    "read-only at ./tmp/data/<name>/ in sandbox cwd. Optional — engine derives " +
     "a deterministic name from (workflowId, nodeId) when omitted. " +
     "Last-write-wins: re-running with the same name replaces the cached dataset.",
   ),
