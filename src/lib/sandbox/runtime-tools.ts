@@ -43,9 +43,8 @@ const RunInSandboxArgs = z.object({
    *  must already have materialised them via `extract_dataset_by_sql`.
    *
    *  Backend mechanism (transparent to the LLM):
-   *    subprocess: `<tmpHostDir>/data/<name>` symlink → cache
-   *    docker:     `/work/data/<name>` bind mount (--workdir /work)
-   *  Either way, in-sandbox code reads `./data/<name>/...`. */
+   *    service: datasets mounted at `site-packages/data/<name>` (readonly)
+   *  In-sandbox code reads `./data/<name>/...`. */
   datasets: z
     .array(z.string().min(1))
     .optional()

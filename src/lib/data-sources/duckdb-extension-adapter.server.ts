@@ -20,9 +20,6 @@ import {
 export interface DuckdbExtensionAdapterConfig {
   /** DuckDB scanner extension to install/load. */
   extension: DuckdbExtensionName;
-  /** Per-provider connection-string builder. Keeps the libpq vs
-   *  mysql_scanner attach grammar isolated per provider. */
-  buildAttachString: (resolved: ResolvedDataSource) => string;
   /** Emit `USE src.<resolved.database>` after ATTACH so unqualified
    *  table refs resolve. Required for MySQL / MariaDB; wrong for
    *  Postgres. */
@@ -40,26 +37,23 @@ export interface DuckdbExtensionAdapterFns {
 export function createDuckdbExtensionAdapter(
   config: DuckdbExtensionAdapterConfig,
 ): DuckdbExtensionAdapterFns {
-  const { extension, buildAttachString, pinDefaultSchema } = config;
+  const { extension, pinDefaultSchema } = config;
 
   return {
     async extract(resolved, input) {
       return extractViaDuckdb({
         extension,
-        attachString: buildAttachString(resolved),
+        resolved,
         defaultSchema: pinDefaultSchema ? resolved.database : undefined,
         input,
       });
     },
 
     async testConnection(resolved, signal) {
-      // testConnectionViaDuckdb has its own try/catch; the outer
-      // try/catch here only covers the pre-call path (e.g.
-      // attach-string builder throwing on malformed `params`).
       try {
         return await testConnectionViaDuckdb({
           extension,
-          attachString: buildAttachString(resolved),
+          resolved,
           signal,
         });
       } catch (err) {

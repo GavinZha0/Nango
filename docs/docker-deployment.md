@@ -18,12 +18,14 @@ time instead of debugging them in production.
 
 ## 1. Pipeline overview
 
-`docker-compose.yaml` starts two services:
+`docker-compose.yaml` starts four services:
 
 | Service | Image | Purpose |
 |---|---|---|
 | `nango-db` | `postgres:18-alpine` | Stateful — owns the named volume `nango-db-data` |
 | `nango-app` | `nango:latest` (built from `docker/Dockerfile`) | Stateless — Next.js standalone server on port 9300 |
+| `dify-sandbox` | `langgenius/dify-sandbox:latest` | Code execution sandbox for Python scripts |
+| `duckdb-engine` | `nango-duckdb-engine:latest` (built from `docker/duckdb-engine/Dockerfile`) | DuckDB data extraction service |
 
 The app image is multi-stage:
 
@@ -50,6 +52,22 @@ docker/Dockerfile
 The DB container runs the official Postgres image; the entrypoint
 creates the user / db on first start, applies migrations on every start
 via `docker/migrate.mjs`, then `node server.js` launches Next.js.
+
+### 2.1 duckdb-engine Service
+
+The `duckdb-engine` service is a dedicated container for DuckDB data extraction operations:
+
+- **Image**: Built from `docker/duckdb-engine/Dockerfile` (Python 3.13 + DuckDB + FastAPI)
+- **Purpose**: Handles data extraction from external databases (Postgres, MySQL, Vertica) and converts to Parquet format
+- **Shared Volume**: Mounts `.cache/datasource/parquet:/cache/parquet` for shared Parquet cache access
+- **API**: Exposes HTTP endpoint on port 8526 with API key authentication
+- **Auto-seeding**: Credentials are automatically seeded on first admin user creation
+
+The service provides:
+- Isolated DuckDB operations (doesn't affect main container)
+- Consistent HTTP API for data extraction
+- Support for multiple database backends via DuckDB extensions
+- Preview row generation for immediate data inspection
 
 ---
 
@@ -96,7 +114,7 @@ After changing Docker configurations:
 ## 5. Architectural Quirks
 
 ### Next.js Standalone vs. pnpm Symlinks
-Next.js `output: "standalone"` uses `nft` to trace dependencies. However, `nft` often mishandles pnpm's symlink layout and drops necessary entry files or native sidecars (like `duckdb.node`).
+Next.js `output: "standalone"` uses `nft` to trace dependencies. However, `nft` often mishandles pnpm's symlink layout and drops necessary entry files or native sidecars.
 To fix this, the Dockerfile includes a custom "fixpoint repair" script during the builder stage. It walks the `nft` traced package set, follows pnpm symlinks, and copies missing files from the full `node_modules` store to the standalone bundle. This reduces the image size significantly while preventing runtime crashes.
 
 ### Single Migration Runner

@@ -77,27 +77,28 @@ Each provider module exposes a static client-safe descriptor (`adapter.ts`) and 
 
 ### 3.1 The DuckDB-backed extraction shortcut
 
-For sources with DuckDB native scanner extensions (Postgres, MySQL, SQLite), the adapter uses DuckDB to directly query the source and write Parquet in a single streaming operation. This gives us:
+For sources with DuckDB native scanner extensions (Postgres, MySQL, SQLite), the adapter delegates to the external `duckdb-engine` container service to directly query the source and write Parquet in a single streaming operation. This gives us:
 - Streaming end-to-end (low memory)
 - Type preservation
 - Optimised row group sizing
+- Resource isolation (DuckDB operations run in separate container)
 
 
 Three things this gives us for free:
 
-- Streaming end-to-end: DuckDB reads from Postgres in batches, writes Parquet without ever materialising the full result in memory.
+- Streaming end-to-end: DuckDB engine reads from Postgres in batches, writes Parquet without ever materialising the full result in memory.
 - Type preservation: DuckDB maps Postgres types to Arrow types and emits a faithful schema in the Parquet metadata.
 - Row group sizing: the `ROW_GROUP_SIZE 100000` hint optimises later DuckDB queries at the sandbox layer.
 
 ### 3.2 The custom-adapter path (e.g. Vertica)
 
-For sources without DuckDB extensions (e.g. Vertica), the adapter uses the native Node client to fetch the full result into memory, writes it to an intermediate NDJSON file, and then uses DuckDB to convert NDJSON to Parquet. This path accepts costs in memory, CPU, and type fidelity but provides identical Parquet output to the agent.
+For sources without DuckDB extensions (e.g. Vertica), the adapter uses the native Node client to fetch the full result into memory, writes it to an intermediate NDJSON file, and then delegates to the `duckdb-engine` service to convert NDJSON to Parquet. This path accepts costs in memory, CPU, and type fidelity but provides identical Parquet output to the agent.
 
 
 Costs we accept in V1:
 
 - Memory: full result set lives in V8 heap (vertica-nodejs is buffer-driven, not streaming).
-- CPU: N rows × `JSON.stringify` + DuckDB JSON parse.
+- CPU: N rows × `JSON.stringify` + duckdb-engine JSON parse.
 - I/O: NDJSON written then re-read (double disk pass).
 - Type fidelity: `read_json_auto` infers from JSON sample — `TIMESTAMPTZ` and high-precision `DECIMAL` round-trip to `VARCHAR` / lossy numerics.
 
@@ -192,7 +193,7 @@ Implications:
 - **In-flight extractions across boot are not preserved.** If Node restarts mid-extraction, the half-written `.tmp-<name>-<uuid>/` directory is swept along with everything else. The next call starts fresh — which is what an idempotent extract should do anyway.
 - **Cache hits within a session still work as before.** TTL governs the in-session refresh decision; the boot sweep only governs what survives a Node restart (answer: nothing).
 - **Multi-process deployments are NOT supported** by this design. Nango is a single-node multi-tenant runtime (see `docs/architecture.md` §"Runtime boundary"); two Node workers sharing one cache_root would race the boot sweep and clobber each other's freshly-written datasets. If you need to run multiple workers, give each its own `datasource.cache_root` config — but you should first read the runtime-boundary section about why that's not a supported topology in V1.
-- **Docker sandbox mode is unaffected.** The cache is a host filesystem path; both subprocess (symlink) and service sandbox (mount) adapters resolve `./data/<name>/` to the same directory.
+- **Service sandbox mode is unaffected.** The cache is a host filesystem path; the service sandbox (mount) adapter resolves `./data/<name>/` to the same directory.
 
 ### 4.4 Metadata: file convention vs `cache_meta.duckdb`
 

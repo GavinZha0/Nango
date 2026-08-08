@@ -62,24 +62,12 @@ export async function register(): Promise<void> {
   // Application config: seed defaults (insert-if-absent), then load all
   // rows into the in-memory cache. Must run before any module that reads
   // config values (caches, sandbox, etc.).
-  const { seedDefaults, loadAllConfigs, getConfig } = await import(
+  const { seedDefaults, loadAllConfigs } = await import(
     "@/lib/config/service"
   );
   try {
     await seedDefaults();
     await loadAllConfigs();
-    // Boot-trace: log the resolved value of a known-tricky key
-    // (sandbox.subprocess.python_path) so an operator can confirm
-    // the DB row actually landed in the in-memory cache for this
-    // particular Node worker. The previous "[config] loaded N
-    // config(s)" line only proves the SELECT returned rows, not
-    // that any specific key is queryable from this worker's
-    // module instance — Next.js dev / Turbopack can hold multiple
-    // module realms.
-    const pyPath = getConfig("sandbox.subprocess.python_path", "");
-    console.log(
-      `[instrumentation] config probe: sandbox.subprocess.python_path=${JSON.stringify(pyPath)}`,
-    );
   } catch (err) {
     console.error("[nango] config bootstrap failed:", err);
   }
@@ -145,10 +133,9 @@ export async function register(): Promise<void> {
     nodeProcess.on("SIGINT", onShutdown);
   }
 
-  // Sandbox: resolve the active adapter eagerly so a misconfigured
-  // SANDBOX_MODE (e.g. SANDBOX_MODE=docker but Docker is down) fails
-  // at boot instead of on the first user invocation. Also pins the
-  // selection in the per-process cache and emits a single line
+  // Sandbox: resolve the active adapter eagerly so an unreachable
+  // dify-sandbox service fails at boot instead of on the first user
+  // invocation. Also pins the selection in the per-process cache and emits a single line
   // operators can grep for.
   const { getActiveAdapter } = await import("@/lib/sandbox/registry.server");
   try {

@@ -1,31 +1,25 @@
 /**
  * Server-only sandbox-adapter registry + selection.
  *
+ * Nango uses `dify-sandbox` (service mode) as its sole sandbox backend.
  * See docs/sandbox.md.
  */
 
 import "server-only";
 
-import type { ISandboxAdapter, SandboxBackend } from "./types";
-import { SANDBOX_BACKENDS } from "./types";
-import { BackendUnavailableError, SandboxError } from "./errors";
-import { getConfig } from "@/lib/config";
+import type { ISandboxAdapter } from "./types";
+import { BackendUnavailableError } from "./errors";
 
-import { SubprocessAdapter } from "./adapters/subprocess/adapter.server";
 import { ServiceSandboxAdapter } from "./adapters/service/adapter.server";
 
-/** Default when SANDBOX_MODE unset. Subprocess works without external deps. */
-const DEFAULT_MODE: SandboxBackend = "subprocess";
-
 /**
- * CONTRACT: every `SANDBOX_BACKENDS` key has an entry. `satisfies Record<…>`
- * makes missing entries compile errors. Stubs reject at selection with
- * `BackendUnavailableError`.
+ * CONTRACT: the service adapter is the only sandbox backend.
+ * The subprocess fallback was removed to allow Python to be
+ * stripped from the main container image.
  */
 export const ADAPTERS = {
-  subprocess: new SubprocessAdapter(),
   service: new ServiceSandboxAdapter(),
-} as const satisfies Record<SandboxBackend, ISandboxAdapter | null>;
+} as const;
 
 let cachedActive: ISandboxAdapter | null = null;
 
@@ -34,41 +28,18 @@ export function _resetActiveAdapterCache(): void {
   cachedActive = null;
 }
 
-/** Resolve active sandbox adapter for this process. Throws on unknown mode (typo guard) or unavailable backend. */
+/** Resolve active sandbox adapter for this process. Throws if the service is unavailable. */
 export async function getActiveAdapter(): Promise<ISandboxAdapter> {
   if (cachedActive) return cachedActive;
 
-  const mode = parseSandboxMode(getConfig("sandbox.mode", "service"));
-
-  const adapter = ADAPTERS[mode];
-  if (!adapter) {
-    throw new BackendUnavailableError(
-      mode,
-      `SANDBOX_MODE=${mode} is not implemented yet. Available modes: ` +
-        `subprocess, service.`,
-    );
-  }
+  const adapter = ADAPTERS.service;
   if (!(await adapter.isAvailable())) {
     throw new BackendUnavailableError(
-      mode,
-      `SANDBOX_MODE=${mode} but isAvailable() returned false. ` +
-        `Ensure the external sandbox service is running (e.g. docker compose up -d dify-sandbox) — ` +
-        `there is no silent fallback.`,
+      "service",
+      `Sandbox service is not reachable. ` +
+        `Ensure the external sandbox service is running (e.g. docker compose up -d dify-sandbox).`,
     );
   }
   cachedActive = adapter;
   return adapter;
-}
-
-/** Parse SANDBOX_MODE env var. Empty/unset → subprocess. Unknown values throw at boot (typo guard). */
-function parseSandboxMode(raw: string | undefined): SandboxBackend {
-  if (!raw || raw.trim().length === 0) return DEFAULT_MODE;
-  const v = raw.trim().toLowerCase();
-  if ((SANDBOX_BACKENDS as readonly string[]).includes(v)) {
-    return v as SandboxBackend;
-  }
-  throw new SandboxError(
-    "INVALID_INPUT",
-    `Unknown SANDBOX_MODE=${raw}. Expected one of: ${SANDBOX_BACKENDS.join(", ")}.`,
-  );
 }

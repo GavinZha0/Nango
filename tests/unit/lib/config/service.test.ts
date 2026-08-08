@@ -133,7 +133,7 @@ describe("loadAllConfigs", () => {
     vi.mocked((await import("@/lib/db")).db.select).mockReturnValueOnce({
       from: vi.fn().mockResolvedValue([
         { key: "sandbox.timeout", value: "60" },
-        { key: "sandbox.memory_mb", value: "512" },
+        { key: "sandbox.stdout_max_chars", value: "30000" },
       ]),
     } as never);
 
@@ -143,7 +143,7 @@ describe("loadAllConfigs", () => {
     expect(_cacheSize()).toBe(2);
     // DB value overrides code default
     expect(getConfig("sandbox.timeout", "30")).toBe("60");
-    expect(getConfigNumber("sandbox.memory_mb", 256)).toBe(512);
+    expect(getConfigNumber("sandbox.stdout_max_chars", 20000)).toBe(30000);
   });
 
   it("falls back to defaults on DB error", async () => {

@@ -36,7 +36,31 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { DuckDBInstance } from "@duckdb/node-api";
+let currentMockRows: Array<Record<string, unknown>> = [];
+
+const mockExtractViaDuckdbEngine = vi.fn();
+vi.mock("@/lib/data-sources/duckdb-engine-client.server", () => ({
+  extractViaDuckdbEngine: (input: { previewRows?: number; maxRows?: number; datasetName?: string }) => {
+    mockExtractViaDuckdbEngine(input);
+    const limit = input.previewRows ?? 5;
+    const sliced = currentMockRows.slice(0, limit);
+    const cols = Object.keys(currentMockRows[0] ?? { id: 0 }).map((name) => ({
+      name,
+      type: typeof currentMockRows[0]?.[name] === "number" ? "int64" : "string",
+      nullable: false,
+    }));
+    return Promise.resolve({
+      ok: true,
+      datasetName: input.datasetName ?? "ds_test",
+      outputPath: "/mock/path/data.parquet",
+      totalRows: currentMockRows.length,
+      returnedRows: sliced.length,
+      byteSize: 100,
+      rows: sliced,
+      rowSchema: { columns: cols },
+    });
+  },
+}));
 
 import { buildExtractDatasetTool } from "@/lib/data-sources/runtime-tools";
 import { hashQuery, validateDatasetName } from "@/lib/data-sources/cache";
@@ -62,10 +86,12 @@ function fakeResolved(overrides: Partial<ResolvedDataSource> = {}): ResolvedData
 }
 
 beforeEach(async () => {
-  tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nango-extract-test-"));
+  tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nango-test-rt-"));
   mockCacheRoot = tmpRoot;
+  currentMockRows = [];
   mockResolveByName.mockReset();
   mockExtract.mockReset();
+  mockExtractViaDuckdbEngine.mockReset();
 });
 
 afterEach(async () => {
@@ -73,43 +99,13 @@ afterEach(async () => {
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
-/** Write a real Parquet file at `outputPath` via DuckDB so the tool's
- *  preview reader can later open it. */
+/** Write a placeholder Parquet file at `outputPath` for testing file checks. */
 async function writeRealParquet(
   outputPath: string,
-  rows: Array<Record<string, string | number>>,
+  _rows: Array<Record<string, string | number>>,
 ): Promise<void> {
-  const db = await DuckDBInstance.create(":memory:");
-  const conn = await db.connect();
-  try {
-    if (rows.length === 0) {
-      await conn.run(
-        `COPY (SELECT 1::INTEGER AS id WHERE FALSE) TO '${outputPath}' (FORMAT PARQUET)`,
-      );
-      return;
-    }
-    const cols = Object.keys(rows[0]);
-    const sql =
-      `COPY (SELECT * FROM (VALUES ` +
-      rows
-        .map(
-          (r) =>
-            "(" +
-            cols
-              .map((c) => {
-                const v = r[c];
-                return typeof v === "number" ? String(v) : `'${String(v)}'`;
-              })
-              .join(", ") +
-            ")",
-        )
-        .join(", ") +
-      `) AS t(${cols.join(", ")})) TO '${outputPath}' (FORMAT PARQUET)`;
-    await conn.run(sql);
-  } finally {
-    conn.closeSync();
-    db.closeSync();
-  }
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, "MOCK_PARQUET_CONTENT");
 }
 
 /** Wire `mockResolveByName` to succeed and `mockExtract` to write a
@@ -118,12 +114,14 @@ function arrangeSuccessfulExtract(
   rows: Array<Record<string, string | number>>,
   resolvedOverrides: Partial<ResolvedDataSource> = {},
 ): void {
+  currentMockRows = rows;
   mockResolveByName.mockResolvedValue({
     ok: true,
     resolved: fakeResolved(resolvedOverrides),
   });
   mockExtract.mockImplementation(async (_resolved, input) => {
     await writeRealParquet(input.outputPath, rows);
+    const limit = input.previewRows ?? 5;
     return {
       schema: {
         columns: Object.keys(rows[0] ?? { id: 0 }).map((name) => ({
@@ -134,6 +132,7 @@ function arrangeSuccessfulExtract(
         rowCount: rows.length,
         byteSize: 100,
       },
+      rows: rows.slice(0, limit),
       queryHash: hashQuery(input.query),
     };
   });

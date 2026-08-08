@@ -121,31 +121,31 @@ Nango exposes four peer integration layers, each shielding the agent runtime fro
 ```
                                 External World
   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-  │ Remote agent │  │ External     │  │ SSH hosts    │  │ (no external —│
-  │ platforms    │  │ data sources │  │ (Linux /     │  │  local        │
-  │ agno /       │  │ MySQL /      │  │  network     │  │  sandbox is a │
-  │ Mastra /     │  │ Postgres /   │  │  devices)    │  │  local OS/VM  │
-  │ Dify / …     │  │ Vertica / …  │  │              │  │  capability)  │
-  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └───────────────┘
-         │                  │                  │
-  ░░░░░░░│░░░░░░░░░░░░░░░░░░│░░░░░░░░░░░░░░░░░░│░  trust / network boundary  ░░░
-         │                  │                  │
-╔════════│══════════════════│══════════════════│═════ Nango Server ═══════════╗
-║        ▼                  ▼                  ▼                              ║
+  │ Remote agent │  │ External     │  │ SSH hosts    │  │ External     │
+  │ platforms    │  │ data sources │  │ (Linux /     │  │ sandbox      │
+  │ agno /       │  │ MySQL /      │  │  network     │  │ (dify-sandbox│
+  │ Mastra /     │  │ Postgres /   │  │  devices)    │  │  service)    │
+  │ Dify / …     │  │ Vertica / …  │  │              │  │              │
+  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+         │                  │                  │                  │
+  ░░░░░░░│░░░░░░░░░░░░░░░░░░│░░░░░░░░░░░░░░░░░░│░░░░░░░░░░░░░░░░░░│░  trust / network boundary  ░░░
+         │                  │                  │                  │
+╔════════│══════════════════│══════════════════│══════════════════│═════ Nango Server ═══════════╗
+║        ▼                  ▼                  ▼                  ▼                              ║
 ║  ┌──────────────┐   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    ║
 ║  │ IBackend-     │   │ IDataSource- │  │ SSH client    │  │ ISandbox-     │    ║
 ║  │  Adapter      │   │  Adapter     │  │ (node-ssh +   │  │  Adapter      │    ║
 ║  │               │   │              │  │  host-key pin)│  │               │    ║
-║  │ agno / Mastra │   │ MySQL /      │  │               │  │ LocalDocker / │    ║
-║  │ / Dify / …    │   │ Postgres /   │  │ login-shell   │  │ Subprocess    │    ║
-║  │               │   │ Vertica / …  │  │  wrap option  │  │ (remote — V2) │    ║
+║  │ agno / Mastra │   │ MySQL /      │  │               │  │ Service       │    ║
+║  │ / Dify / …    │   │ Postgres /   │  │ login-shell   │  │ (dify-sandbox)│    ║
+║  │               │   │ Vertica / …  │  │  wrap option  │  │               │    ║
 ║  │ writes:       │   │ writes:      │  │ writes:       │  │ reads:        │    ║
 ║  │  AG-UI events │   │  Parquet     │  │  exec result  │  │  Parquet      │    ║
 ║  │               │   │  files       │  │               │  │  files        │    ║
 ║  │               │   │      ↓       │  │               │  │      ↑        │    ║
 ║  │               │   │ ┌────────────────────────────┐  │  │               │    ║
 ║  │               │   │ │ Parquet Cache (shared FS)  │  │  │               │    ║
-║  │               │   │ │  /data/shared_cache/       │  │  │               │    ║
+║  │               │   │ │  .cache/datasource/parquet/ │  │  │               │    ║
 ║  │               │   │ │ owned by data-source layer;│  │  │               │    ║
 ║  │               │   │ │ read-only mounted by sandbox│ │  │               │    ║
 ║  │               │   │ └────────────────────────────┘  │  │               │    ║
@@ -159,15 +159,15 @@ Nango exposes four peer integration layers, each shielding the agent runtime fro
 
 | | Agent Adapter Layer | Data Source Adapter Layer | SSH Layer | Sandbox Adapter Layer |
 |---|---|---|---|---|
-| **Status** | shipped | shipped | shipped | shipped (local); remote planned |
+| **Status** | shipped | shipped | shipped | shipped (service) |
 | **Code** | `src/lib/backends/` | `src/lib/data-sources/` | `src/lib/ssh/` | `src/lib/sandbox/` |
 | **Interface** | `IBackendAdapter` | `IDataSourceAdapter` | direct `node-ssh` client + policy | `ISandboxAdapter` |
 | **Hides** | Agent platform protocol diversity | Database protocol diversity | Per-host auth + login-shell quirks | OS isolation tech diversity |
-| **External** | REST + SSE per platform | DB wire protocol per source | SSH protocol; strict host-key pin | Docker daemon (local); HTTP service (remote V2) |
-| **Credentials** | `credential` table (encrypted) | `credential` table (encrypted) | `credential` table (`basic_auth` or `private_key`) | none |
+| **External** | REST + SSE per platform | DB wire protocol per source | SSH protocol; strict host-key pin | HTTP service (dify-sandbox) |
+| **Credentials** | `credential` table (encrypted) | `credential` table (encrypted) | `credential` table (`basic_auth` or `private_key`) | `credential` table (encrypted) |
 | **Output** | AG-UI event stream | Parquet files in shared cache | stdout / stderr / exit code | Bounded code execution |
 
-**Parquet cache as the data-source ↔ sandbox handshake.** The two layers do not call each other directly. The data-source layer writes Parquet to `/data/shared_cache/`; the sandbox layer mounts those files read-only into the jail. This keeps the layers independently swappable and means the trust boundary is a file-system region, not an RPC interface.
+**Parquet cache as the data-source ↔ sandbox handshake.** The two layers do not call each other directly. The data-source layer writes Parquet to `.cache/datasource/parquet/` via the duckdb-engine service; the sandbox layer mounts those files read-only into the jail. This keeps the layers independently swappable and means the trust boundary is a file-system region, not an RPC interface.
 
 **Same pattern, four uses.** Each layer uses the same authoring shape: a typed adapter interface (or equivalent — SSH uses a more direct client wrapper since the protocol surface is already uniform), a per-implementation provider module aggregating its parts, a server-only registry that fails compilation if a registered key is missing an implementation. Adding a new agent platform / data source / isolation backend always follows the same four-step recipe.
 
@@ -175,7 +175,7 @@ For detailed design and implementation phases, see:
 
 - `docs/data-sources.md` — `IDataSourceAdapter` contract, Parquet cache strategy, per-source adapter onboarding, multi-tenancy / sharing rules.
 - `docs/ssh.md` — SSH client design, host-key pinning, login-shell wrap, command allow/deny policy, runtime tools (`run_ssh_command` / `list_ssh_hosts`).
-- `docs/sandbox.md` — `ISandboxAdapter` contract, local providers (Subprocess / LocalDocker), virtual path mapping, output truncation / masking, agent-tool surface (`run_code_in_sandbox`).
+- `docs/sandbox.md` — `ISandboxAdapter` contract, service provider (dify-sandbox), virtual path mapping, output truncation / masking, agent-tool surface (`run_code_in_sandbox`).
 
 ---
 

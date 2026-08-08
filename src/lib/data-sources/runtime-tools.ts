@@ -8,7 +8,7 @@ import "server-only";
 
 import * as path from "node:path";
 
-import { DuckDBInstance } from "@duckdb/node-api";
+import { extractViaDuckdbEngine } from "./duckdb-engine-client.server";
 import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { childLogger } from "@/lib/observability/logger";
@@ -204,7 +204,7 @@ export function buildExtractDatasetTool(
       const limits = getExtractLimits();
       const ttlHours = limits.defaultTtlHours;
       const queryHash = hashQuery(args.sql_text);
-      const rowLimit = args.row_limit;
+      const rowLimit = Math.min(args.row_limit, PREVIEW_HARD_CAP_ROWS());
 
       // We DO NOT re-validate policy on cache hits: the Parquet
       // snapshot is a historical artefact, and re-checking would
@@ -271,6 +271,7 @@ export function buildExtractDatasetTool(
           outputPath: slot.outputPath,
           timeoutMs: limits.timeoutMs,
           maxRows: limits.maxRows,
+          previewRows: rowLimit,
           signal: ac.signal,
         });
       } catch (err) {
@@ -295,10 +296,7 @@ export function buildExtractDatasetTool(
         byteSize: extracted.schema.byteSize,
       });
 
-      const preview =
-        rowLimit > 0 && extracted.schema.rowCount > 0
-          ? await readPreview(args.dataset_name, rowLimit)
-          : [];
+      const preview = extracted.rows ?? [];
 
       const result: ExtractDatasetResult = {
         cache_hit: false,
@@ -321,7 +319,7 @@ export function buildExtractDatasetTool(
 
 /**
  * Read the first `requested` rows from the dataset's Parquet files
- * via DuckDB and return them as a row-of-objects array
+ * via duckdb-engine container service and return them as a row-of-objects array
  * (`Record<columnName, cellValue>[]`). Drops rows from the tail
  * until the JSON serialisation fits in
  * {@link PREVIEW_HARD_CAP_BYTES}.
@@ -333,41 +331,24 @@ async function readPreview(
   const limit = Math.min(requestedRows, PREVIEW_HARD_CAP_ROWS());
   const glob = path.join(datasetDir(name), "**", "*.parquet");
 
-  const db = await DuckDBInstance.create(":memory:");
-  const conn = await db.connect();
-  let columns: string[];
-  let rawRows: unknown[][];
   try {
-    const result = await conn.runAndReadAll(
-      `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}') LIMIT ${limit}`,
-    );
-    columns = result.columnNames();
-    rawRows = result.getRowsJson() as unknown[][];
-  } finally {
-    conn.closeSync();
-    db.closeSync();
-  }
-
-  // Inflate column-oriented (column names + 2D rows) to
-  // row-of-objects so the wire / spec shape is uniform.
-  const rows: Array<Record<string, unknown>> = rawRows.map((row) => {
-    const obj: Record<string, unknown> = {};
-    for (let c = 0; c < columns.length; c++) {
-      obj[columns[c]!] = row[c];
+    const res = await extractViaDuckdbEngine({
+      query: `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}')`,
+      provider: "standalone",
+      previewRows: limit,
+      maxRows: limit + 10,
+    });
+    const rows = res.rows;
+    while (
+      rows.length > 0 &&
+      JSON.stringify(rows).length > PREVIEW_HARD_CAP_BYTES()
+    ) {
+      rows.pop();
     }
-    return obj;
-  });
-
-  // Byte budget cap. Pathological wide schemas need the same
-  // protection.
-  while (
-    rows.length > 0 &&
-    JSON.stringify(rows).length > PREVIEW_HARD_CAP_BYTES()
-  ) {
-    rows.pop();
+    return rows;
+  } catch {
+    return [];
   }
-
-  return rows;
 }
 
 function escapeSingleQuotes(s: string): string {

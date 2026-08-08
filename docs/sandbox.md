@@ -5,7 +5,7 @@
 
 The sandbox integration layer is one of the three peer integration layers in Nango (`docs/architecture.md` §3.3). It hides OS-level isolation diversity behind a single typed contract and exposes a uniform `run` operation to the agent runtime. Its consumers are agents that need to execute generated Python (and later Node.js / shell) for data analysis. Its inputs are the agent's command + Parquet datasets prepared by the data-source layer.
 
-**Status:** Shipped — code lives under `src/lib/sandbox/` (`types.ts`, `errors.ts`, `path-mapper.ts`, `output.ts`, `registry.server.ts`, `runtime-tools.ts`, `index.ts` plus `adapters/{subprocess, service}/`). Two backends are available: **SubprocessAdapter** (degraded fallback, no isolation) and **ServiceSandboxAdapter** (decoupled external service execution, defaulting to `dify-sandbox`). This document is the as-built reference.
+**Status:** Shipped — code lives under `src/lib/sandbox/` (`types.ts`, `errors.ts`, `path-mapper.ts`, `output.ts`, `registry.server.ts`, `runtime-tools.ts`, `index.ts` plus `adapters/service/`). One backend is available: **ServiceSandboxAdapter** (decoupled external service execution via `dify-sandbox`). This document is the as-built reference.
 
 ---
 
@@ -14,9 +14,9 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 ### Goals
 
 - One uniform interface (`ISandboxAdapter`) so the agent tool surface is identical regardless of the underlying isolation tech.
-- Two local backends in V1: **Subprocess** (degraded fallback, dev only) and **Service** (external service-based execution via `dify-sandbox`). Selected explicitly via `SANDBOX_MODE` env var.
-- A **cwd-relative path contract** (`./data/<name>/`) so agent-generated code never sees host filesystem paths AND works identically across backends. Both adapters surface declared datasets under the sandbox's working directory — subprocess via symlink, service via volume mount (`.cache/datasource/parquet:/work/data:ro`).
-- Hard limits: timeout, memory, CPU. Each backend enforces them with the strongest mechanism it has.
+- Single backend in V1: **Service** (external service-based execution via `dify-sandbox`).
+- A **cwd-relative path contract** (`./data/<name>/`) so agent-generated code never sees host filesystem paths. The service adapter surfaces declared datasets under the sandbox's working directory via volume mount (`.cache/datasource/parquet:/opt/python/lib/python3.14/site-packages/data:ro`).
+- Hard limits: timeout, memory, CPU. The backend enforces them with the strongest mechanism it has.
 - Output truncation + path masking so a noisy or hostile script cannot flood the agent context or leak host paths.
 - Configurable service endpoint (`sandbox.service.url`, `sandbox.service.api_key`) and provider selection (`sandbox.service.provider`).
 
@@ -31,7 +31,7 @@ The sandbox integration layer is one of the three peer integration layers in Nan
 
 ## 2. The contract
 
-**`SandboxBackend`**: `"subprocess" | "service"`
+**`SandboxBackend`**: `"service"`
 
 **`SandboxInput`**
 | Field | Type | Description |
@@ -73,56 +73,19 @@ Three things the contract makes explicit:
 src/lib/sandbox/
   types.ts                          # ISandboxAdapter, SandboxInput, SandboxOutput
   registry.server.ts                # ADAPTERS satisfies Record<SandboxBackend, …>
-                                    # explicit selection via sandbox.mode
   path-mapper.ts                    # virtual ↔ host path resolution + output masking
   output.ts                         # truncate, mask, structured error mapping
   errors.ts                         # SandboxError, BackendUnavailableError, ...
   adapters/
-    subprocess/
-      adapter.server.ts             # spawn + RSS poll + timer, no isolation
     service/
       adapter.server.ts             # REST API bridge to dify-sandbox (/v1/sandbox/run)
 docker/dify-sandbox/
   Dockerfile                        # dify-sandbox service Dockerfile
   requirements.txt                  # aggregated skill python dependencies
+  config.yaml                       # dify-sandbox configuration
 ```
 
-### 3.1 SubprocessAdapter
-
-Pure `child_process.spawn`, no kernel isolation. Used only when service sandbox is not available (local development fallback).
-
-- **Path layout**: child cwd is a fresh `mkdtemp` dir. For each declared dataset, the adapter creates `<tmpHostDir>/data/<name>` as a directory symlink to `<cacheRoot>/parquet/<name>/`. In-sandbox code reads `./data/<name>/...` — identical to service sandbox, just realised in user-land instead of volume mounts.
-- **Read-only is unenforced**. Subprocess mode is "degraded" by design — symlinks honour the target dir's permissions, and shared cache dirs default to user-writable.
-- Memory limit via 500 ms RSS polling + SIGKILL on overshoot.
-- Timeout via `setTimeout` + SIGKILL.
-- Network: clear `http_proxy` / `https_proxy` env vars (a hint to well-behaved libraries; not enforced).
-- **Loud at startup**: the registry logs `[sandbox] running in DEGRADED mode (subprocess)` so the operator cannot miss it.
-
-#### Subprocess venv selection
-
-`python3` resolves through the spawned child's `PATH`, which defaults to whatever `python3` ships on the host. To point the subprocess backend at a project venv / pyenv / conda env without leaking the path into agent prompts, set the DB config:
-
-```
-sandbox.subprocess.python_path = ~/.pyenv/versions/nango        # pyenv-virtualenv
-                                  ~/miniforge3/envs/myenv         # conda / mamba
-                                  ~/projects/x/.venv               # plain python3 -m venv
-                                  ~/.pyenv/versions/nango/bin/python3   # explicit interpreter
-```
-
-Resolution rules (see `resolvePythonVenv` in `adapters/subprocess/adapter.server.ts`):
-
-- Empty / unset → no injection, use system `python3`.
-- `~` prefix → home-expanded against `os.homedir()`.
-- Path ending in `/bin/python` or `/bin/python3` → treated as the interpreter; venv root inferred as `dirname(dirname(...))`.
-- Anything else → treated as the venv root; bin dir is `<root>/bin`; interpreter is `<root>/bin/python3` (falls back to `<root>/bin/python`).
-
-When the config points at a path with no usable interpreter the adapter logs a one-shot warning per misconfigured value and falls back to system PATH — agent calls still succeed (against system `python3`) rather than hard-failing every invocation.
-
-Injection mechanism mirrors `source <venv>/bin/activate`: spawn env gets `VIRTUAL_ENV=<root>`, `PATH=<bin>:$PATH` (bin dir prepended), and `PYTHONHOME` is unset. `argv[0]` is NOT rewritten — PATH injection is enough to make a bare `python3` resolve to the venv, and other commands the LLM might run (`duckdb`, `bash`, …) still fall back to system PATH.
-
-This is a development quality-of-life feature, not a production option.
-
-### 3.2 ServiceSandboxAdapter (dify-sandbox)
+### 3.1 ServiceSandboxAdapter (dify-sandbox)
 
 Service mode connects to an external REST-based code execution sandbox (`dify-sandbox`).
 
@@ -130,27 +93,16 @@ Service mode connects to an external REST-based code execution sandbox (`dify-sa
 - **Credentials**: Automatically looked up from `CredentialTable` (provider: `dify-sandbox`, serviceType: `integration`).
 - **Python deps are skill-driven**: `docker/dify-sandbox/requirements.txt` is generated from builtin skills' frontmatter `dependencies-python: [...]` declarations by `pnpm sandbox:build` (which runs `scripts/collect-skill-deps.ts`). Authors who need a new package add it to the relevant `skills/<name>/SKILL.md`, run `pnpm sandbox:build`, and commit the regenerated `requirements.txt` together with the skill change. CI guards against drift via `pnpm sandbox:check`.
 
-### 3.3 Backend selection — always explicit
+### 3.2 Backend selection
 
-Selection is controlled by `sandbox.mode`. **There is no auto-probe and no silent fallback.** Supported modes are `service` (default, dify-sandbox) and `subprocess` (local degraded fallback).
+The service backend is the only available sandbox backend. The registry resolves it at boot and throws if the service is unreachable.
 
-| `sandbox.mode` | Behaviour |
-|---|---|
-| `service` (default) | Service mode — connects to external sandbox service (`dify-sandbox`). |
-| `subprocess` | Subprocess mode — local process execution (dev / fallback). |
-| anything else | Throws `SandboxError("INVALID_INPUT")` at boot (typo guard). |
-
-Boot emits one log line so the choice is grep-able:
+Boot emits one log line so the status is grep-able:
 ```
 [nango] sandbox active backend: service
 ```
 
-`isAvailable()` checks per backend:
-
-- `subprocess`: always true.
-- `service`: queries sandbox service health/reachability.
-
-The choice is made once at boot (in `instrumentation.ts`); the active adapter is cached for the process lifetime — `_resetActiveAdapterCache()` exists for tests only.
+`isAvailable()` queries the sandbox service health/reachability. The choice is made once at boot (in `instrumentation.ts`); the active adapter is cached for the process lifetime — `_resetActiveAdapterCache()` exists for tests only.
 
 ---
 
@@ -160,20 +112,17 @@ The agent never sees host paths. Everything is **cwd-relative**:
 
 | In-sandbox path | Realised by | Access |
 |---|---|---|
-| `./data/<name>/` | subprocess: symlink `<tmpHostDir>/data/<name>` → `<cacheRoot>/parquet/<name>/`<br/>docker: bind mount `<cacheRoot>/parquet/<name>/` → `/work/data/<name>` | read-only (docker enforced; subprocess by convention) |
-| `./` (cwd itself) | subprocess: `<tmpHostDir>` directly<br/>docker: bind mount `<tmpHostDir>` → `/work` | read-write, cleared on exit |
-| `/tmp/` (docker only) | tmpfs | read-write, cleared on exit |
+| `./data/<name>/` | service: bind mount `<cacheRoot>/parquet/<name>/` → `/opt/python/lib/python3.14/site-packages/data/<name>` | read-only (enforced by container) |
+| `./` (cwd itself) | service: container working directory | read-write, cleared on exit |
+| `/tmp/` (container only) | tmpfs | read-write, cleared on exit |
 
 `path-mapper.ts` exposes:
 
 - `SANDBOX_DATA_DIR = "data"` — the cwd-relative subdir
-- `DOCKER_CONTAINER_WORKDIR = "/work"` — container cwd
 - `resolveDatasetHostDir(name) → host path` — adapter mount-source
 - `maskOutput(text, mapping) → text` — rewrites any host / container absolute paths leaked into stdout / stderr back to cwd-relative form
 
 Reasoning for masking: even a well-behaved Python script that prints a `FileNotFoundError` exposes the absolute path it tried. We unify the LLM's view to `./data/<name>/...` at the output boundary so error feedback round-trips into the next call without translation.
-
-**Why cwd-relative over absolute** (decision D38): an earlier design used `/mnt/cache/<name>/` as the in-sandbox contract — fine in docker (real bind mount at that path) but impossible to fulfil in subprocess (the kernel can't be tricked into having `/mnt/cache` exist without root). The cwd-relative approach works identically in both modes: a symlink under cwd resolves transparently, a bind mount under the container's `--workdir` resolves transparently. Same LLM code runs everywhere.
 
 ---
 
@@ -192,18 +141,14 @@ Mid-truncation: keep first half + `... [truncated N chars] ...` + last half. Std
 
 ### 5.2 Path masking
 
-Pure string replace, applied longest-prefix-first to avoid nested-substitution corruption. Three forms get rewritten per declared dataset (covers every way an absolute path can leak across the two backends):
+Pure string replace, applied longest-prefix-first to avoid nested-substitution corruption. Forms get rewritten per declared dataset (covers ways an absolute path can leak from the service backend):
 
 | Found in stderr / stdout | Rewritten to |
 |---|---|
-| `<cacheRoot>/parquet/<name>/...` (subprocess: symlink target deref) | `./data/<name>/...` |
-| `<tmpHostDir>/data/<name>/...` (subprocess: symlink path itself) | `./data/<name>/...` |
-| `/work/data/<name>/...` (docker: container absolute) | `./data/<name>/...` |
+| `<cacheRoot>/parquet/<name>/...` | `./data/<name>/...` |
+| `/opt/python/lib/python3.14/site-packages/data/<name>/...` (container absolute) | `./data/<name>/...` |
 | `<cacheRoot>/parquet/...` (fallback, undeclared dataset) | `./data/...` |
-| `<tmpHostDir>/...` (subprocess: cwd) | `./...` |
-| `/work/...` (docker: container cwd) | `./...` |
-
-The mapper holds the per-call `<tmpHostDir>` so replacements target the right dir.
+| `/opt/python/lib/python3.14/site-packages/...` (container cwd) | `./...` |
 
 ### 5.3 Termination → structured error
 
@@ -215,7 +160,7 @@ The mapper holds the per-call `<tmpHostDir>` so replacements target the right di
 { "ok": false, "error": { "code": "SECURITY", "message": "syscall blocked" } }
 ```
 
-The codes are stable across backends; an OOM kill from cgroup (Docker) and from RSS polling (Subprocess) both surface as `OOM`.
+The codes are stable across the service backend; an OOM kill from cgroup surfaces as `OOM`.
 
 ---
 
@@ -235,7 +180,7 @@ run_code_in_sandbox({
 }) → SandboxOutput
 ```
 
-The dataset is exposed at `./data/sales_q1_2025/` — relative to the sandbox's cwd. Works identically across both backends.
+The dataset is exposed at `./data/sales_q1_2025/` — relative to the sandbox's cwd.
 
 Design notes:
 
@@ -248,11 +193,10 @@ Design notes:
 ## 7. Hard invariants
 
 1. **`run` is ephemeral.** No state survives between calls. The shared Parquet cache is the only persistence; it is read-only from the sandbox's perspective.
-2. **The sandbox never has network.** Both backends close it: Docker's `--network=none`, subprocess's env-var hint (the only point where this is best-effort).
+2. **The sandbox has controlled network access.** The service backend can be configured with network access if needed for data fetching operations.
 3. **Datasets are read-only mounts.** Even within a single `run`, the script cannot mutate Parquet files.
 4. **Path output is masked.** Host paths never appear in `SandboxOutput.stdout` / `stderr` after `output.ts` post-processing.
-5. **`command` is argv, never a shell string.** Backends construct the final command via the shell only when the operator explicitly opts in (e.g., `["bash", "-c", "..."]`); the default is `execve`-direct.
-6. **Subprocess backend is loud.** Any process startup using subprocess logs a single warning line so operators cannot accidentally ship to production with no isolation.
+5. **`command` is argv, never a shell string.** The backend constructs the final command via the shell only when the operator explicitly opts in (e.g., `["bash", "-c", "..."]`); the default is `execve`-direct.
 
 ---
 

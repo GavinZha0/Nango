@@ -21,9 +21,6 @@ export interface ConfigDefault {
 export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   // ── sandbox ───────────────────────────────────────────────────────
   { key: "sandbox.timeout", value: "30", valueType: "number", description: "Execution timeout in seconds" },
-  { key: "sandbox.memory_mb", value: "256", valueType: "number", description: "Container memory limit in MB" },
-  { key: "sandbox.cpu_cores", value: "0.8", valueType: "number", description: "CPU limit as fractional cores" },
-  { key: "sandbox.tmpfs_size_mb", value: "512", valueType: "number", description: "Tmpfs size in MB" },
   { key: "sandbox.stdout_max_chars", value: "20000", valueType: "number", description: "Max stdout chars before truncation" },
   { key: "sandbox.stderr_max_chars", value: "10000", valueType: "number", description: "Max stderr chars before truncation" },
 
@@ -74,8 +71,6 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "mcp.discovery_timeout", value: "5", valueType: "number", description: "Tool discovery timeout in seconds" },
 
   // ── infrastructure ────────────────────────────────────────────────
-  { key: "sandbox.mode", value: "service", valueType: "string", description: "Sandbox backend mode", options: ["subprocess", "service"] },
-  { key: "sandbox.subprocess.python_path", value: "", valueType: "string", description: "Absolute path to a Python interpreter or venv root (subprocess backend only). Examples: ~/.pyenv/versions/nango (pyenv-virtualenv), ~/miniforge3/envs/myenv (conda), ~/projects/x/.venv (plain venv). Empty = system python3 from PATH." },
   { key: "datasource.cache_root", value: "", valueType: "string", description: "Parquet cache root path (empty = <repoRoot>/.cache/datasource — under the project root for easy inspection / cleanup)" },
 
   // ── supervisor ──────────────────────────────────────────────────

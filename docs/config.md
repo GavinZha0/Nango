@@ -46,8 +46,7 @@ The `config` table stores the configuration parameters:
   at display time.
 - **`value` stored as text**, parsed by typed getters at read time.
   Keeps the schema simple; type safety lives in the application layer.
-- **`options` as JSONB array** for enum configs (e.g.
-  `["subprocess", "service"]`). NULL means free input. The UI
+- **`options` as JSONB array** for enum configs. NULL means free input. The UI
   renders a dropdown when options is non-null.
 - **`prev_value`** provides single-level undo. Sufficient for the
   rare "just changed it, want to revert" scenario. Full audit history
@@ -70,7 +69,7 @@ instrumentation.ts (Next.js register hook)
   │
   ├─ 4. seedBuiltinSkills()        — may read config
   ├─ 5. bootstrapScheduler()       — may read config
-  └─ 6. getActiveAdapter()         — reads sandbox.mode from config
+  └─ 6. getActiveAdapter()         — reads sandbox service configuration
 ```
 
 Steps 2–3 run before any module that reads config values.
@@ -178,15 +177,13 @@ There are predefined keys across groups such as `sandbox`, `cache`, `datasource`
 
 For the complete, authoritative list of keys, their default values, and descriptions, always refer to `src/lib/config/defaults.ts`.
 
----|---|---|---|
+### sandbox (3)
+
+| Key | Default | Type | Description |
+|---|---|---|---|
 | `sandbox.timeout` | 30 | number | Execution timeout in seconds |
-| `sandbox.memory_mb` | 256 | number | Container memory limit in MB |
-| `sandbox.cpu_cores` | 0.8 | number | CPU limit as fractional cores |
-| `sandbox.tmpfs_size_mb` | 512 | number | Tmpfs size in MB |
 | `sandbox.stdout_max_chars` | 20000 | number | Max stdout chars before truncation |
 | `sandbox.stderr_max_chars` | 10000 | number | Max stderr chars before truncation |
-| `sandbox.mode` | service | enum | `subprocess` / `service` |
-| `sandbox.subprocess.python_path` | "" | string | Python interpreter path for subprocess mode |
 
 ### cache (10)
 

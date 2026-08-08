@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  duckdb-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nango-duckdb-engine
+    ports:
+      - "8526:8526"
+    environment:
+      - DUCKDB_APIKEY=my-local-duckdb-engine-secret
+      - SHARED_CACHE_DIR=/cache/parquet
+    volumes:
+      - cache_data:/cache/parquet
+
+volumes:
+  cache_data:

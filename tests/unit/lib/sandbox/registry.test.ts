@@ -2,12 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-let mockSandboxMode = "service";
 vi.mock("@/lib/config", () => ({
-  getConfig: (key: string, defaultValue: string) => {
-    if (key === "sandbox.mode") return mockSandboxMode;
-    return defaultValue;
-  },
+  getConfig: (_key: string, defaultValue: string) => defaultValue,
   getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
   getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
   getConfigBoolean: (_key: string, defaultValue: boolean) => defaultValue,
@@ -18,12 +14,10 @@ import {
   getActiveAdapter,
   _resetActiveAdapterCache,
 } from "@/lib/sandbox/registry.server";
-import { SandboxError } from "@/lib/sandbox/errors";
 import { SANDBOX_BACKENDS } from "@/lib/sandbox/types";
 
 beforeEach(() => {
   _resetActiveAdapterCache();
-  mockSandboxMode = "service";
   vi.spyOn(ADAPTERS.service, "isAvailable").mockResolvedValue(true);
 });
 
@@ -32,43 +26,32 @@ afterEach(() => {
 });
 
 describe("sandbox registry — adapter table", () => {
-  it("declares an entry for every SANDBOX_BACKENDS id", () => {
-    expect(Object.keys(ADAPTERS).sort()).toEqual([...SANDBOX_BACKENDS].sort());
+  it("declares only the service backend", () => {
+    expect(Object.keys(ADAPTERS)).toEqual(["service"]);
   });
 
-  it("subprocess + service backends are initialized", () => {
-    expect(ADAPTERS.subprocess).not.toBeNull();
-    expect(ADAPTERS.subprocess?.backend).toBe("subprocess");
+  it("SANDBOX_BACKENDS contains only 'service'", () => {
+    expect([...SANDBOX_BACKENDS]).toEqual(["service"]);
+  });
+
+  it("service backend is initialized", () => {
     expect(ADAPTERS.service).not.toBeNull();
     expect(ADAPTERS.service?.backend).toBe("service");
   });
 });
 
-describe("sandbox registry — sandbox.mode selection", () => {
-  it("sandbox.mode=service → service adapter (default)", async () => {
-    mockSandboxMode = "service";
+describe("sandbox registry — adapter selection", () => {
+  it("returns the service adapter", async () => {
     const a = await getActiveAdapter();
     expect(a.backend).toBe("service");
   });
 
-  it("sandbox.mode=subprocess → subprocess adapter", async () => {
-    mockSandboxMode = "subprocess";
-    const a = await getActiveAdapter();
-    expect(a.backend).toBe("subprocess");
-  });
-
-  it("sandbox.mode=nsjail is rejected as unknown (removed from backends)", async () => {
-    mockSandboxMode = "nsjail";
-    await expect(getActiveAdapter()).rejects.toBeInstanceOf(SandboxError);
-  });
-
-  it("rejects unknown mode values at parse time (typo guard)", async () => {
-    mockSandboxMode = "docker";
-    await expect(getActiveAdapter()).rejects.toBeInstanceOf(SandboxError);
+  it("throws when service is unavailable", async () => {
+    vi.spyOn(ADAPTERS.service, "isAvailable").mockResolvedValue(false);
+    await expect(getActiveAdapter()).rejects.toThrow("Sandbox service is not reachable");
   });
 
   it("caches the resolved adapter across calls", async () => {
-    mockSandboxMode = "service";
     const a = await getActiveAdapter();
     const b = await getActiveAdapter();
     expect(a).toBe(b);

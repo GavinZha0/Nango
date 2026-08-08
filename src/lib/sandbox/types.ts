@@ -5,13 +5,11 @@
  */
 
 /**
- * Stable backend ids. Each value doubles as the public `SANDBOX_MODE`
- * env-var slug (1:1 — no alias layer). Backend selection is always
- * explicit: callers pin one of these via SANDBOX_MODE; the registry
- * never auto-probes. `remote-docker` is reserved — the registry
- * carries a null stub for it that rejects with `BackendUnavailableError`.
+ * Stable backend ids. Nango uses the external `dify-sandbox` service
+ * as the sole sandbox backend. The subprocess fallback was removed —
+ * see docs/sandbox.md for rationale.
  */
-export const SANDBOX_BACKENDS = ["subprocess", "service"] as const;
+export const SANDBOX_BACKENDS = ["service"] as const;
 export type SandboxBackend = (typeof SANDBOX_BACKENDS)[number];
 
 export const SERVICE_SANDBOX_PROVIDERS = ["dify", "opensandbox"] as const;
@@ -30,9 +28,9 @@ export type ServiceSandboxProvider = (typeof SERVICE_SANDBOX_PROVIDERS)[number];
  *
  * Rule: the sandbox Docker image must NEVER declare this key in its
  * own `ENV` instructions — doing so would let the image-baked value
- * silently override a caller-supplied payload in the Docker adapter,
- * which does not apply an allowlist filter (unlike the subprocess
- * adapter). Double-underscore prefix is the naming convention that
+ * silently override a caller-supplied payload, which the
+ * `ServiceSandboxAdapter` does not filter.
+ * Double-underscore prefix is the naming convention that
  * marks these keys as "owned by the Nango engine, not user space".
  */
 export const SANDBOX_PARAMS_ENV_KEY = "__PARAMS__" as const;
@@ -53,16 +51,12 @@ export interface SandboxInput {
 
   /** Datasets to expose read-only at `./data/<name>/` (cwd-relative)
    *  inside the sandbox. The runner resolves names to absolute Parquet
-   *  directory paths; the local-docker adapter bind-mounts each at
-   *  `/work/data/<name>` (readonly) while the subprocess adapter
-   *  symlinks them under `tmpHostDir/data/<name>` (degraded —
-   *  readonly is not enforced). */
+   *  directory paths; the service adapter bind-mounts each at
+   *  the sandbox's site-packages `data/` directory (readonly). */
   datasets?: string[];
 
   /** Extra files written to `./<name>` (cwd-relative) before execution
-   *  and cleared on exit. The local-docker adapter places them under
-   *  the writable `/work` mount; the subprocess adapter writes them
-   *  under `tmpHostDir`. */
+   *  and cleared on exit. */
   inputFiles?: Record<string, Buffer>;
 
   /**
@@ -70,20 +64,13 @@ export interface SandboxInput {
    * sandbox process. Values MUST be plain strings; the caller is
    * responsible for any necessary serialization (e.g. JSON for typed
    * data — see `__PARAMS__` in `execute-workflow.ts`).
-   *
-   * CONTRACT (security): both adapters merge this overlay AFTER their
-   * own allowlists/defaults, so callers cannot override system-managed
-   * variables such as PATH, HOME, TMPDIR, NANGO_SANDBOX_BACKEND, or
-   * the venv VIRTUAL_ENV setting. Attempting to set any of those keys
-   * here is silently ignored.
    */
   env?: Record<string, string>;
 
   /** Hard timeout. SIGKILL on overshoot. Default: 30 000. */
   timeoutMs?: number;
 
-  /** Memory cap in MB. Cgroup-backed in local-docker, RSS-poll
-   *  based in subprocess (best-effort). Default: 256. */
+  /** Memory cap in MB. Default: 256. */
   maxMemoryMb?: number;
 
   /** CPU cap as fractional cores. Default: 0.8. */
@@ -117,9 +104,8 @@ export interface ISandboxAdapter {
   readonly displayName: string;
 
   /** True iff this backend can be used in the current process's
-   *  environment. LocalDockerAdapter.isAvailable() requires
-   *  `docker info` to succeed; SubprocessAdapter.isAvailable()
-   *  is always true. */
+   *  environment. ServiceSandboxAdapter probes the sandbox HTTP
+   *  endpoint for reachability. */
   isAvailable(): Promise<boolean>;
 
   /** Execute one command in a fresh sandbox; tear down on return.

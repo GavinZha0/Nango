@@ -51,7 +51,7 @@ beforeEach(() => {
   adapterRunMock.mockReset();
   getActiveAdapterMock.mockReset();
   getActiveAdapterMock.mockResolvedValue({
-    backend: "subprocess",
+    backend: "service",
     run: adapterRunMock,
   });
 });
@@ -150,7 +150,7 @@ describe("run_skill_script", () => {
     // "hello from skill\n" is not valid JSON → message = raw stdout.
     expect(r.ok).toBe(true);
     expect(r.message).toBe("hello from skill\n");
-    expect(r.backend).toBe("subprocess");
+    expect(r.backend).toBe("service");
   });
 
   it("dispatches .sh to bash", async () => {

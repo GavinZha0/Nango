@@ -63,12 +63,16 @@ export interface ExtractInput {
   timeoutMs: number;
   /** Hard row cap. Adapter aborts if exceeded. */
   maxRows: number;
+  /** Number of inline preview rows to request from extraction. */
+  previewRows?: number;
   /** Plumbed through cancellable network clients. */
   signal: AbortSignal;
 }
 
 export interface ExtractResult {
   schema: DatasetSchema;
+  /** Inline preview rows returned by the extraction engine. */
+  rows?: Array<Record<string, unknown>>;
   /** sha256 of the canonicalised query text — used by the cache layer
    *  to detect slot reassignment (same name + different query). */
   queryHash: string;

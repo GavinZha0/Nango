@@ -162,6 +162,13 @@ export async function commitWriteSlot(input: CommitInput): Promise<DatasetMeta> 
 
   await fs.rm(final, { recursive: true, force: true });
   await fs.rename(input.slot.tmpDir, final);
+  await fs.chmod(final, 0o777).catch(() => {});
+  try {
+    const files = await fs.readdir(final);
+    for (const f of files) {
+      await fs.chmod(path.join(final, f), 0o666).catch(() => {});
+    }
+  } catch {}
 
   const meta: DatasetMeta = {
     name: input.name,

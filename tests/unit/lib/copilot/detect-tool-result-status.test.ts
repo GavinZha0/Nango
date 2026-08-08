@@ -130,7 +130,7 @@ describe("detectToolResultStatus", () => {
           stderr: "Traceback ... ModuleNotFoundError: No module named 'duckdb'",
           exitCode: 1,
           durationMs: 62,
-          backend: "subprocess",
+          backend: "service",
         }),
       ),
     ).toBe("failure");
@@ -144,7 +144,7 @@ describe("detectToolResultStatus", () => {
           stderr: "",
           exitCode: 0,
           durationMs: 12,
-          backend: "subprocess",
+          backend: "service",
         }),
       ),
     ).toBe("success");
@@ -287,7 +287,7 @@ describe("extractErrorMessage", () => {
             "Traceback (most recent call last):\n  File \"<stdin>\", line 2\nModuleNotFoundError: No module named 'duckdb'",
           exitCode: 1,
           durationMs: 62,
-          backend: "subprocess",
+          backend: "service",
         }),
       ),
     ).toContain("ModuleNotFoundError");

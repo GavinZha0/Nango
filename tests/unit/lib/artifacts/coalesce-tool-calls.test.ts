@@ -213,7 +213,7 @@ describe("coalesceToolCalls — failure modes", () => {
       result(
         2,
         "call-sb",
-        '{"stdout":"","stderr":"ModuleNotFoundError: No module named \'duckdb\'","exitCode":1,"durationMs":62,"backend":"subprocess"}',
+        '{"stdout":"","stderr":"ModuleNotFoundError: No module named \'duckdb\'","exitCode":1,"durationMs":62,"backend":"service"}',
       ),
     ];
     const inv = coalesceToolCalls(events);
@@ -229,7 +229,7 @@ describe("coalesceToolCalls — failure modes", () => {
       result(
         2,
         "call-sb",
-        '{"stdout":"hello","stderr":"","exitCode":0,"durationMs":10,"backend":"subprocess"}',
+        '{"stdout":"hello","stderr":"","exitCode":0,"durationMs":10,"backend":"service"}',
       ),
     ];
     const inv = coalesceToolCalls(events);

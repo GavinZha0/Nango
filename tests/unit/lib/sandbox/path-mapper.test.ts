@@ -61,7 +61,7 @@ describe("maskOutput", () => {
     expect(normalizeSlashes(out)).toBe("read from ./data/sales_q1/part-001.parquet");
   });
 
-  it("rewrites a declared dataset's symlink-path form (subprocess in-cwd absolute)", () => {
+  it("rewrites a declared dataset's work-dir path form (in-cwd absolute)", () => {
     const m = buildMapping(TMP_DIR, ["sales_q1"]);
     const out = maskOutput(
       `FileNotFoundError: '${path.join(TMP_DIR, "data", "sales_q1", "x.parquet")}'`,

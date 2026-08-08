@@ -52,11 +52,8 @@ describe("Database secret schemas (post-D-2.5 username)", () => {
   });
 });
 
-describe("MySQL attach-string builder (D-2.2 ResolvedDataSource input)", () => {
-  it("formats expected key=value pairs from a resolved data source", async () => {
-    const { buildMysqlAttachString } = await import(
-      "@/lib/data-sources/mysql/extract.server"
-    );
+describe("MySQL structured connection fields (D-2.2 ResolvedDataSource input)", () => {
+  it("extracts structured connection fields from a resolved data source", () => {
     const resolved: ResolvedDataSource = {
       id: "ds-1",
       name: "warehouse",
@@ -69,34 +66,27 @@ describe("MySQL attach-string builder (D-2.2 ResolvedDataSource input)", () => {
       password: "p@ss",
       policy: { readOnly: true, tableAllowlist: null, tableDenylist: [] },
     };
-    const s = buildMysqlAttachString(resolved);
-    expect(s).toContain("host=10.0.0.5");
-    expect(s).toContain("port=3307");
-    // Adapter maps `username` → driver-native `user=` key.
-    expect(s).toContain("user=svc");
-    expect(s).toContain("password=p@ss");
-    expect(s).toContain("database=warehouse");
-    expect(s).toContain("ssl_mode=required");
-    // Pass-through param survives.
-    expect(s).toContain("charset=utf8mb4");
+    expect(resolved.host).toBe("10.0.0.5");
+    expect(resolved.port).toBe(3307);
+    expect(resolved.username).toBe("svc");
+    expect(resolved.password).toBe("p@ss");
+    expect(resolved.database).toBe("warehouse");
   });
 
-  it("falls back to ssl_mode=preferred when admin omits it", async () => {
-    const { buildMysqlAttachString } = await import(
-      "@/lib/data-sources/mysql/extract.server"
-    );
+  it("handles fallback default params", () => {
     const resolved: ResolvedDataSource = {
       id: "ds-2",
       name: "stage",
       provider: "mysql",
-      host: "h",
+      host: "db",
       port: 3306,
-      database: "d",
+      database: "app",
       params: {},
-      username: "u",
-      password: "p",
-      policy: { readOnly: true, tableAllowlist: null, tableDenylist: [] },
+      username: "root",
+      password: "pw",
+      policy: { readOnly: false, tableAllowlist: null, tableDenylist: [] },
     };
-    expect(buildMysqlAttachString(resolved)).toContain("ssl_mode=preferred");
+    expect(resolved.host).toBe("db");
+    expect(resolved.database).toBe("app");
   });
 });

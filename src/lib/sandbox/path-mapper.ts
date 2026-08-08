@@ -67,17 +67,21 @@ export function maskOutput(text: string, mapping: PathMapping): string {
 function collectReplacements(mapping: PathMapping): Array<[string, string]> {
   const r: Array<[string, string]> = [];
 
-  // Per-dataset replacements (longest, most specific first). Three
+  // Per-dataset replacements (longest, most specific first). Multiple
   // forms per declared dataset because the path that leaks depends on
-  // which adapter ran AND whether Python dereferenced symlinks:
+  // how the sandbox runtime resolves paths:
   //
-  //   1. <cacheRoot>/parquet/<name>     — subprocess symlink target
-  //   2. <tmpHostDir>/data/<name>       — subprocess symlink path
+  //   1. <cacheRoot>/parquet/<name>     — host cache directory
+  //   2. <tmpHostDir>/data/<name>       — work directory data path
   //   3. /work/data/<name>              — docker container path
   for (const [name, hostDir] of Object.entries(mapping.datasetHostDirs)) {
     const dataRelative = `./${SANDBOX_DATA_DIR}/${name}`;
     r.push([hostDir, dataRelative]);
     r.push([path.join(mapping.tmpHostDir, SANDBOX_DATA_DIR, name), dataRelative]);
+    r.push([
+      `/opt/python-3.14.4/lib/python3.14/site-packages/${SANDBOX_DATA_DIR}/${name}`,
+      dataRelative,
+    ]);
     r.push([
       `${DOCKER_CONTAINER_WORKDIR}/${SANDBOX_DATA_DIR}/${name}`,
       dataRelative,
@@ -90,10 +94,9 @@ function collectReplacements(mapping: PathMapping): Array<[string, string]> {
   // it — keeps the masked form consistent with the in-sandbox view.
   r.push([path.join(getCacheHostRoot(), "parquet"), `./${SANDBOX_DATA_DIR}`]);
 
-  // Per-call work-dir / cwd. Subprocess: the host tmp dir IS the
-  // child's cwd. Docker: /work is the container's cwd. Replace both
-  // with `.` so absolute-path logging (`os.getcwd()`, `os.path.
-  // abspath('foo')`, …) round-trips to the cwd-relative form.
+  // Per-call work-dir / cwd. Replace with `.` so absolute-path
+  // logging (`os.getcwd()`, `os.path.abspath('foo')`, …) round-trips
+  // to the cwd-relative form.
   r.push([mapping.tmpHostDir, "."]);
   r.push([DOCKER_CONTAINER_WORKDIR, "."]);
 

@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}));
 const mockRun = vi.fn();
 vi.mock("@/lib/sandbox/registry.server", () => ({
   getActiveAdapter: async () => ({
-    backend: "subprocess" as const,
+    backend: "service" as const,
     displayName: "Mocked",
     isAvailable: async () => true,
     run: mockRun,
@@ -62,7 +62,7 @@ describe("buildRunInSandboxTool", () => {
       message: "hello\n",
       files: null,
       error: null,
-      backend: "subprocess",
+      backend: "service",
     });
   });
 

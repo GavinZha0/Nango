@@ -39,8 +39,6 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "@copilotkit/runtime",
     "openai",
-    "@duckdb/node-api",
-    "@duckdb/node-bindings",
     "pg",
     "pg-native",
     "vertica-nodejs",

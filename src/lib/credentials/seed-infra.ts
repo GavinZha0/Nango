@@ -41,6 +41,32 @@ export async function seedInitialInfrastructureCredentials(adminUserId: string):
       console.log(`[credentials] Seeded default Dify Sandbox credential for admin (${adminUserId})`);
     }
 
+    // 2. Seed DuckDB Engine Credential
+    const existingDuckdbEngine = await db
+      .select({ id: CredentialTable.id })
+      .from(CredentialTable)
+      .where(eq(CredentialTable.provider, "duckdb-engine"))
+      .limit(1);
+
+    if (existingDuckdbEngine.length === 0) {
+      const payload = {
+        host: "http://duckdb-engine:8526",
+        apiKey: "my-local-duckdb-engine-secret",
+      };
+      await db.insert(CredentialTable).values({
+        name: "DuckDB Engine",
+        type: "api_key",
+        serviceType: "integration",
+        provider: "duckdb-engine",
+        restUrl: "http://duckdb-engine:8526",
+        encryptedPayload: encrypt(payload),
+        metadata: { keyPreview: "my-local-duckdb-engine-secret" },
+        enabled: true,
+        createdBy: adminUserId,
+      });
+      console.log(`[credentials] Seeded default DuckDB Engine credential for admin (${adminUserId})`);
+    }
+
     // 2. Seed SenseVoice Credential
     const existingSenseVoice = await db
       .select({ id: CredentialTable.id })
