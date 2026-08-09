@@ -41,19 +41,25 @@ export function createDuckdbExtensionAdapter(
 
   return {
     async extract(resolved, input) {
+      const attachString = buildAttachString(extension, resolved);
+      const defaultSchema = pinDefaultSchema
+        ? resolved.database
+        : (resolved.params.schema as string | undefined) ?? "public";
+
       return extractViaDuckdb({
         extension,
-        resolved,
-        defaultSchema: pinDefaultSchema ? resolved.database : undefined,
+        attachString,
+        defaultSchema,
         input,
       });
     },
 
     async testConnection(resolved, signal) {
       try {
+        const attachString = buildAttachString(extension, resolved);
         return await testConnectionViaDuckdb({
           extension,
-          resolved,
+          attachString,
           signal,
         });
       } catch (err) {
@@ -65,4 +71,25 @@ export function createDuckdbExtensionAdapter(
       }
     },
   };
+}
+
+/**
+ * Compose the DuckDB `ATTACH '...'` connection string (libpq-style).
+ */
+function buildAttachString(
+  extension: DuckdbExtensionName,
+  resolved: ResolvedDataSource,
+): string {
+  const host = resolved.host;
+  const port = resolved.port;
+  const user = resolved.username;
+  const password = resolved.password;
+  const database = resolved.database;
+
+  if (extension === "postgres") {
+    return `host=${host} port=${port} dbname=${database} user=${user} password=${password}`;
+  } else {
+    // mysql / mariadb
+    return `host=${host} port=${port} database=${database} user=${user} password=${password}`;
+  }
 }

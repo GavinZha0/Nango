@@ -92,7 +92,7 @@ export async function executeSqlNode(
         throw new WorkflowError({
           errorCode: "TOOL_NOT_FOUND",
           message:
-            `Node ${node.id}: SQL execution requires the '${SQL_TOOL_NAME}' ` +
+            `SQL execution requires the '${SQL_TOOL_NAME}' ` +
             "tool, which is not in the workflow runner's catalog. The " +
             "artifact's owner needs at least one enabled data source " +
             "binding for this tool to be auto-mounted.",
@@ -125,9 +125,7 @@ export async function executeSqlNode(
         const errorCode = mapToolErrorCodeToWorkflowCode(rawResult.error.code);
         throw new WorkflowError({
           errorCode,
-          message:
-            `Node ${node.id}: ${SQL_TOOL_NAME} failed ` +
-            `(${rawResult.error.code}): ${rawResult.error.message}`,
+          message: `${rawResult.error.code}: ${rawResult.error.message}`,
           nodeId: node.id,
           nodeName: displayName,
         });
@@ -243,7 +241,7 @@ function resolveStringField(
     throw new WorkflowError({
       errorCode: "SPEC_SCHEMA_MISMATCH",
       message:
-        `Node ${nodeId}: sql.${fieldName} must resolve to a string ` +
+        `sql.${fieldName} must resolve to a string ` +
         `(got ${typeof value}). Check that any refs in the field ` +
         "point to string-typed upstream outputs.",
       nodeId,

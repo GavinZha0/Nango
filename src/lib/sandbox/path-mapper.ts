@@ -22,7 +22,7 @@ function getCacheHostRoot(): string {
 /** Mirrors `data-sources/cache.ts → datasetDir` so the sandbox
  *  sees exactly what the data-source layer wrote. */
 export function resolveDatasetHostDir(datasetName: string): string {
-  return path.join(getCacheHostRoot(), "parquet", datasetName);
+  return path.join(getCacheHostRoot(), datasetName);
 }
 
 /** Per-call mapping built by the backend before exec. */
@@ -49,9 +49,9 @@ export function buildMapping(
 /**
  * Rewrite host / container absolute paths in stdout / stderr back
  * to the cwd-relative form (`./data/<name>` or `.`). Replacements
- * are applied longest-first so `<cacheRoot>/parquet/<name>/foo`
+ * are applied longest-first so `<cacheRoot>/<name>/foo`
  * resolves to `./data/<name>/foo`, not the cache-root fallback
- * `./data/parquet/<name>/foo`. Output is always a `./…`-rooted
+ * `./data/<name>/foo`. Output is always a `./…`-rooted
  * relative path the LLM can round-trip into its next call.
  */
 export function maskOutput(text: string, mapping: PathMapping): string {
@@ -71,7 +71,7 @@ function collectReplacements(mapping: PathMapping): Array<[string, string]> {
   // forms per declared dataset because the path that leaks depends on
   // how the sandbox runtime resolves paths:
   //
-  //   1. <cacheRoot>/parquet/<name>     — host cache directory
+  //   1. <cacheRoot>/<name>             — host cache directory
   //   2. <tmpHostDir>/data/<name>       — work directory data path
   //   3. /work/data/<name>              — docker container path
   for (const [name, hostDir] of Object.entries(mapping.datasetHostDirs)) {
@@ -86,7 +86,7 @@ function collectReplacements(mapping: PathMapping): Array<[string, string]> {
   // message mentions a dataset the caller didn't put in `datasets`).
   // Surfaces as `./data/<otherName>/...` even though we didn't mount
   // it — keeps the masked form consistent with the in-sandbox view.
-  r.push([path.join(getCacheHostRoot(), "parquet"), `./${SANDBOX_DATA_DIR}`]);
+  r.push([getCacheHostRoot(), `./${SANDBOX_DATA_DIR}`]);
 
   // Per-call work-dir / cwd. Replace with `.` so absolute-path
   // logging (`os.getcwd()`, `os.path.abspath('foo')`, …) round-trips

@@ -49,7 +49,10 @@ const RunInSandboxArgs = z.object({
     .array(z.string().min(1))
     .optional()
     .describe(
-      "Cached dataset names to expose read-only at ./tmp/data/<name>/ (relative to the sandbox's current working directory). Materialise them first with extract_dataset_by_sql.",
+      "Cached dataset names to expose read-only at ./tmp/data/<name>/ in the sandbox cwd. " +
+      "Materialise them first with extract_dataset_by_sql. " +
+      "In Python: `duckdb.read_parquet('./tmp/data/<name>/**/*.parquet').df()` " +
+      "or `pd.read_parquet(glob.glob('./tmp/data/<name>/*.parquet')[0])`.",
     ),
   /** Free-form parameters serialised into the sandbox process'
    *  env vars. Use for small typed inputs the code reads via

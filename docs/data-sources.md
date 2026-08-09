@@ -145,16 +145,15 @@ The cache is a host-filesystem region under `<repoRoot>/.cache/datasource/` owne
 
 ```
 <repoRoot>/.cache/datasource/
-  parquet/
-    sales_q1_2025/
-      part-001.parquet                  ← single-file dataset (small / scalar tables)
-    sales/
-      year=2025/quarter=Q1/             ← Hive-style partitioned dataset
-        part-001.parquet
-        part-002.parquet
-      year=2025/quarter=Q2/
-        part-001.parquet
-  cache_meta.duckdb                     ← optional, see §4.4
+  sales_q1_2025/
+    part-001.parquet                  ← single-file dataset (small / scalar tables)
+  sales/
+    year=2025/quarter=Q1/             ← Hive-style partitioned dataset
+      part-001.parquet
+      part-002.parquet
+    year=2025/quarter=Q2/
+      part-001.parquet
+cache_meta.duckdb                     ← optional, see §4.4
 ```
 
 `datasetName` may map to either layout. Adapters writing partitioned output emit one Parquet file per partition; adapters writing scalar results emit a single file. The mount path the sandbox sees is always the **directory**, so DuckDB's `read_parquet('./tmp/data/<name>/**/*.parquet')` works regardless.
@@ -173,14 +172,14 @@ The cache is a host-filesystem region under `<repoRoot>/.cache/datasource/` owne
 Each dataset carries a `ttl_hours`. The cache check is:
 
 ```
-exists(parquet/<name>/) AND (now - created_at) < ttl_hours * 3600s
+exists(<name>/) AND (now - created_at) < ttl_hours * 3600s
 ```
 
 On expiry the cache transparently re-extracts from the source. There is **no** background eviction job — disk cleanup happens on Node boot (see §4.3.1) and lazily on stale-name access. A simple admin endpoint `POST /api/admin/data-cache/sweep` removes any directory older than its TTL.
 
 ### 4.3.1 Cache lifecycle = process lifetime
 
-Every Node boot calls `purgeAllDatasets()` from `instrumentation.ts` before serving any request. This wipes `<cacheRoot>/parquet/` clean and pins the dataset cache to the lifetime of the current Node process — restart Nango and the cache starts empty.
+Every Node boot calls `purgeAllDatasets()` from `instrumentation.ts` before serving any request. This wipes `<cacheRoot>/` clean and pins the dataset cache to the lifetime of the current Node process — restart Nango and the cache starts empty.
 
 Two operational problems disappear under this rule:
 

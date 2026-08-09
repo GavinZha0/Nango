@@ -4,7 +4,7 @@ app:
   key: dify-sandbox
 max_workers: 10
 max_requests: 100
-worker_timeout: 30
+worker_timeout: 60
 python_path: /opt/python/bin/python3
 enable_network: true
 enable_preload: true

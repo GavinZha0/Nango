@@ -56,8 +56,18 @@ export async function buildDataSourcesPromptBlock(
     "access — to read data you MUST first call extract_dataset_by_sql " +
     "(materialises a Parquet snapshot), then pass the same `name` as " +
     "`datasets[]` to run_code_in_sandbox; the file becomes available " +
-    "at ./tmp/data/<name>/ in the sandbox's current working directory. Do NOT attempt to `import duckdb` or any " +
-    "other DB driver inside the sandbox — there are no credentials there.\n\n" +
+    "at ./tmp/data/<name>/ in the sandbox's current working directory.\n\n" +
+    "### Reading shared datasets in Python (run_code_in_sandbox):\n" +
+    "```python\n" +
+    "# Option A (Recommended): DuckDB auto-scans wildcard paths\n" +
+    "import duckdb\n" +
+    "df = duckdb.read_parquet('./tmp/data/<name>/**/*.parquet').df()\n\n" +
+    "# Option B: Pandas + glob (use single-level *.parquet or glob(..., recursive=True))\n" +
+    "import glob, pandas as pd\n" +
+    "files = glob.glob('./tmp/data/<name>/*.parquet')\n" +
+    "df = pd.read_parquet(files[0])\n" +
+    "```\n\n" +
+    "Do NOT attempt to `import duckdb` or any other DB driver inside the sandbox to connect to external databases — there are no credentials there.\n\n" +
     "Cross-schema queries: for mysql / mariadb / postgres sources, if a " +
     "query against an unqualified table name returns a 'Catalog Error' or " +
     "'Did you mean ...' hint, the table lives in a different schema/database " +

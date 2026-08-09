@@ -71,7 +71,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "mcp.discovery_timeout", value: "5", valueType: "number", description: "Tool discovery timeout in seconds" },
 
   // ── infrastructure ────────────────────────────────────────────────
-  { key: "datasource.cache_root", value: "", valueType: "string", description: "Parquet cache root path (empty = <repoRoot>/.cache/datasource — under the project root for easy inspection / cleanup)" },
+  { key: "datasource.cache_root", value: "", valueType: "string", description: "Dataset cache root path (empty = <repoRoot>/.cache/datasource — under the project root for easy inspection / cleanup)" },
 
   // ── supervisor ──────────────────────────────────────────────────
   { key: "supervisor.catalog_excerpt_chars", value: "300", valueType: "number", description: "Max characters of each specialist's system prompt shown in the supervisor catalog (the 'about' field). Longer prompts are truncated with an ellipsis." },

@@ -24,9 +24,9 @@ function normalizeSlashes(s: string) {
 }
 
 describe("path resolution", () => {
-  it("resolveDatasetHostDir composes <root>/parquet/<name>", () => {
+  it("resolveDatasetHostDir composes <root>/<name>", () => {
     expect(normalizeSlashes(resolveDatasetHostDir("sales_q1"))).toBe(
-      normalizeSlashes(path.join(CACHE_ROOT, "parquet", "sales_q1"))
+      normalizeSlashes(path.join(CACHE_ROOT, "sales_q1"))
     );
   });
 
@@ -55,7 +55,7 @@ describe("maskOutput", () => {
   it("rewrites a declared dataset's host path (symlink-target form) to ../tmp/data/<name>", () => {
     const m = buildMapping(TMP_DIR, ["sales_q1"]);
     const out = maskOutput(
-      `read from ${path.join(CACHE_ROOT, "parquet", "sales_q1", "part-001.parquet")}`,
+      `read from ${path.join(CACHE_ROOT, "sales_q1", "part-001.parquet")}`,
       m
     );
     expect(normalizeSlashes(out)).toBe("read from ../tmp/data/sales_q1/part-001.parquet");
@@ -89,7 +89,7 @@ describe("maskOutput", () => {
   it("masks multiple host paths in one string", () => {
     const m = buildMapping(TMP_DIR, ["sales_q1"]);
     const out = maskOutput(
-      `loaded ${path.join(CACHE_ROOT, "parquet", "sales_q1", "part-001.parquet")} from ` +
+      `loaded ${path.join(CACHE_ROOT, "sales_q1", "part-001.parquet")} from ` +
         path.join(TMP_DIR, "script.py"),
       m
     );
@@ -101,7 +101,7 @@ describe("maskOutput", () => {
   it("falls back to ./tmp/data when an UNDECLARED dataset is mentioned", () => {
     const m = buildMapping(TMP_DIR, []);
     const out = maskOutput(
-      `found ${path.join(CACHE_ROOT, "parquet", "sales_q1", "x.parquet")}`,
+      `found ${path.join(CACHE_ROOT, "sales_q1", "x.parquet")}`,
       m
     );
     expect(normalizeSlashes(out)).toBe("found ./tmp/data/sales_q1/x.parquet");
@@ -110,7 +110,7 @@ describe("maskOutput", () => {
   it("longest-host-path wins (declared dataset path over cache-root fallback)", () => {
     const m = buildMapping(TMP_DIR, ["sales_q1"]);
     const out = maskOutput(
-      `x ${path.join(CACHE_ROOT, "parquet", "sales_q1")} y`,
+      `x ${path.join(CACHE_ROOT, "sales_q1")} y`,
       m
     );
     expect(normalizeSlashes(out)).toBe("x ../tmp/data/sales_q1 y");

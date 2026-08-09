@@ -20,21 +20,20 @@ export function getCacheRoot(): string {
   return resolveCacheRoot();
 }
 
-/** Final dataset directory: `<root>/parquet/<name>/`. Sandbox mounts this. */
+/** Final dataset directory: `<root>/<name>/`. Sandbox mounts this. */
 export function datasetDir(name: string): string {
-  return path.join(getCacheRoot(), "parquet", name);
+  return path.join(getCacheRoot(), name);
 }
 
-/** Sidecar metadata file: `<root>/parquet/<name>.meta.json`. */
+/** Sidecar metadata file: `<root>/<name>.meta.json`. */
 function metaPath(name: string): string {
-  return path.join(getCacheRoot(), "parquet", `${name}.meta.json`);
+  return path.join(getCacheRoot(), `${name}.meta.json`);
 }
 
 /** Tmp staging dir; random suffix lets two writers race without colliding. */
 function tmpDir(name: string): string {
   return path.join(
     getCacheRoot(),
-    "parquet",
     `.tmp-${name}-${randomUUID()}`,
   );
 }
@@ -208,7 +207,7 @@ export async function purgeDatasetsForDataSource(
   dataSourceId: string,
 ): Promise<string[]> {
   const removed: string[] = [];
-  const root = path.join(getCacheRoot(), "parquet");
+  const root = getCacheRoot();
   let entries: string[];
   try {
     entries = await fs.readdir(root);
@@ -231,15 +230,15 @@ export async function purgeDatasetsForDataSource(
 }
 
 /**
- * Drop EVERY cached dataset + sidecar under `<cacheRoot>/parquet/`.
+ * Drop EVERY cached dataset + sidecar under `<cacheRoot>/`.
  *
  * Called once on Node boot from `instrumentation.ts` to pin cache
  * lifetime to Node process lifetime — restart Nango and the cache
- * starts empty. Idempotent + best-effort: a missing parquet root is
+ * starts empty. Idempotent + best-effort: a missing cache root is
  * fine (first boot), rm failures do not block boot.
  */
 export async function purgeAllDatasets(): Promise<number> {
-  const root = path.join(getCacheRoot(), "parquet");
+  const root = getCacheRoot();
   let entries: string[];
   try {
     entries = await fs.readdir(root);

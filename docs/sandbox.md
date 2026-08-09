@@ -112,13 +112,13 @@ The agent never sees host paths. Everything is **cwd-relative**:
 
 | In-sandbox path | Realised by | Access |
 |---|---|---|
-| `./tmp/data/<name>/` | service: bind mount `<cacheRoot>/parquet/<name>/` → `/var/sandbox/sandbox-python/tmp/data/<name>` | read-only (enforced by container) |
+| `./tmp/data/<name>/` | service: bind mount `<cacheRoot>/<name>/` → `/tmp/data/<name>` | read-only (enforced by container) |
 | `./` (cwd itself) | service: container working directory | read-write, cleared on exit |
 | `/tmp/` (container only) | tmpfs | read-write, cleared on exit |
 
 `path-mapper.ts` exposes:
 
-- `SANDBOX_DATA_DIR = "data"` — the cwd-relative subdir
+- `SANDBOX_DATA_DIR = "tmp/data"` — the cwd-relative subdir
 - `resolveDatasetHostDir(name) → host path` — adapter mount-source
 - `maskOutput(text, mapping) → text` — rewrites any host / container absolute paths leaked into stdout / stderr back to cwd-relative form
 
@@ -145,9 +145,9 @@ Pure string replace, applied longest-prefix-first to avoid nested-substitution c
 
 | Found in stderr / stdout | Rewritten to |
 |---|---|
-| `<cacheRoot>/parquet/<name>/...` | `./tmp/data/<name>/...` |
-| `/var/sandbox/sandbox-python/tmp/data/<name>/...` (container absolute) | `./tmp/data/<name>/...` |
-| `<cacheRoot>/parquet/...` (fallback, undeclared dataset) | `./tmp/data/...` |
+| `<cacheRoot>/<name>/...` | `./tmp/data/<name>/...` |
+| `/tmp/data/<name>/...` (container absolute) | `./tmp/data/<name>/...` |
+| `<cacheRoot>/...` (fallback, undeclared dataset) | `./tmp/data/...` |
 | `/opt/python/lib/python3.14/site-packages/...` (container cwd) | `./...` |
 
 ### 5.3 Termination → structured error

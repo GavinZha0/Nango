@@ -57,8 +57,7 @@ export function validateSqlAgainstPolicy(
       ok: false,
       code: "PARSE_ERROR",
       message:
-        `Failed to parse SQL for policy check: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+        `[Syntax Error]: Failed to parse SQL query (${err instanceof Error ? err.message : String(err)})`,
     };
   }
 
@@ -82,7 +81,7 @@ export function validateSqlAgainstPolicy(
         ok: false,
         code: "WRITE_NOT_ALLOWED",
         message:
-          `Data source is read-only; ${type.toUpperCase()} on ` +
+          `[Security Check Failed]: Data source is read-only; ${type.toUpperCase()} on ` +
           `"${table}" is not permitted.`,
       };
     }
@@ -91,7 +90,7 @@ export function validateSqlAgainstPolicy(
         ok: false,
         code: "TABLE_DENIED",
         message:
-          `Table "${table}" is on the data source's deny list and ` +
+          `[Security Check Failed]: Table "${table}" is on the data source's deny list and ` +
           `cannot be queried.`,
       };
     }
@@ -100,7 +99,7 @@ export function validateSqlAgainstPolicy(
         ok: false,
         code: "TABLE_NOT_ALLOWED",
         message:
-          `Table "${table}" is not in the data source's allow list.`,
+          `[Security Check Failed]: Table "${table}" is not in the data source's allow list.`,
       };
     }
   }

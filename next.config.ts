@@ -42,6 +42,7 @@ const nextConfig: NextConfig = {
   // loaded by Node at runtime, not bundled.
   serverExternalPackages: [
     "@copilotkit/runtime",
+    "@duckdb/node-api",
     "openai",
     "pg",
     "pg-native",

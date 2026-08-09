@@ -118,7 +118,7 @@ RUN chmod +x ./docker/start.sh
 
 # QUIRK: Python runtime removed — subprocess sandbox mode was retired
 # in favour of the external dify-sandbox service. DuckDB extraction
-# runs in the separate duckdb-engine container. This saves ~120-150 MB.
+# runs in-process via @duckdb/node-api.
 
 # Pre-create the runtime cache directory so the non-root user can
 # write datasource Parquet snapshots at runtime (extract_dataset_by_sql).

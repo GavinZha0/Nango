@@ -1,5 +1,10 @@
 /**
- * Vertica extraction — `vertica-nodejs` query → NDJSON → DuckDB Engine → Parquet.
+ * Vertica extraction — `vertica-nodejs` query → NDJSON → DuckDB → Parquet.
+ *
+ * V1 takes a JSON-intermediate shortcut (buffers full result in heap,
+ * round-trips through NDJSON). Acceptable for one adapter; the future
+ * migration plan onto a shared ODBC backbone lives in
+ * docs/data-sources.md.
  */
 
 import "server-only";
@@ -8,6 +13,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { DuckDBInstance } from "@duckdb/node-api";
+
 import type {
   ConnectionTestResult,
   ExtractInput,
@@ -15,7 +22,8 @@ import type {
   ResolvedDataSource,
 } from "../types";
 import { hashQuery } from "../cache";
-import { extractViaDuckdbEngine } from "../duckdb-engine-client.server";
+
+// Minimal type slice for vertica-nodejs (no upstream .d.ts)
 
 interface VerticaQueryResult {
   rows: Array<Record<string, unknown>>;
@@ -41,6 +49,8 @@ interface VerticaModule {
   }) => VerticaClient;
 }
 
+// Connection
+
 async function openClient(resolved: ResolvedDataSource): Promise<VerticaClient> {
   const mod = (await import("vertica-nodejs")) as unknown as { default: VerticaModule };
   const Vertica = mod.default;
@@ -55,6 +65,8 @@ async function openClient(resolved: ResolvedDataSource): Promise<VerticaClient> 
   await client.connect();
   return client;
 }
+
+// Extraction
 
 export async function extractFromVertica(
   resolved: ResolvedDataSource,
@@ -73,6 +85,9 @@ export async function extractFromVertica(
     `vertica-${randomUUID()}.ndjson`,
   );
 
+  const startedAt = Date.now();
+  let rowCount = 0;
+
   try {
     const searchPath = resolved.params.schema;
     if (searchPath) {
@@ -81,7 +96,7 @@ export async function extractFromVertica(
 
     const work = (async () => {
       const result = await client.query(input.query);
-      const rowCount = result.rowCount;
+      rowCount = result.rowCount;
       if (rowCount > input.maxRows) {
         throw new Error(
           `Vertica returned ${rowCount} rows, exceeds maxRows=${input.maxRows}.`,
@@ -92,32 +107,45 @@ export async function extractFromVertica(
     })();
     await raceWithTimeoutAndAbort(work, input.timeoutMs, input.signal);
 
-    const convertQuery = `SELECT * FROM read_json_auto('${escapeSingleQuotes(tmpJson)}', format='newline_delimited')`;
+    const db = await DuckDBInstance.create(":memory:");
+    const conn = await db.connect();
+    try {
+      const copySql =
+        `COPY (SELECT * FROM read_json_auto('${escapeSingleQuotes(tmpJson)}', format='newline_delimited')) ` +
+        `TO '${escapeSingleQuotes(input.outputPath)}' ` +
+        `(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)`;
+      await conn.run(copySql);
+    } finally {
+      conn.closeSync();
+      db.closeSync();
+    }
 
-    const res = await extractViaDuckdbEngine({
-      query: convertQuery,
-      datasetName: input.datasetName,
-      provider: "standalone",
-      previewRows: input.previewRows ?? 0,
-      maxRows: input.maxRows,
-      timeoutMs: input.timeoutMs,
-      signal: input.signal,
-    });
+    const schema = await introspectFromDuckdb(input.outputPath);
+    void startedAt;
 
-    return {
-      schema: {
-        columns: res.rowSchema.columns,
-        rowCount: res.totalRows,
-        byteSize: res.byteSize,
-      },
-      rows: res.rows,
-      queryHash: hashQuery(input.query),
-    };
+    let previewRows: Array<Record<string, unknown>> = [];
+    if (input.previewRows && input.previewRows > 0 && schema.rowCount > 0) {
+      const dbPreview = await DuckDBInstance.create(":memory:");
+      const connPreview = await dbPreview.connect();
+      try {
+        const previewRel = await connPreview.runAndReadAll(
+          `SELECT * FROM read_parquet('${escapeSingleQuotes(input.outputPath)}') LIMIT ${input.previewRows}`,
+        );
+        previewRows = previewRel.getRowObjectsJson() as Array<Record<string, unknown>>;
+      } finally {
+        connPreview.closeSync();
+        dbPreview.closeSync();
+      }
+    }
+
+    return { schema, rows: previewRows, queryHash: hashQuery(input.query) };
   } finally {
     await fs.rm(tmpJson, { force: true }).catch(() => {});
     await client.end().catch(() => {});
   }
 }
+
+// Connection test
 
 export async function testVerticaConnection(
   resolved: ResolvedDataSource,
@@ -142,6 +170,8 @@ export async function testVerticaConnection(
     if (client) await (client as VerticaClient).end().catch(() => {});
   }
 }
+
+// Helpers
 
 function escapeSingleQuotes(s: string): string {
   return s.replaceAll("'", "''");
@@ -174,4 +204,60 @@ async function raceWithTimeoutAndAbort<T>(
       },
     );
   });
+}
+
+async function introspectFromDuckdb(
+  outputPath: string,
+): Promise<import("../types").DatasetSchema> {
+  const db = await DuckDBInstance.create(":memory:");
+  const conn = await db.connect();
+  try {
+    const cols = await conn.runAndReadAll(
+      `DESCRIBE SELECT * FROM read_parquet('${escapeSingleQuotes(outputPath)}')`,
+    );
+    const colRows = cols.getRowObjectsJson() as Array<{
+      column_name: string;
+      column_type: string;
+      null: string;
+    }>;
+    const columns = colRows.map((r) => ({
+      name: String(r.column_name),
+      type: mapDuckdbType(String(r.column_type)),
+      nullable: String(r.null).toUpperCase() === "YES",
+    }));
+
+    const counts = await conn.runAndReadAll(
+      `SELECT count(*) AS n FROM read_parquet('${escapeSingleQuotes(outputPath)}')`,
+    );
+    const countRows = counts.getRowObjectsJson() as Array<{ n: number | bigint | string }>;
+    const rowCount = Number(countRows[0]?.n ?? 0);
+
+    let byteSize = 0;
+    try {
+      const stat = await fs.stat(outputPath);
+      byteSize = stat.size;
+    } catch {
+      /* ignore */
+    }
+
+    return { columns, rowCount, byteSize };
+  } finally {
+    conn.closeSync();
+    db.closeSync();
+  }
+}
+
+function mapDuckdbType(t: string): import("../types").ColumnSchema["type"] {
+  const u = t.toUpperCase();
+  if (u === "BOOLEAN") return "bool";
+  if (u === "INTEGER" || u === "INT4") return "int32";
+  if (u === "BIGINT" || u === "INT8" || u === "HUGEINT") return "int64";
+  if (u === "FLOAT" || u === "REAL") return "float32";
+  if (u === "DOUBLE") return "float64";
+  if (u.startsWith("DECIMAL")) return "decimal";
+  if (u === "DATE") return "date";
+  if (u.startsWith("TIMESTAMP")) return "timestamp";
+  if (u === "VARCHAR" || u === "TEXT" || u === "STRING") return "string";
+  if (u === "BLOB" || u === "BYTEA") return "binary";
+  return "binary";
 }

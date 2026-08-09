@@ -13,6 +13,8 @@ services:
         required: false
     ports:
       - "${APP_PORT:-9300}:9300"
+    volumes:
+      - .cache/datasource:/app/.cache/datasource
     environment:
       NO_HTTPS: ${NO_HTTPS:-1}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-secret-change-me-32chars}
@@ -34,9 +36,7 @@ services:
       nango-db:
         condition: service_healthy
       dify-sandbox:
-        condition: service_started
-      duckdb-engine:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -77,25 +77,20 @@ services:
     volumes:
       - ./docker/dify-sandbox/config.yaml:/conf/config.yaml:ro
       - ./docker/dify-sandbox/requirements.txt:/dependencies/python-requirements.txt:ro
-      # read only volume mount for shared datasets
-      - .cache/datasource/parquet:/var/sandbox/sandbox-python/tmp/data:ro
+      # read only volume mount for shared datasets (must mount to subdirectory so /tmp stays writable)
+      - .cache/datasource:/tmp/data:ro
+      - .cache/datasource:/var/sandbox/sandbox-python/tmp/data:ro
+      - .cache/datasource:/var/sandbox/sandbox-nodejs/tmp/data:ro
     cap_add:
       - SYS_ADMIN
     security_opt:
       - seccomp:unconfined
-
-  duckdb-engine:
-    image: ghcr.io/gavinzha0/nango/duckdb-engine:latest
-    pull_policy: missing
-    container_name: duckdb-engine
-    # ports:
-    #   - "8526:8526"
-    environment:
-      - DUCKDB_APIKEY=my-local-duckdb-engine-secret
-      - SHARED_CACHE_DIR=/cache/parquet
-    volumes:
-      - .cache/datasource/parquet:/cache/parquet
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8194/v1/sandbox/run > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   sensevoice:
     image: markgzhou/sensevoice-asr-server:latest
@@ -105,6 +100,12 @@ services:
     environment:
       - SENSEVOICE_API_KEY=MySuperSafeApiKey
       - SENSEVOICE_TIMEOUT=60
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/docs || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 

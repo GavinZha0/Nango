@@ -7,8 +7,8 @@
 import "server-only";
 
 import * as path from "node:path";
+import { DuckDBInstance } from "@duckdb/node-api";
 
-import { extractViaDuckdbEngine } from "./duckdb-engine-client.server";
 import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { childLogger } from "@/lib/observability/logger";
@@ -331,14 +331,13 @@ async function readPreview(
   const limit = Math.min(requestedRows, PREVIEW_HARD_CAP_ROWS());
   const glob = path.join(datasetDir(name), "**", "*.parquet");
 
+  const db = await DuckDBInstance.create(":memory:");
+  const conn = await db.connect();
   try {
-    const res = await extractViaDuckdbEngine({
-      query: `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}')`,
-      provider: "standalone",
-      previewRows: limit,
-      maxRows: limit + 10,
-    });
-    const rows = res.rows;
+    const previewRel = await conn.runAndReadAll(
+      `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}') LIMIT ${limit}`,
+    );
+    const rows = previewRel.getRowObjectsJson() as Array<Record<string, unknown>>;
     while (
       rows.length > 0 &&
       JSON.stringify(rows).length > PREVIEW_HARD_CAP_BYTES()
@@ -348,6 +347,9 @@ async function readPreview(
     return rows;
   } catch {
     return [];
+  } finally {
+    conn.closeSync();
+    db.closeSync();
   }
 }
 

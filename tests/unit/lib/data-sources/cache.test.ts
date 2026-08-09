@@ -206,7 +206,7 @@ describe("getCacheStatus", () => {
       byteSize: 1,
     });
     // hand-edit the meta to force expiry
-    const metaFile = path.join(tmpRoot, "parquet", "sales.meta.json");
+    const metaFile = path.join(tmpRoot, "sales.meta.json");
     const meta = JSON.parse(await fs.readFile(metaFile, "utf-8"));
     meta.createdAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
     await fs.writeFile(metaFile, JSON.stringify(meta));
@@ -291,9 +291,8 @@ describe("purgeAllDatasets", () => {
     const removed = await purgeAllDatasets();
     expect(removed).toBeGreaterThan(0);
 
-    const parquetRoot = path.join(tmpRoot, "parquet");
     const after = await fs
-      .readdir(parquetRoot)
+      .readdir(tmpRoot)
       .catch(() => [] as string[]);
     expect(after).toEqual([]);
   });
