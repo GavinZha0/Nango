@@ -9,6 +9,8 @@
 
 import "server-only";
 
+import { scanCodeAst } from "./code-ast-scan";
+
 export interface StaticScanViolation {
   ruleId: string;
   message: string;
@@ -59,15 +61,19 @@ const JS_FORBIDDEN_PATTERNS: Array<{ id: string; pattern: RegExp; message: strin
 ];
 
 /**
- * Perform a fast, deterministic pre-execution static scan on code text.
+ * Perform a fast pre-execution static scan on code text.
+ *
+ * Security guardrails are evaluated first. If safety rules pass,
+ * WASM AST inspection is invoked for syntax and undeclared symbol checks.
  */
-export function scanCodeStatic(
+export async function scanCodeStatic(
   codeText: string,
   language: "python" | "javascript" = "python",
-): StaticScanResult {
+): Promise<StaticScanResult> {
   const violations: StaticScanViolation[] = [];
   const patterns = language === "python" ? PYTHON_FORBIDDEN_PATTERNS : JS_FORBIDDEN_PATTERNS;
 
+  // Step 1: Security guardrail check (priority)
   for (const item of patterns) {
     if (item.pattern.test(codeText)) {
       violations.push({
@@ -78,8 +84,21 @@ export function scanCodeStatic(
     }
   }
 
+  // If security violations are found, abort early (do not run AST check)
+  if (violations.length > 0) {
+    return {
+      passed: false,
+      violations,
+    };
+  }
+
+  // Step 2: WASM AST static syntax & undefined symbol check
+  const astViolations = await scanCodeAst(codeText, language);
+  violations.push(...astViolations);
+
   return {
     passed: violations.length === 0,
     violations,
   };
 }
+

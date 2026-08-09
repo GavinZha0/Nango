@@ -26,7 +26,11 @@ const nextConfig: NextConfig = {
   // one native dlopen sidecar (duckdb's libduckdb.so) is shipped via an
   // explicit COPY in docker/Dockerfile.
   outputFileTracingIncludes: {
-    "/**/*": ["./node_modules/pino-pretty/**/*"],
+    "/**/*": [
+      "./node_modules/pino-pretty/**/*",
+      "./node_modules/web-tree-sitter/**/*",
+      "./node_modules/tree-sitter-wasms/**/*",
+    ],
   },
 
   // Keep heavy server-only packages out of the Turbopack bundle.
@@ -43,6 +47,8 @@ const nextConfig: NextConfig = {
     "pg-native",
     "vertica-nodejs",
     "node-ical",
+    "web-tree-sitter",
+    "tree-sitter-wasms",
   ],
 
   env: {

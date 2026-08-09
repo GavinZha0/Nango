@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nango-duckdb-engine
+    container_name: duckdb-engine
     ports:
       - "8526:8526"
     environment:

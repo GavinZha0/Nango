@@ -3,7 +3,7 @@ name: nango-dify-sandbox
 services:
   dify-sandbox:
     image: langgenius/dify-sandbox:latest
-    container_name: nango-dify-sandbox
+    container_name: dify-sandbox
     restart: always
     ports:
       - "8194:8194"

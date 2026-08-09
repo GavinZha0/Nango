@@ -124,9 +124,41 @@ export function buildRunInSandboxTool(): ToolDefinition {
       "Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
     parameters: RunInSandboxArgs,
     execute: async (args) => {
-      // Node 9: Pre-execution Static Security Scan (AST & pattern inspection)
-      const scanResult = scanCodeStatic(args.code_text, args.language);
+      // Pre-execution Static Scan (Security guardrails & WASM AST inspection)
+      const scanResult = await scanCodeStatic(args.code_text, args.language);
       if (!scanResult.passed) {
+        const securityMsgs = scanResult.violations
+          .filter((v) => v.ruleId.startsWith("BANNED_"))
+          .map((v) => v.message);
+        const syntaxMsgs = scanResult.violations
+          .filter((v) => v.ruleId === "SYNTAX_ERROR")
+          .map((v) => v.message);
+        const nameMsgs = scanResult.violations
+          .filter((v) => v.ruleId === "UNDEFINED_NAME")
+          .map((v) => v.message);
+        const otherMsgs = scanResult.violations
+          .filter(
+            (v) =>
+              !v.ruleId.startsWith("BANNED_") &&
+              v.ruleId !== "SYNTAX_ERROR" &&
+              v.ruleId !== "UNDEFINED_NAME"
+          )
+          .map((v) => v.message);
+
+        const errorParts: string[] = [];
+        if (securityMsgs.length > 0) {
+          errorParts.push(`[Security Check Failed]: ${securityMsgs.join("; ")}`);
+        }
+        if (syntaxMsgs.length > 0) {
+          errorParts.push(`[Syntax Error]: ${syntaxMsgs.join("; ")}`);
+        }
+        if (nameMsgs.length > 0) {
+          errorParts.push(`[Name Error]: ${nameMsgs.join("; ")}`);
+        }
+        if (otherMsgs.length > 0) {
+          errorParts.push(`[Static Check Failed]: ${otherMsgs.join("; ")}`);
+        }
+
         return {
           ok: false,
           duration_ms: 0,
@@ -135,7 +167,7 @@ export function buildRunInSandboxTool(): ToolDefinition {
           row_schema: null,
           message: null,
           files: null,
-          error: `[Node 9 Static Security Scan Failed]: ${scanResult.violations.map((v) => v.message).join("; ")}`,
+          error: errorParts.join("\n"),
           backend: null,
         };
       }
