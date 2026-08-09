@@ -497,8 +497,8 @@ class RunnerImpl implements Runner {
         startSeq,
         log: requestLog,
       });
-    } else if (classified?.action === "connect") {
-      // /connect: no new run row, but replay events from DB.
+    } else if (classified?.action === "connect" || classified?.action === "stop") {
+      // /connect or /stop: no new run row, but attach runner for DB replay / stop handling.
       dbRunner = new PersistedAgentRunner({
         ownerId: userId,
         log: requestLog,

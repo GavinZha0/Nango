@@ -43,11 +43,16 @@ export interface PersistedAgentRunnerConfig {
   log: ReturnType<typeof childLogger>;
 }
 
+/** Process-wide shared InMemoryAgentRunner instance.
+ *  Ensures live runs, pub/sub, and stop() signals map across
+ *  per-request PersistedAgentRunner wrappers in the single-node process. */
+const sharedInMemoryRunner = new InMemoryAgentRunner();
+
 export class PersistedAgentRunner extends AgentRunner {
   /** Shared in-memory machinery: pub/sub for live runs, isRunning
    *  bookkeeping, abort. We never read its historicRuns for replay —
    *  that goes to DB. */
-  private readonly inner = new InMemoryAgentRunner();
+  private readonly inner = sharedInMemoryRunner;
 
   constructor(private readonly cfg: PersistedAgentRunnerConfig) {
     super();

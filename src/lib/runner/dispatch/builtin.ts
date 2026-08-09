@@ -53,11 +53,13 @@ import {
  *  dispatches; `null` for bookkeeping calls. */
 export function classifyBuiltinPath(
   pathname: string,
-): { agentId: string; action: "run" | "connect" } | null {
+): { agentId: string; action: "run" | "connect" | "stop" } | null {
   const run = pathname.match(/\/agent\/([^/]+)\/run\b/);
   if (run) return { agentId: run[1], action: "run" };
   const connect = pathname.match(/\/agent\/([^/]+)\/connect\b/);
   if (connect) return { agentId: connect[1], action: "connect" };
+  const stop = pathname.match(/\/agent\/([^/]+)\/stop\b/);
+  if (stop) return { agentId: stop[1], action: "stop" };
   return null;
 }
 

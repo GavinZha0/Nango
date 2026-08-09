@@ -8,7 +8,7 @@
 import "server-only";
 
 import { AbstractAgent, EventType } from "@/lib/copilot/index.server";
-import type { AgUiEvent, BaseEvent, RunAgentInput } from "@/lib/copilot/index.server";
+import type { AgUiEvent, BaseEvent, RunAgentInput, RunErrorEvent } from "@/lib/copilot/index.server";
 import { Observable } from "rxjs";
 
 import { childLogger } from "@/lib/observability/logger";
@@ -56,6 +56,15 @@ function asString(value: unknown, fallback = ""): string {
 export class PersistingAgent extends AbstractAgent {
   constructor(public readonly cfg: PersistingAgentConfig) {
     super();
+  }
+
+  /** Forward abortRun to the inner BuiltInAgent so InMemoryAgentRunner.stop()
+   *  can trip the underlying LLM stream's AbortController. */
+  abortRun(): void {
+    const inner = this.cfg.inner as unknown as { abortRun?: () => void };
+    if (typeof inner.abortRun === "function") {
+      inner.abortRun();
+    }
   }
 
   /** Re-attach config + clone inner so CopilotRuntime's per-request
@@ -386,6 +395,17 @@ export class PersistingAgent extends AbstractAgent {
       return () => {
         innerSub.unsubscribe();
         if (finalized) return;
+        try {
+          const errEvent: RunErrorEvent = {
+            type: EventType.RUN_ERROR,
+            message: "Run stopped by user",
+            code: "STOPPED",
+          };
+          subscriber.next(errEvent);
+          subscriber.complete();
+        } catch {
+          // Subscriber may already be closed by client disconnect.
+        }
         log.info(
           { runId },
           "run subscriber unsubscribed before completion; marking cancelled",
