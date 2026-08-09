@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/GavinZha0/Nango/compare/v0.12.0...v0.13.0) (2026-08-09)
+
+
+### Features
+
+* **data-sources:** restore embedded @duckdb/node-api & simplify cache layout ([cd0f218](https://github.com/GavinZha0/Nango/commit/cd0f218416580204fe2c939879b38423351042f1))
+
 ## [0.12.0](https://github.com/GavinZha0/Nango/compare/v0.11.0...v0.12.0) (2026-08-09)
 
 
