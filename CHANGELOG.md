@@ -5,17 +5,17 @@
 
 ### Features
 
-* extract duckdb to standalone engine service and setup CI workflow ([81c460f](https://github.com/GavinZha0/Nango/commit/81c460f34c71fc75da4ae6a48667eb1841b05a93))
-* **sandbox:** add WASM AST static syntax and undefined symbol scan ([cc1d29e](https://github.com/GavinZha0/Nango/commit/cc1d29eb889d201dbcd4d6eb98c2e7c2da4ada71))
-* **sandbox:** integrate dify-sandbox, replace local-docker ([0f49d0e](https://github.com/GavinZha0/Nango/commit/0f49d0e883080731e97bfdc57d7a78e3dfdb9d2c))
-* UI enhancements and bug fixes ([6eb7501](https://github.com/GavinZha0/Nango/commit/6eb75014717c2026caa30aba8d3cf3ffd16918b1))
-* **voice:** add Edge TTS and Kokoro providers, remove Deepgram and ElevenLabs ([3881c77](https://github.com/GavinZha0/Nango/commit/3881c7752462c2c7a0c0a6883a1d0a0776f2833e))
+* extract duckdb to standalone engine service and setup CI workflow ([81c460f](https://github.com/GavinZha0/Nango/commit/81c460f34c71fc75da4ae6a48667eb1841b05a93)) by @GavinZha0
+* **sandbox:** add WASM AST static syntax and undefined symbol scan ([cc1d29e](https://github.com/GavinZha0/Nango/commit/cc1d29eb889d201dbcd4d6eb98c2e7c2da4ada71)) by @GavinZha0
+* **sandbox:** integrate dify-sandbox, replace local-docker ([0f49d0e](https://github.com/GavinZha0/Nango/commit/0f49d0e883080731e97bfdc57d7a78e3dfdb9d2c)) by @GavinZha0
+* UI enhancements and bug fixes ([6eb7501](https://github.com/GavinZha0/Nango/commit/6eb75014717c2026caa30aba8d3cf3ffd16918b1)) by @GavinZha0
+* **voice:** add Edge TTS and Kokoro providers, remove Deepgram and ElevenLabs ([3881c77](https://github.com/GavinZha0/Nango/commit/3881c7752462c2c7a0c0a6883a1d0a0776f2833e)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* shared data dir in sandbox (./tmp/data/, read only) ([15e3c5a](https://github.com/GavinZha0/Nango/commit/15e3c5ac49e9b3290dd5747023f65d61025ddb42))
-* VAD issue and dev issue ([530d7b5](https://github.com/GavinZha0/Nango/commit/530d7b589017ae78080bd8bfdd363fc583472bc8))
+* shared data dir in sandbox (./tmp/data/, read only) ([15e3c5a](https://github.com/GavinZha0/Nango/commit/15e3c5ac49e9b3290dd5747023f65d61025ddb42)) by @GavinZha0
+* VAD issue and dev issue ([530d7b5](https://github.com/GavinZha0/Nango/commit/530d7b589017ae78080bd8bfdd363fc583472bc8)) by @GavinZha0
 
 ## [0.11.0](https://github.com/GavinZha0/Nango/compare/v0.10.1...v0.11.0) (2026-08-05)
 
