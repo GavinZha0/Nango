@@ -49,7 +49,7 @@ export interface CodeOutputEnvelope {
 
   /**
    * Structured output data — always an array of plain objects, or null.
-   * Populated from the "rows" key in the stdout JSON.
+   * Populated from the "rows" key in stdout JSON or extracted via multi-stage parsing.
    * For chart nodes: inputs.dataset = "@nodes.X.rows"
    */
   rows:        Record<string, unknown>[] | null;
@@ -65,8 +65,7 @@ export interface CodeOutputEnvelope {
   row_schema:  Record<string, unknown> | null;
 
   /**
-   * Human-readable description from the "message" key in stdout JSON.
-   * Falls back to the raw stdout content when stdout is not valid JSON.
+   * Human-readable description from the "message" key in stdout JSON or raw stdout.
    * Null when stdout is empty and no message key was found.
    */
   message:     string | null;
@@ -89,19 +88,18 @@ export interface CodeOutputEnvelope {
 /**
  * Assemble a CodeOutputEnvelope from a raw sandbox execution result.
  *
- * Accepts both `SandboxOutput` (tool layer) and `CodeRunResult` (workflow
- * engine) since both satisfy `RawCodeResult` structurally.
- *
- * Parsing rules (when ok=true):
- *   1. stdout is a JSON object with our convention keys → extract rows/message/files
- *   2. stdout is not a valid JSON object → message = raw stdout (soft fallback)
- *
- * When ok=false: error = stderr content, all data fields are null.
+ * Uses a robust 5-Stage resolution pipeline:
+ *   Stage 0: Exit Code Guard (ok=false → return error envelope)
+ *   Stage 1: Strict JSON Parse (stdout is a clean JSON object containing "rows")
+ *   Stage 2: Robust Regex Substring Extraction (extract JSON substring when stdout has extra print logs)
+ *   Stage 3/4: Markdown/Text Table Parsing (auto-convert text tables to rows)
+ *   Stage 5: Non-data Fallback (rows=null, message=stdout)
  */
 export function assembleCodeOutput(raw: RawCodeResult): CodeOutputEnvelope {
   const ok = raw.exitCode === 0;
   const duration_ms = raw.durationMs;
 
+  // Stage 0: Exit code check
   if (!ok) {
     const errorText =
       raw.stderr.trim().length > 0
@@ -119,48 +117,135 @@ export function assembleCodeOutput(raw: RawCodeResult): CodeOutputEnvelope {
     };
   }
 
-  // Try to parse stdout as a JSON object conforming to the output convention.
-  let parsed: Record<string, unknown> | null = null;
-  try {
-    const candidate: unknown = JSON.parse(raw.stdout);
-    if (
-      candidate !== null &&
-      typeof candidate === "object" &&
-      !Array.isArray(candidate)
-    ) {
-      parsed = candidate as Record<string, unknown>;
-    }
-  } catch {
-    // stdout is not valid JSON — fall back to message = raw stdout.
-  }
-
-  if (parsed === null) {
+  const trimmedStdout = raw.stdout.trim();
+  if (trimmedStdout.length === 0) {
     return {
       ok,
       duration_ms,
       rows: null,
       row_count: null,
       row_schema: null,
-      message: raw.stdout.length > 0 ? raw.stdout : null,
+      message: null,
       files: null,
       error: null,
     };
   }
 
-  const rows = extractRows(parsed.rows);
+  // Stage 1: Strict JSON Parsing
+  try {
+    const candidate: unknown = JSON.parse(trimmedStdout);
+    if (candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)) {
+      const parsed = candidate as Record<string, unknown>;
+      const rows = extractRows(parsed.rows);
+      if (rows !== null || parsed.message !== undefined) {
+        return buildEnvelope(raw, rows, typeof parsed.message === "string" ? parsed.message : null, extractFiles(parsed.files));
+      }
+    }
+  } catch {
+    // Continue to Stage 2
+  }
+
+  // Stage 2: Substring Regex JSON Extraction (handles print(df) + print(json.dumps({"rows": ...})))
+  const regexResult = tryExtractSubstrJson(raw.stdout);
+  if (regexResult !== null) {
+    return buildEnvelope(raw, regexResult.rows, regexResult.message, regexResult.files);
+  }
+
+  // Stage 3 & 4: Text / Markdown Table Parsing
+  const tableRows = tryParseMarkdownTable(raw.stdout);
+  if (tableRows !== null) {
+    return buildEnvelope(raw, tableRows, raw.stdout);
+  }
+
+  // Stage 5: Non-data Fallback (pure logic script or plain text)
+  return buildEnvelope(raw, null, raw.stdout);
+}
+
+// ─── Stage Helpers ─────────────────────────────────────────────────────
+
+function buildEnvelope(
+  raw: RawCodeResult,
+  rows: Record<string, unknown>[] | null,
+  message: string | null,
+  files: string[] | null = null,
+): CodeOutputEnvelope {
   return {
-    ok,
-    duration_ms,
+    ok: true,
+    duration_ms: raw.durationMs,
     rows,
     row_count: rows !== null ? rows.length : null,
     row_schema: inferRowSchema(rows),
-    message:
-      typeof parsed.message === "string" && parsed.message.length > 0
-        ? parsed.message
-        : null,
-    files: extractFiles(parsed.files),
+    message: message && message.length > 0 ? message : null,
+    files,
     error: null,
   };
+}
+
+/**
+ * Stage 2: Extracts a JSON substring object containing "rows" from raw stdout
+ * when extra print() statements preceded or followed the JSON output.
+ */
+function tryExtractSubstrJson(stdout: string): {
+  rows: Record<string, unknown>[] | null;
+  message: string | null;
+  files: string[] | null;
+} | null {
+  // Matches the last JSON object in stdout that contains a "rows" key
+  const match = stdout.match(/\{[\s\S]*?"rows"\s*:\s*\[[\s\S]*?\][\s\S]*?\}(?=[^{}]*$)/);
+  if (!match) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(match[0]);
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const dict = parsed as Record<string, unknown>;
+      const rows = extractRows(dict.rows);
+      if (rows !== null) {
+        const jsonIndex = match.index ?? 0;
+        const prefixLog = stdout.slice(0, jsonIndex).trim();
+        const msgInJson = typeof dict.message === "string" ? dict.message : null;
+        let message = msgInJson;
+        if (prefixLog.length > 0) {
+          message = msgInJson ? `${prefixLog}\n\n${msgInJson}` : prefixLog;
+        }
+        return {
+          rows,
+          message,
+          files: extractFiles(dict.files),
+        };
+      }
+    }
+  } catch {
+    // Ignores substring parse errors
+  }
+  return null;
+}
+
+/**
+ * Stage 3 & 4: Parses Markdown tables in stdout (| col1 | col2 |) into structured rows.
+ */
+function tryParseMarkdownTable(stdout: string): Record<string, unknown>[] | null {
+  const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const tableLines = lines.filter((l) => l.startsWith("|") && l.endsWith("|"));
+  if (tableLines.length < 3) return null;
+
+  const headers = tableLines[0].split("|").slice(1, -1).map((h) => h.trim());
+  const delimiter = tableLines[1];
+  if (!delimiter.includes("-")) return null;
+
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 2; i < tableLines.length; i++) {
+    const cells = tableLines[i].split("|").slice(1, -1).map((c) => c.trim());
+    if (cells.length === headers.length) {
+      const rowObj: Record<string, unknown> = {};
+      headers.forEach((h, idx) => {
+        const val = cells[idx];
+        const num = Number(val);
+        rowObj[h] = val !== "" && !isNaN(num) ? num : val;
+      });
+      rows.push(rowObj);
+    }
+  }
+  return rows.length > 0 ? rows : null;
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────

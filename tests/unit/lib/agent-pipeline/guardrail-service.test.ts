@@ -26,12 +26,13 @@ describe("guardrail-service", () => {
     vi.clearAllMocks();
   });
 
-  it("defines 10 baseline seed policies", () => {
-    expect(DEFAULT_SAFETY_POLICIES.length).toBe(10);
+  it("defines baseline seed policies", () => {
+    expect(DEFAULT_SAFETY_POLICIES.length).toBe(11);
     const names = DEFAULT_SAFETY_POLICIES.map((p) => p.name);
     expect(names).toContain("llm_api_key_redact");
     expect(names).toContain("chinese_phone_redact");
     expect(names).toContain("system_tag_injection_block");
+    expect(names).toContain("db_connection_redact");
   });
 
   it("seeds policies when they do not exist", async () => {
@@ -47,7 +48,7 @@ describe("guardrail-service", () => {
 
     await seedSafetyPolicies();
 
-    expect(db.insert).toHaveBeenCalledTimes(10);
+    expect(db.insert).toHaveBeenCalledTimes(DEFAULT_SAFETY_POLICIES.length);
   });
 
   it("loads and caches tool overrides and safety policies", async () => {

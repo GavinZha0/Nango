@@ -50,6 +50,7 @@ export interface ExecutionState {
   readonly input: Readonly<Record<string, unknown>>;
   readonly context: Readonly<Record<string, unknown>>;
   readonly abortSignal: AbortSignal;
+  readonly forceFresh?: boolean;
   readonly outputs: Map<number, Record<string, unknown>>;
   readonly completed: Set<number>;
   readonly failed: Set<number>;
@@ -65,6 +66,7 @@ export function createExecutionState(params: ExecuteParams): ExecutionState {
     input: params.input,
     context: params.context,
     abortSignal: params.abortController.signal,
+    forceFresh: params.forceFresh,
     outputs: new Map<number, Record<string, unknown>>(),
     completed: new Set<number>(),
     failed: new Set<number>(),

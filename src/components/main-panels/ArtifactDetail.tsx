@@ -237,12 +237,28 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
         throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
       const bundle = (await res.json()) as ArtifactBundleResponse;
-      await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: false });
-      toast.success("Chart refreshed");
+
+      // Automatically switch viewMode to live when user explicitly refreshes data
+      if (node?.viewMode === "snapshot") {
+        const patchRes = await fetch(`/api/artifacts/${artifactId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ view_mode: "live" }),
+        });
+        if (patchRes.ok && bundle.node) {
+          bundle.node.viewMode = "live";
+        }
+      } else if (bundle.node && node?.viewMode) {
+        bundle.node.viewMode = node.viewMode;
+      }
+
+      await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: true });
+      await Promise.all([mutate(), mutateTree()]);
+      toast.success("Chart refreshed & switched to live mode");
     } catch (err) {
       toast.error(`Refresh failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [artifactId]);
+  }, [artifactId, node, mutate, mutateTree]);
 
   const handleSaveSnapshot = useCallback(async (): Promise<void> => {
     try {

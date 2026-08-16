@@ -13,6 +13,7 @@ import { DataSourceTable } from "@/lib/db/schema";
 
 import { BUILTIN_TOOLS } from "./catalog";
 import { buildExtractDatasetTool } from "@/lib/data-sources/runtime-tools";
+import { buildGetCurrentDatetimeTool } from "@/lib/time/runtime-tools";
 
 /**
  * Returns `Map<toolName, ToolDefinition>`. Unknown tool names surface
@@ -25,6 +26,9 @@ export async function buildUserToolCatalog(
   for (const entry of BUILTIN_TOOLS) {
     map.set(entry.name, entry.build());
   }
+
+  // Register ambient tools (e.g. get_current_datetime) so they resolve during workflow save canonicalize
+  map.set("get_current_datetime", buildGetCurrentDatetimeTool({ userId: ownerId }));
 
   // SECURITY (BUG-1): workflow SQL nodes may only reach data sources
   // visible to the workflow owner (enabled + public | owned). This is

@@ -67,6 +67,21 @@ export const DEFAULT_SAFETY_POLICIES = [
     },
   },
   {
+    name: "db_connection_redact",
+    displayName: "Database Connection Masking",
+    description: "Detect and redact database connection parameters (host, port, dbname, user, password).",
+    category: "secret_leak",
+    policyType: "regex",
+    action: "redact",
+    severity: "critical",
+    scope: "global",
+    enabled: true,
+    policyConfig: {
+      pattern: "(?:host|port|dbname|database|user|password|pwd)=[^\\s'\"]+|[a-z0-9+.-]+://[^:\\s'\"]+:[^@\\s'\"]+@[^\\s'\"]+",
+      replacement: "[REDACTED_CONNECTION_INFO]",
+    },
+  },
+  {
     name: "chinese_phone_redact",
     displayName: "Chinese Phone Number Masking",
     description: "Automatically masks 11-digit mobile phone numbers with asterisks.",

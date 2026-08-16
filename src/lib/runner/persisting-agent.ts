@@ -343,7 +343,10 @@ export class PersistingAgent extends AbstractAgent {
               flushPending();
               persist("tool_call_result", {
                 toolCallId: ev.toolCallId,
-                content: ev.content,
+                content:
+                  typeof ev.content === "string"
+                    ? redactSensitiveText(ev.content)
+                    : ev.content,
               });
               break;
             }

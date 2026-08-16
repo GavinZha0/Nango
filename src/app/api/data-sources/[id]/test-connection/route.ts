@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { resolveDataSourceByIdIncludingDisabled } from "@/lib/data-sources/lookup";
 import { getDataSource } from "@/lib/data-sources/registry.server";
+import { sanitizeAdminTestError } from "@/lib/data-sources/sanitization";
 
 const ROUTE = "/api/data-sources/[id]/test-connection";
 
@@ -31,6 +32,11 @@ export const POST = withEditor<{ id: string }>(
 
     const source = getDataSource(lookup.resolved.provider);
     const result = await source.testConnection(lookup.resolved, req.signal);
+
+    if (!result.ok && result.error) {
+      result.error = sanitizeAdminTestError(result.error);
+    }
+
     return NextResponse.json(result);
   },
 );

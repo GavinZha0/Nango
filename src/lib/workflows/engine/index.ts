@@ -37,6 +37,11 @@ export interface ExecuteParams {
    * checkpoint inside each executor.
    */
   abortController: AbortController;
+  /**
+   * When true, node executors (e.g. sql-node) bypass data-source cache
+   * and force fresh execution.
+   */
+  forceFresh?: boolean;
 }
 
 /**

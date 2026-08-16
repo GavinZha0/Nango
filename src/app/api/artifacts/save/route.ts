@@ -5,8 +5,9 @@ import { z } from "zod";
 
 import { saveArtifact } from "@/lib/artifacts/save-artifact";
 import { buildProductionSaveDeps } from "@/lib/artifacts/save-deps.server";
-import { withSession } from "@/lib/http/route-handlers";
+import { ApiError, withSession } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
+import { WorkflowError } from "@/lib/workflows/error";
 
 /**
  * POST /api/artifacts/save — Save button on the outcomes card.
@@ -31,30 +32,37 @@ const bodySchema = z
 
 export const POST = withSession(ROUTE, async ({ req, session, log }) => {
   const body = await parseBody(req, bodySchema);
-  const result = await saveArtifact(
-    {
-      ownerId: session.user.id,
-      threadId: body.threadId,
-      outcomeId: body.outcomeId,
-      ...(body.parentId !== undefined && { parentId: body.parentId }),
-      ...(body.name !== undefined && { name: body.name }),
-      ...(body.description !== undefined && { description: body.description }),
-    },
-    buildProductionSaveDeps(session.user.id),
-  );
-  log.info(
-    {
-      event: "artifact_save_from_outcome",
-      artifactId: result.artifactId,
-      workflowId: result.workflowId,
-      workflowOutputField: result.workflowOutputField,
-      reused: result.reused,
-      threadId: body.threadId,
-      outcomeId: body.outcomeId,
-    },
-    result.reused
-      ? "artifact save idempotent — existing row reused"
-      : "artifact + workflow created from chat outcome",
-  );
-  return NextResponse.json(result);
+  try {
+    const result = await saveArtifact(
+      {
+        ownerId: session.user.id,
+        threadId: body.threadId,
+        outcomeId: body.outcomeId,
+        ...(body.parentId !== undefined && { parentId: body.parentId }),
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.description !== undefined && { description: body.description }),
+      },
+      buildProductionSaveDeps(session.user.id),
+    );
+    log.info(
+      {
+        event: "artifact_save_from_outcome",
+        artifactId: result.artifactId,
+        workflowId: result.workflowId,
+        workflowOutputField: result.workflowOutputField,
+        reused: result.reused,
+        threadId: body.threadId,
+        outcomeId: body.outcomeId,
+      },
+      result.reused
+        ? "artifact save idempotent — existing row reused"
+        : "artifact + workflow created from chat outcome",
+    );
+    return NextResponse.json(result);
+  } catch (err) {
+    if (err instanceof WorkflowError) {
+      throw new ApiError("VALIDATION_FAILED", 400, err.message);
+    }
+    throw err;
+  }
 });

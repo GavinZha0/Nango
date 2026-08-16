@@ -29,6 +29,7 @@ import { validateSqlAgainstPolicy } from "./policy";
 import { getDataSource } from "./registry.server";
 import type { ColumnSchema, ExtractResult } from "./types";
 import { getExtractLimits } from "./limits";
+import { sanitizeConnectionStringError } from "./sanitization";
 
 // Caps
 
@@ -276,11 +277,16 @@ export function buildExtractDatasetTool(
         });
       } catch (err) {
         await abortWriteSlot(slot);
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        log.error(
+          { err, dataSourceName: args.data_source_name, datasetName: args.dataset_name },
+          "extract_dataset_by_sql failed",
+        );
         return {
           ok: false,
           error: {
             code: "EXTRACT_FAILED",
-            message: err instanceof Error ? err.message : String(err),
+            message: sanitizeConnectionStringError(rawMessage, args.data_source_name),
           },
         };
       }

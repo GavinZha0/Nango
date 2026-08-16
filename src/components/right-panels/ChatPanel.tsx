@@ -2,7 +2,7 @@
 
 import "@copilotkit/react-ui/v2/styles.css";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   CopilotChat,
@@ -238,6 +238,66 @@ function CollapsibleUserMessage(props: CopilotChatUserMessageProps): ReactNode {
 
 // ChatViewShell — chatView slot wrapper
 
+// ── Custom Assistant Message with Turn-End Button Logic ──────────
+
+function ConnectedAssistantMessage(
+  props: CopilotChatAssistantMessageProps,
+): ReactNode {
+  const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
+  const { agent } = useAgent({ agentId: activeAgentId ?? "" });
+  const onRegenerate = useOnRegenerate(agent);
+
+  const { data: session } = authClient.useSession();
+  const userFields = session?.user as { ttsCredentialId?: string | null } | undefined;
+  const hasTts = !!userFields?.ttsCredentialId;
+
+  const messages = agent.messages;
+  const isRunning = agent.isRunning;
+  const index = messages.findIndex((m) => m.id === props.message.id);
+
+  let isEndOfTurn = true;
+  if (index !== -1) {
+    const remaining = messages.slice(index + 1);
+    const nextUserIdx = remaining.findIndex((m) => m.role === "user");
+
+    if (nextUserIdx !== -1) {
+      // Historical turn: followed by a subsequent user prompt.
+      // Is end-of-turn if no other assistant message exists before that next user prompt.
+      const turnSubSlice = remaining.slice(0, nextUserIdx);
+      const hasLaterAssistant = turnSubSlice.some((m) => m.role === "assistant");
+      isEndOfTurn = !hasLaterAssistant;
+    } else {
+      // Current active turn: no subsequent user prompt yet.
+      // Hide toolbar if agent is actively running or if a later assistant message exists.
+      if (isRunning) {
+        isEndOfTurn = false;
+      } else {
+        const hasLaterAssistant = remaining.some((m) => m.role === "assistant");
+        isEndOfTurn = !hasLaterAssistant;
+      }
+    }
+  }
+
+  return (
+    <CopilotChatAssistantMessage
+      {...props}
+      onRegenerate={isEndOfTurn ? onRegenerate : undefined}
+      onThumbsUp={isEndOfTurn ? noop : undefined}
+      onThumbsDown={isEndOfTurn ? noop : undefined}
+      onReadAloud={isEndOfTurn && hasTts ? readAloud : undefined}
+    />
+  );
+}
+
+/** Top-level static messageView object — zero references changes across turns,
+ *  preventing CopilotChatView from unmounting/remounting the entire list and resetting scroll. */
+const STATIC_MESSAGE_VIEW = {
+  userMessage: CollapsibleUserMessage as unknown as typeof CopilotChatUserMessage,
+  assistantMessage: ConnectedAssistantMessage as unknown as typeof CopilotChatAssistantMessage,
+};
+
+// ChatViewShell — chatView slot wrapper
+
 /** Slot wrapper inside CopilotChat's chatConfig provider. Hooks
  *  that need the live per-thread clone (regenerate, handoff
  *  injection) live here so `useAgent` resolves the same agent
@@ -261,18 +321,8 @@ function ChatViewShellBody({
   // the CopilotChat UI is rendering, regardless of the outer threadId prop.
   const { agent } = useAgent({ agentId });
 
-  const { data: session } = authClient.useSession();
-  const userFields = session?.user as { ttsCredentialId?: string | null } | undefined;
-  const hasTts = !!userFields?.ttsCredentialId;
-
   // Drain pending handoff context as the first user message.
   useInjectHandoffContext(agent);
-  const onRegenerate = useOnRegenerate(agent);
-
-  // Ref-capture for stable callback — avoids re-creating the
-  // assistant message component on every streaming token.
-  const messagesRef = useRef(agent.messages);
-  useEffect(() => { messagesRef.current = agent.messages; });
 
   // Auto-focus input when chatbot input moves to bottom after first message
   const hasFocusedFirstMsgRef = useRef(false);
@@ -295,53 +345,10 @@ function ChatViewShellBody({
     }
   }, [agent.messages.length]);
 
-  // Wire up onRegenerate; thumbs/read-aloud slots are no-op stubs.
-  const AssistantMessageWithRegenerate = useCallback(
-    (props: CopilotChatAssistantMessageProps) => {
-      // Determine if this is the last message of the assistant's current turn.
-      // If there's another assistant message or tool call immediately after this one,
-      // we hide the toolbar to avoid rendering multiple sets of action buttons.
-      const messages = messagesRef.current;
-      const index = messages.findIndex((m) => m.id === props.message.id);
-      
-      let isEndOfTurn = true;
-      if (index !== -1 && index < messages.length - 1) {
-        const nextMessage = messages[index + 1];
-        if (nextMessage?.role !== "user") {
-          isEndOfTurn = false;
-        }
-      }
-
-      return (
-        <CopilotChatAssistantMessage
-          {...props}
-          onRegenerate={isEndOfTurn ? onRegenerate : undefined}
-          onThumbsUp={isEndOfTurn ? noop : undefined}
-          onThumbsDown={isEndOfTurn ? noop : undefined}
-          onReadAloud={isEndOfTurn && hasTts ? readAloud : undefined}
-        />
-      );
-    },
-    [onRegenerate, hasTts],
-  );
-
-  // `SlotValue<C>` requires `C` (a namespace component with static fields)
-  // but v2 runtime (`renderSlot`) accepts any component type. Cast to
-  // satisfy TS without forcing our render fn into a namespace shape.
-  const messageView = useMemo(
-    () => ({
-      userMessage:
-        CollapsibleUserMessage as unknown as typeof CopilotChatUserMessage,
-      assistantMessage:
-        AssistantMessageWithRegenerate as unknown as typeof CopilotChatAssistantMessage,
-    }),
-    [AssistantMessageWithRegenerate],
-  );
-
-  // NOTE: only augment messageView. Do NOT override slotProps.messages /
-  // onSubmitMessage / isRunning / hasExplicitThreadId / isConnecting —
+  // NOTE: only augment messageView using the static top-level reference.
+  // Do NOT override slotProps.messages / onSubmitMessage / isRunning —
   // those are CopilotChat-managed state.
-  return <CopilotChatView {...slotProps} messageView={messageView} />;
+  return <CopilotChatView {...slotProps} messageView={STATIC_MESSAGE_VIEW} />;
 }
 
 // MemoChat

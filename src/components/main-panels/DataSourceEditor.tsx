@@ -14,13 +14,11 @@ import {
 } from "react";
 import {
   ArrowLeft,
-  CheckCircle2,
   Loader2,
   Plug,
   Plus,
   Save,
   Trash2,
-  XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -28,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "sonner";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import {
   Select,
@@ -211,11 +210,6 @@ export function DataSourceEditor({
   const [deleting, setDeleting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState<boolean>(false);
-  const [testResult, setTestResult] = useState<
-    | { ok: true; latencyMs: number }
-    | { ok: false; error: string }
-    | null
-  >(null);
 
   // Credentials list — filter to provider on the client so the picker
   // only shows usable creds. Server enforces the same constraint.
@@ -385,11 +379,10 @@ export function DataSourceEditor({
     // unsaved edits are tested — not the DB-persisted version.
     const localErr = validateLocal();
     if (localErr) {
-      setTestResult({ ok: false, error: localErr });
+      toast.error("Validation error", { description: localErr });
       return;
     }
     setTesting(true);
-    setTestResult(null);
     try {
       const res = await fetch("/api/data-sources/test-connection", {
         method: "POST",
@@ -407,20 +400,17 @@ export function DataSourceEditor({
         | { ok: boolean; latencyMs: number; error?: string; message?: string }
         | null;
       if (!res.ok) {
-        setTestResult({
-          ok: false,
-          error: body?.message ?? body?.error ?? `HTTP ${res.status}`,
-        });
+        const errMsg = body?.message ?? body?.error ?? `HTTP ${res.status}`;
+        toast.error("Test connection failed", { description: errMsg, duration: 6000 });
       } else if (body?.ok) {
-        setTestResult({ ok: true, latencyMs: body.latencyMs ?? 0 });
+        toast.success(`Connected successfully (${body.latencyMs ?? 0}ms)`);
       } else {
-        setTestResult({ ok: false, error: body?.error ?? "Unknown error" });
+        const errMsg = body?.error ?? "Unknown error";
+        toast.error("Test connection failed", { description: errMsg, duration: 6000 });
       }
     } catch (err) {
-      setTestResult({
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      toast.error("Test connection failed", { description: errMsg, duration: 6000 });
     } finally {
       setTesting(false);
     }
@@ -501,35 +491,9 @@ export function DataSourceEditor({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-3xl space-y-6 px-6 py-6">
-          {(error || testResult) && (
-            <div className="space-y-2">
-              {error && (
-                <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  {error}
-                </div>
-              )}
-              {testResult && (
-                <div
-                  className={cn(
-                    "flex items-center gap-2 rounded border px-3 py-2 text-xs",
-                    testResult.ok
-                      ? "border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-300"
-                      : "border-destructive/40 bg-destructive/10 text-destructive",
-                  )}
-                >
-                  {testResult.ok ? (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" />
-                      <span>Connected (latency {testResult.latencyMs} ms)</span>
-                    </>
-                  ) : (
-                    <>
-                      <XCircle className="h-4 w-4" />
-                      <span>{testResult.error}</span>
-                    </>
-                  )}
-                </div>
-              )}
+          {error && (
+            <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {error}
             </div>
           )}
 

@@ -16,6 +16,7 @@ import {
   testConnectionViaDuckdb,
   type DuckdbExtensionName,
 } from "./duckdb-extension.server";
+import { sanitizeAdminTestError } from "./sanitization";
 
 export interface DuckdbExtensionAdapterConfig {
   /** DuckDB scanner extension to install/load. */
@@ -63,10 +64,11 @@ export function createDuckdbExtensionAdapter(
           signal,
         });
       } catch (err) {
+        const rawMessage = err instanceof Error ? err.message : String(err);
         return {
           ok: false,
           latencyMs: 0,
-          error: err instanceof Error ? err.message : String(err),
+          error: sanitizeAdminTestError(rawMessage),
         };
       }
     },

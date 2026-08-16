@@ -12,6 +12,7 @@ import {
   dataSourceParams,
   dataSourceProvider,
 } from "@/lib/data-sources/validation";
+import { sanitizeAdminTestError } from "@/lib/data-sources/sanitization";
 import { isSupportedDataSource, type DataSourceId } from "@/lib/data-sources/types";
 
 const ROUTE = "/api/data-sources/test-connection";
@@ -76,5 +77,10 @@ export const POST = withEditor(ROUTE, async ({ req }) => {
     },
     req.signal,
   );
+
+  if (!result.ok && result.error) {
+    result.error = sanitizeAdminTestError(result.error);
+  }
+
   return NextResponse.json(result);
 });

@@ -112,8 +112,8 @@ export async function executeSqlNode(
           data_source_name: dataSourceName,
           sql_text: sqlText,
           row_limit: inlineMaxRows,
-          // Refresh happens at the artifact level, not per-node.
-          force_refresh: false,
+          // Pass force_refresh when state.forceFresh is true (e.g. on artifact refresh path)
+          force_refresh: Boolean(state.forceFresh),
         },
         abortSignal: state.abortSignal,
         context: state.context,

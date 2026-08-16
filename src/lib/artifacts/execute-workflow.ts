@@ -100,6 +100,7 @@ export async function executeWorkflow(
         input: {},
         context: {},
         abortController,
+        ...(args.forceFresh === true && { forceFresh: true }),
       },
       deps,
     );
