@@ -179,8 +179,8 @@ importers:
         specifier: ^1.1.4
         version: 1.1.4
       web-tree-sitter:
-        specifier: ^0.22.6
-        version: 0.22.6
+        specifier: ^0.26.12
+        version: 0.26.12
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -7697,8 +7697,8 @@ packages:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
 
-  web-tree-sitter@0.22.6:
-    resolution: {integrity: sha512-hS87TH71Zd6mGAmYCvlgxeGDjqd9GTeqXNqTT+u0Gs51uIozNIaaq/kUAbV/Zf56jb2ZOyG8BxZs2GG9wbLi6Q==}
+  web-tree-sitter@0.26.12:
+    resolution: {integrity: sha512-fvqTNZQBGUgUgfP0mHw+iHf9Yf6bRQrp0A3pSf2v/hSKxkT1beCoIWoLVmlPL7O6dmySfSb/t1aJoJvrgTRStw==}
 
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
@@ -16302,7 +16302,7 @@ snapshots:
 
   web-streams-polyfill@3.3.3: {}
 
-  web-tree-sitter@0.22.6: {}
+  web-tree-sitter@0.26.12: {}
 
   webidl-conversions@3.0.1: {}
 
