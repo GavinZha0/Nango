@@ -59,7 +59,10 @@ const options = {
   hooks: {
     after: createAuthMiddleware(async (ctx) => {
       if (ctx.path.includes("change-password")) {
-        const userId = ctx.context?.session?.user?.id || ctx.context?.user?.id;
+        // QUIRK: better-auth v1.6 tightened AuthContext type signature; cast context to extract legacy/session user ID
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctxAny = ctx as Record<string, any>;
+        const userId = (ctxAny.session?.user?.id || ctxAny.context?.session?.user?.id || ctxAny.context?.user?.id) as string | undefined;
         if (userId) {
           console.log("[auth hook] change-password success, resetting mustChangePassword. userId:", userId);
           await db
