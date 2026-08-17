@@ -32,9 +32,13 @@ import { buildArtifactBundle } from "./bundle";
  *   - `ApiError(NOT_FOUND, 404)` if the artifact doesn't exist
  *   - `ApiError(FORBIDDEN, 403)` if `ownerId` is not the creator
  */
+import { WorkflowTable } from "@/lib/db/schema";
+import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
+
 export async function saveSnapshot(
   artifactId: string,
   ownerId: string,
+  inputValues?: Record<string, unknown>,
 ): Promise<ArtifactBundle> {
   // Ownership check — the artifact must exist and belong to ownerId.
   const rows = await db
@@ -61,7 +65,7 @@ export async function saveSnapshot(
     artifactId,
     ownerId,
     productionDeps,
-    { forceFresh: false },
+    { forceFresh: false, inputValues },
   );
 
   // Persist snapshot only when data is available.
@@ -75,6 +79,34 @@ export async function saveSnapshot(
           : new Date(),
       })
       .where(eq(ArtifactTable.id, artifactId));
+
+    // Update value fields in workflow spec if inputValues provided
+    if (inputValues && bundle.workflow?.id) {
+      const wfRows = await db
+        .select({ spec: WorkflowTable.spec })
+        .from(WorkflowTable)
+        .where(eq(WorkflowTable.id, bundle.workflow.id))
+        .limit(1);
+      const spec = (wfRows[0]?.spec ?? {}) as Record<string, unknown>;
+      const inputSchema = (spec.input_schema ?? {}) as Record<string, unknown>;
+      const properties = (inputSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+      
+      let changed = false;
+      for (const k of Object.keys(inputValues)) {
+        if (properties[k]) {
+          properties[k].value = inputValues[k];
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        spec.input_schema = { ...inputSchema, properties };
+        await db
+          .update(WorkflowTable)
+          .set({ spec: spec as CanonicalWorkflowSpec, updatedAt: new Date() })
+          .where(eq(WorkflowTable.id, bundle.workflow.id));
+      }
+    }
   }
 
   return bundle;

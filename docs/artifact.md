@@ -48,6 +48,7 @@ The final major missing steps for the artifact subsystem are:
 |---|---|
 | [`workflow.md`](./workflow.md) | Data engine: workflow DAG, spec format, save/refresh flows |
 | [`workflow-spec.md`](./workflow-spec.md) | Normative node shape reference for LLM authoring |
+| [`artifact-filters.md`](./artifact-filters.md) | Interactive filters architecture, implementation status & roadmap |
 | [`data-visualization.md`](./data-visualization.md) | Chat-time chart generation (outcomes panel design) |
 | [`data-sources.md`](./data-sources.md) | SQL node's data-source / DuckDB / Parquet contract |
 | [`sandbox.md`](./sandbox.md) | Code node's sandbox path and mount contract |

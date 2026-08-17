@@ -38,6 +38,8 @@ export interface ArtifactBundle {
   /** ISO-8601 timestamp of the snapshot that produced `data`.
    *  Present only when `fromSnapshot=true`. */
   snapshotAt?: string;
+  /** User-supplied input values applied during this live execution (if any). */
+  appliedInputs?: Record<string, unknown>;
 }
 
 export interface DataResolution {
@@ -71,6 +73,7 @@ export interface BundleDeps {
     outputField: string;
     ownerId: string;
     forceFresh?: boolean;
+    inputValues?: Record<string, unknown>;
     /** Used only on the recorded (`forceFresh: true`) path so the
      *  entity_run row surfaces "Refresh workflow: <name>". */
     workflowName?: string;
@@ -80,6 +83,8 @@ export interface BundleDeps {
 export interface BundleOptions {
   /** Pass-through to `deps.executeWorkflow.forceFresh`. */
   forceFresh?: boolean;
+  /** Optional user-supplied input values to override/populate input_schema defaults. */
+  inputValues?: Record<string, unknown>;
 }
 
 // ─── Entry point ───────────────────────────────────────────────────────
@@ -156,6 +161,7 @@ export async function buildArtifactBundle(
     outputField,
     ownerId,
     workflowName: workflow.name,
+    inputValues: options?.inputValues,
     ...(options?.forceFresh === true && { forceFresh: true }),
   });
 
@@ -163,6 +169,7 @@ export async function buildArtifactBundle(
     node,
     workflow: workflowMeta,
     fromSnapshot: false,
+    ...(options?.inputValues !== undefined && { appliedInputs: options.inputValues }),
   };
   if (resolution !== null) {
     bundle.data = resolution.data;

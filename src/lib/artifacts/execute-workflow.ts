@@ -45,6 +45,8 @@ export interface ExecuteWorkflowArgs {
   outputField: string;
   ownerId: string;
   forceFresh?: boolean;
+  /** Optional user-supplied input values to override/populate input_schema defaults. */
+  inputValues?: Record<string, unknown>;
   /** Human-readable workflow name surfaced into `entity_run.input_task`
    *  ("Refresh workflow: <name>"). Falls back to a generic label when
    *  omitted. Only consumed when `forceFresh: true` triggers recording. */
@@ -89,6 +91,25 @@ export async function executeWorkflow(
     recorder !== null ? buildRealRunAgent(args.ownerId) : stubRunAgent;
   const deps = buildEngineDeps(catalog, emitEvent, runAgent);
 
+  // Build input dictionary from spec.input_schema (value ?? default) overlaid with args.inputValues
+  const inputBag: Record<string, unknown> = {};
+  const schemaProps = args.spec.input_schema?.properties as Record<string, Record<string, unknown>> | undefined;
+  if (schemaProps) {
+    for (const key of Object.keys(schemaProps)) {
+      const fieldDef = schemaProps[key];
+      if (fieldDef) {
+        if (fieldDef.value !== undefined) {
+          inputBag[key] = fieldDef.value;
+        } else if (fieldDef.default !== undefined) {
+          inputBag[key] = fieldDef.default;
+        }
+      }
+    }
+  }
+  if (args.inputValues) {
+    Object.assign(inputBag, args.inputValues);
+  }
+
   const abortController = new AbortController();
   const startedAt = Date.now();
   try {
@@ -97,7 +118,7 @@ export async function executeWorkflow(
         workflowId: args.workflowId,
         runId,
         spec: args.spec,
-        input: {},
+        input: inputBag,
         context: {},
         abortController,
         ...(args.forceFresh === true && { forceFresh: true }),

@@ -23,14 +23,25 @@ const ROUTE = "/api/artifacts/[id]/refresh";
 
 export const POST = withSession<{ id: string }>(
   ROUTE,
-  async ({ params, session, log }) => {
-    const bundle = await refreshArtifact(params.id, session.user.id);
+  async ({ req, params, session, log }) => {
+    let inputValues: Record<string, unknown> | undefined;
+    try {
+      const body = await req.json();
+      if (body && typeof body === "object" && body.inputs && typeof body.inputs === "object") {
+        inputValues = body.inputs as Record<string, unknown>;
+      }
+    } catch {
+      // Body may be empty on plain POST refresh requests
+    }
+
+    const bundle = await refreshArtifact(params.id, session.user.id, inputValues);
     log.info(
       {
         event: "artifact_refresh",
         artifactId: bundle.node.id,
         hasWorkflow: bundle.workflow !== undefined,
         dataResolved: bundle.data !== undefined,
+        hasInputValues: inputValues !== undefined,
       },
       "artifact refreshed",
     );

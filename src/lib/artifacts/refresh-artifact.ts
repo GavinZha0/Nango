@@ -18,8 +18,10 @@ import { productionDeps } from "./get-artifact";
 export async function refreshArtifact(
   artifactId: string,
   ownerId: string,
+  inputValues?: Record<string, unknown>,
 ): Promise<ArtifactBundle> {
   return buildArtifactBundle(artifactId, ownerId, productionDeps, {
     forceFresh: true,
+    inputValues,
   });
 }

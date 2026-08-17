@@ -190,32 +190,53 @@ function tryExtractSubstrJson(stdout: string): {
   message: string | null;
   files: string[] | null;
 } | null {
-  // Matches the last JSON object in stdout that contains a "rows" key
-  const match = stdout.match(/\{[\s\S]*?"rows"\s*:\s*\[[\s\S]*?\][\s\S]*?\}(?=[^{}]*$)/);
-  if (!match) return null;
+  const rowsIdx = stdout.lastIndexOf('"rows"');
+  if (rowsIdx === -1) return null;
 
-  try {
-    const parsed: unknown = JSON.parse(match[0]);
-    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const dict = parsed as Record<string, unknown>;
-      const rows = extractRows(dict.rows);
-      if (rows !== null) {
-        const jsonIndex = match.index ?? 0;
-        const prefixLog = stdout.slice(0, jsonIndex).trim();
-        const msgInJson = typeof dict.message === "string" ? dict.message : null;
-        let message = msgInJson;
-        if (prefixLog.length > 0) {
-          message = msgInJson ? `${prefixLog}\n\n${msgInJson}` : prefixLog;
-        }
-        return {
-          rows,
-          message,
-          files: extractFiles(dict.files),
-        };
+  const startIdx = stdout.lastIndexOf("{", rowsIdx);
+  if (startIdx === -1) return null;
+
+  const candidateSubstrings = [stdout.slice(startIdx)];
+
+  let braceCount = 0;
+  let endIdx = -1;
+  for (let i = startIdx; i < stdout.length; i++) {
+    if (stdout[i] === "{") braceCount++;
+    else if (stdout[i] === "}") {
+      braceCount--;
+      if (braceCount === 0) {
+        endIdx = i + 1;
+        break;
       }
     }
-  } catch {
-    // Ignores substring parse errors
+  }
+  if (endIdx !== -1) {
+    candidateSubstrings.unshift(stdout.slice(startIdx, endIdx));
+  }
+
+  for (const candidateStr of candidateSubstrings) {
+    try {
+      const parsed: unknown = JSON.parse(candidateStr);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const dict = parsed as Record<string, unknown>;
+        const rows = extractRows(dict.rows);
+        if (rows !== null) {
+          const prefixLog = stdout.slice(0, startIdx).trim();
+          const msgInJson = typeof dict.message === "string" ? dict.message : null;
+          let message = msgInJson;
+          if (prefixLog.length > 0) {
+            message = msgInJson ? `${prefixLog}\n\n${msgInJson}` : prefixLog;
+          }
+          return {
+            rows,
+            message,
+            files: extractFiles(dict.files),
+          };
+        }
+      }
+    } catch {
+      // Continue to next candidate
+    }
   }
   return null;
 }

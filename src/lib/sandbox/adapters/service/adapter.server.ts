@@ -140,7 +140,10 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
       const exitCode =
         typeof json.data?.error === "number"
           ? json.data.error
-          : json.data?.error && json.data.error !== ""
+          : json.data?.error &&
+            typeof json.data.error === "string" &&
+            json.data.error !== "" &&
+            !rawStdout.trim()
           ? 1
           : 0;
 

@@ -22,28 +22,39 @@
 import {
   ArrowLeft,
   Camera,
-  ChevronDown,
   ChevronRight as ChevronRightCrumb,
-  Columns2,
   Folder,
+  FolderInput,
+  GitCompare,
   Loader2,
-  MoreHorizontal,
-  Move,
-  SquarePen,
+  Pencil,
   RefreshCw,
+  Save,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactElement,
 } from "react";
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
-import { useDefaultLayout } from "react-resizable-panels";
+import {
+  useDefaultLayout,
+  type PanelImperativeHandle,
+} from "react-resizable-panels";
+
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import { ArtifactFolderTreeSelect } from "@/components/library/ArtifactFolderTreeSelect";
 import {
@@ -72,19 +83,12 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkflowGraph } from "@/components/workflow-graph/WorkflowGraph";
 import { ChartErrorBoundary } from "@/components/workspace/ChartErrorBoundary";
 import { EChartsRenderer } from "@/components/workspace/EChartsRenderer";
+import { ArtifactFilterPanel } from "@/components/main-panels/ArtifactFilterPanel";
 import {
   useArtifactTree,
   indexById,
@@ -127,6 +131,8 @@ interface ArtifactBundleResponse {
   fromSnapshot?: boolean;
   /** ISO-8601 timestamp of when the snapshot was saved. Present when fromSnapshot=true. */
   snapshotAt?: string;
+  /** User-supplied input values applied during live execution. */
+  appliedInputs?: Record<string, unknown>;
 }
 
 interface SnapshotInfo {
@@ -151,14 +157,43 @@ const VERTICAL_LAYOUT_ID = "nango:artifact-detail:vertical";
  */
 const WORKFLOW_PANEL_DEFAULT_SIZE = 40;
 
+/** Map to preserve user's active session filter inputs per artifact across tab navigation without writing DB. */
+const sessionAppliedInputsMap = new Map<string, Record<string, unknown>>();
+
+/** Map to track transient viewMode overrides in session. */
+const sessionViewModeMap = new Map<string, "snapshot" | "live">();
+
 const fetcher = async (url: string): Promise<ArtifactBundleResponse> => {
+  const artifactId = url.split("/").pop();
+  const sessionInputs = artifactId ? sessionAppliedInputsMap.get(artifactId) : undefined;
+  const viewModeOverride = artifactId ? sessionViewModeMap.get(artifactId) : undefined;
+
   const res = await fetch(url);
   if (!res.ok) {
     const detail: string = (await res.json().catch(() => ({})))?.message
       ?? `${res.status} ${res.statusText}`;
     throw new Error(detail);
   }
-  return res.json();
+  const bundle = (await res.json()) as ArtifactBundleResponse;
+
+  const currentViewMode = viewModeOverride ?? bundle.node?.viewMode ?? "live";
+
+  if (currentViewMode === "live" && sessionInputs && Object.keys(sessionInputs).length > 0) {
+    const refreshRes = await fetch(`${url}/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inputs: sessionInputs }),
+    });
+    if (refreshRes.ok) {
+      const refreshedBundle = (await refreshRes.json()) as ArtifactBundleResponse;
+      if (refreshedBundle.node) {
+        refreshedBundle.node.viewMode = "live";
+      }
+      return refreshedBundle;
+    }
+  }
+
+  return bundle;
 };
 
 export interface ArtifactDetailProps {
@@ -227,10 +262,19 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
   }, [node, mutateTree, router]);
 
   // ── Snapshot actions ────────────────────────────────────────────
-  const handleRefresh = useCallback(async (): Promise<void> => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async (inputs?: Record<string, unknown>): Promise<void> => {
+    setIsRefreshing(true);
     try {
+      if (inputs) {
+        sessionAppliedInputsMap.set(artifactId, inputs);
+      }
+      sessionViewModeMap.set(artifactId, "live");
       const res = await fetch(`/api/artifacts/${artifactId}/refresh`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: inputs ? JSON.stringify({ inputs }) : undefined,
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -252,24 +296,37 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
         bundle.node.viewMode = node.viewMode;
       }
 
-      await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: true });
-      await Promise.all([mutate(), mutateTree()]);
+      await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: false });
       toast.success("Chart refreshed & switched to live mode");
     } catch (err) {
       toast.error(`Refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsRefreshing(false);
     }
-  }, [artifactId, node, mutate, mutateTree]);
+  }, [artifactId, node]);
 
-  const handleSaveSnapshot = useCallback(async (): Promise<void> => {
+  const handleSaveSnapshot = useCallback(async (inputs?: Record<string, unknown>): Promise<void> => {
     try {
+      const activeSessionInputs = sessionAppliedInputsMap.get(artifactId);
+      const inputsToSave = inputs ?? activeSessionInputs;
+
       const res = await fetch(`/api/artifacts/${artifactId}/snapshot`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: inputsToSave && Object.keys(inputsToSave).length > 0
+          ? JSON.stringify({ inputs: inputsToSave })
+          : undefined,
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
         throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
       const bundle = (await res.json()) as ArtifactBundleResponse;
+
+      if (inputsToSave && Object.keys(inputsToSave).length > 0) {
+        sessionAppliedInputsMap.set(artifactId, inputsToSave);
+      }
+
       await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: false });
       toast.success("Snapshot saved");
     } catch (err) {
@@ -280,6 +337,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
   const handleToggleViewMode = useCallback(async (): Promise<void> => {
     if (!node) return;
     const next = node.viewMode === "snapshot" ? "live" : "snapshot";
+    sessionViewModeMap.set(artifactId, next);
     try {
       const res = await fetch(`/api/artifacts/${artifactId}`, {
         method: "PATCH",
@@ -297,16 +355,10 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     }
   }, [artifactId, node, mutate]);
 
-  // Compute the data timestamp for the title row.
+  // Compute the snapshot timestamp for the title row (only in snapshot mode).
   const snapshotInfo: SnapshotInfo | undefined = useMemo(() => {
     if (data?.fromSnapshot === true && data.snapshotAt) {
       return { fromSnapshot: true, timestamp: formatTimestamp(data.snapshotAt, tz) };
-    }
-    if (data?.fromSnapshot === false && data.executedAt) {
-      return { fromSnapshot: false, timestamp: formatTimestamp(data.executedAt, tz) };
-    }
-    if (data?.executedAt) {
-      return { fromSnapshot: false, timestamp: formatTimestamp(data.executedAt, tz) };
     }
     return undefined;
   }, [data, tz]);
@@ -334,6 +386,12 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     );
   }
 
+  const spec = data?.workflow?.spec;
+  const hasFilters = Boolean(
+    spec?.input_schema?.properties &&
+    Object.keys(spec.input_schema.properties).length > 0,
+  );
+
   return (
     <div className="flex h-full flex-col">
       <DetailHeader
@@ -348,10 +406,14 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           isSeedCategory ? null : (
             <ActionBar
               viewMode={node?.viewMode ?? "snapshot"}
-              fromSnapshot={snapshotInfo?.fromSnapshot ?? true}
+              hasFilters={hasFilters}
               onRefresh={() => void handleRefresh()}
               onSaveSnapshot={() => void handleSaveSnapshot()}
-              onToggleViewMode={() => void handleToggleViewMode()}
+              onLoadSnapshot={() => {
+                if (node?.viewMode !== "snapshot") {
+                  void handleToggleViewMode();
+                }
+              }}
               onRename={() => setDialog("rename")}
               onMove={() => setDialog("move")}
               onDelete={() => setDialog("delete")}
@@ -370,6 +432,9 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           router={router}
           spec={data.workflow.spec}
           data={data.data}
+          appliedInputs={data.appliedInputs}
+          onRefreshWithInputs={handleRefresh}
+          isRefreshing={isRefreshing}
         />
       ) : (
         <ArtifactScrollBody
@@ -453,7 +518,7 @@ function ArtifactScrollBody({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-6">
+    <div className="flex h-full w-full min-h-0 min-w-0 flex-1 flex-col gap-3 px-6 py-6">
       {node.description && (
         <p className="shrink-0 text-sm text-muted-foreground">
           {node.description}
@@ -463,7 +528,6 @@ function ArtifactScrollBody({
         <ArtifactBody node={node} data={data} />
       </div>
     </div>
-
   );
 }
 
@@ -473,6 +537,9 @@ interface WorkflowBackedLayoutProps {
   router: ReturnType<typeof useRouter>;
   spec: CanonicalWorkflowSpec;
   data?: unknown;
+  appliedInputs?: Record<string, unknown>;
+  onRefreshWithInputs?: (inputs: Record<string, unknown>) => Promise<void>;
+  isRefreshing?: boolean;
 }
 
 /**
@@ -489,6 +556,9 @@ function WorkflowBackedLayout({
   router,
   spec,
   data,
+  appliedInputs,
+  onRefreshWithInputs,
+  isRefreshing = false,
 }: WorkflowBackedLayoutProps): ReactElement {
   const storage = typeof window !== "undefined" ? window.localStorage : undefined;
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -496,6 +566,48 @@ function WorkflowBackedLayout({
     panelIds: ["artifact-upper", "artifact-lower"],
     storage,
   });
+
+  const hasFilters = Boolean(
+    spec?.input_schema?.properties &&
+    Object.keys(spec.input_schema.properties).length > 0,
+  );
+
+  const initialFilterValues = useMemo(() => {
+    const initial: Record<string, unknown> = {};
+    if (spec?.input_schema?.properties) {
+      const props = spec.input_schema.properties as Record<string, Record<string, unknown>>;
+      for (const k of Object.keys(props)) {
+        const field = props[k];
+        if (field) {
+          if (field.value !== undefined) {
+            initial[k] = field.value;
+          } else if (field.default !== undefined) {
+            initial[k] = field.default;
+          }
+        }
+      }
+    }
+    const sessionInputs = sessionAppliedInputsMap.get(node.id);
+    if (node.viewMode === "live" && sessionInputs && Object.keys(sessionInputs).length > 0) {
+      return { ...initial, ...sessionInputs };
+    }
+    // If live mode with appliedInputs from SWR cache or dynamic refresh, overlay appliedInputs
+    if (appliedInputs && Object.keys(appliedInputs).length > 0) {
+      return { ...initial, ...appliedInputs };
+    }
+    return initial;
+  }, [spec.input_schema, appliedInputs, node.id, node.viewMode]);
+
+  const filterPanelRef = useRef<PanelImperativeHandle>(null);
+
+  useEffect(() => {
+    const panel = filterPanelRef.current;
+    if (hasFilters && panel) {
+      if (panel.isCollapsed()) {
+        panel.expand();
+      }
+    }
+  }, [hasFilters]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -507,16 +619,46 @@ function WorkflowBackedLayout({
         <ResizablePanel
           id="artifact-upper"
           defaultSize={60}
-          minSize={20}
+          minSize={0}
+          className="flex h-full w-full min-h-0 min-w-0 flex-col"
         >
-          <div className="flex h-full flex-col">
-          <ArtifactScrollBody
-            node={node}
-            tree={tree}
-            router={router}
-            data={data}
-          />
-          </div>
+          <ResizablePanelGroup
+            key={`horizontal-${node.id}-${hasFilters}`}
+            orientation="horizontal"
+            className="h-full w-full flex-1"
+          >
+            <ResizablePanel
+              id="artifact-chart-pane"
+              defaultSize={hasFilters ? "80%" : "100%"}
+              minSize="50%"
+              className="flex h-full w-full min-h-0 min-w-0 flex-col"
+            >
+              <ArtifactScrollBody
+                node={node}
+                tree={tree}
+                router={router}
+                data={data}
+              />
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel
+              panelRef={filterPanelRef}
+              id="artifact-filter-pane"
+              defaultSize={hasFilters ? "20%" : "0%"}
+              minSize="15%"
+              maxSize="20%"
+              collapsible
+              collapsedSize="0%"
+              className="flex h-full w-full min-h-0 min-w-0 flex-col"
+            >
+              <ArtifactFilterPanel
+                schema={spec.input_schema}
+                initialValues={initialFilterValues}
+                onApply={(values) => void onRefreshWithInputs?.(values)}
+                loading={isRefreshing}
+              />
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel
@@ -554,7 +696,7 @@ function DetailHeader({
   snapshotInfo,
 }: DetailHeaderProps): ReactElement {
   return (
-    <header className="flex items-center gap-2 border-b px-4 py-3">
+    <header className="flex h-12 items-center gap-2 border-b px-4">
       <Button
         variant="ghost"
         size="icon"
@@ -593,22 +735,10 @@ function DetailHeader({
             </h1>
           )}
         </div>
-        {/* Data timestamp — amber for snapshot, muted for live. Shrinks-0 so
-            title text truncates before reaching it. */}
-        {snapshotInfo !== undefined && (
-          <span
-            className={cn(
-              "shrink-0 flex items-center gap-1 text-xs",
-              snapshotInfo.fromSnapshot
-                ? "text-amber-400"
-                : "text-muted-foreground",
-            )}
-          >
-            {snapshotInfo.fromSnapshot ? (
-              <Camera className="h-3 w-3" />
-            ) : (
-              <RefreshCw className="h-3 w-3" />
-            )}
+        {/* Snapshot timestamp — amber camera label shown only in snapshot mode. */}
+        {snapshotInfo !== undefined && snapshotInfo.fromSnapshot && (
+          <span className="shrink-0 flex items-center gap-1 text-xs text-amber-400">
+            <Camera className="h-3 w-3" />
             {snapshotInfo.timestamp}
           </span>
         )}
@@ -620,103 +750,117 @@ function DetailHeader({
 
 function ActionBar({
   viewMode,
-  fromSnapshot,
+  hasFilters,
   onRefresh,
   onSaveSnapshot,
-  onToggleViewMode,
+  onLoadSnapshot,
   onRename,
   onMove,
   onDelete,
 }: {
   viewMode: "snapshot" | "live";
-  /** True when the currently displayed data came from the stored snapshot.
-   *  Compare is available whenever this is false — the user is looking at
-   *  live data (either live mode or after a manual refresh in snapshot mode). */
-  fromSnapshot: boolean;
+  hasFilters: boolean;
   onRefresh: () => void;
   onSaveSnapshot: () => void;
-  onToggleViewMode: () => void;
+  onLoadSnapshot: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
 }): ReactElement {
   return (
-    <>
-      {/* Refresh — standalone, most-used action */}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={onRefresh}
-        className="h-8 gap-1.5"
-        title="Re-execute workflow and show latest data"
-      >
-        <RefreshCw className="h-3.5 w-3.5" />
-        Refresh
-      </Button>
-
-      {/* More — everything else in one dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          className={buttonVariants({ size: "sm", variant: "outline" }) + " h-8 gap-1.5"}
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-          More
-          <ChevronDown className="h-3 w-3 opacity-60" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-
-          {/* ── Snapshot section ──────────────────────────── */}
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
-              Snapshot
-            </DropdownMenuLabel>
-            <DropdownMenuItem onClick={onSaveSnapshot}>
-              <Camera className="mr-2 h-3.5 w-3.5" />
-              Save as snapshot
-            </DropdownMenuItem>
-            {/* Compare — enabled whenever live data is shown (not from snapshot).
-                Covers: live mode, or snapshot mode after a manual Refresh. */}
-            <DropdownMenuItem
-              disabled={fromSnapshot}
-              onClick={() => { /* TODO: open compare view */ }}
+    <TooltipProvider delay={200}>
+      <div className="flex items-center gap-1">
+        {/* Data & View Action Group */}
+        {!hasFilters && (
+          <Tooltip>
+            <TooltipTrigger
+              onClick={onRefresh}
+              className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+              aria-label="Refresh live data"
             >
-              <Columns2 className="mr-2 h-3.5 w-3.5" />
-              Compare with snapshot
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onToggleViewMode}>
-              {viewMode === "snapshot" ? (
-                <><RefreshCw className="mr-2 h-3.5 w-3.5" />Switch to Live mode</>
-              ) : (
-                <><Camera className="mr-2 h-3.5 w-3.5" />Switch to Snapshot mode</>
-              )}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
+              <RefreshCw className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Refresh</TooltipContent>
+          </Tooltip>
+        )}
 
-          {/* ── Management section ────────────────────────── */}
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuItem onClick={onRename}>
-              <SquarePen className="mr-2 h-3.5 w-3.5" />
-              Rename
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onMove}>
-              <Move className="mr-2 h-3.5 w-3.5" />
-              Move
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem
-            onClick={onDelete}
-            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onSaveSnapshot}
+            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            aria-label="Save snapshot"
           >
-            <Trash2 className="mr-2 h-3.5 w-3.5" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+            <Save className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Save</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onLoadSnapshot}
+            className={cn(
+              buttonVariants({ size: "icon", variant: "ghost" }),
+              "h-8 w-8",
+              viewMode === "snapshot"
+                ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 hover:text-amber-600"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            aria-label="Load snapshot"
+          >
+            <Camera className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Snapshot</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            onClick={() => { /* Compare modal */ }}
+            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            aria-label="Compare snapshot vs live"
+          >
+            <GitCompare className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Compare</TooltipContent>
+        </Tooltip>
+
+        {/* Vertical Divider */}
+        <div className="mx-1 h-4 w-px shrink-0 bg-border" />
+
+        {/* Node Management Group */}
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onRename}
+            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            aria-label="Rename"
+          >
+            <Pencil className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Rename</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onMove}
+            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            aria-label="Move"
+          >
+            <FolderInput className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Move</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onDelete}
+            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive")}
+            aria-label="Delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Delete</TooltipContent>
+        </Tooltip>
+      </div>
+    </TooltipProvider>
   );
 }
 

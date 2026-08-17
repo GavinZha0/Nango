@@ -19,10 +19,20 @@ const ROUTE = "/api/artifacts/[id]/snapshot";
  */
 export const POST = withSession<{ id: string }>(
   ROUTE,
-  async ({ params, session, log }) => {
-    const bundle = await saveSnapshot(params.id, session.user.id);
+  async ({ req, params, session, log }) => {
+    let inputValues: Record<string, unknown> | undefined;
+    try {
+      const body = await req.json();
+      if (body && typeof body === "object" && body.inputs && typeof body.inputs === "object") {
+        inputValues = body.inputs as Record<string, unknown>;
+      }
+    } catch {
+      // Body may be empty on plain POST snapshot requests
+    }
+
+    const bundle = await saveSnapshot(params.id, session.user.id, inputValues);
     log.info(
-      { event: "artifact_snapshot_saved", artifactId: params.id },
+      { event: "artifact_snapshot_saved", artifactId: params.id, hasInputValues: inputValues !== undefined },
       "artifact snapshot saved",
     );
     return NextResponse.json(bundle);
