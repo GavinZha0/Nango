@@ -27,7 +27,7 @@ function toolNode(
     id,
     description: `n${id}`,
     depends_on,
-    inputs: { name: `tool_${id}`, arguments: {} },
+    inputs: { source: "builtin", name: `tool_${id}`, arguments: {} },
   };
 }
 

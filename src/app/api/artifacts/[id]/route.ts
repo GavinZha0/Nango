@@ -23,6 +23,8 @@ import { parseBody } from "@/lib/http/validation";
  * See docs/artifact-evolution.md.
  */
 
+import { CanonicalWorkflowSpecSchema } from "@/lib/workflows/spec/schema";
+
 const ROUTE = "/api/artifacts/[id]";
 
 const patchSchema = z
@@ -33,6 +35,7 @@ const patchSchema = z
     displayOrder: z.number().int().nonnegative().optional(),
     visibility: z.enum(["private", "shared"]).optional(),
     view_mode: z.enum(["snapshot", "live"]).optional(),
+    workflow_spec: CanonicalWorkflowSpecSchema.optional(),
   })
   .strict();
 
@@ -46,15 +49,19 @@ export const GET = withSession<{ id: string }>(
 );
 
 /** PATCH updates tree metadata (name / description / parent /
- *  display order / visibility). Returns the same bundle shape as
- *  GET. Workflow changes flow through a new save, not this route. */
+ *  display order / visibility) and backing workflow spec.
+ *  Returns the same bundle shape as GET. */
 export const PATCH = withSession<{ id: string }>(
   ROUTE,
   async ({ req, params, session, log }) => {
     const raw = await parseBody(req, patchSchema);
-    // Map API snake_case → Drizzle camelCase for viewMode.
-    const { view_mode, ...rest } = raw;
-    const patch = { ...rest, ...(view_mode !== undefined && { viewMode: view_mode }) };
+    // Map API snake_case → Drizzle/service camelCase for viewMode & workflowSpec.
+    const { view_mode, workflow_spec, ...rest } = raw;
+    const patch = {
+      ...rest,
+      ...(view_mode !== undefined && { viewMode: view_mode }),
+      ...(workflow_spec !== undefined && { workflowSpec: workflow_spec }),
+    };
     const bundle = await updateArtifact(params.id, patch, session.user.id);
     log.info(
       {

@@ -30,6 +30,11 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/db/schema", () => ({
   EntityRunTable: {},
   EntityRunEventTable: {},
+  UserTable: {},
+  SessionTable: {},
+  AccountTable: {},
+  VerificationTable: {},
+  LoginEventTable: {},
 }));
 
 // ─── Mocks for direct collaborators ────────────────────────────────────

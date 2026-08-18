@@ -52,7 +52,6 @@ export function validate(spec: CanonicalWorkflowSpec): void {
       message: "spec.outputs must contain at least one entry.",
     });
   }
-
   validateExecutorKeys(spec.nodes);
   validatePromotedToolNodes(spec.nodes);
   const { nodeById, depsOf } = buildDependsOnGraph(spec.nodes);
@@ -60,6 +59,7 @@ export function validate(spec: CanonicalWorkflowSpec): void {
   const closureOf = buildClosure(spec.nodes, depsOf);
   validateNodeInputs(spec, nodeById, closureOf);
   validateWorkflowOutputs(spec, nodeById);
+
   validateToolInputCoverage(spec.nodes);
   validateCodeNodeSourceXor(spec.nodes);
   validateJsConstraints(spec.nodes);

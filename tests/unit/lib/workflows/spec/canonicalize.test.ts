@@ -81,6 +81,7 @@ function baseSpec(
         description: "Extract last 30d orders",
         depends_on: [],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "fetch_data_table",
           arguments: { dataSourceId: "orders_pg", sql: "select 1" },
         },
@@ -123,6 +124,7 @@ describe("canonicalize — tool nodes", () => {
         description: "Legacy tool",
         depends_on: [],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "legacy_tool",
           arguments: {},
         },
@@ -146,6 +148,7 @@ describe("canonicalize — tool nodes", () => {
         depends_on: [],
         type: "tool",
         inputs: {
+          source: "builtin",
           name: "minimal_tool",
           arguments: {},
         },
@@ -173,6 +176,7 @@ describe("canonicalize — tool nodes", () => {
         description: "Custom desc",
         depends_on: [3, 5],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "fetch_data_table",
           arguments: { dataSourceId: "x", sql: "select 1" },
         },
@@ -189,6 +193,7 @@ describe("canonicalize — tool nodes", () => {
     expect(node.retries).toEqual({ attempts: 2, delay_seconds: 30 });
     if (node.type !== "tool") throw new Error("expected tool node");
     expect(node.inputs).toEqual({
+      source: "builtin",
       name: "fetch_data_table",
       arguments: { dataSourceId: "x", sql: "select 1" },
     });
@@ -375,6 +380,7 @@ describe("canonicalize — workflow-level enrichment", () => {
           description: "n",
           depends_on: [],
           type: "tool",          inputs: {
+            source: "builtin",
             name: "minimal_tool",
             arguments: {},
           },
@@ -413,6 +419,7 @@ describe("canonicalize — TOOL_NOT_FOUND", () => {
         description: "Bad tool",
         depends_on: [],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "no_such_tool",
           arguments: {},
         },
@@ -487,6 +494,7 @@ describe("canonicalize — fail-fast on first node error", () => {
         description: "fine",
         depends_on: [],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "minimal_tool",
           arguments: {},
         },
@@ -496,6 +504,7 @@ describe("canonicalize — fail-fast on first node error", () => {
         description: "fails here",
         depends_on: [0],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "no_such_tool",
           arguments: {},
         },
@@ -505,6 +514,7 @@ describe("canonicalize — fail-fast on first node error", () => {
         description: "never reached",
         depends_on: [1],
         type: "tool",        inputs: {
+          source: "builtin",
           name: "minimal_tool",
           arguments: {},
         },
@@ -722,6 +732,7 @@ describe("canonicalize — per-node schema_version", () => {
       id: 0,
       description: "legacy",
       depends_on: [],      inputs: {
+        source: "builtin",
         name: "fetch_data_table",
         arguments: {},
       },
@@ -737,6 +748,7 @@ describe("canonicalize — per-node schema_version", () => {
       id: 0,
       description: "future",
       depends_on: [],      inputs: {
+        source: "builtin",
         name: "fetch_data_table",
         arguments: {},
       },

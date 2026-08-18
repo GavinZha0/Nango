@@ -35,7 +35,7 @@ services:
     depends_on:
       nango-db:
         condition: service_healthy
-      dify-sandbox:
+      sandbox:
         condition: service_healthy
     healthcheck:
       test:
@@ -68,12 +68,12 @@ services:
       retries: 5
     restart: unless-stopped
 
-  dify-sandbox:
+  sandbox:
     image: langgenius/dify-sandbox:latest
-    container_name: dify-sandbox
+    container_name: sandbox
     restart: unless-stopped
-    # ports:
-    #   - "8194:8194"
+    ports:
+      - "8194:8194"
     volumes:
       - ./docker/dify-sandbox/config.yaml:/conf/config.yaml:ro
       - ./docker/dify-sandbox/requirements.txt:/dependencies/python-requirements.txt:ro
@@ -95,8 +95,8 @@ services:
   sensevoice:
     image: markgzhou/sensevoice-asr-server:latest
     container_name: sensevoice
-    # ports:
-    #   - "10085:8000"
+    ports:
+      - "10085:8000"
     environment:
       - SENSEVOICE_API_KEY=MySuperSafeApiKey
       - SENSEVOICE_TIMEOUT=60

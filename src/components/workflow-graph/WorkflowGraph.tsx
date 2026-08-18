@@ -58,7 +58,10 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
-import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
+import type {
+  CanonicalNode,
+  CanonicalWorkflowSpec,
+} from "@/lib/workflows/spec/schema";
 
 import { InspectorDrawer } from "./InspectorDrawer";
 import { layoutWorkflow, type WorkflowNodeData } from "./layout";
@@ -95,6 +98,8 @@ const defaultEdgeOptions: DefaultEdgeOptions = {
 
 export interface WorkflowGraphProps {
   spec: CanonicalWorkflowSpec;
+  onSaveNode?: (updatedNode: CanonicalNode) => Promise<void>;
+  onDeleteNode?: (nodeId: number) => Promise<void>;
 }
 
 /**
@@ -110,7 +115,11 @@ function isDegenerateSpec(spec: CanonicalWorkflowSpec): boolean {
   return only.type === "tool" && only.inputs.name === "noop";
 }
 
-export function WorkflowGraph({ spec }: WorkflowGraphProps): ReactElement {
+export function WorkflowGraph({
+  spec,
+  onSaveNode,
+  onDeleteNode,
+}: WorkflowGraphProps): ReactElement {
   const { resolvedTheme } = useTheme();
 
   // Layout is pure & cheap (<1ms for typical 1-10 nodes); recompute
@@ -152,9 +161,13 @@ export function WorkflowGraph({ spec }: WorkflowGraphProps): ReactElement {
       // callback's compatibility with the ref.
       laidOutNodes.map((n) => ({
         ...n,
+        data: {
+          ...n.data,
+          onDelete: onDeleteNode ? (id) => void onDeleteNode(id) : undefined,
+        },
         selected: n.id === effectiveSelectedNodeId,
       })),
-    [laidOutNodes, effectiveSelectedNodeId],
+    [laidOutNodes, effectiveSelectedNodeId, onDeleteNode],
   );
 
   const handleNodeClick = useCallback(
@@ -202,12 +215,28 @@ export function WorkflowGraph({ spec }: WorkflowGraphProps): ReactElement {
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
-      <ResizablePanel defaultSize={70} minSize={40}>
+      <ResizablePanel
+        id="workflow-graph-canvas"
+        defaultSize="80%"
+        minSize="50%"
+        className="flex h-full w-full min-h-0 min-w-0 flex-col relative"
+      >
         {canvas}
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={30} minSize={20}>
-        <InspectorDrawer node={selectedSpecNode} onClose={handleCloseDrawer} />
+      <ResizablePanel
+        id="workflow-graph-inspector"
+        defaultSize="20%"
+        minSize="15%"
+        maxSize="25%"
+        collapsible
+        className="flex h-full w-full min-h-0 min-w-0 flex-col"
+      >
+        <InspectorDrawer
+          node={selectedSpecNode}
+          onClose={handleCloseDrawer}
+          onSaveNode={onSaveNode}
+        />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

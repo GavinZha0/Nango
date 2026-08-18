@@ -47,6 +47,7 @@ function toolNode(
     depends_on: [],
     ...rest,
     inputs: {
+      source: inputsOverride?.source ?? "builtin",
       name: inputsOverride?.name ?? "extract_dataset_by_sql",
       arguments: inputsOverride?.arguments ?? {
         dataSourceId: "x",

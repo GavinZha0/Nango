@@ -54,6 +54,7 @@ const RANKSEP = 64;
  */
 export interface WorkflowNodeData extends Record<string, unknown> {
   spec: CanonicalWorkflowSpec["nodes"][number];
+  onDelete?: (id: number) => void;
 }
 
 /** Output of `layoutWorkflow` — drop straight into `<ReactFlow>`. */

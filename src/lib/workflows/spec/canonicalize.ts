@@ -169,6 +169,22 @@ async function canonicalizeToolNode(
       nodeName: toolName,
     });
   }
+
+  // Validate MCP server_id format if source is mcp:<server_id>
+  const source = n.inputs.source;
+  if (source?.startsWith("mcp:")) {
+    const serverId = source.slice(4);
+    // Validate UUID format (basic check - actual existence will be validated at runtime)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(serverId)) {
+      throw new WorkflowError({
+        errorCode: "SPEC_SCHEMA_MISMATCH",
+        message: `Node ${n.id}: invalid MCP server_id '${serverId}' in source '${source}'. Must be a valid UUID.`,
+        nodeId: n.id,
+      });
+    }
+  }
+
   const canonical: CanonicalToolNode = {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.tool,

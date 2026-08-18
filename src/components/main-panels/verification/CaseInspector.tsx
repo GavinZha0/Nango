@@ -460,7 +460,7 @@ export function CaseInspector({
                 className="h-6 w-6 p-0"
                 disabled={!canSave || readOnly}
                 onClick={() => void handleSave()}
-                title="Save changes"
+                title="Save"
               >
                 {inputDraft.saving || assertionsDraft.saving ? (
                   <Loader2 className="h-3 w-3 animate-spin" />

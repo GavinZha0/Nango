@@ -38,6 +38,48 @@ import { z } from "zod";
 
 // ─── Shared helpers ────────────────────────────────────────────────────
 
+/**
+ * Validate tool source format.
+ * 
+ * Accepted formats:
+ * - "builtin": Built-in tools from the global catalog
+ * - "mcp:<server_id>": MCP server tools where <server_id> is a valid UUID
+ * - "custom": Custom/user-defined tools (reserved for future use)
+ * 
+ * This validation ensures前后端一致性 and prevents invalid values from
+ * being stored in the database.
+ * 
+ * Exported for use in frontend validation to maintain consistency.
+ */
+export function validateToolSource(source: string): boolean {
+  if (source === "builtin" || source === "custom") {
+    return true;
+  }
+  if (source.startsWith("mcp:")) {
+    const serverId = source.slice(4); // Remove "mcp:" prefix
+    // Basic UUID format validation (simplified - canonicalize will do full UUID resolution)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(serverId);
+  }
+  return false;
+}
+
+/**
+ * Zod refinement for tool source validation.
+ * Provides a clear error message when the source format is invalid.
+ */
+const ToolSourceSchema = z
+  .string()
+  .min(1)
+  .default("builtin")
+  .describe("Tool source provider (e.g. 'builtin', 'mcp:<server_id>', 'custom')")
+  .refine(
+    (source) => validateToolSource(source),
+    {
+      message: "Tool source must be 'builtin', 'custom', or 'mcp:<server_id>' where <server_id> is a valid UUID",
+    },
+  );
+
 /** Per-node retry configuration. All time units in seconds. */
 export const RetriesSchema = z.object({
   attempts: z.number().int().nonnegative(),
@@ -93,7 +135,8 @@ export const CodeLanguageSchema = z.enum(["python", "javascript"]);
 export const LLMToolNodeSchema = NodeBaseSchema.extend({
   type: z.literal("tool"),
   inputs: z.object({
-    name: z.string().min(1),
+    source: ToolSourceSchema,
+    name: z.string().min(1).describe("Tool identifier within the source provider"),
     arguments: z.record(z.string(), z.unknown()),
   }),
 });
@@ -381,6 +424,15 @@ export const CanonicalNodeSchema = z.discriminatedUnion("type", [
 /** Canonical workflow spec — what `workflow.spec` JSONB holds. */
 export const CanonicalWorkflowSpecSchema = LLMWorkflowSpecSchema.extend({
   nodes: z.array(CanonicalNodeSchema).min(1),
+  // CONTRACT: outputs must be non-empty — enforced at Zod parse time and
+  // again by validate.ts (SPEC_NO_OUTPUTS) as a defense-in-depth layer.
+  // The .optional().default({}) form was a temporary relaxation that caused
+  // a semantic gap: Zod accepted {} but validate.ts rejected it afterwards.
+  // Restored to match LLMWorkflowSpecSchema (same refine, same error message).
+  outputs: z.record(z.string(), z.string()).refine(
+    (m) => Object.keys(m).length > 0,
+    { message: "spec.outputs must contain at least one entry" },
+  ),
 });
 
 // ─── Inferred TypeScript types ─────────────────────────────────────────

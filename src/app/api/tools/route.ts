@@ -5,11 +5,13 @@ import { and, eq, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { McpServerTable, CredentialTable } from "@/lib/db/schema";
+import { listWorkflowToolDescriptors } from "@/lib/builtin-tools";
 import { withSession } from "@/lib/http/route-handlers";
 
 // GET /api/tools
 // Returns MCP servers, enabled LLM credentials (for agent editor),
-// and enabled API credentials (for MCP server credential selector).
+// enabled API credentials (for MCP server credential selector),
+// and builtin tools descriptors.
 
 export const GET = withSession("/api/tools", async ({ session }) => {
   const userId = session.user.id;
@@ -30,6 +32,7 @@ export const GET = withSession("/api/tools", async ({ session }) => {
         serverInstructions: McpServerTable.serverInstructions,
         url: McpServerTable.url,
         enabled: McpServerTable.enabled,
+        tools: McpServerTable.tools,
       })
       .from(McpServerTable)
       .where(
@@ -64,5 +67,7 @@ export const GET = withSession("/api/tools", async ({ session }) => {
       .orderBy(CredentialTable.name),
   ]);
 
-  return NextResponse.json({ mcpServers, llmCredentials, apiCredentials });
+  const builtinTools = listWorkflowToolDescriptors();
+
+  return NextResponse.json({ builtinTools, mcpServers, llmCredentials, apiCredentials });
 });

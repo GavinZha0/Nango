@@ -31,6 +31,7 @@ function chainSpec(): CanonicalWorkflowSpec {
         description: "extract",
         depends_on: [],
         inputs: {
+          source: "builtin",
           name: "extract_dataset_by_sql",
           arguments: { name: "ds", query: "SELECT 1" },
         },
@@ -42,6 +43,7 @@ function chainSpec(): CanonicalWorkflowSpec {
         description: "filter",
         depends_on: [0],
         inputs: {
+          source: "builtin",
           name: "filter",
           arguments: {},
         },
@@ -156,6 +158,7 @@ describe("layoutWorkflow", () => {
         description: "a",
           depends_on: [],
           inputs: {
+            source: "builtin",
             name: "a",
             arguments: {},
           },
@@ -167,6 +170,7 @@ describe("layoutWorkflow", () => {
         description: "b",
           depends_on: [],
           inputs: {
+            source: "builtin",
             name: "b",
             arguments: {},
           },

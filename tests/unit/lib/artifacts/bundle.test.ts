@@ -34,6 +34,9 @@ function artifactRow(
     displayOrder: 0,
     workflowId: WORKFLOW_ID,
     workflowOutputField: "data",
+    viewMode: "live",
+    snapshot: null,
+    snapshotAt: null,
     createdBy: OWNER,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -68,6 +71,7 @@ function sampleSpec(): CanonicalWorkflowSpec {
         id: 0,
         description: "n",
         depends_on: [],        inputs: {
+          source: "builtin",
           name: "extract_dataset_by_sql",
           arguments: { sql: "select 1" },
         },
@@ -91,13 +95,18 @@ function buildDeps(
     outputField: string;
     ownerId: string;
   }> = [];
+  
+  const { getArtifact, getWorkflow, executeWorkflow, ...restOverrides } = overrides;
+  
   return {
     getArtifact: async (id, ownerId) => {
       artifactCalls.push({ id, ownerId });
+      if (getArtifact) return getArtifact(id, ownerId);
       return artifactRow();
     },
     getWorkflow: async (id) => {
       workflowCalls.push({ id });
+      if (getWorkflow) return getWorkflow(id);
       return workflowRow();
     },
     executeWorkflow: async (args) => {
@@ -106,9 +115,10 @@ function buildDeps(
         outputField: args.outputField,
         ownerId: args.ownerId,
       });
+      if (executeWorkflow) return executeWorkflow(args);
       return null;
     },
-    ...overrides,
+    ...restOverrides,
     artifactCalls,
     workflowCalls,
     executeCalls,
@@ -249,13 +259,15 @@ describe("buildArtifactBundle — workflow-backed artifact", () => {
     expect(deps.executeCalls[0]!.outputField).toBe("data");
   });
 
-  it("returns workflow metadata with empty outputField when spec.outputs is empty (defensive)", async () => {
-    // Shouldn't happen post-validate, but don't crash if a spec
-    // sneaks in with no outputs.
-    const emptySpec: CanonicalWorkflowSpec = {
+  it("returns workflow metadata with empty outputField when spec.outputs is empty (defense-in-depth: blocked at Zod + validate.ts before reaching DB)", async () => {
+    // Zod parse of CanonicalWorkflowSpecSchema now rejects outputs:{} before
+    // it can be written to the DB; validate.ts also throws SPEC_NO_OUTPUTS.
+    // This test exists purely as a defense-in-depth guard: bundle.ts should
+    // not crash if somehow malformed legacy data escapes both layers.
+    const emptySpec = {
       ...sampleSpec(),
       outputs: {},
-    };
+    } as unknown as CanonicalWorkflowSpec;
     const deps = buildDeps({
       getArtifact: async () => artifactRow({ workflowOutputField: null }),
       getWorkflow: async () => workflowRow({ spec: emptySpec }),
@@ -300,5 +312,115 @@ describe("buildArtifactBundle — bundle shape consistency", () => {
       expect(bundle.node).toBeDefined();
       expect(bundle.node.id).toBe(ARTIFACT_ID);
     }
+  });
+});
+
+// ─── Snapshot mode ─────────────────────────────────────────────────────
+
+describe("buildArtifactBundle — snapshot mode", () => {
+  it("returns snapshot data when viewMode='snapshot' and snapshot exists", async () => {
+    const snapshotData = { rows: [{ id: 1 }, { id: 2 }] };
+    const snapshotAt = new Date("2026-05-24T10:00:00Z");
+    const deps = buildDeps({
+      getArtifact: async () =>
+        artifactRow({
+          viewMode: "snapshot",
+          snapshot: snapshotData,
+          snapshotAt,
+        }),
+    });
+    const bundle = await buildArtifactBundle(ARTIFACT_ID, OWNER, deps);
+    
+    expect(bundle.data).toEqual(snapshotData);
+    expect(bundle.fromSnapshot).toBe(true);
+    expect(bundle.snapshotAt).toBe(snapshotAt.toISOString());
+    expect(bundle.fromCache).toBeUndefined();
+    expect(bundle.executedAt).toBeUndefined();
+    expect(deps.executeCalls).toEqual([]); // Should not execute workflow
+  });
+
+  it("falls back to live execution when viewMode='snapshot' but snapshot is null", async () => {
+    const deps = buildDeps({
+      getArtifact: async () =>
+        artifactRow({
+          viewMode: "snapshot",
+          snapshot: null,
+        }),
+      executeWorkflow: async () => ({
+        data: { rows: [{ id: 1 }] },
+        fromCache: false,
+        executedAt: new Date("2026-05-24T11:00:00Z"),
+      }),
+    });
+    const bundle = await buildArtifactBundle(ARTIFACT_ID, OWNER, deps);
+    
+    expect(bundle.data).toEqual({ rows: [{ id: 1 }] });
+    expect(bundle.fromSnapshot).toBe(false);
+    expect(bundle.fromCache).toBe(false);
+    expect(deps.executeCalls).toHaveLength(1);
+  });
+
+  it("falls back to live execution when viewMode='snapshot' but snapshot is undefined", async () => {
+    const deps = buildDeps({
+      getArtifact: async () =>
+        artifactRow({
+          viewMode: "snapshot",
+          snapshot: undefined,
+        }),
+      executeWorkflow: async () => ({
+        data: { rows: [{ id: 1 }] },
+        fromCache: false,
+        executedAt: new Date("2026-05-24T11:00:00Z"),
+      }),
+    });
+    const bundle = await buildArtifactBundle(ARTIFACT_ID, OWNER, deps);
+    
+    expect(bundle.data).toEqual({ rows: [{ id: 1 }] });
+    expect(bundle.fromSnapshot).toBe(false);
+    expect(deps.executeCalls).toHaveLength(1);
+  });
+
+  it("executes workflow when forceFresh=true even with snapshot data", async () => {
+    const snapshotData = { rows: [{ id: 1 }] };
+    const deps = buildDeps({
+      getArtifact: async () =>
+        artifactRow({
+          viewMode: "snapshot",
+          snapshot: snapshotData,
+          snapshotAt: new Date("2026-05-24T10:00:00Z"),
+        }),
+      executeWorkflow: async () => ({
+        data: { rows: [{ id: 2 }] },
+        fromCache: false,
+        executedAt: new Date("2026-05-24T11:00:00Z"),
+      }),
+    });
+    const bundle = await buildArtifactBundle(ARTIFACT_ID, OWNER, deps, { forceFresh: true });
+    
+    expect(bundle.data).toEqual({ rows: [{ id: 2 }] }); // Fresh data, not snapshot
+    expect(bundle.fromSnapshot).toBe(false);
+    expect(deps.executeCalls).toHaveLength(1);
+  });
+
+  it("executes workflow in live mode regardless of snapshot presence", async () => {
+    const snapshotData = { rows: [{ id: 1 }] };
+    const deps = buildDeps({
+      getArtifact: async () =>
+        artifactRow({
+          viewMode: "live",
+          snapshot: snapshotData,
+          snapshotAt: new Date("2026-05-24T10:00:00Z"),
+        }),
+      executeWorkflow: async () => ({
+        data: { rows: [{ id: 2 }] },
+        fromCache: false,
+        executedAt: new Date("2026-05-24T11:00:00Z"),
+      }),
+    });
+    const bundle = await buildArtifactBundle(ARTIFACT_ID, OWNER, deps);
+    
+    expect(bundle.data).toEqual({ rows: [{ id: 2 }] }); // Live data, not snapshot
+    expect(bundle.fromSnapshot).toBe(false);
+    expect(deps.executeCalls).toHaveLength(1);
   });
 });

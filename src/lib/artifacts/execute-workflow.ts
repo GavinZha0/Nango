@@ -17,6 +17,8 @@ import { randomUUID } from "node:crypto";
 
 import { buildUserToolCatalog } from "@/lib/builtin-tools/build-user-catalog";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
+import { mcpProviderPool } from "@/lib/mcp";
+import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
 import { logger as observabilityLogger } from "@/lib/observability/logger";
 import { WorkflowError } from "@/lib/workflows/error";
 import { inProcessWorkflowEngine } from "@/lib/workflows/engine/in-process";
@@ -67,6 +69,13 @@ export async function executeWorkflow(
   });
 
   const catalog = await buildUserToolCatalog(args.ownerId);
+
+  // Inject MCP tools into the catalog for this run. Workflow tool nodes
+  // with source="mcp:<serverId>" need their tools available at execute
+  // time (not just at save/canonicalize time). We borrow each referenced
+  // MCP provider from the pool, extract its tools under the canonical
+  // mcp__<serverName>__<toolName> keys, then release after execution.
+  const mcpBorrows = await injectMcpTools(args.spec, catalog);
 
   // Persist a forensic entity_run + event timeline only on the
   // refresh path. `recorder` is null when forceFresh wasn't set or
@@ -162,6 +171,11 @@ export async function executeWorkflow(
     }
     if (recorder !== null) await recorder.fail(err);
     throw err;
+  } finally {
+    // CONTRACT: release every MCP provider borrowed at the start of
+    // this run. The pool's refcount drops to 0 after the last release,
+    // making the entry idle-reaapable. Must run even on error paths.
+    releaseMcpBorrows(mcpBorrows);
   }
 }
 
@@ -182,6 +196,118 @@ function buildEngineDeps(
     emitEvent,
     // cache omitted — see file header
   };
+}
+
+// ─── MCP tool injection ────────────────────────────────────────────────
+
+/** One borrowed MCP provider with its resolved server name. */
+interface McpBorrow {
+  serverId: string;
+  serverName: string;
+  provider: GracefulMcpProvider;
+}
+
+/**
+ * Scan `spec` for tool nodes whose `source` starts with `"mcp:"`,
+ * borrow the corresponding providers from the process-wide pool,
+ * and inject their tools into `catalog` under the canonical
+ * `mcp__<serverName>__<rawToolName>` keys.
+ *
+ * Returns the list of borrows so the caller can release them
+ * when the workflow run finishes (success or failure).
+ *
+ * Failures for individual servers are logged and skipped — a missing
+ * or disconnected MCP server surfaces as `TOOL_NOT_FOUND` at
+ * execute time for nodes that need it, which the engine maps to a
+ * `WorkflowError` with a clear message.
+ */
+async function injectMcpTools(
+  spec: CanonicalWorkflowSpec,
+  catalog: Map<string, ToolDefinition>,
+): Promise<McpBorrow[]> {
+  // Collect distinct serverId values from MCP tool nodes.
+  const serverIds = new Set<string>();
+  for (const node of spec.nodes) {
+    if (node.type === "tool" && typeof node.inputs.source === "string" && node.inputs.source.startsWith("mcp:")) {
+      const serverId = node.inputs.source.slice(4); // strip "mcp:"
+      if (serverId.length > 0) serverIds.add(serverId);
+    }
+  }
+  if (serverIds.size === 0) return [];
+
+  const borrows: McpBorrow[] = [];
+  await Promise.allSettled(
+    [...serverIds].map(async (serverId) => {
+      let provider: GracefulMcpProvider;
+      try {
+        provider = await mcpProviderPool.borrow(serverId);
+      } catch (err) {
+        observabilityLogger.warn(
+          { event: "mcp_borrow_failed", serverId, err: err instanceof Error ? err.message : String(err) },
+          "Failed to borrow MCP provider for workflow execution; tools from this server will be unavailable",
+        );
+        return;
+      }
+
+      // Extract the server name from the provider label to build the
+      // canonical mcp__<serverName>__<toolName> key. The label matches
+      // the McpServerTable.name column, which is what build-from-events
+      // uses when stamping inputs.name during spec construction.
+      const serverName = provider.label;
+
+      let toolSet: Record<string, unknown>;
+      try {
+        // tools() awaits warmup internally — if discovery failed it
+        // returns {} which leaves the catalog empty for this server.
+        toolSet = await (provider.tools() as Promise<Record<string, unknown>>);
+      } catch (err) {
+        observabilityLogger.warn(
+          { event: "mcp_tools_failed", serverId, err: err instanceof Error ? err.message : String(err) },
+          "Failed to retrieve tools from MCP provider; tools from this server will be unavailable",
+        );
+        // Still record the borrow so we release it in the finally block.
+        borrows.push({ serverId, serverName, provider });
+        return;
+      }
+
+      borrows.push({ serverId, serverName, provider });
+
+      // Register each MCP tool under its canonical workflow key.
+      // The MCP server's raw tool name (e.g. "search") becomes
+      // "mcp__<serverName>__search" — matching both build-from-events.ts
+      // (which stamps this pattern into inputs.name) and ToolBody.tsx
+      // (which builds the same pattern for the UI dropdown).
+      for (const [rawToolName, toolDef] of Object.entries(toolSet)) {
+        const catalogKey = `mcp__${serverName}__${rawToolName}`;
+        // QUIRK: MCP tools from wrapTools() are dynamicTool instances
+        // (Vercel AI SDK shape), not ToolDefinition. We only need the
+        // execute function — adaptToolHandle() never reads `parameters`.
+        // Cast via unknown to satisfy the Map<string, ToolDefinition> type
+        // without constructing a ToolDefinition with an invalid `parameters`.
+        const mcpExecute = async (args: Record<string, unknown>, ctx?: { abortSignal?: AbortSignal }) => {
+          const execFn = (toolDef as { execute?: (args: unknown, ctx?: unknown) => Promise<unknown> }).execute;
+          if (typeof execFn !== "function") {
+            throw new Error(`MCP tool '${rawToolName}' on server '${serverName}' has no execute function.`);
+          }
+          return execFn(args, ctx);
+        };
+        catalog.set(catalogKey, { name: catalogKey, execute: mcpExecute } as unknown as ToolDefinition);
+      }
+    }),
+  );
+
+  return borrows;
+}
+
+/**
+ * Release all MCP providers borrowed by {@link injectMcpTools}.
+ * Called from the `finally` block of `executeWorkflow` so the pool
+ * refcount is always decremented even on error paths.
+ */
+function releaseMcpBorrows(borrows: McpBorrow[]): void {
+  for (const { serverId, provider } of borrows) {
+    mcpProviderPool.release(serverId, provider);
+  }
 }
 
 /** Bridge from the engine's `runCode` contract to the active

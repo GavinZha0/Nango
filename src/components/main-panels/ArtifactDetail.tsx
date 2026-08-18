@@ -26,12 +26,14 @@ import {
   Folder,
   FolderInput,
   GitCompare,
+  LineChart,
   Loader2,
   Pencil,
   RefreshCw,
   Save,
   Sparkles,
   Trash2,
+  Workflow,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -45,7 +47,6 @@ import {
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
-  useDefaultLayout,
   type PanelImperativeHandle,
 } from "react-resizable-panels";
 
@@ -99,7 +100,10 @@ import type { ArtifactEntity } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { formatTimestamp } from "@/components/admin/format";
-import type { CanonicalWorkflowSpec } from "@/lib/workflows/spec/schema";
+import type {
+  CanonicalNode,
+  CanonicalWorkflowSpec,
+} from "@/lib/workflows/spec/schema";
 
 /**
  * Bundle response shape returned by `GET /api/artifacts/[id]`.
@@ -143,19 +147,6 @@ interface SnapshotInfo {
 }
 
 
-
-/**
- * localStorage id for the vertical (chart / workflow) split. One
- * global preference shared across all workflow-backed artifacts —
- * the user has one mental model of "how much space the workflow
- * deserves", not a per-artifact one.
- */
-const VERTICAL_LAYOUT_ID = "nango:artifact-detail:vertical";
-
-/**
- * Default share of the bottom (workflow) panel when newly mounting.
- */
-const WORKFLOW_PANEL_DEFAULT_SIZE = 40;
 
 /** Map to preserve user's active session filter inputs per artifact across tab navigation without writing DB. */
 const sessionAppliedInputsMap = new Map<string, Record<string, unknown>>();
@@ -211,6 +202,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
   const { tree, mutate: mutateTree } = useArtifactTree();
 
   const [dialog, setDialog] = useState<"rename" | "move" | "delete" | null>(null);
+  const [activeView, setActiveView] = useState<"preview" | "workflow">("preview");
 
   const node: ArtifactEntity | undefined = data?.node;
   const isSeedCategory: boolean = node ? node.parentId === null && node.kind === "folder" : false;
@@ -297,7 +289,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
       }
 
       await globalMutate(`/api/artifacts/${artifactId}`, bundle, { revalidate: false });
-      toast.success("Chart refreshed & switched to live mode");
+      toast.success("Chart refreshed");
     } catch (err) {
       toast.error(`Refresh failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -334,26 +326,76 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     }
   }, [artifactId]);
 
-  const handleToggleViewMode = useCallback(async (): Promise<void> => {
-    if (!node) return;
-    const next = node.viewMode === "snapshot" ? "live" : "snapshot";
-    sessionViewModeMap.set(artifactId, next);
+  const handleLoadSnapshot = useCallback(async (): Promise<void> => {
+    if (!node || node.viewMode === "snapshot") return;
+    sessionViewModeMap.set(artifactId, "snapshot");
     try {
       const res = await fetch(`/api/artifacts/${artifactId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ view_mode: next }),
+        body: JSON.stringify({ view_mode: "snapshot" }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
         throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
       await mutate();
-      toast.success(`Switched to ${next} mode`);
+      toast.success("Loaded snapshot");
     } catch (err) {
-      toast.error(`Mode switch failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Load snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [artifactId, node, mutate]);
+
+  const handleSaveWorkflowNode = useCallback(
+    async (updatedNode: CanonicalNode): Promise<void> => {
+      try {
+        const res = await fetch(`/api/artifacts/${artifactId}/nodes/${updatedNode.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedNode),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(body?.message ?? `HTTP ${res.status}`);
+        }
+        const bundle = (await res.json()) as ArtifactBundleResponse;
+        await mutate(bundle, { revalidate: false });
+        toast.success("Workflow node saved.");
+      } catch (err) {
+        toast.error(`Save node failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [artifactId, mutate],
+  );
+
+  const handleDeleteNode = useCallback(
+    async (nodeIdToDelete: number): Promise<void> => {
+      if (!data?.workflow?.spec) return;
+      const spec = data.workflow.spec;
+      const newSpec = {
+        ...spec,
+        nodes: spec.nodes.filter((n: CanonicalNode) => n.id !== nodeIdToDelete),
+      };
+      
+      try {
+        const res = await fetch(`/api/artifacts/${artifactId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow_spec: newSpec }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(body?.message ?? `HTTP ${res.status}`);
+        }
+        const bundle = (await res.json()) as ArtifactBundleResponse;
+        await mutate(bundle, { revalidate: false });
+        toast.success("Node deleted.");
+      } catch (err) {
+        toast.error(`Delete node failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [artifactId, data, mutate],
+  );
 
   // Compute the snapshot timestamp for the title row (only in snapshot mode).
   const snapshotInfo: SnapshotInfo | undefined = useMemo(() => {
@@ -386,12 +428,6 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     );
   }
 
-  const spec = data?.workflow?.spec;
-  const hasFilters = Boolean(
-    spec?.input_schema?.properties &&
-    Object.keys(spec.input_schema.properties).length > 0,
-  );
-
   return (
     <div className="flex h-full flex-col">
       <DetailHeader
@@ -402,17 +438,29 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           if (id !== node.id) router.push(`/artifact/${id}`);
         }}
         snapshotInfo={snapshotInfo}
+        activeView={activeView}
+        setActiveView={setActiveView}
+        hasWorkflow={Boolean(data?.workflow)}
         actions={
           isSeedCategory ? null : (
             <ActionBar
               viewMode={node?.viewMode ?? "snapshot"}
-              hasFilters={hasFilters}
-              onRefresh={() => void handleRefresh()}
-              onSaveSnapshot={() => void handleSaveSnapshot()}
+              disableManagement={activeView === "workflow"}
+              onRefresh={() => {
+                if (activeView === "workflow") setActiveView("preview");
+                void handleRefresh();
+              }}
+              onSaveSnapshot={() => {
+                if (activeView === "workflow") setActiveView("preview");
+                void handleSaveSnapshot();
+              }}
               onLoadSnapshot={() => {
-                if (node?.viewMode !== "snapshot") {
-                  void handleToggleViewMode();
-                }
+                if (activeView === "workflow") setActiveView("preview");
+                void handleLoadSnapshot();
+              }}
+              onCompare={() => {
+                if (activeView === "workflow") setActiveView("preview");
+                // TODO: Compare modal
               }}
               onRename={() => setDialog("rename")}
               onMove={() => setDialog("move")}
@@ -422,11 +470,10 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
         }
       />
 
-      {/* Body layout — workflow-backed artifacts get a vertical
-          split (chart on top, workflow graph on bottom); folders
-          and standalone artifacts keep the single-pane scroll. */}
+      {/* Body layout */}
       {data?.workflow && node.kind !== "folder" ? (
-        <WorkflowBackedLayout
+        <WorkflowOrPreviewLayout
+          activeView={activeView}
           node={node}
           tree={tree}
           router={router}
@@ -434,6 +481,8 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           data={data.data}
           appliedInputs={data.appliedInputs}
           onRefreshWithInputs={handleRefresh}
+          onSaveWorkflowNode={handleSaveWorkflowNode}
+          onDeleteWorkflowNode={handleDeleteNode}
           isRefreshing={isRefreshing}
         />
       ) : (
@@ -531,7 +580,8 @@ function ArtifactScrollBody({
   );
 }
 
-interface WorkflowBackedLayoutProps {
+interface WorkflowOrPreviewLayoutProps {
+  activeView: "preview" | "workflow";
   node: ArtifactEntity;
   tree: ArtifactNode[] | undefined;
   router: ReturnType<typeof useRouter>;
@@ -539,18 +589,18 @@ interface WorkflowBackedLayoutProps {
   data?: unknown;
   appliedInputs?: Record<string, unknown>;
   onRefreshWithInputs?: (inputs: Record<string, unknown>) => Promise<void>;
+  onSaveWorkflowNode?: (updatedNode: CanonicalNode) => Promise<void>;
+  onDeleteWorkflowNode?: (nodeId: number) => Promise<void>;
   isRefreshing?: boolean;
 }
 
 /**
- * Two-row layout for workflow-backed artifacts: chart + metadata
- * on top, workflow graph on the bottom, separated by a draggable
- * `<ResizableHandle>`. Layout proportions persist to localStorage
- * (`useDefaultLayout`) under a single shared key so the user's
- * "how much space for the workflow" preference carries across
- * artifacts.
+ * Single view layout for workflow-backed artifacts: conditionally
+ * renders either the artifact preview (chart + filters) or the
+ * full-screen workflow graph, based on `activeView`.
  */
-function WorkflowBackedLayout({
+function WorkflowOrPreviewLayout({
+  activeView,
   node,
   tree,
   router,
@@ -558,14 +608,10 @@ function WorkflowBackedLayout({
   data,
   appliedInputs,
   onRefreshWithInputs,
+  onSaveWorkflowNode,
+  onDeleteWorkflowNode,
   isRefreshing = false,
-}: WorkflowBackedLayoutProps): ReactElement {
-  const storage = typeof window !== "undefined" ? window.localStorage : undefined;
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: VERTICAL_LAYOUT_ID,
-    panelIds: ["artifact-upper", "artifact-lower"],
-    storage,
-  });
+}: WorkflowOrPreviewLayoutProps): ReactElement {
 
   const hasFilters = Boolean(
     spec?.input_schema?.properties &&
@@ -609,66 +655,55 @@ function WorkflowBackedLayout({
     }
   }, [hasFilters]);
 
+  if (activeView === "workflow") {
+    return (
+      <div className="flex min-h-0 flex-1 border-t bg-muted/20">
+        <WorkflowGraph
+          spec={spec}
+          onSaveNode={onSaveWorkflowNode}
+          onDeleteNode={onDeleteWorkflowNode}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ResizablePanelGroup
-        orientation="vertical"
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
+        key={`horizontal-${node.id}-${hasFilters}`}
+        orientation="horizontal"
+        className="h-full w-full flex-1"
       >
         <ResizablePanel
-          id="artifact-upper"
-          defaultSize={60}
-          minSize={0}
+          id="artifact-chart-pane"
+          defaultSize={hasFilters ? "80%" : "100%"}
+          minSize="50%"
           className="flex h-full w-full min-h-0 min-w-0 flex-col"
         >
-          <ResizablePanelGroup
-            key={`horizontal-${node.id}-${hasFilters}`}
-            orientation="horizontal"
-            className="h-full w-full flex-1"
-          >
-            <ResizablePanel
-              id="artifact-chart-pane"
-              defaultSize={hasFilters ? "80%" : "100%"}
-              minSize="50%"
-              className="flex h-full w-full min-h-0 min-w-0 flex-col"
-            >
-              <ArtifactScrollBody
-                node={node}
-                tree={tree}
-                router={router}
-                data={data}
-              />
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              panelRef={filterPanelRef}
-              id="artifact-filter-pane"
-              defaultSize={hasFilters ? "20%" : "0%"}
-              minSize="15%"
-              maxSize="20%"
-              collapsible
-              collapsedSize="0%"
-              className="flex h-full w-full min-h-0 min-w-0 flex-col"
-            >
-              <ArtifactFilterPanel
-                schema={spec.input_schema}
-                initialValues={initialFilterValues}
-                onApply={(values) => void onRefreshWithInputs?.(values)}
-                loading={isRefreshing}
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
+          <ArtifactScrollBody
+            node={node}
+            tree={tree}
+            router={router}
+            data={data}
+          />
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel
-          id="artifact-lower"
-          defaultSize={WORKFLOW_PANEL_DEFAULT_SIZE}
-          minSize={0}
+          panelRef={filterPanelRef}
+          id="artifact-filter-pane"
+          defaultSize={hasFilters ? "20%" : "0%"}
+          minSize="15%"
+          maxSize="20%"
           collapsible
-          collapsedSize={0}
+          collapsedSize="0%"
+          className="flex h-full w-full min-h-0 min-w-0 flex-col"
         >
-          <WorkflowGraph spec={spec} />
+          <ArtifactFilterPanel
+            schema={spec.input_schema}
+            initialValues={initialFilterValues}
+            onApply={(values) => void onRefreshWithInputs?.(values)}
+            loading={isRefreshing}
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
@@ -685,6 +720,9 @@ interface DetailHeaderProps {
   actions?: ReactElement | null;
   /** Snapshot / live timestamp shown right-aligned in the title row. */
   snapshotInfo?: SnapshotInfo;
+  activeView?: "preview" | "workflow";
+  setActiveView?: (view: "preview" | "workflow") => void;
+  hasWorkflow?: boolean;
 }
 
 function DetailHeader({
@@ -694,9 +732,12 @@ function DetailHeader({
   onCrumbClick,
   actions,
   snapshotInfo,
+  activeView,
+  setActiveView,
+  hasWorkflow,
 }: DetailHeaderProps): ReactElement {
   return (
-    <header className="flex h-12 items-center gap-2 border-b px-4">
+    <header className="relative flex h-12 items-center gap-2 border-b px-4">
       <Button
         variant="ghost"
         size="icon"
@@ -735,14 +776,39 @@ function DetailHeader({
             </h1>
           )}
         </div>
+
         {/* Snapshot timestamp — amber camera label shown only in snapshot mode. */}
         {snapshotInfo !== undefined && snapshotInfo.fromSnapshot && (
           <span className="shrink-0 flex items-center gap-1 text-xs text-amber-400">
-            <Camera className="h-3 w-3" />
             {snapshotInfo.timestamp}
           </span>
         )}
       </div>
+
+      {/* View Toggle (Absolute Centered) */}
+      {hasWorkflow && activeView && setActiveView && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setActiveView(activeView === "preview" ? "workflow" : "preview")}
+            className="h-8 gap-1.5 px-3 text-muted-foreground hover:text-foreground shadow-sm"
+          >
+            {activeView === "preview" ? (
+              <>
+                <Workflow className="h-4 w-4 text-blue-500" />
+                Edit Workflow
+              </>
+            ) : (
+              <>
+                <LineChart className="h-4 w-4 text-emerald-500" />
+                View Artifact
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+
       {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
     </header>
   );
@@ -750,19 +816,21 @@ function DetailHeader({
 
 function ActionBar({
   viewMode,
-  hasFilters,
+  disableManagement,
   onRefresh,
   onSaveSnapshot,
   onLoadSnapshot,
+  onCompare,
   onRename,
   onMove,
   onDelete,
 }: {
   viewMode: "snapshot" | "live";
-  hasFilters: boolean;
+  disableManagement?: boolean;
   onRefresh: () => void;
   onSaveSnapshot: () => void;
   onLoadSnapshot: () => void;
+  onCompare: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
@@ -770,19 +838,18 @@ function ActionBar({
   return (
     <TooltipProvider delay={200}>
       <div className="flex items-center gap-1">
+
         {/* Data & View Action Group */}
-        {!hasFilters && (
-          <Tooltip>
-            <TooltipTrigger
-              onClick={onRefresh}
-              className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
-              aria-label="Refresh live data"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Refresh</TooltipContent>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger
+            onClick={onRefresh}
+            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            aria-label="Refresh live data"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Refresh</TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger
@@ -792,7 +859,7 @@ function ActionBar({
           >
             <Save className="h-4 w-4" />
           </TooltipTrigger>
-          <TooltipContent side="bottom">Save</TooltipContent>
+          <TooltipContent side="bottom">Save Snapshot</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -809,12 +876,12 @@ function ActionBar({
           >
             <Camera className="h-4 w-4" />
           </TooltipTrigger>
-          <TooltipContent side="bottom">Snapshot</TooltipContent>
+          <TooltipContent side="bottom">Load Snapshot</TooltipContent>
         </Tooltip>
 
         <Tooltip>
           <TooltipTrigger
-            onClick={() => { /* Compare modal */ }}
+            onClick={onCompare}
             className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
             aria-label="Compare snapshot vs live"
           >
@@ -829,8 +896,16 @@ function ActionBar({
         {/* Node Management Group */}
         <Tooltip>
           <TooltipTrigger
-            onClick={onRename}
-            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            onClick={(e) => {
+              if (disableManagement) { e.preventDefault(); return; }
+              onRename();
+            }}
+            disabled={disableManagement}
+            className={cn(
+              buttonVariants({ size: "icon", variant: "ghost" }),
+              "h-8 w-8 text-muted-foreground hover:text-foreground",
+              disableManagement && "opacity-50 cursor-not-allowed"
+            )}
             aria-label="Rename"
           >
             <Pencil className="h-4 w-4" />
@@ -840,8 +915,16 @@ function ActionBar({
 
         <Tooltip>
           <TooltipTrigger
-            onClick={onMove}
-            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+            onClick={(e) => {
+              if (disableManagement) { e.preventDefault(); return; }
+              onMove();
+            }}
+            disabled={disableManagement}
+            className={cn(
+              buttonVariants({ size: "icon", variant: "ghost" }),
+              "h-8 w-8 text-muted-foreground hover:text-foreground",
+              disableManagement && "opacity-50 cursor-not-allowed"
+            )}
             aria-label="Move"
           >
             <FolderInput className="h-4 w-4" />
@@ -851,8 +934,16 @@ function ActionBar({
 
         <Tooltip>
           <TooltipTrigger
-            onClick={onDelete}
-            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive")}
+            onClick={(e) => {
+              if (disableManagement) { e.preventDefault(); return; }
+              onDelete();
+            }}
+            disabled={disableManagement}
+            className={cn(
+              buttonVariants({ size: "icon", variant: "ghost" }),
+              "h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+              disableManagement && "opacity-50 cursor-not-allowed"
+            )}
             aria-label="Delete"
           >
             <Trash2 className="h-4 w-4" />

@@ -25,6 +25,7 @@ function toolNode(retries?: Retries): CanonicalToolNode {
     id: 0,
     description: "n",
     depends_on: [],    inputs: {
+      source: "builtin",
       name: "flaky_tool",
       arguments: {},
     },

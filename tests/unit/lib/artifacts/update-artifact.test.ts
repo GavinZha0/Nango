@@ -145,6 +145,7 @@ describe("updateArtifact — write-then-bundle", () => {
               id: 0,
               description: "n",
               depends_on: [],              inputs: {
+                source: "builtin",
                 name: "x",
                 arguments: {},
               },
@@ -203,5 +204,68 @@ describe("updateArtifact — module-shape sanity", () => {
     // exercises via updateArtifactWithDeps. (Catches accidental
     // re-export drift.)
     expect(typeof buildArtifactBundle).toBe("function");
+  });
+});
+
+// ─── WorkflowSpec update path ─────────────────────────────────────────
+
+describe("updateArtifactWithDeps — workflowSpec behavior", () => {
+  it("silently discards workflowSpec field (current behavior)", async () => {
+    const before = artifactRow();
+    const after = artifactRow({ name: "Renamed" });
+    const workflowSpec = {
+      name: "test-spec",
+      nodes: [
+        {
+          type: "tool",
+          schema_version: "1",
+          id: 0,
+          description: "test",
+          depends_on: [],
+          inputs: {
+            source: "builtin",
+            name: "test-tool",
+            arguments: {},
+          },
+        },
+      ],
+      outputs: { result: "@nodes.0.result" },
+    } as CanonicalWorkflowSpec;
+    
+    const { deps } = await callUpdate(
+      { workflowSpec, name: "Renamed" },
+      before,
+      after,
+    );
+    
+    // workflowSpec should be discarded, only name should be passed
+    expect(deps.performUpdateCalls).toEqual([
+      { id: ARTIFACT_ID, patch: { name: "Renamed" }, ownerId: OWNER },
+    ]);
+    // The patch should not contain workflowSpec
+    expect(deps.performUpdateCalls[0]!.patch).not.toHaveProperty("workflowSpec");
+  });
+
+  it("handles empty patch correctly (no updates applied)", async () => {
+    const before = artifactRow();
+    const after = artifactRow();
+    const { deps } = await callUpdate({}, before, after);
+    
+    expect(deps.performUpdateCalls).toEqual([]);
+  });
+
+  it("updates only metadata when workflowSpec is provided alone", async () => {
+    const before = artifactRow();
+    const after = artifactRow();
+    const workflowSpec = {
+      name: "test-spec",
+      nodes: [],
+      outputs: {},
+    } as CanonicalWorkflowSpec;
+    
+    const { deps } = await callUpdate({ workflowSpec }, before, after);
+    
+    // workflowSpec should be discarded
+    expect(deps.performUpdateCalls).toEqual([]);
   });
 });

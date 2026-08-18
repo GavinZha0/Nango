@@ -15,6 +15,7 @@ export {
   findBuiltinTool,
   isKnownBuiltinTool,
   listBuiltinToolDescriptors,
+  listWorkflowToolDescriptors,
   type BuiltinToolEntry,
   type BuiltinToolCategory,
   type BuiltinToolDescriptor,

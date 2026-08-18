@@ -328,11 +328,15 @@ function assembleNode(invocation: ToolInvocation, id: number): LLMNode {
 }
 
 function assembleToolNode(invocation: ToolInvocation, id: number): LLMToolNode {
+  const source = invocation.toolName.startsWith("mcp__")
+    ? `mcp:${invocation.toolName.split("__")[1]}`
+    : "builtin";
   return {
     id,
     type: "tool",
     depends_on: [],
     inputs: {
+      source,
       name: invocation.toolName,
       arguments: invocation.inputs,
     },
@@ -1126,7 +1130,7 @@ function withRewrittenInputAndDeps(
   if (node.type === "tool") {
     return {
       ...node,
-      inputs: { name: node.inputs.name, arguments: rewrittenInput },
+      inputs: { source: node.inputs.source, name: node.inputs.name, arguments: rewrittenInput },
       depends_on,
     };
   }
@@ -1330,6 +1334,7 @@ function placeholderNoOpNode(): LLMToolNode {
     description: "(no upstream data) — placeholder; save again from a richer chat to refine",
     depends_on: [],
     inputs: {
+      source: "builtin",
       name: "noop",
       arguments: {},
     },

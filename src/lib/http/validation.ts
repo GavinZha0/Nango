@@ -21,11 +21,14 @@ export async function parseBody<T>(
 
   const result = schema.safeParse(raw);
   if (!result.success) {
+    const issues = formatIssues(result.error);
+    const detailMsg = issues.map((i) => `${i.path || "root"}: ${i.message}`).join("; ");
+    console.error(`[parseBody Validation Error for ${req.url}]:`, detailMsg);
     throw new ApiError(
       "VALIDATION_FAILED",
       400,
-      "Request body validation failed.",
-      { issues: formatIssues(result.error) },
+      `Request body validation failed: ${detailMsg || "schema mismatch"}`,
+      { issues },
     );
   }
 

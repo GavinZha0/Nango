@@ -47,7 +47,7 @@ function tool(
     id,
     description: `n${id}`,
     depends_on,
-    inputs: { name: toolName, arguments: args },
+    inputs: { source: "builtin", name: toolName, arguments: args },
   };
 }
 

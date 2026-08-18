@@ -25,6 +25,7 @@ function toolNode(
     depends_on: [],
     ...rest,
     inputs: {
+      source: inputsOverride?.source ?? "builtin",
       name: inputsOverride?.name ?? "extract",
       arguments: inputsOverride?.arguments ?? { sql: "select 1" },
     },

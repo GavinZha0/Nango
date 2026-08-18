@@ -9,6 +9,7 @@ import {
   type LLMAgentNode,
   type LLMToolNode,
   type LLMWorkflowSpec,
+  validateToolSource,
 } from "@/lib/workflows/spec/schema";
 
 /**
@@ -20,7 +21,9 @@ const toolNode: LLMToolNode = {
   id: 0,
   description: "Fetch Q4 orders",
   depends_on: [],
-  type: "tool",  inputs: {
+  type: "tool",
+  inputs: {
+    source: "builtin",
     name: "fetch_data_table",
     arguments: { dataSourceName: "warehouse_prod", sql: "SELECT *" },
   },
@@ -321,6 +324,63 @@ describe("LLMChartNodeSchema", () => {
       LLMWorkflowSpecSchema.parse(
         chartSpecWith({ dataset: undefined }),
       ),
+    ).not.toThrow();
+  });
+});
+
+describe("Tool source validation", () => {
+  it("accepts 'builtin' source", () => {
+    expect(validateToolSource("builtin")).toBe(true);
+  });
+
+  it("accepts 'custom' source", () => {
+    expect(validateToolSource("custom")).toBe(true);
+  });
+
+  it("accepts valid 'mcp:<uuid>' source", () => {
+    expect(validateToolSource("mcp:550e8400-e29b-41d4-a716-446655440000")).toBe(true);
+  });
+
+  it("rejects invalid MCP source with non-UUID", () => {
+    expect(validateToolSource("mcp:invalid-uuid")).toBe(false);
+  });
+
+  it("rejects invalid MCP source with malformed UUID", () => {
+    expect(validateToolSource("mcp:12345")).toBe(false);
+  });
+
+  it("rejects invalid source format", () => {
+    expect(validateToolSource("invalid-source")).toBe(false);
+  });
+
+  it("rejects empty source", () => {
+    expect(validateToolSource("")).toBe(false);
+  });
+
+  it("Zod schema rejects invalid source in tool node", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse({
+        ...baseLLMSpec,
+        nodes: [{ ...toolNode, inputs: { ...toolNode.inputs, source: "invalid-source" } }],
+      }),
+    ).toThrow();
+  });
+
+  it("Zod schema rejects malformed MCP server ID", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse({
+        ...baseLLMSpec,
+        nodes: [{ ...toolNode, inputs: { ...toolNode.inputs, source: "mcp:not-a-uuid" } }],
+      }),
+    ).toThrow();
+  });
+
+  it("Zod schema accepts valid MCP server ID", () => {
+    expect(() =>
+      LLMWorkflowSpecSchema.parse({
+        ...baseLLMSpec,
+        nodes: [{ ...toolNode, inputs: { ...toolNode.inputs, source: "mcp:550e8400-e29b-41d4-a716-446655440000" } }],
+      }),
     ).not.toThrow();
   });
 });

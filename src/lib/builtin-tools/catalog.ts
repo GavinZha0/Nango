@@ -33,6 +33,7 @@ export interface BuiltinToolEntry {
    *  `description` shown to the LLM lives on the `defineTool` call. */
   readonly description: string;
   readonly category: BuiltinToolCategory;
+  readonly input_schema?: Record<string, unknown>;
   /** Factory called once per agent run when this tool is bound. */
   readonly build: () => ToolDefinition;
 }
@@ -44,6 +45,20 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     description:
       "Generate a chart configuration based on ECharts for data visualization.",
     category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        option: {
+          type: "string",
+          description: "ECharts option configuration object or JSON string.",
+        },
+        title: {
+          type: "string",
+          description: "Optional chart title.",
+        },
+      },
+      required: ["option"],
+    },
     build: buildGenerateEchartsConfigTool,
   },
   {
@@ -52,6 +67,34 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     description:
       "Execute Python/JavaScript in an isolated sandbox with read-only datasets at ./tmp/data/<name>/.",
     category: "sandbox",
+    input_schema: {
+      type: "object",
+      properties: {
+        language: {
+          type: "string",
+          enum: ["python", "javascript"],
+          default: "python",
+          description: "Interpreter to run code in ('python' or 'javascript').",
+        },
+        code_text: {
+          type: "string",
+          description: "Source code body to execute in the sandbox.",
+        },
+        datasets: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional dataset handles exposed at ./tmp/data/<name>/.",
+        },
+        timeout_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 300,
+          default: 30,
+          description: "Execution timeout in seconds.",
+        },
+      },
+      required: ["language", "code_text"],
+    },
     build: buildRunInSandboxTool,
   },
   {
@@ -60,6 +103,20 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     description:
       "Generate a complete HTML page and render it in a sandboxed iframe for rich visual content.",
     category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        html: {
+          type: "string",
+          description: "Complete HTML source body to render.",
+        },
+        title: {
+          type: "string",
+          description: "Document title.",
+        },
+      },
+      required: ["html"],
+    },
     build: buildGenerateHtmlPageTool,
   },
   {
@@ -68,7 +125,126 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     description:
       "Search the public web via a configured search engine (Exa today; Tavily / Brave).",
     category: "search",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search engine query string.",
+        },
+        num_results: {
+          type: "integer",
+          default: 5,
+          description: "Number of search results to return.",
+        },
+      },
+      required: ["query"],
+    },
     build: buildWebSearchTool,
+  },
+];
+
+export const WORKFLOW_AMBIENT_TOOLS: readonly BuiltinToolDescriptor[] = [
+  {
+    name: "get_current_datetime",
+    displayName: "get_current_datetime",
+    description: "Get current system date and time",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        timezone: {
+          type: "string",
+          description:
+            "Optional IANA timezone to report in (e.g. 'America/New_York'). Omit to use default.",
+        },
+      },
+    },
+  },
+  {
+    name: "extract_dataset_by_sql",
+    displayName: "extract_dataset_by_sql",
+    description: "Execute SQL query and extract dataset",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        dataSourceName: {
+          type: "string",
+          description: "Target database data source identifier.",
+        },
+        sql: {
+          type: "string",
+          description: "SQL query to execute for dataset extraction.",
+        },
+        datasetName: {
+          type: "string",
+          description: "Optional dataset handle name for downstream referencing.",
+        },
+      },
+      required: ["dataSourceName", "sql"],
+    },
+  },
+  {
+    name: "run_skill_script",
+    displayName: "run_skill_script",
+    description: "Execute a skill script",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        skillName: {
+          type: "string",
+          description: "Name of the skill.",
+        },
+        scriptName: {
+          type: "string",
+          description: "Filename of the script under scripts/.",
+        },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Arguments passed to the script.",
+        },
+      },
+      required: ["skillName", "scriptName"],
+    },
+  },
+  {
+    name: "get_skill",
+    displayName: "get_skill",
+    description: "Retrieve skill content and metadata",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Skill identifier.",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "get_skill_file",
+    displayName: "get_skill_file",
+    description: "Retrieve a specific skill file",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        skillName: {
+          type: "string",
+          description: "Skill identifier.",
+        },
+        filePath: {
+          type: "string",
+          description: "Relative file path inside the skill directory.",
+        },
+      },
+      required: ["skillName", "filePath"],
+    },
   },
 ];
 
@@ -97,6 +273,7 @@ export interface BuiltinToolDescriptor {
   displayName: string;
   description: string;
   category: BuiltinToolCategory;
+  input_schema?: Record<string, unknown>;
 }
 
 export function listBuiltinToolDescriptors(): BuiltinToolDescriptor[] {
@@ -105,5 +282,10 @@ export function listBuiltinToolDescriptors(): BuiltinToolDescriptor[] {
     displayName: t.displayName,
     description: t.description,
     category: t.category,
+    input_schema: t.input_schema,
   }));
+}
+
+export function listWorkflowToolDescriptors(): BuiltinToolDescriptor[] {
+  return [...listBuiltinToolDescriptors(), ...WORKFLOW_AMBIENT_TOOLS];
 }

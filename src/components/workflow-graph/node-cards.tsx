@@ -18,6 +18,7 @@ import {
   Bot,
   Code2,
   Database,
+  Trash2,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -209,6 +210,7 @@ function describeNode(spec: CanonicalNode): NodeSummary {
 interface NodeCardShellProps {
   spec: CanonicalNode;
   selected: boolean;
+  onDelete?: (id: number) => void;
 }
 
 /**
@@ -220,7 +222,7 @@ interface NodeCardShellProps {
  * The handle dots are kept in the DOM (edges need anchors) but
  * styled to be invisible — V1 graphs are read-only.
  */
-function NodeCardShell({ spec, selected }: NodeCardShellProps): ReactElement {
+function NodeCardShell({ spec, selected, onDelete }: NodeCardShellProps): ReactElement {
   const accent: Accent = ACCENTS[spec.type];
   const { title, line1, line2 } = describeNode(spec);
   const Icon = accent.Icon;
@@ -229,7 +231,7 @@ function NodeCardShell({ spec, selected }: NodeCardShellProps): ReactElement {
     <div
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
       className={cn(
-        "relative flex flex-col gap-1 rounded-md border bg-card p-2 shadow-sm transition",
+        "group relative flex flex-col gap-1 rounded-md border bg-card p-2 shadow-sm transition",
         selected
           ? "border-primary shadow-md ring-2 ring-primary/30"
           : "border-border hover:shadow-md",
@@ -285,6 +287,18 @@ function NodeCardShell({ spec, selected }: NodeCardShellProps): ReactElement {
           border: 0,
         }}
       />
+
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(spec.id);
+          }}
+          className="absolute bottom-1 right-1 p-1.5 rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 transition-opacity"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -299,5 +313,11 @@ export function WorkflowNodeCard({
   data,
   selected,
 }: NodeProps<WorkflowNode>): ReactElement {
-  return <NodeCardShell spec={data.spec} selected={selected ?? false} />;
+  return (
+    <NodeCardShell
+      spec={data.spec}
+      selected={selected ?? false}
+      onDelete={data.onDelete}
+    />
+  );
 }

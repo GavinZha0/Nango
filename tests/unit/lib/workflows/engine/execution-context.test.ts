@@ -20,6 +20,7 @@ const MINIMAL_SPEC: CanonicalWorkflowSpec = {
       id: 0,
       description: "n",
       depends_on: [],      inputs: {
+        source: "builtin",
         name: "minimal",
         arguments: {},
       },

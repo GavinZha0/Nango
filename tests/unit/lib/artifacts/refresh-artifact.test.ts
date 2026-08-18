@@ -68,6 +68,7 @@ function sampleSpec(): CanonicalWorkflowSpec {
         id: 0,
         description: "n",
         depends_on: [],        inputs: {
+          source: "builtin",
           name: "x",
           arguments: {},
         },

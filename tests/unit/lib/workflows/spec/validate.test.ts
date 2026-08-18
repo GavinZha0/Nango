@@ -49,6 +49,7 @@ function toolNode(
     },
     ...rest,
     inputs: {
+      source: inputsOverride?.source ?? "builtin",
       name: inputsOverride?.name ?? "fetch_data_table",
       arguments: inputsOverride?.arguments ?? {
         dataSourceId: "x",
@@ -1179,6 +1180,7 @@ describe("validate — PROMOTED_TOOL_AS_NODE guard", () => {
       description: "should be rejected",
       depends_on: [],
       inputs: {
+        source: "builtin",
         name: toolName,
         arguments: {},
       },
@@ -1242,7 +1244,7 @@ describe("validate — PROMOTED_TOOL_AS_NODE guard", () => {
       id: 0,
       description: "plain search",
       depends_on: [],
-      inputs: { name: "web_search", arguments: { query: "test" } },
+      inputs: { source: "builtin", name: "web_search", arguments: { query: "test" } },
       outputs: ["results"],
     };
     expect(() =>
