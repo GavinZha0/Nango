@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/GavinZha0/Nango/compare/v0.13.0...v0.14.0) (2026-08-18)
+
+
+### Features
+
+* **artifact:** implement filter panel, session persistence & header UI ([f03bf76](https://github.com/GavinZha0/Nango/commit/f03bf761b5141bfedaf0a16c6249d093114b78d9))
+* comprehensive workflow UX and backend improvements ([623dff2](https://github.com/GavinZha0/Nango/commit/623dff246317108514c7e77968d841363475da36))
+
+
+### Bug Fixes
+
+* agent stop issue ([478f921](https://github.com/GavinZha0/Nango/commit/478f9213702da3b47bdc3007f8e3a8d323f19171))
+* improve code output parsing, artifact refresh cache bypass, and chat UI stability ([ea46b8d](https://github.com/GavinZha0/Nango/commit/ea46b8d369ee8a1e174cee9916c7973058e20ac5))
+
 ## [0.13.0](https://github.com/GavinZha0/Nango/compare/v0.12.0...v0.13.0) (2026-08-09)
 
 
