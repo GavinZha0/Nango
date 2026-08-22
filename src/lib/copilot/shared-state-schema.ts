@@ -17,8 +17,8 @@ export interface NangoSharedState {
       | "agent" | "mcp" | "skills" | "datasource" | "ssh-server" 
       | "verification" | "evaluation" | "outcomes" | "profile"
       | "user" | "credential" | "config" | "trace" 
-      | "none";
-    activeResourceId?: string | null;
+      | "none" | "web-auto";
+    activeResourceId: string | null;
     activeResourceData?: Record<string, unknown> | null; // A readonly copy of the data to give the agent context
   };
 

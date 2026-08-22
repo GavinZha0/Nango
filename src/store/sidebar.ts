@@ -15,6 +15,7 @@ export const LEFT_PANEL_IDS = [
   "ssh-server",
   "verification",
   "evaluation",
+  "web-auto",
 ] as const;
 
 export type LeftPanelId = (typeof LEFT_PANEL_IDS)[number];

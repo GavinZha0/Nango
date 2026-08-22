@@ -9,7 +9,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Bot, FlaskConical, Medal, BotMessageSquare, LogOut, UserRound, ChevronDown, Sun, Moon } from "lucide-react";
+import { Bot, FlaskConical, Medal, GlobeCheck, BotMessageSquare, LogOut, UserRound, ChevronDown, Sun, Moon } from "lucide-react";
 import { useActiveTasksStore, type ActiveTask } from "@/store/active-tasks";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -186,6 +186,7 @@ const KIND_ICON: Record<ActiveTask["kind"], React.ComponentType<{ className?: st
   agent: Bot,
   verification: FlaskConical,
   evaluation: Medal,
+  web_auto: GlobeCheck,
 };
 
 function BadgeVariant({ task, progressText }: { task: ActiveTask; progressText: string }) {
@@ -202,6 +203,9 @@ function BadgeVariant({ task, progressText }: { task: ActiveTask; progressText: 
       setLeftPanelOpen(true);
     } else if (task.kind === "evaluation") {
       router.push("/evaluation");
+      setLeftPanelOpen(true);
+    } else if (task.kind === "web_auto") {
+      router.push("/web-auto");
       setLeftPanelOpen(true);
     }
   };

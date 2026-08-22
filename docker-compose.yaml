@@ -108,6 +108,23 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  playwright:
+    image: mcr.microsoft.com/playwright/mcp
+    container_name: playwright
+    pull_policy: always
+    init: true
+    entrypoint: ["node"]
+    command: ["/app/cli.js", "--headless", "--browser", "chromium", "--isolated", "--no-sandbox", "--port", "8931", "--host", "0.0.0.0"]
+    ports:
+      - "8931:8931"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8931/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
 
 volumes:
   nango-db-data:

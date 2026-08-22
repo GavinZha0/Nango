@@ -8,12 +8,14 @@ import {
   VerificationSuiteTable,
   EvalRunTable,
   EvalSuiteTable,
+  WebAutoRunTable,
+  WebAutoSuiteTable,
   BuiltinAgentTable,
 } from "@/lib/db/schema";
 
 export interface ActiveTask {
   id: string;
-  kind: "agent" | "verification" | "evaluation";
+  kind: "agent" | "verification" | "evaluation" | "web_auto";
   name: string;
   status: "running" | "succeeded" | "failed";
   startedAt: Date;
@@ -23,7 +25,7 @@ export interface ActiveTask {
 
 export interface TaskProgressDetail {
   id: string;
-  kind: "agent" | "verification" | "evaluation";
+  kind: "agent" | "verification" | "evaluation" | "web_auto";
   status: string;
   startedAt: Date;
   finishedAt: Date | null;
@@ -145,8 +147,41 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
       completedCount: row.passedCount + row.failedCount + row.erroredCount,
     }));
 
+    // 4. 查询正在运行的 Web Auto Suite
+    const runningWebAuto = await db
+      .select({
+        id: WebAutoRunTable.id,
+        startedAt: WebAutoRunTable.startedAt,
+        passedCount: WebAutoRunTable.passed,
+        failedCount: WebAutoRunTable.failed,
+        erroredCount: WebAutoRunTable.errored,
+        suiteName: WebAutoSuiteTable.name,
+        totalCount: sql<number>`(select count(*) from web_auto_case where suite_id = ${WebAutoSuiteTable.id} and enabled = true)::int`,
+      })
+      .from(WebAutoRunTable)
+      .innerJoin(
+        WebAutoSuiteTable,
+        eq(WebAutoRunTable.suiteId, WebAutoSuiteTable.id)
+      )
+      .where(
+        and(
+          eq(WebAutoSuiteTable.createdBy, ownerId),
+          eq(WebAutoRunTable.status, "running")
+        )
+      );
+
+    const webAutoTasks: ActiveTask[] = runningWebAuto.map((row) => ({
+      id: row.id,
+      kind: "web_auto",
+      name: row.suiteName,
+      status: "running",
+      startedAt: row.startedAt,
+      totalCount: Number(row.totalCount ?? 0),
+      completedCount: row.passedCount + row.failedCount + row.erroredCount,
+    }));
+
     // 合并所有活跃任务并按照 startedAt 升序排列 (最早启动的排在前面)
-    return [...agentTasks, ...verificationTasks, ...evaluationTasks].sort(
+    return [...agentTasks, ...verificationTasks, ...evaluationTasks, ...webAutoTasks].sort(
       (a, b) => a.startedAt.getTime() - b.startedAt.getTime()
     );
   } catch (err) {
@@ -160,13 +195,13 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
  * 供 Agent 工具后续追踪特定任务结果并向用户汇报。
  *
  * SECURITY: scoped to the run's owner (`isAdmin` bypasses). agent runs
- * filter by `EntityRunTable.ownerId`; verification/evaluation runs have
+ * filter by `EntityRunTable.ownerId`; verification/evaluation/web_auto runs have
  * no owner column, so they filter by the suite's `createdBy` — mirroring
  * `getActiveTasks`. Without this a caller could read any run by id.
  */
 export async function getTaskProgress(
   runId: string,
-  kind: "agent" | "verification" | "evaluation",
+  kind: "agent" | "verification" | "evaluation" | "web_auto",
   userId: string,
   isAdmin = false
 ): Promise<TaskProgressDetail | null> {
@@ -285,6 +320,45 @@ export async function getTaskProgress(
         finishedAt: row.finishedAt,
         progressText: `${completed}/${row.totalCount} cases completed (${row.passedCount} passed, ${row.failedCount} failed, ${row.erroredCount} errored)`,
         summary: `Evaluation Suite '${row.suiteName}' finished with score: ${row.score}% (status: ${row.status}).`,
+      };
+    }
+
+    if (kind === "web_auto") {
+      const [row] = await db
+        .select({
+          id: WebAutoRunTable.id,
+          status: WebAutoRunTable.status,
+          startedAt: WebAutoRunTable.startedAt,
+          finishedAt: WebAutoRunTable.finishedAt,
+          passedCount: WebAutoRunTable.passed,
+          failedCount: WebAutoRunTable.failed,
+          erroredCount: WebAutoRunTable.errored,
+          suiteName: WebAutoSuiteTable.name,
+          totalCount: sql<number>`(select count(*) from web_auto_case where suite_id = ${WebAutoSuiteTable.id} and enabled = true)::int`,
+        })
+        .from(WebAutoRunTable)
+        .innerJoin(
+          WebAutoSuiteTable,
+          eq(WebAutoRunTable.suiteId, WebAutoSuiteTable.id)
+        )
+        .where(
+          isAdmin
+            ? eq(WebAutoRunTable.id, runId)
+            : and(eq(WebAutoRunTable.id, runId), eq(WebAutoSuiteTable.createdBy, userId))
+        )
+        .limit(1);
+
+      if (!row) return null;
+      const completed = row.passedCount + row.failedCount + row.erroredCount;
+      const total = Number(row.totalCount ?? 0);
+      return {
+        id: row.id,
+        kind: "web_auto",
+        status: row.status,
+        startedAt: row.startedAt,
+        finishedAt: row.finishedAt,
+        progressText: `${completed}/${total} cases completed (${row.passedCount} passed, ${row.failedCount} failed, ${row.erroredCount} errored)`,
+        summary: `Web Auto Suite '${row.suiteName}' finished with status: ${row.status}.`,
       };
     }
   } catch (err) {

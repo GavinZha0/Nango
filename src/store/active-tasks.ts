@@ -4,7 +4,7 @@ import { create } from "zustand";
 
 export interface ActiveTask {
   id: string;
-  kind: "agent" | "verification" | "evaluation";
+  kind: "agent" | "verification" | "evaluation" | "web_auto";
   name: string;
   status: "running" | "succeeded" | "failed";
   startedAt: string | Date; // 序列化后的时间字符串或 Date 对象

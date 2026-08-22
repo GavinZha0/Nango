@@ -2274,3 +2274,93 @@ export const SafetyInterceptionLogTable = pgTable(
 );
 
 export type SafetyInterceptionLogEntity = typeof SafetyInterceptionLogTable.$inferSelect;
+// ----------------------------------------------------------------------------
+// Web Auto Subsystem
+// ----------------------------------------------------------------------------
+
+export const WebAutoSuiteTable = pgTable("web_auto_suite", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").references((): AnyPgColumn => WebAutoSuiteTable.id, {
+    onDelete: "cascade",
+  }),
+  name: text("name").notNull(),
+  description: text("description"),
+  variables: jsonb("variables").notNull().default({}),
+  enabled: boolean("enabled").notNull().default(true),
+  visibility: text("visibility").notNull().default("private"),
+  timeoutSec: integer("timeout_sec").notNull().default(300),
+  evaluatorAgentId: uuid("evaluator_agent_id").references(
+    () => BuiltinAgentTable.id,
+    { onDelete: "set null" }
+  ),
+  mcpServerId: uuid("mcp_server_id").references(
+    () => McpServerTable.id,
+    { onDelete: "set null" }
+  ),
+  createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdBy: uuid("created_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+  updatedAt: timestamp("updated_at"),
+  updatedBy: uuid("updated_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+});
+
+export const WebAutoCaseTable = pgTable("web_auto_case", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  suiteId: uuid("suite_id")
+    .notNull()
+    .references(() => WebAutoSuiteTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  scriptContent: text("script_content"),
+  assertions: jsonb("assertions").notNull().default([]),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdBy: uuid("created_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+  updatedAt: timestamp("updated_at"),
+  updatedBy: uuid("updated_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+});
+
+export const WebAutoRunTable = pgTable("web_auto_run", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  suiteId: uuid("suite_id")
+    .notNull()
+    .references(() => WebAutoSuiteTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("running"),
+  passed: integer("passed").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  errored: integer("errored").notNull().default(0),
+  startedAt: timestamp("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  finishedAt: timestamp("finished_at"),
+  createdBy: uuid("created_by").references(() => UserTable.id, {
+    onDelete: "cascade",
+  }),
+});
+
+export const WebAutoCaseResultTable = pgTable("web_auto_case_result", {
+  id: bigint("id", { mode: "number" })
+    .primaryKey()
+    .generatedAlwaysAsIdentity(),
+  runId: uuid("run_id")
+    .notNull()
+    .references(() => WebAutoRunTable.id, { onDelete: "cascade" }),
+  caseId: uuid("case_id")
+    .notNull()
+    .references(() => WebAutoCaseTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull(), // 'passed', 'failed', 'errored'
+  executionOutput: jsonb("execution_output"),
+  verdict: jsonb("verdict"),
+  error: jsonb("error"),
+  createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type WebAutoSuiteEntity = typeof WebAutoSuiteTable.$inferSelect;
+export type WebAutoCaseEntity = typeof WebAutoCaseTable.$inferSelect;
+export type WebAutoRunEntity = typeof WebAutoRunTable.$inferSelect;
+export type WebAutoCaseResultEntity = typeof WebAutoCaseResultTable.$inferSelect;

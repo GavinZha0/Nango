@@ -1,0 +1,2 @@
+ALTER TABLE "web_auto_suite" ADD COLUMN "mcp_server_id" uuid;--> statement-breakpoint
+ALTER TABLE "web_auto_suite" ADD CONSTRAINT "web_auto_suite_mcp_server_id_mcp_server_id_fk" FOREIGN KEY ("mcp_server_id") REFERENCES "public"."mcp_server"("id") ON DELETE set null ON UPDATE no action;

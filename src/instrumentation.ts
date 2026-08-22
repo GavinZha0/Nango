@@ -57,6 +57,16 @@ export async function register(): Promise<void> {
     } catch (err) {
       console.error("[nango] evaluation recovery failed:", err);
     }
+
+    // Web Auto subsystem: boot-epoch recovery for stranded web_auto_run rows.
+    const { recoverStrandedWebAutoRuns } = await import(
+      "@/lib/web-auto/recovery"
+    );
+    try {
+      await recoverStrandedWebAutoRuns(bootStartedAt);
+    } catch (err) {
+      console.error("[nango] web-auto recovery failed:", err);
+    }
   }
 
   // Application config: seed defaults (insert-if-absent), then load all

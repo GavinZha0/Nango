@@ -16,6 +16,7 @@ import {
   Server,
   FlaskConical,
   Medal,
+  GlobeCheck,
 } from "lucide-react";
 import type { LeftPanelId } from "@/store/sidebar";
 import { LEFT_PANEL_IDS } from "@/store/sidebar";
@@ -32,6 +33,7 @@ import { VerificationPanel } from "@/components/left-panels/VerificationPanel";
 import { EvaluationPanel } from "@/components/left-panels/EvaluationPanel";
 import { DataSourcePanel } from "@/components/left-panels/DataSourcePanel";
 import { SshServerPanel } from "@/components/left-panels/SshServerPanel";
+import { WebAutoPanel } from "@/components/left-panels/WebAutoPanel";
 
 // Types
 
@@ -144,6 +146,14 @@ export const SIDEBAR_PANEL_REGISTRY: Record<LeftPanelId, SidebarPanelDefinition>
     icon: Server,
     component: SshServerPanel,
     href: "/ssh-server",
+    requiredRole: "editor",
+  },
+  "web-auto": {
+    id: "web-auto",
+    label: "Web Auto",
+    icon: GlobeCheck,
+    component: WebAutoPanel,
+    href: "/web-auto",
     requiredRole: "editor",
   },
 };

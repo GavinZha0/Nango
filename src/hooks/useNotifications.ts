@@ -191,6 +191,29 @@ export function useStartNotifications(): void {
               frame.status === "passed" ? "succeeded" : "failed"
             );
           }
+        } else if (event.kind === "web_auto") {
+          const { frame } = event;
+          if (frame.kind === "run_started") {
+            useActiveTasksStore.getState().addTask({
+              id: frame.runId,
+              kind: "web_auto",
+              name: frame.suiteName || "Web Automation",
+              status: "running",
+              startedAt: new Date(),
+              totalCount: frame.totalCount,
+              completedCount: 0,
+            });
+          } else if (frame.kind === "case_finished") {
+            const task = useActiveTasksStore.getState().activeTasks.find((t) => t.id === frame.runId);
+            if (task) {
+              useActiveTasksStore.getState().updateProgress(frame.runId, (task.completedCount ?? 0) + 1);
+            }
+          } else if (frame.kind === "run_finished") {
+            useActiveTasksStore.getState().setTerminalState(
+              frame.runId,
+              frame.status === "passed" ? "succeeded" : "failed"
+            );
+          }
         }
       } catch (err) {
         console.error("SSE parse failed", err);

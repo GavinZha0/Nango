@@ -294,9 +294,21 @@ function evaluateJsExpression(
   // Before "hardening" `(${expr})`, read the security model in
   // docs/verification.md.
   try {
+    const structured = extractMcpStructuredData(payload);
+    const contextObj: Record<string, unknown> = {
+      ...(typeof structured === "object" && structured !== null && !Array.isArray(structured)
+        ? (structured as Record<string, unknown>)
+        : {}),
+      result: structured,
+      $: structured,
+      root: payload,
+      input,
+      ...runContext,
+    };
+
     const ok = runInNewContext(
       `(${spec.expression})`,
-      { result: extractMcpStructuredData(payload), root: payload, input, ...runContext },
+      contextObj,
       { timeout: JS_EXPRESSION_TIMEOUT_MS, displayErrors: false },
     );
     return {

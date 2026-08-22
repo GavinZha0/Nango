@@ -1,0 +1,2 @@
+ALTER TABLE "web_auto_suite" ADD COLUMN "evaluator_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "web_auto_suite" ADD CONSTRAINT "web_auto_suite_evaluator_agent_id_builtin_agent_id_fk" FOREIGN KEY ("evaluator_agent_id") REFERENCES "public"."builtin_agent"("id") ON DELETE set null ON UPDATE no action;

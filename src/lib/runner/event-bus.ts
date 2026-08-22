@@ -74,6 +74,19 @@ export interface EvaluationRunEvent {
   };
 }
 
+/**
+ * Web Auto subsystem frames — same multiplexing pattern as
+ * verification & evaluation.
+ */
+export interface WebAutoRunEvent {
+  kind: "web_auto";
+  ownerId: string;
+  frame: WebAutoFrame;
+}
+
+import type { WebAutoFrame } from "@/lib/web-auto/types";
+export type { WebAutoFrame };
+
 export interface ToolApprovalResolvedEvent {
   kind: "tool_approval_resolved";
   runId: string;
@@ -99,6 +112,7 @@ export type RunnerEvent =
   | NotificationCreatedEvent
   | VerificationRunEvent
   | EvaluationRunEvent
+  | WebAutoRunEvent
   | ToolApprovalResolvedEvent
   | ToolApprovalRequestedEvent;
 

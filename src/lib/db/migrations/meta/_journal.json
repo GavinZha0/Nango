@@ -71,6 +71,27 @@
       "when": 1786000000000,
       "tag": "0009_purge_obsolete_sandbox_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787280339483,
+      "tag": "0010_web-auto",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787346836101,
+      "tag": "0011_web_auto_evaluator",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787359273905,
+      "tag": "0012_add_web_auto_mcp_server_id",
+      "breakpoints": true
     }
   ]
 }

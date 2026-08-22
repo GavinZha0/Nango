@@ -79,6 +79,7 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   { kind: "panel", id: "ssh-server", role: "editor" },
   { kind: "panel", id: "verification", role: "editor" },
   { kind: "panel", id: "evaluation", role: "editor" },
+  { kind: "panel", id: "web-auto", role: "editor" },
   { kind: "route", id: "trace", label: "Traces", icon: Activity, href: "/trace", role: "editor" },
 
   // Admin group

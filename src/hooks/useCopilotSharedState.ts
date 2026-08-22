@@ -51,7 +51,10 @@ export function useCopilotSharedStateSync() {
     let resourceId: string | null = null;
     const parts = pathname.split("/").filter(Boolean);
     if (parts.length > 1 && panelId !== "none") {
-      resourceId = parts[1];
+      const uuidSegment = parts.find((p) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p),
+      );
+      resourceId = uuidSegment || parts[parts.length - 1] || null;
     }
 
     return { activeUrl: pathname, activeView: panelId, activeResourceId: resourceId };
