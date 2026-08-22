@@ -57,9 +57,11 @@ Nango's design is centered around two product pillars: **AI Engine** (intelligen
 * **Credential lifecycle & security**: All third-party secrets (API keys, DB credentials, SSH private keys) are encrypted with **AES-256-GCM** on a versioned keyring, decrypted strictly server-side, and support zero-downtime key rotation.
 * **Governed data access & execution safety**: Enforce read-only flags and table-level allow/deny lists. SQL queries are parsed and validated before reaching the database, and results are cached as Columnar Parquet files for secure sharing and sandbox execution.
 * **Schedules, async runs & unified history**: Trigger agent runs on one-shot or recurring schedules, with async execution results pushed to a live notification inbox. All backend and built-in chat histories are persisted in PostgreSQL, with an admin forensics page to trace run execution timelines.
-* **Artifact library & save-from-chat**: Keep a folder-tree library to catalog AI-generated outputs (charts, code, HTML, PPT, reports), allowing users to save outputs from chat with full lineage trace back to the original workflow.
+* **Artifact library & save-from-chat**: Keep a folder-tree library to catalog AI-generated outputs (charts, code, HTML, images, PPT, reports), allowing users to save outputs from chat with full lineage trace back to the original workflow.
 * **Dashboard composition**: Combine multiple saved artifacts into responsive grid-layout dashboards and publish them with a stable URL.
 * **Workflow-driven refresh & re-creation**: Artifacts are backed by replayable workflows. Users can apply filters (time range, dimension slice) to charts, refresh them with live data by re-running the workflow, or use AI inside an editor to tweak the underlying query and save it as a new version.
+* **Web Automation (Web Auto)**: Deterministic Playwright browser automation and regression testing harness with dual-tier evaluation (Node.js VM sandboxed assertions + LLM-as-Judge inspection) and real-time SSE progress streaming.
+* **Verification & Evaluation Subsystems**: Deterministic assert-on-output testing for MCP tools/workflows and stochastic conversational quality evaluation for AI agents.
 
 ---
 

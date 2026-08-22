@@ -54,17 +54,18 @@ async function signUpOrSignIn(
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: /sign up/i }).click();
 
-  // Wait for either redirect (success) or error (user exists)
-  const redirected = await Promise.race([
+  // Wait for either redirect (success) or error indicator on the form
+  const outcome = await Promise.race([
     page
-      .waitForURL((url) => !url.pathname.includes("/sign-up"), { timeout: 8000 })
-      .then(() => true),
+      .waitForURL((url) => !url.pathname.includes("/sign-up"), { timeout: 15000 })
+      .then(() => "success" as const),
     page
-      .waitForTimeout(4000)
-      .then(() => false),
-  ]);
+      .locator("p.text-destructive")
+      .waitFor({ state: "visible", timeout: 15000 })
+      .then(() => "error" as const),
+  ]).catch(() => "timeout" as const);
 
-  if (!redirected) {
+  if (outcome !== "success") {
     // User might already exist — try sign-in
     await page.goto("/sign-in");
     await page.getByLabel("Email").fill(user.email);
@@ -73,7 +74,7 @@ async function signUpOrSignIn(
 
     await page.waitForURL(
       (url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"),
-      { timeout: 10000 },
+      { timeout: 15000 },
     );
   }
 
@@ -97,7 +98,7 @@ setup("create admin user", async ({ page }) => {
   await page.getByLabel("Email").fill(TEST_USERS.admin.email);
   await page.getByLabel("Password").fill(TEST_USERS.admin.password);
   await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 10000 });
+  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
   await page.context().storageState({ path: ADMIN_STATE_PATH });
 });
 
@@ -112,7 +113,7 @@ setup("create editor user", async ({ page, context }) => {
   await page.getByLabel("Email").fill(TEST_USERS.editor.email);
   await page.getByLabel("Password").fill(TEST_USERS.editor.password);
   await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 10000 });
+  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
   await context.storageState({ path: EDITOR_STATE_PATH });
 });
 

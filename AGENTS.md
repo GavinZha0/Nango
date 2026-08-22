@@ -63,6 +63,7 @@ pnpm comments:check:all   # Run comment guard sweep on src/ and scripts/
 19. **Tool execution failure contract**: Every built-in agent tool execution is wrapped by `wrapToolExecute` converting thrown errors into a return value `{ isError: true, message, toolName }`. Do not throw errors from custom tool `execute` methods; return structured failure states instead.
 20. **Verification subsystem**: Deterministic assert-on-output testing framework for MCP tools (V1) and workflows (V2). MCP test runs do not write `entity_run` records; workflow test runs execute on the runner. Suite runs are serial, alphabetical, and fail-tolerant. Assertions support `json_schema`, `jsonpath_equals`, and `js_expression` (vm sandbox). See [docs/verification.md](file:///d:/AI/nango/docs/verification.md).
 21. **Evaluation subsystem**: Stochastic LLM-as-Judge conversational quality testing. Targets are run via `runner.start({mode: "sync"})`. Evaluations are executed programmatically by a system evaluator agent (not user-routable) which submits structured grades via `submit_evaluation_scores` tool. Results are compiled and persisted. See [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md).
+22. **Web Auto subsystem**: Deterministic Playwright-based browser automation and regression test harness with dual-tier evaluation (JS VM sandbox assertions + LLM Evaluator). Directly executes scripts on Playwright MCP servers and broadcasts live progress via SSE. See [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md).
 
 ## Codebase Organization
 

@@ -28,6 +28,7 @@ Key system capabilities:
 | **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs; permanent Artifact library via Save | `src/lib/artifacts/` |
 | **Verification Subsystem** | Deterministic quality gate for testing MCP tools and workflows using assertions | `src/lib/verification/` ([docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | **Evaluation Subsystem** | Stochastic quality assessment for agent conversations using LLM-as-Judge | `src/lib/evaluation/` ([docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
+| **Web Auto Subsystem** | Deterministic Playwright-based browser automation & regression testing with dual-tier evaluation | `src/lib/web-auto/` ([docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
 
 ---
 
@@ -186,7 +187,7 @@ For detailed design and implementation phases, see:
 | Group | Paths | Guards | Purpose |
 |---|---|---|---|
 | `(auth)` | `/sign-in`, `/sign-up` | none | accessible while signed out |
-| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/schedule[/[id]]`, `/notifications` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
+| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/schedule[/[id]]`, `/notifications`, `/web-auto[/[id]]` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
 | API | `/api/*` | `getSession()` per-route | unified 401 handling |
 
 ### 4.2 Frontend Layout (Three-Pane)
@@ -194,7 +195,7 @@ For detailed design and implementation phases, see:
 `ThreePanelContent` uses `react-resizable-panels` for draggable, collapsible panels:
 
 - **Left**: `SidePanel`, renders one of `DashboardPanel` / `ArtifactPanel` / `AgentPanel` / `McpPanel` / `SkillsPanel` / `SchedulesPanel` based on `useSidebarStore.activeLeftPanel`.
-- **Center**: route-driven main area. `/outcomes` shows the current thread's transient Outcomes panel (V1); editor routes like `/agent/[id]` render their own pages; `/` is the welcome page.
+- **Center**: route-driven main area. `/outcomes` shows the current thread's transient Outcomes panel (V1); editor routes like `/agent/[id]` or `/web-auto/[id]` render their own pages; `/` is the welcome page.
 - **Right**: `RightPanel` — hosts the CopilotKit provider plus `ChatPanel` / `HistoryPanel` / `BuiltinAgentEditor`.
 
 The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on purpose: switching agents remounts only the chat subtree, never the page chrome (header, toolbar, panel widths).
@@ -210,6 +211,8 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `/api/builtin-agents`, `/[id]` | CRUD | Built-in agent + tool bindings (incl. `role` enum) | session |
 | `/api/mcp-servers`, `/[id]/discover`, `/[id]/call-tool` | CRUD/RPC | MCP server registration, tool discovery, invocation | session |
 | `/api/skills`, `/api/skills/[id]`, `/api/skills/[id]/files/[...]` | CRUD | Skills CRUD + helper-file read | session |
+| `/api/web-auto/suites`, `/cases`, `/runs` | CRUD/RPC | Web Auto suites, cases, execution batches and case results | session |
+| `/api/media/tool-image/[id]` | GET | Stream temporary media cache images produced by MCP tools | session |
 | `/api/notifications`, `/api/notifications/[id]` | GET/POST/PATCH/DELETE | Inbox list / mark-all-read / mark-read / delete | session |
 | `/api/runs/stream` | GET (SSE) | Live notification + `run_finalized` stream keyed by ownerId. Notification frames carry `id: <uuidv7>`; on EventSource auto-reconnect we replay missed `notification` rows via `Last-Event-ID` (header or `?lastEventId=`), capped at 200 rows per resume. | session |
 | `/api/threads`, `/api/threads/[id]`, `/api/threads/[id]/messages` | GET / DELETE / GET | Unified chat history surface. Lists threads (filtered by optional `?entityId=`), reconstructs AG-UI `Message[]` from `entity_run.input_task` + post-coalesce `entity_run_event` rows, deletes a thread + its delegation sub-tree via recursive CTE. owner-scoped end to end (`owner_id = session.user.id`); sub-runs excluded by `parent_run_id IS NULL`. Replaces the previous reverse-proxy of upstream agent platform `/sessions` APIs. | session |
@@ -240,7 +243,9 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `builtin-agents/agent-spec.ts` | Polymorphic `AgentToolRef` (mcp_server / mcp_tool / skill / builtin_tool) decoded from `builtin_agent_tool` rows. |
 | `mcp/provider-pool.ts` + `mcp/index.ts` | Process-wide MCP provider pool: one transport per server, refcounted, with idle reaper and detach-on-evict. Singleton in `mcp/index.ts`. |
 | `credentials/invalidation.ts` | Cross-cutting helpers: `invalidateForCredentialChange` and `invalidateForMcpServerChange`. Call from any write path. |
-| `mcp/client-providers.ts` | `createGracefulMcpProvider` — degrade MCP failures without aborting agent runs |
+| `mcp/client-providers.ts` | `createGracefulMcpProvider` — degrade MCP failures without aborting agent runs; supports `mcp.execution_timeout` |
+| `media/temp-media-cache.ts` | In-memory LRU buffer cache for tool-emitted images with TTL and streaming endpoint |
+| `web-auto/` | Web Auto subsystem: Playwright MCP runner, JS VM sandboxed assertions, evaluator agent bridge, and crash recovery scanner (see [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
 | `runner/runner.ts` | Execution kernel: `runChatRequest` (backend) / `runBuiltinChatRequest` (built-in) / `start` (programmatic, sync + async). Every dispatch produces an `entity_run` row. Sync runs timeout after `runner.sync_timeout` (default 300s); async runs timeout after `runner.async_timeout` (default 1800s / 30 min). Both are configurable in the admin config table. |
 | `runner/persisting-agent.ts` | AG-UI event tee — wraps every dispatched agent so the event stream both reaches the browser and persists into `entity_run_event`. Storage is **coalesced**: TEXT_MESSAGE_CONTENT / REASONING_MESSAGE_CONTENT deltas are buffered in memory and flushed to a single `message` / `reasoning` row at each natural boundary (tool call, message-id change, stream end). The browser still sees real-time deltas on the wire. |
 | `runner/event-bus.ts` | In-process pub/sub keyed by `ownerId`, surfaced via `/api/runs/stream` SSE; `globalThis` slot for HMR safety. |
@@ -408,6 +413,7 @@ Lookup paths (server-side only):
 | Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards |
 | Verification | `verification_suite`, `verification_case`, `verification_run`, `verification_case_result` | Deterministic assert-on-output testing for tools and workflows (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | Evaluation | `eval_suite`, `eval_case`, `eval_run`, `eval_case_result` | Stochastic quality evaluations using LLM-as-Judge (see [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
+| Web Auto | `web_auto_suite`, `web_auto_case`, `web_auto_run`, `web_auto_case_result` | Deterministic Playwright browser automation suites, cases, runs & results (see [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
 
 ### 6.2 Built-in Agent → Tool Binding (Polymorphic FK)
 

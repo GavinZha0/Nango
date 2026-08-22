@@ -92,6 +92,13 @@
       "when": 1787359273905,
       "tag": "0012_add_web_auto_mcp_server_id",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787441780198,
+      "tag": "0013_add_account_issuer",
+      "breakpoints": true
     }
   ]
 }

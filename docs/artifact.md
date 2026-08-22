@@ -23,9 +23,11 @@ A single workflow can power **many** artifacts with different UI configurations 
 
 The following core capabilities have been fully designed and implemented:
 - **Chatbot to Outcomes**: Chat tool chain generates outcomes.
-- **Save to Artifact**: Outcomes can be persisted as artifacts.
+- **Save to Artifact**: Outcomes can be persisted as artifacts with full workflow DAG lineage.
 - **Workflow Generation & Display**: Artifacts successfully generate and display backing workflows.
 - **Chart Rendering (ECharts)**: `<EChartsRenderer />` consumes merged options from the workflow engine.
+- **HTML Artifact Rendering**: Sandboxed iframe preview for generated HTML artifacts.
+- **Image Artifact Rendering**: `<img />` visual rendering with support for URLs and Base64 outputs produced by MCP tools and screenshot tools.
 
 ---
 
@@ -37,8 +39,7 @@ The final major missing steps for the artifact subsystem are:
 |---|---|---|
 | 1 | **Artifact & Workflow Editing** | Capabilities to edit the generated artifacts and their backing workflows. |
 | 2 | **Dashboard Construction** | Composing multiple artifacts into a presentable dashboard layout. |
-| 3 | **HTML Artifact Rendering** | iframe + postMessage bridge; theme propagation; auto-resize. |
-| 4 | **PPT Rendering (Marp)** | Marp-core markdown → slides; deck navigator (arrow keys, page counter, fullscreen). |
+| 3 | **PPT Rendering (Marp)** | Marp-core markdown → slides; deck navigator (arrow keys, page counter, fullscreen). |
 
 ---
 
