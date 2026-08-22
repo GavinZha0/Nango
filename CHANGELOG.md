@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/GavinZha0/Nango/compare/v0.14.0...v0.15.0) (2026-08-22)
+
+
+### Features
+
+* add Web Auto subsystem for Playwright automation testing ([425d9bb](https://github.com/GavinZha0/Nango/commit/425d9bb356268317d3c5ef9f405ff88a8e184774))
+* **mcp:** support image outcomes, artifact saving, history replay and execution timeout ([1763058](https://github.com/GavinZha0/Nango/commit/176305851d2e78052fd593213d8915d323df3d7a))
+
 ## [0.14.0](https://github.com/GavinZha0/Nango/compare/v0.13.0...v0.14.0) (2026-08-18)
 
 
