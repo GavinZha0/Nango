@@ -179,6 +179,7 @@ export async function saveArtifact(
         throw new Error("saveArtifact: workflow row insert returned no id.");
       }
 
+      const creatorInv = invocations.find((i) => i.callId === resolution.toolCallId);
       const [artifactRow] = await tx
         .insert(ArtifactTable)
         .values({
@@ -195,6 +196,10 @@ export async function saveArtifact(
           sourceOutcomeId: input.outcomeId,
           workflowId: workflowRow.id,
           workflowOutputField,
+          config: {
+            ...built.strippedFrontendConfig,
+            ...(creatorInv?.result ? { result: creatorInv.result } : {}),
+          },
           ...(input.parentId !== undefined && { parentId: input.parentId }),
           createdBy: input.ownerId,
         })
@@ -523,9 +528,18 @@ function deriveArtifactType(toolName: string): ArtifactType {
     case "render_html":
       return "html";
     case "render_markdown":
+    case "web_search":
       return "report";
+    case "browser_take_screenshot":
+    case "take_screenshot":
+    case "generate_image":
+    case "render_image":
+      return "image";
     default:
-      return "chart";
+      if (toolName.includes("screenshot") || toolName.includes("image")) {
+        return "image";
+      }
+      return "report";
   }
 }
 

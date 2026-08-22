@@ -16,7 +16,9 @@ const callToolSchema = z.object({
 
 import { normalizeMcpToolResult } from "@/lib/mcp/tool-result-utils";
 
-import { getConfigNumber } from "@/lib/config";
+import { getConfigMs, getConfigNumber } from "@/lib/config";
+
+const DEFAULT_EXECUTION_TIMEOUT_S = 60;
 
 /**
  * POST /api/mcp-servers/[id]/call-tool
@@ -25,15 +27,23 @@ export const POST = withEditor<{ id: string }>(
   "/api/mcp-servers/[id]/call-tool",
   async ({ req, params }) => {
     const body = await parseBody(req, callToolSchema);
+    const timeoutMs = getConfigMs(
+      "mcp.execution_timeout",
+      DEFAULT_EXECUTION_TIMEOUT_S,
+    );
     const raw = await withMcpAdminClient({
       serverId: params.id,
       clientName: "nango-tool-call",
       errorPrefix: "Tool call failed",
       fn: ({ client }) =>
-        client.callTool({
-          name: body.toolName,
-          arguments: body.args ?? {},
-        }),
+        client.callTool(
+          {
+            name: body.toolName,
+            arguments: body.args ?? {},
+          },
+          undefined,
+          { timeout: timeoutMs },
+        ),
     });
     return NextResponse.json({
       result: normalizeMcpToolResult(raw, { parseForUi: true }),

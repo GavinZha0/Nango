@@ -1056,6 +1056,23 @@ function ArtifactBody({
     );
   }
 
+  // Image artifacts: render image directly via URL / data URL
+  if (node.type === "image") {
+    const imgSrc = extractImageSrc(data, node.config);
+    if (imgSrc) {
+      return (
+        <div className="flex h-full min-h-0 w-full items-center justify-center p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imgSrc}
+            alt={node.name ?? "Saved image artifact"}
+            className="max-h-[600px] max-w-full rounded object-contain shadow-sm border border-border"
+          />
+        </div>
+      );
+    }
+  }
+
   return (
     <div className="rounded border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">
       No renderer for this artifact type yet
@@ -1068,6 +1085,51 @@ function ArtifactBody({
       type-specific renderer will land in a future release.
     </div>
   );
+}
+
+function extractImageSrc(data: unknown, config: unknown): string | null {
+  const findInObject = (obj: unknown): string | null => {
+    if (!obj) return null;
+    if (typeof obj === "string" && obj.trim().length > 0) {
+      if (obj.startsWith("http") || obj.startsWith("/") || obj.startsWith("data:")) {
+        return obj;
+      }
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        const found = findInObject(item);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof obj === "object") {
+      const rec = obj as Record<string, unknown>;
+      if (typeof rec.url === "string") return rec.url;
+      if (typeof rec.src === "string") return rec.src;
+      if (typeof rec.data === "string" && !rec.data.startsWith("[")) {
+        const mime = typeof rec.mimeType === "string" ? rec.mimeType : "image/png";
+        return rec.data.startsWith("data:") ? rec.data : `data:${mime};base64,${rec.data}`;
+      }
+      if (rec.content) {
+        const found = findInObject(rec.content);
+        if (found) return found;
+      }
+      if (rec.result) {
+        const found = findInObject(rec.result);
+        if (found) return found;
+      }
+      if (rec.blocks && Array.isArray(rec.blocks)) {
+        const imgBlock = rec.blocks.find((b: { kind?: string }) => b?.kind === "image") as
+          | { src?: string; url?: string }
+          | undefined;
+        if (imgBlock?.src) return imgBlock.src;
+        if (imgBlock?.url) return imgBlock.url;
+      }
+    }
+    return null;
+  };
+
+  return findInObject(data) ?? findInObject(config);
 }
 
 /**

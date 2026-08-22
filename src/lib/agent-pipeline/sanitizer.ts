@@ -68,6 +68,42 @@ export function sanitizeToolResultText(text: string): string {
   return cleaned;
 }
 
+import { getConfigBoolean } from "@/lib/config";
+import { setTempMedia } from "@/lib/media/temp-media-cache";
+
+function processImageContent(
+  content: Array<Record<string, unknown>>,
+  toolCallId?: string,
+): Array<Record<string, unknown>> {
+  const cropEnabled = getConfigBoolean("mcp.crop_image_for_llm", true);
+
+  return content.map((item, idx) => {
+    if (item && item.type === "image" && typeof item.data === "string") {
+      const mediaId = toolCallId ? `${toolCallId}_${idx}` : `img_${Date.now()}_${idx}`;
+      const mimeType = typeof item.mimeType === "string" ? item.mimeType : "image/png";
+
+      // Cache full image buffer in server-side memory cache
+      setTempMedia(mediaId, item.data, mimeType);
+      const url = `/api/media/tool-image/${mediaId}`;
+      const sizeKB = Math.round((item.data.length * 0.75) / 1024);
+
+      if (cropEnabled) {
+        return {
+          ...item,
+          url,
+          data: `[${sizeKB}KB ${mimeType} base64 string]`,
+        };
+      } else {
+        return {
+          ...item,
+          url,
+        };
+      }
+    }
+    return item;
+  });
+}
+
 /**
  * Determine if a tool is external (Web search, external MCP server)
  * vs a local trusted system tool (SQL, local bash, file read).
@@ -88,6 +124,32 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
     order: 55,
     wrapToolCall: async (_ctx, call, next) => {
       const rawResult = await next(call);
+
+      // Process image content in tool results (both external and internal)
+      if (rawResult && typeof rawResult === "object") {
+        if (Array.isArray(rawResult)) {
+          return processImageContent(rawResult as Array<Record<string, unknown>>, call.toolCallId);
+        }
+
+        const resObj = rawResult as Record<string, unknown>;
+        if (Array.isArray(resObj.content)) {
+          const processedContent = processImageContent(
+            resObj.content as Array<Record<string, unknown>>,
+            call.toolCallId,
+          );
+
+          if (isExternalTool(call.toolName)) {
+            const sanitizedContent = processedContent.map((entry) => {
+              if (entry.type === "text" && typeof entry.text === "string") {
+                return { ...entry, text: wrapUntrustedContext(sanitizeToolResultText(entry.text)) };
+              }
+              return entry;
+            });
+            return { ...resObj, content: sanitizedContent };
+          }
+          return { ...resObj, content: processedContent };
+        }
+      }
 
       // Only sanitize external tools
       if (!isExternalTool(call.toolName)) {

@@ -179,6 +179,26 @@ function isHtmlPageInvocation(inv: ToolInvocation): boolean {
   return inv.toolName === HTML_PAGE_TOOL_NAME;
 }
 
+function isImageInvocation(inv: ToolInvocation): boolean {
+  const name = inv.toolName.toLowerCase();
+  if (
+    name === "browser_take_screenshot" ||
+    name === "take_screenshot" ||
+    name === "generate_image" ||
+    name === "render_image" ||
+    name.includes("screenshot")
+  ) {
+    return true;
+  }
+  if (inv.result && typeof inv.result === "object") {
+    const res = inv.result as Record<string, unknown>;
+    if (Array.isArray(res.content)) {
+      return (res.content as Array<{ type?: string }>).some((c) => c?.type === "image");
+    }
+  }
+  return false;
+}
+
 /**
  * SQL extraction tool's operational fields — present on tool
  * results but not part of any spec node's output contract. Strategy
@@ -250,14 +270,13 @@ export function buildWorkflowSpecFromRunEvents(
   // stored this payload was dropped (migration 0004).
   const strippedFrontendConfig = { ...artifactCreator.inputs };
 
-  // Chart tools (generate_echarts_config / generate_<lib>_config)
-  // become first-class workflow nodes — their invocations stay in
-  // `dataInvocations`. Every other artifact creator (render_html,
-  // render_markdown, …) produces final rendered output rather than
-  // a replayable data operation and is stripped from the pipeline.
+  // Chart tools, HTML tools, and image/screenshot tools become first-class
+  // workflow nodes — their invocations stay in `dataInvocations`.
   const artifactCreatorIsChart = isChartInvocation(artifactCreator);
   const artifactCreatorIsHtmlPage = isHtmlPageInvocation(artifactCreator);
-  const artifactCreatorIsFirstClass = artifactCreatorIsChart || artifactCreatorIsHtmlPage;
+  const artifactCreatorIsImage = isImageInvocation(artifactCreator);
+  const artifactCreatorIsFirstClass =
+    artifactCreatorIsChart || artifactCreatorIsHtmlPage || artifactCreatorIsImage;
   const dataInvocations = artifactCreatorIsFirstClass
     ? successful
     : successful.filter((i) => i.callId !== artifactCreatingCallId);
@@ -274,19 +293,13 @@ export function buildWorkflowSpecFromRunEvents(
     artifactInput: strippedFrontendConfig,
   });
 
-  // spec.outputs from the rewritten artifact-creator input. Only
-  // entries Strategy Z+ successfully rewrote to a real @nodes ref
-  // make it in — static literals (title, description, …) live in
-  // `strippedFrontendConfig` and have no place in spec.outputs.
-  //
-  // Special-case: when the artifact creator is a chart tool, the
-  // spec's output is the chart node's merged option — there is no
-  // freeform args-to-outputs mapping. We pin spec.outputs to
-  // `{ option: "@nodes.<chartNodeId>.option" }`.
+  // spec.outputs mapping
   const outputs = artifactCreatorIsChart
     ? buildChartOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : artifactCreatorIsHtmlPage
     ? buildHtmlOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
+    : artifactCreatorIsImage
+    ? buildImageOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : buildOutputsMap(
         reconciled.rewrittenArtifactInput,
         reconciled.nodes,
@@ -1319,6 +1332,24 @@ function buildHtmlOutputsMap(
     );
   }
   return { html: `@nodes.${htmlNode.id}.html` };
+}
+
+function buildImageOutputsMap(
+  dataInvocations: ReadonlyArray<ToolInvocation>,
+  nodes: ReadonlyArray<LLMNode>,
+  artifactCreatingCallId: string,
+): Record<string, string> {
+  const idx = dataInvocations.findIndex((inv) => inv.callId === artifactCreatingCallId);
+  if (idx < 0) {
+    throw new Error(
+      `buildImageOutputsMap: image callId '${artifactCreatingCallId}' is not present in dataInvocations.`,
+    );
+  }
+  const imgNode = nodes[idx];
+  if (imgNode === undefined) {
+    throw new Error(`buildImageOutputsMap: expected node at index ${idx}`);
+  }
+  return { image: `@nodes.${imgNode.id}.content` };
 }
 
 

@@ -69,6 +69,8 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
 
   // ── mcp ───────────────────────────────────────────────────────────
   { key: "mcp.discovery_timeout", value: "5", valueType: "number", description: "Tool discovery timeout in seconds" },
+  { key: "mcp.execution_timeout", value: "60", valueType: "number", description: "MCP tool execution timeout in seconds" },
+  { key: "mcp.crop_image_for_llm", value: "true", valueType: "boolean", description: "Crop massive base64 image data in tool results before passing to LLM" },
 
   // ── infrastructure ────────────────────────────────────────────────
   { key: "datasource.cache_root", value: "", valueType: "string", description: "Dataset cache root path (empty = <repoRoot>/.cache/datasource — under the project root for easy inspection / cleanup)" },

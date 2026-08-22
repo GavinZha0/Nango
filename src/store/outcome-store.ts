@@ -17,7 +17,7 @@ import { create } from "zustand";
  *  dedicated renderer under `components/workspace/blocks/`. Adding a
  *  new block: append the discriminant + a `<KindBlock>` component +
  *  wire it in `BlockList`. */
-export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock;
+export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock | ImageBlock;
 
 export interface TextBlock {
   kind: "text";
@@ -88,6 +88,15 @@ export interface HtmlBlock {
   /** Complete HTML page source (≤ 512 KB; enforced at the handler).
    *  Rendered inside a sandboxed iframe via `srcdoc`. */
   html: string;
+}
+
+export interface ImageBlock {
+  kind: "image";
+  /** URL (e.g. /api/media/tool-image/xxx) or data:image/...;base64,... */
+  src: string;
+  mimeType?: string;
+  alt?: string;
+  caption?: string;
 }
 
 // outcome

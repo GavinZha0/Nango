@@ -44,9 +44,18 @@ export function buildProductionSaveDeps(ownerId: string): SaveArtifactDeps {
       toolCatalogP ??= buildUserToolCatalog(ownerId);
       const catalog = await toolCatalogP;
       const def = catalog.get(toolName);
-      if (!def) return null;
+      if (def) {
+        return {
+          input_schema: extractInputJsonSchema(def.parameters),
+        };
+      }
+      // For dynamic/external tools (e.g. MCP tools like browser_navigate, browser_take_screenshot, etc.),
+      // provide permissive object schema instead of blocking the save.
       return {
-        input_schema: extractInputJsonSchema(def.parameters),
+        input_schema: {
+          type: "object",
+          additionalProperties: true,
+        },
       };
     },
 

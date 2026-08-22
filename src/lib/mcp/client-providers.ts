@@ -28,6 +28,7 @@ import { getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 
 const DEFAULT_DISCOVERY_TIMEOUT_S = 5;
+const DEFAULT_EXECUTION_TIMEOUT_S = 60;
 
 export interface GracefulMcpProviderConfig {
   /** Server display name used in log lines. */
@@ -267,10 +268,18 @@ function wrapTools(
         additionalProperties: false,
       } as Record<string, unknown>),
       execute: async (args: unknown) => {
-        const result = await client.callTool({
-          name: raw.name,
-          arguments: (args ?? {}) as Record<string, unknown>,
-        });
+        const timeoutMs = getConfigMs(
+          "mcp.execution_timeout",
+          DEFAULT_EXECUTION_TIMEOUT_S,
+        );
+        const result = await client.callTool(
+          {
+            name: raw.name,
+            arguments: (args ?? {}) as Record<string, unknown>,
+          },
+          undefined,
+          { timeout: timeoutMs },
+        );
 
         return normalizeAndDeduplicateMcpResult(result, { parseForUi: false });
       },

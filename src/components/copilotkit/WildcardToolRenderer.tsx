@@ -36,10 +36,13 @@
  * (Python traceback, ModuleNotFoundError, OOM, …).
  */
 
-import { useState, type ReactElement } from "react";
-import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { ArrowUpRight, ChevronDown, ChevronRight, ImageIcon, Wrench } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { useToolApproval, ToolApprovalButtons, ToolApprovalBadge } from "@/hooks/useToolApproval";
+import { useOutcomeStore } from "@/store/outcome-store";
+import { useWorkspaceStore } from "@/store/workspace";
 
 import {
   detectToolResultStatus,
@@ -62,6 +65,45 @@ export type WildcardRenderProps = {
   result: string | undefined;
 };
 
+interface ExtractedToolImage {
+  src: string;
+  mimeType?: string;
+  alt?: string;
+}
+
+function extractImages(rawResult: string | undefined): ExtractedToolImage[] {
+  if (!rawResult) return [];
+  try {
+    const obj = JSON.parse(rawResult) as Record<string, unknown>;
+    if (!obj || typeof obj !== "object") return [];
+
+    const contentList: Array<Record<string, unknown>> = Array.isArray(obj.content)
+      ? (obj.content as Array<Record<string, unknown>>)
+      : Array.isArray(obj)
+        ? (obj as Array<Record<string, unknown>>)
+        : [];
+
+    const images: ExtractedToolImage[] = [];
+    for (const item of contentList) {
+      if (item && item.type === "image") {
+        const url = typeof item.url === "string" ? item.url : null;
+        const data = typeof item.data === "string" ? item.data : null;
+        const mimeType = typeof item.mimeType === "string" ? item.mimeType : "image/png";
+
+        if (url) {
+          images.push({ src: url, mimeType, alt: "Tool image output" });
+        } else if (data && !data.startsWith("[")) {
+          const src = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
+          images.push({ src, mimeType, alt: "Tool image output" });
+        }
+      }
+    }
+    return images;
+  } catch {
+    return [];
+  }
+}
+
 /** Pretty-print arbitrary parameters object. Empty objects render as
  *  `{}` (the CopilotKit default behaviour); we don't substitute a
  *  custom "(no arguments)" string to keep the visual cue minimal. */
@@ -73,6 +115,29 @@ function formatParameters(parameters: unknown): string {
   }
 }
 
+/** Format result safely for display, truncating any raw long base64 strings
+ *  to avoid hanging the browser DOM. */
+function formatDisplayResult(rawResult: string | undefined): string {
+  if (!rawResult) return "";
+  try {
+    const parsed = JSON.parse(rawResult) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const sanitized = JSON.parse(
+        JSON.stringify(parsed, (key, value) => {
+          if (key === "data" && typeof value === "string" && value.length > 200) {
+            return `[${Math.round((value.length * 0.75) / 1024)}KB base64 image data]`;
+          }
+          return value;
+        }),
+      );
+      return JSON.stringify(sanitized, null, 2);
+    }
+    return rawResult;
+  } catch {
+    return rawResult;
+  }
+}
+
 export function WildcardToolRenderer({
   name,
   toolCallId,
@@ -80,48 +145,86 @@ export function WildcardToolRenderer({
   status,
   result,
 }: WildcardRenderProps): ReactElement {
+  const router = useRouter();
+  const select = useOutcomeStore((s) => s.select);
+  const addOutcome = useOutcomeStore((s) => s.addOutcome);
+
   const approval = useToolApproval(toolCallId, name, parameters);
 
   const detected = detectToolResultStatus(result);
   const badgeStatus = approval.showButtons ? "waiting" : deriveBadgeStatus(status, detected);
   const elapsed = useElapsedSeconds(toolCallId, badgeStatus === "running");
 
-  // Inline header annotation — populated for both `error` and
-  // `warning` badge states (both carry an `isError: true` envelope
-  // with a `message`). A plain `done` result that happens to have an
-  // `error` field — e.g. a SQL query that legitimately returns rows
-  // with an "error" column — must NOT show this banner, so we gate on
-  // the badge state, not on the raw payload.
+  // Extract any images present in the tool result
+  const images = useMemo(() => extractImages(result), [result]);
+  const hasImages = images.length > 0;
+
+  // Upsert image outcome to OutcomeStore when tool finishes successfully
+  useEffect(() => {
+    if (status !== "complete" || images.length === 0) return;
+
+    const ws = useWorkspaceStore.getState();
+    addOutcome({
+      outcomeId: toolCallId,
+      kind: "report",
+      title: `Screenshot: ${name}`,
+      description: `Captured from ${name}`,
+      blocks: images.map((img) => ({
+        kind: "image",
+        src: img.src,
+        mimeType: img.mimeType,
+        alt: img.alt,
+      })),
+      agentId: ws.activeAgentId,
+      threadId: ws.runtimeThreadId ?? null,
+      runId: null,
+      createdAt: Date.now(),
+      collapsed: false,
+      savedArtifactId: null,
+    });
+  }, [status, images, toolCallId, name, addOutcome]);
+
+  const onViewInOutcomes = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    router.push("/outcomes");
+    select(toolCallId);
+  };
+
+  // Inline header annotation
   const annotated = badgeStatus === "error" || badgeStatus === "warning";
   const headerMessage = annotated ? extractErrorMessage(result) : null;
 
-  // Default collapsed for both success and failure paths. The badge
-  // colour signals the outcome; the LLM's narration explains why; the
-  // failure header below surfaces the diagnostic without forcing a
-  // visual jump. Users who want raw args/result click to expand.
+  // Default collapsed for both success and failure paths
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-border bg-card">
-      {/* Header row — always visible. Failure message is inlined after
-          the elapsed timer and truncates against the badge so a long
-          error never wraps; the full text is on the `title` tooltip and
-          in the expanded result view. */}
+      {/* Header row — always visible. */}
       <div
         onClick={() => setExpanded((prev) => !prev)}
         className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40"
       >
-        <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        {hasImages ? (
+          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden />
+        ) : (
+          <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        )}
         <span className="shrink-0 text-xs font-medium text-foreground">
           {name}
         </span>
-        {/* History replay always lands here with elapsed === "0s"
-            because `useElapsedSeconds` uses Date.now() for both
-            startedAt and completedAt, which collapse together on
-            instant SSE replay. Hiding the span on "0s" doubles as the
-            cleanest replay-vs-live discriminator AND filters out the
-            sub-second flash of "0s" on a fresh live tool call before
-            the 1s interval fires. */}
+
+        {hasImages && (
+          <button
+            type="button"
+            onClick={onViewInOutcomes}
+            className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+            title="View image in Outcomes panel"
+          >
+            Screenshot ({images.length})
+            <ArrowUpRight className="h-3 w-3" aria-hidden />
+          </button>
+        )}
+
         {elapsed !== "0s" && (
           <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
             · {elapsed}
@@ -168,13 +271,12 @@ export function WildcardToolRenderer({
                 Result
               </div>
               <pre className="mt-1.5 max-h-64 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-relaxed text-foreground">
-                {result}
+                {formatDisplayResult(result)}
               </pre>
             </div>
           )}
         </>
       )}
-
     </div>
   );
 }

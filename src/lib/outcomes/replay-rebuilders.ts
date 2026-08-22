@@ -324,6 +324,79 @@ export function rebuildHtmlPageOutcome(
   };
 }
 
+// image outcomes from MCP / screenshot tools
+
+/**
+ * Rebuild an image outcome from a tool_call_result carrying MCP image content.
+ */
+export function rebuildImageOutcome(
+  chunk: ToolCallChunkPayload | undefined,
+  result: ToolCallResultPayload,
+  ctx: RebuildContext,
+): { id: string; outcome: Outcome } | null {
+  if (!result || !result.content) return null;
+  try {
+    const parsed =
+      typeof result.content === "string"
+        ? (JSON.parse(result.content) as Record<string, unknown>)
+        : (result.content as Record<string, unknown>);
+
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const contentList: Array<Record<string, unknown>> = Array.isArray(parsed.content)
+      ? (parsed.content as Array<Record<string, unknown>>)
+      : Array.isArray(parsed)
+        ? (parsed as Array<Record<string, unknown>>)
+        : [];
+
+    const imageBlocks: OutcomeBlock[] = [];
+    for (const item of contentList) {
+      if (item && item.type === "image") {
+        const url = typeof item.url === "string" ? item.url : null;
+        const data = typeof item.data === "string" ? item.data : null;
+        const mimeType = typeof item.mimeType === "string" ? item.mimeType : "image/png";
+
+        if (url) {
+          imageBlocks.push({ kind: "image", src: url, mimeType, alt: "Tool image output" });
+        } else if (data && !data.startsWith("[")) {
+          const src = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
+          imageBlocks.push({ kind: "image", src, mimeType, alt: "Tool image output" });
+        }
+      }
+    }
+
+    if (imageBlocks.length === 0) return null;
+
+    const toolName = chunk?.toolName ?? "tool";
+    return {
+      id: result.toolCallId,
+      outcome: {
+        outcomeId: result.toolCallId,
+        kind: "report",
+        title: `Screenshot: ${toolName}`,
+        description: `Captured from ${toolName}`,
+        blocks: imageBlocks,
+        agentId: ctx.entityId,
+        threadId: ctx.threadId,
+        runId: ctx.runId,
+        createdAt: ctx.ts.getTime(),
+        collapsed: false,
+        savedArtifactId: null,
+      },
+    };
+  } catch (err) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_image_failed",
+        toolCallId: result.toolCallId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "failed to rebuild image outcome from result",
+    );
+    return null;
+  }
+}
+
 // helpers
 
 /** Best-effort domain extraction. Returns the empty string when

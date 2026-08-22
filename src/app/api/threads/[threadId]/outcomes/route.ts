@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -15,6 +15,7 @@ import type { Outcome } from "@/store/outcome-store";
 import {
   rebuildChartOutcome,
   rebuildHtmlPageOutcome,
+  rebuildImageOutcome,
   rebuildWebSearchOutcome,
   type RebuildContext,
   type ToolCallChunkPayload,
@@ -30,19 +31,6 @@ import {
  */
 
 const ROUTE = "/api/threads/[threadId]/outcomes" as const;
-
-/** Tool names this replay endpoint knows how to rebuild. Mirrors
- *  the dispatch switch in the loop body — adding a new tool
- *  requires touching both sides (compile-friction is intentional). */
-const REBUILDABLE_TOOLS = ["generate_echarts_config", "generate_html_page", "web_search"] as const;
-type RebuildableTool = (typeof REBUILDABLE_TOOLS)[number];
-
-function isRebuildable(name: string | undefined): name is RebuildableTool {
-  return (
-    typeof name === "string" &&
-    (REBUILDABLE_TOOLS as readonly string[]).includes(name)
-  );
-}
 
 export const GET = withSession<{ threadId: string }>(
   ROUTE,
@@ -82,10 +70,7 @@ export const GET = withSession<{ threadId: string }>(
           eq(EntityRunTable.threadId, threadId),
           eq(EntityRunTable.ownerId, userId),
           or(
-            and(
-              eq(EntityRunEventTable.type, "tool_call_chunk"),
-              sql`${EntityRunEventTable.payload}->>'toolName' IN ('generate_echarts_config', 'generate_html_page', 'web_search')`,
-            ),
+            eq(EntityRunEventTable.type, "tool_call_chunk"),
             eq(EntityRunEventTable.type, "tool_call_result"),
           ),
         ),
@@ -114,7 +99,6 @@ export const GET = withSession<{ threadId: string }>(
     for (const row of rows) {
       if (row.eventType === "tool_call_chunk") {
         const chunk = row.payload as ToolCallChunkPayload;
-        if (!isRebuildable(chunk.toolName)) continue;
 
         // generate_echarts_config and generate_html_page rebuild from
         // chunk only — the result event is a server-side echo of the
@@ -144,8 +128,7 @@ export const GET = withSession<{ threadId: string }>(
           continue;
         }
 
-        // web_search needs the matching tool_call_result to know
-        // the search hits — stash until the result arrives.
+        // Stash all other chunks for pairing with results (web_search, screenshots, etc.)
         pending.set(chunk.toolCallId, {
           chunk,
           runId: row.runId,
@@ -155,10 +138,30 @@ export const GET = withSession<{ threadId: string }>(
       } else if (row.eventType === "tool_call_result") {
         const result = row.payload as ToolCallResultPayload;
         const pair = pending.get(result.toolCallId);
-        if (!pair) continue; // result for an irrelevant tool — ignore.
-        const built = rebuildWebSearchOutcome(pair.chunk, result, ctxFor(pair));
-        pending.delete(result.toolCallId);
-        if (built) outcomes.set(built.id, built.outcome);
+
+        // 1. Try web_search
+        if (pair && pair.chunk.toolName === "web_search") {
+          const built = rebuildWebSearchOutcome(pair.chunk, result, ctxFor(pair));
+          pending.delete(result.toolCallId);
+          if (built) outcomes.set(built.id, built.outcome);
+          continue;
+        }
+
+        // 2. Try image outcome from MCP tools (e.g. browser_take_screenshot)
+        const ctx: RebuildContext = pair
+          ? ctxFor(pair)
+          : {
+              threadId,
+              runId: row.runId,
+              entityId: row.entityId,
+              ts: row.eventTs,
+              log,
+            };
+        const imageOutcome = rebuildImageOutcome(pair?.chunk, result, ctx);
+        if (imageOutcome) {
+          outcomes.set(imageOutcome.id, imageOutcome.outcome);
+          if (pair) pending.delete(result.toolCallId);
+        }
       }
     }
 
