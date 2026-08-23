@@ -5,9 +5,9 @@
 
 ### Features
 
-* add Web Auto image extraction ([c1d1ed2](https://github.com/GavinZha0/Nango/commit/c1d1ed200665803c2a4c46cd679dd3d5edb24b18))
-* add Web Auto subsystem for Playwright automation testing ([425d9bb](https://github.com/GavinZha0/Nango/commit/425d9bb356268317d3c5ef9f405ff88a8e184774))
-* **mcp:** support image outcomes, artifact saving, history replay and execution timeout ([1763058](https://github.com/GavinZha0/Nango/commit/176305851d2e78052fd593213d8915d323df3d7a))
+* add Web Auto image extraction ([c1d1ed2](https://github.com/GavinZha0/Nango/commit/c1d1ed200665803c2a4c46cd679dd3d5edb24b18)) by @GavinZha0
+* add Web Auto subsystem for Playwright automation testing ([425d9bb](https://github.com/GavinZha0/Nango/commit/425d9bb356268317d3c5ef9f405ff88a8e184774)) by @GavinZha0
+* **mcp:** support image outcomes, artifact saving, history replay and execution timeout ([1763058](https://github.com/GavinZha0/Nango/commit/176305851d2e78052fd593213d8915d323df3d7a)) by @GavinZha0
 
 ## [0.14.0](https://github.com/GavinZha0/Nango/compare/v0.13.0...v0.14.0) (2026-08-18)
 
