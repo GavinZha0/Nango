@@ -448,8 +448,9 @@ function ServerHeader({
           <button
             type="button"
             onClick={onSelect}
-            className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2"
+            className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
             aria-label={`Select ${server.name}`}
+            title={version ? `${server.name} (v${version})` : server.name}
           >
             {server.name}
           </button>
@@ -457,13 +458,16 @@ function ServerHeader({
             {toolCount}
           </span>
           {version && (
-            <span className="text-xs font-normal text-muted-foreground/60 shrink-0">
+            <span
+              className="text-xs font-normal text-muted-foreground/60 truncate min-w-0 shrink"
+              title={`v${version}`}
+            >
               v{version}
             </span>
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {/* Refresh tools */}
         {canEdit && (
           <button

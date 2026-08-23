@@ -1,13 +1,18 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Play, Plus, X, ArrowLeft, Loader2, AlertCircle, Save, SquarePen, Trash2, CircleCheck, CircleX, CircleSlash } from "lucide-react";
+import { Play, Plus, X, ArrowLeft, Loader2, AlertCircle, Save, SquarePen, Trash2, CircleCheck, CircleX, CircleSlash, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useWebAutoStore, WebAutoCaseRow, WebAutoSuiteRow } from "@/store/web-auto-store";
 import { useWebAutoRunStream } from "@/hooks/useWebAutoRunStream";
+import {
+  extractWebAutoImages,
+  formatWebAutoOutputForDisplay,
+  type WebAutoExtractedImage,
+} from "@/lib/web-auto/image-extractor";
 import { useRouter } from "next/navigation";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
@@ -62,6 +67,11 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const [activeSuiteRunId, setActiveSuiteRunId] = useState<string | null>(null);
   const liveRun = useWebAutoRunStream(activeSuiteRunId);
 
+  const [outputTab, setOutputTab] = useState<"output" | "images">("output");
+  const [copiedImageId, setCopiedImageId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<WebAutoExtractedImage | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [runOutcome, setRunOutcome] = useState<{
@@ -75,6 +85,33 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     error: { source: string; message: string; details?: unknown } | null;
     durationMs: number;
   } | null>(null);
+
+  const extractedImages = useMemo(() => {
+    return extractWebAutoImages(runOutcome?.executionOutput);
+  }, [runOutcome?.executionOutput]);
+
+  const formattedOutputText = useMemo(() => {
+    return formatWebAutoOutputForDisplay(runOutcome?.executionOutput);
+  }, [runOutcome?.executionOutput]);
+
+  const handleCopyBase64 = async (e: React.MouseEvent, img: WebAutoExtractedImage) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(img.rawBase64);
+      setCopiedImageId(img.id);
+      toast.success("Base64 copied to clipboard");
+      setTimeout(() => {
+        setCopiedImageId((prev) => (prev === img.id ? null : prev));
+      }, 2000);
+    } catch {
+      toast.error("Failed to copy Base64");
+    }
+  };
+
+  const handleOpenPreview = (img: WebAutoExtractedImage) => {
+    setZoomLevel(1);
+    setPreviewImage(img);
+  };
 
   useEffect(() => {
     if (selectedCase) {
@@ -197,6 +234,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         throw new Error(data.message || "Execution failed");
       }
       setRunOutcome(data);
+      const imgs = extractWebAutoImages(data.executionOutput);
+      if (imgs.length > 0) {
+        setOutputTab("images");
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -520,9 +561,35 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
             </div>
           </div>          <div className="flex min-h-0 flex-col min-w-0">
             <div className="flex h-8 shrink-0 items-center justify-between border-b bg-muted/40 px-3 min-w-0">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground shrink-0">
-                Output
-              </span>
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => setOutputTab("output")}
+                  className={`flex h-8 items-center border-b-2 px-3 text-xs font-medium transition-colors ${
+                    outputTab === "output"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Output
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOutputTab("images")}
+                  className={`flex h-8 items-center border-b-2 px-3 text-xs font-medium transition-colors gap-1.5 ${
+                    outputTab === "images"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Images
+                  {extractedImages.length > 0 && (
+                    <span className="rounded-full bg-primary/10 px-1.5 py-0.2 text-[10px] font-semibold text-primary">
+                      {extractedImages.length}
+                    </span>
+                  )}
+                </button>
+              </div>
               {runOutcome && (
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground font-mono">
@@ -548,31 +615,103 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
             <div className="grid h-full grid-rows-[calc(50%-1rem)_calc(50%+1rem)] min-w-0 flex-1 overflow-hidden">
               <div className="flex flex-col min-h-0 overflow-hidden">
                 <div className="flex-1 min-h-0 px-3 pb-2 pt-2">
-                  <div className="h-full w-full overflow-auto rounded-md border bg-background/50 p-2 flex flex-col font-mono text-xs">
-                    {running ? (
-                      <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        Executing Playwright script & evaluating assertions...
-                      </div>
-                    ) : runOutcome ? (
-                      <div className="space-y-2">
-                        {runOutcome.error && (
-                          <div className="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
-                            <span className="font-semibold">[{runOutcome.error.source}]</span> {runOutcome.error.message}
-                          </div>
-                        )}
-                        <pre className="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed">
-                          {typeof runOutcome.executionOutput === "string"
-                            ? runOutcome.executionOutput
-                            : JSON.stringify(runOutcome.executionOutput, null, 2)}
+                  {outputTab === "output" ? (
+                    <div className="h-full w-full overflow-auto rounded-md border bg-background/50 p-2 flex flex-col font-mono text-xs">
+                      {running ? (
+                        <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          Executing script & evaluating assertions...
+                        </div>
+                      ) : runOutcome ? (
+                        <div className="space-y-2">
+                          {runOutcome.error && (
+                            <div className="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+                              <span className="font-semibold">[{runOutcome.error.source}]</span> {runOutcome.error.message}
+                            </div>
+                          )}
+                          <pre className="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed font-mono">
+                            {formattedOutputText}
+                          </pre>
+                        </div>
+                      ) : (
+                        <pre className="flex-1 text-xs font-mono text-muted-foreground overflow-auto">
+                          {`// Run the case to see output...`}
                         </pre>
-                      </div>
-                    ) : (
-                      <pre className="flex-1 text-xs font-mono text-muted-foreground overflow-auto">
-                        {`// Run the case to see output...`}
-                      </pre>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="h-full w-full overflow-hidden rounded-md border bg-background/50 flex flex-col">
+                      {extractedImages.length === 0 ? (
+                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                          No image
+                        </div>
+                      ) : extractedImages.length === 1 ? (
+                        <div className="flex h-full w-full flex-col items-center justify-center p-2 relative group overflow-hidden">
+                          <div className="absolute top-2 right-2 z-10">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6 p-0 bg-background/80 hover:bg-background border text-muted-foreground hover:text-foreground rounded shadow-xs"
+                              onClick={(e) => handleCopyBase64(e, extractedImages[0])}
+                              title="Copy Base64 string"
+                            >
+                              {copiedImageId === extractedImages[0].id ? (
+                                <Check className="h-3 w-3 text-emerald-500" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
+                          <div
+                            className="relative flex h-full w-full items-center justify-center cursor-pointer overflow-hidden rounded bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:12px_12px]"
+                            onClick={() => handleOpenPreview(extractedImages[0])}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={extractedImages[0].src}
+                              alt={extractedImages[0].name}
+                              className="max-h-full max-w-full object-contain rounded transition-transform hover:scale-[1.01]"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2 p-2 overflow-y-auto h-full">
+                          {extractedImages.map((img) => (
+                            <div
+                              key={img.id}
+                              className="group relative flex flex-col rounded-md border bg-background/80 overflow-hidden hover:border-primary/50 transition-all cursor-pointer"
+                              onClick={() => handleOpenPreview(img)}
+                            >
+                              <div className="flex items-center justify-between px-2 py-1 bg-muted/40 border-b text-[10px] text-muted-foreground font-mono">
+                                <span className="truncate max-w-[130px]" title={img.name}>{img.name}</span>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => handleCopyBase64(e, img)}
+                                  title="Copy Base64 string"
+                                >
+                                  {copiedImageId === img.id ? (
+                                    <Check className="h-2.5 w-2.5 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="h-2.5 w-2.5" />
+                                  )}
+                                </Button>
+                              </div>
+                              <div className="relative aspect-video w-full flex items-center justify-center p-1 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:8px_8px] overflow-hidden">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={img.src}
+                                  alt={img.name}
+                                  className="max-h-full max-w-full object-contain"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col min-h-0 overflow-hidden">
@@ -587,11 +726,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   )}
                 </div>
                 <div className="min-h-0 flex-1 px-3 pb-2 pt-1 overflow-y-auto">
-                  {running ? (
-                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> Evaluating verdicts...
-                    </div>
-                  ) : runOutcome?.verdict ? (
+                  {runOutcome?.verdict ? (
                     <div className="space-y-2">
                       {/* Deterministic Assertions */}
                       {runOutcome.verdict.deterministic.results.length === 0 && !runOutcome.verdict.llm ? (
@@ -747,10 +882,83 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Image Preview Lightbox Modal */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="relative flex flex-col max-h-[90vh] max-w-[90vw] rounded-lg border bg-background shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/40 text-xs">
+              <span className="font-mono font-semibold text-foreground truncate max-w-[200px]" title={previewImage.name}>
+                {previewImage.name}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  disabled={zoomLevel <= 0.25}
+                  onClick={() => setZoomLevel((z) => Math.max(0.25, Math.round((z - 0.25) * 100) / 100))}
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="h-3.5 w-3.5" />
+                </Button>
+                <button
+                  type="button"
+                  className="px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground hover:text-foreground rounded hover:bg-muted transition-colors cursor-pointer"
+                  onClick={() => setZoomLevel(1)}
+                  title="Reset Zoom (100%)"
+                >
+                  {Math.round(zoomLevel * 100)}%
+                </button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  disabled={zoomLevel >= 4}
+                  onClick={() => setZoomLevel((z) => Math.min(4, Math.round((z + 0.25) * 100) / 100))}
+                  title="Zoom In"
+                >
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </Button>
+                <div className="h-3.5 w-[1px] bg-border mx-1" />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setPreviewImage(null);
+                    setZoomLevel(1);
+                  }}
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 flex items-start justify-center min-h-[350px] max-h-[calc(90vh-45px)] min-w-[350px] max-w-[90vw] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:12px_12px]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewImage.src}
+                alt={previewImage.name}
+                style={{
+                  width: zoomLevel === 1 ? "auto" : `${zoomLevel * 100}%`,
+                  maxWidth: zoomLevel === 1 ? "100%" : "none",
+                  maxHeight: zoomLevel === 1 ? "calc(90vh - 80px)" : "none",
+                }}
+                className="rounded object-contain select-none shadow-xs transition-all duration-150"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-
-
 }
 
 function getConditionDescription(
