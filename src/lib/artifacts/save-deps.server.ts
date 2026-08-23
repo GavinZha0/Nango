@@ -13,7 +13,12 @@ import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { BuiltinAgentTable, CredentialTable, DataSourceTable } from "@/lib/db/schema";
+import {
+  BuiltinAgentTable,
+  CredentialTable,
+  DataSourceTable,
+  McpServerTable,
+} from "@/lib/db/schema";
 import type { AgentRole } from "@/lib/db/schema";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { computeDisplayName } from "@/lib/orchestration/display-name";
@@ -46,12 +51,47 @@ export function buildProductionSaveDeps(ownerId: string): SaveArtifactDeps {
       const def = catalog.get(toolName);
       if (def) {
         return {
+          source: "builtin",
           input_schema: extractInputJsonSchema(def.parameters),
         };
       }
-      // For dynamic/external tools (e.g. MCP tools like browser_navigate, browser_take_screenshot, etc.),
-      // provide permissive object schema instead of blocking the save.
+
+      // Check active MCP servers accessible by ownerId
+      const mcpServers = await db
+        .select({
+          id: McpServerTable.id,
+          name: McpServerTable.name,
+          tools: McpServerTable.tools,
+        })
+        .from(McpServerTable)
+        .where(
+          and(
+            eq(McpServerTable.enabled, true),
+            or(
+              eq(McpServerTable.visibility, "public"),
+              eq(McpServerTable.createdBy, ownerId),
+            ),
+          ),
+        );
+
+      for (const server of mcpServers) {
+        if (server.tools && Array.isArray(server.tools)) {
+          const match = server.tools.find((t) => t && t.name === toolName);
+          if (match) {
+            return {
+              source: `mcp:${server.id}`,
+              input_schema: (match.input_schema as Record<string, unknown>) ?? {
+                type: "object",
+                additionalProperties: true,
+              },
+            };
+          }
+        }
+      }
+
+      // For dynamic/external tools (e.g. fallback), provide permissive object schema
       return {
+        source: "builtin",
         input_schema: {
           type: "object",
           additionalProperties: true,

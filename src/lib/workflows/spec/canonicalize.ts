@@ -92,6 +92,7 @@ export const SUPPORTED_EXECUTOR_KEYS: ReadonlySet<string> = new Set<string>([
  * at execute time if validation later fails.
  */
 export interface ToolMetadata {
+  source?: string;
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
   outputs?: readonly string[];
@@ -171,7 +172,7 @@ async function canonicalizeToolNode(
   }
 
   // Validate MCP server_id format if source is mcp:<server_id>
-  const source = n.inputs.source;
+  const source = meta.source ?? n.inputs.source;
   if (source?.startsWith("mcp:")) {
     const serverId = source.slice(4);
     // Validate UUID format (basic check - actual existence will be validated at runtime)
@@ -188,6 +189,10 @@ async function canonicalizeToolNode(
   const canonical: CanonicalToolNode = {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.tool,
+    inputs: {
+      ...n.inputs,
+      ...(source ? { source } : {}),
+    },
   };
   // Build input_schema describing the wrapper shape:
   //   { name: const, arguments: <registry-provided args schema> }

@@ -209,19 +209,6 @@ const options = {
               err,
             );
           }
-
-          // Seed default infrastructure credentials (Dify Sandbox & SenseVoice)
-          try {
-            const { seedInitialInfrastructureCredentials } = await import(
-              "@/lib/credentials/seed-infra"
-            );
-            await seedInitialInfrastructureCredentials(userId);
-          } catch (err) {
-            console.warn(
-              `[auth] infrastructure credential seed failed for user ${userId}:`,
-              err,
-            );
-          }
         },
       },
     },

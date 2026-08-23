@@ -108,6 +108,17 @@ export async function register(): Promise<void> {
     console.error("[nango] builtin skills reconcile failed:", err);
   }
 
+  // Built-in infrastructure: seed default credentials (Dify Sandbox, SenseVoice)
+  // and default MCP servers (Playwright) into DB if not present.
+  const { seedBuiltinInfrastructure } = await import(
+    "@/lib/credentials/seed-infra"
+  );
+  try {
+    await seedBuiltinInfrastructure();
+  } catch (err) {
+    console.error("[nango] builtin infrastructure seed failed:", err);
+  }
+
   // Supervisor canonicalization — see docs/prompts.md.
   const { canonicalizeSupervisorAgents } = await import(
     "@/lib/builtin-agents/canonicalize-supervisor"

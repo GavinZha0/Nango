@@ -69,6 +69,26 @@ interface ExtractedToolImage {
   src: string;
   mimeType?: string;
   alt?: string;
+  filename?: string;
+}
+
+function extractFilenameFromScreenshotText(text: string): string | null {
+  if (!text || typeof text !== "string") return null;
+
+  // 1. Match Markdown link: [Screenshot of viewport](./mypage) or [Screenshot](...)
+  const mdMatch = text.match(/\[(?:[^\]]*screenshot[^\]]*)\]\(([^)]+)\)/i);
+  // 2. Match Playwright code block parameter: path: './mypage'
+  const codeMatch = text.match(/path:\s*['"]([^'"]+)['"]/i);
+
+  const rawPath = mdMatch?.[1] || codeMatch?.[1];
+  if (!rawPath) return null;
+
+  let cleaned = rawPath.trim().replace(/^['"]|['"]$/g, "").replace(/\\/g, "/");
+  cleaned = cleaned.replace(/^(\.\/|\/app\/\.output\/|\.playwright-mcp\/)/, "");
+
+  const basename = cleaned.split("/").pop();
+  if (!basename || basename === "." || basename === "..") return null;
+  return basename;
 }
 
 function extractImages(rawResult: string | undefined): ExtractedToolImage[] {
@@ -84,6 +104,8 @@ function extractImages(rawResult: string | undefined): ExtractedToolImage[] {
         : [];
 
     const images: ExtractedToolImage[] = [];
+
+    // Priority 1: Check for explicit image blocks (Base64 data or server URLs)
     for (const item of contentList) {
       if (item && item.type === "image") {
         const url = typeof item.url === "string" ? item.url : null;
@@ -98,6 +120,26 @@ function extractImages(rawResult: string | undefined): ExtractedToolImage[] {
         }
       }
     }
+
+    if (images.length > 0) {
+      return images;
+    }
+
+    // Priority 2: Fallback to extracting screenshot file paths from text blocks
+    for (const item of contentList) {
+      if (item && item.type === "text" && typeof item.text === "string") {
+        const filename = extractFilenameFromScreenshotText(item.text);
+        if (filename) {
+          images.push({
+            src: `/api/media/playwright-files?file=${encodeURIComponent(filename)}`,
+            mimeType: "image/png",
+            alt: filename,
+            filename,
+          });
+        }
+      }
+    }
+
     return images;
   } catch {
     return [];
@@ -164,11 +206,15 @@ export function WildcardToolRenderer({
     if (status !== "complete" || images.length === 0) return;
 
     const ws = useWorkspaceStore.getState();
+    const firstFilename = images.find((i) => i.filename)?.filename;
+    const outcomeTitle = firstFilename || `Screenshot: ${name}`;
+    const outcomeDescription = `Captured from ${name}`;
+
     addOutcome({
       outcomeId: toolCallId,
       kind: "report",
-      title: `Screenshot: ${name}`,
-      description: `Captured from ${name}`,
+      title: outcomeTitle,
+      description: outcomeDescription,
       blocks: images.map((img) => ({
         kind: "image",
         src: img.src,

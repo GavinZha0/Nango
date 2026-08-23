@@ -291,7 +291,11 @@ async function injectMcpTools(
           }
           return execFn(args, ctx);
         };
-        catalog.set(catalogKey, { name: catalogKey, execute: mcpExecute } as unknown as ToolDefinition);
+        const toolInstance = { name: catalogKey, execute: mcpExecute } as unknown as ToolDefinition;
+        catalog.set(catalogKey, toolInstance);
+        if (!catalog.has(rawToolName)) {
+          catalog.set(rawToolName, toolInstance);
+        }
       }
     }),
   );

@@ -15,6 +15,7 @@ services:
       - "${APP_PORT:-9300}:9300"
     volumes:
       - .cache/datasource:/app/.cache/datasource
+      - .cache/playwright:/app/.cache/playwright:ro
     environment:
       NO_HTTPS: ${NO_HTTPS:-1}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-secret-change-me-32chars}
@@ -113,10 +114,29 @@ services:
     container_name: playwright
     pull_policy: always
     init: true
+    working_dir: /app/.output
     entrypoint: ["node"]
-    command: ["/app/cli.js", "--headless", "--browser", "chromium", "--isolated", "--no-sandbox", "--port", "8931", "--host", "0.0.0.0"]
+    command: [
+      "/app/cli.js",
+      "--headless",
+      "--browser", "chromium",
+      "--isolated",
+      "--no-sandbox",
+      "--port", "8931",
+      "--host", "0.0.0.0",
+      "--allowed-hosts", "*",
+      "--ignore-https-errors",
+      "--grant-permissions", "geolocation,clipboard-read,clipboard-write,notifications",
+      "--viewport-size", "1920x1080",
+      "--block-service-workers",
+      "--caps", "vision,pdf",
+      "--output-dir", "/app/.output",
+      "--output-max-size", "1073741824"           
+    ]
     ports:
       - "8931:8931"
+    volumes:
+      - .cache/playwright:/app/.output
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8931/health || exit 1"]
       interval: 15s
@@ -124,7 +144,6 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-
 
 volumes:
   nango-db-data:

@@ -1094,6 +1094,17 @@ function extractImageSrc(data: unknown, config: unknown): string | null {
       if (obj.startsWith("http") || obj.startsWith("/") || obj.startsWith("data:")) {
         return obj;
       }
+      const filenameMatch =
+        obj.match(/\[(?:[^\]]*screenshot[^\]]*)\]\(([^)]+)\)/i) ||
+        obj.match(/path:\s*['"]([^'"]+)['"]/i);
+      if (filenameMatch?.[1]) {
+        let clean = filenameMatch[1].trim().replace(/^['"]|['"]$/g, "").replace(/\\/g, "/");
+        clean = clean.replace(/^(\.\/|\/app\/\.output\/|\.playwright-mcp\/)/, "");
+        const base = clean.split("/").pop();
+        if (base && base !== "." && base !== "..") {
+          return `/api/media/playwright-files?file=${encodeURIComponent(base)}`;
+        }
+      }
     }
     if (Array.isArray(obj)) {
       for (const item of obj) {
@@ -1106,6 +1117,9 @@ function extractImageSrc(data: unknown, config: unknown): string | null {
       const rec = obj as Record<string, unknown>;
       if (typeof rec.url === "string") return rec.url;
       if (typeof rec.src === "string") return rec.src;
+      if (typeof rec.filename === "string" && rec.filename.trim().length > 0) {
+        return `/api/media/playwright-files?file=${encodeURIComponent(rec.filename)}`;
+      }
       if (typeof rec.data === "string" && !rec.data.startsWith("[")) {
         const mime = typeof rec.mimeType === "string" ? rec.mimeType : "image/png";
         return rec.data.startsWith("data:") ? rec.data : `data:${mime};base64,${rec.data}`;
@@ -1120,10 +1134,13 @@ function extractImageSrc(data: unknown, config: unknown): string | null {
       }
       if (rec.blocks && Array.isArray(rec.blocks)) {
         const imgBlock = rec.blocks.find((b: { kind?: string }) => b?.kind === "image") as
-          | { src?: string; url?: string }
+          | { src?: string; url?: string; filename?: string }
           | undefined;
         if (imgBlock?.src) return imgBlock.src;
         if (imgBlock?.url) return imgBlock.url;
+        if (imgBlock?.filename) {
+          return `/api/media/playwright-files?file=${encodeURIComponent(imgBlock.filename)}`;
+        }
       }
     }
     return null;

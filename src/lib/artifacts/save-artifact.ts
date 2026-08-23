@@ -24,6 +24,7 @@ import {
   canonicalize,
   type CanonicalizeDeps,
   type SaveLineageReport,
+  type ToolInvocation,
   validate,
   type LLMWorkflowSpec,
 } from "@/lib/workflows";
@@ -32,6 +33,63 @@ import type { ArtifactType } from "@/lib/domain/artifact";
 
 import { coalesceToolCalls } from "./coalesce-tool-calls";
 import { executeWorkflow } from "./execute-workflow";
+import { extractFilenameFromScreenshotText } from "@/lib/playwright/storage.server";
+
+function extractInitialSnapshot(
+  artifactType: ArtifactType,
+  creatorInv: ToolInvocation | undefined,
+  config: Record<string, unknown>,
+): unknown {
+  if (artifactType === "image") {
+    // 1. Check creatorInv.result or config.result for image data / URL / file
+    const resultObj = creatorInv?.result ?? (config.result as Record<string, unknown> | undefined);
+    if (resultObj && typeof resultObj === "object") {
+      const contentList = Array.isArray(resultObj.content) ? resultObj.content : [];
+      for (const item of contentList) {
+        if (item && typeof item === "object") {
+          const rec = item as Record<string, unknown>;
+          if (rec.type === "image") {
+            const url = typeof rec.url === "string" ? rec.url : null;
+            const data = typeof rec.data === "string" ? rec.data : null;
+            const mimeType = typeof rec.mimeType === "string" ? rec.mimeType : "image/png";
+            if (url) return { url, src: url, mimeType };
+            if (data && !data.startsWith("[")) {
+              const src = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
+              return { src, url: src, mimeType };
+            }
+          }
+          if (rec.type === "text" && typeof rec.text === "string") {
+            const filename = extractFilenameFromScreenshotText(rec.text);
+            if (filename) {
+              const url = `/api/media/playwright-files?file=${encodeURIComponent(filename)}`;
+              return { url, src: url, filename, mimeType: "image/png" };
+            }
+          }
+        }
+      }
+    }
+    // 2. Also check direct parameters in config / inputs
+    const directFilename = typeof config.filename === "string" ? config.filename : null;
+    if (directFilename) {
+      const url = `/api/media/playwright-files?file=${encodeURIComponent(directFilename)}`;
+      return { url, src: url, filename: directFilename, mimeType: "image/png" };
+    }
+  }
+
+  if (artifactType === "html") {
+    if (typeof config.html === "string" && config.html.length > 0) {
+      return config.html;
+    }
+  }
+
+  if (artifactType === "chart") {
+    if (config.option && typeof config.option === "object") {
+      return config.option;
+    }
+  }
+
+  return null;
+}
 
 // ─── Public surface ────────────────────────────────────────────────────
 
@@ -180,11 +238,22 @@ export async function saveArtifact(
       }
 
       const creatorInv = invocations.find((i) => i.callId === resolution.toolCallId);
+      const artifactType = deriveArtifactType(built.artifactCreatorToolName);
+      const combinedConfig = {
+        ...built.strippedFrontendConfig,
+        ...(creatorInv?.result ? { result: creatorInv.result } : {}),
+      };
+      const initialSnapshot = extractInitialSnapshot(
+        artifactType,
+        creatorInv,
+        combinedConfig,
+      );
+
       const [artifactRow] = await tx
         .insert(ArtifactTable)
         .values({
           kind: "artifact",
-          type: deriveArtifactType(built.artifactCreatorToolName),
+          type: artifactType,
           name:
             input.name?.trim()?.length
               ? input.name.trim().slice(0, 200)
@@ -196,10 +265,11 @@ export async function saveArtifact(
           sourceOutcomeId: input.outcomeId,
           workflowId: workflowRow.id,
           workflowOutputField,
-          config: {
-            ...built.strippedFrontendConfig,
-            ...(creatorInv?.result ? { result: creatorInv.result } : {}),
-          },
+          viewMode: "snapshot",
+          ...(initialSnapshot !== null && initialSnapshot !== undefined
+            ? { snapshot: initialSnapshot, snapshotAt: new Date() }
+            : {}),
+          config: combinedConfig,
           ...(input.parentId !== undefined && { parentId: input.parentId }),
           createdBy: input.ownerId,
         })

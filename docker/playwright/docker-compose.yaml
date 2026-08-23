@@ -1,0 +1,89 @@
+name: nango-playwright
+
+services:
+  playwright:
+    image: mcr.microsoft.com/playwright/mcp:latest
+    container_name: playwright
+    pull_policy: always
+    init: true
+    working_dir: /app/.output
+    entrypoint: ["node"]
+    command: [
+      "/app/cli.js",
+      
+      # ------------------------------------------------------------------------
+      # 1. Core runtime & network bindings (Required)
+      # ------------------------------------------------------------------------
+      "--headless",                                      # Run in headless mode (required in Docker)
+      "--browser", "chromium",                           # Default browser: chromium (optional: firefox / webkit)
+      "--no-sandbox",                                    # Required in Docker: disable Chromium sandbox to avoid launch failures
+      "--isolated",                                      # In-memory isolated sessions: prevent cookie/storage contamination across runs
+      "--port", "8931",                                  # MCP server port
+      "--host", "0.0.0.0",                              # Bind to all network interfaces
+      "--allowed-hosts", "*",                           # Allowed Host headers (* allows requests via Docker network like playwright:8931)
+
+      # ------------------------------------------------------------------------
+      # 2. Automated testing & deterministic optimization (Recommended)
+      # ------------------------------------------------------------------------
+      "--ignore-https-errors",                           # Ignore SSL certificate errors (for testing internal or self-signed domains)
+      "--viewport-size", "1280x720",                     # Standard viewport resolution for consistent screenshots and assertions
+      "--block-service-workers",                        # Block Service Workers to prevent stale offline caching issues in regression tests
+      "--grant-permissions", "geolocation,clipboard-read,clipboard-write,notifications", # Pre-grant common browser permissions
+
+      # ------------------------------------------------------------------------
+      # 3. Advanced capability expansion (Optional)
+      # ------------------------------------------------------------------------
+      "--caps", "vision,pdf,devtools",                   # Enable capability packs:
+                                                         # - vision: pixel coordinate mouse click/drag (Canvas / WebGL / non-DOM elements)
+                                                         # - pdf: save web pages as PDF files (browser_pdf_save)
+                                                         # - devtools: performance tracing and visual debugging
+      "--snapshot-boxes",                                # Include [box=x,y,w,h] bounding boxes in accessibility snapshots for vision LLMs
+
+      # ------------------------------------------------------------------------
+      # 4. Resource control & disk protection
+      # ------------------------------------------------------------------------
+      "--output-dir", "/app/.output",                    # Output directory for screenshots, downloads and traces
+      "--output-max-size", "1073741824",                 # Output eviction threshold (1GB limit to prevent Docker disk exhaustion)
+
+      # ------------------------------------------------------------------------
+      # 5. Website credential injection (For internal / authenticated sites)
+      # ------------------------------------------------------------------------
+      # To safely inject test account credentials, uncomment this flag and the volume mount below:
+      # "--secrets", "/conf/secrets.env"
+    ]
+
+    # Volumes & secret files
+    volumes:
+      # Mount shared output directory for screenshots, downloads and traces
+      - ../../.cache/playwright:/app/.output
+      # Mount credentials for websites under test (read-only, uncomment when secrets.env exists)
+      # - ./secrets.env:/conf/secrets.env:ro
+
+    # Environment variables
+    environment:
+      # [Optional] Token for securing the MCP server itself (clients must send Authorization: Bearer <TOKEN>)
+      # - MCP_AUTH_TOKEN=your-custom-auth-token-here
+
+      # [Optional] Forward proxy configuration (for accessing external sites behind a proxy)
+      # - PLAYWRIGHT_MCP_PROXY_SERVER=http://proxy-server:7890
+      # - PLAYWRIGHT_MCP_PROXY_BYPASS=localhost,127.0.0.1,.internal
+
+      # [Optional] Timeout adjustments (default action: 5000ms, navigation: 60000ms)
+      # - PLAYWRIGHT_MCP_TIMEOUT_ACTION=10000
+      # - PLAYWRIGHT_MCP_TIMEOUT_NAVIGATION=60000
+
+    # Port mapping:
+    # - Commented out by default: inter-container traffic uses Docker internal network (http://playwright:8931/mcp).
+    # - Uncomment if direct host access (e.g. pnpm dev or host browser debugging) is required.
+    # ports:
+    #   - "8931:8931"
+
+    # Healthcheck
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8931/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
