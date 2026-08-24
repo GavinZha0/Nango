@@ -43,12 +43,50 @@ import { useWorkspaceStore } from "@/store/workspace";
 import { useShallow } from "zustand/react/shallow";
 import type { EntityDescriptor } from "@/lib/backends/types";
 
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { EVALUATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/evaluation/schema-spec";
+
 interface EvaluationEditorProps {
   agentId: string;
   agentSource: string;
   /** Required for backend agents; ignored for builtin. */
   credentialId?: string;
   onBack: () => void;
+}
+
+function EmptyEvaluationCopilotSync({
+  suite,
+}: {
+  suite: EvalSuiteRow | null;
+}) {
+  const getCurrentData = useCallback(
+    () => ({
+      _schema: EVALUATION_ACTIVE_RESOURCE_SCHEMA,
+      suite: suite
+        ? {
+            id: suite.id,
+            name: suite.name,
+            description: suite.description ?? null,
+            agentId: suite.agentId,
+            agentSource: suite.agentSource,
+            evaluatorAgentId: suite.evaluatorAgentId,
+            dimensionIds: suite.dimensionIds,
+            caseCount: 0,
+          }
+        : null,
+      selectedCase: null,
+      outcome: null,
+    }),
+    [suite],
+  );
+
+  useCopilotDraft({
+    resourceType: "evaluation",
+    getCurrentData,
+    applyDraft: () => {},
+  });
+
+  return null;
 }
 
 export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }: EvaluationEditorProps): ReactNode {
@@ -354,6 +392,7 @@ export function EvaluationEditor({ agentId, agentSource, credentialId, onBack }:
           />
         ) : (
           <div className="flex flex-[8] items-center justify-center text-xs text-muted-foreground">
+            <EmptyEvaluationCopilotSync suite={suites[0] ?? null} />
             Select a case from the tree to inspect.
           </div>
         )}

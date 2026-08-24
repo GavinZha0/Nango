@@ -34,6 +34,7 @@ import { Theme as ShadcnTheme } from "@rjsf/shadcn";
 import validator from "@rjsf/validator-ajv8";
 import type { FieldTemplateProps } from "@rjsf/utils";
 import type { McpToolSnapshot } from "@/lib/db/schema";
+import { MCP_ACTIVE_RESOURCE_SCHEMA } from "@/lib/mcp/schema-spec";
 
 const Form = withTheme(ShadcnTheme);
 
@@ -385,27 +386,78 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   // help build tool params or analyse execution results.
   const getCurrentData = useCallback(
     () => ({
-      serverName,
-      toolName: activeToolName,
-      toolDescription: tool?.description ?? null,
-      inputSchema: schema,
-      jsonInput: input.jsonInput,
-      executionResult: exec.result,
-      executionError: exec.execError,
+      _schema: MCP_ACTIVE_RESOURCE_SCHEMA,
+      server: {
+        id: serverId,
+        name: serverName,
+      },
+      selectedTool: tool
+        ? {
+            name: activeToolName,
+            description: tool.description ?? null,
+            inputSchema: schema,
+            args: input.formData,
+          }
+        : null,
+      execution: {
+        status: exec.executing
+          ? "executing"
+          : exec.execError
+            ? "failed"
+            : exec.result !== null
+              ? "succeeded"
+              : "idle",
+        durationMs: exec.durationMs,
+        result: exec.result,
+        error: exec.execError,
+      },
     }) as Record<string, unknown>,
-    [serverName, activeToolName, tool?.description, schema, input.jsonInput, exec.result, exec.execError],
+    [
+      serverId,
+      serverName,
+      tool,
+      activeToolName,
+      schema,
+      input.formData,
+      exec.executing,
+      exec.execError,
+      exec.result,
+      exec.durationMs,
+    ],
   );
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
-    if (typeof draft.jsonInput === "string") {
-      const raw = draft.jsonInput;
-      let parsed: Record<string, unknown> | undefined;
-      let jsonError: string | null = null;
-      try { parsed = JSON.parse(raw) as Record<string, unknown>; } catch { jsonError = "Invalid JSON"; }
+    let targetArgs: Record<string, unknown> | null = null;
+    if (
+      draft.selectedTool &&
+      typeof draft.selectedTool === "object" &&
+      !Array.isArray(draft.selectedTool)
+    ) {
+      const st = draft.selectedTool as Record<string, unknown>;
+      if (st.args && typeof st.args === "object" && !Array.isArray(st.args)) {
+        targetArgs = st.args as Record<string, unknown>;
+      }
+    } else if (
+      draft.args &&
+      typeof draft.args === "object" &&
+      !Array.isArray(draft.args)
+    ) {
+      targetArgs = draft.args as Record<string, unknown>;
+    } else if (typeof draft.jsonInput === "string") {
+      try {
+        const parsed = JSON.parse(draft.jsonInput);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          targetArgs = parsed as Record<string, unknown>;
+        }
+      } catch {
+        /* ignore invalid JSON */
+      }
+    }
+    if (targetArgs !== null) {
       setInput((prev) => ({
         ...prev,
-        jsonInput: raw,
-        jsonError,
-        ...(parsed !== undefined ? { formData: parsed } : {}),
+        formData: targetArgs!,
+        jsonInput: JSON.stringify(targetArgs, null, 2),
+        jsonError: null,
       }));
     }
   }, []);

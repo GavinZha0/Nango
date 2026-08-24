@@ -35,6 +35,9 @@ import { cn } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { formatTimestamp } from "@/components/admin/format";
 import { JsonView } from "@/components/ui/json-view";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { sanitizeWebAutoOutput } from "@/lib/web-auto/image-extractor";
+import { VERIFICATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/verification/schema-spec";
 import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
   AssertionResult,
@@ -43,6 +46,60 @@ import type {
   ErrorEnvelope,
 } from "@/lib/verification/types";
 import { AssertionsEditor } from "./AssertionsEditor";
+
+function extractTargetCase(
+  draft: Record<string, unknown>,
+  currentCaseId?: number | string | null,
+): Record<string, unknown> {
+  // 1. Direct selectedCase
+  if (draft.selectedCase && typeof draft.selectedCase === "object" && !Array.isArray(draft.selectedCase)) {
+    return draft.selectedCase as Record<string, unknown>;
+  }
+
+  // 2. Direct case
+  if (draft.case && typeof draft.case === "object" && !Array.isArray(draft.case)) {
+    return draft.case as Record<string, unknown>;
+  }
+
+  const searchInCases = (casesList: unknown[]): Record<string, unknown> | null => {
+    if (!Array.isArray(casesList) || casesList.length === 0) return null;
+    if (currentCaseId != null) {
+      const match = casesList.find((c) => (c as Record<string, unknown>)?.id == currentCaseId);
+      if (match && typeof match === "object") return match as Record<string, unknown>;
+    }
+    const first = casesList[0];
+    if (first && typeof first === "object") return first as Record<string, unknown>;
+    return null;
+  };
+
+  // 3. draft.cases array
+  if (Array.isArray(draft.cases)) {
+    const found = searchInCases(draft.cases);
+    if (found) return found;
+  }
+
+  // 4. draft.suites array (e.g. draft.suites[0].cases)
+  if (Array.isArray(draft.suites)) {
+    for (const s of draft.suites) {
+      if (s && typeof s === "object" && Array.isArray((s as Record<string, unknown>).cases)) {
+        const found = searchInCases((s as Record<string, unknown>).cases as unknown[]);
+        if (found) return found;
+      }
+    }
+  }
+
+  // 5. draft.suite object (e.g. draft.suite.cases)
+  if (draft.suite && typeof draft.suite === "object" && !Array.isArray(draft.suite)) {
+    const s = draft.suite as Record<string, unknown>;
+    if (Array.isArray(s.cases)) {
+      const found = searchInCases(s.cases);
+      if (found) return found;
+    }
+  }
+
+  // 6. Direct flat draft
+  return draft;
+}
 
 const INPUT_PLACEHOLDER = `// Dynamic generator variables:
 // {{$uuid}}             - Standard random UUID v4 string
@@ -61,6 +118,11 @@ const INPUT_PLACEHOLDER = `// Dynamic generator variables:
 
 export interface CaseInspectorProps {
   caseRow: VerificationCaseRow;
+  serverMeta?: {
+    id: string;
+    name: string;
+    caseCount: number;
+  } | null;
   /**
    * Outcome supplied by the parent — the persisted suite-run result
    * for this case from a run snapshot (just-completed live run OR an
@@ -294,6 +356,7 @@ function validateAssertionsArray(
 
 export function CaseInspector({
   caseRow,
+  serverMeta = null,
   pinnedOutcome,
   historyMeta = null,
   onExitHistoryView,
@@ -323,6 +386,110 @@ export function CaseInspector({
     null,
   );
 
+  // Priority: a fresh single-case rerun (`lastOutcome`) wins over
+  // the suite-run snapshot (`pinnedOutcome`) — the user just clicked
+  // "Run case" and expects to see THAT result, not the stale
+  // suite-run row. CaseInspector remounts (via `key={case.id}` on
+  // the parent) when the user switches cases, so `lastOutcome`
+  // never bleeds across cases.
+  const displayedOutcome = lastOutcome ?? pinnedOutcome ?? null;
+
+  // History-view styling. Active ONLY when the parent supplied meta
+  // AND we're showing the snapshot (not a fresh single-case rerun).
+  const showHistoryChrome: boolean =
+    historyMeta !== null && lastOutcome === null;
+
+  // Copilot ambient context & draft integration
+  const getCurrentData = useCallback(() => {
+    let currentInput: unknown = caseRow.input ?? {};
+    if (inputDraft.text.trim()) {
+      try {
+        currentInput = JSON.parse(inputDraft.text);
+      } catch {
+        currentInput = inputDraft.text;
+      }
+    }
+    let currentAssertions: unknown = caseRow.assertions ?? [];
+    if (assertionsDraft.text.trim()) {
+      try {
+        currentAssertions = JSON.parse(assertionsDraft.text);
+      } catch {
+        currentAssertions = assertionsDraft.text;
+      }
+    }
+
+    return {
+      _schema: VERIFICATION_ACTIVE_RESOURCE_SCHEMA,
+      server: {
+        id: serverMeta?.id ?? caseRow.mcpServerId ?? "",
+        name: serverMeta?.name ?? "MCP Server",
+        caseCount: serverMeta?.caseCount ?? 1,
+      },
+      selectedCase: {
+        id: caseRow.id,
+        suiteId: caseRow.suiteId,
+        suiteName: caseRow.suiteName || "Suite",
+        name: caseRow.name,
+        toolName: caseRow.toolName ?? null,
+        input: currentInput,
+        assertions: currentAssertions,
+        isDirty: Boolean(inputDraft.isDirty || assertionsDraft.isDirty),
+      },
+      outcome: displayedOutcome
+        ? {
+            source: showHistoryChrome ? "history" : "live",
+            ...(showHistoryChrome && historyMeta ? { historySeq: historyMeta.seq } : {}),
+            status: displayedOutcome.status,
+            error: displayedOutcome.error || null,
+            verdict: {
+              passed: displayedOutcome.status === "passed",
+              results: displayedOutcome.assertionResults || [],
+            },
+            output: sanitizeWebAutoOutput(displayedOutcome.resultPayload),
+          }
+        : null,
+    } as Record<string, unknown>;
+  }, [
+    serverMeta,
+    caseRow,
+    inputDraft.text,
+    inputDraft.isDirty,
+    assertionsDraft.text,
+    assertionsDraft.isDirty,
+    displayedOutcome,
+    showHistoryChrome,
+    historyMeta,
+  ]);
+
+  const applyDraft = useCallback(
+    (draft: Record<string, unknown>) => {
+      const target = extractTargetCase(draft, caseRow.id);
+
+      if (target.input !== undefined && target.input !== null) {
+        if (typeof target.input === "string") {
+          inputDraft.setText(target.input);
+        } else {
+          inputDraft.setText(JSON.stringify(target.input, null, 2));
+        }
+      }
+
+      if (target.assertions !== undefined && target.assertions !== null) {
+        if (typeof target.assertions === "string") {
+          assertionsDraft.setText(target.assertions);
+        } else {
+          assertionsDraft.setText(JSON.stringify(target.assertions, null, 2));
+        }
+      }
+    },
+    [caseRow.id, inputDraft, assertionsDraft],
+  );
+
+  const { clearDraftState } = useCopilotDraft({
+    resourceType: "verification",
+    getCurrentData,
+    applyDraft,
+  });
+
   // Manual save handler
   const handleSave = useCallback(async (): Promise<void> => {
     const [inputOk, assertionsOk] = await Promise.all([
@@ -331,8 +498,10 @@ export function CaseInspector({
     ]);
     if (!inputOk || !assertionsOk) {
       setRunError("Fix the JSON errors before saving.");
+    } else {
+      clearDraftState();
     }
-  }, [inputDraft, assertionsDraft]);
+  }, [inputDraft, assertionsDraft, clearDraftState]);
 
   // Check if any draft has unsaved changes
   const hasUnsavedChanges = inputDraft.isDirty || assertionsDraft.isDirty;
@@ -381,18 +550,6 @@ export function CaseInspector({
 
   // --- Render ---------------------------------------------------------------
 
-  // Priority: a fresh single-case rerun (`lastOutcome`) wins over
-  // the suite-run snapshot (`pinnedOutcome`) — the user just clicked
-  // "Run case" and expects to see THAT result, not the stale
-  // suite-run row. CaseInspector remounts (via `key={case.id}` on
-  // the parent) when the user switches cases, so `lastOutcome`
-  // never bleeds across cases.
-  const displayedOutcome = lastOutcome ?? pinnedOutcome ?? null;
-
-  // History-view styling. Active ONLY when the parent supplied meta
-  // AND we're showing the snapshot (not a fresh single-case rerun).
-  const showHistoryChrome: boolean =
-    historyMeta !== null && lastOutcome === null;
   const historyStartedAtLabel: string | null = showHistoryChrome
     ? formatTimestamp(historyMeta!.startedAt, tz)
     : null;
@@ -457,7 +614,7 @@ export function CaseInspector({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-6 w-6 p-0"
+                className={`h-6 w-6 p-0 hover:bg-transparent hover:text-foreground ${hasUnsavedChanges ? "text-amber-500" : "text-muted-foreground"}`}
                 disabled={!canSave || readOnly}
                 onClick={() => void handleSave()}
                 title="Save"

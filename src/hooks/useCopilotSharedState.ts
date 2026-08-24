@@ -120,7 +120,7 @@ export function useCopilotSharedStateSync() {
   }, [activeAgentId, agent, setGlobalState]);
 
   /** Constrained resource types that support draft editing. */
-  const draftResourceTypes = z.enum(["schedule", "workflow", "skill", "agent", "datasource", "ssh-server", "mcp"]);
+  const draftResourceTypes = z.enum(["schedule", "workflow", "skill", "agent", "datasource", "ssh-server", "mcp", "web-auto", "verification", "evaluation"]);
 
   /** Map activeView → accepted resourceType so we can detect mismatches. */
   const viewToResource: Record<string, string> = {
@@ -131,6 +131,9 @@ export function useCopilotSharedStateSync() {
     datasource: "datasource",
     "ssh-server": "ssh-server",
     mcp: "mcp",
+    "web-auto": "web-auto",
+    verification: "verification",
+    evaluation: "evaluation",
   };
 
   // Tool: propose_page_edit
@@ -140,13 +143,13 @@ export function useCopilotSharedStateSync() {
     description: [
       "Propose changes to the resource currently open in the editor.",
       "The frontend will show a preview; the user decides whether to save.",
-      "Send the FULL modified object (replace, not merge).",
+      "Send the FULL modified object mirroring the activeResourceData structure (conform to activeResourceData._schema if provided).",
       "Format: dates as ISO 8601 (e.g. 2025-06-15T00:00:00.000Z), cron as standard 5-field.",
       "Only works when the user is viewing an editable page with existing data.",
     ].join(" "),
     parameters: z.object({
       resourceType: draftResourceTypes.describe("The type of resource being modified."),
-      draftData: z.record(z.string(), z.unknown()).describe("The complete draft object with all fields."),
+      draftData: z.record(z.string(), z.unknown()).describe("The complete draft object mirroring activeResourceData structure."),
     }),
     handler: async ({ resourceType, draftData }) => {
       if (!agent) return "Agent not ready.";

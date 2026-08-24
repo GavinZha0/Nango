@@ -35,6 +35,9 @@ export interface NangoSharedState {
       nodes: Record<string, unknown>[];
       edges: Record<string, unknown>[];
     };
+    "web-auto"?: Record<string, unknown>;
+    verification?: Record<string, unknown>;
+    evaluation?: Record<string, unknown>;
     // Add other resource types as needed
     [key: string]: Record<string, unknown> | undefined;
   };

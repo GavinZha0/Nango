@@ -53,6 +53,7 @@ import {
 } from "@/lib/orchestration/display-name";
 import type { EntityKind } from "@/lib/backends/types";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { SCHEDULE_ACTIVE_RESOURCE_SCHEMA } from "@/lib/runner/schedule-schema-spec";
 // Agent option helpers
 
 interface AgentOption {
@@ -276,9 +277,50 @@ export function ScheduleEditor({
   const [deleting, setDeleting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const getCurrentData = useCallback(() => (form as unknown as Record<string, unknown>), [form]);
+  const getCurrentData = useCallback(
+    () => ({
+      _schema: SCHEDULE_ACTIVE_RESOURCE_SCHEMA,
+      ...form,
+    } as Record<string, unknown>),
+    [form],
+  );
   const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
-    setForm((f) => ({ ...f, ...draft }));
+    setForm((f) => {
+      const next = { ...f };
+      if (typeof draft.name === "string") next.name = draft.name;
+      if (typeof draft.task === "string") next.task = draft.task;
+      if (typeof draft.agentKey === "string") next.agentKey = draft.agentKey;
+      if (typeof draft.timezone === "string") next.timezone = draft.timezone;
+      if (draft.triggerMode === "one_shot" || draft.triggerMode === "recurring") {
+        next.triggerMode = draft.triggerMode;
+      }
+      if (draft.intervalValue !== undefined && draft.intervalValue !== null) {
+        next.intervalValue = String(draft.intervalValue);
+      }
+      if (
+        typeof draft.intervalUnit === "string" &&
+        ["minute", "hour", "day", "week", "month"].includes(draft.intervalUnit)
+      ) {
+        next.intervalUnit = draft.intervalUnit as ScheduleIntervalUnit;
+      }
+      if (typeof draft.startLocal === "string") {
+        next.startLocal =
+          draft.startLocal.includes("T") && !draft.startLocal.endsWith("Z")
+            ? draft.startLocal
+            : isoToLocalInputValue(draft.startLocal);
+      } else if (typeof draft.startAt === "string") {
+        next.startLocal = isoToLocalInputValue(draft.startAt);
+      }
+      if (typeof draft.endLocal === "string") {
+        next.endLocal =
+          draft.endLocal.includes("T") && !draft.endLocal.endsWith("Z")
+            ? draft.endLocal
+            : isoToLocalInputValue(draft.endLocal);
+      } else if (typeof draft.endAt === "string") {
+        next.endLocal = isoToLocalInputValue(draft.endAt);
+      }
+      return next;
+    });
   }, []);
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
@@ -472,7 +514,7 @@ export function ScheduleEditor({
                 size="sm"
                 onClick={() => void submit()}
                 disabled={submitting || startInPast || (!isCreating && !isDirty && !draftApplied)}
-                className={cn("h-6 cursor-pointer gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
+                className={cn("h-6 cursor-pointer gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
               >
                 {submitting ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

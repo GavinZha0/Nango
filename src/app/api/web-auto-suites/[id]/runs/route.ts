@@ -44,8 +44,16 @@ export const GET = withEditor<{ id: string }>(
       countWebAutoRuns(suiteId),
     ]);
 
+    const mappedRows = rows.map((r) => ({
+      ...r,
+      totalCount: r.passed + r.failed + r.errored,
+      passedCount: r.passed,
+      failedCount: r.failed,
+      erroredCount: r.errored,
+    }));
+
     return NextResponse.json({
-      rows,
+      rows: mappedRows,
       total,
       offset,
       limit,

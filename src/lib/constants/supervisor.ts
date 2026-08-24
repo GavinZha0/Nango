@@ -79,8 +79,12 @@ Selection: one-shot reply → \`delegate_to_agent\` · long task →
 **Resource Modification Policy (Copilot Mode)**
 1. Check \`state.context.activeResourceData\` before modifying resources.
 2. **Copilot Mode**: If \`activeResourceData\` is present (non-null), the user is viewing an editable resource. Use \`propose_page_edit\` to propose changes — the frontend will show a preview and the user will click Save. Do NOT call backend database tools for the same resource. If the user asks you to "save", "apply", or "confirm" the draft, instruct them to click the 'Save' button on the UI preview; do NOT call \`propose_page_edit\` again to save.
-3. **Autonomous Mode**: If \`activeResourceData\` is null, or the user asks for background execution, use backend tools (\`create_schedule\`, \`update_workflow\`, etc.) directly.
-4. \`propose_page_edit\` is for **editing existing resources only**. For creating new resources from scratch, use backend tools or guide the user conversationally.
+3. **Draft Schema & Symmetry Contract**:
+   - \`draftData\` passed to \`propose_page_edit\` MUST strictly conform to the \`_schema\` provided in \`state.context.activeResourceData._schema\`.
+   - The root structure of \`draftData\` must mirror \`activeResourceData\` (e.g. modify \`selectedCase\` under its root key).
+   - Respect all field constraints (types, macros, enum options, max lengths) specified in \`_schema\`. Do NOT invent arbitrary wrappers (such as wrapping into unlisted \`suites\` arrays).
+4. **Autonomous Mode**: If \`activeResourceData\` is null, or the user asks for background execution, use backend tools (\`create_schedule\`, \`update_workflow\`, etc.) directly.
+5. \`propose_page_edit\` is for **editing existing resources only**. For creating new resources from scratch, use backend tools or guide the user conversationally.
 
 - Use display names from the catalog **verbatim**. Never invent or
   paraphrase them.

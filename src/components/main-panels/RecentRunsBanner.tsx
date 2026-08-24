@@ -130,7 +130,7 @@ interface RunsPageResponse {
  * and the lint mis-flags it when the fetcher is defined locally.
  */
 async function fetchRecentRuns(
-  apiPrefix: "verification-suites" | "eval-suites" | "verification-servers",
+  apiPrefix: "verification-suites" | "eval-suites" | "verification-servers" | "web-auto-suites",
   suiteId: string,
   offset: number,
 ): Promise<RunsPageResponse> {
@@ -146,7 +146,7 @@ async function fetchRecentRuns(
 }
 
 function useRecentRuns(
-  apiPrefix: "verification-suites" | "eval-suites" | "verification-servers",
+  apiPrefix: "verification-suites" | "eval-suites" | "verification-servers" | "web-auto-suites",
   suiteId: string,
   offset: number,
   refreshKey: number,
@@ -199,7 +199,7 @@ export interface RecentRunsBannerProps {
    *  user can tell at a glance which run they're inspecting. `null`
    *  payload means "deselect, return to live view". */
   onSelectRun: (runId: string | null, seq: number | null) => void;
-  apiPrefix?: "verification-suites" | "eval-suites" | "verification-servers";
+  apiPrefix?: "verification-suites" | "eval-suites" | "verification-servers" | "web-auto-suites";
 }
 
 export function RecentRunsBanner({
@@ -292,24 +292,28 @@ interface RunChipProps {
 function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
   const tz = useDisplayTimezone();
   const v = statusVisual(run.status);
+  const passed = run.passedCount ?? (run as unknown as { passed?: number }).passed ?? 0;
+  const failed = run.failedCount ?? (run as unknown as { failed?: number }).failed ?? 0;
+  const errored = run.erroredCount ?? (run as unknown as { errored?: number }).errored ?? 0;
+
   const counts =
     run.status === "running"
       ? null
       : (
         <span className="text-[10px] tabular-nums text-muted-foreground">
-          {run.passedCount > 0 && (
+          {passed > 0 && (
             <span className="text-emerald-600 dark:text-emerald-400">
-              ✓{run.passedCount}
+              ✓{passed}
             </span>
           )}
-          {run.failedCount > 0 && (
+          {failed > 0 && (
             <span className="ml-1 text-red-600 dark:text-red-400">
-              ✗{run.failedCount}
+              ✗{failed}
             </span>
           )}
-          {run.erroredCount > 0 && (
+          {errored > 0 && (
             <span className="ml-1 text-amber-600 dark:text-amber-400">
-              !{run.erroredCount}
+              !{errored}
             </span>
           )}
         </span>

@@ -40,6 +40,7 @@ import {
 } from "@/lib/constants/supervisor";
 import type { AgentRole } from "@/lib/db/schema";
 import { DEFAULT_EVALUATOR_SYSTEM_PROMPT } from "@/lib/evaluation/types";
+import { AGENT_ACTIVE_RESOURCE_SCHEMA } from "@/lib/agents/schema-spec";
 export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 import type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 
@@ -330,6 +331,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   // serializable object for the agent, split back on apply.
   const getCurrentData = useCallback(
     () => ({
+      _schema: AGENT_ACTIVE_RESOURCE_SCHEMA,
       ...form,
       tools: {
         mcp: [...tools.mcp].sort(),
@@ -337,6 +339,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         builtinTools: [...tools.builtinTools].sort(),
         dataSources: [...tools.dataSources].sort(),
         sshServers: [...tools.sshServers].sort(),
+        calendars: [...tools.calendars].sort(),
       },
     }) as Record<string, unknown>,
     [form, tools],
@@ -344,7 +347,20 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
     const { tools: draftTools, ...formFields } = draft;
     if (Object.keys(formFields).length > 0) {
-      setForm((prev) => ({ ...prev, ...formFields as Partial<FormState> }));
+      const normalized: Partial<FormState> = {};
+      if (typeof formFields.name === "string") normalized.name = formFields.name;
+      if (typeof formFields.description === "string") normalized.description = formFields.description;
+      if (typeof formFields.icon === "string" || formFields.icon === null) normalized.icon = formFields.icon;
+      if (typeof formFields.model === "string") normalized.model = formFields.model;
+      if (typeof formFields.modelProvider === "string") normalized.modelProvider = formFields.modelProvider;
+      if (typeof formFields.credentialId === "string" || formFields.credentialId === null) normalized.credentialId = formFields.credentialId;
+      if (typeof formFields.prompt === "string") normalized.prompt = formFields.prompt;
+      if (typeof formFields.toolChoice === "string") normalized.toolChoice = formFields.toolChoice;
+      if (typeof formFields.toolApprovalMode === "string") normalized.toolApprovalMode = formFields.toolApprovalMode;
+      if (formFields.maxSteps !== undefined && formFields.maxSteps !== null) normalized.maxSteps = Number(formFields.maxSteps);
+      if (formFields.temperature !== undefined && formFields.temperature !== null) normalized.temperature = Number(formFields.temperature);
+      if (formFields.role !== undefined) normalized.role = formFields.role as AgentRole | null;
+      setForm((prev) => ({ ...prev, ...normalized }));
     }
     if (draftTools && typeof draftTools === "object" && !Array.isArray(draftTools)) {
       const t = draftTools as Record<string, string[]>;
@@ -659,7 +675,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">{headerTitle}</span>
         <Button
           size="sm"
-          className={cn("h-7 shrink-0 gap-1.5 px-3 text-xs", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
+          className={cn("h-7 shrink-0 gap-1.5 px-3 text-xs", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
           onClick={handleSave}
               disabled={saving || deleting || (!isNew && !isDirty && !draftApplied)}
             >

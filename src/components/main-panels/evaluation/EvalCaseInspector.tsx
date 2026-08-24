@@ -46,6 +46,8 @@ import {
 } from "@/lib/evaluation/config";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import { evalCaseActions } from "@/store/evaluation-cases";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { EVALUATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/evaluation/schema-spec";
 
 /** EvalTurn with a stable React key (runtime-only, not persisted). */
 interface KeyedTurn extends EvalTurn {
@@ -680,6 +682,48 @@ interface EvalCaseInspectorProps {
   selectedRunSeq?: number | null;
 }
 
+function extractEvalTargetCase(
+  draft: Record<string, unknown>,
+  currentCaseId?: number | string | null,
+): Record<string, unknown> {
+  if (draft.selectedCase && typeof draft.selectedCase === "object" && !Array.isArray(draft.selectedCase)) {
+    return draft.selectedCase as Record<string, unknown>;
+  }
+  if (draft.case && typeof draft.case === "object" && !Array.isArray(draft.case)) {
+    return draft.case as Record<string, unknown>;
+  }
+  const searchInCases = (casesList: unknown[]): Record<string, unknown> | null => {
+    if (!Array.isArray(casesList) || casesList.length === 0) return null;
+    if (currentCaseId != null) {
+      const match = casesList.find((c) => (c as Record<string, unknown>)?.id == currentCaseId);
+      if (match && typeof match === "object") return match as Record<string, unknown>;
+    }
+    const first = casesList[0];
+    if (first && typeof first === "object") return first as Record<string, unknown>;
+    return null;
+  };
+  if (Array.isArray(draft.cases)) {
+    const found = searchInCases(draft.cases);
+    if (found) return found;
+  }
+  if (Array.isArray(draft.suites)) {
+    for (const s of draft.suites) {
+      if (s && typeof s === "object" && Array.isArray((s as Record<string, unknown>).cases)) {
+        const found = searchInCases((s as Record<string, unknown>).cases as unknown[]);
+        if (found) return found;
+      }
+    }
+  }
+  if (draft.suite && typeof draft.suite === "object" && !Array.isArray(draft.suite)) {
+    const s = draft.suite as Record<string, unknown>;
+    if (Array.isArray(s.cases)) {
+      const found = searchInCases(s.cases);
+      if (found) return found;
+    }
+  }
+  return draft;
+}
+
 // CONTRACT: parent renders <EvalCaseInspector key={evalCase.id} />,
 // so the counter resets on case switch via remount.
 let nextTurnKey = 0;
@@ -731,19 +775,6 @@ export function EvalCaseInspector({
 
   const canSave = isDirty && !criteriaHasError && !saving;
 
-  const handleSave = useCallback(async (): Promise<void> => {
-    if (!canSave) return;
-    setSaving(true);
-    await evalCaseActions.patch(
-      { id: evalCase.id, suiteId: evalCase.suiteId },
-      {
-        turns: stripKeys(turns) as Array<{ userMessage: string }>,
-        criteria: criteria as Record<string, unknown>,
-      },
-    );
-    setSaving(false);
-  }, [canSave, evalCase.id, evalCase.suiteId, turns, criteria]);
-
   const activeDimensions = suite.dimensionIds;
 
   function updateTurn(index: number, updated: EvalTurn): void {
@@ -756,9 +787,11 @@ export function EvalCaseInspector({
   const displayScore = pinnedOutcome
     ? pinnedOutcome.score
     : (liveCaseResult?.score ?? (historicalResult?.score ?? null));
-  const displayDimensionScores = pinnedOutcome
-    ? pinnedOutcome.dimensionScores
-    : (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {}));
+  const displayDimensionScores = useMemo(() => {
+    return pinnedOutcome
+      ? pinnedOutcome.dimensionScores
+      : (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {}));
+  }, [pinnedOutcome, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
   const displayBaselineScore = displayDimensionScores?.baseline ?? null;
   const displayCriteriaScore = pinnedOutcome
     ? pinnedOutcome.criteriaScore
@@ -782,6 +815,107 @@ export function EvalCaseInspector({
   const resolvedStatus = pinnedOutcome
     ? pinnedOutcome.status
     : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"));
+
+  // Copilot ambient context & draft integration
+  const getCurrentData = useCallback(() => {
+    return {
+      _schema: EVALUATION_ACTIVE_RESOURCE_SCHEMA,
+      suite: {
+        id: suite.id,
+        name: suite.name,
+        description: suite.description ?? null,
+        agentId: suite.agentId,
+        agentSource: suite.agentSource,
+        evaluatorAgentId: suite.evaluatorAgentId,
+        dimensionIds: suite.dimensionIds,
+        caseCount: 0,
+      },
+      selectedCase: {
+        id: evalCase.id,
+        suiteId: evalCase.suiteId,
+        suiteName: suite.name,
+        name: evalCase.name,
+        turns: stripKeys(turns),
+        criteria,
+        isDirty: Boolean(isDirty),
+      },
+      outcome: (displayScore !== null || resolvedStatus !== "idle")
+        ? {
+            source: pinnedOutcome ? "history" : "live",
+            ...(pinnedOutcome && selectedRunSeq !== null ? { historySeq: selectedRunSeq } : {}),
+            status: resolvedStatus,
+            score: displayScore,
+            dimensionScores: displayDimensionScores,
+            criteriaScore: displayCriteriaScore,
+            criteriaResults: displayCriteriaResults ?? [],
+            feedback: displayFeedback || null,
+          }
+        : null,
+    } as Record<string, unknown>;
+  }, [
+    suite,
+    evalCase,
+    turns,
+    criteria,
+    isDirty,
+    displayScore,
+    resolvedStatus,
+    pinnedOutcome,
+    selectedRunSeq,
+    displayDimensionScores,
+    displayCriteriaScore,
+    displayCriteriaResults,
+    displayFeedback,
+  ]);
+
+  const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    const sc = extractEvalTargetCase(draft, evalCase.id);
+    if (Array.isArray(sc.turns)) {
+      const newTurns: KeyedTurn[] = [];
+      for (const item of sc.turns) {
+        if (typeof item === "string") {
+          newTurns.push({ userMessage: item, _key: mintKey() });
+        } else if (item && typeof item === "object" && typeof (item as Record<string, unknown>).userMessage === "string") {
+          newTurns.push({ userMessage: (item as Record<string, unknown>).userMessage as string, _key: mintKey() });
+        }
+      }
+      if (newTurns.length > 0) {
+        setTurns(newTurns);
+      }
+    }
+    if (sc.criteria !== undefined && sc.criteria !== null) {
+      if (typeof sc.criteria === "object" && !Array.isArray(sc.criteria)) {
+        setCriteria(sc.criteria as EvalCriteria);
+      } else if (typeof sc.criteria === "string") {
+        try {
+          const parsed = JSON.parse(sc.criteria);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            setCriteria(parsed as EvalCriteria);
+          }
+        } catch { /* ignore parse error */ }
+      }
+    }
+  }, [evalCase.id]);
+
+  const { clearDraftState } = useCopilotDraft({
+    resourceType: "evaluation",
+    getCurrentData,
+    applyDraft,
+  });
+
+  const handleSave = useCallback(async (): Promise<void> => {
+    if (!canSave) return;
+    setSaving(true);
+    await evalCaseActions.patch(
+      { id: evalCase.id, suiteId: evalCase.suiteId },
+      {
+        turns: stripKeys(turns) as Array<{ userMessage: string }>,
+        criteria: criteria as Record<string, unknown>,
+      },
+    );
+    setSaving(false);
+    clearDraftState();
+  }, [canSave, evalCase.id, evalCase.suiteId, turns, criteria, clearDraftState]);
 
   const { data: messagesData, isLoading: messagesLoading } = useSWR<{ messages: ResponseMessage[] }>(
     resolvedRunId ? `/api/eval-runs/${resolvedRunId}/messages?caseId=${evalCase.id}&status=${resolvedStatus}` : null,
@@ -848,7 +982,7 @@ export function EvalCaseInspector({
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 w-6 p-0"
+              className={`h-6 w-6 p-0 hover:bg-transparent hover:text-foreground ${isDirty ? "text-amber-500" : "text-muted-foreground"}`}
               disabled={!canSave || selectedRunSeq !== null}
               onClick={handleSave}
             >

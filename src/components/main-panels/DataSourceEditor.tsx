@@ -38,6 +38,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
+import { DATASOURCE_ACTIVE_RESOURCE_SCHEMA } from "@/lib/data-sources/schema-spec";
 
 // Match server-side DATA_SOURCE_IDS. Hard-coded here to avoid pulling
 // the server module into the client bundle.
@@ -189,11 +190,58 @@ export function DataSourceEditor({
 
   // Copilot draft integration
   const getCurrentData = useCallback(
-    () => form as FormState & Record<string, unknown>,
+    () => ({
+      _schema: DATASOURCE_ACTIVE_RESOURCE_SCHEMA,
+      name: form.name,
+      description: form.description,
+      provider: form.provider,
+      credentialId: form.credentialId,
+      host: form.host,
+      port: Number(form.port) || 0,
+      database: form.database,
+      params: rowsToParams(form.paramRows),
+      readOnly: form.readOnly,
+      tableAllowlist:
+        parseTableList(form.tableAllowlistText).length > 0
+          ? parseTableList(form.tableAllowlistText)
+          : null,
+      tableDenylist: parseTableList(form.tableDenylistText),
+    } as Record<string, unknown>),
     [form],
   );
-  const applyDraft = useCallback((draft: Partial<FormState>) => {
-    setForm((prev) => ({ ...prev, ...draft }));
+  const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    setForm((prev) => {
+      const next = { ...prev };
+      if (typeof draft.name === "string") next.name = draft.name;
+      if (typeof draft.description === "string") next.description = draft.description;
+      if (typeof draft.provider === "string") next.provider = draft.provider;
+      if (typeof draft.credentialId === "string") next.credentialId = draft.credentialId;
+      if (typeof draft.host === "string") next.host = draft.host;
+      if (draft.port !== undefined && draft.port !== null) next.port = String(draft.port);
+      if (typeof draft.database === "string") next.database = draft.database;
+      if (typeof draft.readOnly === "boolean") next.readOnly = draft.readOnly;
+
+      if (draft.params && typeof draft.params === "object" && !Array.isArray(draft.params)) {
+        next.paramRows = paramsToRows(draft.params as Record<string, string>);
+      } else if (Array.isArray(draft.paramRows)) {
+        next.paramRows = draft.paramRows as ParamRow[];
+      }
+
+      if (Array.isArray(draft.tableAllowlist)) {
+        next.tableAllowlistText = (draft.tableAllowlist as string[]).join(", ");
+      } else if (typeof draft.tableAllowlistText === "string") {
+        next.tableAllowlistText = draft.tableAllowlistText;
+      } else if (draft.tableAllowlist === null) {
+        next.tableAllowlistText = "";
+      }
+
+      if (Array.isArray(draft.tableDenylist)) {
+        next.tableDenylistText = (draft.tableDenylist as string[]).join(", ");
+      } else if (typeof draft.tableDenylistText === "string") {
+        next.tableDenylistText = draft.tableDenylistText;
+      }
+      return next;
+    });
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "datasource",
@@ -452,7 +500,7 @@ export function DataSourceEditor({
             size="sm"
             onClick={() => void handleSave()}
             disabled={saving || (!isNew && !isDirty && !draftApplied)}
-            className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
+            className={cn("h-8 gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

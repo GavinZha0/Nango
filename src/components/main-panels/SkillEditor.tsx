@@ -16,10 +16,11 @@ import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { Textarea } from "@/components/ui/textarea";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { cn } from "@/lib/utils";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
+import { SKILL_ACTIVE_RESOURCE_SCHEMA } from "@/lib/skills/schema-spec";
 
 export interface SkillRow {
   id: string;
@@ -145,16 +146,24 @@ export function SkillEditor({
   }, [isCreating]);
 
   const getCurrentData = useCallback(
-    () => form as FormState & Record<string, unknown>,
-    [form],
+    () => ({
+      _schema: SKILL_ACTIVE_RESOURCE_SCHEMA,
+      name: form.name,
+      source: initialDetail?.source ?? "local",
+      isReadOnly: Boolean(readOnly),
+      skillMd: form.skillMd,
+    } as Record<string, unknown>),
+    [form, initialDetail?.source, readOnly],
   );
-  const applyDraft = useCallback((draft: Partial<FormState>) => {
-    if (draft.name !== undefined && draft.skillMd === undefined) {
-      onNameChange(draft.name);
-    } else {
-      setForm((prev) => ({ ...prev, ...draft }));
+  const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    if (readOnly) return; // Prevent draft application on builtin immutable skills
+    if (typeof draft.skillMd === "string") {
+      setForm((prev) => ({ ...prev, skillMd: draft.skillMd as string }));
     }
-  }, [onNameChange]);
+    if (isCreating && typeof draft.name === "string") {
+      onNameChange(draft.name);
+    }
+  }, [readOnly, isCreating, onNameChange]);
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "skill",
@@ -257,7 +266,7 @@ export function SkillEditor({
                 size="sm"
                 onClick={() => void submit()}
                 disabled={saving || deleting || (!isCreating && !isDirty)}
-                className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
+                className={cn("h-8 gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
               >
                 {saving ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -11,6 +11,7 @@ export interface WebAutoExtractedImage {
   name: string;
   src: string;
   rawBase64: string;
+  filename?: string;
   format: "png" | "jpeg" | "webp" | "image";
   sizeKB: number;
 }
@@ -24,9 +25,21 @@ const PRIORITY_KEYS = [
   "images",
 ] as const;
 
-/** Detect format from MIME type or data URI prefix */
-function detectImageFormat(dataUriOrMime: string): "png" | "jpeg" | "webp" | "image" {
-  const lower = dataUriOrMime.toLowerCase();
+const IMAGE_EXT_REGEX = /\.(png|jpe?g|webp|gif|svg)$/i;
+
+/** Strip relative/container path tokens to obtain the clean base filename */
+function sanitizeFilename(raw: string): string {
+  let cleaned = raw.trim();
+  cleaned = cleaned.replace(/^['"]|['"]$/g, "");
+  cleaned = cleaned.replace(/\\/g, "/");
+  cleaned = cleaned.replace(/^(\.\/|\/app\/\.output\/|\.playwright-mcp\/)/, "");
+  const parts = cleaned.split("/");
+  return parts[parts.length - 1] || cleaned;
+}
+
+/** Detect format from MIME type, data URI prefix, or filename extension */
+function detectImageFormat(dataUriOrMimeOrFilename: string): "png" | "jpeg" | "webp" | "image" {
+  const lower = dataUriOrMimeOrFilename.toLowerCase();
   if (lower.includes("png")) return "png";
   if (lower.includes("jpeg") || lower.includes("jpg")) return "jpeg";
   if (lower.includes("webp")) return "webp";
@@ -38,7 +51,7 @@ function isDataImageUri(val: string): boolean {
   return /^data:image\/(png|jpeg|jpg|webp);base64,/i.test(val);
 }
 
-/** Extract base64 payload and size */
+/** Extract base64 payload or filename image payload */
 function parseImageString(
   raw: string,
   name: string,
@@ -85,6 +98,23 @@ function parseImageString(
     };
   }
 
+  // 3. Direct filename or file path (e.g. "githubhome.png", "./screenshot.webp", "/app/.output/dashboard.jpeg")
+  if (IMAGE_EXT_REGEX.test(trimmed) && trimmed.length < 500) {
+    const clean = sanitizeFilename(trimmed);
+    if (clean && clean !== "." && clean !== "..") {
+      const format = detectImageFormat(clean);
+      return {
+        id: `img-${name}-${index}`,
+        name,
+        filename: clean,
+        src: `/api/media/playwright-files?file=${encodeURIComponent(clean)}`,
+        rawBase64: "",
+        format,
+        sizeKB: 0,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -129,17 +159,23 @@ export function extractWebAutoImages(output: unknown): WebAutoExtractedImage[] {
         const val = obj[key];
         if (typeof val === "string") {
           const parsed = parseImageString(val, key, images.length);
-          if (parsed && !visited.has(parsed.rawBase64)) {
-            visited.add(parsed.rawBase64);
-            images.push(parsed);
+          if (parsed) {
+            const dedupKey = parsed.rawBase64 || parsed.src;
+            if (!visited.has(dedupKey)) {
+              visited.add(dedupKey);
+              images.push(parsed);
+            }
           }
         } else if (Array.isArray(val)) {
           val.forEach((item, idx) => {
             if (typeof item === "string") {
               const parsed = parseImageString(item, `${key}[${idx}]`, images.length);
-              if (parsed && !visited.has(parsed.rawBase64.slice(0, 40))) {
-                visited.add(parsed.rawBase64.slice(0, 40));
-                images.push(parsed);
+              if (parsed) {
+                const dedupKey = parsed.rawBase64 ? parsed.rawBase64.slice(0, 40) : parsed.src;
+                if (!visited.has(dedupKey)) {
+                  visited.add(dedupKey);
+                  images.push(parsed);
+                }
               }
             }
           });
@@ -148,23 +184,29 @@ export function extractWebAutoImages(output: unknown): WebAutoExtractedImage[] {
     }
   }
 
-  // 2. Fallback scan if no priority keys found: scan all keys for data:image
+  // 2. Fallback scan if no priority keys found: scan all keys for image strings
   if (images.length === 0) {
     for (const { obj } of targets) {
       for (const [key, val] of Object.entries(obj)) {
-        if (typeof val === "string" && isDataImageUri(val)) {
+        if (typeof val === "string") {
           const parsed = parseImageString(val, key, images.length);
-          if (parsed && !visited.has(parsed.rawBase64)) {
-            visited.add(parsed.rawBase64);
-            images.push(parsed);
+          if (parsed) {
+            const dedupKey = parsed.rawBase64 ? parsed.rawBase64.slice(0, 40) : parsed.src;
+            if (!visited.has(dedupKey)) {
+              visited.add(dedupKey);
+              images.push(parsed);
+            }
           }
         } else if (Array.isArray(val)) {
           val.forEach((item, idx) => {
-            if (typeof item === "string" && isDataImageUri(item)) {
+            if (typeof item === "string") {
               const parsed = parseImageString(item, `${key}[${idx}]`, images.length);
-              if (parsed && !visited.has(parsed.rawBase64.slice(0, 40))) {
-                visited.add(parsed.rawBase64.slice(0, 40));
-                images.push(parsed);
+              if (parsed) {
+                const dedupKey = parsed.rawBase64 ? parsed.rawBase64.slice(0, 40) : parsed.src;
+                if (!visited.has(dedupKey)) {
+                  visited.add(dedupKey);
+                  images.push(parsed);
+                }
               }
             }
           });
@@ -177,16 +219,16 @@ export function extractWebAutoImages(output: unknown): WebAutoExtractedImage[] {
 }
 
 /**
- * Format execution output for display, replacing large Base64 / data:image
- * strings with concise placeholder summaries: `[${sizeKB}KB ${mimeType} base64 string]`.
+ * Sanitize output object, replacing large Base64 / data:image strings with
+ * `[${sizeKB}KB ${mimeType} base64 string]`.
  */
-export function formatWebAutoOutputForDisplay(output: unknown): string {
-  if (output === null || output === undefined) return "";
+export function sanitizeWebAutoOutput(output: unknown): unknown {
+  if (output === null || output === undefined) return null;
   if (typeof output === "string") {
     try {
       const parsed = JSON.parse(output) as unknown;
       if (parsed && typeof parsed === "object") {
-        return formatWebAutoOutputForDisplay(parsed);
+        return sanitizeWebAutoOutput(parsed);
       }
       return output;
     } catch {
@@ -195,14 +237,14 @@ export function formatWebAutoOutputForDisplay(output: unknown): string {
   }
 
   try {
-    const sanitized = JSON.parse(
+    return JSON.parse(
       JSON.stringify(output, (_key, value) => {
         if (typeof value === "string") {
           if (isDataImageUri(value)) {
             const match = value.match(/^data:(image\/[^;]+);base64,([\s\S]+)$/i);
             if (match && match[1] && match[2]) {
               const mimeType = match[1];
-              const sizeKB = Math.round((match[2].length * 0.75) / 1024);
+              const sizeKB = Math.max(1, Math.round((match[2].length * 0.75) / 1024));
               return `[${sizeKB}KB ${mimeType} base64 string]`;
             }
           } else if (
@@ -210,13 +252,27 @@ export function formatWebAutoOutputForDisplay(output: unknown): string {
             !value.includes(" ") &&
             /^[A-Za-z0-9+/=]+$/.test(value)
           ) {
-            const sizeKB = Math.round((value.length * 0.75) / 1024);
+            const sizeKB = Math.max(1, Math.round((value.length * 0.75) / 1024));
             return `[${sizeKB}KB image/png base64 string]`;
           }
         }
         return value;
       }),
     );
+  } catch {
+    return output;
+  }
+}
+
+/**
+ * Format execution output for display, replacing large Base64 / data:image
+ * strings with concise placeholder summaries: `[${sizeKB}KB ${mimeType} base64 string]`.
+ */
+export function formatWebAutoOutputForDisplay(output: unknown): string {
+  if (output === null || output === undefined) return "";
+  const sanitized = sanitizeWebAutoOutput(output);
+  if (typeof sanitized === "string") return sanitized;
+  try {
     return JSON.stringify(sanitized, null, 2);
   } catch {
     return String(output);

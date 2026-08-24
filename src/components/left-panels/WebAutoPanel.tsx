@@ -55,7 +55,7 @@ export function WebAutoPanel() {
     if (data) setSuites(data);
   }, [data, error, isLoading, setSuites, setLoading, setError]);
 
-  const handleRunSuite = async (suiteId: string, suiteName: string) => {
+  const handleRunSuite = async (suiteId: string) => {
     try {
       const res = await fetch("/api/web-auto-runs", {
         method: "POST",
@@ -66,9 +66,7 @@ export function WebAutoPanel() {
       if (!res.ok) {
         throw new Error(data.message || "Failed to start suite run");
       }
-      toast.success(`Suite run started for "${suiteName}"`, {
-        description: `Running ${data.totalCount} cases in background.`,
-      });
+      toast.success(`Running ${data.totalCount} cases in background`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
@@ -169,7 +167,7 @@ export function WebAutoPanel() {
                             className="rounded p-0.5 text-muted-foreground/70 hover:text-green-500 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              void handleRunSuite(suite.id, suite.name);
+                              void handleRunSuite(suite.id);
                             }}
                           >
                             <Play className="h-3 w-3 fill-current" />

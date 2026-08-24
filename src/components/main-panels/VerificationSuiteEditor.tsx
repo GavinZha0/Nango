@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useRunSnapshot } from "@/hooks/useRunSnapshot";
 import { useVerificationRunStream } from "@/hooks/useVerificationRunStream";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { CaseInspector } from "@/components/main-panels/verification/CaseInspector";
 import type {
   AssertionResult,
@@ -43,11 +44,36 @@ import {
   useCasesStore,
   type VerificationCaseRow,
 } from "@/store/verification-cases";
+import { VERIFICATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/verification/schema-spec";
 
 export interface VerificationSuiteEditorProps {
   /** The active MCP Server being verification-managed. */
   row: VerificationServerRow;
   onBack: () => void;
+}
+
+function EmptyVerificationCopilotSync({
+  server,
+}: {
+  server: { id: string; name: string; caseCount: number };
+}) {
+  const getCurrentData = useCallback(
+    () => ({
+      _schema: VERIFICATION_ACTIVE_RESOURCE_SCHEMA,
+      server,
+      selectedCase: null,
+      outcome: null,
+    }),
+    [server],
+  );
+
+  useCopilotDraft({
+    resourceType: "verification",
+    getCurrentData,
+    applyDraft: () => {},
+  });
+
+  return null;
 }
 
 export function VerificationSuiteEditor({
@@ -169,25 +195,27 @@ export function VerificationSuiteEditor({
       }
       return map;
     }
-    for (const [caseId, v] of liveRun.caseResults) {
-      map.set(caseId, { status: v.status });
+    for (const [caseId, res] of liveRun.caseResults) {
+      map.set(caseId, {
+        status: res.status,
+      });
     }
     return map;
   }, [runSnapshot, liveRun.caseResults]);
 
   const pinnedOutcome = useMemo<CaseExecutionOutcome | undefined>(() => {
     if (!runSnapshot || selectedCaseId === null) return undefined;
-    const row = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
-    if (!row) return undefined;
+    const r = runSnapshot.results.find((row) => row.caseId === selectedCaseId);
+    if (!r) return undefined;
     return {
-      status: row.status as VerificationCaseResultStatus,
-      resolvedInput: (row.inputSnapshot ?? {}) as Record<string, unknown>,
-      resultPayload: row.resultPayload,
-      resultTruncated: row.resultTruncated,
-      assertionResults: row.assertionResults as AssertionResult[],
-      error: row.error as ErrorEnvelope | null,
-      startedAt: new Date(row.startedAt).getTime(),
-      durationMs: row.durationMs ?? 0,
+      status: r.status as VerificationCaseResultStatus,
+      resolvedInput: (r.inputSnapshot ?? {}) as Record<string, unknown>,
+      resultPayload: r.resultPayload,
+      resultTruncated: r.resultTruncated,
+      assertionResults: r.assertionResults as AssertionResult[],
+      error: r.error as ErrorEnvelope | null,
+      startedAt: new Date(r.startedAt).getTime(),
+      durationMs: r.durationMs ?? 0,
     };
   }, [runSnapshot, selectedCaseId]);
 
@@ -264,8 +292,18 @@ export function VerificationSuiteEditor({
 
   const displayName = row.serverTitle || row.name;
 
+  const serverMeta = useMemo(
+    () => ({
+      id: row.id,
+      name: row.serverTitle || row.name,
+      caseCount: cases.length,
+    }),
+    [row.id, row.serverTitle, row.name, cases.length],
+  );
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {!selectedCase && <EmptyVerificationCopilotSync server={serverMeta} />}
       {/* Header aligned with left panel height and layout */}
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -326,6 +364,7 @@ export function VerificationSuiteEditor({
               <CaseInspector
                 key={selectedCase.id}
                 caseRow={selectedCase}
+                serverMeta={serverMeta}
                 pinnedOutcome={pinnedOutcome}
                 historyMeta={historyMeta}
                 onExitHistoryView={exitHistoryView}

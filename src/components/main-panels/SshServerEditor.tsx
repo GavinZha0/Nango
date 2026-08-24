@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
+import { SSH_SERVER_ACTIVE_RESOURCE_SCHEMA } from "@/lib/ssh/schema-spec";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,62}$/;
 const FP_RE = /^SHA256:[A-Za-z0-9+/=]+$/;
@@ -144,11 +145,57 @@ export function SshServerEditor({
 
   // Copilot draft integration
   const getCurrentData = useCallback(
-    () => form as FormState & Record<string, unknown>,
+    () => ({
+      _schema: SSH_SERVER_ACTIVE_RESOURCE_SCHEMA,
+      name: form.name,
+      description: form.description,
+      credentialId: form.credentialId,
+      host: form.host,
+      port: Number(form.port) || 22,
+      knownHostFingerprint: form.fingerprint,
+      commandAllow:
+        parseCommandList(form.commandAllowText).length > 0
+          ? parseCommandList(form.commandAllowText)
+          : null,
+      commandApprove: parseCommandList(form.commandApproveText),
+      commandDeny: parseCommandList(form.commandDenyText),
+      loginShell: form.loginShell,
+    } as Record<string, unknown>),
     [form],
   );
-  const applyDraft = useCallback((draft: Partial<FormState>) => {
-    setForm((prev) => ({ ...prev, ...draft }));
+  const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    setForm((prev) => {
+      const next = { ...prev };
+      if (typeof draft.name === "string") next.name = draft.name;
+      if (typeof draft.description === "string") next.description = draft.description;
+      if (typeof draft.credentialId === "string") next.credentialId = draft.credentialId;
+      if (typeof draft.host === "string") next.host = draft.host;
+      if (draft.port !== undefined && draft.port !== null) next.port = String(draft.port);
+      if (typeof draft.knownHostFingerprint === "string") next.fingerprint = draft.knownHostFingerprint;
+      else if (typeof draft.fingerprint === "string") next.fingerprint = draft.fingerprint;
+      if (typeof draft.loginShell === "boolean") next.loginShell = draft.loginShell;
+
+      if (Array.isArray(draft.commandAllow)) {
+        next.commandAllowText = (draft.commandAllow as string[]).join("\n");
+      } else if (typeof draft.commandAllowText === "string") {
+        next.commandAllowText = draft.commandAllowText;
+      } else if (draft.commandAllow === null) {
+        next.commandAllowText = "";
+      }
+
+      if (Array.isArray(draft.commandApprove)) {
+        next.commandApproveText = (draft.commandApprove as string[]).join("\n");
+      } else if (typeof draft.commandApproveText === "string") {
+        next.commandApproveText = draft.commandApproveText;
+      }
+
+      if (Array.isArray(draft.commandDeny)) {
+        next.commandDenyText = (draft.commandDeny as string[]).join("\n");
+      } else if (typeof draft.commandDenyText === "string") {
+        next.commandDenyText = draft.commandDenyText;
+      }
+      return next;
+    });
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "ssh-server",
@@ -466,7 +513,7 @@ export function SshServerEditor({
             size="sm"
             onClick={() => void handleSave()}
             disabled={saving || (!isNew && !isDirty && !draftApplied)}
-            className={cn("h-8 gap-1.5", draftApplied && "bg-amber-600 hover:bg-amber-700 text-white")}
+            className={cn("h-8 gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
