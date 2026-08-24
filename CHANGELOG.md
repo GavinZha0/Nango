@@ -5,8 +5,8 @@
 
 ### Features
 
-* add shared storage streaming, solidify artifact snapshots, and fix mcp tool resolution ([521f0ec](https://github.com/GavinZha0/Nango/commit/521f0ecdc796535fa5db2a19f1ec3aefb554e88c))
-* **copilot:** implement read-write symmetry and self-describing schema across 9 core modules ([57f087d](https://github.com/GavinZha0/Nango/commit/57f087d9330fe9aa4120947c9bf728ae826218a4))
+* add shared storage streaming, solidify artifact snapshots, and fix mcp tool resolution ([521f0ec](https://github.com/GavinZha0/Nango/commit/521f0ecdc796535fa5db2a19f1ec3aefb554e88c)) by @GavinZha0
+* **copilot:** implement read-write symmetry and self-describing schema across 9 core modules ([57f087d](https://github.com/GavinZha0/Nango/commit/57f087d9330fe9aa4120947c9bf728ae826218a4)) by @GavinZha0
 
 ## [0.15.0](https://github.com/GavinZha0/Nango/compare/v0.14.0...v0.15.0) (2026-08-23)
 
