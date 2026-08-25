@@ -19,7 +19,7 @@ import { buildMapping } from "../../path-mapper";
 import { getConfigMs } from "@/lib/config";
 import { getEnabledInfrastructureCredentialByProvider } from "@/lib/credentials/lookup";
 
-const DEFAULT_SERVICE_URL = "http://dify-sandbox:8194";
+const DEFAULT_SERVICE_URL = "http://sandbox:8194";
 const DEFAULT_API_KEY = "dify-sandbox";
 const DEFAULT_TIMEOUT_MS = 30000;
 

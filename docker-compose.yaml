@@ -14,10 +14,11 @@ services:
     ports:
       - "${APP_PORT:-9300}:9300"
     volumes:
-      - .cache/datasource:/app/.cache/datasource
+      - .cache/datasource:/app/.cache/datasource:U
       - .cache/playwright:/app/.cache/playwright:ro
     environment:
       NO_HTTPS: ${NO_HTTPS:-1}
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-secret-change-me-32chars}
       # Nested expansion: if BETTER_AUTH_URL isn't set, derive it from APP_PORT
       # so users only need to change APP_PORT to move the app to a different
@@ -136,7 +137,7 @@ services:
     ports:
       - "8931:8931"
     volumes:
-      - .cache/playwright:/app/.output
+      - .cache/playwright:/app/.output:U
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8931/health || exit 1"]
       interval: 15s
