@@ -44,7 +44,6 @@ import {
   useCasesStore,
   type VerificationCaseRow,
 } from "@/store/verification-cases";
-import { VERIFICATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/verification/schema-spec";
 
 export interface VerificationSuiteEditorProps {
   /** The active MCP Server being verification-managed. */
@@ -59,7 +58,6 @@ function EmptyVerificationCopilotSync({
 }) {
   const getCurrentData = useCallback(
     () => ({
-      _schema: VERIFICATION_ACTIVE_RESOURCE_SCHEMA,
       server,
       selectedCase: null,
       outcome: null,

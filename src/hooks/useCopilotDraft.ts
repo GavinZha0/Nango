@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { useCopilotSharedState } from "@/hooks/useCopilotSharedState";
+import { useEffect, useId, useRef, useState } from "react";
+import { useCopilotStateStore } from "@/store/copilot";
 
 export interface UseCopilotDraftOptions<T extends Record<string, unknown>> {
   /** The resource key in the drafts object, e.g., 'schedule', 'agent', 'skill' */
   resourceType: string;
+  /** Optional resource ID for instance identification */
+  resourceId?: string | null;
+  /** Whether the resource is read-only */
+  isReadOnly?: boolean;
   /** Function to get the current state of the form to sync to the agent */
   getCurrentData: () => T;
   /** Callback fired when a draft is received. Should update component state. */
@@ -12,46 +16,72 @@ export interface UseCopilotDraftOptions<T extends Record<string, unknown>> {
 
 export function useCopilotDraft<T extends Record<string, unknown>>({
   resourceType,
+  resourceId = null,
+  isReadOnly = false,
   getCurrentData,
   applyDraft,
 }: UseCopilotDraftOptions<T>) {
-  const { drafts, clearDraft, setActiveResourceData } = useCopilotSharedState();
-  const draft = drafts[resourceType] as Partial<T> | undefined;
+  const instanceId = useId();
+  const registerEditor = useCopilotStateStore((s) => s.registerEditor);
+  const unregisterEditor = useCopilotStateStore((s) => s.unregisterEditor);
+  const setActiveResourceData = useCopilotStateStore((s) => s.setActiveResourceData);
 
   const [draftApplied, setDraftApplied] = useState(false);
   const preDraftRef = useRef<T | null>(null);
 
   // Keep latest callbacks in refs to avoid useEffect dependency churn
-  const callbacksRef = useRef({ getCurrentData, applyDraft });
+  const callbacksRef = useRef({ getCurrentData, applyDraft, isReadOnly, resourceId });
   useEffect(() => {
-    callbacksRef.current = { getCurrentData, applyDraft };
+    callbacksRef.current = { getCurrentData, applyDraft, isReadOnly, resourceId };
   });
 
-  // 1. Sync current state to global context continuously.
-  // Stringify to avoid infinite renders if getCurrentData returns a new object reference every time.
-  const dataJson = JSON.stringify(getCurrentData());
-  
+  // 1. Register editor slot with the store for direct tool dispatch
   useEffect(() => {
-    setActiveResourceData(JSON.parse(dataJson));
-    return () => setActiveResourceData(null);
-  }, [dataJson, setActiveResourceData]);
-
-  // 2. Watch for drafts and apply them
-  useEffect(() => {
-    if (draft && Object.keys(draft).length > 0) {
-      const timer = setTimeout(() => {
-        // Snapshot the state before applying if we haven't already
+    registerEditor({
+      instanceId,
+      resourceType,
+      resourceId,
+      isReadOnly,
+      getCurrentData: () => callbacksRef.current.getCurrentData(),
+      applyDraft: (draftData) => {
+        if (callbacksRef.current.isReadOnly) return [];
         if (!preDraftRef.current) {
           preDraftRef.current = callbacksRef.current.getCurrentData();
         }
-        
-        callbacksRef.current.applyDraft(draft);
+        callbacksRef.current.applyDraft(draftData as Partial<T>);
         setDraftApplied(true);
-        clearDraft(resourceType);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [draft, clearDraft, resourceType]);
+        return Object.keys(draftData);
+      },
+      discardDraft: () => {
+        if (preDraftRef.current) {
+          callbacksRef.current.applyDraft(preDraftRef.current);
+          preDraftRef.current = null;
+          setDraftApplied(false);
+        }
+      },
+    });
+
+    return () => unregisterEditor(instanceId);
+  }, [instanceId, resourceType, resourceId, isReadOnly, registerEditor, unregisterEditor]);
+
+  // 2. Sync current state to global context with 150ms debounce to avoid render churn
+  const dataJson = JSON.stringify(getCurrentData());
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setActiveResourceData(JSON.parse(dataJson));
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [dataJson, setActiveResourceData]);
+
+  // Clean up activeResourceData on unmount if this instance owns the active editor
+  useEffect(() => {
+    return () => {
+      if (useCopilotStateStore.getState().activeEditor?.instanceId === instanceId) {
+        setActiveResourceData(null);
+      }
+    };
+  }, [instanceId, setActiveResourceData]);
 
   // 3. Discard draft logic
   const discardDraft = () => {

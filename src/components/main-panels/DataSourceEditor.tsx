@@ -38,7 +38,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
-import { DATASOURCE_ACTIVE_RESOURCE_SCHEMA } from "@/lib/data-sources/schema-spec";
 
 // Match server-side DATA_SOURCE_IDS. Hard-coded here to avoid pulling
 // the server module into the client bundle.
@@ -191,7 +190,6 @@ export function DataSourceEditor({
   // Copilot draft integration
   const getCurrentData = useCallback(
     () => ({
-      _schema: DATASOURCE_ACTIVE_RESOURCE_SCHEMA,
       name: form.name,
       description: form.description,
       provider: form.provider,

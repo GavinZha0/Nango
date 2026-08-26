@@ -34,7 +34,6 @@ import { Theme as ShadcnTheme } from "@rjsf/shadcn";
 import validator from "@rjsf/validator-ajv8";
 import type { FieldTemplateProps } from "@rjsf/utils";
 import type { McpToolSnapshot } from "@/lib/db/schema";
-import { MCP_ACTIVE_RESOURCE_SCHEMA } from "@/lib/mcp/schema-spec";
 
 const Form = withTheme(ShadcnTheme);
 
@@ -386,7 +385,6 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   // help build tool params or analyse execution results.
   const getCurrentData = useCallback(
     () => ({
-      _schema: MCP_ACTIVE_RESOURCE_SCHEMA,
       server: {
         id: serverId,
         name: serverName,

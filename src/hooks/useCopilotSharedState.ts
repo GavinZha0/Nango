@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { useAgent } from "@copilotkit/react-core/v2";
 import { resolveActivePanel } from "@/components/layout/sidebar-panel-registry";
@@ -8,6 +8,7 @@ import { defaultSharedState, type NangoSharedState } from "@/lib/copilot/shared-
 import { useWorkspaceStore } from "@/store/workspace";
 import { useCopilotStateStore } from "@/store/copilot";
 import { useValidatedFrontendTool } from "@/lib/copilot/frontend-tool-helpers";
+import { normalizeResourceType } from "@/lib/copilot/resource-registry";
 import { z } from "zod";
 
 /**
@@ -24,8 +25,6 @@ export function useCopilotSharedStateSync() {
   const isSupervisor = builtinAgents.find((a) => a.id === activeAgentId)?.role === "supervisor";
 
   const setGlobalState = useCopilotStateStore((s) => s.setState);
-  const clearDraftRequest = useCopilotStateStore((s) => s.clearDraftRequest);
-  const ackClearDraft = useCopilotStateStore((s) => s.ackClearDraft);
   const activeResourceData = useCopilotStateStore((s) => s.activeResourceData);
 
   // Infer context from URL
@@ -60,7 +59,7 @@ export function useCopilotSharedStateSync() {
     return { activeUrl: pathname, activeView: panelId, activeResourceId: resourceId };
   }, [pathname]);
 
-  // Sync context to Agent state
+  // Sync context to Agent state (Single Writer)
   useEffect(() => {
     if (!agent) return;
     const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
@@ -85,56 +84,12 @@ export function useCopilotSharedStateSync() {
     }
   }, [agent, activeUrl, activeView, activeResourceId, activeResourceData]);
 
-  // Sync state from Agent -> Global Zustand Store
+  // Mirror Agent State into global Zustand store (one-way mirror)
   useEffect(() => {
-    if (!agent) return;
-    const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
-    setGlobalState(currentState);
-  }, [agent, agent.state, setGlobalState]);
-
-  // Handle cross-component draft clears
-  useEffect(() => {
-    if (clearDraftRequest && agent) {
-      const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
-      if (currentState.drafts && currentState.drafts[clearDraftRequest]) {
-        const newState = { ...currentState, drafts: { ...currentState.drafts } };
-        delete newState.drafts[clearDraftRequest];
-        agent.setState(newState);
-        setGlobalState(newState);
-      }
-      ackClearDraft();
+    if (agent?.state) {
+      setGlobalState(agent.state as NangoSharedState);
     }
-  }, [clearDraftRequest, agent, ackClearDraft, setGlobalState]);
-
-  // Clear drafts when the active agent changes to prevent stale state.
-  const prevAgentIdRef = useRef(activeAgentId);
-  useEffect(() => {
-    if (prevAgentIdRef.current !== activeAgentId) {
-      prevAgentIdRef.current = activeAgentId;
-      if (agent) {
-        const cleared = { ...defaultSharedState, context: (agent.state as NangoSharedState)?.context ?? defaultSharedState.context };
-        agent.setState(cleared);
-        setGlobalState(cleared);
-      }
-    }
-  }, [activeAgentId, agent, setGlobalState]);
-
-  /** Constrained resource types that support draft editing. */
-  const draftResourceTypes = z.enum(["schedule", "workflow", "skill", "agent", "datasource", "ssh-server", "mcp", "web-auto", "verification", "evaluation"]);
-
-  /** Map activeView → accepted resourceType so we can detect mismatches. */
-  const viewToResource: Record<string, string> = {
-    schedules: "schedule",
-    artifact: "workflow",
-    skills: "skill",
-    agent: "agent",
-    datasource: "datasource",
-    "ssh-server": "ssh-server",
-    mcp: "mcp",
-    "web-auto": "web-auto",
-    verification: "verification",
-    evaluation: "evaluation",
-  };
+  }, [agent?.state, setGlobalState]);
 
   // Tool: propose_page_edit
   useValidatedFrontendTool({
@@ -143,40 +98,53 @@ export function useCopilotSharedStateSync() {
     description: [
       "Propose changes to the resource currently open in the editor.",
       "The frontend will show a preview; the user decides whether to save.",
-      "Send the FULL modified object mirroring the activeResourceData structure (conform to activeResourceData._schema if provided).",
+      "Send ONLY editable fields you want to change.",
       "Format: dates as ISO 8601 (e.g. 2025-06-15T00:00:00.000Z), cron as standard 5-field.",
       "Only works when the user is viewing an editable page with existing data.",
     ].join(" "),
     parameters: z.object({
-      resourceType: draftResourceTypes.describe("The type of resource being modified."),
-      draftData: z.record(z.string(), z.unknown()).describe("The complete draft object mirroring activeResourceData structure."),
+      resourceType: z.string().describe("The type of resource being modified (e.g. 'agent', 'skills', 'schedule', 'datasource', 'ssh-server', 'mcp', 'web-auto', 'verification', 'evaluation')."),
+      draftData: z.record(z.string(), z.unknown()).describe("The fields and values to modify."),
     }),
     handler: async ({ resourceType, draftData }) => {
-      if (!agent) return "Agent not ready.";
-      const rt: string = resourceType;
-      
-      // Read fresh state from Zustand to avoid stale closures from useFrontendTool
-      const globalState = useCopilotStateStore.getState();
-      const currentResourceData = globalState.activeResourceData;
-      const currentActiveView = globalState.state.context?.activeView ?? "none";
+      const editor = useCopilotStateStore.getState().activeEditor;
 
-      // Guard: reject when the page has no editable data
-      if (!currentResourceData) {
-        return "Current page has no editable data. Use backend tools or ask the user to navigate to the resource editor.";
+      // Guard: reject empty draftData (#6)
+      if (!draftData || Object.keys(draftData).length === 0) {
+        return "Draft data cannot be empty. Please specify the fields you want to change.";
       }
-      // Guard: reject resourceType / activeView mismatch
-      const expectedResource = viewToResource[currentActiveView];
-      if (expectedResource && expectedResource !== rt) {
-        return `Mismatch: user is viewing ${currentActiveView} but draft targets ${rt}. Navigate first or use backend tools.`;
+
+      // Guard: reject when no editor is open
+      if (!editor) {
+        return "No active resource editor is currently open. Ask the user to navigate to the resource editor first.";
       }
-      const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
-      const newState = {
-        ...currentState,
-        drafts: { ...currentState.drafts, [rt]: draftData },
+
+      // Normalize resourceType for comparison
+      const normalizedTarget = normalizeResourceType(resourceType);
+      const normalizedEditor = normalizeResourceType(editor.resourceType) ?? editor.resourceType;
+
+      // Guard: reject resourceType mismatch (Safety Interlock against cross-page contamination)
+      if (!normalizedTarget || normalizedTarget !== normalizedEditor) {
+        return `Mismatch: current editor is viewing '${editor.resourceType}', but draft targets '${resourceType}'. Navigate first or use backend tools.`;
+      }
+
+      // Guard: reject read-only/builtin resources (#1)
+      if (editor.isReadOnly) {
+        return `Permission Denied: This ${editor.resourceType} is read-only (builtin) and cannot be edited.`;
+      }
+
+      // Apply directly to the active editor
+      const appliedFields = editor.applyDraft(draftData);
+      if (appliedFields.length === 0) {
+        return "None of the provided fields were accepted by the editor.";
+      }
+
+      return {
+        status: "success",
+        resourceType: editor.resourceType,
+        appliedFields,
+        message: "Draft applied.",
       };
-      agent.setState(newState);
-      globalState.setState(newState);
-      return `Draft for ${rt} proposed. The user will review and save.`;
     },
   });
 
@@ -184,23 +152,22 @@ export function useCopilotSharedStateSync() {
   useValidatedFrontendTool({
     name: "discard_page_edit",
     available: isSupervisor,
-    description: "Discard a previously proposed draft for a resource type.",
+    description: "Discard previously proposed draft changes and restore original values in the editor.",
     parameters: z.object({
-      resourceType: draftResourceTypes.describe("The type of resource whose draft should be discarded."),
+      resourceType: z.string().describe("The type of resource whose draft should be discarded."),
     }),
     handler: async ({ resourceType }) => {
-      if (!agent) return "Agent not ready.";
-      const rt: string = resourceType;
-      const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
-      if (!currentState.drafts?.[rt]) {
-        return `No draft found for ${rt}.`;
+      const editor = useCopilotStateStore.getState().activeEditor;
+      if (!editor) {
+        return `No active draft found for ${resourceType}.`;
       }
-      const newDrafts = { ...currentState.drafts };
-      delete newDrafts[rt];
-      const newState = { ...currentState, drafts: newDrafts };
-      agent.setState(newState);
-      useCopilotStateStore.getState().setState(newState);
-      return `Draft for ${rt} discarded.`;
+      const normalizedTarget = normalizeResourceType(resourceType);
+      const normalizedEditor = normalizeResourceType(editor.resourceType) ?? editor.resourceType;
+      if (!normalizedTarget || normalizedTarget !== normalizedEditor) {
+        return `No active draft found for ${resourceType}. Current editor is viewing '${editor.resourceType}'.`;
+      }
+      editor.discardDraft();
+      return `Draft changes for ${editor.resourceType} have been discarded and original values restored.`;
     },
   });
 
@@ -208,18 +175,14 @@ export function useCopilotSharedStateSync() {
 }
 
 /**
- * A custom hook to be used ANYWHERE in the app (even outside CopilotKitProvider).
- * Exposes the typed state and a helper to clear drafts via Zustand.
+ * A custom hook to access shared context data.
  */
 export function useCopilotSharedState() {
   const state = useCopilotStateStore((s) => s.state);
-  const requestClearDraft = useCopilotStateStore((s) => s.requestClearDraft);
   const setActiveResourceData = useCopilotStateStore((s) => s.setActiveResourceData);
 
   return {
     state,
-    drafts: state.drafts ?? {},
-    clearDraft: requestClearDraft,
     setActiveResourceData,
   };
 }

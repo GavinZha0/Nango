@@ -37,7 +37,6 @@ import { formatTimestamp } from "@/components/admin/format";
 import { JsonView } from "@/components/ui/json-view";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { sanitizeWebAutoOutput } from "@/lib/web-auto/image-extractor";
-import { VERIFICATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/verification/schema-spec";
 import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
   AssertionResult,
@@ -419,7 +418,6 @@ export function CaseInspector({
     }
 
     return {
-      _schema: VERIFICATION_ACTIVE_RESOURCE_SCHEMA,
       server: {
         id: serverMeta?.id ?? caseRow.mcpServerId ?? "",
         name: serverMeta?.name ?? "MCP Server",

@@ -40,7 +40,6 @@ import {
 } from "@/lib/constants/supervisor";
 import type { AgentRole } from "@/lib/db/schema";
 import { DEFAULT_EVALUATOR_SYSTEM_PROMPT } from "@/lib/evaluation/types";
-import { AGENT_ACTIVE_RESOURCE_SCHEMA } from "@/lib/agents/schema-spec";
 export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 import type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 
@@ -331,7 +330,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   // serializable object for the agent, split back on apply.
   const getCurrentData = useCallback(
     () => ({
-      _schema: AGENT_ACTIVE_RESOURCE_SCHEMA,
       ...form,
       tools: {
         mcp: [...tools.mcp].sort(),

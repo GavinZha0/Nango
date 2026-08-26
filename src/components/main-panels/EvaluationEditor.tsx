@@ -44,7 +44,6 @@ import { useShallow } from "zustand/react/shallow";
 import type { EntityDescriptor } from "@/lib/backends/types";
 
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
-import { EVALUATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/evaluation/schema-spec";
 
 interface EvaluationEditorProps {
   agentId: string;
@@ -61,7 +60,6 @@ function EmptyEvaluationCopilotSync({
 }) {
   const getCurrentData = useCallback(
     () => ({
-      _schema: EVALUATION_ACTIVE_RESOURCE_SCHEMA,
       suite: suite
         ? {
             id: suite.id,

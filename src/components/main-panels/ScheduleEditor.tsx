@@ -53,7 +53,6 @@ import {
 } from "@/lib/orchestration/display-name";
 import type { EntityKind } from "@/lib/backends/types";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
-import { SCHEDULE_ACTIVE_RESOURCE_SCHEMA } from "@/lib/runner/schedule-schema-spec";
 // Agent option helpers
 
 interface AgentOption {
@@ -279,7 +278,6 @@ export function ScheduleEditor({
 
   const getCurrentData = useCallback(
     () => ({
-      _schema: SCHEDULE_ACTIVE_RESOURCE_SCHEMA,
       ...form,
     } as Record<string, unknown>),
     [form],

@@ -6,7 +6,7 @@
 
 export interface NangoSharedState {
   /**
-   * 1. Context Injection (Frontend -> Agent)
+   * Context Injection (Frontend -> Agent)
    * The frontend updates this when the user navigates across panels.
    * Gives the Agent ambient awareness of what the user is currently looking at.
    */
@@ -19,29 +19,8 @@ export interface NangoSharedState {
       | "user" | "credential" | "config" | "trace" 
       | "none" | "web-auto";
     activeResourceId: string | null;
-    activeResourceData?: Record<string, unknown> | null; // A readonly copy of the data to give the agent context
+    activeResourceData?: Record<string, unknown> | null;
   };
-
-  /**
-   * 2. Drafts (Agent -> Frontend)
-   * When the agent decides to use "Copilot Mode" (interactive modification),
-   * it writes proposed changes here instead of calling DB tools directly.
-   * Frontend components react to this to show previews/diffs.
-   */
-  drafts: {
-    schedule?: Record<string, unknown>;
-    skill?: Record<string, unknown>;
-    workflow?: {
-      nodes: Record<string, unknown>[];
-      edges: Record<string, unknown>[];
-    };
-    "web-auto"?: Record<string, unknown>;
-    verification?: Record<string, unknown>;
-    evaluation?: Record<string, unknown>;
-    // Add other resource types as needed
-    [key: string]: Record<string, unknown> | undefined;
-  };
-
 }
 
 export const defaultSharedState: NangoSharedState = {
@@ -51,5 +30,4 @@ export const defaultSharedState: NangoSharedState = {
     activeResourceId: null,
     activeResourceData: null,
   },
-  drafts: {},
 };

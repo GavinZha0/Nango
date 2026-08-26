@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/select";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { cn } from "@/lib/utils";
-import { SSH_SERVER_ACTIVE_RESOURCE_SCHEMA } from "@/lib/ssh/schema-spec";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,62}$/;
 const FP_RE = /^SHA256:[A-Za-z0-9+/=]+$/;
@@ -146,7 +145,6 @@ export function SshServerEditor({
   // Copilot draft integration
   const getCurrentData = useCallback(
     () => ({
-      _schema: SSH_SERVER_ACTIVE_RESOURCE_SCHEMA,
       name: form.name,
       description: form.description,
       credentialId: form.credentialId,

@@ -18,9 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
-import { cn } from "@/lib/utils";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
-import { SKILL_ACTIVE_RESOURCE_SCHEMA } from "@/lib/skills/schema-spec";
+import { cn } from "@/lib/utils";
 
 export interface SkillRow {
   id: string;
@@ -147,7 +146,6 @@ export function SkillEditor({
 
   const getCurrentData = useCallback(
     () => ({
-      _schema: SKILL_ACTIVE_RESOURCE_SCHEMA,
       name: form.name,
       source: initialDetail?.source ?? "local",
       isReadOnly: Boolean(readOnly),
@@ -166,7 +164,7 @@ export function SkillEditor({
   }, [readOnly, isCreating, onNameChange]);
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
-    resourceType: "skill",
+    resourceType: "skills",
     getCurrentData,
     applyDraft,
   });

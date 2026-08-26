@@ -47,7 +47,6 @@ import {
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import { evalCaseActions } from "@/store/evaluation-cases";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
-import { EVALUATION_ACTIVE_RESOURCE_SCHEMA } from "@/lib/evaluation/schema-spec";
 
 /** EvalTurn with a stable React key (runtime-only, not persisted). */
 interface KeyedTurn extends EvalTurn {
@@ -819,7 +818,6 @@ export function EvalCaseInspector({
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
     return {
-      _schema: EVALUATION_ACTIVE_RESOURCE_SCHEMA,
       suite: {
         id: suite.id,
         name: suite.name,

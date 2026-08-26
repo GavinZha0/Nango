@@ -16,7 +16,6 @@ import {
   sanitizeWebAutoOutput,
   type WebAutoExtractedImage,
 } from "@/lib/web-auto/image-extractor";
-import { WEB_AUTO_ACTIVE_RESOURCE_SCHEMA } from "@/lib/web-auto/schema-spec";
 import { useRouter } from "next/navigation";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
@@ -295,7 +294,6 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
     return {
-      _schema: WEB_AUTO_ACTIVE_RESOURCE_SCHEMA,
       suite: {
         id: selectedSuite?.id ?? suiteId,
         name: selectedSuite?.name ?? "",
