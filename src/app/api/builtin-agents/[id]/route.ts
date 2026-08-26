@@ -136,8 +136,8 @@ const updateSchema = z
     temperature: z.number().min(0).max(1).nullable().optional(),
     maxTokens: z.number().int().positive().nullable().optional(),
     maxSteps: z.number().int().positive().optional(),
-    toolChoice: z.enum(["auto", "required", "none"]).optional(),
     toolApprovalMode: z.enum(["always", "auto", "never"]).optional(),
+    sharedStateEnabled: z.boolean().optional(),
     memoryEnabled: z.boolean().optional(),
     memoryWindowSize: z.number().int().positive().nullable().optional(),
     enabled: z.boolean().optional(),
@@ -234,10 +234,11 @@ export const PATCH = withEditor<{ id: string }>(
       || body.modelProvider !== undefined
       || body.credentialId !== undefined
       || body.prompt !== undefined
-      || body.toolChoice !== undefined
       || body.temperature !== undefined
       || body.maxTokens !== undefined
       || body.maxSteps !== undefined
+      || body.toolApprovalMode !== undefined
+      || body.sharedStateEnabled !== undefined
       || body.memoryEnabled !== undefined
       || body.memoryWindowSize !== undefined
       || body.tools !== undefined;
@@ -269,8 +270,8 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.modelProvider !== undefined) updates.modelProvider = body.modelProvider;
     if (body.credentialId !== undefined) updates.credentialId = body.credentialId;
     if (body.prompt !== undefined) updates.prompt = body.prompt;
-    if (body.toolChoice !== undefined) updates.toolChoice = body.toolChoice;
     if (body.toolApprovalMode !== undefined) updates.toolApprovalMode = body.toolApprovalMode;
+    if (body.sharedStateEnabled !== undefined) updates.sharedStateEnabled = body.sharedStateEnabled;
     if (body.temperature !== undefined) updates.temperature = body.temperature != null ? String(body.temperature) : null;
     if (body.maxTokens !== undefined) updates.maxTokens = body.maxTokens;
     if (body.maxSteps !== undefined) updates.maxSteps = body.maxSteps;

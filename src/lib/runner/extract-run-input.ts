@@ -13,6 +13,14 @@ import { childLogger } from "@/lib/observability/logger";
 
 const log = childLogger({ component: "extract-run-input" });
 
+/** Real-time page/editor context passed via Copilot shared state. */
+export interface PageContextSnapshot {
+  activeUrl?: string;
+  activeView?: string;
+  activeResourceId?: string | null;
+  activeResourceData?: Record<string, unknown> | null;
+}
+
 /** Fields the runner pulls out of the AG-UI POST body. */
 export interface RunInputPeek {
   /** Triggering input for this run, capped at 1000 chars. Latest user
@@ -28,6 +36,20 @@ export interface RunInputPeek {
    *  continuation run; empty for normal chat turns. Persisted as
    *  `tool_call_result` events on the new run. */
   triggeringToolResults: ReadonlyArray<{ toolCallId: string; content: string }>;
+  /** Read-only snapshot of the user's active editor page context (if present). */
+  pageContext?: PageContextSnapshot | null;
+}
+
+/** Format a page context snapshot into a clean Markdown block for agent prompt injection. */
+export function formatPageContextSnapshot(ctx: PageContextSnapshot): string {
+  const parts: string[] = [];
+  if (ctx.activeView) parts.push(`- **Active View / Panel**: \`${ctx.activeView}\``);
+  if (ctx.activeResourceId) parts.push(`- **Active Resource ID**: \`${ctx.activeResourceId}\``);
+  if (ctx.activeUrl) parts.push(`- **Active URL**: \`${ctx.activeUrl}\``);
+  if (ctx.activeResourceData && Object.keys(ctx.activeResourceData).length > 0) {
+    parts.push(`- **Active Resource Content**:\n\`\`\`json\n${JSON.stringify(ctx.activeResourceData, null, 2)}\n\`\`\``);
+  }
+  return parts.length > 0 ? parts.join("\n") : "(No active resource open in editor)";
 }
 
 /** Coerce arbitrary tool-result content into a UI-safe string. */
@@ -87,6 +109,8 @@ function readUserMessage(
 /** Extract from a pre-parsed body. */
 export function extractRunInputFromBody(body: {
   threadId?: unknown;
+  state?: unknown;
+  context?: unknown;
   messages?: ReadonlyArray<{
     id?: unknown;
     role?: string;
@@ -100,6 +124,27 @@ export function extractRunInputFromBody(body: {
       : undefined;
   const messages = Array.isArray(body.messages) ? body.messages : [];
 
+  let pageContext: PageContextSnapshot | null = null;
+  const rawState = body.state && typeof body.state === "object" ? (body.state as Record<string, unknown>) : undefined;
+  const rawContext =
+    (rawState?.context && typeof rawState.context === "object" ? (rawState.context as Record<string, unknown>) : undefined)
+    ?? (body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>) : undefined);
+
+  if (rawContext) {
+    pageContext = {
+      activeUrl: typeof rawContext.activeUrl === "string" ? rawContext.activeUrl : undefined,
+      activeView: typeof rawContext.activeView === "string" ? rawContext.activeView : undefined,
+      activeResourceId:
+        typeof rawContext.activeResourceId === "string" || rawContext.activeResourceId === null
+          ? rawContext.activeResourceId
+          : undefined,
+      activeResourceData:
+        rawContext.activeResourceData && typeof rawContext.activeResourceData === "object"
+          ? (rawContext.activeResourceData as Record<string, unknown>)
+          : null,
+    };
+  }
+
   // Tool-tail = continuation run: trigger is the tool result, not the
   // (stale) last user message.
   const triggeringToolResults = extractTrailingToolResults(messages);
@@ -110,6 +155,7 @@ export function extractRunInputFromBody(body: {
       threadId,
       userMessageId: undefined,
       triggeringToolResults,
+      pageContext,
     };
   }
 
@@ -123,10 +169,11 @@ export function extractRunInputFromBody(body: {
         threadId,
         userMessageId: parsed.userMessageId,
         triggeringToolResults: [],
+        pageContext,
       };
     }
   }
-  return { task: "", threadId, userMessageId: undefined, triggeringToolResults: [] };
+  return { task: "", threadId, userMessageId: undefined, triggeringToolResults: [], pageContext };
 }
 
 /**

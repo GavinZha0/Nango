@@ -19,7 +19,6 @@ vi.mock("@/lib/db/schema", () => ({
     temperature: "temperature",
     maxTokens: "max_tokens",
     maxSteps: "max_steps",
-    toolChoice: "tool_choice",
   },
   BuiltinAgentToolTable: {
     agentId: "agent_id",
@@ -47,13 +46,15 @@ const { getCredentialConfigById } = await import("@/lib/credentials/lookup");
 interface AgentRowDb {
   id: string;
   name: string;
+  role?: import("@/lib/db/schema").AgentRole | null;
   modelProvider: string;
   model: string;
   prompt: string | null;
   temperature: string | null;
   maxTokens: number | null;
   maxSteps: number;
-  toolChoice: string;
+  toolApprovalMode: string;
+  sharedStateEnabled: boolean;
   credentialId: string;
 }
 
@@ -106,13 +107,15 @@ const CRED_ID: string = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const sampleAgentRow: AgentRowDb = {
   id: AGENT_ID,
   name: "sample agent",
+  role: null,
   modelProvider: "openai",
   model: "gpt-4o",
   prompt: "you are helpful",
   temperature: "0.7",
   maxTokens: 2048,
   maxSteps: 5,
-  toolChoice: "auto",
+  toolApprovalMode: "never",
+  sharedStateEnabled: false,
   credentialId: CRED_ID,
 };
 
@@ -276,12 +279,14 @@ describe("defaultLoadAgentSpec", () => {
     expect(spec).toEqual({
       agentId: AGENT_ID,
       name: "sample agent",
+      role: null,
       modelProvider: "openai",
       model: "gpt-4o",
       prompt: "you are helpful",
       temperature: 0.7, // parsed to number
       maxTokens: 2048,
-      toolChoice: "auto",
+      toolApprovalMode: "never",
+      sharedStateEnabled: false,
       maxSteps: 5,
       apiKey: "sk-decrypted",
       restUrl: null,
@@ -385,8 +390,8 @@ function fakeSpec(agentId: string): AgentSpec {
     prompt: null,
     temperature: null,
     maxTokens: null,
-    toolChoice: "auto",
     toolApprovalMode: "never",
+    sharedStateEnabled: false,
     maxSteps: 5,
     apiKey: "sk-fake",
     restUrl: null,

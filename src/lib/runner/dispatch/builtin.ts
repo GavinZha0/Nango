@@ -48,6 +48,7 @@ import {
   AUTO_APPROVAL_POLICY_BLOCK,
   ALWAYS_APPROVAL_POLICY_BLOCK,
 } from "@/lib/constants/safety";
+import { SHARED_STATE_PROMPT_BLOCK } from "@/lib/constants/supervisor";
 
 /** Classify a CopilotKit URL: `{agentId, action}` for user-perceived
  *  dispatches; `null` for bookkeeping calls. */
@@ -89,6 +90,8 @@ export interface CapabilityDegradation {
   message: string;
 }
 
+import type { PageContextSnapshot } from "../extract-run-input";
+
 export interface BuiltinAgentsMap {
   agents: Record<string, BuiltInAgent>;
   borrowed: BorrowRecord[];
@@ -106,7 +109,9 @@ export interface BuiltinBuildContext {
   /** Active orchestration mode. Only consulted for supervisor agents. */
   mode?: OrchestrationModeId | EntityRunMode;
   initiator?: EntityRunInitiator;
-  /** Context for programmatic run start (e.g. expectedDimensionIds for evaluator tools). */
+  /** Active editor page context snapshot from the request (if present). */
+  pageContext?: PageContextSnapshot | null;
+  /** Context for programmatic run start (e.g. expectedDimensionIds for evaluator tools, delegated pageContext). */
   context?: Record<string, unknown>;
 }
 
@@ -298,6 +303,7 @@ export async function buildBuiltinAgents(
           userId: ctx.userId,
           supervisorAgentId: agentId,
           parentRunIdHolder: holder,
+          pageContext: ctx.pageContext,
         });
         supervisorTools.push(...rt.tools);
         supervisorCatalogBlock = rt.catalogPromptBlock;
@@ -400,6 +406,14 @@ export async function buildBuiltinAgents(
       }
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
       if (htmlPagePromptBlock.length > 0) parts.push(htmlPagePromptBlock);
+
+      if (spec.sharedStateEnabled || isSupervisor) {
+        parts.push(SHARED_STATE_PROMPT_BLOCK);
+      }
+
+      if (typeof ctx?.context?.pageContext === "string" && ctx.context.pageContext.trim().length > 0) {
+        parts.push(`## Active Page Context Snapshot (Read-Only Reference)\n\n${ctx.context.pageContext.trim()}`);
+      }
 
       if (isSupervisor) {
         if (supervisorCatalogBlock.length > 0) {
@@ -509,7 +523,7 @@ export async function buildBuiltinAgents(
       ...(composedPrompt !== undefined ? { prompt: composedPrompt } : {}),
       ...(spec.temperature !== null ? { temperature: spec.temperature } : {}),
       ...(spec.maxTokens !== null ? { maxTokens: spec.maxTokens } : {}),
-      toolChoice: spec.toolChoice,
+      toolChoice: "auto",
       // maxSteps MUST be > 1 when tools are bound; otherwise the agent
       // calls a tool with no step left to generate a reply. With the
       // ambient get_current_datetime making `hasTools` effectively

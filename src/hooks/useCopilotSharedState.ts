@@ -22,7 +22,10 @@ export function useCopilotSharedStateSync() {
   const { agent } = useAgent({ agentId: activeAgentId || undefined });
   const pathname = usePathname();
 
-  const isSupervisor = builtinAgents.find((a) => a.id === activeAgentId)?.role === "supervisor";
+  const activeAgent = builtinAgents.find((a) => a.id === activeAgentId);
+  const isSharedStateEnabled = Boolean(
+    activeAgent?.sharedStateEnabled ?? (activeAgent?.role === "supervisor"),
+  );
 
   const setGlobalState = useCopilotStateStore((s) => s.setState);
   const activeResourceData = useCopilotStateStore((s) => s.activeResourceData);
@@ -59,17 +62,18 @@ export function useCopilotSharedStateSync() {
     return { activeUrl: pathname, activeView: panelId, activeResourceId: resourceId };
   }, [pathname]);
 
-  // Sync context to Agent state (Single Writer)
+  // Sync context to Agent state (Single Writer) - gate activeResourceData behind isSharedStateEnabled
   useEffect(() => {
     if (!agent) return;
     const currentState = (agent.state as NangoSharedState) ?? defaultSharedState;
     const currentContext = currentState.context ?? defaultSharedState.context;
+    const effectiveResourceData = isSharedStateEnabled ? activeResourceData : null;
 
     if (
       currentContext.activeUrl !== activeUrl ||
       currentContext.activeView !== activeView ||
       currentContext.activeResourceId !== activeResourceId ||
-      currentContext.activeResourceData !== activeResourceData
+      currentContext.activeResourceData !== effectiveResourceData
     ) {
       agent.setState({
         ...currentState,
@@ -78,11 +82,11 @@ export function useCopilotSharedStateSync() {
           activeUrl,
           activeView,
           activeResourceId,
-          activeResourceData,
+          activeResourceData: effectiveResourceData,
         },
       });
     }
-  }, [agent, activeUrl, activeView, activeResourceId, activeResourceData]);
+  }, [agent, activeUrl, activeView, activeResourceId, activeResourceData, isSharedStateEnabled]);
 
   // Mirror Agent State into global Zustand store (one-way mirror)
   useEffect(() => {
@@ -94,7 +98,7 @@ export function useCopilotSharedStateSync() {
   // Tool: propose_page_edit
   useValidatedFrontendTool({
     name: "propose_page_edit",
-    available: isSupervisor,
+    available: isSharedStateEnabled,
     description: [
       "Propose changes to the resource currently open in the editor.",
       "The frontend will show a preview; the user decides whether to save.",
@@ -108,18 +112,16 @@ export function useCopilotSharedStateSync() {
     }),
     handler: async ({ resourceType, draftData }) => {
       const editor = useCopilotStateStore.getState().activeEditor;
-
-      // Guard: reject empty draftData (#6)
-      if (!draftData || Object.keys(draftData).length === 0) {
-        return "Draft data cannot be empty. Please specify the fields you want to change.";
-      }
-
-      // Guard: reject when no editor is open
       if (!editor) {
         return "No active resource editor is currently open. Ask the user to navigate to the resource editor first.";
       }
 
-      // Normalize resourceType for comparison
+      // Guard: reject empty drafts (#6)
+      if (!draftData || Object.keys(draftData).length === 0) {
+        return "Draft data cannot be empty. Please specify the fields you want to change.";
+      }
+
+      // Normalize both target and active editor type for fuzzy comparison (#5)
       const normalizedTarget = normalizeResourceType(resourceType);
       const normalizedEditor = normalizeResourceType(editor.resourceType) ?? editor.resourceType;
 
@@ -151,7 +153,7 @@ export function useCopilotSharedStateSync() {
   // Tool: discard_page_edit
   useValidatedFrontendTool({
     name: "discard_page_edit",
-    available: isSupervisor,
+    available: isSharedStateEnabled,
     description: "Discard previously proposed draft changes and restore original values in the editor.",
     parameters: z.object({
       resourceType: z.string().describe("The type of resource whose draft should be discarded."),

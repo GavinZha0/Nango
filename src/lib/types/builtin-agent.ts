@@ -27,8 +27,8 @@ export interface BuiltinAgentRow {
   temperature: string | null;
   maxTokens: number | null;
   maxSteps: number | null;
-  toolChoice: string;
   toolApprovalMode: string;
+  sharedStateEnabled?: boolean;
   memoryEnabled: boolean;
   memoryWindowSize: number | null;
   enabled: boolean;

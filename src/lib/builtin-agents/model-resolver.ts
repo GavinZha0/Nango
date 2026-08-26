@@ -53,14 +53,7 @@ export function resolveLanguageModel(spec: AgentSpec): ResolvedModel {
 
   if (provider === "ollama") {
     const baseURL: string = resolveOllamaBaseUrl(spec.restUrl);
-    const ollama = createOllama({
-      baseURL,
-      // QUIRK: when toolChoice="none", strip `tools`/`tool_choice` from
-      // every outbound body. Required for Ollama models that don't yet
-      // support function calling (gemma3, mistral:7b, phi*, …); drop
-      // this wrapper once they all gain native tool support.
-      fetch: spec.toolChoice === "none" ? makeStripToolsFetch() : undefined,
-    });
+    const ollama = createOllama({ baseURL });
     return { model: ollama(spec.model) };
   }
 
@@ -132,36 +125,4 @@ export function resolveLanguageModel(spec: AgentSpec): ResolvedModel {
 function resolveOllamaBaseUrl(restUrl: string | null): string {
   const trimmed: string = (restUrl?.trim() || DEFAULT_OLLAMA_HOST).replace(/\/+$/, "");
   return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
-}
-
-/**
- * Wrap `fetch` so every outbound Ollama request has `tools` and
- * `tool_choice` stripped. CopilotKit's `BuiltInAgent` unconditionally
- * injects two state-management tools that older Ollama models reject.
- */
-function makeStripToolsFetch(): typeof fetch {
-  return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
-    fetch(input, forceStripTools(init) ?? init);
-}
-
-/** Returns undefined when the body isn't a JSON string we can rewrite
- *  (e.g. ReadableStream), so caller falls back to the original init. */
-function forceStripTools(init: RequestInit | undefined): RequestInit | undefined {
-  if (!init || typeof init.body !== "string") return undefined;
-  if (!init.body.includes('"tools"') && !init.body.includes('"tool_choice"')) {
-    return undefined;
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(init.body) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-
-  if (!("tools" in parsed) && !("tool_choice" in parsed)) return undefined;
-
-  delete parsed.tools;
-  delete (parsed as { tool_choice?: unknown }).tool_choice;
-  return { ...init, body: JSON.stringify(parsed) };
 }

@@ -924,8 +924,6 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   /** Maximum number of tool-call steps per run (default 5). */
   maxSteps: integer("max_steps").notNull().default(5),
 
-  /** Tool choice strategy: "auto" | "required" | "none". Default "auto". */
-  toolChoice: text("tool_choice").notNull().default("auto"),
   /** Tool execution approval mode: "always" | "auto" | "never". Default "never". */
   toolApprovalMode: text("tool_approval_mode").notNull().default("never"),
 
@@ -935,6 +933,9 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   memoryWindowSize: integer("memory_window_size"),
 
   enabled: boolean("enabled").notNull().default(true),
+
+  /** Whether this agent has read/write access to the editor's shared state (Copilot Mode). */
+  sharedStateEnabled: boolean("shared_state_enabled").notNull().default(false),
 
   visibility: text("visibility").notNull().default("private"), // "private" | "public"
 

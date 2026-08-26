@@ -117,6 +117,7 @@ describe("extractRunInputFromBody", () => {
       threadId: undefined,
       userMessageId: undefined,
       triggeringToolResults: [],
+      pageContext: null,
     });
   });
 
@@ -146,6 +147,7 @@ describe("extractRunInputFromBody", () => {
       threadId: "t-1",
       userMessageId: "msg-c",
       triggeringToolResults: [],
+      pageContext: null,
     });
   });
 
@@ -163,6 +165,7 @@ describe("extractRunInputFromBody", () => {
       threadId: "t-1",
       userMessageId: undefined,
       triggeringToolResults: [{ toolCallId: "call_x", content: "Go" }],
+      pageContext: null,
     });
   });
 
@@ -226,5 +229,67 @@ describe("extractRunInputFromBody", () => {
     expect(result.task).toBe("");
     expect(result.userMessageId).toBeUndefined();
     expect(result.triggeringToolResults).toEqual([]);
+  });
+
+  it("extracts pageContext from body.state.context", () => {
+    const result = extractRunInputFromBody({
+      state: {
+        context: {
+          activeUrl: "/agent/123",
+          activeView: "agent-editor",
+          activeResourceId: "123",
+          activeResourceData: { name: "Test Agent", model: "gpt-4o" },
+        },
+      },
+      messages: [{ role: "user", content: "Review my agent prompt" }],
+    });
+    expect(result.pageContext).toEqual({
+      activeUrl: "/agent/123",
+      activeView: "agent-editor",
+      activeResourceId: "123",
+      activeResourceData: { name: "Test Agent", model: "gpt-4o" },
+    });
+  });
+
+  it("extracts pageContext from body.context fallback", () => {
+    const result = extractRunInputFromBody({
+      context: {
+        activeUrl: "/datasource/ds-1",
+        activeView: "datasource-editor",
+        activeResourceId: "ds-1",
+        activeResourceData: { name: "Main DB" },
+      },
+      messages: [{ role: "user", content: "Check SQL" }],
+    });
+    expect(result.pageContext).toEqual({
+      activeUrl: "/datasource/ds-1",
+      activeView: "datasource-editor",
+      activeResourceId: "ds-1",
+      activeResourceData: { name: "Main DB" },
+    });
+  });
+});
+
+describe("formatPageContextSnapshot", () => {
+  it("formats full page context snapshot into markdown", async () => {
+    const { formatPageContextSnapshot } = await import("@/lib/runner/extract-run-input");
+    const snapshot = formatPageContextSnapshot({
+      activeView: "agent-editor",
+      activeResourceId: "agent-123",
+      activeUrl: "/agent/agent-123",
+      activeResourceData: { name: "Analyst", model: "claude-3-5-sonnet" },
+    });
+    expect(snapshot).toContain("- **Active View / Panel**: `agent-editor`");
+    expect(snapshot).toContain("- **Active Resource ID**: `agent-123`");
+    expect(snapshot).toContain("- **Active URL**: `/agent/agent-123`");
+    expect(snapshot).toContain('"name": "Analyst"');
+  });
+
+  it("handles empty resource data gracefully", async () => {
+    const { formatPageContextSnapshot } = await import("@/lib/runner/extract-run-input");
+    const snapshot = formatPageContextSnapshot({
+      activeView: "agent-editor",
+    });
+    expect(snapshot).toBe("- **Active View / Panel**: `agent-editor`");
   });
 });

@@ -355,8 +355,9 @@ class RunnerImpl implements Runner {
     let threadId: string | undefined;
     let dbRunner: PersistedAgentRunner | undefined;
     let preBuildSeq = 0;
+    let peek: import("./extract-run-input").RunInputPeek | undefined;
     if (classified?.action === "run") {
-      const peek = await extractRunInput(request);
+      peek = await extractRunInput(request);
       threadId = peek.threadId;
       const run = await recordRunStart({
         entityId: classified.agentId,
@@ -430,7 +431,12 @@ class RunnerImpl implements Runner {
     let supervisorRunHolders: Map<string, ParentRunIdHolder>;
     try {
       ({ agents, borrowed, degradations, supervisorRunHolders } =
-        await buildBuiltinAgents(agentIds, requestLog, { userId, mode, runId: runId ?? undefined }));
+        await buildBuiltinAgents(agentIds, requestLog, {
+          userId,
+          mode,
+          runId: runId ?? undefined,
+          pageContext: peek?.pageContext,
+        }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await finalizeIfCreated(`agent_build_threw: ${message}`);

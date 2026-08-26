@@ -4,9 +4,6 @@
  * See docs/builtin-runtime.md.
  */
 
-/** Tool-choice strategy mirroring `builtin_agent.tool_choice`. */
-export type AgentToolChoice = "auto" | "required" | "none";
-
 /** Tool-execution approval mode mirroring `builtin_agent.tool_approval_mode`. */
 export type AgentToolApprovalMode = "always" | "auto" | "never";
 
@@ -41,8 +38,9 @@ export interface AgentSpec {
   /** Pre-parsed; null = use provider default. */
   temperature: number | null;
   maxTokens: number | null;
-  toolChoice: AgentToolChoice;
   toolApprovalMode: AgentToolApprovalMode;
+  /** Whether this agent has read/write access to the editor's shared state (Copilot Mode). */
+  sharedStateEnabled: boolean;
   /** Always >= 1; defaults to 5 in schema. */
   maxSteps: number;
   /** SECURITY: decrypted LLM API key. Memory-only, never persisted /

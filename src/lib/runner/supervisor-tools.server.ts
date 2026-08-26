@@ -32,6 +32,10 @@ import {
   computeDisplayName,
   computeSourceLabel,
 } from "@/lib/orchestration/display-name";
+import {
+  type PageContextSnapshot,
+  formatPageContextSnapshot,
+} from "./extract-run-input";
 
 const log = childLogger({ component: "supervisor-tools" });
 
@@ -54,6 +58,8 @@ export interface SupervisorRuntimeContext {
   /** Supervisor's own id — for self-filter and log correlation. */
   supervisorAgentId: string;
   parentRunIdHolder: ParentRunIdHolder;
+  /** Active editor page context snapshot from the request (if present). */
+  pageContext?: PageContextSnapshot | null;
 }
 
 /** Agent card the supervisor sees in its prompt. Deliberately narrow
@@ -284,8 +290,14 @@ export async function buildSupervisorRuntime(
           "\"Generate ...\", \"Plan ...\"). See the \"Routing tools\" " +
           "section of the system prompt for the required phrasing.",
         ),
+      includePageContext: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, snapshots the user's active editor page context (open resource data) and injects it into the delegated agent's context as background reference.",
+        ),
     }),
-    execute: async ({ agent, task }) => {
+    execute: async ({ agent, task, includePageContext }) => {
       const entry = catalogByName.get(agent.trim());
       if (!entry) {
         const available = [...catalogByName.keys()].join(" | ");
@@ -294,6 +306,10 @@ export async function buildSupervisorRuntime(
           error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
+      const pageSnapshotString =
+        includePageContext && ctx.pageContext
+          ? formatPageContextSnapshot(ctx.pageContext)
+          : undefined;
       try {
         const result = await runner.start({
           entityId: entry.entityId,
@@ -308,13 +324,21 @@ export async function buildSupervisorRuntime(
           initiator: "orchestrator",
           ownerId: ctx.userId,
           createdBy: ctx.userId,
+          context: pageSnapshotString ? { pageContext: pageSnapshotString } : undefined,
         });
+        if (result.status === "failed") {
+          return {
+            ok: false as const,
+            error: result.errorMessage || "Delegated agent execution failed",
+            runId: result.runId,
+            status: result.status,
+          };
+        }
         return {
           ok: true as const,
           runId: result.runId,
           status: result.status,
           summary: result.summary,
-          ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -377,6 +401,14 @@ export async function buildSupervisorRuntime(
           createdBy: ctx.userId,
           sourceLabel: entry.card.displayName,
         });
+        if (result.status === "failed") {
+          return {
+            ok: false as const,
+            error: result.errorMessage || "Failed to start async delegation",
+            runId: result.runId,
+            status: result.status,
+          };
+        }
         return {
           ok: true as const,
           runId: result.runId,

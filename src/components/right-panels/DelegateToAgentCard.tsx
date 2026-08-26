@@ -38,6 +38,7 @@ export const delegateToAgentArgsSchema = z.object({
   /** Display name from "Available specialists" list; server resolves to internal id. */
   agent: z.string(),
   task: z.string(),
+  includePageContext: z.boolean().optional(),
 });
 
 export type DelegateToAgentArgs = z.infer<typeof delegateToAgentArgsSchema>;
@@ -86,6 +87,16 @@ function parseSummary(raw: string | undefined): string {
     /* fall through */
   }
   return "";
+}
+
+/** Format parameters as clean JSON. */
+function formatArgs(args: Partial<DelegateToAgentArgs> | undefined): string {
+  if (!args || typeof args !== "object") return "{}";
+  const clean: Record<string, unknown> = {};
+  if (args.agent !== undefined) clean.agent = args.agent;
+  if (args.task !== undefined) clean.task = args.task;
+  if (args.includePageContext !== undefined) clean.includePageContext = args.includePageContext;
+  return JSON.stringify(clean, null, 2);
 }
 
 export function DelegateToAgentCard(props: DelegateRenderProps): ReactElement {
@@ -164,33 +175,41 @@ export function DelegateToAgentCard(props: DelegateRenderProps): ReactElement {
       {/* Body (expanded) */}
       {expanded && (
         <>
-          {args?.task && (
-            <div className="border-t border-purple-500/15 px-3 py-1.5 text-[11px] italic text-muted-foreground">
-              “{args.task}”
+          <div className="border-t border-purple-500/15 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Arguments
             </div>
-          )}
+            <pre className="mt-1.5 max-h-48 overflow-auto rounded bg-purple-500/[0.06] p-2 font-mono text-[11px] leading-relaxed text-foreground">
+              {formatArgs(args)}
+            </pre>
+          </div>
           {status === "complete" && (
             <div className="border-t border-purple-500/15 px-3 py-2">
-              {annotated && headerMessage ? (
-                <p
-                  className={cn(
-                    "whitespace-pre-wrap text-xs",
-                    badgeStatus === "error"
-                      ? "text-red-600 dark:text-red-300"
-                      : "text-muted-foreground italic",
-                  )}
-                >
-                  {headerMessage}
-                </p>
-              ) : summary.length > 0 ? (
-                <p className="whitespace-pre-wrap text-xs text-foreground">
-                  {summary}
-                </p>
-              ) : (
-                <p className="text-xs italic text-muted-foreground">
-                  (no textual output)
-                </p>
-              )}
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Result
+              </div>
+              <div className="mt-1.5">
+                {annotated && headerMessage ? (
+                  <p
+                    className={cn(
+                      "whitespace-pre-wrap font-mono text-xs",
+                      badgeStatus === "error"
+                        ? "text-red-600 dark:text-red-300"
+                        : "text-muted-foreground italic",
+                    )}
+                  >
+                    {headerMessage}
+                  </p>
+                ) : summary.length > 0 ? (
+                  <p className="whitespace-pre-wrap text-xs text-foreground">
+                    {summary}
+                  </p>
+                ) : (
+                  <p className="text-xs italic text-muted-foreground">
+                    (no textual output)
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </>

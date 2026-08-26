@@ -60,6 +60,22 @@ describe("detectToolResultStatus", () => {
     ).toBe("success");
   });
 
+  it("returns failure on status: failed fallback", () => {
+    expect(
+      detectToolResultStatus(
+        JSON.stringify({ status: "failed", errorMessage: "Model 404" }),
+      ),
+    ).toBe("failure");
+  });
+
+  it("returns success on status: succeeded fallback", () => {
+    expect(
+      detectToolResultStatus(
+        JSON.stringify({ status: "succeeded", summary: "all good" }),
+      ),
+    ).toBe("success");
+  });
+
   it("returns null when result has neither isError nor ok", () => {
     expect(
       detectToolResultStatus(
@@ -251,6 +267,17 @@ describe("extractErrorMessage", () => {
         }),
       ),
     ).toBe("The real message");
+  });
+
+  it("extracts top-level errorMessage string", () => {
+    expect(
+      extractErrorMessage(
+        JSON.stringify({
+          status: "failed",
+          errorMessage: "This model is unavailable for free.",
+        }),
+      ),
+    ).toBe("This model is unavailable for free.");
   });
 
   it("returns null when no recognised error field present", () => {

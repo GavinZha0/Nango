@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -164,11 +165,11 @@ interface FormState {
   modelProvider: string;
   credentialId: string | null;
   prompt: string;
-  toolChoice: string;
   toolApprovalMode: string;
   maxSteps: number;
   temperature: number;
   role: AgentRole | null;
+  sharedStateEnabled: boolean;
   kbEnabled: boolean;
 }
 
@@ -180,11 +181,11 @@ const EMPTY_FORM: FormState = {
   modelProvider: "",
   credentialId: null,
   prompt: "",
-  toolChoice: "auto",
   toolApprovalMode: "never",
   maxSteps: 5,
   temperature: 0.3,
   role: null,
+  sharedStateEnabled: false,
   kbEnabled: false,
 };
 
@@ -197,11 +198,11 @@ function formFromDetail(data: AgentDetail): FormState {
     modelProvider: data.modelProvider,
     credentialId: data.credentialId ?? null,
     prompt: data.prompt ?? "",
-    toolChoice: data.toolChoice ?? "auto",
     toolApprovalMode: data.toolApprovalMode ?? "never",
     maxSteps: data.maxSteps ?? 5,
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
+    sharedStateEnabled: data.sharedStateEnabled ?? (data.role === "supervisor"),
     kbEnabled: false,
   };
 }
@@ -353,11 +354,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       if (typeof formFields.modelProvider === "string") normalized.modelProvider = formFields.modelProvider;
       if (typeof formFields.credentialId === "string" || formFields.credentialId === null) normalized.credentialId = formFields.credentialId;
       if (typeof formFields.prompt === "string") normalized.prompt = formFields.prompt;
-      if (typeof formFields.toolChoice === "string") normalized.toolChoice = formFields.toolChoice;
       if (typeof formFields.toolApprovalMode === "string") normalized.toolApprovalMode = formFields.toolApprovalMode;
       if (formFields.maxSteps !== undefined && formFields.maxSteps !== null) normalized.maxSteps = Number(formFields.maxSteps);
       if (formFields.temperature !== undefined && formFields.temperature !== null) normalized.temperature = Number(formFields.temperature);
       if (formFields.role !== undefined) normalized.role = formFields.role as AgentRole | null;
+      if (typeof formFields.sharedStateEnabled === "boolean") normalized.sharedStateEnabled = formFields.sharedStateEnabled;
       setForm((prev) => ({ ...prev, ...normalized }));
     }
     if (draftTools && typeof draftTools === "object" && !Array.isArray(draftTools)) {
@@ -566,8 +567,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         modelProvider: form.modelProvider,
         credentialId: form.credentialId,
         prompt: form.prompt.trim() || null,
-        toolChoice: form.toolChoice,
         toolApprovalMode: form.toolApprovalMode,
+        sharedStateEnabled: form.sharedStateEnabled,
         maxSteps: form.maxSteps,
         temperature: form.temperature,
         tools: toolList,
@@ -759,26 +760,13 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   className={cn("h-8 flex-1 text-xs", form.role === "supervisor" && "bg-muted text-muted-foreground")}
                   title={form.role === "supervisor" ? "Supervisor name is locked." : undefined}
                 />
+                <Label className="text-xs font-normal text-muted-foreground shrink-0 pl-1">Icon</Label>
                 <EmojiPicker
                   value={form.icon}
                   onChange={(v) => update("icon", v)}
                   onClear={() => update("icon", null)}
                   size={32}
                   ariaLabel="Pick agent icon"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Label className="w-20 shrink-0 text-xs">Description</Label>
-                <Input
-                  value={form.description}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("description", e.target.value)}
-                  readOnly={form.role === "supervisor"}
-                  className={cn(
-                    "h-8 flex-1 text-xs",
-                    form.role === "supervisor" && "bg-muted text-muted-foreground",
-                  )}
-                  placeholder="One-sentence summary of the agent's responsibility"
-                  title={form.role === "supervisor" ? "Supervisor description is locked." : undefined}
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -799,6 +787,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                       setForm((prev) => ({
                         ...prev,
                         role: newRole,
+                        sharedStateEnabled: true,
                         name: SUPERVISOR_NAME,
                         description: SUPERVISOR_DESCRIPTION,
                         prompt: SUPERVISOR_PROMPT,
@@ -838,6 +827,28 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     <SelectItem value="evaluator" className="text-xs">Evaluator</SelectItem>
                   </SelectContent>
                 </Select>
+                <Label htmlFor="state-sharing-toggle" className="text-xs font-normal text-muted-foreground shrink-0 pl-1 cursor-pointer">
+                  State Sharing
+                </Label>
+                <Switch
+                  id="state-sharing-toggle"
+                  checked={form.sharedStateEnabled}
+                  onCheckedChange={(checked) => update("sharedStateEnabled", checked)}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="w-20 shrink-0 text-xs">Description</Label>
+                <Input
+                  value={form.description}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("description", e.target.value)}
+                  readOnly={form.role === "supervisor"}
+                  className={cn(
+                    "h-8 flex-1 text-xs",
+                    form.role === "supervisor" && "bg-muted text-muted-foreground",
+                  )}
+                  placeholder="One-sentence summary of the agent's responsibility"
+                  title={form.role === "supervisor" ? "Supervisor description is locked." : undefined}
+                />
               </div>
               <div className="flex items-center gap-2">
                 <Label className="w-20 shrink-0 text-xs">Provider</Label>
@@ -909,22 +920,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     <SelectItem value="always" className="text-xs">Always (ask for all)</SelectItem>
                     <SelectItem value="auto" className="text-xs">Auto (ask for sensitive)</SelectItem>
                     <SelectItem value="never" className="text-xs">Never (skip all)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label className="w-20 shrink-0 text-xs">Tool Choice</Label>
-                <Select
-                  value={form.toolChoice}
-                  onValueChange={(v: string | null) => update("toolChoice", v ?? "auto")}
-                >
-                  <SelectTrigger className="h-8 flex-1 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto" className="text-xs">Auto (model decides)</SelectItem>
-                    <SelectItem value="required" className="text-xs">Required (force tool call)</SelectItem>
-                    <SelectItem value="none" className="text-xs">None (disable tools)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

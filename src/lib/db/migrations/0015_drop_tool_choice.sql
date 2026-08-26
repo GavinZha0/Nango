@@ -1,0 +1,1 @@
+ALTER TABLE "builtin_agent" DROP COLUMN "tool_choice";

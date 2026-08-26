@@ -87,6 +87,8 @@ export function detectToolResultStatus(
   // Business `ok` flag — supervisor tools, extract_dataset_by_sql, etc.
   if (obj.ok === false) return "failure";
   if (obj.ok === true) return "success";
+  if (obj.status === "failed") return "failure";
+  if (obj.status === "succeeded") return "success";
   // Process-result envelope — only consulted when no semantic envelope
   // was present. A non-numeric / absent `exitCode` is ignored to avoid
   // catching unrelated numeric fields on other tools' results.
@@ -136,6 +138,9 @@ export function extractErrorMessage(
 
   if (typeof obj.message === "string" && obj.message.length > 0) {
     return obj.message;
+  }
+  if (typeof obj.errorMessage === "string" && obj.errorMessage.length > 0) {
+    return obj.errorMessage;
   }
   if (typeof obj.error === "string" && obj.error.length > 0) {
     return obj.error;

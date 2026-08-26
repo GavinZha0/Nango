@@ -49,7 +49,6 @@ export const GET = withSession(ROUTE, async ({ req, session }) => {
       temperature: BuiltinAgentTable.temperature,
       maxTokens: BuiltinAgentTable.maxTokens,
       maxSteps: BuiltinAgentTable.maxSteps,
-      toolChoice: BuiltinAgentTable.toolChoice,
       memoryEnabled: BuiltinAgentTable.memoryEnabled,
       memoryWindowSize: BuiltinAgentTable.memoryWindowSize,
       enabled: BuiltinAgentTable.enabled,
@@ -59,6 +58,7 @@ export const GET = withSession(ROUTE, async ({ req, session }) => {
       updatedAt: BuiltinAgentTable.updatedAt,
       credentialId: BuiltinAgentTable.credentialId,
       toolApprovalMode: BuiltinAgentTable.toolApprovalMode,
+      sharedStateEnabled: BuiltinAgentTable.sharedStateEnabled,
       // Total number of tool rows attached to this agent
       toolCount: sql<number>`(
         select count(*)::int from builtin_agent_tool
@@ -126,8 +126,8 @@ const createSchema = z.object({
   temperature: z.number().min(0).max(1).nullable().optional(),
   maxTokens: z.number().int().positive().nullable().optional(),
   maxSteps: z.number().int().positive().optional(),
-  toolChoice: z.enum(["auto", "required", "none"]).optional(),
   toolApprovalMode: z.enum(["always", "auto", "never"]).optional(),
+  sharedStateEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
   memoryWindowSize: z.number().int().positive().nullable().optional(),
   visibility: z.enum(["private", "public"]).optional(),
@@ -169,8 +169,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
           temperature: body.temperature != null ? String(body.temperature) : null,
           maxTokens: body.maxTokens ?? null,
           maxSteps: body.maxSteps ?? 5,
-          toolChoice: body.toolChoice ?? "auto",
           toolApprovalMode: body.toolApprovalMode ?? "never",
+          sharedStateEnabled: body.sharedStateEnabled ?? (isSupervisor ? true : false),
           memoryEnabled: body.memoryEnabled ?? false,
           memoryWindowSize: body.memoryWindowSize ?? null,
           enabled: true,

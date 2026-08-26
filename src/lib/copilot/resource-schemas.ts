@@ -64,13 +64,6 @@ export const AGENT_ACTIVE_RESOURCE_SCHEMA = {
       maximum: 50,
       description: "Maximum number of autonomous tool-calling steps per run (default: 5)",
     },
-    toolChoice: {
-      type: "string",
-      enum: ["auto", "required", "none"],
-      editable: true,
-      description:
-        "Tool choice mode: 'auto' (model decides), 'required' (must call a tool), 'none' (pure chat)",
-    },
     toolApprovalMode: {
       type: "string",
       enum: ["always", "auto", "never"],
@@ -84,6 +77,11 @@ export const AGENT_ACTIVE_RESOURCE_SCHEMA = {
       editable: true,
       description:
         "Special system role assignment (supervisor/secretary/evaluator), or null for general agent",
+    },
+    sharedStateEnabled: {
+      type: "boolean",
+      editable: true,
+      description: "Whether this agent has read/write access to shared editor state (Copilot Mode)",
     },
     tools: {
       type: "object",
