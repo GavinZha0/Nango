@@ -461,6 +461,7 @@ export function CaseInspector({
 
   const applyDraft = useCallback(
     (draft: Record<string, unknown>) => {
+      const applied: string[] = [];
       const target = extractTargetCase(draft, caseRow.id);
 
       if (target.input !== undefined && target.input !== null) {
@@ -469,6 +470,7 @@ export function CaseInspector({
         } else {
           inputDraft.setText(JSON.stringify(target.input, null, 2));
         }
+        applied.push("input");
       }
 
       if (target.assertions !== undefined && target.assertions !== null) {
@@ -477,7 +479,11 @@ export function CaseInspector({
         } else {
           assertionsDraft.setText(JSON.stringify(target.assertions, null, 2));
         }
+        applied.push("assertions");
       }
+
+      if (draft.selectedCase) applied.push("selectedCase");
+      return applied;
     },
     [caseRow.id, inputDraft, assertionsDraft],
   );

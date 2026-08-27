@@ -344,21 +344,22 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     [form, tools],
   );
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    const applied: string[] = [];
     const { tools: draftTools, ...formFields } = draft;
     if (Object.keys(formFields).length > 0) {
       const normalized: Partial<FormState> = {};
-      if (typeof formFields.name === "string") normalized.name = formFields.name;
-      if (typeof formFields.description === "string") normalized.description = formFields.description;
-      if (typeof formFields.icon === "string" || formFields.icon === null) normalized.icon = formFields.icon;
-      if (typeof formFields.model === "string") normalized.model = formFields.model;
-      if (typeof formFields.modelProvider === "string") normalized.modelProvider = formFields.modelProvider;
-      if (typeof formFields.credentialId === "string" || formFields.credentialId === null) normalized.credentialId = formFields.credentialId;
-      if (typeof formFields.prompt === "string") normalized.prompt = formFields.prompt;
-      if (typeof formFields.toolApprovalMode === "string") normalized.toolApprovalMode = formFields.toolApprovalMode;
-      if (formFields.maxSteps !== undefined && formFields.maxSteps !== null) normalized.maxSteps = Number(formFields.maxSteps);
-      if (formFields.temperature !== undefined && formFields.temperature !== null) normalized.temperature = Number(formFields.temperature);
-      if (formFields.role !== undefined) normalized.role = formFields.role as AgentRole | null;
-      if (typeof formFields.sharedStateEnabled === "boolean") normalized.sharedStateEnabled = formFields.sharedStateEnabled;
+      if (typeof formFields.name === "string") { normalized.name = formFields.name; applied.push("name"); }
+      if (typeof formFields.description === "string") { normalized.description = formFields.description; applied.push("description"); }
+      if (typeof formFields.icon === "string" || formFields.icon === null) { normalized.icon = formFields.icon; applied.push("icon"); }
+      if (typeof formFields.model === "string") { normalized.model = formFields.model; applied.push("model"); }
+      if (typeof formFields.modelProvider === "string") { normalized.modelProvider = formFields.modelProvider; applied.push("modelProvider"); }
+      if (typeof formFields.credentialId === "string" || formFields.credentialId === null) { normalized.credentialId = formFields.credentialId; applied.push("credentialId"); }
+      if (typeof formFields.prompt === "string") { normalized.prompt = formFields.prompt; applied.push("prompt"); }
+      if (typeof formFields.toolApprovalMode === "string") { normalized.toolApprovalMode = formFields.toolApprovalMode; applied.push("toolApprovalMode"); }
+      if (formFields.maxSteps !== undefined && formFields.maxSteps !== null) { normalized.maxSteps = Number(formFields.maxSteps); applied.push("maxSteps"); }
+      if (formFields.temperature !== undefined && formFields.temperature !== null) { normalized.temperature = Number(formFields.temperature); applied.push("temperature"); }
+      if (formFields.role !== undefined) { normalized.role = formFields.role as AgentRole | null; applied.push("role"); }
+      if (typeof formFields.sharedStateEnabled === "boolean") { normalized.sharedStateEnabled = formFields.sharedStateEnabled; applied.push("sharedStateEnabled"); }
       setForm((prev) => ({ ...prev, ...normalized }));
     }
     if (draftTools && typeof draftTools === "object" && !Array.isArray(draftTools)) {
@@ -371,7 +372,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         sshServers:   Array.isArray(t.sshServers)   ? new Set(t.sshServers)   : prev.sshServers,
         calendars:    Array.isArray(t.calendars)    ? new Set(t.calendars)    : prev.calendars,
       }));
+      applied.push("tools");
     }
+    return applied;
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "agent",

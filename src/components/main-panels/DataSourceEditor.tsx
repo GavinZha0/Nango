@@ -208,38 +208,47 @@ export function DataSourceEditor({
     [form],
   );
   const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    const applied: string[] = [];
     setForm((prev) => {
       const next = { ...prev };
-      if (typeof draft.name === "string") next.name = draft.name;
-      if (typeof draft.description === "string") next.description = draft.description;
-      if (typeof draft.provider === "string") next.provider = draft.provider;
-      if (typeof draft.credentialId === "string") next.credentialId = draft.credentialId;
-      if (typeof draft.host === "string") next.host = draft.host;
-      if (draft.port !== undefined && draft.port !== null) next.port = String(draft.port);
-      if (typeof draft.database === "string") next.database = draft.database;
-      if (typeof draft.readOnly === "boolean") next.readOnly = draft.readOnly;
+      if (typeof draft.name === "string") { next.name = draft.name; applied.push("name"); }
+      if (typeof draft.description === "string") { next.description = draft.description; applied.push("description"); }
+      if (typeof draft.provider === "string") { next.provider = draft.provider; applied.push("provider"); }
+      if (typeof draft.credentialId === "string") { next.credentialId = draft.credentialId; applied.push("credentialId"); }
+      if (typeof draft.host === "string") { next.host = draft.host; applied.push("host"); }
+      if (draft.port !== undefined && draft.port !== null) { next.port = String(draft.port); applied.push("port"); }
+      if (typeof draft.database === "string") { next.database = draft.database; applied.push("database"); }
+      if (typeof draft.readOnly === "boolean") { next.readOnly = draft.readOnly; applied.push("readOnly"); }
 
       if (draft.params && typeof draft.params === "object" && !Array.isArray(draft.params)) {
         next.paramRows = paramsToRows(draft.params as Record<string, string>);
+        applied.push("params");
       } else if (Array.isArray(draft.paramRows)) {
         next.paramRows = draft.paramRows as ParamRow[];
+        applied.push("paramRows");
       }
 
       if (Array.isArray(draft.tableAllowlist)) {
         next.tableAllowlistText = (draft.tableAllowlist as string[]).join(", ");
+        applied.push("tableAllowlist");
       } else if (typeof draft.tableAllowlistText === "string") {
         next.tableAllowlistText = draft.tableAllowlistText;
+        applied.push("tableAllowlist");
       } else if (draft.tableAllowlist === null) {
         next.tableAllowlistText = "";
+        applied.push("tableAllowlist");
       }
 
       if (Array.isArray(draft.tableDenylist)) {
         next.tableDenylistText = (draft.tableDenylist as string[]).join(", ");
+        applied.push("tableDenylist");
       } else if (typeof draft.tableDenylistText === "string") {
         next.tableDenylistText = draft.tableDenylistText;
+        applied.push("tableDenylist");
       }
       return next;
     });
+    return applied;
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "datasource",

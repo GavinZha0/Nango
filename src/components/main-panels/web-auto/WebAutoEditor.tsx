@@ -337,11 +337,23 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   ]);
 
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    const applied: string[] = [];
     const sc = extractWebAutoTargetCase(draft, selectedCase?.id);
     const script = (typeof sc.scriptContent === "string" ? sc.scriptContent : (typeof sc.script === "string" ? sc.script : null));
-    if (script !== null) setDraftScript(script);
-    if (typeof sc.description === "string") setDraftDescription(sc.description);
-    if (Array.isArray(sc.assertions)) setDraftAssertions(sc.assertions);
+    if (script !== null) {
+      setDraftScript(script);
+      applied.push("scriptContent");
+    }
+    if (typeof sc.description === "string") {
+      setDraftDescription(sc.description);
+      applied.push("description");
+    }
+    if (Array.isArray(sc.assertions)) {
+      setDraftAssertions(sc.assertions);
+      applied.push("assertions");
+    }
+    if (draft.selectedCase) applied.push("selectedCase");
+    return applied;
   }, [selectedCase?.id, setDraftScript, setDraftDescription, setDraftAssertions]);
 
   const { clearDraftState } = useCopilotDraft({

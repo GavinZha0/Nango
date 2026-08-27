@@ -65,4 +65,18 @@ describe("Shared State Schema Specs Contract", () => {
       expect(stateWithResource.context.activeResourceData?.name).toBe(`Test ${expectedType}`);
     }
   });
+
+  it("builds dynamic RESOURCE_DRAFT_CONTRACTS_BLOCK containing all 9 resource contracts", async () => {
+    const { RESOURCE_DRAFT_CONTRACTS_BLOCK } = await import("@/lib/copilot/resource-schemas");
+    const { SHARED_STATE_PROMPT_BLOCK } = await import("@/lib/constants/supervisor");
+
+    expect(RESOURCE_DRAFT_CONTRACTS_BLOCK).toContain("### Resource Draft Contracts (Allowed Fields & Constraints)");
+    for (const { expectedType } of ALL_SCHEMAS) {
+      expect(RESOURCE_DRAFT_CONTRACTS_BLOCK).toContain(`- **\`${expectedType}\`**:`);
+    }
+
+    // Verify SHARED_STATE_PROMPT_BLOCK accurately embeds dynamic contracts
+    expect(SHARED_STATE_PROMPT_BLOCK).toContain(RESOURCE_DRAFT_CONTRACTS_BLOCK);
+    expect(SHARED_STATE_PROMPT_BLOCK).toContain("## Resource Modification Policy (Copilot Mode)");
+  });
 });

@@ -211,3 +211,99 @@ export const EVALUATION_ACTIVE_RESOURCE_SCHEMA = deriveResourceJSONSchema(
   "evaluation",
   "Evaluation Suite Editor symmetric state contract.",
 );
+
+interface JSONSchemaProp {
+  type?: string;
+  enum?: string[];
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  properties?: Record<string, JSONSchemaProp>;
+  items?: JSONSchemaProp;
+  description?: string;
+}
+
+function formatPropertyContract(key: string, prop: JSONSchemaProp): string {
+  // 1. Enum constraints
+  if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+    const validEnums = prop.enum.filter((v) => v !== null);
+    return `\`${key}\` (enum: ${validEnums.map((e) => `"${e}"`).join(" | ")})`;
+  }
+
+  // 2. String constraints (maxLength, minLength)
+  if (prop.type === "string") {
+    const constraints: string[] = [];
+    if (prop.maxLength !== undefined) constraints.push(`max: ${prop.maxLength}`);
+    if (prop.minLength !== undefined) constraints.push(`min: ${prop.minLength}`);
+    return `\`${key}\` (string${constraints.length > 0 ? `, ${constraints.join(", ")}` : ""})`;
+  }
+
+  // 3. Number & integer ranges
+  if (prop.type === "number" || prop.type === "integer") {
+    const isInt = prop.type === "integer";
+    if (prop.minimum !== undefined && prop.maximum !== undefined) {
+      return `\`${key}\` (${isInt ? "int" : "number"}, ${prop.minimum}-${prop.maximum})`;
+    }
+    if (prop.minimum !== undefined) {
+      return `\`${key}\` (${isInt ? "int" : "number"}, min: ${prop.minimum})`;
+    }
+    if (prop.maximum !== undefined) {
+      return `\`${key}\` (${isInt ? "int" : "number"}, max: ${prop.maximum})`;
+    }
+    return `\`${key}\` (${isInt ? "int" : "number"})`;
+  }
+
+  // 4. Boolean
+  if (prop.type === "boolean") {
+    return `\`${key}\` (boolean)`;
+  }
+
+  // 5. Array
+  if (prop.type === "array") {
+    const itemType = prop.items?.type === "string" ? "string[]" : "array";
+    return `\`${key}\` (${itemType})`;
+  }
+
+  // 6. Object (with nested properties)
+  if (prop.type === "object" && prop.properties) {
+    const subKeys = Object.keys(prop.properties).map((k) => `\`${k}\``).join(", ");
+    return `\`${key}\` (object with ${subKeys})`;
+  }
+
+  return `\`${key}\` (object)`;
+}
+
+/**
+ * Dynamically builds the Markdown Compact Draft Contracts block from Zod-derived JSON schemas.
+ * Guarantees zero drift between runtime Zod validation and system prompt instructions.
+ */
+export function buildResourceDraftContractsBlock(): string {
+  const lines: string[] = [
+    "### Resource Draft Contracts (Allowed Fields & Constraints)",
+  ];
+
+  const schemas: Array<{ type: string; schema: ResourceJSONSchema }> = [
+    { type: "schedule", schema: SCHEDULE_ACTIVE_RESOURCE_SCHEMA },
+    { type: "skills", schema: SKILL_ACTIVE_RESOURCE_SCHEMA },
+    { type: "agent", schema: AGENT_ACTIVE_RESOURCE_SCHEMA },
+    { type: "datasource", schema: DATASOURCE_ACTIVE_RESOURCE_SCHEMA },
+    { type: "ssh-server", schema: SSH_SERVER_ACTIVE_RESOURCE_SCHEMA },
+    { type: "mcp", schema: MCP_ACTIVE_RESOURCE_SCHEMA },
+    { type: "web-auto", schema: WEB_AUTO_ACTIVE_RESOURCE_SCHEMA },
+    { type: "verification", schema: VERIFICATION_ACTIVE_RESOURCE_SCHEMA },
+    { type: "evaluation", schema: EVALUATION_ACTIVE_RESOURCE_SCHEMA },
+  ];
+
+  for (const { type, schema } of schemas) {
+    const props = schema.properties || {};
+    const fieldContracts = Object.entries(props)
+      .map(([key, prop]) => formatPropertyContract(key, prop as JSONSchemaProp))
+      .join(", ");
+    lines.push(`- **\`${type}\`**: ${fieldContracts}.`);
+  }
+
+  return lines.join("\n");
+}
+
+export const RESOURCE_DRAFT_CONTRACTS_BLOCK: string = buildResourceDraftContractsBlock();

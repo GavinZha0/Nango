@@ -162,38 +162,47 @@ export function SshServerEditor({
     [form],
   );
   const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    const applied: string[] = [];
     setForm((prev) => {
       const next = { ...prev };
-      if (typeof draft.name === "string") next.name = draft.name;
-      if (typeof draft.description === "string") next.description = draft.description;
-      if (typeof draft.credentialId === "string") next.credentialId = draft.credentialId;
-      if (typeof draft.host === "string") next.host = draft.host;
-      if (draft.port !== undefined && draft.port !== null) next.port = String(draft.port);
-      if (typeof draft.knownHostFingerprint === "string") next.fingerprint = draft.knownHostFingerprint;
-      else if (typeof draft.fingerprint === "string") next.fingerprint = draft.fingerprint;
-      if (typeof draft.loginShell === "boolean") next.loginShell = draft.loginShell;
+      if (typeof draft.name === "string") { next.name = draft.name; applied.push("name"); }
+      if (typeof draft.description === "string") { next.description = draft.description; applied.push("description"); }
+      if (typeof draft.credentialId === "string") { next.credentialId = draft.credentialId; applied.push("credentialId"); }
+      if (typeof draft.host === "string") { next.host = draft.host; applied.push("host"); }
+      if (draft.port !== undefined && draft.port !== null) { next.port = String(draft.port); applied.push("port"); }
+      if (typeof draft.knownHostFingerprint === "string") { next.fingerprint = draft.knownHostFingerprint; applied.push("knownHostFingerprint"); }
+      else if (typeof draft.fingerprint === "string") { next.fingerprint = draft.fingerprint; applied.push("fingerprint"); }
+      if (typeof draft.loginShell === "boolean") { next.loginShell = draft.loginShell; applied.push("loginShell"); }
 
       if (Array.isArray(draft.commandAllow)) {
         next.commandAllowText = (draft.commandAllow as string[]).join("\n");
+        applied.push("commandAllow");
       } else if (typeof draft.commandAllowText === "string") {
         next.commandAllowText = draft.commandAllowText;
+        applied.push("commandAllow");
       } else if (draft.commandAllow === null) {
         next.commandAllowText = "";
+        applied.push("commandAllow");
       }
 
       if (Array.isArray(draft.commandApprove)) {
         next.commandApproveText = (draft.commandApprove as string[]).join("\n");
+        applied.push("commandApprove");
       } else if (typeof draft.commandApproveText === "string") {
         next.commandApproveText = draft.commandApproveText;
+        applied.push("commandApprove");
       }
 
       if (Array.isArray(draft.commandDeny)) {
         next.commandDenyText = (draft.commandDeny as string[]).join("\n");
+        applied.push("commandDeny");
       } else if (typeof draft.commandDenyText === "string") {
         next.commandDenyText = draft.commandDenyText;
+        applied.push("commandDeny");
       }
       return next;
     });
+    return applied;
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "ssh-server",

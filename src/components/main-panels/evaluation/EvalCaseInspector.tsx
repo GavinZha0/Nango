@@ -867,6 +867,7 @@ export function EvalCaseInspector({
   ]);
 
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    const applied: string[] = [];
     const sc = extractEvalTargetCase(draft, evalCase.id);
     if (Array.isArray(sc.turns)) {
       const newTurns: KeyedTurn[] = [];
@@ -879,20 +880,25 @@ export function EvalCaseInspector({
       }
       if (newTurns.length > 0) {
         setTurns(newTurns);
+        applied.push("turns");
       }
     }
     if (sc.criteria !== undefined && sc.criteria !== null) {
       if (typeof sc.criteria === "object" && !Array.isArray(sc.criteria)) {
         setCriteria(sc.criteria as EvalCriteria);
+        applied.push("criteria");
       } else if (typeof sc.criteria === "string") {
         try {
           const parsed = JSON.parse(sc.criteria);
           if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
             setCriteria(parsed as EvalCriteria);
+            applied.push("criteria");
           }
         } catch { /* ignore parse error */ }
       }
     }
+    if (draft.selectedCase) applied.push("selectedCase");
+    return applied;
   }, [evalCase.id]);
 
   const { clearDraftState } = useCopilotDraft({

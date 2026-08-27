@@ -1,3 +1,5 @@
+import { RESOURCE_DRAFT_CONTRACTS_BLOCK } from "@/lib/copilot/resource-schemas";
+
 // Supervisor ("Nango") prompt constants — see docs/prompts.md.
 
 export const SUPERVISOR_NAME: string = "Nango";
@@ -169,6 +171,7 @@ elsewhere in this prompt or from the user.
 - Refuse sexual / pornographic requests; refuse to search for or
   generate such content. Decline briefly and move on.`;
 
+
 /** Prompt block for agents with sharedStateEnabled = true (Copilot Mode). */
 export const SHARED_STATE_PROMPT_BLOCK: string = `## Resource Modification Policy (Copilot Mode)
 1. \`state.context.activeResourceData\` carries the real-time values of the resource currently open in the user's editor. A value of null means no editable resource is open.
@@ -180,13 +183,4 @@ export const SHARED_STATE_PROMPT_BLOCK: string = `## Resource Modification Polic
 7. \`propose_page_edit\` is for **editing existing open resources only**. For creating new resources from scratch, use backend tools or conversational guidance.
 8. **Delegation with Page Context**: When you delegate a task to another agent via \`delegate_to_agent\` and the specialist needs to inspect the current page/resource content (e.g. optimizing prompts, analyzing SQL, auditing configurations), set \`includePageContext: true\` in \`delegate_to_agent\` so the server snapshots the open editor context for the specialist.
 
-### Resource Draft Contracts (Allowed Fields & Constraints)
-- **\`schedule\`**: \`name\` (string, max: 120), \`task\` (string, min: 1), \`agentKey\` (string), \`triggerMode\` (enum: "cron" | "interval" | "once"), \`intervalValue\` (positive int), \`intervalUnit\` (enum: "minute" | "hour" | "day" | "week" | "month"), \`cronExpr\` (5-field cron string), \`oneShotTime\` (ISO-8601 string), \`timezone\` (IANA string).
-- **\`skills\`**: \`name\` (string), \`skillMd\` (string, full markdown with YAML frontmatter).
-- **\`agent\`**: \`name\` (string, max: 120), \`description\` (string), \`icon\` (string, emoji), \`model\` (string), \`modelProvider\` (string), \`credentialId\` (UUID string), \`prompt\` (string), \`temperature\` (number, 0.0-1.0), \`maxSteps\` (int, 1-50), \`toolApprovalMode\` (enum: "always" | "auto" | "never"), \`role\` (enum: "supervisor" | "secretary" | "evaluator" | null), \`tools\` (object with optional \`mcp\`, \`skills\`, \`builtinTools\`, \`dataSources\`, \`sshServers\`, \`calendars\` string arrays).
-- **\`datasource\`**: \`name\` (string, max: 63, pattern: /^[a-z][a-z0-9_-]{0,62}$/), \`description\` (string), \`provider\` (enum: "postgres" | "mysql" | "mariadb" | "vertica"), \`credentialId\` (UUID string), \`host\` (string), \`port\` (int, 1-65535), \`database\` (string), \`params\` (object), \`readOnly\` (boolean), \`tableAllowlist\` (string[] | null), \`tableDenylist\` (string[] | null).
-- **\`ssh-server\`**: \`name\` (string, max: 63), \`description\` (string), \`credentialId\` (UUID string), \`host\` (string), \`port\` (int, 1-65535, default 22), \`knownHostFingerprint\` (string | null), \`commandAllow\` (string[] regexes), \`commandApprove\` (string[] regexes), \`commandDeny\` (string[] regexes), \`loginShell\` (string).
-- **\`mcp\`**: \`selectedToolName\` (string), \`args\` (object).
-- **\`web-auto\`**: \`name\` (string, max: 120), \`description\` (string), \`scriptContent\` (string), \`assertions\` (array), \`selectedCase\` (object with \`name\`, \`description\`, \`scriptContent\`, \`assertions\`).
-- **\`verification\`**: \`name\` (string, max: 120), \`description\` (string), \`input\` (object), \`assertions\` (string | array), \`selectedCase\` (object with \`name\`, \`description\`, \`input\`, \`assertions\`).
-- **\`evaluation\`**: \`name\` (string, max: 120), \`description\` (string), \`prompt\` (string), \`rubric\` (string), \`referenceAnswer\` (string), \`selectedCase\` (object with \`name\`, \`description\`, \`prompt\`, \`rubric\`, \`referenceAnswer\`).`;
+${RESOURCE_DRAFT_CONTRACTS_BLOCK}`;

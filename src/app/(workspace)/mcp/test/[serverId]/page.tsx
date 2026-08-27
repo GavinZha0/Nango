@@ -424,6 +424,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     ],
   );
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    const applied: string[] = [];
     let targetArgs: Record<string, unknown> | null = null;
     if (
       draft.selectedTool &&
@@ -433,6 +434,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       const st = draft.selectedTool as Record<string, unknown>;
       if (st.args && typeof st.args === "object" && !Array.isArray(st.args)) {
         targetArgs = st.args as Record<string, unknown>;
+        applied.push("args");
       }
     } else if (
       draft.args &&
@@ -440,11 +442,13 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       !Array.isArray(draft.args)
     ) {
       targetArgs = draft.args as Record<string, unknown>;
+      applied.push("args");
     } else if (typeof draft.jsonInput === "string") {
       try {
         const parsed = JSON.parse(draft.jsonInput);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           targetArgs = parsed as Record<string, unknown>;
+          applied.push("jsonInput");
         }
       } catch {
         /* ignore invalid JSON */
@@ -458,6 +462,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         jsonError: null,
       }));
     }
+    if (typeof draft.selectedToolName === "string") {
+      applied.push("selectedToolName");
+    }
+    return applied;
   }, []);
 
   useCopilotDraft({

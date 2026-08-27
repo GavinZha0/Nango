@@ -72,7 +72,7 @@ export async function executeProposePageEdit({
     status: "success",
     resourceType: editor.resourceType,
     appliedFields,
-    message: `Draft applied.`,
+    message: `Draft applied, please save.`,
   };
 }
 

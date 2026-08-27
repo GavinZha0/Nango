@@ -283,42 +283,54 @@ export function ScheduleEditor({
     [form],
   );
   const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
+    const applied: string[] = [];
     setForm((f) => {
       const next = { ...f };
-      if (typeof draft.name === "string") next.name = draft.name;
-      if (typeof draft.task === "string") next.task = draft.task;
-      if (typeof draft.agentKey === "string") next.agentKey = draft.agentKey;
-      if (typeof draft.timezone === "string") next.timezone = draft.timezone;
-      if (draft.triggerMode === "one_shot" || draft.triggerMode === "recurring") {
-        next.triggerMode = draft.triggerMode;
+      if (typeof draft.name === "string") { next.name = draft.name; applied.push("name"); }
+      if (typeof draft.task === "string") { next.task = draft.task; applied.push("task"); }
+      if (typeof draft.agentKey === "string") { next.agentKey = draft.agentKey; applied.push("agentKey"); }
+      if (typeof draft.timezone === "string") { next.timezone = draft.timezone; applied.push("timezone"); }
+      if (draft.triggerMode === "one_shot" || draft.triggerMode === "recurring" || draft.triggerMode === "cron" || draft.triggerMode === "interval" || draft.triggerMode === "once") {
+        next.triggerMode = draft.triggerMode === "once" ? "one_shot" : (draft.triggerMode === "interval" || draft.triggerMode === "cron") ? "recurring" : draft.triggerMode;
+        applied.push("triggerMode");
       }
       if (draft.intervalValue !== undefined && draft.intervalValue !== null) {
         next.intervalValue = String(draft.intervalValue);
+        applied.push("intervalValue");
       }
       if (
         typeof draft.intervalUnit === "string" &&
         ["minute", "hour", "day", "week", "month"].includes(draft.intervalUnit)
       ) {
         next.intervalUnit = draft.intervalUnit as ScheduleIntervalUnit;
+        applied.push("intervalUnit");
       }
       if (typeof draft.startLocal === "string") {
         next.startLocal =
           draft.startLocal.includes("T") && !draft.startLocal.endsWith("Z")
             ? draft.startLocal
             : isoToLocalInputValue(draft.startLocal);
+        applied.push("startLocal");
       } else if (typeof draft.startAt === "string") {
         next.startLocal = isoToLocalInputValue(draft.startAt);
+        applied.push("startAt");
+      } else if (typeof draft.oneShotTime === "string") {
+        next.startLocal = isoToLocalInputValue(draft.oneShotTime);
+        applied.push("oneShotTime");
       }
       if (typeof draft.endLocal === "string") {
         next.endLocal =
           draft.endLocal.includes("T") && !draft.endLocal.endsWith("Z")
             ? draft.endLocal
             : isoToLocalInputValue(draft.endLocal);
+        applied.push("endLocal");
       } else if (typeof draft.endAt === "string") {
         next.endLocal = isoToLocalInputValue(draft.endAt);
+        applied.push("endAt");
       }
       return next;
     });
+    return applied;
   }, []);
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
