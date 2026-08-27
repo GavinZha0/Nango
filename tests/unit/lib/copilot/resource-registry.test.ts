@@ -4,18 +4,23 @@ import {
   RESOURCE_TYPES,
   deriveResourceType,
   isResourceType,
-  normalizeResourceType,
+  resourceTypeSchema,
+  getResourceUrlPrefix,
+  DRAFT_SCHEMAS,
 } from "@/lib/copilot/resource-registry";
 
 describe("Resource Registry and URL Derivation Contract", () => {
-  it("defines all 9 active resource types matching registry keys", () => {
+  it("defines all 9 active resource types matching registry keys and draft schemas", () => {
     expect(RESOURCE_TYPES).toHaveLength(9);
     expect(Object.keys(RESOURCE_REGISTRY)).toHaveLength(9);
+    expect(Object.keys(DRAFT_SCHEMAS)).toHaveLength(9);
 
     for (const type of RESOURCE_TYPES) {
       expect(RESOURCE_REGISTRY[type]).toBeDefined();
-      expect(RESOURCE_REGISTRY[type].resourceType).toBe(type);
-      expect(RESOURCE_REGISTRY[type].urlPrefix).toBe(`/${type}`);
+      expect(RESOURCE_REGISTRY[type].schema).toBeDefined();
+      expect(RESOURCE_REGISTRY[type].draftSchema).toBeDefined();
+      expect(getResourceUrlPrefix(type)).toBe(`/${type}`);
+      expect(DRAFT_SCHEMAS[type]).toBeDefined();
     }
   });
 
@@ -42,38 +47,14 @@ describe("Resource Registry and URL Derivation Contract", () => {
     expect(deriveResourceType("/profile")).toBeNull();
   });
 
-  it("validates isResourceType guard function", () => {
+  it("validates isResourceType guard function and resourceTypeSchema", () => {
     expect(isResourceType("schedule")).toBe(true);
     expect(isResourceType("skills")).toBe(true);
     expect(isResourceType("agent")).toBe(true);
     expect(isResourceType("unknown-type")).toBe(false);
-  });
 
-  it("normalizes diverse user/LLM input strings with singular/plural and separator tolerance", () => {
-    // Exact canonical
-    expect(normalizeResourceType("skills")).toBe("skills");
-    expect(normalizeResourceType("schedule")).toBe("schedule");
-
-    // Singular / Plural
-    expect(normalizeResourceType("skill")).toBe("skills");
-    expect(normalizeResourceType("schedules")).toBe("schedule");
-    expect(normalizeResourceType("agents")).toBe("agent");
-    expect(normalizeResourceType("datasources")).toBe("datasource");
-    expect(normalizeResourceType("evals")).toBe("evaluation");
-    expect(normalizeResourceType("verifications")).toBe("verification");
-
-    // Separator / Case variations
-    expect(normalizeResourceType("ssh_server")).toBe("ssh-server");
-    expect(normalizeResourceType("SSH-SERVER")).toBe("ssh-server");
-    expect(normalizeResourceType("data_source")).toBe("datasource");
-    expect(normalizeResourceType("data-source")).toBe("datasource");
-    expect(normalizeResourceType("web_auto")).toBe("web-auto");
-    expect(normalizeResourceType("webauto")).toBe("web-auto");
-    expect(normalizeResourceType("builtin_agent")).toBe("agent");
-
-    // Invalid or unknown
-    expect(normalizeResourceType("random_page")).toBeNull();
-    expect(normalizeResourceType("")).toBeNull();
-    expect(normalizeResourceType(null)).toBeNull();
+    expect(resourceTypeSchema.safeParse("skills").success).toBe(true);
+    expect(resourceTypeSchema.safeParse("schedule").success).toBe(true);
+    expect(resourceTypeSchema.safeParse("invalid").success).toBe(false);
   });
 });

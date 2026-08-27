@@ -14,6 +14,15 @@ import {
   SSH_SERVER_ACTIVE_RESOURCE_SCHEMA,
   VERIFICATION_ACTIVE_RESOURCE_SCHEMA,
   WEB_AUTO_ACTIVE_RESOURCE_SCHEMA,
+  AgentDraftSchema,
+  DataSourceDraftSchema,
+  EvaluationDraftSchema,
+  McpDraftSchema,
+  ScheduleDraftSchema,
+  SkillDraftSchema,
+  SshServerDraftSchema,
+  VerificationDraftSchema,
+  WebAutoDraftSchema,
 } from "./resource-schemas";
 
 export * from "./resource-schemas";
@@ -35,58 +44,53 @@ export type ResourceType = (typeof RESOURCE_TYPES)[number];
 export const resourceTypeSchema = z.enum(RESOURCE_TYPES);
 
 export interface ResourceDefinition {
-  resourceType: ResourceType;
-  urlPrefix: string;
   schema: Record<string, unknown>;
+  draftSchema: z.ZodTypeAny;
 }
 
 export const RESOURCE_REGISTRY: Record<ResourceType, ResourceDefinition> = {
   schedule: {
-    resourceType: "schedule",
-    urlPrefix: "/schedule",
     schema: SCHEDULE_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: ScheduleDraftSchema,
   },
   skills: {
-    resourceType: "skills",
-    urlPrefix: "/skills",
     schema: SKILL_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: SkillDraftSchema,
   },
   agent: {
-    resourceType: "agent",
-    urlPrefix: "/agent",
     schema: AGENT_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: AgentDraftSchema,
   },
   datasource: {
-    resourceType: "datasource",
-    urlPrefix: "/datasource",
     schema: DATASOURCE_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: DataSourceDraftSchema,
   },
   "ssh-server": {
-    resourceType: "ssh-server",
-    urlPrefix: "/ssh-server",
     schema: SSH_SERVER_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: SshServerDraftSchema,
   },
   mcp: {
-    resourceType: "mcp",
-    urlPrefix: "/mcp",
     schema: MCP_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: McpDraftSchema,
   },
   "web-auto": {
-    resourceType: "web-auto",
-    urlPrefix: "/web-auto",
     schema: WEB_AUTO_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: WebAutoDraftSchema,
   },
   verification: {
-    resourceType: "verification",
-    urlPrefix: "/verification",
     schema: VERIFICATION_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: VerificationDraftSchema,
   },
   evaluation: {
-    resourceType: "evaluation",
-    urlPrefix: "/evaluation",
     schema: EVALUATION_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: EvaluationDraftSchema,
   },
 };
+
+/** Get the canonical URL prefix for a resource type. */
+export function getResourceUrlPrefix(type: ResourceType): string {
+  return `/${type}`;
+}
 
 /**
  * Derive the ResourceType from a pathname (matching URL first segment).
@@ -103,56 +107,4 @@ export function deriveResourceType(pathname: string): ResourceType | null {
 
 export function isResourceType(value: string): value is ResourceType {
   return (RESOURCE_TYPES as readonly string[]).includes(value);
-}
-
-const RESOURCE_TYPE_ALIASES: Record<string, ResourceType> = {
-  // Singular / Plural aliases
-  skill: "skills",
-  skills: "skills",
-  schedule: "schedule",
-  schedules: "schedule",
-  agent: "agent",
-  agents: "agent",
-  "builtin-agent": "agent",
-  "builtin_agent": "agent",
-  "agent-editor": "agent",
-  datasource: "datasource",
-  datasources: "datasource",
-  "data-source": "datasource",
-  "data-sources": "datasource",
-  "data_source": "datasource",
-  "data_sources": "datasource",
-  "ssh-server": "ssh-server",
-  "ssh-servers": "ssh-server",
-  "ssh_server": "ssh-server",
-  "ssh_servers": "ssh-server",
-  ssh: "ssh-server",
-  mcp: "mcp",
-  "mcp-server": "mcp",
-  "mcp-tool": "mcp",
-  "web-auto": "web-auto",
-  "web_auto": "web-auto",
-  webauto: "web-auto",
-  "web-automation": "web-auto",
-  verification: "verification",
-  verifications: "verification",
-  "verification-suite": "verification",
-  evaluation: "evaluation",
-  evaluations: "evaluation",
-  eval: "evaluation",
-  evals: "evaluation",
-  "eval-suite": "evaluation",
-};
-
-/**
- * Normalizes user or LLM input string to canonical ResourceType with alias, plural, and separator tolerance.
- */
-export function normalizeResourceType(input: string | null | undefined): ResourceType | null {
-  if (!input || typeof input !== "string") return null;
-  const trimmed = input.trim().toLowerCase();
-  if (isResourceType(trimmed)) return trimmed;
-  if (RESOURCE_TYPE_ALIASES[trimmed]) return RESOURCE_TYPE_ALIASES[trimmed];
-  const hyphenated = trimmed.replace(/_/g, "-");
-  if (isResourceType(hyphenated)) return hyphenated;
-  return RESOURCE_TYPE_ALIASES[hyphenated] ?? null;
 }

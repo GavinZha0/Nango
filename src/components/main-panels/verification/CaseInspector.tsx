@@ -484,6 +484,8 @@ export function CaseInspector({
 
   const { clearDraftState } = useCopilotDraft({
     resourceType: "verification",
+    resourceId: String(caseRow.id),
+    isReadOnly: Boolean(showHistoryChrome),
     getCurrentData,
     applyDraft,
   });

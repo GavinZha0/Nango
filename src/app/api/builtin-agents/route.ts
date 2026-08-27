@@ -25,6 +25,7 @@ import {
   SUPERVISOR_TOOL_NAMES,
 } from "@/lib/runner/supervisor-tools.server";
 import type { AgentRole } from "@/lib/db/schema";
+import { resolveSharedStateEnabled } from "@/lib/types/builtin-agent";
 
 const ROUTE = "/api/builtin-agents";
 
@@ -170,7 +171,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
           maxTokens: body.maxTokens ?? null,
           maxSteps: body.maxSteps ?? 5,
           toolApprovalMode: body.toolApprovalMode ?? "never",
-          sharedStateEnabled: body.sharedStateEnabled ?? (isSupervisor ? true : false),
+          sharedStateEnabled: resolveSharedStateEnabled({ sharedStateEnabled: body.sharedStateEnabled, role }),
           memoryEnabled: body.memoryEnabled ?? false,
           memoryWindowSize: body.memoryWindowSize ?? null,
           enabled: true,

@@ -243,6 +243,8 @@ export function DataSourceEditor({
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "datasource",
+    resourceId: dataSourceId ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });

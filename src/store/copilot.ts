@@ -17,6 +17,7 @@ interface CopilotStateStore {
   activeResourceData: Record<string, unknown> | null;
   setActiveResourceData: (data: Record<string, unknown> | null) => void;
 
+  editors: EditorRegistration[];
   activeEditor: EditorRegistration | null;
   registerEditor: (editor: EditorRegistration) => void;
   unregisterEditor: (instanceId: string) => void;
@@ -28,10 +29,21 @@ export const useCopilotStateStore = create<CopilotStateStore>((set) => ({
   activeResourceData: null,
   setActiveResourceData: (data) => set({ activeResourceData: data }),
 
+  editors: [],
   activeEditor: null,
-  registerEditor: (editor) => set({ activeEditor: editor }),
+  registerEditor: (editor) =>
+    set((s) => {
+      const next = [...s.editors.filter((e) => e.instanceId !== editor.instanceId), editor];
+      return { editors: next, activeEditor: editor };
+    }),
   unregisterEditor: (instanceId) =>
-    set((s) => (s.activeEditor?.instanceId === instanceId ? { activeEditor: null } : {})),
+    set((s) => {
+      const next = s.editors.filter((e) => e.instanceId !== instanceId);
+      return {
+        editors: next,
+        activeEditor: next.length > 0 ? next[next.length - 1] : null,
+      };
+    }),
 }));
 
 // Expose store to window for debugging (only in development)

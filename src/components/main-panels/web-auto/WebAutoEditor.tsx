@@ -346,6 +346,8 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   const { clearDraftState } = useCopilotDraft({
     resourceType: "web-auto",
+    resourceId: suiteId ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });

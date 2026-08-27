@@ -42,7 +42,7 @@ import {
 import type { AgentRole } from "@/lib/db/schema";
 import { DEFAULT_EVALUATOR_SYSTEM_PROMPT } from "@/lib/evaluation/types";
 export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
-import type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
+import { resolveSharedStateEnabled, type BuiltinAgentRow, type BoundToolRow } from "@/lib/types/builtin-agent";
 
 // Types
 
@@ -202,7 +202,7 @@ function formFromDetail(data: AgentDetail): FormState {
     maxSteps: data.maxSteps ?? 5,
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
-    sharedStateEnabled: data.sharedStateEnabled ?? (data.role === "supervisor"),
+    sharedStateEnabled: resolveSharedStateEnabled(data),
     kbEnabled: false,
   };
 }
@@ -375,6 +375,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "agent",
+    resourceId: agentId ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });

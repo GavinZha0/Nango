@@ -80,6 +80,8 @@ function EmptyEvaluationCopilotSync({
 
   useCopilotDraft({
     resourceType: "evaluation",
+    resourceId: suite?.id ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft: () => {},
   });

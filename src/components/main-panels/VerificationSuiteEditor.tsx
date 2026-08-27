@@ -67,6 +67,8 @@ function EmptyVerificationCopilotSync({
 
   useCopilotDraft({
     resourceType: "verification",
+    resourceId: server?.id ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft: () => {},
   });

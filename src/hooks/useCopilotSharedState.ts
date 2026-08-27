@@ -8,7 +8,9 @@ import { defaultSharedState, type NangoSharedState } from "@/lib/copilot/shared-
 import { useWorkspaceStore } from "@/store/workspace";
 import { useCopilotStateStore } from "@/store/copilot";
 import { useValidatedFrontendTool } from "@/lib/copilot/frontend-tool-helpers";
-import { normalizeResourceType } from "@/lib/copilot/resource-registry";
+import { RESOURCE_TYPES } from "@/lib/copilot/resource-registry";
+import { executeProposePageEdit, executeDiscardPageEdit } from "@/lib/copilot/tool-handlers";
+import { resolveSharedStateEnabled } from "@/lib/types/builtin-agent";
 import { z } from "zod";
 
 /**
@@ -23,9 +25,7 @@ export function useCopilotSharedStateSync() {
   const pathname = usePathname();
 
   const activeAgent = builtinAgents.find((a) => a.id === activeAgentId);
-  const isSharedStateEnabled = Boolean(
-    activeAgent?.sharedStateEnabled ?? (activeAgent?.role === "supervisor"),
-  );
+  const isSharedStateEnabled = resolveSharedStateEnabled(activeAgent);
 
   const setGlobalState = useCopilotStateStore((s) => s.setState);
   const activeResourceData = useCopilotStateStore((s) => s.activeResourceData);
@@ -49,14 +49,17 @@ export function useCopilotSharedStateSync() {
       else if (pathname.startsWith("/trace")) panelId = "trace";
     }
     
-    // Extract the resource ID
+    // Extract the resource ID (ignoring reserved creation segments)
     let resourceId: string | null = null;
     const parts = pathname.split("/").filter(Boolean);
     if (parts.length > 1 && panelId !== "none") {
       const uuidSegment = parts.find((p) =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p),
       );
-      resourceId = uuidSegment || parts[parts.length - 1] || null;
+      const candidate = uuidSegment || parts[parts.length - 1] || null;
+      if (candidate && candidate !== "new" && candidate !== "create") {
+        resourceId = candidate;
+      }
     }
 
     return { activeUrl: pathname, activeView: panelId, activeResourceId: resourceId };
@@ -107,46 +110,11 @@ export function useCopilotSharedStateSync() {
       "Only works when the user is viewing an editable page with existing data.",
     ].join(" "),
     parameters: z.object({
-      resourceType: z.string().describe("The type of resource being modified (e.g. 'agent', 'skills', 'schedule', 'datasource', 'ssh-server', 'mcp', 'web-auto', 'verification', 'evaluation')."),
-      draftData: z.record(z.string(), z.unknown()).describe("The fields and values to modify."),
+      resourceType: z.enum(RESOURCE_TYPES).describe("The exact type of resource being modified matching current URL view."),
+      draftData: z.record(z.string(), z.unknown()).describe("The fields and values to modify conforming strictly to the Resource Draft Contracts in system prompt. Unknown fields are rejected."),
     }),
     handler: async ({ resourceType, draftData }) => {
-      const editor = useCopilotStateStore.getState().activeEditor;
-      if (!editor) {
-        return "No active resource editor is currently open. Ask the user to navigate to the resource editor first.";
-      }
-
-      // Guard: reject empty drafts (#6)
-      if (!draftData || Object.keys(draftData).length === 0) {
-        return "Draft data cannot be empty. Please specify the fields you want to change.";
-      }
-
-      // Normalize both target and active editor type for fuzzy comparison (#5)
-      const normalizedTarget = normalizeResourceType(resourceType);
-      const normalizedEditor = normalizeResourceType(editor.resourceType) ?? editor.resourceType;
-
-      // Guard: reject resourceType mismatch (Safety Interlock against cross-page contamination)
-      if (!normalizedTarget || normalizedTarget !== normalizedEditor) {
-        return `Mismatch: current editor is viewing '${editor.resourceType}', but draft targets '${resourceType}'. Navigate first or use backend tools.`;
-      }
-
-      // Guard: reject read-only/builtin resources (#1)
-      if (editor.isReadOnly) {
-        return `Permission Denied: This ${editor.resourceType} is read-only (builtin) and cannot be edited.`;
-      }
-
-      // Apply directly to the active editor
-      const appliedFields = editor.applyDraft(draftData);
-      if (appliedFields.length === 0) {
-        return "None of the provided fields were accepted by the editor.";
-      }
-
-      return {
-        status: "success",
-        resourceType: editor.resourceType,
-        appliedFields,
-        message: "Draft applied.",
-      };
+      return executeProposePageEdit({ resourceType, draftData });
     },
   });
 
@@ -156,20 +124,10 @@ export function useCopilotSharedStateSync() {
     available: isSharedStateEnabled,
     description: "Discard previously proposed draft changes and restore original values in the editor.",
     parameters: z.object({
-      resourceType: z.string().describe("The type of resource whose draft should be discarded."),
+      resourceType: z.enum(RESOURCE_TYPES).describe("The exact type of resource whose draft should be discarded."),
     }),
     handler: async ({ resourceType }) => {
-      const editor = useCopilotStateStore.getState().activeEditor;
-      if (!editor) {
-        return `No active draft found for ${resourceType}.`;
-      }
-      const normalizedTarget = normalizeResourceType(resourceType);
-      const normalizedEditor = normalizeResourceType(editor.resourceType) ?? editor.resourceType;
-      if (!normalizedTarget || normalizedTarget !== normalizedEditor) {
-        return `No active draft found for ${resourceType}. Current editor is viewing '${editor.resourceType}'.`;
-      }
-      editor.discardDraft();
-      return `Draft changes for ${editor.resourceType} have been discarded and original values restored.`;
+      return executeDiscardPageEdit({ resourceType });
     },
   });
 

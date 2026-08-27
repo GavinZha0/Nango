@@ -302,8 +302,8 @@ export async function buildSupervisorRuntime(
       if (!entry) {
         const available = [...catalogByName.keys()].join(" | ");
         return {
-          ok: false as const,
-          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
+          isError: true as const,
+          message: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
       const pageSnapshotString =
@@ -328,8 +328,8 @@ export async function buildSupervisorRuntime(
         });
         if (result.status === "failed") {
           return {
-            ok: false as const,
-            error: result.errorMessage || "Delegated agent execution failed",
+            isError: true as const,
+            message: result.errorMessage || "Delegated agent execution failed",
             runId: result.runId,
             status: result.status,
           };
@@ -353,7 +353,7 @@ export async function buildSupervisorRuntime(
           },
           "delegate_to_agent failed",
         );
-        return { ok: false as const, error: message };
+        return { isError: true as const, message };
       }
     },
   });
@@ -383,8 +383,8 @@ export async function buildSupervisorRuntime(
       if (!entry) {
         const available = [...catalogByName.keys()].join(" | ");
         return {
-          ok: false as const,
-          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
+          isError: true as const,
+          message: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
       try {
@@ -403,8 +403,8 @@ export async function buildSupervisorRuntime(
         });
         if (result.status === "failed") {
           return {
-            ok: false as const,
-            error: result.errorMessage || "Failed to start async delegation",
+            isError: true as const,
+            message: result.errorMessage || "Failed to start async delegation",
             runId: result.runId,
             status: result.status,
           };
@@ -428,7 +428,7 @@ export async function buildSupervisorRuntime(
           },
           "delegate_async failed",
         );
-        return { ok: false as const, error: message };
+        return { isError: true as const, message };
       }
     },
   });
@@ -458,8 +458,8 @@ export async function buildSupervisorRuntime(
       if (!entry) {
         const available = [...catalogByName.keys()].join(" | ");
         return {
-          ok: false as const,
-          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
+          isError: true as const,
+          message: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
       return {
@@ -550,8 +550,8 @@ export async function buildSupervisorRuntime(
       if (!entry) {
         const available = [...catalogByName.keys()].join(" | ");
         return {
-          ok: false as const,
-          error: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
+          isError: true as const,
+          message: `Agent '${agent}' not found. Available: ${available || "(none)"}`,
         };
       }
       const tz = timezone?.trim() || profileTimezone || "UTC";
@@ -567,7 +567,7 @@ export async function buildSupervisorRuntime(
         timezone: tz,
       });
       if (!validation.ok) {
-        return { ok: false as const, error: validation.error };
+        return { isError: true as const, message: validation.error };
       }
       try {
         const [row] = await db
@@ -610,7 +610,7 @@ export async function buildSupervisorRuntime(
           },
           "create_schedule failed",
         );
-        return { ok: false as const, error: message };
+        return { isError: true as const, message };
       }
     },
   });
@@ -745,7 +745,7 @@ export async function buildSupervisorRuntime(
         { requireFutureStartAt: true },
       );
       if (!result.ok) {
-        return { ok: false as const, error: result.error };
+        return { isError: true as const, message: result.error };
       }
       const next = nextFireAt(result.row);
       return {
@@ -784,8 +784,8 @@ export async function buildSupervisorRuntime(
         .returning({ id: ScheduleTable.id });
       if (result.length === 0) {
         return {
-          ok: false as const,
-          error: `No schedule '${scheduleId}' found for this user.`,
+          isError: true as const,
+          message: `No schedule '${scheduleId}' found for this user.`,
         };
       }
       unregisterSchedule(scheduleId);

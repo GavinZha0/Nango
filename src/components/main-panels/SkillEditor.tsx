@@ -154,17 +154,23 @@ export function SkillEditor({
     [form, initialDetail?.source, readOnly],
   );
   const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
-    if (readOnly) return; // Prevent draft application on builtin immutable skills
-    if (typeof draft.skillMd === "string") {
+    if (readOnly) return [];
+    const modified: string[] = [];
+    if (typeof draft.skillMd === "string" && draft.skillMd !== form.skillMd) {
       setForm((prev) => ({ ...prev, skillMd: draft.skillMd as string }));
+      modified.push("skillMd");
     }
-    if (isCreating && typeof draft.name === "string") {
+    if (isCreating && typeof draft.name === "string" && draft.name !== form.name) {
       onNameChange(draft.name);
+      modified.push("name");
     }
-  }, [readOnly, isCreating, onNameChange]);
+    return modified;
+  }, [readOnly, isCreating, form.skillMd, form.name, onNameChange]);
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "skills",
+    resourceId: skillId ?? null,
+    isReadOnly: Boolean(readOnly),
     getCurrentData,
     applyDraft,
   });

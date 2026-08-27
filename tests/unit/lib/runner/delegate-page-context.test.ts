@@ -81,14 +81,14 @@ describe("formatPageContextSnapshot", () => {
 });
 
 describe("delegation failure detection and handling", () => {
-  it("detects failure when delegate_to_agent returns ok: false", async () => {
+  it("detects failure when delegate_to_agent returns isError: true", async () => {
     const { detectToolResultStatus, extractErrorMessage } = await import(
       "@/lib/copilot/detect-tool-result-status"
     );
 
     const failureResult = JSON.stringify({
-      ok: false,
-      error: "This model is unavailable for free. The paid version is available now.",
+      isError: true,
+      message: "This model is unavailable for free. The paid version is available now.",
       runId: "018f-1234",
       status: "failed",
     });

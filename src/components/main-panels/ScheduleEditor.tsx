@@ -323,6 +323,8 @@ export function ScheduleEditor({
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "schedule",
+    resourceId: scheduleId ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });

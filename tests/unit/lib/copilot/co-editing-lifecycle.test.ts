@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useCopilotStateStore, type EditorRegistration } from "@/store/copilot";
 import { defaultSharedState } from "@/lib/copilot/shared-state-schema";
-import { normalizeResourceType } from "@/lib/copilot/resource-registry";
+import { DRAFT_SCHEMAS } from "@/lib/copilot/resource-registry";
 
 describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
   beforeEach(() => {
@@ -9,6 +9,7 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
     useCopilotStateStore.setState({
       state: defaultSharedState,
       activeResourceData: null,
+      editors: [],
       activeEditor: null,
     });
   });
@@ -194,44 +195,42 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
     });
   });
 
-  describe("Scenario 5: Multi-Editor Lifecycle & Safe Unregistration", () => {
-    it("prevents unmounting old component from wiping newly mounted component", () => {
-      const editorA: EditorRegistration = {
-        instanceId: "inst-A",
-        resourceType: "agent",
-        resourceId: "agent-1",
+  describe("Scenario 5: Multi-Editor Lifecycle & Stack Unregistration (Parent/Child Inspector)", () => {
+    it("handles parent suite and child case inspector lifecycle with automatic stack fallback", () => {
+      const suiteEditor: EditorRegistration = {
+        instanceId: "inst-suite",
+        resourceType: "verification",
+        resourceId: "suite-1",
         isReadOnly: false,
         applyDraft: () => [],
-        getCurrentData: () => ({}),
+        getCurrentData: () => ({ name: "Suite 1" }),
         discardDraft: () => {},
       };
 
-      const editorB: EditorRegistration = {
-        instanceId: "inst-B",
-        resourceType: "agent",
-        resourceId: "agent-2",
+      const caseInspector: EditorRegistration = {
+        instanceId: "inst-case",
+        resourceType: "verification",
+        resourceId: "case-101",
         isReadOnly: false,
         applyDraft: () => [],
-        getCurrentData: () => ({}),
+        getCurrentData: () => ({ name: "Case 101" }),
         discardDraft: () => {},
       };
 
-      // 1. Mount Editor A
-      useCopilotStateStore.getState().registerEditor(editorA);
-      expect(useCopilotStateStore.getState().activeEditor?.instanceId).toBe("inst-A");
+      // 1. Mount Suite Editor
+      useCopilotStateStore.getState().registerEditor(suiteEditor);
+      expect(useCopilotStateStore.getState().activeEditor?.instanceId).toBe("inst-suite");
 
-      // 2. Fast transition: Editor B mounts before Editor A cleanup finishes
-      useCopilotStateStore.getState().registerEditor(editorB);
-      expect(useCopilotStateStore.getState().activeEditor?.instanceId).toBe("inst-B");
+      // 2. Open Case Inspector (child pushes onto stack)
+      useCopilotStateStore.getState().registerEditor(caseInspector);
+      expect(useCopilotStateStore.getState().activeEditor?.instanceId).toBe("inst-case");
 
-      // 3. Delayed cleanup from Editor A executes
-      useCopilotStateStore.getState().unregisterEditor("inst-A");
+      // 3. Close Case Inspector (child unmounts) -> MUST automatically fall back to parent Suite Editor!
+      useCopilotStateStore.getState().unregisterEditor("inst-case");
+      expect(useCopilotStateStore.getState().activeEditor?.instanceId).toBe("inst-suite");
 
-      // Active editor must STILL be Editor B!
-      expect(useCopilotStateStore.getState().activeEditor?.instanceId).toBe("inst-B");
-
-      // 4. Editor B unmounts
-      useCopilotStateStore.getState().unregisterEditor("inst-B");
+      // 4. Suite Editor unmounts -> activeEditor becomes null
+      useCopilotStateStore.getState().unregisterEditor("inst-suite");
       expect(useCopilotStateStore.getState().activeEditor).toBeNull();
     });
   });
@@ -346,10 +345,6 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
       const editor = useCopilotStateStore.getState().activeEditor!;
 
       // 1. Pass malformed types and rogue fields:
-      // - name is an object (invalid)
-      // - task is a valid string
-      // - intervalValue is a string "twenty" (invalid)
-      // - rogueField is unknown (ignored)
       const appliedFields = editor.applyDraft({
         name: { unexpected: "object" },
         task: "pg_dump -Fc --clean",
@@ -367,48 +362,52 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
     });
   });
 
-  describe("Scenario 8: Smart Resource Type Normalization & Interlock Defense", () => {
-    it("safely tolerates single/plural and separator variations while strictly blocking cross-resource mutations", () => {
-      const skillForm = {
-        name: "csv-analyst",
-        skillMd: "# CSV Analyst\n\nAnalyze CSV files",
-      };
+  describe("Scenario 8: Zod Boundary Validation & Unknown Field Rejection", () => {
+    it("strictly validates draft payloads against Zod schemas and rejects unknown fields", () => {
+      const scheduleSchema = DRAFT_SCHEMAS["schedule"];
 
-      const skillEditor: EditorRegistration = {
-        instanceId: "editor-skill-alias",
-        resourceType: "skills",
-        resourceId: "skill-1",
-        isReadOnly: false,
-        applyDraft: (draft) => {
-          if (typeof draft.skillMd === "string") {
-            skillForm.skillMd = draft.skillMd;
-            return ["skillMd"];
-          }
-          return [];
-        },
-        getCurrentData: () => skillForm,
-        discardDraft: () => {},
-      };
+      // 1. Valid payload parses cleanly
+      const valid = scheduleSchema.safeParse({
+        name: "Nightly Backup",
+        task: "Run backup job",
+        triggerMode: "cron",
+        cronExpr: "0 2 * * *",
+      });
+      expect(valid.success).toBe(true);
 
-      useCopilotStateStore.getState().registerEditor(skillEditor);
-      const editor = useCopilotStateStore.getState().activeEditor!;
+      // 2. Unknown/rogue fields are rejected by .strict() validation
+      const withBogus = scheduleSchema.safeParse({
+        name: "Valid Name",
+        task: "Valid Task",
+        unknownRogueField: "malicious_injection",
+      });
+      expect(withBogus.success).toBe(false);
 
-      // 1. Tool dispatch with singular alias "skill" when editor is "skills"
-      const normalizedTarget = normalizeResourceType("skill");
-      const normalizedEditor = normalizeResourceType(editor.resourceType);
+      // 3. Invalid enum value is rejected
+      const invalidEnum = scheduleSchema.safeParse({
+        triggerMode: "not_a_valid_mode",
+      });
+      expect(invalidEnum.success).toBe(false);
 
-      expect(normalizedTarget).toBe("skills");
-      expect(normalizedEditor).toBe("skills");
-      expect(normalizedTarget === normalizedEditor).toBe(true);
+      // 4. Constraint violation: max string length exceeded
+      const overlongName = scheduleSchema.safeParse({
+        name: "A".repeat(121), // max is 120
+      });
+      expect(overlongName.success).toBe(false);
+    });
 
-      // Draft application succeeds with alias
-      const applied = editor.applyDraft({ skillMd: "# Updated CSV Analyst" });
-      expect(applied).toEqual(["skillMd"]);
-      expect(skillForm.skillMd).toBe("# Updated CSV Analyst");
+    it("enforces boundary constraints across resource schemas (datasource & agent)", () => {
+      // DataSource: invalid provider & port constraint
+      const dsSchema = DRAFT_SCHEMAS["datasource"];
+      expect(dsSchema.safeParse({ provider: "unsupported_db" }).success).toBe(false);
+      expect(dsSchema.safeParse({ port: 70000 }).success).toBe(false); // port max 65535
+      expect(dsSchema.safeParse({ provider: "postgres", port: 5432 }).success).toBe(true);
 
-      // 2. Cross-resource mutation attempt (e.g. agent draft sent while viewing skills)
-      const foreignTarget = normalizeResourceType("agent");
-      expect(foreignTarget === normalizedEditor).toBe(false); // Interlocked and blocked!
+      // Agent: temperature range & maxSteps
+      const agentSchema = DRAFT_SCHEMAS["agent"];
+      expect(agentSchema.safeParse({ temperature: 1.5 }).success).toBe(false); // max 1.0
+      expect(agentSchema.safeParse({ maxSteps: 100 }).success).toBe(false); // max 50
+      expect(agentSchema.safeParse({ temperature: 0.7, maxSteps: 10 }).success).toBe(true);
     });
   });
 });

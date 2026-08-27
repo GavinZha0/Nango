@@ -19,6 +19,7 @@ import {
 import { getCredentialConfigById } from "@/lib/credentials/lookup";
 
 import type { AgentSpec, AgentToolApprovalMode, AgentToolRef } from "./agent-spec";
+import { resolveSharedStateEnabled } from "@/lib/types/builtin-agent";
 
 export interface AgentPoolOptions {
   /** Max entries; protects against pathological agent-row growth. */
@@ -190,7 +191,7 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
     temperature: agent.temperature !== null ? parseFloat(agent.temperature) : null,
     maxTokens: agent.maxTokens,
     toolApprovalMode: agent.toolApprovalMode as AgentToolApprovalMode,
-    sharedStateEnabled: agent.sharedStateEnabled ?? false,
+    sharedStateEnabled: resolveSharedStateEnabled(agent),
     maxSteps: agent.maxSteps,
     apiKey: credential.token,
     restUrl: credential.restUrl,

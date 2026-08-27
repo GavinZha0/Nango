@@ -459,7 +459,14 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       }));
     }
   }, []);
-  useCopilotDraft({ resourceType: "mcp", getCurrentData, applyDraft });
+
+  useCopilotDraft({
+    resourceType: "mcp",
+    resourceId: serverId ?? null,
+    isReadOnly: false,
+    getCurrentData,
+    applyDraft,
+  });
 
   const durationStr = useMemo(() => {
     if (exec.durationMs === null) return null;

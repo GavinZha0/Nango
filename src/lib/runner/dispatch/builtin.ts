@@ -49,6 +49,7 @@ import {
   ALWAYS_APPROVAL_POLICY_BLOCK,
 } from "@/lib/constants/safety";
 import { SHARED_STATE_PROMPT_BLOCK } from "@/lib/constants/supervisor";
+import { resolveSharedStateEnabled } from "@/lib/types/builtin-agent";
 
 /** Classify a CopilotKit URL: `{agentId, action}` for user-perceived
  *  dispatches; `null` for bookkeeping calls. */
@@ -407,7 +408,7 @@ export async function buildBuiltinAgents(
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
       if (htmlPagePromptBlock.length > 0) parts.push(htmlPagePromptBlock);
 
-      if (spec.sharedStateEnabled || isSupervisor) {
+      if (resolveSharedStateEnabled({ sharedStateEnabled: spec.sharedStateEnabled, role: spec.role })) {
         parts.push(SHARED_STATE_PROMPT_BLOCK);
       }
 

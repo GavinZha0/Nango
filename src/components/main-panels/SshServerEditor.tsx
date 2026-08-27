@@ -197,6 +197,8 @@ export function SshServerEditor({
   }, []);
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "ssh-server",
+    resourceId: sshServerId ?? null,
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });

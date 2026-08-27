@@ -897,6 +897,8 @@ export function EvalCaseInspector({
 
   const { clearDraftState } = useCopilotDraft({
     resourceType: "evaluation",
+    resourceId: String(evalCase.id),
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });

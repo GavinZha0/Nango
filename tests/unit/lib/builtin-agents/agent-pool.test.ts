@@ -410,3 +410,28 @@ function row(toolType: string, overrides: Partial<ToolRowDb>): ToolRowDb {
     ...overrides,
   };
 }
+
+describe("resolveSharedStateEnabled", () => {
+  it("defaults to true for supervisor role when unspecified", async () => {
+    const { resolveSharedStateEnabled } = await import("@/lib/types/builtin-agent");
+    expect(resolveSharedStateEnabled({ role: "supervisor" })).toBe(true);
+    expect(resolveSharedStateEnabled({ role: "supervisor", sharedStateEnabled: null })).toBe(true);
+  });
+
+  it("defaults to false for other roles or general agents when unspecified", async () => {
+    const { resolveSharedStateEnabled } = await import("@/lib/types/builtin-agent");
+    expect(resolveSharedStateEnabled({ role: "secretary" })).toBe(false);
+    expect(resolveSharedStateEnabled({ role: "evaluator" })).toBe(false);
+    expect(resolveSharedStateEnabled({ role: null })).toBe(false);
+    expect(resolveSharedStateEnabled({})).toBe(false);
+    expect(resolveSharedStateEnabled(null)).toBe(false);
+    expect(resolveSharedStateEnabled(undefined)).toBe(false);
+  });
+
+  it("respects explicitly configured boolean values over role defaults", async () => {
+    const { resolveSharedStateEnabled } = await import("@/lib/types/builtin-agent");
+    expect(resolveSharedStateEnabled({ role: "supervisor", sharedStateEnabled: false })).toBe(false);
+    expect(resolveSharedStateEnabled({ role: "evaluator", sharedStateEnabled: true })).toBe(true);
+    expect(resolveSharedStateEnabled({ role: null, sharedStateEnabled: true })).toBe(true);
+  });
+});
