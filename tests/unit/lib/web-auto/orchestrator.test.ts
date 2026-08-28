@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -61,10 +61,10 @@ describe("runWebAutoCase", () => {
 
   it("returns errored when case has no script content", async () => {
     const outcome = await runWebAutoCase({
-      caseId: "case-1",
+      caseId: 1,
       suiteId: "suite-1",
       suite: dummySuite,
-      case: { id: "case-1", scriptContent: null, assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      case: { id: 1, scriptContent: null, assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
     });
 
@@ -75,10 +75,10 @@ describe("runWebAutoCase", () => {
   it("returns errored when suite has no mcpServerId", async () => {
     const suiteNoMcp = { ...dummySuite, mcpServerId: null };
     const outcome = await runWebAutoCase({
-      caseId: "case-1",
+      caseId: 1,
       suiteId: "suite-1",
       suite: suiteNoMcp,
-      case: { id: "case-1", scriptContent: "return 1;", assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      case: { id: 1, scriptContent: "return 1;", assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
     });
 
@@ -95,11 +95,11 @@ describe("runWebAutoCase", () => {
     });
 
     const outcome = await runWebAutoCase({
-      caseId: "case-1",
+      caseId: 1,
       suiteId: "suite-1",
       suite: dummySuite,
       case: {
-        id: "case-1",
+        id: 1,
         scriptContent: "return { count: 5 };",
         assertions: [{ type: "js_expression", expression: "result.count === 10" }],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
@@ -119,11 +119,11 @@ describe("runWebAutoCase", () => {
     });
 
     const outcome = await runWebAutoCase({
-      caseId: "case-1",
+      caseId: 1,
       suiteId: "suite-1",
       suite: dummySuite,
       case: {
-        id: "case-1",
+        id: 1,
         scriptContent: "return { success: true };",
         assertions: [{ type: "js_expression", expression: "result.success === true" }],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
@@ -148,7 +148,7 @@ describe("startWebAutoSuiteRun", () => {
 
     const dummyCases = [
       {
-        id: "case-1",
+        id: 1,
         name: "Case 1",
         scriptContent: "return { ok: true };",
         assertions: [],
@@ -190,7 +190,7 @@ describe("startWebAutoSuiteRun", () => {
       2,
       "user-1",
       expect.objectContaining({
-        frame: expect.objectContaining({ kind: "case_finished", caseId: "case-1", status: "passed" }),
+        frame: expect.objectContaining({ kind: "case_finished", caseId: 1, status: "passed" }),
       })
     );
     expect(mockPublish).toHaveBeenNthCalledWith(
@@ -205,7 +205,7 @@ describe("startWebAutoSuiteRun", () => {
     expect(mockWriteWebAutoCaseResult).toHaveBeenCalledWith(
       expect.objectContaining({
         runId: "run-100",
-        caseId: "case-1",
+        caseId: 1,
         status: "passed",
       })
     );

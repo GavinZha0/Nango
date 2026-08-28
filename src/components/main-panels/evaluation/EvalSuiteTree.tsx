@@ -157,10 +157,8 @@ function SuiteActions(
         }}
         title={
           !suite.evaluatorAgentId
-            ? "Evaluator Agent is required to run"
-            : isSuiteRunning
-              ? "A run is in progress"
-              : "Run suite"
+            ? "Evaluator not configured"
+            : "Run"
         }
         disabled={!suite.evaluatorAgentId || isSuiteRunning}
       >

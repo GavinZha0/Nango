@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import useSWR from "swr";
 
 import {
   AlertDialog,
@@ -31,43 +32,47 @@ import type {
   ErrorEnvelope,
 } from "@/lib/verification/types";
 import type { VerificationCaseResultStatus } from "@/lib/db/schema";
-import {
-  CaseTree,
-  type CaseVerdict,
-} from "@/components/main-panels/verification/CaseTree";
+import { VerificationCaseList } from "@/components/main-panels/verification/VerificationCaseList";
 import { NewCaseDialog } from "@/components/main-panels/verification/NewCaseDialog";
 import { RecentRunsBanner } from "@/components/main-panels/RecentRunsBanner";
-import { type VerificationServerRow, verificationActions } from "@/store/verification";
-import { VerificationSuiteEditDialog } from "@/components/main-panels/verification/VerificationSuiteEditDialog";
 import {
   caseActions,
   useCasesStore,
   type VerificationCaseRow,
 } from "@/store/verification-cases";
+import type { VerificationSuiteRow } from "@/store/verification";
+
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch data");
+  return res.json();
+};
 
 export interface VerificationSuiteEditorProps {
-  /** The active MCP Server being verification-managed. */
-  row: VerificationServerRow;
-  onBack: () => void;
+  /** The active verification suite ID. */
+  suiteId?: string;
+  /** Legacy prop support for server-level row if routed from old page. */
+  row?: { id: string; name: string; serverTitle?: string | null };
+  onBack?: () => void;
 }
 
 function EmptyVerificationCopilotSync({
-  server,
+  suite,
 }: {
-  server: { id: string; name: string; caseCount: number };
+  suite: { id: string; name: string; caseCount: number };
 }) {
   const getCurrentData = useCallback(
     () => ({
-      server,
+      suite,
       selectedCase: null,
       outcome: null,
     }),
-    [server],
+    [suite],
   );
 
   useCopilotDraft({
     resourceType: "verification",
-    resourceId: server?.id ?? null,
+    resourceId: suite?.id ?? null,
     isReadOnly: false,
     getCurrentData,
     applyDraft: () => {},
@@ -77,9 +82,18 @@ function EmptyVerificationCopilotSync({
 }
 
 export function VerificationSuiteEditor({
-  row,
+  suiteId: propSuiteId,
+  row: legacyRow,
   onBack,
 }: VerificationSuiteEditorProps): ReactNode {
+  const effectiveSuiteId = propSuiteId ?? legacyRow?.id;
+
+  // 1. Fetch Suite details if suiteId is present
+  const { data: suiteData, error: suiteError, isLoading: suiteLoading } = useSWR<VerificationSuiteRow & { mcpServerId?: string; serverTitle?: string; serverName?: string }>(
+    effectiveSuiteId ? `/api/verification-suites/${effectiveSuiteId}` : null,
+    fetcher,
+  );
+
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const liveRun = useVerificationRunStream(liveRunId);
@@ -94,24 +108,23 @@ export function VerificationSuiteEditor({
 
   const [bannerRefreshKey, setBannerRefreshKey] = useState<number>(0);
 
-  const [editingSuite, setEditingSuite] = useState<{ id: string; name: string } | null>(null);
-  const [deletingSuiteId, setDeletingSuiteId] = useState<string | null>(null);
-
-  // Subscribe to all cases in the store, then filter for this server.
+  // 2. Cases subscription
   const bySuite = useCasesStore((s) => s.bySuite);
   const cases = useMemo(() => {
-    return Object.values(bySuite).flat().filter((c) => c.mcpServerId === row.id);
-  }, [bySuite, row.id]);
+    if (!effectiveSuiteId) return [];
+    return bySuite[effectiveSuiteId] ?? [];
+  }, [bySuite, effectiveSuiteId]);
 
   const [casesLoading, setCasesLoading] = useState<boolean>(false);
   const [casesError, setCasesError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!effectiveSuiteId) return;
     let active = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCasesLoading(true);
     setCasesError(null);
-    caseActions.refreshForServer(row.id)
+    caseActions.refresh(effectiveSuiteId)
       .catch((err) => {
         if (active) setCasesError(err instanceof Error ? err.message : String(err));
       })
@@ -121,7 +134,7 @@ export function VerificationSuiteEditor({
     return () => {
       active = false;
     };
-  }, [row.id]);
+  }, [effectiveSuiteId]);
 
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const selectedCase = useMemo(
@@ -136,48 +149,17 @@ export function VerificationSuiteEditor({
     }
   }, [selectedCaseId, selectedCase]);
 
-  const [serverNameById, setServerNameById] = useState<ReadonlyMap<string, string>>(
-    EMPTY_NAME_MAP,
-  );
+  // Auto-select first case if none selected
   useEffect(() => {
-    let cancelled = false;
-    fetchMcpServerNameMap()
-      .then((map) => {
-        if (!cancelled) setServerNameById(map);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleEditSuiteRequest = (suiteId: string) => {
-    const matchedCase = cases.find((c) => c.suiteId === suiteId);
-    const suiteName = matchedCase?.suiteName || "Suite";
-    setEditingSuite({ id: suiteId, name: suiteName });
-  };
-
-  const handleSuiteSave = async (name: string): Promise<void> => {
-    if (!editingSuite) return;
-    await verificationActions.patch(editingSuite.id, { name });
-    void caseActions.refreshForServer(row.id);
-  };
-
-  const handleSuiteDeleteConfirm = async (): Promise<void> => {
-    if (!deletingSuiteId) return;
-    await verificationActions.remove(deletingSuiteId);
-    useCasesStore.getState().setItemsFor(deletingSuiteId, []);
-    void caseActions.refreshForServer(row.id);
-    setDeletingSuiteId(null);
-  };
+    if (selectedCaseId === null && cases.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedCaseId(cases[0].id);
+    }
+  }, [selectedCaseId, cases]);
 
   const [newCaseOpen, setNewCaseOpen] = useState<boolean>(false);
-
-  const [editingCase, setEditingCase] = useState<VerificationCaseRow | null>(
-    null,
-  );
-  const [deletingCase, setDeletingCase] =
-    useState<VerificationCaseRow | null>(null);
+  const [editingCase, setEditingCase] = useState<VerificationCaseRow | null>(null);
+  const [deletingCase, setDeletingCase] = useState<VerificationCaseRow | null>(null);
 
   const isLiveTerminal: boolean =
     liveRun.phase !== "idle" && liveRun.phase !== "running";
@@ -185,8 +167,8 @@ export function VerificationSuiteEditor({
     selectedRunId ?? (isLiveTerminal ? liveRunId : null);
   const { snapshot: runSnapshot } = useRunSnapshot(snapshotRunId);
 
-  const verdictByCaseId = useMemo<ReadonlyMap<number, CaseVerdict>>(() => {
-    const map = new Map<number, CaseVerdict>();
+  const verdictByCaseId = useMemo<ReadonlyMap<number, { status: VerificationCaseResultStatus }>>(() => {
+    const map = new Map<number, { status: VerificationCaseResultStatus }>();
     if (runSnapshot) {
       for (const r of runSnapshot.results) {
         map.set(r.caseId, {
@@ -219,14 +201,6 @@ export function VerificationSuiteEditor({
     };
   }, [runSnapshot, selectedCaseId]);
 
-  useEffect(() => {
-    if (runSnapshot && selectedCaseId === null && runSnapshot.results.length > 0) {
-      const first = runSnapshot.results[0]?.caseId;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (first !== undefined) setSelectedCaseId(first);
-    }
-  }, [runSnapshot, selectedCaseId]);
-
   useTerminalRunEffect(
     liveRun.phase,
     useCallback(() => {
@@ -234,13 +208,14 @@ export function VerificationSuiteEditor({
     }, [setBannerRefreshKey]),
   );
 
-  const handleRunTool = async (suiteId: string): Promise<void> => {
+  const handleRunSuite = async (): Promise<void> => {
+    if (!effectiveSuiteId) return;
     setStartError(null);
     try {
       const res = await fetch("/api/verification-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ suiteId }),
+        body: JSON.stringify({ suiteId: effectiveSuiteId }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as
@@ -251,24 +226,19 @@ export function VerificationSuiteEditor({
       const { runId } = (await res.json()) as { runId: string };
       setLiveRunId(runId);
       exitHistoryView();
+      toast.success("Started verification suite run");
     } catch (err) {
       setStartError(err instanceof Error ? err.message : String(err));
+      toast.error(err instanceof Error ? err.message : "Failed to run suite");
     }
   };
 
-  const handleToggleSuiteVisibility = async (suiteId: string, next: "public" | "private"): Promise<void> => {
+  const handleToggleCaseEnabled = async (caseId: number, nextEnabled: boolean): Promise<void> => {
+    if (!effectiveSuiteId) return;
     try {
-      const res = await fetch(`/api/verification-suites/${suiteId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility: next }),
-      });
-      if (res.ok) {
-        void caseActions.refreshForServer(row.id);
-      }
-    }
-    catch (err) {
-      console.error("Failed to toggle suite visibility:", err);
+      await caseActions.patch({ id: caseId, suiteId: effectiveSuiteId }, { enabled: nextEnabled });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update case enabled state");
     }
   };
 
@@ -290,40 +260,73 @@ export function VerificationSuiteEditor({
         }
       : null;
 
-  const displayName = row.serverTitle || row.name;
+  const suiteDisplayName = suiteData?.name || legacyRow?.name || "Verification Suite";
+  const serverDisplayName = suiteData?.serverTitle || suiteData?.serverName || legacyRow?.serverTitle || null;
 
-  const serverMeta = useMemo(
+  const suiteMeta = useMemo(
     () => ({
-      id: row.id,
-      name: row.serverTitle || row.name,
+      id: effectiveSuiteId ?? "",
+      name: suiteDisplayName,
       caseCount: cases.length,
     }),
-    [row.id, row.serverTitle, row.name, cases.length],
+    [effectiveSuiteId, suiteDisplayName, cases.length],
   );
+
+  if (suiteLoading && !suiteData) {
+    return (
+      <div className="flex h-full w-full items-center justify-center gap-2 text-muted-foreground text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading suite…
+      </div>
+    );
+  }
+
+  if (suiteError || !effectiveSuiteId) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground text-sm">
+        <p>Verification suite not found or inaccessible.</p>
+        {onBack && (
+          <Button variant="outline" size="sm" onClick={onBack}>
+            Back to verification
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {!selectedCase && <EmptyVerificationCopilotSync server={serverMeta} />}
-      {/* Header aligned with left panel height and layout */}
+      {!selectedCase && <EmptyVerificationCopilotSync suite={suiteMeta} />}
+
+      {/* Top Header */}
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="h-6 w-6 shrink-0"
-            onClick={onBack}
-            aria-label="Back to server list"
-          >
-            <ArrowLeft className="h-3 w-3" />
-          </Button>
-          <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
-            {displayName}
-          </h1>
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="h-6 w-6 shrink-0"
+              onClick={onBack}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-3 w-3" />
+            </Button>
+          )}
+          <div className="flex items-center gap-1.5 min-w-0 truncate">
+            {serverDisplayName && (
+              <span className="text-xs text-muted-foreground truncate">
+                {serverDisplayName} /
+              </span>
+            )}
+            <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
+              {suiteDisplayName}
+            </h1>
+          </div>
         </div>
+
         <div className="shrink-0 flex items-center gap-2">
           <RecentRunsBanner
-            suiteId={row.id}
-            apiPrefix="verification-servers"
+            suiteId={effectiveSuiteId}
+            apiPrefix="verification-suites"
             refreshKey={bannerRefreshKey}
             selectedRunId={selectedRunId}
             onSelectRun={(id, seq) => {
@@ -340,31 +343,31 @@ export function VerificationSuiteEditor({
         </p>
       )}
 
+      {/* Main Grid: Left 20% Case List + Right Inspector */}
       <div className="flex-1 min-h-0">
         <div className="grid h-full grid-cols-[20%_1fr] overflow-hidden">
-          <CaseTree
+          <VerificationCaseList
+            suiteName={suiteDisplayName}
             cases={cases}
-            serverNameById={serverNameById}
             verdictByCaseId={verdictByCaseId}
             selectedCaseId={selectedCaseId}
             onSelectCase={setSelectedCaseId}
             onNewCase={() => setNewCaseOpen(true)}
+            onRunSuite={handleRunSuite}
+            onToggleCaseEnabled={handleToggleCaseEnabled}
             onRequestEditCase={setEditingCase}
             onRequestDeleteCase={setDeletingCase}
-            onRunTool={handleRunTool}
-            onToggleSuiteVisibility={handleToggleSuiteVisibility}
-            onEditSuite={handleEditSuiteRequest}
-            onDeleteSuite={setDeletingSuiteId}
             loading={casesLoading}
             error={casesError}
             readOnly={false}
           />
+
           <div className="min-w-0 overflow-hidden">
             {selectedCase ? (
               <CaseInspector
                 key={selectedCase.id}
                 caseRow={selectedCase}
-                serverMeta={serverMeta}
+                serverMeta={{ id: suiteData?.mcpServerId ?? "", name: serverDisplayName ?? "", caseCount: cases.length }}
                 pinnedOutcome={pinnedOutcome}
                 historyMeta={historyMeta}
                 onExitHistoryView={exitHistoryView}
@@ -379,14 +382,16 @@ export function VerificationSuiteEditor({
       </div>
 
       <NewCaseDialog
-        serverId={row.id}
+        suiteId={effectiveSuiteId}
+        serverId={suiteData?.mcpServerId}
         open={newCaseOpen}
         onOpenChange={setNewCaseOpen}
         onCreated={(created) => setSelectedCaseId(created.id)}
       />
 
       <NewCaseDialog
-        serverId={row.id}
+        suiteId={effectiveSuiteId}
+        serverId={suiteData?.mcpServerId}
         open={editingCase !== null}
         onOpenChange={(o) => { if (!o) setEditingCase(null); }}
         caseRow={editingCase}
@@ -405,47 +410,9 @@ export function VerificationSuiteEditor({
           if (selectedCaseId === deletedId) setSelectedCaseId(null);
         }}
       />
-
-
-      <VerificationSuiteEditDialog
-        open={editingSuite !== null}
-        onOpenChange={(o) => { if (!o) setEditingSuite(null); }}
-        serverName={displayName}
-        suite={editingSuite}
-        onSave={handleSuiteSave}
-      />
-
-      <AlertDialog
-        open={deletingSuiteId !== null}
-        onOpenChange={(o) => { if (!o) setDeletingSuiteId(null); }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete suite</AlertDialogTitle>
-            <AlertDialogDescription>
-              Permanently delete this verification suite and all its cases? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleSuiteDeleteConfirm();
-              }}
-              className="bg-destructive hover:bg-destructive/90"
-            >
-              <Trash2 className="mr-1 h-3.5 w-3.5" />
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
-
-
 
 function DeleteCaseDialog({
   caseRow,
@@ -466,6 +433,7 @@ function DeleteCaseDialog({
       await caseActions.remove(caseRow);
       onDeleted(caseRow.id);
       onClose();
+      toast.success("Case deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete case");
     } finally {
@@ -525,21 +493,4 @@ function useTerminalRunEffect(
       queueMicrotask(onTerminal);
     }
   }
-}
-
-const EMPTY_NAME_MAP: ReadonlyMap<string, string> = new Map();
-
-async function fetchMcpServerNameMap(): Promise<ReadonlyMap<string, string>> {
-  const res = await fetch("/api/mcp-servers");
-  if (!res.ok) throw new Error(`${res.status}`);
-  const rows = (await res.json()) as Array<{
-    id: string;
-    name: string;
-    serverTitle?: string | null;
-  }>;
-  const map = new Map<string, string>();
-  for (const r of rows) {
-    map.set(r.id, r.serverTitle ?? r.name);
-  }
-  return map;
 }

@@ -21,7 +21,7 @@ export interface NewWebAutoCaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   suiteId: string;
-  caseToEdit?: { id: string; name: string } | null;
+  caseToEdit?: { id: number; name: string } | null;
 }
 
 export function NewWebAutoCaseDialog({
@@ -81,7 +81,7 @@ export function NewWebAutoCaseDialog({
         body: JSON.stringify({
           suiteId,
           name: trimmedName,
-          scriptContent: `// playwright script\nasync (page) => {\n  await page.goto('https://www.example.com/');\n  return { success: true };\n}`,
+          scriptContent: null,
           assertions: [],
         }),
       });
@@ -96,7 +96,7 @@ export function NewWebAutoCaseDialog({
       setSelectedCaseId(createdCase.id);
       
       toast.success("Created case", {
-        description: `Case "${createdCase.name}" is now ready.`,
+        description: `Case "${createdCase.name}"`,
       });
 
       onOpenChange(false);
@@ -135,7 +135,6 @@ export function NewWebAutoCaseDialog({
               id="caseName"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Valid Login credentials"
               autoFocus
               disabled={submitting}
               onKeyDown={(e) => {

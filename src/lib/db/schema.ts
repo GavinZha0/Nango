@@ -2310,7 +2310,9 @@ export const WebAutoSuiteTable = pgTable("web_auto_suite", {
 });
 
 export const WebAutoCaseTable = pgTable("web_auto_case", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: bigint("id", { mode: "number" })
+    .primaryKey()
+    .generatedAlwaysAsIdentity(),
   suiteId: uuid("suite_id")
     .notNull()
     .references(() => WebAutoSuiteTable.id, { onDelete: "cascade" }),
@@ -2352,13 +2354,16 @@ export const WebAutoCaseResultTable = pgTable("web_auto_case_result", {
   runId: uuid("run_id")
     .notNull()
     .references(() => WebAutoRunTable.id, { onDelete: "cascade" }),
-  caseId: uuid("case_id")
+  caseId: bigint("case_id", { mode: "number" })
     .notNull()
     .references(() => WebAutoCaseTable.id, { onDelete: "cascade" }),
   status: text("status").notNull(), // 'passed', 'failed', 'errored'
   executionOutput: jsonb("execution_output"),
   verdict: jsonb("verdict"),
   error: jsonb("error"),
+  durationMs: integer("duration_ms"),
+  startedAt: timestamp("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  finishedAt: timestamp("finished_at"),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

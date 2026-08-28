@@ -359,7 +359,7 @@ function HistoryPanelContent(): ReactNode {
                         size="icon"
                         className="h-5 w-5 shrink-0 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover/header:opacity-100"
                         onClick={() => setBulkDeleteGroup(group)}
-                        aria-label={`Delete all ${GROUP_LABELS[group]} conversations`}
+                        aria-label={`Delete ${GROUP_LABELS[group]}`}
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>

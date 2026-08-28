@@ -19,7 +19,7 @@ export interface WebAutoSuiteRow {
 }
 
 export interface WebAutoCaseRow {
-  id: string;
+  id: number;
   suiteId: string;
   name: string;
   description: string | null;
@@ -32,11 +32,12 @@ export interface WebAutoCaseRow {
   updatedAt: string;
 }
 
-export interface WebAutoGroup {
+export interface WebAutoTarget {
   id: string;
   name: string;
   suites: WebAutoSuiteRow[];
 }
+export type WebAutoGroup = WebAutoTarget;
 
 interface WebAutoStore {
   suites: WebAutoSuiteRow[];
@@ -44,12 +45,12 @@ interface WebAutoStore {
   loading: boolean;
   error: string | null;
   expandedGroups: Record<string, boolean>;
-  selectedCaseId: string | null;
+  selectedCaseId: number | null;
 
   setSuites: (suites: WebAutoSuiteRow[]) => void;
   setLoading: (loading: boolean) => void;
   setError: (err: string | null) => void;
-  setSelectedCaseId: (id: string | null) => void;
+  setSelectedCaseId: (id: number | null) => void;
   upsert: (suite: WebAutoSuiteRow) => void;
   remove: (id: string) => void;
   toggleGroup: (id: string) => void;

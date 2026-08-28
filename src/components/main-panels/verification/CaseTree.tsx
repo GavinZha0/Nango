@@ -300,7 +300,7 @@ function ToolGroupNode({
               onRunTool(tool.suiteId);
             }}
             className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 group-hover/tool-node:opacity-100 transition-opacity hover:text-foreground"
-            title="Run suite"
+            title="Run"
           >
             <Play className="h-3 w-3 fill-green-500 text-green-500" />
           </button>

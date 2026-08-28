@@ -1,7 +1,6 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 import { canViewResource, ResourceWithRBAC } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
@@ -12,20 +11,14 @@ import { eq } from "drizzle-orm";
 
 const ROUTE = "/api/web-auto-cases/[id]/run";
 
-const idSchema = z.string().uuid();
-
-// POST /api/web-auto-cases/[id]/run
-// Synchronous one-shot execution of a single web auto case.
-// Returns the outcome immediately without persisting a suite run record.
 export const POST = withEditor<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const { id } = await params;
-    const idParse = idSchema.safeParse(id);
-    if (!idParse.success) {
+    const caseId = Number(id);
+    if (!Number.isSafeInteger(caseId) || caseId <= 0) {
       throw new ApiError("VALIDATION_FAILED", 400, "Invalid case ID format.");
     }
-    const caseId = idParse.data;
 
     // Load case and parent suite
     const [caseRow] = await db

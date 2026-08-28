@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Play, Plus, X, ArrowLeft, Loader2, AlertCircle, Save, SquarePen, Trash2, CircleCheck, CircleX, CircleSlash, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
+import { Play, Plus, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { NewWebAutoCaseDialog } from "./NewWebAutoCaseDialog";
+import { WebAutoCaseList, type CaseVerdict } from "./WebAutoCaseList";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { cn } from "@/lib/utils";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -39,7 +41,7 @@ const fetcher = async (url: string) => {
 
 function extractWebAutoTargetCase(
   draft: Record<string, unknown>,
-  currentCaseId?: string | null,
+  currentCaseId?: number | string | null,
 ): Record<string, unknown> {
   if (draft.selectedCase && typeof draft.selectedCase === "object" && !Array.isArray(draft.selectedCase)) {
     return draft.selectedCase as Record<string, unknown>;
@@ -49,8 +51,8 @@ function extractWebAutoTargetCase(
   }
   const searchInCases = (casesList: unknown[]): Record<string, unknown> | null => {
     if (!Array.isArray(casesList) || casesList.length === 0) return null;
-    if (currentCaseId) {
-      const match = casesList.find((c) => (c as Record<string, unknown>)?.id === currentCaseId);
+    if (currentCaseId != null) {
+      const match = casesList.find((c) => (c as Record<string, unknown>)?.id == currentCaseId);
       if (match && typeof match === "object") return match as Record<string, unknown>;
     }
     const first = casesList[0];
@@ -79,13 +81,25 @@ function extractWebAutoTargetCase(
   return draft;
 }
 
+export interface SingleCaseRunOutcome {
+  status: "passed" | "failed" | "errored";
+  executionOutput: unknown;
+  verdict: {
+    deterministic: { passed: boolean; results: Array<{ index: number; ok: boolean; type: string; message?: string; expected?: unknown; actual?: unknown }> };
+    llm?: { passed: boolean; score?: number; feedback?: string; expectationResults: Array<{ expectation: string; score: number; feedback: string }> };
+    overall: { passed: boolean; reason: string };
+  };
+  error: { source: string; message: string; details?: unknown } | null;
+  durationMs: number;
+}
+
 export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const router = useRouter();
   const { selectedCaseId, setSelectedCaseId, suites } = useWebAutoStore();
   const [activeTab, setActiveTab] = useState<"js" | "llm" | "json">("js");
   const [caseDialogOpen, setCaseDialogOpen] = useState(false);
-  const [caseToEdit, setCaseToEdit] = useState<{id: string, name: string} | null>(null);
-  const [caseToDelete, setCaseToDelete] = useState<{id: string, name: string} | null>(null);
+  const [caseToEdit, setCaseToEdit] = useState<{ id: number; name: string } | null>(null);
+  const [caseToDelete, setCaseToDelete] = useState<{ id: number; name: string } | null>(null);
 
   // History Banner & Run Selection State
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -102,7 +116,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const selectedSuite = suiteFromStore || fetchedSuite;
 
   // Fetch cases for this suite
-  const { data: cases, isLoading, error } = useSWR<WebAutoCaseRow[]>(
+  const { data: cases, isLoading, error, mutate: mutateCases } = useSWR<WebAutoCaseRow[]>(
     `/api/web-auto-cases?suiteId=${suiteId}`,
     fetcher
   );
@@ -115,7 +129,21 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const [inputTab, setInputTab] = useState<"script" | "description">("script");
   const [draftAssertions, setDraftAssertions] = useState<Record<string, unknown>[]>([]);
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const [activeSuiteRunId, setActiveSuiteRunId] = useState<string | null>(null);
+
+  const hasJsAssertions = useMemo(() => {
+    return draftAssertions.some(
+      (a) => a.type === "js_expression" && typeof a.expression === "string" && a.expression.trim().length > 0
+    );
+  }, [draftAssertions]);
+
+  const hasLlmAssertions = useMemo(() => {
+    return draftAssertions.some(
+      (a) => a.type === "llm_expectation" && typeof a.expectation === "string" && a.expectation.trim().length > 0
+    );
+  }, [draftAssertions]);
+
+  const activeSuiteRunId_state = useState<string | null>(null);
+  const [activeSuiteRunId, setActiveSuiteRunId] = activeSuiteRunId_state;
   const liveRun = useWebAutoRunStream(activeSuiteRunId);
 
   // Terminal run effect to refresh banner when a suite run finishes
@@ -131,7 +159,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const { data: runSnapshot } = useSWR<{
     run: { id: string; startedAt: string; status: string };
     results: Array<{
-      caseId: string;
+      caseId: number;
       status: "passed" | "failed" | "errored";
       executionOutput: unknown;
       verdict: {
@@ -151,20 +179,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
-  const [runOutcome, setRunOutcome] = useState<{
-    status: "passed" | "failed" | "errored";
-    executionOutput: unknown;
-    verdict: {
-      deterministic: { passed: boolean; results: Array<{ index: number; ok: boolean; type: string; message?: string; expected?: unknown; actual?: unknown }> };
-      llm?: { passed: boolean; score?: number; feedback?: string; expectationResults: Array<{ expectation: string; score: number; feedback: string }> };
-      overall: { passed: boolean; reason: string };
-    };
-    error: { source: string; message: string; details?: unknown } | null;
-    durationMs: number;
-  } | null>(null);
+  const [runOutcome, setRunOutcome] = useState<SingleCaseRunOutcome | null>(null);
 
   // Compute effective outcome (prioritizes historical snapshot when in history view)
-  const displayOutcome = useMemo(() => {
+  const displayOutcome = useMemo<SingleCaseRunOutcome | null>(() => {
     if (inHistoryView) {
       if (!runSnapshot || !selectedCaseId) return null;
       const historyCaseResult = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
@@ -179,6 +197,40 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     }
     return runOutcome;
   }, [inHistoryView, runSnapshot, selectedCaseId, runOutcome]);
+
+  const verdictByCaseId = useMemo<ReadonlyMap<number, CaseVerdict>>(() => {
+    const map = new Map<number, CaseVerdict>();
+    if (inHistoryView && runSnapshot) {
+      for (const hr of runSnapshot.results) {
+        map.set(hr.caseId, {
+          status: hr.status,
+          durationMs: hr.durationMs,
+        });
+      }
+    } else {
+      for (const [caseId, liveCase] of liveRun.caseResults) {
+        map.set(Number(caseId), {
+          status: liveCase.status,
+          durationMs: liveCase.durationMs,
+        });
+      }
+    }
+    return map;
+  }, [inHistoryView, runSnapshot, liveRun.caseResults]);
+
+  const handleToggleCaseEnabled = async (caseId: number, nextEnabled: boolean): Promise<void> => {
+    try {
+      const res = await fetch(`/api/web-auto-cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      if (!res.ok) throw new Error("Failed to update case enabled status");
+      await mutateCases();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to toggle case");
+    }
+  };
 
   const extractedImages = useMemo(() => {
     return extractWebAutoImages(displayOutcome?.executionOutput);
@@ -496,112 +548,30 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
       </header>
 
       <div className="flex-1 grid h-full grid-cols-[20%_1fr] min-h-0 overflow-hidden">
-        <div className="flex h-full flex-col border-r border-border/60 bg-background overflow-hidden">
-          <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Test suite
-            </h2>
-            {cases && cases.length > 0 && (
-              <span className="text-[10px] text-muted-foreground">
-                ({cases.length})
-              </span>
-            )}
-            <div className="ml-auto flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 p-0"
-                title="New Case"
-                onClick={() => {
-                  setCaseToEdit(null);
-                  setCaseDialogOpen(true);
-                }}
-              >
-                <Plus className="h-3 w-3" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 p-0 text-emerald-600 hover:text-emerald-500 hover:bg-emerald-500/10"
-                title="Run suite"
-                disabled={liveRun.phase === "running" || !cases || cases.length === 0}
-                onClick={() => void handleRunSuite()}
-              >
-                {liveRun.phase === "running" ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Play className="h-3 w-3 fill-current" />
-                )}
-              </Button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto py-1 px-1">
-            {isLoading && (
-               <div className="p-4 text-center text-xs text-muted-foreground flex justify-center items-center gap-2">
-                 <Loader2 className="h-3 w-3 animate-spin" /> Loading cases...
-               </div>
-            )}
-            {error && (
-               <div className="p-4 text-center text-xs text-destructive flex justify-center items-center gap-2">
-                 <AlertCircle className="h-3 w-3" /> Error loading
-               </div>
-            )}
-            {cases?.map((c) => {
-              const liveCase = liveRun.caseResults.get(c.id);
-              const isSelected = selectedCaseId === c.id;
-
-              let caseStatus: "passed" | "failed" | "errored" | "running" | null = null;
-              let caseDurationMs: number | null = null;
-
-              if (inHistoryView && runSnapshot) {
-                const hr = runSnapshot.results.find((r) => r.caseId === c.id);
-                if (hr) {
-                  caseStatus = hr.status;
-                  caseDurationMs = hr.durationMs;
-                }
-              } else if (liveCase) {
-                caseStatus = liveCase.status;
-                caseDurationMs = liveCase.durationMs;
-              } else if (liveRun.phase === "running") {
-                caseStatus = "running";
-              }
-
-              return (
-                <div 
-                  key={c.id}
-                  className={`group px-2 py-1.5 text-xs cursor-pointer rounded transition-colors mb-0.5 flex items-center justify-between ${isSelected ? 'bg-accent text-foreground' : 'hover:bg-muted/30 text-muted-foreground'}`}
-                  onClick={() => setSelectedCaseId(c.id)}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-1">
-                    {caseStatus === "passed" ? (
-                      <CircleCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                    ) : caseStatus === "failed" ? (
-                      <CircleX className="h-3.5 w-3.5 text-destructive shrink-0" />
-                    ) : caseStatus === "errored" ? (
-                      <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                    ) : caseStatus === "running" ? (
-                      <CircleSlash className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
-                    ) : null}
-                    <span className="truncate flex-1">{c.name}</span>
-                    {caseDurationMs !== null && caseDurationMs > 0 && (
-                      <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                        {(caseDurationMs / 1000).toFixed(1)}s
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button type="button" className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors" title="Edit this case" onClick={(e) => { e.stopPropagation(); setCaseToEdit({ id: c.id, name: c.name }); setCaseDialogOpen(true); }}>
-                      <SquarePen className="h-3 w-3" />
-                    </button>
-                    <button type="button" className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors" title="Delete this case" onClick={(e) => { e.stopPropagation(); setCaseToDelete({ id: c.id, name: c.name }); }}>
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <WebAutoCaseList
+          cases={cases ?? []}
+          verdictByCaseId={verdictByCaseId}
+          selectedCaseId={selectedCaseId}
+          onSelectCase={setSelectedCaseId}
+          onNewCase={() => {
+            setCaseToEdit(null);
+            setCaseDialogOpen(true);
+          }}
+          onRunSuite={() => void handleRunSuite()}
+          isSuiteRunning={liveRun.phase === "running"}
+          mcpServerId={selectedSuite?.mcpServerId}
+          onToggleCaseEnabled={handleToggleCaseEnabled}
+          onRequestEditCase={(c) => {
+            setCaseToEdit({ id: c.id, name: c.name });
+            setCaseDialogOpen(true);
+          }}
+          onRequestDeleteCase={(c) => {
+            setCaseToDelete({ id: c.id, name: c.name });
+          }}
+          loading={isLoading}
+          error={error ? "Error loading cases" : null}
+          readOnly={false}
+        />
 
         <div className="grid h-full grid-cols-2 min-w-0 overflow-hidden">
             <div className="flex min-h-0 flex-col min-w-0 border-r border-border/60">
@@ -642,13 +612,21 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   <Button
                     size="sm"
                     className="h-6 px-2 text-xs"
-                    disabled={!selectedCase || running}
+                    disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
                     onClick={() => void handleRunCase()}
+                    title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
                   >
                     {running ? (
                       <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                     ) : (
-                      <Play className="mr-1.5 h-3 w-3 fill-green-500 text-green-500" />
+                      <Play
+                        className={cn(
+                          "mr-1.5 h-3 w-3",
+                          selectedSuite?.mcpServerId
+                            ? "fill-green-500 text-green-500"
+                            : "fill-muted-foreground text-muted-foreground"
+                        )}
+                      />
                     )}
                     Run
                   </Button>
@@ -665,7 +643,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                           spellCheck={false}
                           value={draftScript}
                           onChange={(e) => setDraftScript(e.target.value)}
-                          placeholder="// Write Playwright script (e.g. await page.goto(...))"
+                          placeholder={`// playwright script\nasync (page) => {\n  await page.goto('https://www.example.com/');\n  return { success: true };\n}`}
                         />
                       ) : (
                         <Textarea
@@ -680,11 +658,32 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 </div>
 
                 <div className="flex flex-col min-h-0 overflow-hidden">
-                  <div className="flex h-8 shrink-0 items-center justify-between border-y border-border/60 bg-muted/40 min-w-0">
-                    <div className="flex items-center">
-                      <button onClick={() => setActiveTab("js")} className={`flex h-8 items-center border-b-2 px-3 text-xs font-medium transition-colors ${activeTab === "js" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>JS Expression</button>
-                      <button onClick={() => setActiveTab("llm")} className={`flex h-8 items-center border-b-2 px-3 text-xs font-medium transition-colors ${activeTab === "llm" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Expectations</button>
-                      <button onClick={() => setActiveTab("json")} className={`flex h-8 items-center border-b-2 px-3 text-xs font-medium transition-colors ${activeTab === "json" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>JSON</button>
+                  <div className="flex h-8 shrink-0 items-center justify-between border-y border-border/60 bg-muted/20 px-3 min-w-0">
+                    <div className="flex items-center gap-1">
+                      {(
+                        [
+                          { id: "js", label: "JS Expression", hasDot: hasJsAssertions },
+                          { id: "llm", label: "Expectations", hasDot: hasLlmAssertions },
+                          { id: "json", label: "JSON", hasDot: false },
+                        ] as const
+                      ).map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setActiveTab(t.id)}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded transition-colors border",
+                            activeTab === t.id
+                              ? "bg-muted text-foreground border-muted-foreground/10 font-semibold"
+                              : "text-muted-foreground hover:bg-muted/30 hover:text-foreground border-transparent"
+                          )}
+                        >
+                          <span>{t.label}</span>
+                          {t.hasDot && (
+                            <span className="w-1 h-1 rounded-full bg-emerald-500 shrink-0 animate-pulse-subtle" />
+                          )}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <div className="flex-1 min-h-0 p-3 overflow-y-auto">

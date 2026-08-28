@@ -117,7 +117,7 @@ export function NewWebAutoSuiteDialog({
   const canSubmit =
     !submitting &&
     trimmedName.length > 0 &&
-    (isEditingGroup || (hasValidGroup && form.mcpServerId.trim().length > 0));
+    (isEditingGroup || hasValidGroup);
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
@@ -199,7 +199,7 @@ export function NewWebAutoSuiteDialog({
 
       await mutate("/api/web-auto-suites");
       toast.success("Created web auto suite", {
-        description: `Suite "${createdSuite.name}" is now ready.`,
+        description: `Suite "${createdSuite.name}"`,
       });
 
       onCreated(createdSuite.id);

@@ -48,19 +48,26 @@ export const GET = withSession<{ id: string }>(
       throw new ApiError("VALIDATION_FAILED", 400, "caseId is required.");
     }
 
-    const run = await storage.getRunById(params.id);
-    if (!run) throw new ApiError("NOT_FOUND", 404, "Eval run not found.");
+    let targetThreadId: string | null = null;
 
-    await loadSuite(run.suiteId, session);
+    if (params.id === "playground") {
+      targetThreadId = url.searchParams.get("threadId");
+    } else {
+      const run = await storage.getRunById(params.id);
+      if (!run) throw new ApiError("NOT_FOUND", 404, "Eval run not found.");
 
-    const result = await storage.getCaseResult(params.id, parsed.data.caseId);
-    if (!result || !result.threadId) {
-      return Response.json({ messages: [] });
+      await loadSuite(run.suiteId, session);
+
+      const result = await storage.getCaseResult(params.id, parsed.data.caseId);
+      if (!result || !result.threadId) {
+        return Response.json({ messages: [] });
+      }
+      targetThreadId = result.threadId;
     }
 
-    // result.threadId stores the target agent's conversation threadId.
-    // Read all runs that belong to this thread.
-    const targetThreadId = result.threadId;
+    if (!targetThreadId) {
+      return Response.json({ messages: [] });
+    }
 
     const runs = await db
       .select({ id: EntityRunTable.id, inputTask: EntityRunTable.inputTask })

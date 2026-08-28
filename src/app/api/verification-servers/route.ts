@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { McpServerTable, VerificationSuiteTable } from "@/lib/db/schema";
 import { withEditor } from "@/lib/http/route-handlers";
 import { visibilitySql } from "@/lib/auth/permissions";
-import { and, asc, sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 
 const ROUTE = "/api/verification-servers";
 
@@ -53,23 +53,10 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
     })
     .from(McpServerTable)
     .where(
-      and(
-        visibilitySql(
-          session,
-          McpServerTable.visibility,
-          McpServerTable.createdBy,
-        ),
-        // INNER JOIN equivalent filter to load only servers with visible cases.
-        sql`exists (
-          select 1 from "verification_suite"
-          inner join "verification_case" on "verification_case"."suite_id" = "verification_suite"."id"
-          where "verification_suite"."mcp_server_id" = "mcp_server"."id"
-            and ${visibilitySql(
-              session,
-              VerificationSuiteTable.visibility,
-              VerificationSuiteTable.createdBy,
-            )}
-        )`
+      visibilitySql(
+        session,
+        McpServerTable.visibility,
+        McpServerTable.createdBy,
       )
     )
     .orderBy(asc(McpServerTable.name));

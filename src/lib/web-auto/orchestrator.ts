@@ -488,7 +488,7 @@ async function handleSuiteLoopCrash(
 async function persistAndPublishError(args: {
   ownerId: string;
   runId: string;
-  caseId: string;
+  caseId: number;
   error: ErrorEnvelope;
 }): Promise<void> {
   await storage.writeWebAutoCaseResult({

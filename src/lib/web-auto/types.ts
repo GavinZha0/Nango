@@ -124,7 +124,7 @@ export interface WebAutoCaseFinishedFrame {
   topic: "web_auto_run";
   kind: "case_finished";
   runId: string;
-  caseId: string;
+  caseId: number;
   status: "passed" | "failed" | "errored";
   durationMs: number;
   /** Present iff status !== "passed" */
@@ -151,7 +151,7 @@ export type WebAutoFrame =
 // --- Runner input interfaces -----------------------------------------------
 
 export interface RunWebAutoCaseInput {
-  caseId: string;
+  caseId: number;
   suiteId: string;
   suite: WebAutoSuiteEntity;
   case: WebAutoCaseEntity | import("./storage").WebAutoCaseRunItem;
@@ -171,12 +171,13 @@ export interface RunWebAutoSuiteInput {
 
 export interface WriteWebAutoCaseResultInput {
   runId: string;
-  caseId: string;
+  caseId: number;
   status: "passed" | "failed" | "errored";
   executionOutput: unknown;
   verdict: WebAutoVerdict;
   error: ErrorEnvelope | null;
   startedAt: number;
+  finishedAt?: number;
   durationMs: number;
 }
 

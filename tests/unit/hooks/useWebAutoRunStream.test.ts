@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   isWebAutoEnvelope,
   applyWebAutoFrame,
@@ -49,14 +49,14 @@ describe("useWebAutoRunStream helpers", () => {
         topic: "web_auto_run",
         kind: "case_finished",
         runId: "run-1",
-        caseId: "case-uuid-1",
+        caseId: 101 as unknown as number,
         status: "passed",
         durationMs: 1500,
       });
 
       expect(next.caseResults.size).toBe(1);
-      expect(next.caseResults.get("case-uuid-1")).toEqual({
-        caseId: "case-uuid-1",
+      expect(next.caseResults.get(101)).toEqual({
+        caseId: 101,
         status: "passed",
         durationMs: 1500,
         error: undefined,

@@ -5,10 +5,10 @@ import { z } from "zod";
 
 import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
-import { WebAutoSuiteTable } from "@/lib/db/schema";
+import { McpServerTable, WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, sql } from "drizzle-orm";
 
 const ROUTE = "/api/web-auto-suites";
 
@@ -70,14 +70,35 @@ const createSchema = z
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
 
+  let mcpServerId = body.mcpServerId ?? null;
+
   // Enforce 2-level nesting: A suite's parent must be a top-level group (parentId is null)
   if (body.parentId) {
-    if (!body.mcpServerId) {
-      throw new ApiError(
-        "VALIDATION_FAILED",
-        400,
-        "Playwright MCP server is required for a Web Auto suite.",
-      );
+    if (!mcpServerId) {
+      // Auto-discover default Playwright MCP server if not explicitly passed
+      const [playwrightServer] = await db
+        .select({ id: McpServerTable.id })
+        .from(McpServerTable)
+        .where(
+          and(
+            eq(McpServerTable.enabled, true),
+            ilike(McpServerTable.name, "%playwright%"),
+          ),
+        )
+        .limit(1);
+
+      if (playwrightServer) {
+        mcpServerId = playwrightServer.id;
+      } else {
+        const [anyServer] = await db
+          .select({ id: McpServerTable.id })
+          .from(McpServerTable)
+          .where(eq(McpServerTable.enabled, true))
+          .limit(1);
+        if (anyServer) {
+          mcpServerId = anyServer.id;
+        }
+      }
     }
 
     const [parentSuite] = await db
@@ -108,7 +129,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       enabled: body.enabled ?? true,
       timeoutSec: body.timeoutSec ?? 300,
       evaluatorAgentId: body.evaluatorAgentId ?? null,
-      mcpServerId: body.mcpServerId ?? null,
+      mcpServerId: mcpServerId,
       createdBy: session.user.id,
       updatedBy: session.user.id,
     })

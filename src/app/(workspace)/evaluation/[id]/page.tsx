@@ -1,37 +1,27 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
-import { useRouter, useParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { EvaluationEditor } from "@/components/main-panels/EvaluationEditor";
-import { useEvaluationStore, evalActions, agentKey } from "@/store/evaluation";
+import { type ReactNode } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { EvaluationSuiteEditor } from "@/components/main-panels/evaluation/EvaluationSuiteEditor";
 
-export default function EvaluationEditorPage(): ReactNode {
+/**
+ * /evaluation/[id] — Evaluation Suite Editor for a specific eval suite.
+ */
+export default function EvaluationSuitePage(): ReactNode {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
-  const suitesLoaded = useEvaluationStore(
-    (s) => s.suitesLoaded[agentKey(id, "builtin")] ?? false,
-  );
-  const loading = useEvaluationStore((s) => s.loading);
-
-  useEffect(() => {
-    if (!suitesLoaded) void evalActions.refreshSuites(id, "builtin");
-  }, [id, suitesLoaded]);
-
-  if (!suitesLoaded || loading) {
+  if (!id) {
     return (
-      <div className="grid h-full place-items-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      <div className="grid h-full place-items-center px-8 text-center text-sm text-muted-foreground">
+        <p>Invalid suite ID.</p>
       </div>
     );
   }
 
   return (
-    <EvaluationEditor
-      key={id}
-      agentId={id}
-      agentSource="builtin"
+    <EvaluationSuiteEditor
+      suiteId={id}
       onBack={() => router.push("/evaluation")}
     />
   );

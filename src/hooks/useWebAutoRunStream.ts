@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 /**
  * useWebAutoRunStream — live-feed for one in-flight Web Auto suite run.
@@ -15,7 +15,7 @@ import type { ErrorEnvelope } from "@/lib/verification/types";
 
 /** Per-case live snapshot accumulated from `case_finished` frames. */
 export interface WebAutoCaseLive {
-  caseId: string;
+  caseId: number;
   status: "passed" | "failed" | "errored";
   durationMs: number;
   error?: ErrorEnvelope;
@@ -26,8 +26,8 @@ export interface WebAutoRunLiveState {
   runId: string | null;
   /** Run-level lifecycle. `idle` = no run currently followed. */
   phase: "idle" | "running" | "passed" | "failed" | "errored";
-  /** Per-case results, keyed by `web_auto_case.id` (UUID string). */
-  caseResults: Map<string, WebAutoCaseLive>;
+  /** Per-case results, keyed by `web_auto_case.id` (bigint number). */
+  caseResults: Map<number, WebAutoCaseLive>;
   /** Final aggregate counts — only meaningful once `phase !== "running"`. */
   totals?: {
     totalCount: number;
@@ -78,7 +78,7 @@ export function applyWebAutoFrame(
 
   if (frame.kind === "case_finished") {
     const nextResults = new Map(base.caseResults);
-    const caseId = frame.caseId as string;
+    const caseId = Number(frame.caseId);
     nextResults.set(caseId, {
       caseId,
       status: frame.status as WebAutoCaseLive["status"],

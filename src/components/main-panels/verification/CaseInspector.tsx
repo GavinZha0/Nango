@@ -705,10 +705,10 @@ export function CaseInspector({
               </div>
             )}
 
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ml-auto flex items-center gap-2">
               {showHistoryChrome && historyMeta && (
                 <span
-                  className="text-xs font-semibold text-amber-600 dark:text-amber-400 shrink-0"
+                  className="text-xs font-semibold text-amber-500 dark:text-amber-400 shrink-0"
                   title={`Viewing snapshot of run #${historyMeta.seq} — started ${historyStartedAtLabel}`}
                 >
                   (#{historyMeta.seq}{historyStartedAtLabel ? ` - ${historyStartedAtLabel}` : ""})
@@ -716,16 +716,24 @@ export function CaseInspector({
               )}
               {displayedOutcome && (
                 <>
+                  {typeof displayedOutcome.durationMs === "number" && !isNaN(displayedOutcome.durationMs) && displayedOutcome.durationMs > 0 && (
+                    <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                      {displayedOutcome.durationMs >= 1000
+                        ? `${(displayedOutcome.durationMs / 1000).toFixed(1)}s`
+                        : `${displayedOutcome.durationMs}ms`}
+                    </span>
+                  )}
                   <span
                     className={cn(
-                      "text-xs font-semibold shrink-0",
-                      outcomeStatusColor(displayedOutcome.status),
+                      "text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0",
+                      displayedOutcome.status === "passed"
+                        ? "bg-green-500/10 text-green-500 border border-green-500/20"
+                        : displayedOutcome.status === "failed"
+                        ? "bg-destructive/10 text-destructive border border-destructive/20"
+                        : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
                     )}
                   >
                     {displayedOutcome.status.toUpperCase()}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground shrink-0">
-                    {displayedOutcome.durationMs} ms
                   </span>
                 </>
               )}
@@ -852,21 +860,6 @@ function JsonPane({
 }
 
 // --- Outcome viewer ---------------------------------------------------------
-
-/** Tailwind colour class for the status pill shown in the Run header. */
-function outcomeStatusColor(status: CaseExecutionOutcome["status"]): string {
-  switch (status) {
-    case "passed":
-      return "text-emerald-600 dark:text-emerald-400";
-    case "failed":
-      return "text-red-600 dark:text-red-400";
-    case "errored":
-    case "timeout":
-      return "text-amber-600 dark:text-amber-400";
-    case "skipped":
-      return "text-muted-foreground";
-  }
-}
 
 interface OutputPaneProps {
   outcome: CaseExecutionOutcome | null;

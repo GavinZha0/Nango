@@ -9,20 +9,13 @@ import * as storage from "@/lib/evaluation/storage";
 
 const ROUTE = "/api/eval-suites";
 
-// GET /api/eval-suites?agentId=<id>&agentSource=builtin
-// Returns suites for a specific agent with case counts.
+// GET /api/eval-suites[?agentId=<id>&agentSource=builtin]
+// Returns suites visible to the user (optionally filtered by agent).
 
 export const GET = withEditor(ROUTE, async ({ req, session }) => {
   const url = new URL(req.url);
   const agentId = url.searchParams.get("agentId");
-  if (!agentId) {
-    throw new ApiError(
-      "VALIDATION_FAILED",
-      400,
-      "Query param `agentId` is required.",
-    );
-  }
-  const agentSource = url.searchParams.get("agentSource") ?? "builtin";
+  const agentSource = url.searchParams.get("agentSource");
 
   const rows = await storage.listSuitesByAgentWithCaseCount(
     agentId,

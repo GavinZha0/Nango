@@ -34,6 +34,8 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
       name: VerificationSuiteTable.name,
       description: VerificationSuiteTable.description,
       category: VerificationSuiteTable.category,
+      mcpServerId: VerificationSuiteTable.mcpServerId,
+      workflowId: VerificationSuiteTable.workflowId,
       visibility: VerificationSuiteTable.visibility,
       enabled: VerificationSuiteTable.enabled,
       timeoutSec: VerificationSuiteTable.timeoutSec,

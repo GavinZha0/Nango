@@ -283,7 +283,7 @@ export function AssertionsEditor({
               onClick={() => switchTab(t.id)}
               disabled={isHistoryView || (activeTab === "json" && hasJsonError && t.id !== "json")}
               className={cn(
-                "flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium rounded transition-colors border",
+                "flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded transition-colors border",
                 activeTab === t.id
                   ? "bg-muted text-foreground border-muted-foreground/10 font-semibold"
                   : "text-muted-foreground hover:bg-muted/30 hover:text-foreground border-transparent",

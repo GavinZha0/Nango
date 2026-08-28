@@ -1,17 +1,28 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { type ReactNode } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { VerificationSuiteEditor } from "@/components/main-panels/VerificationSuiteEditor";
 
-export default function OldVerificationSuitePage(): ReactNode {
+/**
+ * /verification/[id] — Verification Suite Editor for a specific test suite.
+ */
+export default function VerificationSuitePage(): ReactNode {
   const router = useRouter();
-  useEffect(() => {
-    router.replace("/verification");
-  }, [router]);
+  const { id } = useParams<{ id: string }>();
+
+  if (!id) {
+    return (
+      <div className="grid h-full place-items-center px-8 text-center text-sm text-muted-foreground">
+        <p>Invalid suite ID.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="grid h-full place-items-center px-8 text-center text-sm text-muted-foreground">
-      <p>Redirecting…</p>
-    </div>
+    <VerificationSuiteEditor
+      suiteId={id}
+      onBack={() => router.push("/verification")}
+    />
   );
 }

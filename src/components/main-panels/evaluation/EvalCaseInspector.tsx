@@ -36,6 +36,7 @@ import {
   type EvalTurn,
   type CriteriaCheckResult,
 } from "@/lib/evaluation/types";
+import type { RunEvalCaseResult } from "@/lib/evaluation/eval-runner";
 import type { EvaluationRunLiveState } from "@/hooks/useEvaluationRunStream";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { formatTimestamp } from "@/components/admin/format";
@@ -68,7 +69,7 @@ interface TurnRowProps {
   onChange: (updated: EvalTurn) => void;
   onDelete: () => void;
   onViewResponse: () => void;
-  disabled?: boolean;
+  readOnly?: boolean;
 }
 
 function TurnRow({
@@ -80,7 +81,7 @@ function TurnRow({
   onChange,
   onDelete,
   onViewResponse,
-  disabled = false,
+  readOnly = false,
 }: TurnRowProps): ReactNode {
   return (
     <div className="space-y-1">
@@ -105,7 +106,7 @@ function TurnRow({
         >
           <MessageSquare className="h-3 w-3" />
         </button>
-        {canDelete && !disabled && (
+        {canDelete && !readOnly && (
           <button
             type="button"
             onClick={onDelete}
@@ -119,9 +120,9 @@ function TurnRow({
       <Textarea
         value={turn.userMessage}
         onChange={(e) => onChange({ ...turn, userMessage: e.target.value })}
-        placeholder={disabled ? "No message content" : "User message..."}
-        className="h-20 text-xs resize-none field-sizing-fixed"
-        disabled={disabled}
+        placeholder={readOnly ? "No message content" : "User message..."}
+        className={cn("h-20 text-xs resize-none field-sizing-fixed leading-relaxed", readOnly && "bg-transparent cursor-default")}
+        readOnly={readOnly}
       />
     </div>
   );
@@ -339,10 +340,6 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
     );
   }, [criteria]);
 
-  const hasJson = useMemo(() => {
-    return Object.keys(criteria).length > 0;
-  }, [criteria]);
-
   function updateField<K extends keyof EvalCriteria>(key: K, value: EvalCriteria[K]): void {
     const updated = { ...criteria, [key]: value };
     if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
@@ -401,7 +398,7 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
             { id: "expectations", label: "Expectations", hasDot: hasExpectations },
             { id: "checklist", label: "Checklist", hasDot: hasChecklist },
             { id: "limits", label: "Limits", hasDot: hasLimits },
-            { id: "json", label: "JSON", hasDot: hasJson },
+            { id: "json", label: "JSON", hasDot: false },
           ] as const
         ).map((t) => (
           <button
@@ -410,7 +407,7 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
             onClick={() => switchTab(t.id)}
             disabled={subTab === "json" && !!jsonError && t.id !== "json"}
             className={cn(
-              "flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium rounded transition-colors border",
+              "flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded transition-colors border",
               subTab === t.id
                 ? "bg-muted text-foreground border-muted-foreground/10 font-semibold"
                 : "text-muted-foreground hover:bg-muted/30 hover:text-foreground border-transparent",
@@ -436,7 +433,7 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
                 value={criteria.expectation ?? ""}
                 onChange={(e) => updateField("expectation", e.target.value)}
                 placeholder="Natural language description of the expected outcome..."
-                className="h-16 text-xs resize-none bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                className="h-16 text-xs resize-none leading-relaxed bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
               />
             </div>
 
@@ -447,7 +444,7 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
                 value={criteria.reference ?? ""}
                 onChange={(e) => updateField("reference", e.target.value)}
                 placeholder="A good example of an agent response or ground truth..."
-                className="h-16 text-xs font-mono resize-none bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                className="h-16 text-xs font-mono resize-none leading-relaxed bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
               />
             </div>
             
@@ -494,7 +491,6 @@ function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorPro
             <CommaSeparatedInput
               label="Expected tool calls"
               value={criteria.tool_calls ?? []}
-              placeholder="e.g. search_database, send_email"
               onChange={(next) => updateField("tool_calls", next)}
             />
 
@@ -679,6 +675,7 @@ interface EvalCaseInspectorProps {
   pinnedOutcome?: PinnedOutcome;
   pinnedRunId?: string | null;
   selectedRunSeq?: number | null;
+  onExitHistoryView?: () => void;
 }
 
 function extractEvalTargetCase(
@@ -732,10 +729,11 @@ export function EvalCaseInspector({
   evalCase,
   suite,
   liveRun,
-  onRunCase,
+  onRunCase: _onRunCase,
   pinnedOutcome,
   pinnedRunId,
   selectedRunSeq = null,
+  onExitHistoryView,
 }: EvalCaseInspectorProps): ReactNode {
   const [turns, setTurns] = useState<KeyedTurn[]>(() =>
     (evalCase.turns as EvalTurn[]).map((t) => ({ ...t, _key: mintKey() })),
@@ -780,40 +778,45 @@ export function EvalCaseInspector({
     setTurns((prev) => prev.map((t, i) => (i === index ? { ...updated, _key: t._key } : t)));
   }
 
-  // Derive display scores: prefer pinnedOutcome (history snapshot), then liveRun, then latest-result SWR
+  const [localOutcome, setLocalOutcome] = useState<RunEvalCaseResult | null>(null);
+  const [running, setRunning] = useState<boolean>(false);
+  const [_runError, setRunError] = useState<string | null>(null);
+
+  // Derive display scores: prefer pinnedOutcome (history snapshot), then localOutcome (playground), then liveRun, then latest-result SWR
   const liveCaseResult = liveRun.caseResults.get(evalCase.id);
   
   const displayScore = pinnedOutcome
     ? pinnedOutcome.score
-    : (liveCaseResult?.score ?? (historicalResult?.score ?? null));
+    : (localOutcome ? localOutcome.score : (liveCaseResult?.score ?? (historicalResult?.score ?? null)));
   const displayDimensionScores = useMemo(() => {
     return pinnedOutcome
       ? pinnedOutcome.dimensionScores
-      : (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {}));
-  }, [pinnedOutcome, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
+      : (localOutcome?.dimensionScores ?? (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {})));
+  }, [pinnedOutcome, localOutcome?.dimensionScores, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
   const displayBaselineScore = displayDimensionScores?.baseline ?? null;
   const displayCriteriaScore = pinnedOutcome
     ? pinnedOutcome.criteriaScore
-    : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null));
+    : (localOutcome ? (localOutcome.criteriaScore ?? null) : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null)));
   const displayFeedback = pinnedOutcome
     ? pinnedOutcome.feedback
-    : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null));
+    : (localOutcome ? (localOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
   const displayCriteriaResults = pinnedOutcome
     ? pinnedOutcome.criteriaResults
-    : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null));
+    : (localOutcome ? (localOutcome.criteriaResults ?? null) : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null)));
   const displayDurationMs = pinnedOutcome
     ? pinnedOutcome.durationMs
-    : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null));
+    : (localOutcome ? (localOutcome.durationMs ?? null) : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null)));
   const displayOutputTokens = pinnedOutcome
     ? pinnedOutcome.outputTokens
-    : (liveCaseResult?.outputTokens ?? (historicalResult?.outputTokens ?? null));
+    : (localOutcome ? (localOutcome.outputTokens ?? null) : (liveCaseResult?.outputTokens ?? (historicalResult?.outputTokens ?? null)));
 
   const resolvedRunId = pinnedOutcome
     ? pinnedRunId
-    : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId);
+    : (localOutcome ? "playground" : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId));
+  const resolvedThreadId = localOutcome?.threadId ?? null;
   const resolvedStatus = pinnedOutcome
     ? pinnedOutcome.status
-    : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"));
+    : (running ? "running" : (localOutcome ? localOutcome.status : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"))));
 
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
@@ -923,8 +926,14 @@ export function EvalCaseInspector({
     clearDraftState();
   }, [canSave, evalCase.id, evalCase.suiteId, turns, criteria, clearDraftState]);
 
+  const messagesUrl = resolvedRunId === "playground" && resolvedThreadId
+    ? `/api/eval-runs/playground/messages?caseId=${evalCase.id}&threadId=${resolvedThreadId}`
+    : resolvedRunId
+      ? `/api/eval-runs/${resolvedRunId}/messages?caseId=${evalCase.id}&status=${resolvedStatus}`
+      : null;
+
   const { data: messagesData, isLoading: messagesLoading } = useSWR<{ messages: ResponseMessage[] }>(
-    resolvedRunId ? `/api/eval-runs/${resolvedRunId}/messages?caseId=${evalCase.id}&status=${resolvedStatus}` : null,
+    messagesUrl,
     (url: string) => fetch(url).then(res => res.json())
   );
 
@@ -957,6 +966,31 @@ export function EvalCaseInspector({
     return result;
   }, [fullMessages, responseTurnIdx]);
 
+  const handleRunSingleCase = async (): Promise<void> => {
+    onExitHistoryView?.();
+    setRunError(null);
+    setLocalOutcome(null);
+    setRunning(true);
+    try {
+      if (canSave) {
+        await handleSave();
+      }
+      const res = await fetch(`/api/eval-cases/${evalCase.id}/run`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(body?.message ?? `${res.status} ${res.statusText}`);
+      }
+      const outcome = (await res.json()) as RunEvalCaseResult;
+      setLocalOutcome(outcome);
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  };
+
   function deleteTurn(index: number): void {
     setTurns((prev) => prev.filter((_, i) => i !== index));
   }
@@ -966,9 +1000,9 @@ export function EvalCaseInspector({
   }
 
   return (
-    <div className="flex flex-[8] min-h-0">
+    <div className="grid h-full grid-cols-2 overflow-hidden">
       {/* Middle: conversation (top) + criteria/response tabs (bottom) */}
-      <div className="flex flex-[1] flex-col border-r min-w-0">
+      <div className="flex h-full min-h-0 flex-col border-r min-w-0">
         {/* Top: conversation turns */}
         <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -1001,19 +1035,17 @@ export function EvalCaseInspector({
             <Button
               size="sm"
               className="h-6 px-2 text-xs"
-              disabled={!suite.evaluatorAgentId || liveRun.phase === "running" || selectedRunSeq !== null}
+              disabled={!suite.evaluatorAgentId || running || liveRun.phase === "running"}
               title={
                 !suite.evaluatorAgentId
-                  ? "Evaluator Agent is required to run"
-                  : liveRun.phase === "running"
+                  ? "Evaluator not configured"
+                  : running || liveRun.phase === "running"
                     ? "A run is in progress"
-                    : selectedRunSeq !== null
-                      ? "Cannot run while viewing history"
-                      : "Run case"
+                    : "Run case"
               }
-              onClick={() => void onRunCase(evalCase.id)}
+              onClick={() => void handleRunSingleCase()}
             >
-              {liveRun.phase === "running" ? (
+              {running || liveRun.phase === "running" ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               ) : (
                 <Play className={cn("mr-1 h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
@@ -1022,69 +1054,75 @@ export function EvalCaseInspector({
             </Button>
           </div>
         </div>
-        <ScrollArea className="basis-1/2 min-h-0">
-          <div className="space-y-3 p-3">
-            {turns.map((turn, i) => (
-              <TurnRow
-                key={turn._key}
-                turn={turn}
-                index={i}
-                canDelete={turns.length > 1}
-                selected={responseTurnIdx === i}
-                hasResponse={hasResponse}
-                onChange={(updated) => updateTurn(i, updated)}
-                onDelete={() => deleteTurn(i)}
-                onViewResponse={() => {
-                  setResponseTurnIdx(i);
-                  setBottomTab("response");
-                }}
-                disabled={selectedRunSeq !== null}
-              />
-            ))}
+        <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
+          <div className="flex min-h-0 flex-col overflow-hidden">
+            <ScrollArea className="h-full">
+              <div className="space-y-3 p-3">
+                {turns.map((turn, i) => (
+                  <TurnRow
+                    key={turn._key}
+                    turn={turn}
+                    index={i}
+                    canDelete={turns.length > 1}
+                    selected={responseTurnIdx === i}
+                    hasResponse={hasResponse}
+                    onChange={(updated) => updateTurn(i, updated)}
+                    onDelete={() => deleteTurn(i)}
+                    onViewResponse={() => {
+                      setResponseTurnIdx(i);
+                      setBottomTab("response");
+                    }}
+                    readOnly={selectedRunSeq !== null}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
           </div>
-        </ScrollArea>
 
-        {/* Bottom: Criteria / Response tabs */}
-        <div className="flex items-stretch border-y bg-muted/40">
-          <button
-            type="button"
-            onClick={() => setBottomTab("criteria")}
-            className={cn(
-              "px-3 py-1.5 text-xs font-medium transition-colors",
-              bottomTab === "criteria"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Criteria
-          </button>
-          <button
-            type="button"
-            onClick={() => setBottomTab("response")}
-            className={cn(
-              "px-3 py-1.5 text-xs font-medium transition-colors",
-              bottomTab === "response"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Response
-          </button>
-        </div>
-        <ScrollArea className="basis-1/2 min-h-0">
-          {bottomTab === "criteria" ? (
-            <div className={cn("h-full", selectedRunSeq !== null && "pointer-events-none opacity-80")}>
-              <CriteriaEditor criteria={criteria} onChange={setCriteria} onErrorChange={setCriteriaHasError} />
+          {/* Bottom: Criteria / Response tabs */}
+          <div className="flex min-h-0 flex-col overflow-hidden">
+            <div className="flex h-8 shrink-0 items-stretch border-y bg-muted/40">
+              <button
+                type="button"
+                onClick={() => setBottomTab("criteria")}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium transition-colors",
+                  bottomTab === "criteria"
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Criteria
+              </button>
+              <button
+                type="button"
+                onClick={() => setBottomTab("response")}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium transition-colors",
+                  bottomTab === "response"
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Response
+              </button>
             </div>
-          ) : (
-            <ResponseViewer 
-              messages={filteredMessages}
-              isLoading={messagesLoading}
-              hasRun={!!resolvedRunId}
-              turnIndex={responseTurnIdx}
-            />
-          )}
-        </ScrollArea>
+            <ScrollArea className="flex-1 min-h-0">
+              {bottomTab === "criteria" ? (
+                <div className={cn("h-full", selectedRunSeq !== null && "pointer-events-none")}>
+                  <CriteriaEditor criteria={criteria} onChange={setCriteria} onErrorChange={setCriteriaHasError} />
+                </div>
+              ) : (
+                <ResponseViewer 
+                  messages={filteredMessages}
+                  isLoading={messagesLoading}
+                  hasRun={!!resolvedRunId}
+                  turnIndex={responseTurnIdx}
+                />
+              )}
+            </ScrollArea>
+          </div>
+        </div>
       </div>
 
         {/* Right: evaluation result */}
@@ -1156,142 +1194,155 @@ function EvaluationPanel({
   const formattedTime = startedAt ? formatTimestamp(startedAt, tz) : null;
 
   return (
-    <div className="flex flex-[1] flex-col min-w-0 bg-muted/10">
+    <div className="flex h-full min-h-0 flex-col min-w-0 bg-muted/10">
       {/* Header: "Evaluation" + level badge */}
       <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Evaluation
           </span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
           {selectedRunSeq !== null && (
-            <span className="text-xs font-semibold text-amber-500 shrink-0">
+            <span className="text-xs font-semibold text-amber-500 dark:text-amber-400 shrink-0">
               (#{selectedRunSeq}{formattedTime ? ` - ${formattedTime}` : ""})
             </span>
           )}
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
+          {typeof durationMs === "number" && !isNaN(durationMs) && durationMs > 0 && (
+            <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+              {durationMs >= 1000
+                ? `${(durationMs / 1000).toFixed(1)}s`
+                : `${durationMs}ms`}
+            </span>
+          )}
           {levelMeta && overallScore !== null && (
-            <>
+            <div className="flex items-center gap-1.5 shrink-0">
               <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", levelMeta.color, levelMeta.bgColor)}>
                 {levelMeta.label}
               </span>
               <span className="text-xs font-mono tabular-nums font-semibold">
                 {overallScore}
               </span>
-            </>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Top Half: Scores and Criteria */}
-      <ScrollArea className="basis-1/2 min-h-0 bg-background">
-        <div className="p-3 space-y-1.5">
-          {/* Metrics */}
-          {hasResult && (durationMs !== null || outputTokens !== null) && (
-            <div className="flex items-center gap-4 text-[11px] text-muted-foreground mb-3 pb-2 border-b border-muted">
-              {durationMs !== null && (
-                <div className="flex gap-1.5 items-center">
-                  <span className="font-semibold text-foreground/80">Duration:</span>
-                  <span>{(durationMs / 1000).toFixed(1)}s</span>
+      <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
+        {/* Top Half: Scores and Criteria */}
+        <div className="flex min-h-0 flex-col overflow-hidden">
+          <ScrollArea className="h-full bg-background">
+            <div className="p-3 space-y-1.5">
+              {/* Metrics */}
+              {hasResult && (durationMs !== null || outputTokens !== null) && (
+                <div className="flex items-center gap-4 text-[11px] text-muted-foreground mb-3 pb-2 border-b border-muted">
+                  {durationMs !== null && (
+                    <div className="flex gap-1.5 items-center">
+                      <span className="font-semibold text-foreground/80">Duration:</span>
+                      <span>{(durationMs / 1000).toFixed(1)}s</span>
+                    </div>
+                  )}
+                  {outputTokens !== null && (
+                    <div className="flex gap-1.5 items-center">
+                      <span className="font-semibold text-foreground/80">Output token:</span>
+                      <span>{outputTokens}</span>
+                    </div>
+                  )}
                 </div>
               )}
-              {outputTokens !== null && (
-                <div className="flex gap-1.5 items-center">
-                  <span className="font-semibold text-foreground/80">Output token:</span>
-                  <span>{outputTokens}</span>
+
+              {/* Baseline — always present */}
+              <ScoreBar name="Baseline" score={baselineScore} />
+
+              {/* Suite dimensions */}
+              {activeDimensions.length > 0 && activeDimensions.map((dimId) => (
+                <ScoreBar
+                  key={dimId}
+                  name={dimensionName(dimId)}
+                  score={dimensionScores[dimId] ?? null}
+                />
+              ))}
+
+              {/* Criteria — collapsible */}
+              {hasCriteria && (
+                <div>
+                  {/* Criteria header row — click to expand */}
+                  <button
+                    type="button"
+                    onClick={() => setCriteriaExpanded((v) => !v)}
+                    className="flex w-full items-center gap-2 group"
+                  >
+                    <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left">Criteria</span>
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      {criteriaScore !== null && (
+                        <div
+                          className={cn("h-full rounded-full transition-all", barColorForScore(criteriaScore))}
+                          style={{ width: `${Math.min(100, criteriaScore)}%` }}
+                        />
+                      )}
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
+                      {criteriaScore !== null ? `${criteriaScore}` : "—"}
+                    </span>
+                    <ChevronDown className={cn(
+                      "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
+                      criteriaExpanded && "rotate-180",
+                    )} />
+                  </button>
+
+                  {/* Criteria detail items */}
+                  {criteriaExpanded && (
+                    <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
+                      {criteriaChecklist.map((item, i) => (
+                        <div key={i} className="flex items-start gap-1.5">
+                          <div className="mt-0.5 shrink-0">
+                            <CriteriaCheckIcon passed={item.passed} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className={cn(
+                              "text-[11px] break-words",
+                              item.passed === false ? "text-red-400" : "text-muted-foreground",
+                            )}>
+                              {item.label}
+                              {item.actual !== undefined && (
+                                <span className="text-[10px] text-muted-foreground/60 italic ml-1.5">
+                                  (actual: {item.actual})
+                                </span>
+                              )}
+                            </span>
+                            {item.kind === "expectation" && item.score !== null && (
+                              <span className="ml-1.5 text-[10px] font-mono tabular-nums text-muted-foreground">
+                                {item.score}/100
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-
-          {/* Baseline — always present */}
-          <ScoreBar name="Baseline" score={baselineScore} />
-
-          {/* Suite dimensions */}
-          {activeDimensions.length > 0 && activeDimensions.map((dimId) => (
-            <ScoreBar
-              key={dimId}
-              name={dimensionName(dimId)}
-              score={dimensionScores[dimId] ?? null}
-            />
-          ))}
-
-          {/* Criteria — collapsible */}
-          {hasCriteria && (
-              <div>
-                {/* Criteria header row — click to expand */}
-                <button
-                  type="button"
-                  onClick={() => setCriteriaExpanded((v) => !v)}
-                  className="flex w-full items-center gap-2 group"
-                >
-                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left">Criteria</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                    {criteriaScore !== null && (
-                      <div
-                        className={cn("h-full rounded-full transition-all", barColorForScore(criteriaScore))}
-                        style={{ width: `${Math.min(100, criteriaScore)}%` }}
-                      />
-                    )}
-                  </div>
-                  <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
-                    {criteriaScore !== null ? `${criteriaScore}` : "—"}
-                  </span>
-                  <ChevronDown className={cn(
-                    "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-                    criteriaExpanded && "rotate-180",
-                  )} />
-                </button>
-
-                {/* Criteria detail items */}
-                {criteriaExpanded && (
-                  <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
-                    {criteriaChecklist.map((item, i) => (
-                      <div key={i} className="flex items-start gap-1.5">
-                        <div className="mt-0.5 shrink-0">
-                          <CriteriaCheckIcon passed={item.passed} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className={cn(
-                            "text-[11px] break-words",
-                            item.passed === false ? "text-red-400" : "text-muted-foreground",
-                          )}>
-                            {item.label}
-                            {item.actual !== undefined && (
-                              <span className="text-[10px] text-muted-foreground/60 italic ml-1.5">
-                                (actual: {item.actual})
-                              </span>
-                            )}
-                          </span>
-                          {item.kind === "expectation" && item.score !== null && (
-                            <span className="ml-1.5 text-[10px] font-mono tabular-nums text-muted-foreground">
-                              {item.score}/100
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-          )}
+          </ScrollArea>
         </div>
-      </ScrollArea>
 
-      {/* Bottom Half: Feedback */}
-      <div className="flex items-center border-y bg-muted/40 px-3 py-1.5">
-        <span className="text-xs font-medium text-foreground">Feedback</span>
-      </div>
-      <ScrollArea className="basis-1/2 min-h-0 bg-background">
-        <div className="p-3 h-full">
-          <div className={cn(
-            "text-xs text-muted-foreground rounded border p-3 min-h-full",
-            hasResult ? "bg-muted/10 border-border" : "bg-muted/20 border-dashed",
-          )}>
-            {feedback ?? "No evaluation result yet. Click Run to evaluate."}
+        {/* Bottom Half: Feedback */}
+        <div className="flex min-h-0 flex-col overflow-hidden">
+          <div className="flex h-8 shrink-0 items-center border-y bg-muted/40 px-3">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Feedback</span>
           </div>
+          <ScrollArea className="flex-1 min-h-0 bg-background">
+            <div className="p-3 h-full">
+              <div className={cn(
+                "text-xs text-muted-foreground rounded border p-3 min-h-full",
+                hasResult ? "bg-muted/10 border-border" : "bg-muted/20 border-dashed",
+              )}>
+                {feedback ?? "No evaluation result yet. Click Run to evaluate."}
+              </div>
+            </div>
+          </ScrollArea>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

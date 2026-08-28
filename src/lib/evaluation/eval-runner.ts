@@ -37,7 +37,7 @@ const log = childLogger({ component: "eval-runner" });
 // ─── Input / Output ─────────────────────────────────────────────────
 
 export interface RunEvalCaseInput {
-  runId: string;
+  runId?: string;
   caseId: number;
   /** Target agent identity. */
   targetAgentId: string;
@@ -65,6 +65,7 @@ export interface RunEvalCaseResult {
   error?: string;
   durationMs?: number;
   outputTokens?: number;
+  threadId?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -341,21 +342,23 @@ export async function runEvalCase(
     baseline: scores.baseline_score,
   };
 
-  await storage.writeCaseResult({
-    runId: input.runId,
-    caseId: input.caseId,
-    status: passed ? "passed" : "failed",
-    score: overallScore,
-    dimensionScores: finalDimensionScores,
-    criteriaScore: criteriaScoreFinal,
-    criteriaResults: mergedResults,
-    feedback: scores.feedback,
-    threadId: currentThreadId,
-    evaluatorThreadId: evaluatorResult.runId,
-    durationMs,
-    outputTokens,
-    toolCallCount,
-  });
+  if (input.runId) {
+    await storage.writeCaseResult({
+      runId: input.runId,
+      caseId: input.caseId,
+      status: passed ? "passed" : "failed",
+      score: overallScore,
+      dimensionScores: finalDimensionScores,
+      criteriaScore: criteriaScoreFinal,
+      criteriaResults: mergedResults,
+      feedback: scores.feedback,
+      threadId: currentThreadId,
+      evaluatorThreadId: evaluatorResult.runId,
+      durationMs,
+      outputTokens,
+      toolCallCount,
+    });
+  }
 
   return {
     status: passed ? "passed" : "failed",
@@ -366,6 +369,7 @@ export async function runEvalCase(
     feedback: scores.feedback,
     durationMs,
     outputTokens,
+    threadId: currentThreadId,
   };
 }
 
@@ -378,6 +382,7 @@ async function writeErrorResult(
   targetRunId?: string,
   evaluatorRunId?: string,
 ): Promise<void> {
+  if (!input.runId) return;
   try {
     await storage.writeCaseResult({
       runId: input.runId,

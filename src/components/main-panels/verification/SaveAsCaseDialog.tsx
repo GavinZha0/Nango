@@ -117,7 +117,6 @@ export function SaveAsCaseDialog({
               id="save-case-name"
               value={caseName}
               onChange={(e) => setCaseName(e.target.value)}
-              placeholder="e.g. search returns at least one hit"
               autoFocus
             />
           </div>

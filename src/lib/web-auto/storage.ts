@@ -139,7 +139,7 @@ export async function createWebAutoCase(
 }
 
 export async function getWebAutoCaseById(
-  id: string,
+  id: number,
 ): Promise<WebAutoCaseEntity | null> {
   const rows = await db
     .select()
@@ -160,7 +160,7 @@ export async function listWebAutoCasesBySuite(
 }
 
 export async function updateWebAutoCase(
-  id: string,
+  id: number,
   updates: Partial<Omit<CreateWebAutoCaseInput, "suiteId" | "createdBy">> & { updatedBy: string },
 ): Promise<WebAutoCaseEntity> {
   const [row] = await db
@@ -174,14 +174,14 @@ export async function updateWebAutoCase(
   return row;
 }
 
-export async function deleteWebAutoCase(id: string): Promise<void> {
+export async function deleteWebAutoCase(id: number): Promise<void> {
   await db
     .delete(WebAutoCaseTable)
     .where(eq(WebAutoCaseTable.id, id));
 }
 
 export interface WebAutoCaseRunItem {
-  id: string;
+  id: number;
   suiteId: string;
   name: string;
   scriptContent: string | null;
@@ -308,6 +308,11 @@ export async function writeWebAutoCaseResult(
       executionOutput: truncatedPayload ?? null,
       verdict: input.verdict as unknown,
       error: input.error as unknown,
+      durationMs: input.durationMs,
+      startedAt: new Date(input.startedAt),
+      finishedAt: input.finishedAt
+        ? new Date(input.finishedAt)
+        : new Date(input.startedAt + (input.durationMs || 0)),
       createdAt: sql`CURRENT_TIMESTAMP`,
     })
     .returning();
@@ -351,7 +356,7 @@ export async function selectStrandedWebAutoRuns(
  */
 export async function listWrittenCaseIdsForWebAutoRun(
   runId: string,
-): Promise<string[]> {
+): Promise<number[]> {
   const rows = await db
     .select({ caseId: WebAutoCaseResultTable.caseId })
     .from(WebAutoCaseResultTable)
@@ -365,7 +370,7 @@ export async function listWrittenCaseIdsForWebAutoRun(
  */
 export async function writeErroredCaseResults(
   runId: string,
-  caseIds: readonly string[],
+  caseIds: readonly number[],
 ): Promise<void> {
   if (caseIds.length === 0) return;
   await db

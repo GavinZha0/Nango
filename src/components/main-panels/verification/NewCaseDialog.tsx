@@ -23,7 +23,6 @@ import {
 } from "@/components/ui/select";
 import {
   caseActions,
-  useCasesStore,
   type VerificationCaseRow,
 } from "@/store/verification-cases";
 import { verificationActions } from "@/store/verification";
@@ -58,6 +57,7 @@ export interface NewCaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (created: VerificationCaseRow) => void;
+  suiteId?: string; // Optional: when provided, locks or pre-selects this suite
   serverId?: string; // Optional: when provided, locks selection to this server
   defaultToolName?: string; // Optional: default tool selected
   caseRow?: VerificationCaseRow | null; // Optional: when provided, runs in edit mode
@@ -67,11 +67,13 @@ export function NewCaseDialog({
   open,
   onOpenChange,
   onCreated,
+  suiteId,
   serverId,
   defaultToolName,
   caseRow,
 }: NewCaseDialogProps): ReactNode {
   const [servers, setServers] = useState<McpServerListItem[]>([]);
+  const [allSuites, setAllSuites] = useState<Array<{ id: string; name: string; mcpServerId?: string | null }>>([]);
   const [loadingServers, setLoadingServers] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -80,29 +82,16 @@ export function NewCaseDialog({
     name: "",
     mcpServerId: serverId ?? "",
     toolName: defaultToolName ?? "",
-    suiteId: "",
-    newSuiteName: "",
+    suiteId: suiteId ?? "",
   });
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Subscribe to store cases to derive existing suites on-the-fly
-  const bySuite = useCasesStore((s) => s.bySuite);
-  const serverCases = useMemo(() => {
-    const targetId = form.mcpServerId || serverId || caseRow?.mcpServerId;
-    if (!targetId) return [];
-    return Object.values(bySuite).flat().filter((c) => c.mcpServerId === targetId);
-  }, [bySuite, form.mcpServerId, serverId, caseRow?.mcpServerId]);
-
   const suitesList = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const c of serverCases) {
-      if (c.suiteId && c.suiteName) {
-        map.set(c.suiteId, c.suiteName);
-      }
-    }
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [serverCases]);
+    const targetServerId = form.mcpServerId || serverId || caseRow?.mcpServerId;
+    if (!targetServerId) return allSuites;
+    return allSuites.filter((s) => s.mcpServerId === targetServerId);
+  }, [allSuites, form.mcpServerId, serverId, caseRow?.mcpServerId]);
 
   useEffect(() => {
     if (!open) return;
@@ -122,6 +111,15 @@ export function NewCaseDialog({
       .finally(() => {
         if (!cancelled) setLoadingServers(false);
       });
+
+    fetch("/api/verification-suites?category=mcp")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows: Array<{ id: string; name: string; mcpServerId?: string | null }>) => {
+        if (cancelled) return;
+        setAllSuites(rows);
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
@@ -138,16 +136,13 @@ export function NewCaseDialog({
           mcpServerId: caseRow.mcpServerId ?? "",
           toolName: caseRow.toolName || "",
           suiteId: caseRow.suiteId,
-          newSuiteName: "",
         });
       } else {
-        const defaultSuiteId = suitesList[0]?.id || "";
         setForm({
           name: "",
           mcpServerId: serverId ?? "",
           toolName: defaultToolName ?? "",
-          suiteId: defaultSuiteId,
-          newSuiteName: "",
+          suiteId: suiteId ?? "",
         });
       }
       setSubmitError(null);
@@ -171,10 +166,7 @@ export function NewCaseDialog({
   }, [form.mcpServerId, servers]);
 
   const trimmedName = form.name.trim();
-  const isNewSuite = form.suiteId === "NEW_SUITE";
-  const hasValidSuite = isNewSuite
-    ? form.newSuiteName.trim().length > 0
-    : form.suiteId !== "";
+  const hasValidSuite = form.suiteId !== "";
 
   const canSubmit =
     !submitting &&
@@ -188,28 +180,13 @@ export function NewCaseDialog({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      let suiteIdToUse = form.suiteId;
-
-      // Create new suite on the fly if needed
-      if (isNewSuite) {
-        const newSuite = await verificationActions.create({
-          name: form.newSuiteName.trim(),
-          category: "mcp",
-          mcpServerId: form.mcpServerId,
-        });
-        if (!newSuite) {
-          throw new Error("Failed to create verification suite");
-        }
-        suiteIdToUse = newSuite.id;
-      }
-
       let resultRow: VerificationCaseRow;
 
       if (caseRow) {
         // Edit mode
         const updated = await caseActions.patch(caseRow, {
           name: trimmedName,
-          suiteId: suiteIdToUse,
+          suiteId: form.suiteId,
         });
         if (!updated) {
           throw new Error("Failed to update case");
@@ -224,7 +201,7 @@ export function NewCaseDialog({
           name: trimmedName,
           mcpServerId: form.mcpServerId,
           toolName: form.toolName,
-          suiteId: suiteIdToUse,
+          suiteId: form.suiteId,
           input: {},
         });
         if (!created) {
@@ -232,7 +209,7 @@ export function NewCaseDialog({
         }
         resultRow = created;
         toast.success("Created verification case", {
-          description: `Case "${created.name}" is now ready.`,
+          description: `Case "${created.name}"`,
         });
       }
 
@@ -261,7 +238,7 @@ export function NewCaseDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>{caseRow ? "Edit verification case" : "Add verification case"}</DialogTitle>
+            <DialogTitle>{caseRow ? "Edit Case" : "Add Case"}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
@@ -281,13 +258,8 @@ export function NewCaseDialog({
                   value={form.mcpServerId}
                   onValueChange={(v) => {
                     const nextServerId = v ?? "";
-                    const nextCases = Object.values(bySuite).flat().filter((c) => c.mcpServerId === nextServerId);
-                    const map = new Map<string, string>();
-                    for (const c of nextCases) {
-                      if (c.suiteId && c.suiteName) map.set(c.suiteId, c.suiteName);
-                    }
-                    const nextSuites = Array.from(map.keys());
-                    const defaultSuiteId = nextSuites[0] || "";
+                    const nextSuites = allSuites.filter((s) => s.mcpServerId === nextServerId);
+                    const defaultSuiteId = nextSuites[0]?.id || "";
                     setForm((prev) => ({
                       ...prev,
                       mcpServerId: nextServerId,
@@ -325,12 +297,12 @@ export function NewCaseDialog({
             {/* Suite Selector */}
             <div className="grid grid-cols-[120px_1fr] items-center gap-2">
               <Label htmlFor="case-suite">
-                Suite <span className="text-destructive">*</span>
+                Suite Name <span className="text-destructive">*</span>
               </Label>
               <Select
                 value={form.suiteId}
                 onValueChange={(v) =>
-                  setForm((prev) => ({ ...prev, suiteId: v ?? "", newSuiteName: "" }))
+                  setForm((prev) => ({ ...prev, suiteId: v ?? "" }))
                 }
                 disabled={!form.mcpServerId}
               >
@@ -342,11 +314,11 @@ export function NewCaseDialog({
                         : "Select a suite"
                     }
                   >
-                    {form.suiteId === "NEW_SUITE" ? (
-                      <span className="text-primary font-semibold">+ Create new suite...</span>
-                    ) : (
-                      suitesList.find((s) => s.id === form.suiteId)?.name || null
-                    )}
+                    {form.suiteId ? (
+                      allSuites.find((s) => s.id === form.suiteId)?.name ||
+                      suitesList.find((s) => s.id === form.suiteId)?.name ||
+                      "Unknown suite"
+                    ) : null}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -355,31 +327,9 @@ export function NewCaseDialog({
                       {s.name}
                     </SelectItem>
                   ))}
-                  <SelectItem value="NEW_SUITE" className="text-primary font-semibold">
-                    + Create new suite...
-                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
-
-            {/* New Suite Name Input */}
-            {isNewSuite && (
-              <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-                <Label htmlFor="new-suite-name">
-                  Suite Name <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="new-suite-name"
-                  value={form.newSuiteName}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, newSuiteName: e.target.value }))
-                  }
-                  placeholder="e.g. Google Search Suite"
-                  maxLength={120}
-                  required
-                />
-              </div>
-            )}
 
             {/* Tool Selector */}
             <div className="grid grid-cols-[120px_1fr] items-center gap-2">
@@ -429,7 +379,6 @@ export function NewCaseDialog({
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, name: e.target.value }))
                 }
-                placeholder="e.g. search returns results"
                 required
               />
             </div>

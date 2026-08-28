@@ -268,8 +268,8 @@ export interface EvalSuiteRow extends EvalSuiteEntity {
 }
 
 export async function listSuitesByAgentWithCaseCount(
-  agentId: string,
-  agentSource: string,
+  agentId: string | null | undefined,
+  agentSource: string | null | undefined,
   session: Session,
 ): Promise<EvalSuiteRow[]> {
   const rows = await db
@@ -296,8 +296,8 @@ export async function listSuitesByAgentWithCaseCount(
     .from(EvalSuiteTable)
     .where(
       and(
-        eq(EvalSuiteTable.agentId, agentId),
-        eq(EvalSuiteTable.agentSource, agentSource),
+        agentId ? eq(EvalSuiteTable.agentId, agentId) : undefined,
+        agentSource ? eq(EvalSuiteTable.agentSource, agentSource) : undefined,
         visibilitySql(session, EvalSuiteTable.visibility, EvalSuiteTable.createdBy),
       )
     )

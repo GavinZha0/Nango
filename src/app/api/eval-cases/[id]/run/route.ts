@@ -1,7 +1,7 @@
 /**
- * POST /api/eval-cases/[id]/run — start an async single-case eval run.
- * Creates an eval_run with totalCount=1 and runs the case in the
- * background. Returns 202 + { runId }. Progress via SSE.
+ * POST /api/eval-cases/[id]/run — synchronous single-case eval playground run.
+ * Runs target agent + evaluator agent synchronously inline and returns the result JSON;
+ * NOTHING is persisted to eval_run or eval_case_result (mirrors Verification & Web Auto).
  */
 
 import "server-only";
@@ -12,7 +12,8 @@ import { z } from "zod";
 import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { loadCase } from "@/lib/evaluation/access";
-import { startEvalSuiteRun } from "@/lib/evaluation/run-orchestrator";
+import { runEvalCase } from "@/lib/evaluation/eval-runner";
+import type { EvalCriteria, EvalTurn } from "@/lib/evaluation/types";
 
 const ROUTE = "/api/eval-cases/[id]/run";
 
@@ -49,13 +50,18 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    const { runId } = await startEvalSuiteRun({
-      suiteId: suite.id,
+    const outcome = await runEvalCase({
+      caseId: caseRow.id,
+      targetAgentId: suite.agentId,
+      targetCredentialId: suite.credentialId ?? undefined,
+      targetEntityKind: suite.agentSource === "builtin" ? undefined : "agent",
+      evaluatorAgentId: suite.evaluatorAgentId,
+      dimensionIds: (suite.dimensionIds ?? []) as string[],
+      turns: (caseRow.turns ?? []) as EvalTurn[],
+      criteria: (caseRow.criteria ?? {}) as EvalCriteria,
       ownerId: session.user.id,
-      triggeredBy: "manual",
-      caseIds: [caseRow.id],
     });
 
-    return NextResponse.json({ runId }, { status: 202 });
+    return NextResponse.json(outcome);
   },
 );

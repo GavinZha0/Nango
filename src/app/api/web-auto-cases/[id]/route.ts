@@ -27,6 +27,10 @@ export const PATCH = withEditor<{ id: string }>(
   ROUTE,
   async ({ req, session, params }) => {
     const { id } = await params;
+    const caseId = Number(id);
+    if (!Number.isSafeInteger(caseId) || caseId <= 0) {
+      throw new ApiError("VALIDATION_FAILED", 400, "Invalid case ID format.");
+    }
     const body = await parseBody(req, updateSchema);
 
     // Get case and its parent suite to check permissions
@@ -37,7 +41,7 @@ export const PATCH = withEditor<{ id: string }>(
       })
       .from(WebAutoCaseTable)
       .innerJoin(WebAutoSuiteTable, eq(WebAutoSuiteTable.id, WebAutoCaseTable.suiteId))
-      .where(eq(WebAutoCaseTable.id, id));
+      .where(eq(WebAutoCaseTable.id, caseId));
 
     if (!existing) {
       throw new ApiError("NOT_FOUND", 404, "Case not found");
@@ -59,7 +63,7 @@ export const PATCH = withEditor<{ id: string }>(
         updatedBy: session.user.id,
         updatedAt: new Date(),
       })
-      .where(eq(WebAutoCaseTable.id, id))
+      .where(eq(WebAutoCaseTable.id, caseId))
       .returning();
 
     return NextResponse.json(updated);
@@ -70,6 +74,10 @@ export const DELETE = withEditor<{ id: string }>(
   ROUTE,
   async ({ session, params }) => {
     const { id } = await params;
+    const caseId = Number(id);
+    if (!Number.isSafeInteger(caseId) || caseId <= 0) {
+      throw new ApiError("VALIDATION_FAILED", 400, "Invalid case ID format.");
+    }
 
     const [existing] = await db
       .select({
@@ -78,7 +86,7 @@ export const DELETE = withEditor<{ id: string }>(
       })
       .from(WebAutoCaseTable)
       .innerJoin(WebAutoSuiteTable, eq(WebAutoSuiteTable.id, WebAutoCaseTable.suiteId))
-      .where(eq(WebAutoCaseTable.id, id));
+      .where(eq(WebAutoCaseTable.id, caseId));
 
     if (!existing) {
       throw new ApiError("NOT_FOUND", 404, "Case not found");
@@ -94,7 +102,7 @@ export const DELETE = withEditor<{ id: string }>(
 
     const [deleted] = await db
       .delete(WebAutoCaseTable)
-      .where(eq(WebAutoCaseTable.id, id))
+      .where(eq(WebAutoCaseTable.id, caseId))
       .returning({ id: WebAutoCaseTable.id });
 
     return NextResponse.json(deleted);
