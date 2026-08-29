@@ -80,7 +80,7 @@ export function NewWebAutoCaseDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trimmedName,
-          scriptContent: null,
+          input: { script: "", steps: "" },
           assertions: [],
         }),
       });

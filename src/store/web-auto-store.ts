@@ -22,8 +22,7 @@ export interface WebAutoCaseRow {
   id: number;
   suiteId: string;
   name: string;
-  description: string | null;
-  scriptContent: string | null;
+  input: Record<string, unknown>;
   assertions: unknown;
   enabled: boolean;
   createdBy: string;

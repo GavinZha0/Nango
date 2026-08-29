@@ -28,6 +28,8 @@ export const GET = withEditor<{ id: string }>(
 const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
+    input: z.record(z.string(), z.unknown()).optional(),
+    assertions: z.array(z.record(z.string(), z.unknown())).optional(),
     turns: z.array(z.object({ userMessage: z.string() }).passthrough()).optional(),
     criteria: evalCriteriaSchema.optional(),
     enabled: z.boolean().optional(),
@@ -52,11 +54,17 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
+    const payloadInput = body.input ?? (body.turns ? { turns: body.turns } : { turns: [] });
+    const payloadAssertions = body.assertions ?? [];
+
     try {
       const row = await storage.createCase({
         suiteId: suite.id,
         createdBy: session.user.id,
-        ...body,
+        name: body.name,
+        input: payloadInput,
+        assertions: payloadAssertions,
+        enabled: body.enabled ?? true,
       });
       return NextResponse.json(row, { status: 201 });
     } catch (err) {

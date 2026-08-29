@@ -38,8 +38,10 @@ export interface EvalCaseRow {
   id: number;
   suiteId: string;
   name: string;
-  turns: Array<{ userMessage: string }>;
-  criteria: EvalCriteria;
+  input?: Record<string, unknown>;
+  assertions?: unknown[];
+  turns?: Array<{ userMessage: string }>;
+  criteria?: EvalCriteria;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

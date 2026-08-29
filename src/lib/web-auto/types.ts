@@ -21,7 +21,12 @@ import type {
   WebAutoCaseEntity,
 } from "@/lib/db/schema";
 
-// --- Extended assertion types for Web Auto --------------------------------
+/** Web Auto Case Input structure */
+export interface WebAutoInput {
+  script?: string;
+  steps?: string;
+  [key: string]: unknown;
+}
 
 /** Base verification assertion types (reused) */
 export type {

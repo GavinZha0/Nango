@@ -19,6 +19,8 @@ const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     suiteId: z.string().uuid().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    assertions: z.array(z.record(z.string(), z.unknown())).optional(),
     turns: z.array(z.object({ userMessage: z.string() }).passthrough()).optional(),
     criteria: evalCriteriaSchema.optional(),
     enabled: z.boolean().optional(),
@@ -55,8 +57,18 @@ export const PATCH = withEditor<{ id: string }>(
       }
     }
 
+    const payloadInput = body.input !== undefined 
+      ? body.input 
+      : (body.turns !== undefined ? { turns: body.turns } : undefined);
+
     try {
-      const row = await storage.updateCase(caseRow.id, body);
+      const row = await storage.updateCase(caseRow.id, {
+        name: body.name,
+        suiteId: body.suiteId,
+        input: payloadInput,
+        assertions: body.assertions,
+        enabled: body.enabled,
+      });
       return NextResponse.json(row);
     } catch (err) {
       if (isUniqueViolation(err) && body.name) {

@@ -20,22 +20,22 @@ import {
   Check,
   X,
   MessageSquare,
-  Plus,
+  Copy,
+  Terminal,
 } from "lucide-react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   BUILTIN_DIMENSIONS,
-  evalCriteriaSchema,
   type EvalCriteria,
   type EvalTurn,
   type CriteriaCheckResult,
 } from "@/lib/evaluation/types";
+import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
+import type { AssertionSpec } from "@/lib/assertions";
 import type { RunEvalCaseResult } from "@/lib/evaluation/eval-runner";
 import type { EvaluationRunLiveState } from "@/hooks/useEvaluationRunStream";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
@@ -144,6 +144,41 @@ interface ResponseViewerProps {
   turnIndex: number;
 }
 
+function ToolMessageRow({ msg }: { msg: ResponseMessage }): ReactNode {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-md border border-amber-500/20 bg-amber-500/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between px-2.5 py-1 text-left text-xs hover:bg-amber-500/10 transition-colors"
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Terminal className="h-3 w-3 text-amber-500 shrink-0" />
+          <span className="font-mono text-[11px] font-semibold text-amber-500 truncate">
+            {msg.toolName ? `Tool: ${msg.toolName}` : "Tool Execution"}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
+          <span className="text-[9px] uppercase tracking-wider font-mono">{expanded ? "Hide" : "Show"}</span>
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform text-amber-500/70",
+              expanded && "rotate-180",
+            )}
+          />
+        </div>
+      </button>
+      {expanded && (
+        <div className="border-t border-amber-500/15 bg-background/60 p-2 text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all leading-relaxed">
+          {msg.content || "(empty tool output)"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResponseViewer({ messages, isLoading, hasRun, turnIndex: _turnIndex }: ResponseViewerProps): ReactNode {
   if (!hasRun) {
     return (
@@ -172,416 +207,29 @@ function ResponseViewer({ messages, isLoading, hasRun, turnIndex: _turnIndex }: 
   return (
     <ScrollArea className="h-full">
       <div className="space-y-2 p-3">
-        {messages.map((msg, i) => (
-          <div key={i} className="space-y-0.5">
-            <span className={cn(
-              "text-[10px] font-semibold uppercase tracking-wider",
-              msg.role === "user" ? "text-blue-400"
-                : msg.role === "tool" ? "text-amber-400"
-                : "text-emerald-400",
-            )}>
-              {msg.role === "tool" ? `Tool: ${msg.toolName ?? "unknown"}` : msg.role}
-            </span>
-            <div className="rounded border bg-muted/20 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {msg.content || "(empty)"}
+        {messages.map((msg, i) => {
+          if (msg.role === "tool") {
+            return <ToolMessageRow key={i} msg={msg} />;
+          }
+
+          return (
+            <div key={i} className="space-y-0.5">
+              <span
+                className={cn(
+                  "text-[10px] font-semibold uppercase tracking-wider",
+                  msg.role === "user" ? "text-blue-400" : "text-emerald-400",
+                )}
+              >
+                {msg.role}
+              </span>
+              <div className="rounded border bg-muted/20 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                {msg.content || "(empty)"}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </ScrollArea>
-  );
-}
-
-// Criteria JSON editor — case-level
-
-interface CriteriaEditorProps {
-  criteria: EvalCriteria;
-  onChange: (updated: EvalCriteria) => void;
-  onErrorChange: (hasError: boolean) => void;
-}
-
-interface DynamicInputListProps {
-  label: string;
-  items: string[];
-  placeholder?: string;
-  onChange: (items: string[]) => void;
-}
-
-function DynamicInputList({ label, items, placeholder, onChange }: DynamicInputListProps): ReactNode {
-  function handleItemChange(idx: number, val: string): void {
-    const next = [...items];
-    next[idx] = val;
-    onChange(next);
-  }
-
-  function addItem(): void {
-    onChange([...items, ""]);
-  }
-
-  function removeItem(idx: number): void {
-    onChange(items.filter((_, i) => i !== idx));
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <Label className="text-[10px] font-semibold text-muted-foreground">{label}</Label>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-5 px-1.5 text-[9px] gap-1 hover:bg-muted font-semibold"
-          onClick={addItem}
-        >
-          <Plus className="h-2.5 w-2.5" /> Add
-        </Button>
-      </div>
-      {items.length > 0 && (
-        <div className="space-y-1">
-          {items.map((item, idx) => (
-            <div key={idx} className="flex items-center gap-1">
-              <Input
-                value={item}
-                onChange={(e) => handleItemChange(idx, e.target.value)}
-                placeholder={placeholder ?? "Enter value..."}
-                className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
-                onClick={() => removeItem(idx)}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface CommaSeparatedInputProps {
-  label: string;
-  value: string[];
-  placeholder?: string;
-  onChange: (value: string[]) => void;
-}
-
-function CommaSeparatedInput({ label, value, placeholder, onChange }: CommaSeparatedInputProps): ReactNode {
-  const canonical = value.join(", ");
-  const [state, setState] = useState({
-    text: canonical,
-    prevCanonical: canonical,
-  });
-
-  if (canonical !== state.prevCanonical) {
-    setState({
-      text: canonical,
-      prevCanonical: canonical,
-    });
-  }
-
-  function handleChange(val: string): void {
-    setState((prev) => ({ ...prev, text: val }));
-    const parsed = val
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    onChange(parsed);
-  }
-
-  return (
-    <div className="space-y-1">
-      <Label className="text-[10px] font-semibold text-muted-foreground block">{label}</Label>
-      <Input
-        value={state.text}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder={placeholder ?? "e.g. term1, term2, term3"}
-        className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-      />
-    </div>
-  );
-}
-
-function CriteriaEditor({ criteria, onChange, onErrorChange }: CriteriaEditorProps): ReactNode {
-  type CriteriaSubTab = "expectations" | "checklist" | "limits" | "json";
-  const [subTab, setSubTab] = useState<CriteriaSubTab>("expectations");
-
-  const [jsonText, setJsonText] = useState(() => {
-    return Object.keys(criteria).length === 0 ? "" : JSON.stringify(criteria, null, 2);
-  });
-  const [jsonError, setJsonError] = useState<string | null>(null);
-
-  const hasExpectations = useMemo(() => {
-    return !!(
-      criteria.expectation ||
-      criteria.issue ||
-      criteria.reference ||
-      (criteria.context && criteria.context.length > 0)
-    );
-  }, [criteria]);
-
-  const hasChecklist = useMemo(() => {
-    return !!(
-      (criteria.assertions && criteria.assertions.length > 0) ||
-      (criteria.expected_keywords && criteria.expected_keywords.length > 0) ||
-      (criteria.unexpected_keywords && criteria.unexpected_keywords.length > 0) ||
-      (criteria.tool_calls && criteria.tool_calls.length > 0)
-    );
-  }, [criteria]);
-
-  const hasLimits = useMemo(() => {
-    return !!(
-      criteria.max_duration_s !== undefined ||
-      criteria.max_output_tokens !== undefined ||
-      criteria.max_tool_calls !== undefined
-    );
-  }, [criteria]);
-
-  function updateField<K extends keyof EvalCriteria>(key: K, value: EvalCriteria[K]): void {
-    const updated = { ...criteria, [key]: value };
-    if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
-      delete updated[key];
-    }
-    onChange(updated);
-    onErrorChange(false);
-  }
-
-  function handleJsonChange(v: string): void {
-    setJsonText(v);
-    if (!v.trim() || v.trim() === "{}") {
-      setJsonError(null);
-      onErrorChange(false);
-      onChange({});
-      return;
-    }
-    let raw: unknown;
-    try {
-      raw = JSON.parse(v);
-    } catch {
-      setJsonError("Invalid JSON");
-      onErrorChange(true);
-      return;
-    }
-    const result = evalCriteriaSchema.safeParse(raw);
-    if (!result.success) {
-      const first = result.error.issues[0];
-      setJsonError(first?.message ?? "Invalid criteria");
-      onErrorChange(true);
-      return;
-    }
-    setJsonError(null);
-    onErrorChange(false);
-    onChange(result.data as EvalCriteria);
-  }
-
-  function switchTab(newTab: CriteriaSubTab): void {
-    if (subTab === "json" && newTab !== "json") {
-      if (jsonError) return;
-    }
-    if (newTab === "json") {
-      setJsonText(Object.keys(criteria).length === 0 ? "" : JSON.stringify(criteria, null, 2));
-      setJsonError(null);
-      onErrorChange(false);
-    }
-    setSubTab(newTab);
-  }
-
-  return (
-    <div className="flex flex-col h-full min-h-0 bg-muted/5">
-      {/* Sub-tabs header */}
-      <div className="flex items-center gap-1 border-b bg-muted/20 px-3 py-1.5 shrink-0">
-        {(
-          [
-            { id: "expectations", label: "Expectations", hasDot: hasExpectations },
-            { id: "checklist", label: "Checklist", hasDot: hasChecklist },
-            { id: "limits", label: "Limits", hasDot: hasLimits },
-            { id: "json", label: "JSON", hasDot: false },
-          ] as const
-        ).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => switchTab(t.id)}
-            disabled={subTab === "json" && !!jsonError && t.id !== "json"}
-            className={cn(
-              "flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded transition-colors border",
-              subTab === t.id
-                ? "bg-muted text-foreground border-muted-foreground/10 font-semibold"
-                : "text-muted-foreground hover:bg-muted/30 hover:text-foreground border-transparent",
-              subTab === "json" && jsonError && t.id !== "json" ? "opacity-50 cursor-not-allowed" : ""
-            )}
-          >
-            <span>{t.label}</span>
-            {t.hasDot && (
-              <span className="w-1 h-1 rounded-full bg-emerald-500 shrink-0 animate-pulse-subtle" />
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content area */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-        {subTab === "expectations" && (
-          <div className="space-y-3">
-            {/* Expectation */}
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold text-muted-foreground">Expectation</Label>
-              <Textarea
-                value={criteria.expectation ?? ""}
-                onChange={(e) => updateField("expectation", e.target.value)}
-                placeholder="Natural language description of the expected outcome..."
-                className="h-16 text-xs resize-none leading-relaxed bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-              />
-            </div>
-
-            {/* Reference */}
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold text-muted-foreground">Reference answer</Label>
-              <Textarea
-                value={criteria.reference ?? ""}
-                onChange={(e) => updateField("reference", e.target.value)}
-                placeholder="A good example of an agent response or ground truth..."
-                className="h-16 text-xs font-mono resize-none leading-relaxed bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-              />
-            </div>
-            
-            {/* Issue */}
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold text-muted-foreground">Reported issue</Label>
-              <Input
-                value={criteria.issue ?? ""}
-                onChange={(e) => updateField("issue", e.target.value)}
-                placeholder="Describe the previous issue or bug you observed..."
-                className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-              />
-            </div>
-
-            {/* Context */}
-            <DynamicInputList
-              label="Context (supplementary knowledge)"
-              items={criteria.context ?? []}
-              placeholder="e.g. Business rules, documentation snippet..."
-              onChange={(next) => updateField("context", next)}
-            />
-          </div>
-        )}
-
-        {subTab === "checklist" && (
-          <div className="space-y-3">
-            {/* Expected Keywords */}
-            <CommaSeparatedInput
-              label="Expected keywords (must contain)"
-              value={criteria.expected_keywords ?? []}
-              placeholder="e.g. success, approved"
-              onChange={(next) => updateField("expected_keywords", next)}
-            />
-
-            {/* Unexpected Keywords */}
-            <CommaSeparatedInput
-              label="Unexpected keywords (must not contain)"
-              value={criteria.unexpected_keywords ?? []}
-              placeholder="e.g. failure, error, exception"
-              onChange={(next) => updateField("unexpected_keywords", next)}
-            />
-
-            {/* Tool Calls */}
-            <CommaSeparatedInput
-              label="Expected tool calls"
-              value={criteria.tool_calls ?? []}
-              onChange={(next) => updateField("tool_calls", next)}
-            />
-
-            {/* Assertions */}
-            <DynamicInputList
-              label="Assertions (LLM checks)"
-              items={criteria.assertions ?? []}
-              placeholder="e.g. The response does not contain code formatting errors..."
-              onChange={(next) => updateField("assertions", next)}
-            />
-          </div>
-        )}
-
-        {subTab === "limits" && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              {/* Max Duration */}
-              <div className="space-y-1">
-                <Label className="text-[10px] font-semibold text-muted-foreground block">Max duration</Label>
-                <div className="relative flex items-center">
-                  <Input
-                    type="number"
-                    min={1}
-                    value={criteria.max_duration_s ?? ""}
-                    onChange={(e) => {
-                      const val = e.target.value === "" ? undefined : parseFloat(e.target.value);
-                      updateField("max_duration_s", val);
-                    }}
-                    placeholder="None"
-                    className="h-7 text-xs pr-4 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-                  />
-                  <span className="absolute right-1.5 text-[9px] text-muted-foreground font-medium pointer-events-none">s</span>
-                </div>
-              </div>
-
-              {/* Max Output Tokens */}
-              <div className="space-y-1">
-                <Label className="text-[10px] font-semibold text-muted-foreground block">Max tokens</Label>
-                <div className="relative flex items-center">
-                  <Input
-                    type="number"
-                    min={1}
-                    value={criteria.max_output_tokens ?? ""}
-                    onChange={(e) => {
-                      const val = e.target.value === "" ? undefined : parseInt(e.target.value, 10);
-                      updateField("max_output_tokens", val);
-                    }}
-                    placeholder="None"
-                    className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-                  />
-                </div>
-              </div>
-
-              {/* Max Tool Calls */}
-              <div className="space-y-1">
-                <Label className="text-[10px] font-semibold text-muted-foreground block">Max tool calls</Label>
-                <div className="relative flex items-center">
-                  <Input
-                    type="number"
-                    min={0}
-                    value={criteria.max_tool_calls ?? ""}
-                    onChange={(e) => {
-                      const val = e.target.value === "" ? undefined : parseInt(e.target.value, 10);
-                      updateField("max_tool_calls", val);
-                    }}
-                    placeholder="None"
-                    className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-                  />
-                </div>
-              </div>
-            </div>
-            <p className="text-[9px] text-muted-foreground/70 italic leading-relaxed">
-              These are hard limits measured by the runner. If exceeded, the deterministic checks fail and degrade the score.
-            </p>
-          </div>
-        )}
-
-        {subTab === "json" && (
-          <div className="flex flex-col gap-1.5 h-full min-h-0">
-            <Textarea
-              value={jsonText}
-              onChange={(e) => handleJsonChange(e.target.value)}
-              placeholder="{}"
-              className={cn("flex-1 font-mono text-xs resize-none field-sizing-fixed bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30")}
-            />
-            {jsonError && <p className="text-[10px] text-destructive shrink-0">{jsonError}</p>}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -694,16 +342,33 @@ export function EvalCaseInspector({
   selectedRunSeq = null,
   onExitHistoryView,
 }: EvalCaseInspectorProps): ReactNode {
-  const [turns, setTurns] = useState<KeyedTurn[]>(() =>
-    (evalCase.turns as EvalTurn[]).map((t) => ({ ...t, _key: mintKey() })),
-  );
-  const [criteria, setCriteria] = useState<EvalCriteria>((evalCase.criteria ?? {}) as EvalCriteria);
+  const [turns, setTurns] = useState<KeyedTurn[]>(() => {
+    const caseInput = (evalCase.input ?? {}) as Record<string, unknown>;
+    const rawTurns = Array.isArray(caseInput.turns)
+      ? (caseInput.turns as EvalTurn[])
+      : (Array.isArray(evalCase.turns) ? (evalCase.turns as EvalTurn[]) : []);
+    return rawTurns.map((t) => ({ ...t, _key: mintKey() }));
+  });
+
+  const [assertions, setAssertions] = useState<AssertionSpec[]>(() => {
+    if (Array.isArray(evalCase.assertions) && evalCase.assertions.length > 0) {
+      return evalCase.assertions as AssertionSpec[];
+    }
+    const legacy: AssertionSpec[] = [];
+    const c = (evalCase.criteria ?? {}) as EvalCriteria;
+    if (c.expectation) legacy.push({ type: "llm_judge", expectation: c.expectation, reference: c.reference });
+    for (const kw of c.expected_keywords ?? []) legacy.push({ type: "jsonpath", path: "$.text", operator: "contains", expected: kw });
+    for (const tc of c.tool_calls ?? []) legacy.push({ type: "tool_call", toolName: tc, expectedCalls: 1 });
+    if (c.max_duration_s) legacy.push({ type: "metric", metric: "duration_ms", operator: "<=", threshold: c.max_duration_s * 1000 });
+    if (c.max_output_tokens) legacy.push({ type: "metric", metric: "output_tokens", operator: "<=", threshold: c.max_output_tokens });
+    if (c.max_tool_calls) legacy.push({ type: "metric", metric: "total_tool_calls", operator: "<=", threshold: c.max_tool_calls });
+    return legacy;
+  });
+
+  const [criteria, _setCriteria] = useState<EvalCriteria>((evalCase.criteria ?? {}) as EvalCriteria);
   const [criteriaHasError, setCriteriaHasError] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  type BottomTab = "criteria" | "response";
-  const [bottomTab, setBottomTab] = useState<BottomTab>("criteria");
-  const [responseTurnIdx, setResponseTurnIdx] = useState(0);
+  const [responseTurnIdx, setResponseTurnIdx] = useState<number>(() => Math.max(0, turns.length - 1));
 
   // Fetch historical result for this case (Disabled for now to show initial empty state)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -722,12 +387,22 @@ export function EvalCaseInspector({
   }
 
   // Snapshot original values for dirty comparison (stable across renders).
-  const origTurnsJson = useMemo(() => JSON.stringify(evalCase.turns), [evalCase.turns]);
-  const origCriteriaJson = useMemo(() => JSON.stringify(evalCase.criteria ?? {}), [evalCase.criteria]);
+  const origTurnsJson = useMemo(() => {
+    const caseInput = (evalCase.input ?? {}) as Record<string, unknown>;
+    const rawTurns = Array.isArray(caseInput.turns)
+      ? caseInput.turns
+      : (Array.isArray(evalCase.turns) ? evalCase.turns : []);
+    return JSON.stringify(rawTurns);
+  }, [evalCase.input, evalCase.turns]);
+
+  const origAssertionsJson = useMemo(() => {
+    if (Array.isArray(evalCase.assertions)) return JSON.stringify(evalCase.assertions);
+    return JSON.stringify([]);
+  }, [evalCase.assertions]);
 
   const isDirty =
     JSON.stringify(stripKeys(turns)) !== origTurnsJson ||
-    JSON.stringify(criteria) !== origCriteriaJson;
+    JSON.stringify(assertions) !== origAssertionsJson;
 
   const canSave = isDirty && !criteriaHasError && !saving;
 
@@ -845,19 +520,9 @@ export function EvalCaseInspector({
         applied.push("turns");
       }
     }
-    if (sc.criteria !== undefined && sc.criteria !== null) {
-      if (typeof sc.criteria === "object" && !Array.isArray(sc.criteria)) {
-        setCriteria(sc.criteria as EvalCriteria);
-        applied.push("criteria");
-      } else if (typeof sc.criteria === "string") {
-        try {
-          const parsed = JSON.parse(sc.criteria);
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            setCriteria(parsed as EvalCriteria);
-            applied.push("criteria");
-          }
-        } catch { /* ignore parse error */ }
-      }
+    if (sc.assertions !== undefined && Array.isArray(sc.assertions)) {
+      setAssertions(sc.assertions as AssertionSpec[]);
+      applied.push("assertions");
     }
     if (draft.selectedCase) applied.push("selectedCase");
     return applied;
@@ -877,13 +542,13 @@ export function EvalCaseInspector({
     await evalCaseActions.patch(
       { id: evalCase.id, suiteId: evalCase.suiteId },
       {
-        turns: stripKeys(turns) as Array<{ userMessage: string }>,
-        criteria: criteria as Record<string, unknown>,
+        input: { turns: stripKeys(turns) },
+        assertions: assertions,
       },
     );
     setSaving(false);
     clearDraftState();
-  }, [canSave, evalCase.id, evalCase.suiteId, turns, criteria, clearDraftState]);
+  }, [canSave, evalCase.id, evalCase.suiteId, turns, assertions, clearDraftState]);
 
   const messagesUrl = resolvedRunId === "playground" && resolvedThreadId
     ? `/api/eval-runs/playground/messages?caseId=${evalCase.id}&threadId=${resolvedThreadId}`
@@ -944,6 +609,7 @@ export function EvalCaseInspector({
       }
       const outcome = (await res.json()) as RunEvalCaseResult;
       setRunOutcome(outcome);
+      setResponseTurnIdx(Math.max(0, turns.length - 1));
     } catch (err) {
       if (err instanceof Error && err.name === "TimeoutError") {
         setRunError("Evaluation timed out on client side after 290s. Consider reducing turns or testing with shorter prompts.");
@@ -963,14 +629,24 @@ export function EvalCaseInspector({
     setTurns((prev) => [...prev, { userMessage: "", _key: mintKey() }]);
   }
 
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyResponse = () => {
+    if (!filteredMessages || filteredMessages.length === 0) return;
+    const text = filteredMessages.map((m) => m.content).join("\n\n");
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <div className="grid h-full grid-cols-2 overflow-hidden">
-      {/* Middle: conversation (top) + criteria/response tabs (bottom) */}
+      {/* ── Middle Column: Input (Turns, Top) + Assertions (UniversalAssertionsEditor, Bottom) ── */}
       <div className="flex h-full min-h-0 flex-col border-r min-w-0">
-        {/* Top: conversation turns */}
+        {/* Top Header: Input */}
         <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Conversation
+            Input
           </span>
           <div className="ml-auto flex items-center gap-1">
             <Button
@@ -1018,10 +694,13 @@ export function EvalCaseInspector({
             </Button>
           </div>
         </div>
+
+        {/* Input & Assertions split */}
         <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
-          <div className="flex min-h-0 flex-col overflow-hidden">
+          {/* Top: conversation turns input */}
+          <div className="flex min-h-0 flex-col overflow-hidden bg-background">
             <ScrollArea className="h-full">
-              <div className="space-y-3 p-3">
+              <div className="space-y-2 p-3">
                 {turns.map((turn, i) => (
                   <TurnRow
                     key={turn._key}
@@ -1032,10 +711,7 @@ export function EvalCaseInspector({
                     hasResponse={hasResponse}
                     onChange={(updated) => updateTurn(i, updated)}
                     onDelete={() => deleteTurn(i)}
-                    onViewResponse={() => {
-                      setResponseTurnIdx(i);
-                      setBottomTab("response");
-                    }}
+                    onViewResponse={() => setResponseTurnIdx(i)}
                     readOnly={selectedRunSeq !== null}
                   />
                 ))}
@@ -1043,72 +719,83 @@ export function EvalCaseInspector({
             </ScrollArea>
           </div>
 
-          {/* Bottom: Criteria / Response tabs */}
+          {/* Bottom: Universal Assertions Editor */}
           <div className="flex min-h-0 flex-col overflow-hidden">
-            <div className="flex h-8 shrink-0 items-stretch border-y bg-muted/40">
-              <button
-                type="button"
-                onClick={() => setBottomTab("criteria")}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-medium transition-colors",
-                  bottomTab === "criteria"
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Criteria
-              </button>
-              <button
-                type="button"
-                onClick={() => setBottomTab("response")}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-medium transition-colors",
-                  bottomTab === "response"
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Response
-              </button>
-            </div>
-            <ScrollArea className="flex-1 min-h-0">
-              {bottomTab === "criteria" ? (
-                <div className={cn("h-full", selectedRunSeq !== null && "pointer-events-none")}>
-                  <CriteriaEditor criteria={criteria} onChange={setCriteria} onErrorChange={setCriteriaHasError} />
-                </div>
-              ) : (
-                <ResponseViewer 
-                  messages={filteredMessages}
-                  isLoading={messagesLoading}
-                  hasRun={!!resolvedRunId}
-                  turnIndex={responseTurnIdx}
-                />
-              )}
-            </ScrollArea>
+            <UniversalAssertionsEditor
+              mode="evaluation"
+              assertions={assertions}
+              onChange={setAssertions}
+              onErrorChange={(err) => setCriteriaHasError(Boolean(err))}
+              readOnly={selectedRunSeq !== null}
+              saving={saving}
+            />
           </div>
         </div>
       </div>
 
-        {/* Right: evaluation result */}
-        <EvaluationPanel
-          activeDimensions={activeDimensions}
-          criteria={criteria}
-          overallScore={displayScore}
-          baselineScore={displayBaselineScore}
-          dimensionScores={displayDimensionScores}
-          criteriaScore={displayCriteriaScore}
-          criteriaResults={displayCriteriaResults}
-          feedback={displayFeedback}
-          durationMs={displayDurationMs}
-          outputTokens={displayOutputTokens}
-          selectedRunSeq={selectedRunSeq}
-          startedAt={pinnedOutcome?.startedAt}
-        />
+      {/* ── Right Column: Output (Response, Top) + Verdicts (Scores & Feedback, Bottom) ── */}
+      <div className="flex h-full min-h-0 flex-col min-w-0">
+        {/* Top Header: Output (aligned with Left Column Input Header) */}
+        <div className="flex h-8 shrink-0 items-center justify-between border-b bg-muted/40 px-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Output
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+            onClick={handleCopyResponse}
+            disabled={!hasResponse}
+            title="Copy response"
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-green-500" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </div>
+
+        {/* Output & Verdicts split — strictly 50%/50% matching Left Column */}
+        <div className="grid h-full grid-rows-[calc(50%-1rem)_calc(50%+1rem)] min-w-0 flex-1 overflow-hidden bg-background">
+          {/* Top: Output (Agent Response) */}
+          <div className="flex min-h-0 flex-col overflow-hidden">
+            <ScrollArea className="h-full">
+              <ResponseViewer
+                messages={filteredMessages}
+                isLoading={messagesLoading}
+                hasRun={!!resolvedRunId}
+                turnIndex={responseTurnIdx}
+              />
+            </ScrollArea>
+          </div>
+
+          {/* Bottom: Verdicts (Scores, Checklist, and Feedback) */}
+          <div className="flex min-h-0 flex-col overflow-hidden border-t">
+            <EvaluationPanel
+              activeDimensions={activeDimensions}
+              criteria={criteria}
+              overallScore={displayScore}
+              baselineScore={displayBaselineScore}
+              dimensionScores={displayDimensionScores}
+              criteriaScore={displayCriteriaScore}
+              criteriaResults={displayCriteriaResults}
+              feedback={displayFeedback}
+              durationMs={displayDurationMs}
+              outputTokens={displayOutputTokens}
+              selectedRunSeq={selectedRunSeq}
+              startedAt={pinnedOutcome?.startedAt}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── Evaluation result panel (right column) ─────────────────────────
+// ─── Verdicts & Evaluation result panel ─────────────────────────────
 
 interface EvaluationPanelProps {
   activeDimensions: string[];
@@ -1154,19 +841,19 @@ function EvaluationPanel({
     : null;
 
   const hasResult = overallScore !== null;
-
   const formattedTime = startedAt ? formatTimestamp(startedAt, tz) : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col min-w-0 bg-muted/10">
-      {/* Header: "Evaluation" + level badge */}
-      <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
+    <div className="flex h-full min-h-0 flex-col min-w-0 bg-background">
+      {/* Header: "Verdicts" + time, score, result badge */}
+      <div className="flex h-8 shrink-0 items-center border-b bg-muted/20 px-3">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Evaluation
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Verdicts
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* 1. 执行时间 */}
           {selectedRunSeq !== null && (
             <span className="text-xs font-semibold text-amber-500 dark:text-amber-400 shrink-0">
               (#{selectedRunSeq}{formattedTime ? ` - ${formattedTime}` : ""})
@@ -1179,134 +866,127 @@ function EvaluationPanel({
                 : `${durationMs}ms`}
             </span>
           )}
-          {levelMeta && overallScore !== null && (
+          {/* 2. 打分 + 3. 结果字符串 */}
+          {overallScore !== null && (
             <div className="flex items-center gap-1.5 shrink-0">
-              <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", levelMeta.color, levelMeta.bgColor)}>
-                {levelMeta.label}
-              </span>
               <span className="text-xs font-mono tabular-nums font-semibold">
                 {overallScore}
               </span>
+              {levelMeta && (
+                <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", levelMeta.color, levelMeta.bgColor)}>
+                  {levelMeta.label}
+                </span>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[calc(50%-1rem)_calc(50%+1rem)] overflow-hidden">
-        {/* Top Half: Scores and Criteria */}
-        <div className="flex min-h-0 flex-col overflow-hidden">
-          <ScrollArea className="h-full bg-background">
-            <div className="p-3 space-y-1.5">
-              {/* Metrics */}
-              {hasResult && (durationMs !== null || outputTokens !== null) && (
-                <div className="flex items-center gap-4 text-[11px] text-muted-foreground mb-3 pb-2 border-b border-muted">
-                  {durationMs !== null && (
-                    <div className="flex gap-1.5 items-center">
-                      <span className="font-semibold text-foreground/80">Duration:</span>
-                      <span>{(durationMs / 1000).toFixed(1)}s</span>
-                    </div>
-                  )}
-                  {outputTokens !== null && (
-                    <div className="flex gap-1.5 items-center">
-                      <span className="font-semibold text-foreground/80">Output token:</span>
-                      <span>{outputTokens}</span>
-                    </div>
-                  )}
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-3 space-y-3">
+          {/* Metrics header */}
+          {hasResult && (durationMs !== null || outputTokens !== null) && (
+            <div className="flex items-center gap-4 text-[11px] text-muted-foreground pb-2 border-b border-muted">
+              {durationMs !== null && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="font-semibold text-foreground/80">Duration:</span>
+                  <span>{(durationMs / 1000).toFixed(1)}s</span>
                 </div>
               )}
+              {outputTokens !== null && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="font-semibold text-foreground/80">Output token:</span>
+                  <span>{outputTokens}</span>
+                </div>
+              )}
+            </div>
+          )}
 
-              {/* Baseline — always present */}
-              <ScoreBar name="Baseline" score={baselineScore} />
+          {/* Scores Section */}
+          <div className="space-y-1.5">
+            {/* Baseline — always present */}
+            <ScoreBar name="Baseline" score={baselineScore} />
 
-              {/* Suite dimensions */}
-              {activeDimensions.length > 0 && activeDimensions.map((dimId) => (
-                <ScoreBar
-                  key={dimId}
-                  name={dimensionName(dimId)}
-                  score={dimensionScores[dimId] ?? null}
-                />
-              ))}
+            {/* Suite dimensions */}
+            {activeDimensions.length > 0 && activeDimensions.map((dimId) => (
+              <ScoreBar
+                key={dimId}
+                name={dimensionName(dimId)}
+                score={dimensionScores[dimId] ?? null}
+              />
+            ))}
 
-              {/* Criteria — collapsible */}
-              {hasCriteria && (
-                <div>
-                  {/* Criteria header row — click to expand */}
-                  <button
-                    type="button"
-                    onClick={() => setCriteriaExpanded((v) => !v)}
-                    className="flex w-full items-center gap-2 group"
-                  >
-                    <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left">Criteria</span>
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      {criteriaScore !== null && (
-                        <div
-                          className={cn("h-full rounded-full transition-all", barColorForScore(criteriaScore))}
-                          style={{ width: `${Math.min(100, criteriaScore)}%` }}
-                        />
-                      )}
-                    </div>
-                    <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
-                      {criteriaScore !== null ? `${criteriaScore}` : "—"}
-                    </span>
-                    <ChevronDown className={cn(
-                      "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-                      criteriaExpanded && "rotate-180",
-                    )} />
-                  </button>
+            {/* Criteria Checklist — collapsible */}
+            {hasCriteria && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCriteriaExpanded((v) => !v)}
+                  className="flex w-full items-center gap-2 group"
+                >
+                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">Checklist</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                    {criteriaScore !== null && (
+                      <div
+                        className={cn("h-full rounded-full transition-all", barColorForScore(criteriaScore))}
+                        style={{ width: `${Math.min(100, criteriaScore)}%` }}
+                      />
+                    )}
+                  </div>
+                  <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
+                    {criteriaScore !== null ? `${criteriaScore}` : "—"}
+                  </span>
+                  <ChevronDown className={cn(
+                    "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
+                    criteriaExpanded && "rotate-180",
+                  )} />
+                </button>
 
-                  {/* Criteria detail items */}
-                  {criteriaExpanded && (
-                    <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
-                      {criteriaChecklist.map((item, i) => (
-                        <div key={i} className="flex items-start gap-1.5">
-                          <div className="mt-0.5 shrink-0">
-                            <CriteriaCheckIcon passed={item.passed} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <span className={cn(
-                              "text-[11px] break-words",
-                              item.passed === false ? "text-red-400" : "text-muted-foreground",
-                            )}>
-                              {item.label}
-                              {item.actual !== undefined && (
-                                <span className="text-[10px] text-muted-foreground/60 italic ml-1.5">
-                                  (actual: {item.actual})
-                                </span>
-                              )}
-                            </span>
-                            {item.kind === "expectation" && item.score !== null && (
-                              <span className="ml-1.5 text-[10px] font-mono tabular-nums text-muted-foreground">
-                                {item.score}/100
+                {criteriaExpanded && (
+                  <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
+                    {criteriaChecklist.map((item, i) => (
+                      <div key={i} className="flex items-start gap-1.5">
+                        <div className="mt-0.5 shrink-0">
+                          <CriteriaCheckIcon passed={item.passed} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className={cn(
+                            "text-[11px] break-words",
+                            item.passed === false ? "text-red-400" : "text-muted-foreground",
+                          )}>
+                            {item.label}
+                            {item.actual !== undefined && (
+                              <span className="text-[10px] text-muted-foreground/60 italic ml-1.5">
+                                (actual: {item.actual})
                               </span>
                             )}
-                          </div>
+                          </span>
+                          {item.kind === "expectation" && item.score !== null && (
+                            <span className="ml-1.5 text-[10px] font-mono tabular-nums text-muted-foreground">
+                              {item.score}/100
+                            </span>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </ScrollArea>
-        </div>
-
-        {/* Bottom Half: Feedback */}
-        <div className="flex min-h-0 flex-col overflow-hidden">
-          <div className="flex h-8 shrink-0 items-center border-y bg-muted/40 px-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Feedback</span>
-          </div>
-          <ScrollArea className="flex-1 min-h-0 bg-background">
-            <div className="p-3 h-full">
-              <div className={cn(
-                "text-xs text-muted-foreground rounded border p-3 min-h-full",
-                hasResult ? "bg-muted/10 border-border" : "bg-muted/20 border-dashed",
-              )}>
-                {feedback ?? "No evaluation result yet. Click Run to evaluate."}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+            )}
+          </div>
+
+          {/* Feedback section inside Verdicts */}
+          <div className="space-y-1.5 pt-2 border-t border-muted">
+            <span className="text-[11px] font-semibold text-muted-foreground">Feedback</span>
+            <div className={cn(
+              "text-xs text-muted-foreground rounded-md border p-2.5 leading-relaxed",
+              hasResult ? "bg-muted/10 border-border" : "bg-muted/20 border-dashed",
+            )}>
+              {feedback ?? "No verdict yet."}
             </div>
-          </ScrollArea>
+          </div>
         </div>
-      </div>
+      </ScrollArea>
     </div>
   );
 }

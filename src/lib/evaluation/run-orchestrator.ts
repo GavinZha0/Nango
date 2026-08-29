@@ -162,6 +162,10 @@ async function runAllCases(
   counters: LoopCounters,
 ): Promise<void> {
   for (const c of input.cases) {
+    const caseInput = (c.input ?? {}) as Record<string, unknown>;
+    const caseTurns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
+    const caseAssertions = (Array.isArray(c.assertions) ? c.assertions : []) as unknown as EvalCriteria;
+
     let result: RunEvalCaseResult;
     try {
       result = await runEvalCase({
@@ -173,8 +177,8 @@ async function runAllCases(
           input.targetAgentSource === "builtin" ? undefined : "agent",
         evaluatorAgentId: input.evaluatorAgentId,
         dimensionIds: input.dimensionIds,
-        turns: (c.turns ?? []) as EvalTurn[],
-        criteria: (c.criteria ?? {}) as EvalCriteria,
+        turns: caseTurns,
+        criteria: caseAssertions,
         ownerId: input.ownerId,
       });
     } catch (err) {

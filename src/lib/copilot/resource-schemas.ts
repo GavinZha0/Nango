@@ -106,13 +106,17 @@ export const McpDraftSchema = z.object({
 
 export const WebAutoDraftSchema = z.object({
   name: z.string().max(120).optional().describe("Test case display name"),
-  description: z.string().optional().describe("Test scenario description"),
-  scriptContent: z.string().optional().describe("Playwright automation script code"),
+  input: z.object({
+    script: z.string().optional().describe("Playwright automation script code"),
+    steps: z.string().optional().describe("Natural language test steps"),
+  }).passthrough().optional().describe("Test case input containing script and steps"),
   assertions: z.array(z.any()).optional().describe("List of JS or LLM assertions"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
-    description: z.string().optional().describe("Case description"),
-    scriptContent: z.string().optional().describe("Case script content"),
+    input: z.object({
+      script: z.string().optional().describe("Script code"),
+      steps: z.string().optional().describe("Test steps"),
+    }).passthrough().optional().describe("Case input data"),
     assertions: z.array(z.any()).optional().describe("Case assertions"),
   }).optional().describe("Selected case data"),
 }).strict();
@@ -133,6 +137,13 @@ export const VerificationDraftSchema = z.object({
 export const EvaluationDraftSchema = z.object({
   name: z.string().max(120).optional().describe("Evaluation case display name"),
   description: z.string().optional().describe("Case description"),
+  input: z.object({
+    turns: z.array(z.object({
+      userMessage: z.string().min(1).describe("User message input for this turn"),
+      expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
+    })).optional(),
+  }).passthrough().optional().describe("Case input structure"),
+  assertions: z.union([z.string(), z.array(z.any())]).optional().describe("Case assertions list"),
   turns: z.array(z.object({
     userMessage: z.string().min(1).describe("User message input for this turn"),
     expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
@@ -141,6 +152,8 @@ export const EvaluationDraftSchema = z.object({
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     description: z.string().optional().describe("Case description"),
+    input: z.record(z.string(), z.unknown()).optional(),
+    assertions: z.union([z.string(), z.array(z.any())]).optional(),
     turns: z.array(z.object({
       userMessage: z.string().min(1),
       expectedOutput: z.string().optional(),

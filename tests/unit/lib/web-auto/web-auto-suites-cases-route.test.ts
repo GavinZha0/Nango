@@ -76,8 +76,8 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
       };
 
       const mockCases = [
-        { id: 1, suiteId: validSuiteId, name: "case_a", description: null, scriptContent: "await page.goto('/')", assertions: [], enabled: true },
-        { id: 2, suiteId: validSuiteId, name: "case_b", description: null, scriptContent: "await page.click('button')", assertions: [], enabled: true },
+        { id: 1, suiteId: validSuiteId, name: "case_a", input: { script: "await page.goto('/')", steps: "1. Goto" }, assertions: [], enabled: true },
+        { id: 2, suiteId: validSuiteId, name: "case_b", input: { script: "await page.click('button')", steps: "2. Click" }, assertions: [], enabled: true },
       ];
 
       selectMock.mockImplementation(() => ({
@@ -158,8 +158,10 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         id: 10,
         suiteId: validSuiteId,
         name: "test_checkout_flow",
-        description: "Test checkout",
-        scriptContent: "console.log('run')",
+        input: {
+          script: "console.log('run')",
+          steps: "Test checkout",
+        },
         assertions: [],
         enabled: true,
       };
@@ -175,8 +177,10 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "test_checkout_flow",
-          description: "Test checkout",
-          scriptContent: "console.log('run')",
+          input: {
+            script: "console.log('run')",
+            steps: "Test checkout",
+          },
         }),
       });
 

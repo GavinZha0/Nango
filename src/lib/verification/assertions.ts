@@ -91,6 +91,7 @@ function evaluateOne(
   switch (spec.type) {
     case "json_schema":
       return evaluateJsonSchema(spec, payload, index);
+    case "jsonpath":
     case "jsonpath_equals":
       return evaluateJsonPathEquals(spec, payload, index, input, runContext);
     case "js_expression":

@@ -120,6 +120,20 @@
       "when": 1787875925519,
       "tag": "0016_web_auto_case_bigint_and_timing",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787900000000,
+      "tag": "0017_web_auto_case_input_jsonb",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787910000000,
+      "tag": "0018_eval_case_input_and_assertions",
+      "breakpoints": true
     }
   ]
 }

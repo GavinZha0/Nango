@@ -146,8 +146,8 @@ export async function getCaseCount(suiteId: string): Promise<number> {
 export interface CreateCaseInput {
   suiteId: string;
   name: string;
-  turns?: unknown[];
-  criteria?: Record<string, unknown>;
+  input?: Record<string, unknown>;
+  assertions?: unknown[];
   enabled?: boolean;
   createdBy?: string;
 }
@@ -160,8 +160,8 @@ export async function createCase(
     .values({
       suiteId: input.suiteId,
       name: input.name,
-      turns: (input.turns ?? []) as unknown,
-      criteria: (input.criteria ?? {}) as unknown,
+      input: (input.input ?? { turns: [] }) as unknown,
+      assertions: (input.assertions ?? []) as unknown,
       enabled: input.enabled ?? true,
       createdBy: input.createdBy,
     })
@@ -205,8 +205,8 @@ export async function getLatestCaseResult(
 export interface UpdateCaseInput {
   name?: string;
   suiteId?: string;
-  turns?: unknown[];
-  criteria?: Record<string, unknown>;
+  input?: Record<string, unknown>;
+  assertions?: unknown[];
   enabled?: boolean;
 }
 
@@ -217,8 +217,8 @@ export async function updateCase(
   const updates: Record<string, unknown> = {};
   if (input.name !== undefined) updates.name = input.name;
   if (input.suiteId !== undefined) updates.suiteId = input.suiteId;
-  if (input.turns !== undefined) updates.turns = input.turns as unknown;
-  if (input.criteria !== undefined) updates.criteria = input.criteria as unknown;
+  if (input.input !== undefined) updates.input = input.input as unknown;
+  if (input.assertions !== undefined) updates.assertions = input.assertions as unknown;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   updates.updatedAt = sql`CURRENT_TIMESTAMP`;
 

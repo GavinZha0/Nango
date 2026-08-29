@@ -874,21 +874,22 @@ function VerdictsPane({
   const verdicts: readonly AssertionResult[] = outcome?.assertionResults ?? [];
   const error: ErrorEnvelope | null = outcome?.error ?? null;
   const hasContent: boolean = verdicts.length > 0 || !!error;
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-1">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-t border-border/60 bg-muted/20 px-3">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Verdicts
         </span>
         {verdicts.length > 0 && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[10px] text-muted-foreground font-mono">
             ({verdicts.length})
           </span>
         )}
       </div>
-      <div className="min-h-0 flex-1 px-3 pb-2">
+      <div className="min-h-0 flex-1 px-3 pb-2 pt-2 overflow-y-auto">
         {hasContent ? (
-          <div className="h-full space-y-2 overflow-auto rounded-md border bg-muted/30 p-2">
+          <div className="space-y-2">
             {error && error.source !== "assertion" && <ErrorView err={error} />}
             {verdicts.length > 0 && (
               <ul className="space-y-1">
@@ -955,23 +956,27 @@ function getConditionDescription(
   verdict: AssertionResult,
   spec?: AssertionSpec,
 ): string {
-  if (verdict.type === "jsonpath_equals") {
-    const path = verdict.path ?? (spec?.type === "jsonpath_equals" ? spec.path : "");
+  if (verdict.type === "jsonpath" || verdict.type === "jsonpath_equals") {
+    const path = verdict.path ?? (spec && "path" in spec ? spec.path : "");
+    const op = spec && "operator" in spec ? spec.operator : "==";
     const expected = verdict.expected !== undefined 
       ? verdict.expected 
-      : (spec?.type === "jsonpath_equals" ? spec.expected : undefined);
-    return `${path || "path"} === ${JSON.stringify(expected)}`;
+      : (spec && "expected" in spec ? spec.expected : undefined);
+    if (op === "exists") {
+      return `${path || "path"} exists`;
+    }
+    return `${path || "path"} ${op} ${JSON.stringify(expected)}`;
   }
   
   if (verdict.type === "js_expression") {
-    if (spec?.type === "js_expression") {
+    if (spec && "expression" in spec) {
       return spec.expression;
     }
     return "js_expression";
   }
   
   if (verdict.type === "json_schema") {
-    if (spec?.type === "json_schema" && spec.schema) {
+    if (spec && "schema" in spec && spec.schema) {
       const typeStr = spec.schema.type ? String(spec.schema.type) : "object";
       const props = spec.schema.properties && typeof spec.schema.properties === "object"
         ? Object.keys(spec.schema.properties)
@@ -1007,7 +1012,7 @@ function AssertionVerdictRow({
     <li className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]">
       <span
         className={cn(
-          "shrink-0",
+          "shrink-0 font-semibold",
           verdict.ok
             ? "text-emerald-600 dark:text-emerald-400"
             : "text-red-600 dark:text-red-400",

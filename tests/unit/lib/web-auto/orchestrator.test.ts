@@ -64,7 +64,7 @@ describe("runWebAutoCase", () => {
       caseId: 1,
       suiteId: "suite-1",
       suite: dummySuite,
-      case: { id: 1, scriptContent: null, assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      case: { id: 1, input: {}, assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
     });
 
@@ -78,7 +78,7 @@ describe("runWebAutoCase", () => {
       caseId: 1,
       suiteId: "suite-1",
       suite: suiteNoMcp,
-      case: { id: 1, scriptContent: "return 1;", assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      case: { id: 1, input: { script: "return 1;" }, assertions: [] } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
     });
 
@@ -100,7 +100,7 @@ describe("runWebAutoCase", () => {
       suite: dummySuite,
       case: {
         id: 1,
-        scriptContent: "return { count: 5 };",
+        input: { script: "return { count: 5 };" },
         assertions: [{ type: "js_expression", expression: "result.count === 10" }],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
@@ -124,7 +124,7 @@ describe("runWebAutoCase", () => {
       suite: dummySuite,
       case: {
         id: 1,
-        scriptContent: "return { success: true };",
+        input: { script: "return { success: true };" },
         assertions: [{ type: "js_expression", expression: "result.success === true" }],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
@@ -150,7 +150,7 @@ describe("startWebAutoSuiteRun", () => {
       {
         id: 1,
         name: "Case 1",
-        scriptContent: "return { ok: true };",
+        input: { script: "return { ok: true };" },
         assertions: [],
         enabled: true,
       },

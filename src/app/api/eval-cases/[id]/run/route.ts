@@ -52,6 +52,10 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
+    const caseInput = (caseRow.input ?? {}) as Record<string, unknown>;
+    const turns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
+    const assertions = (Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as unknown as EvalCriteria;
+
     const outcome = await runEvalCase({
       caseId: caseRow.id,
       targetAgentId: suite.agentId,
@@ -59,8 +63,8 @@ export const POST = withEditor<{ id: string }>(
       targetEntityKind: suite.agentSource === "builtin" ? undefined : "agent",
       evaluatorAgentId: suite.evaluatorAgentId,
       dimensionIds: (suite.dimensionIds ?? []) as string[],
-      turns: (caseRow.turns ?? []) as EvalTurn[],
-      criteria: (caseRow.criteria ?? {}) as EvalCriteria,
+      turns,
+      criteria: assertions,
       ownerId: session.user.id,
     });
 

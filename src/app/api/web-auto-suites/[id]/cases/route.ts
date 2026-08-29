@@ -42,8 +42,7 @@ export const GET = withEditor<{ id: string }>(
         id: WebAutoCaseTable.id,
         suiteId: WebAutoCaseTable.suiteId,
         name: WebAutoCaseTable.name,
-        description: WebAutoCaseTable.description,
-        scriptContent: WebAutoCaseTable.scriptContent,
+        input: WebAutoCaseTable.input,
         assertions: WebAutoCaseTable.assertions,
         enabled: WebAutoCaseTable.enabled,
         createdBy: WebAutoCaseTable.createdBy,
@@ -63,8 +62,7 @@ export const GET = withEditor<{ id: string }>(
 const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
-    description: z.string().max(1000).optional().nullable(),
-    scriptContent: z.string().optional().nullable(),
+    input: z.record(z.string(), z.unknown()).optional(),
     assertions: z.array(z.unknown()).optional(),
     enabled: z.boolean().optional(),
   })
@@ -108,8 +106,7 @@ export const POST = withEditor<{ id: string }>(
         .values({
           suiteId,
           name: body.name,
-          description: body.description ?? null,
-          scriptContent: body.scriptContent ?? null,
+          input: body.input ?? {},
           assertions: body.assertions ?? [],
           enabled: body.enabled ?? true,
           createdBy: session.user.id,

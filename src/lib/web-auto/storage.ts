@@ -112,8 +112,7 @@ export async function deleteWebAutoSuite(id: string): Promise<void> {
 export interface CreateWebAutoCaseInput {
   suiteId: string;
   name: string;
-  description?: string | null;
-  scriptContent?: string | null;
+  input?: Record<string, unknown>;
   assertions?: unknown;
   enabled?: boolean;
   createdBy: string;
@@ -127,8 +126,7 @@ export async function createWebAutoCase(
     .values({
       suiteId: input.suiteId,
       name: input.name,
-      description: input.description ?? null,
-      scriptContent: input.scriptContent ?? null,
+      input: input.input ?? {},
       assertions: input.assertions ?? [],
       enabled: input.enabled ?? true,
       createdBy: input.createdBy,
@@ -184,7 +182,7 @@ export interface WebAutoCaseRunItem {
   id: number;
   suiteId: string;
   name: string;
-  scriptContent: string | null;
+  input: unknown;
   assertions: unknown;
   enabled: boolean;
   createdAt: Date;
@@ -200,7 +198,7 @@ export async function listEnabledWebAutoCasesForRun(
       id: WebAutoCaseTable.id,
       suiteId: WebAutoCaseTable.suiteId,
       name: WebAutoCaseTable.name,
-      scriptContent: WebAutoCaseTable.scriptContent,
+      input: WebAutoCaseTable.input,
       assertions: WebAutoCaseTable.assertions,
       enabled: WebAutoCaseTable.enabled,
       createdAt: WebAutoCaseTable.createdAt,

@@ -73,6 +73,8 @@ export const useEvalCasesStore = create<EvalCasesState>()((set) => ({
 
 export interface CreateCaseInput {
   name: string;
+  input?: Record<string, unknown>;
+  assertions?: unknown[];
   turns?: Array<{ userMessage: string }>;
   criteria?: Record<string, unknown>;
 }
@@ -80,6 +82,8 @@ export interface CreateCaseInput {
 export interface PatchCaseInput {
   name?: string;
   suiteId?: string;
+  input?: Record<string, unknown>;
+  assertions?: unknown[];
   turns?: Array<{ userMessage: string }>;
   criteria?: Record<string, unknown>;
   enabled?: boolean;

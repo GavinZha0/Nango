@@ -1,0 +1,195 @@
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { evaluateAssertions, type AssertionSpec } from "@/lib/assertions";
+
+describe("Universal Assertion Subsystem — evaluator engine", () => {
+  describe("1. JSONPath assertions with multi-operators", () => {
+    const payload = {
+      user: {
+        id: 101,
+        name: "Alice",
+        role: "admin",
+        score: 95.5,
+        tags: ["qa", "developer"],
+        email: "alice@example.com",
+      },
+    };
+
+    it("evaluates == and != operators", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "$.user.name", operator: "==", expected: "Alice" },
+        { type: "jsonpath", path: "$.user.role", operator: "!=", expected: "guest" },
+      ];
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(2);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+    });
+
+    it("evaluates comparison operators (>, >=, <, <=)", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "$.user.score", operator: ">", expected: 90 },
+        { type: "jsonpath", path: "$.user.score", operator: ">=", expected: 95.5 },
+        { type: "jsonpath", path: "$.user.score", operator: "<", expected: 100 },
+        { type: "jsonpath", path: "$.user.score", operator: "<=", expected: 95.5 },
+        // Failed case
+        { type: "jsonpath", path: "$.user.score", operator: "<", expected: 50 },
+      ];
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(true);
+      expect(outcome.deterministicResults[3].ok).toBe(true);
+      expect(outcome.deterministicResults[4].ok).toBe(false);
+    });
+
+    it("evaluates contains, matches, and exists operators", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "$.user.tags", operator: "contains", expected: "qa" },
+        { type: "jsonpath", path: "$.user.email", operator: "matches", expected: "^[a-z]+@example\\.com$" },
+        { type: "jsonpath", path: "$.user.id", operator: "exists" },
+        { type: "jsonpath", path: "$.user.non_existent", operator: "exists" },
+      ];
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(true);
+      expect(outcome.deterministicResults[3].ok).toBe(false);
+    });
+  });
+
+  describe("2. JSON Schema assertions", () => {
+    it("validates structural schema correctly", () => {
+      const payload = {
+        name: "Test Order",
+        amount: 49.99,
+        items: [{ id: "item-1", qty: 2 }],
+      };
+
+      const validSchema: AssertionSpec = {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          required: ["name", "amount", "items"],
+          properties: {
+            amount: { type: "number", minimum: 0 },
+            items: { type: "array", minItems: 1 },
+          },
+        },
+      };
+
+      const invalidSchema: AssertionSpec = {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          required: ["missing_field"],
+        },
+      };
+
+      const outcome = evaluateAssertions(payload, [validSchema, invalidSchema]);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(false);
+      expect(outcome.deterministicResults[1].message).toContain("missing_field");
+    });
+  });
+
+  describe("3. JS Expression assertions", () => {
+    it("evaluates sandboxed expressions", () => {
+      const payload = {
+        records: [10, 20, 30],
+        meta: { total: 60 },
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "js_expression", expression: "result.records.reduce((a, b) => a + b, 0) === result.meta.total" },
+        { type: "js_expression", expression: "result.records.length > 5" },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(false);
+    });
+  });
+
+  describe("4. Tool Call Trajectory assertions", () => {
+    const options = {
+      toolCalls: [
+        { name: "search_knowledge_base", args: { query: "refund policy", limit: 5 } },
+        { name: "send_email", args: { to: "customer@example.com", subject: "Refund Status" } },
+      ],
+    };
+
+    it("verifies expected tool calls and arguments", () => {
+      const assertions: AssertionSpec[] = [
+        {
+          type: "tool_call",
+          toolName: "search_knowledge_base",
+          expectedCalls: 1,
+          expectedArgs: { query: "refund policy" },
+        },
+        {
+          type: "tool_call",
+          toolName: "delete_database",
+          expectedCalls: 0, // forbidden
+        },
+        {
+          type: "tool_call",
+          toolName: "charge_credit_card",
+          expectedCalls: 1, // missing tool call
+        },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, options);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(false);
+    });
+  });
+
+  describe("5. Metric assertions", () => {
+    const options = {
+      metrics: {
+        durationMs: 3200,
+        outputTokens: 450,
+        toolCallCount: 2,
+      },
+    };
+
+    it("evaluates performance and resource metrics", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "metric", metric: "duration_ms", operator: "<=", threshold: 5000 },
+        { type: "metric", metric: "output_tokens", operator: "<", threshold: 1000 },
+        { type: "metric", metric: "total_tool_calls", operator: "<=", threshold: 3 },
+        // Failed rule
+        { type: "metric", metric: "duration_ms", operator: "<=", threshold: 2000 },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, options);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(true);
+      expect(outcome.deterministicResults[3].ok).toBe(false);
+    });
+  });
+
+  describe("6. LLM Judge partitioning", () => {
+    it("partitions LLM judge assertions for Tier 2 evaluation", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "$.status", operator: "==", expected: "ok" },
+        { type: "llm_judge", expectation: "Assistant should explain the policy politely", reference: "Refunds take 3 days." },
+        { type: "expectation", expectation: "Banner should display successfully" },
+      ];
+
+      const outcome = evaluateAssertions({ status: "ok" }, assertions);
+      expect(outcome.deterministicResults).toHaveLength(1);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.llmAssertions).toHaveLength(2);
+      expect(outcome.llmAssertions[0].spec.expectation).toBe("Assistant should explain the policy politely");
+      expect(outcome.allDeterministicPassed).toBe(true);
+    });
+  });
+});

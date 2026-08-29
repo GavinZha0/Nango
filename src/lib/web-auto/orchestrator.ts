@@ -45,7 +45,9 @@ export async function runWebAutoCase(
   const startedAt: number = Date.now();
 
   // Step 1: MCP execution (Playwright script)
-  if (!input.case.scriptContent) {
+  const rawInput = (input.case.input ?? {}) as Record<string, unknown>;
+  const scriptContent = typeof rawInput.script === "string" ? rawInput.script : null;
+  if (!scriptContent) {
     return {
       status: "errored",
       executionOutput: null,
@@ -87,7 +89,7 @@ export async function runWebAutoCase(
 
   const mcpResult = await runWebAutoMcp({
     mcpServerId: input.suite.mcpServerId,
-    scriptContent: input.case.scriptContent,
+    scriptContent,
     variables: suiteVariables,
   });
 

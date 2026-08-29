@@ -15,8 +15,7 @@ const ROUTE = "/api/web-auto-cases/[id]";
 const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
-    description: z.string().max(1000).optional().nullable(),
-    scriptContent: z.string().optional().nullable(),
+    input: z.record(z.string(), z.unknown()).optional(),
     assertions: z.array(z.unknown()).optional(),
     enabled: z.boolean().optional(),
     suiteId: z.string().uuid().optional(),

@@ -19,6 +19,7 @@
 import "server-only";
 
 import type { EvalCriteria, CriteriaCheckResult } from "./types";
+import { evaluateAssertions, type AssertionSpec } from "@/lib/assertions";
 
 // ─── Input ──────────────────────────────────────────────────────────
 
@@ -27,6 +28,10 @@ export interface DeterministicCheckInput {
   agentText: string;
   /** Tool names the agent actually called (from entity_run_event). */
   actualToolCalls: string[];
+  /** Detailed tool calls if available */
+  toolCalls?: Array<{ name: string; args?: unknown }>;
+  /** Structured output if agent output was JSON */
+  structuredPayload?: unknown;
   /** Runner-measured execution metrics. */
   metrics: {
     durationMs: number;
@@ -52,19 +57,59 @@ export interface DeterministicCheckOutput {
 // ─── Engine ─────────────────────────────────────────────────────────
 
 /**
- * Run all deterministic checks and produce placeholder entries for
- * LLM-judged fields. The returned `results` array matches the order
- * in `buildCriteriaChecklist` (UI-side) so the two are visually
- * aligned.
+ * Run all deterministic checks against assertions or legacy criteria.
  */
 export function runDeterministicChecks(
-  criteria: EvalCriteria,
+  assertionsOrCriteria: AssertionSpec[] | EvalCriteria | unknown,
   input: DeterministicCheckInput,
 ): DeterministicCheckOutput {
   const results: CriteriaCheckResult[] = [];
   let passedCount = 0;
   let totalCount = 0;
 
+  // Case A: Unified AssertionSpec[] array
+  if (Array.isArray(assertionsOrCriteria)) {
+    const assertions = assertionsOrCriteria as AssertionSpec[];
+    const targetPayload = input.structuredPayload ?? { text: input.agentText };
+    const outcome = evaluateAssertions(targetPayload, assertions, {
+      actualToolCallNames: input.actualToolCalls,
+      toolCalls: input.toolCalls,
+      metrics: input.metrics,
+    });
+
+    for (const spec of assertions) {
+      if (spec.type === "llm_judge" || spec.type === "expectation" || spec.type === "llm_expectation") {
+        results.push({
+          label: spec.expectation,
+          kind: "expectation",
+          passed: null,
+          score: null,
+        });
+      }
+    }
+
+    for (const r of outcome.deterministicResults) {
+      const isOk = r.ok;
+      results.push({
+        label: r.message ? `${r.type}: ${r.message}` : `${r.type} check`,
+        kind: r.type === "metric" ? "metric" : (r.type === "tool_call" ? "tool_call" : "assertion"),
+        passed: isOk,
+        ...(r.actual !== undefined ? { actual: String(r.actual) } : {}),
+      });
+      totalCount++;
+      if (isOk) passedCount++;
+    }
+
+    return {
+      results,
+      passedCount,
+      totalCount,
+      passRate: totalCount === 0 ? 1.0 : passedCount / totalCount,
+    };
+  }
+
+  // Case B: Legacy EvalCriteria object
+  const criteria = (assertionsOrCriteria ?? {}) as EvalCriteria;
   const textLower = input.agentText.toLowerCase();
 
   // ── LLM-evaluated (placeholders — evaluator fills these) ────────

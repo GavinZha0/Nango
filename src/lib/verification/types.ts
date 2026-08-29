@@ -31,11 +31,12 @@ export interface JsonSchemaAssertion {
 }
 
 export interface JsonPathEqualsAssertion {
-  type: "jsonpath_equals";
+  type: "jsonpath" | "jsonpath_equals";
   /** JSONPath expression, e.g. "$.data.user.id". */
   path: string;
+  operator?: string;
   /** Deep-equal target. */
-  expected: unknown;
+  expected?: unknown;
 }
 
 export interface JsExpressionAssertion {

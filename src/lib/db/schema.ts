@@ -2010,8 +2010,8 @@ export const EvalCaseTable = pgTable(
       onDelete: "cascade",
     }),
     name: text("name").notNull(),
-    turns: jsonb("turns").notNull().default(sql`'[]'::jsonb`),
-    criteria: jsonb("criteria").notNull().default(sql`'{}'::jsonb`),
+    input: jsonb("input").notNull().default(sql`'{}'::jsonb`),
+    assertions: jsonb("assertions").notNull().default(sql`'[]'::jsonb`),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at")
       .notNull()
@@ -2317,8 +2317,7 @@ export const WebAutoCaseTable = pgTable("web_auto_case", {
     .notNull()
     .references(() => WebAutoSuiteTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  description: text("description"),
-  scriptContent: text("script_content"),
+  input: jsonb("input").notNull().default(sql`'{}'::jsonb`),
   assertions: jsonb("assertions").notNull().default([]),
   enabled: boolean("enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

@@ -55,7 +55,8 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    if (!caseRow.scriptContent) {
+    const rawInput = (caseRow.input ?? {}) as Record<string, unknown>;
+    if (!rawInput.script || typeof rawInput.script !== "string") {
       throw new ApiError(
         "BAD_REQUEST",
         400,

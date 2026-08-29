@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Play, Plus, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
+import { Play, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useWebAutoStore, WebAutoCaseRow, WebAutoSuiteRow } from "@/store/web-auto-store";
 import { useWebAutoRunStream } from "@/hooks/useWebAutoRunStream";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
@@ -33,6 +31,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { extractTargetCase } from "@/components/main-panels/common";
+import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
+import type { AssertionSpec } from "@/lib/assertions";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -55,7 +55,6 @@ export interface SingleCaseRunOutcome {
 export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const router = useRouter();
   const { selectedCaseId, setSelectedCaseId, suites } = useWebAutoStore();
-  const [activeTab, setActiveTab] = useState<"js" | "llm" | "json">("js");
   const [caseDialogOpen, setCaseDialogOpen] = useState(false);
   const [caseToEdit, setCaseToEdit] = useState<{ id: number; name: string } | null>(null);
   const [caseToDelete, setCaseToDelete] = useState<{ id: number; name: string } | null>(null);
@@ -84,22 +83,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   // Editor Draft State
   const [draftScript, setDraftScript] = useState<string>("");
-  const [draftDescription, setDraftDescription] = useState<string>("");
-  const [inputTab, setInputTab] = useState<"script" | "description">("script");
+  const [draftSteps, setDraftSteps] = useState<string>("");
+  const [inputTab, setInputTab] = useState<"script" | "steps">("script");
   const [draftAssertions, setDraftAssertions] = useState<Record<string, unknown>[]>([]);
   const [jsonError, setJsonError] = useState<string | null>(null);
-
-  const hasJsAssertions = useMemo(() => {
-    return draftAssertions.some(
-      (a) => a.type === "js_expression" && typeof a.expression === "string" && a.expression.trim().length > 0
-    );
-  }, [draftAssertions]);
-
-  const hasLlmAssertions = useMemo(() => {
-    return draftAssertions.some(
-      (a) => a.type === "llm_expectation" && typeof a.expectation === "string" && a.expectation.trim().length > 0
-    );
-  }, [draftAssertions]);
 
   const activeSuiteRunId_state = useState<string | null>(null);
   const [activeSuiteRunId, setActiveSuiteRunId] = activeSuiteRunId_state;
@@ -230,25 +217,21 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   useEffect(() => {
     if (selectedCase) {
+      const caseInput = (selectedCase.input ?? {}) as Record<string, unknown>;
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDraftScript(selectedCase.scriptContent || "");
-      setDraftDescription(selectedCase.description || "");
+      setDraftScript(typeof caseInput.script === "string" ? caseInput.script : "");
+      setDraftSteps(typeof caseInput.steps === "string" ? caseInput.steps : "");
       setDraftAssertions(
         Array.isArray(selectedCase.assertions) ? selectedCase.assertions : []
       );
       setJsonError(null);
     } else {
       setDraftScript("");
-      setDraftDescription("");
+      setDraftSteps("");
       setDraftAssertions([]);
       setJsonError(null);
     }
   }, [selectedCase]);
-
-  // Derived state for the specific tabs
-  const jsExpressions = useMemo(() => {
-    return draftAssertions.filter(a => a.type === "js_expression");
-  }, [draftAssertions]);
 
   const deterministicSpecs = useMemo(() => {
     return draftAssertions.filter(
@@ -256,51 +239,13 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     );
   }, [draftAssertions]);
 
-  const jsonText = useMemo(() => {
-    return JSON.stringify(draftAssertions, null, 2);
-  }, [draftAssertions]);
-
-  const handleJsonChange = (val: string) => {
-    try {
-      const parsed = JSON.parse(val);
-      if (Array.isArray(parsed)) {
-        setDraftAssertions(parsed);
-        setJsonError(null);
-      } else {
-        setJsonError("Assertions must be a JSON array.");
-      }
-    } catch (e: unknown) {
-      setJsonError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const updateAssertion = (originalArray: Record<string, unknown>[], idxToUpdate: number, newVal: Record<string, unknown>) => {
-    const next = [...originalArray];
-    next[idxToUpdate] = newVal;
-    setDraftAssertions(next);
-  };
-
-  const removeAssertion = (type: string, localIdx: number) => {
-    let typeCount = -1;
-    const next = draftAssertions.filter(a => {
-      if (a.type === type) {
-        typeCount++;
-        return typeCount !== localIdx;
-      }
-      return true;
-    });
-    setDraftAssertions(next);
-  };
-
-  const addAssertion = (type: string, baseObj: Record<string, unknown>) => {
-    setDraftAssertions([...draftAssertions, { type, ...baseObj }]);
-  };
-
+  const currentCaseInput = (selectedCase?.input ?? {}) as Record<string, unknown>;
   const isDirty = selectedCase && (
-    draftScript !== (selectedCase.scriptContent || "") ||
-    draftDescription !== (selectedCase.description || "") ||
+    draftScript !== ((currentCaseInput.script as string) || "") ||
+    draftSteps !== ((currentCaseInput.steps as string) || "") ||
     JSON.stringify(draftAssertions) !== JSON.stringify(Array.isArray(selectedCase.assertions) ? selectedCase.assertions : [])
   );
+  const canSave = Boolean(isDirty) && !jsonError && !saving;
 
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
@@ -316,8 +261,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         ? {
             id: selectedCase.id,
             name: selectedCase.name,
-            description: draftDescription || null,
-            scriptContent: draftScript || null,
+            input: {
+              script: draftScript,
+              steps: draftSteps,
+            },
             assertions: draftAssertions,
             isDirty: Boolean(isDirty),
           }
@@ -338,7 +285,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     suiteId,
     cases,
     selectedCase,
-    draftDescription,
+    draftSteps,
     draftScript,
     draftAssertions,
     isDirty,
@@ -350,22 +297,31 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
     const applied: string[] = [];
     const sc = extractTargetCase(draft, selectedCase?.id);
-    const script = (typeof sc.scriptContent === "string" ? sc.scriptContent : (typeof sc.script === "string" ? sc.script : null));
+    const inputObj = (sc.input && typeof sc.input === "object" ? sc.input : {}) as Record<string, unknown>;
+    
+    const script = typeof inputObj.script === "string" 
+      ? inputObj.script 
+      : (typeof sc.script === "string" ? sc.script : (typeof sc.scriptContent === "string" ? sc.scriptContent : null));
     if (script !== null) {
       setDraftScript(script);
-      applied.push("scriptContent");
+      applied.push("input.script");
     }
-    if (typeof sc.description === "string") {
-      setDraftDescription(sc.description);
-      applied.push("description");
+
+    const steps = typeof inputObj.steps === "string"
+      ? inputObj.steps
+      : (typeof sc.steps === "string" ? sc.steps : (typeof sc.description === "string" ? sc.description : null));
+    if (steps !== null) {
+      setDraftSteps(steps);
+      applied.push("input.steps");
     }
+
     if (Array.isArray(sc.assertions)) {
       setDraftAssertions(sc.assertions);
       applied.push("assertions");
     }
     if (draft.selectedCase) applied.push("selectedCase");
     return applied;
-  }, [selectedCase?.id, setDraftScript, setDraftDescription, setDraftAssertions]);
+  }, [selectedCase?.id, setDraftScript, setDraftSteps, setDraftAssertions]);
 
   const { clearDraftState } = useCopilotDraft({
     resourceType: "web-auto",
@@ -383,8 +339,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scriptContent: draftScript,
-          description: draftDescription || null,
+          input: {
+            script: draftScript,
+            steps: draftSteps,
+          },
           assertions: draftAssertions,
         }),
       });
@@ -548,21 +506,21 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setInputTab("description")}
+                  onClick={() => setInputTab("steps")}
                   className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                    inputTab === "description"
+                    inputTab === "steps"
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Description
+                  Steps
                 </button>
                 <div className="ml-auto flex shrink-0 items-center gap-2">
                   <Button 
                     size="sm"
                     variant="ghost" 
                     className={`h-6 w-6 p-0 hover:bg-transparent hover:text-foreground ${isDirty ? "text-amber-500" : "text-muted-foreground"}`}
-                    disabled={!isDirty || saving}
+                    disabled={!canSave}
                     onClick={handleSave}
                     title="Save"
                   >
@@ -607,9 +565,9 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                       ) : (
                         <Textarea
                           className="h-full w-full resize-none text-xs leading-relaxed focus-visible:ring-0 focus-visible:ring-offset-0 border-0 p-0 shadow-none bg-transparent"
-                          value={draftDescription}
-                          onChange={(e) => setDraftDescription(e.target.value)}
-                          placeholder="Describe the test purpose or details..."
+                          value={draftSteps}
+                          onChange={(e) => setDraftSteps(e.target.value)}
+                          placeholder={"1. Navigate to target page\n2. Perform interaction steps\n3. Check expected outcomes..."}
                         />
                       )}
                     </div>
@@ -617,113 +575,14 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 </div>
 
                 <div className="flex flex-col min-h-0 overflow-hidden">
-                  <div className="flex h-8 shrink-0 items-center justify-between border-y border-border/60 bg-muted/20 px-3 min-w-0">
-                    <div className="flex items-center gap-1">
-                      {(
-                        [
-                          { id: "js", label: "JS Expression", hasDot: hasJsAssertions },
-                          { id: "llm", label: "Expectations", hasDot: hasLlmAssertions },
-                          { id: "json", label: "JSON", hasDot: false },
-                        ] as const
-                      ).map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => setActiveTab(t.id)}
-                          className={cn(
-                            "flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded transition-colors border",
-                            activeTab === t.id
-                              ? "bg-muted text-foreground border-muted-foreground/10 font-semibold"
-                              : "text-muted-foreground hover:bg-muted/30 hover:text-foreground border-transparent"
-                          )}
-                        >
-                          <span>{t.label}</span>
-                          {t.hasDot && (
-                            <span className="w-1 h-1 rounded-full bg-emerald-500 shrink-0 animate-pulse-subtle" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex-1 min-h-0 p-3 overflow-y-auto">
-                    {!selectedCase ? (
-                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Select a case to edit assertions</div>
-                    ) : activeTab === "js" ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-[10px] font-semibold text-muted-foreground">
-                            • Bindings: <code className="font-semibold text-amber-500">result</code> (script return), <code className="font-semibold text-blue-500">root</code> (full JSON).
-                          </Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-5 px-1.5 text-[9px] gap-1 hover:bg-muted font-semibold"
-                            onClick={() => addAssertion("js_expression", { expression: "" })}
-                          >
-                            <Plus className="h-2.5 w-2.5" /> Add
-                          </Button>
-                        </div>
-                        {jsExpressions.length > 0 && (
-                          <div className="space-y-2">
-                            {jsExpressions.map((expr, localIdx) => {
-                              const globalIdx = draftAssertions.indexOf(expr);
-                              return (
-                                <div key={globalIdx} className="flex items-center gap-1.5">
-                                  <Input
-                                    value={(expr.expression as string) || ""}
-                                    onChange={(e) => updateAssertion(draftAssertions, globalIdx, { ...expr, expression: e.target.value })}
-                                    placeholder="result.success === true"
-                                    className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-                                  />
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 w-7 p-0 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
-                                    onClick={() => removeAssertion("js_expression", localIdx)}
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    ) : activeTab === "llm" ? (
-                      <div className="h-full w-full">
-                        <textarea
-                          className="h-full w-full resize-none rounded-md border bg-background p-2 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring"
-                          spellCheck={false}
-                          value={draftAssertions.find(a => a.type === "llm_expectation")?.expectation as string || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const idx = draftAssertions.findIndex(a => a.type === "llm_expectation");
-                            if (idx !== -1) {
-                              const newAssertions = [...draftAssertions];
-                              newAssertions[idx] = { ...newAssertions[idx], expectation: val };
-                              setDraftAssertions(newAssertions);
-                            } else {
-                              setDraftAssertions([...draftAssertions, { type: "llm_expectation", expectation: val }]);
-                            }
-                          }}
-                          placeholder="e.g. The output should contain a login success message..."
-                        />
-                      </div>
-                    ) : (
-                      <div className="space-y-3 h-full flex flex-col">
-                        <Textarea 
-                          className={`flex-1 min-h-[120px] resize-none font-mono text-xs ${jsonError ? 'border-destructive' : 'border-border/60'}`} 
-                          value={jsonText}
-                          onChange={(e) => handleJsonChange(e.target.value)}
-                        />
-                        {jsonError && (
-                          <p className="text-[10px] text-destructive font-medium">{jsonError}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <UniversalAssertionsEditor
+                    mode="web-auto"
+                    assertions={draftAssertions as AssertionSpec[]}
+                    onChange={(updated) => setDraftAssertions(updated as Record<string, unknown>[])}
+                    onErrorChange={setJsonError}
+                    readOnly={!selectedCase}
+                    saving={saving}
+                  />
                 </div>
               </div>
             </div>
@@ -884,7 +743,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   </div>
                 </div>
                 <div className="flex flex-col min-h-0 overflow-hidden">
-                  <div className="flex h-8 shrink-0 items-center gap-2 border-t border-border/60 bg-muted/40 px-3">
+                  <div className="flex h-8 shrink-0 items-center gap-2 border-t border-border/60 bg-muted/20 px-3">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Verdicts
                     </span>
@@ -991,7 +850,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                       </div>
                     ) : (
                       <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                        No verdict
+                        No verdict yet.
                       </div>
                     )}
                   </div>
