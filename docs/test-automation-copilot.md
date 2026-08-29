@@ -1,6 +1,6 @@
 # Test Automation Copilot & Closed-Loop QA Architecture
 
-Status: Active Specification · Target Subsystems: Verification (P1), Evaluation (P2), Web Auto (P3) · Last Updated: 2026-08-27
+Status: Active Specification · Target Subsystems: Verification (P1), Evaluation (P2), Web Auto (P3) · Last Updated: 2026-08-28
 
 ---
 
@@ -36,23 +36,23 @@ Nango currently supports **Single-Form Shared State & Co-Editing** (`propose_pag
 | **Runtime Layer** | Frontend browser tool (`useValidatedFrontendTool`) | Server-side tools (`defineTool` with RBAC, DB transactions & Zod validation) |
 | **Lifecycle Scope** | Edit single form field | **Closed Loop**: Schema synthesis ➔ Generation ➔ Triage ➔ Remediation ➔ Reporting |
 
-### 1.2 Prerequisites — Frontend Enabled/Draft UI Unification
+### 1.2 Prerequisites — Frontend Enabled/Draft UI Unification ✅ COMPLETED
 
-> [!IMPORTANT]
-> Before implementing authoring tools, the three subsystems' frontend Case
-> list/tree UIs must be unified to consistently render `enabled` state and
-> provide toggle controls. Current status:
+> [!NOTE]
+> **Completed** as part of the three-module architecture unification
+> refactor. All three subsystems now render `enabled` state consistently
+> and provide toggle controls:
 >
 > | Subsystem | disabled case rendering | enabled toggle UI |
 > | :--- | :--- | :--- |
-> | Verification CaseTree | ✅ `opacity-50` when `!enabled` | ❌ No toggle control |
-> | Web Auto Editor | ✅ `[draft]` text label | ❌ No toggle control |
-> | Evaluation | ❌ **No rendering at all** | ❌ No toggle control |
+> | Verification (`VerificationCaseList`) | ✅ `opacity-50` + `text-muted-foreground` | ✅ `onToggleCaseEnabled` callback |
+> | Evaluation (`EvalCaseList`) | ✅ `opacity-50` + `text-muted-foreground` | ✅ `onToggleCaseEnabled` callback |
+> | Web Auto (`WebAutoCaseList`) | ✅ `opacity-50` + `text-muted-foreground` | ✅ `onToggleCaseEnabled` callback |
 >
-> **Required before P1**: All three subsystems must render a visible
-> `[AI Draft]` badge for `enabled = false` cases and provide a toggle
-> (checkbox or switch) to enable/disable individual cases. This frontend
-> unification is tracked as a separate prerequisite task.
+> **Remaining for P1**: Add a dedicated `[AI Draft]` text badge for
+> `enabled = false` cases created by authoring tools (currently only
+> visual opacity distinguishes enabled/disabled). The toggle control
+> itself is fully operational.
 
 ---
 
@@ -89,8 +89,19 @@ Nango currently supports **Single-Form Shared State & Co-Editing** (`propose_pag
   - User reviews each case individually in the inspector and toggles `enabled` when satisfied.
 
 ### Step 4: Test Execution & Result Diagnostics
-- When tests execute (manually by user or triggered programmatically), execution details are persisted to `verification_case_result` / `eval_case_result` / `web_auto_case_result`.
-- Agent calls diagnostic read tools to inspect run telemetry:
+
+> [!NOTE]
+> **Unified Playground vs Suite Run mental model**: All three subsystems
+> now share the same execution semantics. **Single-case "Run"** is
+> strictly an in-memory Playground debug action — the result is returned
+> synchronously and held in frontend component state (`localOutcome` /
+> `lastOutcome`), with **zero DB writes**. **"Run Suite"** creates
+> persisted `*_run` and `*_case_result` records shown in the top
+> History Banner. Diagnostic read tools can only inspect Suite Run
+> results, not ephemeral Playground executions.
+
+- When a **Suite Run** completes (triggered manually by user or programmatically), execution details are persisted to `verification_case_result` / `eval_case_result` / `web_auto_case_result`.
+- Agent calls diagnostic read tools to inspect persisted run telemetry:
   - `get_verification_run_details({ runId })`
   - `get_eval_run_details({ runId })`
   - `get_web_auto_run_details({ runId })`
@@ -170,7 +181,7 @@ src/lib/authoring/
 ├── build-case-remediation-tool.ts    # Shared case update/repair factory
 ├── verification-authoring-tools.ts   # create_verification_cases, update_verification_case, get_mcp_tool_schema
 ├── eval-authoring-tools.ts           # create_eval_cases, update_eval_case, get_target_agent_spec
-└── web-auto-authoring-tools.ts       # create_web_auto_cases, update_web_auto_case
+└── web-auto-authoring-tools.ts       # create_web_auto_cases, update_web_auto_case, get_web_auto_run_details
 ```
 
 ### 3.4 Shared Creation Factory (`buildCaseAuthoringTool`)
@@ -208,7 +219,7 @@ export interface CaseAuthoringConfig<TCase, TExtra extends z.ZodRawShape = {}> {
     cases: TCase[],
     userId: string,
   ) => Promise<{
-    created: Array<{ id: string | number; name: string }>;
+    created: Array<{ id: number; name: string }>;
     skipped: Array<{ name: string; reason: string }>;
   }>;
 }
@@ -286,20 +297,20 @@ import "server-only";
 import { z } from "zod";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 
-export interface CaseRemediationConfig<TPatch, TId extends number | string = number | string> {
+export interface CaseRemediationConfig<TPatch> {
   kind: "verification" | "evaluation" | "web_auto";
   toolName: string;
   description: string;
   /** Zod schema for partial patch. Must use .strict(). */
   patchSchema: z.ZodType<TPatch>;
-  /** Per-subsystem case ID schema (z.number().int() or z.string().uuid()). */
-  caseIdSchema: z.ZodType<TId>;
+  /** Case ID schema — all three subsystems use z.number().int() (bigint PK). */
+  caseIdSchema: z.ZodType<number>;
   resolveCase: (
-    caseId: TId,
+    caseId: number,
     userId: string,
   ) => Promise<{ suiteId: string; caseName: string }>;
   updateCase: (
-    caseId: TId,
+    caseId: number,
     patch: TPatch,
     userId: string,
   ) => Promise<void>;
@@ -308,8 +319,8 @@ export interface CaseRemediationConfig<TPatch, TId extends number | string = num
 /**
  * Build a case remediation (update/repair) tool. Closure-captures userId.
  */
-export function buildCaseRemediationTool<TPatch, TId extends number | string = number | string>(
-  config: CaseRemediationConfig<TPatch, TId>,
+export function buildCaseRemediationTool<TPatch>(
+  config: CaseRemediationConfig<TPatch>,
   ctx: { userId: string },
 ): ToolDefinition {
   return defineTool({
@@ -323,8 +334,8 @@ export function buildCaseRemediationTool<TPatch, TId extends number | string = n
       .strict(),
     // CONTRACT: execute receives only (args). userId is closure-captured.
     execute: async ({ caseId, patch }) => {
-      const caseInfo = await config.resolveCase(caseId as TId, ctx.userId);
-      await config.updateCase(caseId as TId, patch, ctx.userId);
+      const caseInfo = await config.resolveCase(caseId, ctx.userId);
+      await config.updateCase(caseId, patch, ctx.userId);
 
       return {
         ok: true,
@@ -341,11 +352,11 @@ export function buildCaseRemediationTool<TPatch, TId extends number | string = n
 
 ## 4. Subsystem Contracts & Schema Definitions
 
-> [!IMPORTANT]
-> **Primary key types differ across subsystems.** Verification and
-> Evaluation cases use `bigint` (JS `number`), while Web Auto cases use
-> `uuid` (JS `string`). Each subsystem's remediation tool must use the
-> precise `caseIdSchema` for its PK type — no generic `z.union`.
+> [!NOTE]
+> **Unified primary key type.** After migration
+> `0016_web_auto_case_bigint_and_timing.sql`, all three subsystems use
+> `bigint generated always as identity` (JS `number`) for case IDs.
+> Every subsystem's `caseIdSchema` is `z.number().int()`.
 
 ### 4.1 Verification Subsystem (P1)
 
@@ -455,28 +466,31 @@ export const evalCasePatchSchema = z.object({
 
 ### 4.3 Web Auto Subsystem (P3)
 
-**Source**: reuses existing schemas from `src/lib/web-auto/assertions.ts`.
+**Source**: reuses assertion type interfaces from `src/lib/web-auto/types.ts`
+(`WebAutoAssertionSpec = AssertionSpec | ExpectationAssertion`).
 
 > [!IMPORTANT]
-> **Primary key difference**: Web Auto cases use `uuid` (string) PK,
-> unlike Verification/Eval which use `bigint` (number). The remediation
-> tool's `caseIdSchema` must be `z.string().uuid()`.
+> **Web Auto assertion schema must be created.** Unlike Verification
+> (which has `wire-schemas.ts` with Zod definitions), Web Auto currently
+> only has TypeScript interfaces for assertions, not Zod schemas. Before
+> implementing P3, create `src/lib/web-auto/wire-schemas.ts` exporting
+> `webAutoAssertionSchema` / `webAutoAssertionsArraySchema` Zod definitions
+> that mirror the `WebAutoAssertionSpec` type union.
 
 #### Case Schema
 
 ```typescript
-// Reuses webAutoAssertionsArraySchema from src/lib/web-auto/assertions.ts.
-// Web Auto assertions have two types:
-//   - js_expression: { type, label, expression }
-//   - llm_expectation: { type, label, expectation }
-// Note: Web Auto assertions include a `label` field (unlike Verification assertions).
+// Web Auto assertions support five types (three from Verification + two LLM types):
+//   Deterministic: json_schema, jsonpath_equals, js_expression (from AssertionSpec)
+//   LLM Evaluator: expectation, llm_expectation (from ExpectationAssertion)
+// ExpectationAssertion fields: { type, expectation?, description?, referenceImage?, context? }
 export const webAutoCaseCreateSchema = z.object({
   name: z.string().min(1).max(120).describe("User journey scenario title"),
   description: z.string().optional(),
   scriptContent: z.string().min(1).describe("Playwright automation script body"),
   assertions: webAutoAssertionsArraySchema.default([]).describe(
-    "Assertions array. Each entry MUST include `type` ('js_expression' or " +
-    "'llm_expectation') and a `label` field."
+    "Assertions array. Each entry MUST include an explicit `type` field: " +
+    "'json_schema', 'jsonpath_equals', 'js_expression', 'expectation', or 'llm_expectation'."
   ),
 }).strict();
 ```
@@ -492,12 +506,12 @@ export const webAutoCasePatchSchema = z.object({
   enabled: z.boolean().optional(),
 }).strict();
 
-// caseIdSchema: z.string().uuid()  (UUID PK)
+// caseIdSchema: z.number().int()  (bigint PK — unified with Verification & Evaluation)
 ```
 
 #### Companion Read Tools
 
-- **`get_web_auto_run_details({ runId })`**: Returns run status, per-case execution output, deterministic assertion results, LLM evaluation verdicts, and errors.
+- **`get_web_auto_run_details({ runId })`**: Returns run status, per-case execution output, deterministic assertion results, LLM evaluation verdicts, `durationMs`, `startedAt`, `finishedAt`, and errors.
 
 ---
 
@@ -530,7 +544,8 @@ When binding authoring & remediation tools to a dedicated **Test QA Expert Agent
   - Use `jsonpath_equals` for deterministic identifiers and status flags.
   - Avoid hardcoding dynamic fields (timestamps, random UUIDs) into exact
     match assertions.
-  - For Web Auto assertions, always include a `label` field.
+  - For Web Auto `expectation` / `llm_expectation` assertions, provide a
+    clear natural language description in the `expectation` field.
 
 ### 3. Diagnosis & Remediation Procedure
 - When analyzing test run failures:
@@ -580,7 +595,7 @@ on failure (never throw). This is consistent with `wrapToolExecute`
 
 | Phase | Core Deliverables | Detailed Tasks | Milestones |
 | :--- | :--- | :--- | :--- |
-| **Phase 0 (P0)<br>Frontend Prerequisite** | **Enabled/Draft UI Unification** | 1. Add `[AI Draft]` badge + enabled toggle to Verification CaseTree.<br>2. Add enabled rendering + toggle to Evaluation case list (currently missing entirely).<br>3. Verify Web Auto existing `[draft]` label and add toggle.<br>4. Standardize badge styling across all three subsystems. | All three subsystems render and toggle `enabled` state consistently. |
+| **Phase 0 (P0)<br>Frontend Prerequisite** | **~~Enabled/Draft UI Unification~~** ✅ | ~~1. Add `[AI Draft]` badge + enabled toggle to Verification CaseTree.~~<br>~~2. Add enabled rendering + toggle to Evaluation case list (currently missing entirely).~~<br>~~3. Verify Web Auto existing `[draft]` label and add toggle.~~<br>~~4. Standardize badge styling across all three subsystems.~~ | ✅ **COMPLETED** — Three-module unification refactor delivered `opacity-50` + `text-muted-foreground` rendering and `onToggleCaseEnabled` toggle across all subsystems. Remaining: `[AI Draft]` text badge for AI-generated cases. |
 | **Phase 1 (P1)<br>Foundation & Verification** | **Catalog Extension + Verification Closed-Loop** | 1. Extend `BuiltinToolEntry.build` signature to accept optional `BuiltinToolBuildContext`.<br>2. Add `"testing"` to `BuiltinToolCategory`.<br>3. Implement `buildCaseAuthoringTool` & `buildCaseRemediationTool` factories.<br>4. Build `create_verification_cases` (with optional `suiteId` + Lazy Suite), `update_verification_case`, `get_verification_run_details`, `get_mcp_tool_schema`.<br>5. Register tools in catalog & update dispatch to pass build context.<br>6. Craft Test QA Expert Agent prompt block.<br>7. Unit tests: factory, RBAC, de-dup, Zod `.strict()` boundary, Lazy Suite creation. | Verification authoring + diagnostics + remediation end-to-end. |
 | **Phase 2 (P2)<br>Evaluation** | **Eval Authoring & Triage** | 1. Build `create_eval_cases`, `update_eval_case`, `get_eval_run_details`, `get_target_agent_spec`.<br>2. Integrate multi-turn prompt perturbation & adversarial scenario generation strategies.<br>3. Register eval tools in catalog. | Evaluation closed-loop functional. |
 | **Phase 3 (P3)<br>Web Auto** | **Playwright Script Generation & Diagnostics** | 1. Build `create_web_auto_cases`, `update_web_auto_case`, `get_web_auto_run_details`.<br>2. Integrate static page snapshot source for script generation.<br>3. Register web-auto tools in catalog. | Web Auto closed-loop functional. |
@@ -621,4 +636,4 @@ For each subsystem, mirror `tests/unit/lib/copilot/tool-handler-integration.test
 | Selector brittleness (Web Auto) | Start with static page snapshots; add live Playwright probe if quality is insufficient. |
 | Validation drift | Single Zod source per kind; prompt schema derived via `z.toJSONSchema()`; shared batch service used by both tool and REST route. |
 | RBAC / cross-tenant writes | Editor-role check + ownership check in `resolveSuite`; `createdBy` stamped from `ctx.userId`. |
-| PK type confusion | Each subsystem uses its precise `caseIdSchema` (`z.number().int()` or `z.string().uuid()`). No generic union. |
+| PK type confusion | All three subsystems now use `z.number().int()` (bigint PK). No generic union needed. |

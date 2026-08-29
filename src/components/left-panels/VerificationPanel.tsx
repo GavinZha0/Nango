@@ -308,14 +308,14 @@ export function VerificationPanel(): ReactNode {
 
   const [expandedServerIds, setExpandedServerIds] = useState<Record<string, boolean>>({});
 
-  const toggleServerExpand = (serverId: string): void => {
+  const toggleServerExpand = (serverId: string, currentlyExpanded: boolean): void => {
     setExpandedServerIds((prev) => ({
       ...prev,
-      [serverId]: prev[serverId] !== undefined ? !prev[serverId] : false, // default was true
+      [serverId]: !currentlyExpanded,
     }));
   };
 
-  // Build tree grouping
+  // Build tree grouping (alphabetical sort on servers and suites, filter out empty servers)
   const treeGroups = useMemo<ServerTreeGroup[]>(() => {
     if (category !== "mcp" || !serverRows) return [];
 
@@ -329,18 +329,21 @@ export function VerificationPanel(): ReactNode {
       }
     }
 
-    return serverRows.map((s) => ({
-      id: s.id,
-      name: s.name,
-      serverTitle: s.serverTitle,
-      serverDescription: s.serverDescription,
-      enabled: s.enabled,
-      suites: (suitesByServer.get(s.id) ?? []).sort((a, b) =>
-        alphabeticCompare(a.name, b.name),
-      ),
-    })).sort((a, b) =>
-      alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name),
-    );
+    return serverRows
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        serverTitle: s.serverTitle,
+        serverDescription: s.serverDescription,
+        enabled: s.enabled,
+        suites: (suitesByServer.get(s.id) ?? []).sort((a, b) =>
+          alphabeticCompare(a.name, b.name),
+        ),
+      }))
+      .filter((g) => g.suites.length > 0)
+      .sort((a, b) =>
+        alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name),
+      );
   }, [category, serverRows, suiteRows]);
 
   const [runningServerId, setRunningServerId] = useState<string | null>(null);
@@ -542,12 +545,16 @@ export function VerificationPanel(): ReactNode {
               No verification targets or suites found.
             </div>
           ) : (
-            treeGroups.map((group) => (
+            treeGroups.map((group) => {
+            const isExpanded =
+              expandedServerIds[group.id] ??
+              (activeSuiteId ? group.suites.some((s) => s.id === activeSuiteId) : false);
+            return (
               <ServerGroupNode
                 key={group.id}
                 group={group}
-                expanded={expandedServerIds[group.id] ?? true}
-                onToggleExpand={() => toggleServerExpand(group.id)}
+                expanded={isExpanded}
+                onToggleExpand={() => toggleServerExpand(group.id, isExpanded)}
                 activeSuiteId={activeSuiteId}
                 onSelectSuite={(suiteId) => router.push(`/verification/${suiteId}`)}
                 onRunServer={handleStartServerRun}
@@ -565,8 +572,8 @@ export function VerificationPanel(): ReactNode {
                 runningServerId={runningServerId}
                 runningSuiteId={runningSuiteId}
               />
-            ))
-          )}
+            );
+          }))}
         </div>
       </ScrollArea>
 

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
+import { canEditResource } from "@/lib/auth/permissions";
 import { loadVisibleCase } from "@/lib/verification/access";
 import { runMcpCase } from "@/lib/verification/runner-mcp";
 import type { AssertionSpec } from "@/lib/verification/types";
@@ -27,6 +28,19 @@ export const POST = withEditor<{ id: string }>(
     }
     const caseId = idParse.data;
     const { caseRow, suite } = await loadVisibleCase(caseId, session);
+
+    if (
+      !canEditResource(
+        { visibility: suite.visibility as "private" | "public", createdBy: suite.createdBy },
+        session,
+      )
+    ) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "You cannot run cases in this verification suite.",
+      );
+    }
 
     if (suite.category === "workflow") {
       throw new ApiError(

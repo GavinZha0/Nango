@@ -45,6 +45,7 @@ import {
   scoreToLevel,
   barColorForScore,
 } from "@/lib/evaluation/config";
+import { extractTargetCase } from "@/components/main-panels/common";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import { evalCaseActions } from "@/store/evaluation-cases";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
@@ -678,48 +679,6 @@ interface EvalCaseInspectorProps {
   onExitHistoryView?: () => void;
 }
 
-function extractEvalTargetCase(
-  draft: Record<string, unknown>,
-  currentCaseId?: number | string | null,
-): Record<string, unknown> {
-  if (draft.selectedCase && typeof draft.selectedCase === "object" && !Array.isArray(draft.selectedCase)) {
-    return draft.selectedCase as Record<string, unknown>;
-  }
-  if (draft.case && typeof draft.case === "object" && !Array.isArray(draft.case)) {
-    return draft.case as Record<string, unknown>;
-  }
-  const searchInCases = (casesList: unknown[]): Record<string, unknown> | null => {
-    if (!Array.isArray(casesList) || casesList.length === 0) return null;
-    if (currentCaseId != null) {
-      const match = casesList.find((c) => (c as Record<string, unknown>)?.id == currentCaseId);
-      if (match && typeof match === "object") return match as Record<string, unknown>;
-    }
-    const first = casesList[0];
-    if (first && typeof first === "object") return first as Record<string, unknown>;
-    return null;
-  };
-  if (Array.isArray(draft.cases)) {
-    const found = searchInCases(draft.cases);
-    if (found) return found;
-  }
-  if (Array.isArray(draft.suites)) {
-    for (const s of draft.suites) {
-      if (s && typeof s === "object" && Array.isArray((s as Record<string, unknown>).cases)) {
-        const found = searchInCases((s as Record<string, unknown>).cases as unknown[]);
-        if (found) return found;
-      }
-    }
-  }
-  if (draft.suite && typeof draft.suite === "object" && !Array.isArray(draft.suite)) {
-    const s = draft.suite as Record<string, unknown>;
-    if (Array.isArray(s.cases)) {
-      const found = searchInCases(s.cases);
-      if (found) return found;
-    }
-  }
-  return draft;
-}
-
 // CONTRACT: parent renders <EvalCaseInspector key={evalCase.id} />,
 // so the counter resets on case switch via remount.
 let nextTurnKey = 0;
@@ -778,45 +737,45 @@ export function EvalCaseInspector({
     setTurns((prev) => prev.map((t, i) => (i === index ? { ...updated, _key: t._key } : t)));
   }
 
-  const [localOutcome, setLocalOutcome] = useState<RunEvalCaseResult | null>(null);
+  const [runOutcome, setRunOutcome] = useState<RunEvalCaseResult | null>(null);
   const [running, setRunning] = useState<boolean>(false);
   const [_runError, setRunError] = useState<string | null>(null);
 
-  // Derive display scores: prefer pinnedOutcome (history snapshot), then localOutcome (playground), then liveRun, then latest-result SWR
+  // Derive display scores: prefer pinnedOutcome (history snapshot), then runOutcome (local run), then liveRun, then latest-result SWR
   const liveCaseResult = liveRun.caseResults.get(evalCase.id);
   
   const displayScore = pinnedOutcome
     ? pinnedOutcome.score
-    : (localOutcome ? localOutcome.score : (liveCaseResult?.score ?? (historicalResult?.score ?? null)));
+    : (runOutcome ? runOutcome.score : (liveCaseResult?.score ?? (historicalResult?.score ?? null)));
   const displayDimensionScores = useMemo(() => {
     return pinnedOutcome
       ? pinnedOutcome.dimensionScores
-      : (localOutcome?.dimensionScores ?? (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {})));
-  }, [pinnedOutcome, localOutcome?.dimensionScores, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
+      : (runOutcome?.dimensionScores ?? (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {})));
+  }, [pinnedOutcome, runOutcome?.dimensionScores, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
   const displayBaselineScore = displayDimensionScores?.baseline ?? null;
   const displayCriteriaScore = pinnedOutcome
     ? pinnedOutcome.criteriaScore
-    : (localOutcome ? (localOutcome.criteriaScore ?? null) : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null)));
+    : (runOutcome ? (runOutcome.criteriaScore ?? null) : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null)));
   const displayFeedback = pinnedOutcome
     ? pinnedOutcome.feedback
-    : (localOutcome ? (localOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
+    : (runOutcome ? (runOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
   const displayCriteriaResults = pinnedOutcome
     ? pinnedOutcome.criteriaResults
-    : (localOutcome ? (localOutcome.criteriaResults ?? null) : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null)));
+    : (runOutcome ? (runOutcome.criteriaResults ?? null) : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null)));
   const displayDurationMs = pinnedOutcome
     ? pinnedOutcome.durationMs
-    : (localOutcome ? (localOutcome.durationMs ?? null) : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null)));
+    : (runOutcome ? (runOutcome.durationMs ?? null) : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null)));
   const displayOutputTokens = pinnedOutcome
     ? pinnedOutcome.outputTokens
-    : (localOutcome ? (localOutcome.outputTokens ?? null) : (liveCaseResult?.outputTokens ?? (historicalResult?.outputTokens ?? null)));
+    : (runOutcome ? (runOutcome.outputTokens ?? null) : (liveCaseResult?.outputTokens ?? (historicalResult?.outputTokens ?? null)));
 
   const resolvedRunId = pinnedOutcome
     ? pinnedRunId
-    : (localOutcome ? "playground" : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId));
-  const resolvedThreadId = localOutcome?.threadId ?? null;
+    : (runOutcome ? "playground" : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId));
+  const resolvedThreadId = runOutcome?.threadId ?? null;
   const resolvedStatus = pinnedOutcome
     ? pinnedOutcome.status
-    : (running ? "running" : (localOutcome ? localOutcome.status : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"))));
+    : (running ? "running" : (runOutcome ? runOutcome.status : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"))));
 
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
@@ -871,7 +830,7 @@ export function EvalCaseInspector({
 
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
     const applied: string[] = [];
-    const sc = extractEvalTargetCase(draft, evalCase.id);
+    const sc = extractTargetCase(draft, evalCase.id);
     if (Array.isArray(sc.turns)) {
       const newTurns: KeyedTurn[] = [];
       for (const item of sc.turns) {
@@ -969,7 +928,7 @@ export function EvalCaseInspector({
   const handleRunSingleCase = async (): Promise<void> => {
     onExitHistoryView?.();
     setRunError(null);
-    setLocalOutcome(null);
+    setRunOutcome(null);
     setRunning(true);
     try {
       if (canSave) {
@@ -977,15 +936,20 @@ export function EvalCaseInspector({
       }
       const res = await fetch(`/api/eval-cases/${evalCase.id}/run`, {
         method: "POST",
+        signal: AbortSignal.timeout(290_000),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
         throw new Error(body?.message ?? `${res.status} ${res.statusText}`);
       }
       const outcome = (await res.json()) as RunEvalCaseResult;
-      setLocalOutcome(outcome);
+      setRunOutcome(outcome);
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : String(err));
+      if (err instanceof Error && err.name === "TimeoutError") {
+        setRunError("Evaluation timed out on client side after 290s. Consider reducing turns or testing with shorter prompts.");
+      } else {
+        setRunError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setRunning(false);
     }

@@ -7,7 +7,7 @@ import { canEditResource, ResourceWithRBAC, canDeleteResource, canViewResource }
 import { db } from "@/lib/db";
 import { WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { eq, sql } from "drizzle-orm";
 
 const ROUTE = "/api/web-auto-suites/[id]";
@@ -108,17 +108,28 @@ export const PATCH = withEditor<{ id: string }>(
       }
     }
 
-    const [updated] = await db
-      .update(WebAutoSuiteTable)
-      .set({
-        ...body,
-        updatedBy: session.user.id,
-        updatedAt: new Date(),
-      })
-      .where(eq(WebAutoSuiteTable.id, id))
-      .returning();
+    try {
+      const [updated] = await db
+        .update(WebAutoSuiteTable)
+        .set({
+          ...body,
+          updatedBy: session.user.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(WebAutoSuiteTable.id, id))
+        .returning();
 
-    return NextResponse.json(updated);
+      return NextResponse.json(updated);
+    } catch (err) {
+      if (isUniqueViolation(err) && body.name) {
+        throw new ApiError(
+          "CONFLICT",
+          409,
+          `A web automation suite named "${body.name}" already exists.`,
+        );
+      }
+      throw err;
+    }
   },
 );
 

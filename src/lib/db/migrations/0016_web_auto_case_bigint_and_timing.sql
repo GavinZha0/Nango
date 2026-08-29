@@ -1,3 +1,6 @@
+-- CAUTION: Destructive migration during initial development phase.
+-- Drops and recreates web_auto_case.id and web_auto_case_result.case_id as bigint identity.
+-- Safe for fresh databases / development environments.
 ALTER TABLE "web_auto_case" ADD COLUMN IF NOT EXISTS "new_id" bigint GENERATED ALWAYS AS IDENTITY;--> statement-breakpoint
 ALTER TABLE "web_auto_case_result" DROP CONSTRAINT IF EXISTS "web_auto_case_result_case_id_web_auto_case_id_fk";--> statement-breakpoint
 ALTER TABLE "web_auto_case" DROP CONSTRAINT IF EXISTS "web_auto_case_pkey" CASCADE;--> statement-breakpoint

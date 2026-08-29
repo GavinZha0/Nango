@@ -308,14 +308,14 @@ export function EvaluationPanel(): ReactNode {
 
   const [expandedAgentKeys, setExpandedAgentKeys] = useState<Record<string, boolean>>({});
 
-  const toggleAgentExpand = (key: string): void => {
+  const toggleAgentExpand = (key: string, currentlyExpanded: boolean): void => {
     setExpandedAgentKeys((prev) => ({
       ...prev,
-      [key]: prev[key] !== undefined ? !prev[key] : false, // default was true
+      [key]: !currentlyExpanded,
     }));
   };
 
-  // Build tree grouping
+  // Build tree grouping (alphabetical sort on agents and suites, filter out empty agents)
   const treeGroups = useMemo<EvalAgentTreeGroup[]>(() => {
     if (!agentRows) return [];
 
@@ -331,22 +331,25 @@ export function EvaluationPanel(): ReactNode {
       activeTab === "builtin" ? a.agentSource === "builtin" : a.agentSource === "backend",
     );
 
-    return filtered.map((a) => {
-      const resolved = agentMap[a.agentId];
-      const key = `${a.agentId}:${a.agentSource}`;
-      return {
-        agentId: a.agentId,
-        agentSource: a.agentSource,
-        agentName: resolved?.name ?? a.agentName ?? a.agentId,
-        agentIcon: resolved?.icon ?? a.agentIcon ?? null,
-        credentialId: a.credentialId,
-        suites: (suitesByAgent.get(key) ?? []).sort((s1, s2) =>
-          alphabeticCompare(s1.name, s2.name),
-        ),
-      };
-    }).sort((a, b) =>
-      alphabeticCompare(a.agentName || a.agentId, b.agentName || b.agentId),
-    );
+    return filtered
+      .map((a) => {
+        const resolved = agentMap[a.agentId];
+        const key = `${a.agentId}:${a.agentSource}`;
+        return {
+          agentId: a.agentId,
+          agentSource: a.agentSource,
+          agentName: resolved?.name ?? a.agentName ?? a.agentId,
+          agentIcon: resolved?.icon ?? a.agentIcon ?? null,
+          credentialId: a.credentialId,
+          suites: (suitesByAgent.get(key) ?? []).sort((s1, s2) =>
+            alphabeticCompare(s1.name, s2.name),
+          ),
+        };
+      })
+      .filter((g) => g.suites.length > 0)
+      .sort((a, b) =>
+        alphabeticCompare(a.agentName || a.agentId, b.agentName || b.agentId),
+      );
   }, [agentRows, suiteRows, activeTab, agentMap]);
 
   const builtinCount = useMemo(
@@ -571,12 +574,15 @@ export function EvaluationPanel(): ReactNode {
           ) : (
             treeGroups.map((group) => {
               const key = `${group.agentId}:${group.agentSource}`;
+              const isExpanded =
+                expandedAgentKeys[key] ??
+                (activeSuiteId ? group.suites.some((s) => s.id === activeSuiteId) : false);
               return (
                 <AgentGroupNode
                   key={key}
                   group={group}
-                  expanded={expandedAgentKeys[key] ?? true}
-                  onToggleExpand={() => toggleAgentExpand(key)}
+                  expanded={isExpanded}
+                  onToggleExpand={() => toggleAgentExpand(key, isExpanded)}
                   activeSuiteId={activeSuiteId}
                   onSelectSuite={(suiteId) => router.push(`/evaluation/${suiteId}`)}
                   onRunAgent={(e) => void handleRunAgent(group, e)}

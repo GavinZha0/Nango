@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 
-import { canViewResource, ResourceWithRBAC } from "@/lib/auth/permissions";
+import { canEditResource, ResourceWithRBAC } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { WebAutoCaseTable, WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
@@ -35,8 +35,16 @@ export const POST = withEditor<{ id: string }>(
       .from(WebAutoSuiteTable)
       .where(eq(WebAutoSuiteTable.id, caseRow.suiteId));
 
-    if (!suite || !canViewResource(suite as unknown as ResourceWithRBAC, session)) {
-      throw new ApiError("NOT_FOUND", 404, "Web Auto suite not found or access denied.");
+    if (!suite) {
+      throw new ApiError("NOT_FOUND", 404, "Web Auto suite not found.");
+    }
+
+    if (!canEditResource(suite as unknown as ResourceWithRBAC, session)) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "You do not have permission to run cases in this suite.",
+      );
     }
 
     if (!suite.mcpServerId) {

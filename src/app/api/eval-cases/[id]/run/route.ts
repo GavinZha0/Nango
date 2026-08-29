@@ -15,6 +15,8 @@ import { loadCase } from "@/lib/evaluation/access";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
 import type { EvalCriteria, EvalTurn } from "@/lib/evaluation/types";
 
+export const maxDuration = 300;
+
 const ROUTE = "/api/eval-cases/[id]/run";
 
 const idSchema = z.coerce.number().int().positive();

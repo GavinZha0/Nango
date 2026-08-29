@@ -32,54 +32,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { extractTargetCase } from "@/components/main-panels/common";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error("An error occurred while fetching the data.");
   return res.json();
 };
-
-function extractWebAutoTargetCase(
-  draft: Record<string, unknown>,
-  currentCaseId?: number | string | null,
-): Record<string, unknown> {
-  if (draft.selectedCase && typeof draft.selectedCase === "object" && !Array.isArray(draft.selectedCase)) {
-    return draft.selectedCase as Record<string, unknown>;
-  }
-  if (draft.case && typeof draft.case === "object" && !Array.isArray(draft.case)) {
-    return draft.case as Record<string, unknown>;
-  }
-  const searchInCases = (casesList: unknown[]): Record<string, unknown> | null => {
-    if (!Array.isArray(casesList) || casesList.length === 0) return null;
-    if (currentCaseId != null) {
-      const match = casesList.find((c) => (c as Record<string, unknown>)?.id == currentCaseId);
-      if (match && typeof match === "object") return match as Record<string, unknown>;
-    }
-    const first = casesList[0];
-    if (first && typeof first === "object") return first as Record<string, unknown>;
-    return null;
-  };
-  if (Array.isArray(draft.cases)) {
-    const found = searchInCases(draft.cases);
-    if (found) return found;
-  }
-  if (Array.isArray(draft.suites)) {
-    for (const s of draft.suites) {
-      if (s && typeof s === "object" && Array.isArray((s as Record<string, unknown>).cases)) {
-        const found = searchInCases((s as Record<string, unknown>).cases as unknown[]);
-        if (found) return found;
-      }
-    }
-  }
-  if (draft.suite && typeof draft.suite === "object" && !Array.isArray(draft.suite)) {
-    const s = draft.suite as Record<string, unknown>;
-    if (Array.isArray(s.cases)) {
-      const found = searchInCases(s.cases);
-      if (found) return found;
-    }
-  }
-  return draft;
-}
 
 export interface SingleCaseRunOutcome {
   status: "passed" | "failed" | "errored";
@@ -117,7 +76,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   // Fetch cases for this suite
   const { data: cases, isLoading, error, mutate: mutateCases } = useSWR<WebAutoCaseRow[]>(
-    `/api/web-auto-cases?suiteId=${suiteId}`,
+    `/api/web-auto-suites/${suiteId}/cases`,
     fetcher
   );
 
@@ -390,7 +349,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
     const applied: string[] = [];
-    const sc = extractWebAutoTargetCase(draft, selectedCase?.id);
+    const sc = extractTargetCase(draft, selectedCase?.id);
     const script = (typeof sc.scriptContent === "string" ? sc.scriptContent : (typeof sc.script === "string" ? sc.script : null));
     if (script !== null) {
       setDraftScript(script);
@@ -435,7 +394,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
       }
       
       // Trigger SWR revalidation
-      await mutate(`/api/web-auto-cases?suiteId=${suiteId}`);
+      await mutate(`/api/web-auto-suites/${suiteId}/cases`);
       clearDraftState();
       toast.success("Saved successfully");
     } catch (err: unknown) {
@@ -840,16 +799,9 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                             Executing script & evaluating assertions...
                           </div>
                         ) : displayOutcome ? (
-                          <div className="space-y-2">
-                            {displayOutcome.error && (
-                              <div className="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
-                                <span className="font-semibold">[{displayOutcome.error.source}]</span> {displayOutcome.error.message}
-                              </div>
-                            )}
-                            <pre className="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed font-mono">
-                              {formattedOutputText}
-                            </pre>
-                          </div>
+                          <pre className="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed font-mono">
+                            {formattedOutputText}
+                          </pre>
                         ) : (
                           <pre className="flex-1 text-xs font-mono text-muted-foreground overflow-auto">
                             {`// Run the case to see output...`}
@@ -1078,7 +1030,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 try {
                   const res = await fetch(`/api/web-auto-cases/${caseToDelete.id}`, { method: "DELETE" });
                   if (!res.ok) throw new Error("Failed to delete case");
-                  await mutate((key: string) => typeof key === "string" && key.startsWith(`/api/web-auto-cases?suiteId=${suiteId}`));
+                  await mutate(`/api/web-auto-suites/${suiteId}/cases`);
                   setCaseToDelete(null);
                   toast.success("Case deleted");
                   if (selectedCaseId === caseToDelete.id) setSelectedCaseId(null);

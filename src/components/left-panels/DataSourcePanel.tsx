@@ -13,8 +13,8 @@ import {
   Lock,
   Plus,
   RefreshCw,
-  CircleCheck,
-  CircleSlash,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -145,17 +145,17 @@ function DataSourceRowItem({
               aria-label={row.enabled ? "Disable data source" : "Enable data source"}
             >
               {row.enabled ? (
-                <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               ) : (
-                <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
+                <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               )}
             </button>
           ) : (
             <span className="p-0.5">
               {row.enabled ? (
-                <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               ) : (
-                <CircleSlash className="h-3.5 w-3.5" />
+                <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               )}
             </span>
           )}

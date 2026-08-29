@@ -54,8 +54,9 @@ execution metrics are measured by the runner.
 
 ## 3. Execution Flow
 
+### 3.1 Suite Run (Async Batch Mode)
 ```
-User clicks "Run Suite" or "Run Case"
+User clicks "Run Suite"
     │
     ▼
 API returns 202 + runId (fire-and-forget)
@@ -64,7 +65,7 @@ API returns 202 + runId (fire-and-forget)
 Background loop (serial, alphabetical by case name):
     │
     ├─ ① Dispatch target agent (builtin or backend)
-    │     via runner.start({ mode: "sync" })
+    │     via runner.start({ mode: "sync", initiator: "evaluator" })
     │
     ├─ ② Run deterministic checks (code)
     │     keywords · tool_calls · execution metrics
@@ -88,6 +89,11 @@ Background loop (serial, alphabetical by case name):
 
 Finalize: aggregate passed/failed/errored counts → eval_run
 ```
+
+### 3.2 Single Case Run (Synchronous Playground Mode)
+- **Zero DB pollution**: `POST /api/eval-cases/[id]/run` executes the 6-step pipeline synchronously inline without persisting `eval_run` or `eval_case_result` records (mirrors Verification & Web Auto).
+- **Direct UI Feedback**: Returns `RunEvalCaseResult` JSON directly (200 OK) to populate the case inspector outcome state.
+- **Thread Replay**: Ephemeral conversation messages are retrieved on-demand via `/api/eval-runs/playground/messages?threadId=...` bounded by session owner authentication.
 
 Recovery: stranded `eval_run` rows (`status='running'`) are swept
 to `errored` on boot via `instrumentation.ts`.
@@ -133,39 +139,35 @@ dimension IDs; rejects unknown or missing dimensions.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/eval-suites/[id]/run` | Start async suite run (202) |
-| `POST` | `/api/eval-cases/[id]/run` | Start async single case run (202) |
+| `POST` | `/api/eval-suites/[id]/run` | Start async suite run (202 + runId) |
+| `POST` | `/api/eval-cases/[id]/run` | Synchronous playground single case run (200, no DB writes) |
 | `GET` | `/api/eval-suites/[id]/runs` | Paginated run history |
 | `GET` | `/api/eval-runs/[id]` | Run detail + case results |
 | `GET` | `/api/eval-runs/[id]/messages` | Conversation replay for a case |
 | `GET/POST/PATCH/DELETE` | `/api/eval-suites/**`, `/api/eval-cases/**` | Suite + case CRUD |
 | `GET` | `/api/eval-suites/agents` | Agents with eval suites (left panel) |
 
-All routes wrapped by `withEditor`. Suites are private by design
-(scoped to creator; admin sees all).
+All routes wrapped by `withEditor` and protected by `canEditResource` / `canViewResource` RBAC checks.
 
 ---
 
 ## 7. UI Layout
 
 ```
-┌──────────────┬──────────────────┬──────────────────────┐
-│ EvalSuiteTree │ EvalCaseInspector│ Evaluation Panel     │
-│ Suite + case  │ Conversation     │ Header: Level (score)│
-│ tree with     │ + Criteria JSON  │ Baseline score bar   │
-│ run buttons   │ + Response tab   │ Dimension score bars │
-│               │                  │ Criteria (collapsible)│
-│               │                  │ Feedback text        │
-└──────────────┴──────────────────┴──────────────────────┘
+┌─────────────────┬────────────────────────────────────────────────────────┐
+│ EvalCaseList    │ EvalCaseInspector                                      │
+│ Case list with  │ ┌───────────────────────┬────────────────────────────┐ │
+│ verdict badges, │ │ Conversation turns    │ Header: [#seq] [Duration]  │ │
+│ enable toggles, │ │ + Criteria editor     │ Score bar & dimension bars │ │
+│ and action buttons│ + Response replay tab │ Detailed criteria & feedback│ │
+│                 │ └───────────────────────┴────────────────────────────┘ │
+└─────────────────┴────────────────────────────────────────────────────────┘
 ```
 
-- **Run buttons** at suite and case level. Both async, SSE-driven.
-- **Response tab** fetches conversation from `entity_run_event` via
-  the eval run's thread ID. Fetched once, cached in component state.
-- **Criteria section** shows per-item ✓/✗ verdicts (keywords,
-  tools, metrics) with actual values for failures.
-- **SSE** via `useEvaluationRunStream` hook — same multiplexing
-  pattern as verification on `/api/runs/stream`.
+- **Suite Run button**: Async batch run with progress via `RecentRunsBanner` and SSE multiplexing on `/api/runs/stream`.
+- **Case Run button**: Synchronous playground execution returning inline `localOutcome` without writing to `eval_run`.
+- **Response tab**: Fetches conversation from `entity_run_event` via the eval run's thread ID.
+- **Criteria section**: Shows per-item ✓/✗ verdicts (keywords, tools, metrics) with actual values for failures.
 
 ---
 

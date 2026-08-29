@@ -44,61 +44,8 @@ import type {
   CaseExecutionOutcome,
   ErrorEnvelope,
 } from "@/lib/verification/types";
+import { extractTargetCase } from "@/components/main-panels/common";
 import { AssertionsEditor } from "./AssertionsEditor";
-
-function extractTargetCase(
-  draft: Record<string, unknown>,
-  currentCaseId?: number | string | null,
-): Record<string, unknown> {
-  // 1. Direct selectedCase
-  if (draft.selectedCase && typeof draft.selectedCase === "object" && !Array.isArray(draft.selectedCase)) {
-    return draft.selectedCase as Record<string, unknown>;
-  }
-
-  // 2. Direct case
-  if (draft.case && typeof draft.case === "object" && !Array.isArray(draft.case)) {
-    return draft.case as Record<string, unknown>;
-  }
-
-  const searchInCases = (casesList: unknown[]): Record<string, unknown> | null => {
-    if (!Array.isArray(casesList) || casesList.length === 0) return null;
-    if (currentCaseId != null) {
-      const match = casesList.find((c) => (c as Record<string, unknown>)?.id == currentCaseId);
-      if (match && typeof match === "object") return match as Record<string, unknown>;
-    }
-    const first = casesList[0];
-    if (first && typeof first === "object") return first as Record<string, unknown>;
-    return null;
-  };
-
-  // 3. draft.cases array
-  if (Array.isArray(draft.cases)) {
-    const found = searchInCases(draft.cases);
-    if (found) return found;
-  }
-
-  // 4. draft.suites array (e.g. draft.suites[0].cases)
-  if (Array.isArray(draft.suites)) {
-    for (const s of draft.suites) {
-      if (s && typeof s === "object" && Array.isArray((s as Record<string, unknown>).cases)) {
-        const found = searchInCases((s as Record<string, unknown>).cases as unknown[]);
-        if (found) return found;
-      }
-    }
-  }
-
-  // 5. draft.suite object (e.g. draft.suite.cases)
-  if (draft.suite && typeof draft.suite === "object" && !Array.isArray(draft.suite)) {
-    const s = draft.suite as Record<string, unknown>;
-    if (Array.isArray(s.cases)) {
-      const found = searchInCases(s.cases);
-      if (found) return found;
-    }
-  }
-
-  // 6. Direct flat draft
-  return draft;
-}
 
 const INPUT_PLACEHOLDER = `// Dynamic generator variables:
 // {{$uuid}}             - Standard random UUID v4 string
@@ -381,22 +328,22 @@ export function CaseInspector({
   // Run state
   const [running, setRunning] = useState<boolean>(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [lastOutcome, setLastOutcome] = useState<CaseExecutionOutcome | null>(
+  const [runOutcome, setRunOutcome] = useState<CaseExecutionOutcome | null>(
     null,
   );
 
-  // Priority: a fresh single-case rerun (`lastOutcome`) wins over
+  // Priority: a fresh single-case rerun (`runOutcome`) wins over
   // the suite-run snapshot (`pinnedOutcome`) — the user just clicked
   // "Run case" and expects to see THAT result, not the stale
   // suite-run row. CaseInspector remounts (via `key={case.id}` on
-  // the parent) when the user switches cases, so `lastOutcome`
+  // the parent) when the user switches cases, so `runOutcome`
   // never bleeds across cases.
-  const displayedOutcome = lastOutcome ?? pinnedOutcome ?? null;
+  const displayedOutcome = runOutcome ?? pinnedOutcome ?? null;
 
   // History-view styling. Active ONLY when the parent supplied meta
   // AND we're showing the snapshot (not a fresh single-case rerun).
   const showHistoryChrome: boolean =
-    historyMeta !== null && lastOutcome === null;
+    historyMeta !== null && runOutcome === null;
 
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
@@ -521,10 +468,10 @@ export function CaseInspector({
     // Leaving history view first: if the user was inspecting an old
     // run, the act of rerunning the case is an explicit "focus on
     // fresh execution" — drop the snapshot pin so the new outcome
-    // (which arrives via `lastOutcome`) isn't shadowed.
+    // (which arrives via `runOutcome`) isn't shadowed.
     onExitHistoryView?.();
     setRunError(null);
-    setLastOutcome(null);
+    setRunOutcome(null);
     setRunning(true);
     try {
       // Flush both panes BEFORE issuing the run — the runner reads
@@ -546,7 +493,7 @@ export function CaseInspector({
           | null;
         throw new Error(body?.message ?? `${res.status} ${res.statusText}`);
       }
-      setLastOutcome((await res.json()) as CaseExecutionOutcome);
+      setRunOutcome((await res.json()) as CaseExecutionOutcome);
     } catch (err) {
       setRunError(err instanceof Error ? err.message : String(err));
     } finally {

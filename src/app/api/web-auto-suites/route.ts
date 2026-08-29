@@ -7,7 +7,7 @@ import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { McpServerTable, WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
-import { parseBody } from "@/lib/http/validation";
+import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { and, asc, eq, ilike, sql } from "drizzle-orm";
 
 const ROUTE = "/api/web-auto-suites";
@@ -118,22 +118,33 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
-  const [row] = await db
-    .insert(WebAutoSuiteTable)
-    .values({
-      name: body.name,
-      description: body.description ?? null,
-      parentId: body.parentId ?? null,
-      variables: body.variables ?? {},
-      visibility: body.visibility ?? "private",
-      enabled: body.enabled ?? true,
-      timeoutSec: body.timeoutSec ?? 300,
-      evaluatorAgentId: body.evaluatorAgentId ?? null,
-      mcpServerId: mcpServerId,
-      createdBy: session.user.id,
-      updatedBy: session.user.id,
-    })
-    .returning();
+  try {
+    const [row] = await db
+      .insert(WebAutoSuiteTable)
+      .values({
+        name: body.name,
+        description: body.description ?? null,
+        parentId: body.parentId ?? null,
+        variables: body.variables ?? {},
+        visibility: body.visibility ?? "private",
+        enabled: body.enabled ?? true,
+        timeoutSec: body.timeoutSec ?? 300,
+        evaluatorAgentId: body.evaluatorAgentId ?? null,
+        mcpServerId: mcpServerId,
+        createdBy: session.user.id,
+        updatedBy: session.user.id,
+      })
+      .returning();
 
-  return NextResponse.json({ ...row, caseCount: 0 }, { status: 201 });
+    return NextResponse.json({ ...row, caseCount: 0 }, { status: 201 });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new ApiError(
+        "CONFLICT",
+        409,
+        `A web automation suite named "${body.name}" already exists.`,
+      );
+    }
+    throw err;
+  }
 });

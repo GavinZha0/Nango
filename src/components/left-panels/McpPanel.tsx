@@ -13,8 +13,8 @@ import {
   X,
   Globe,
   Lock,
-  CircleCheck,
-  CircleSlash,
+  ToggleLeft,
+  ToggleRight,
   CircleAlert,
 } from "lucide-react";
 import {
@@ -533,17 +533,17 @@ function ServerHeader({
             aria-label={server.enabled ? "Disable server" : "Enable server"}
           >
             {!server.enabled
-              ? <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
+              ? <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               : toolCount > 0
-                ? <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                ? <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
                 : <CircleAlert className="h-3.5 w-3.5 text-red-400/60" />
             }
           </button>
         ) : (
           !server.enabled
-            ? <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
+            ? <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
             : toolCount > 0
-              ? <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+              ? <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               : <CircleAlert className="h-3.5 w-3.5 text-red-400/60" />
         )}
         </div>

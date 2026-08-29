@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { CircleCheck, CircleSlash } from "lucide-react";
+import { ToggleLeft, ToggleRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface CaseEnableToggleProps {
@@ -15,9 +15,9 @@ export interface CaseEnableToggleProps {
 /**
  * CaseEnableToggle — Unified inline icon toggle for enabling/disabling test cases.
  *
- * Mirrors the toggle pattern from McpPanel:
- * - When enabled: displays CircleCheck (greenish/muted, high-contrast on hover).
- * - When disabled: displays CircleSlash (muted grey).
+ * Uses compact vector switch icons:
+ * - When enabled: displays ToggleRight (emerald green).
+ * - When disabled: displays ToggleLeft (muted grey).
  *
  * Includes event stopPropagation to prevent row selection triggering.
  */
@@ -41,17 +41,17 @@ export function CaseEnableToggle({
       className={cn(
         "cursor-pointer rounded p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         enabled
-          ? "text-emerald-500/70 hover:text-emerald-500"
-          : "text-muted-foreground/70 hover:text-foreground",
+          ? "text-emerald-500/80 hover:text-emerald-500"
+          : "text-muted-foreground/40 hover:text-foreground",
         className,
       )}
       title={title ?? (enabled ? "Disable this case" : "Enable this case")}
       aria-label={enabled ? "Disable case" : "Enable case"}
     >
       {enabled ? (
-        <CircleCheck className="h-3.5 w-3.5 shrink-0" />
+        <ToggleRight className="h-3.5 w-3.5 shrink-0" />
       ) : (
-        <CircleSlash className="h-3.5 w-3.5 shrink-0" />
+        <ToggleLeft className="h-3.5 w-3.5 shrink-0" />
       )}
     </button>
   );

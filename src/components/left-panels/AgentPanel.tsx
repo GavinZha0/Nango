@@ -13,8 +13,8 @@ import {
   Plus,
   Globe,
   Lock,
-  CircleCheck,
-  CircleSlash,
+  ToggleLeft,
+  ToggleRight,
   Star,
 } from "lucide-react";
 import {
@@ -275,8 +275,8 @@ function BackendRow({
           aria-label={disabled ? "Enable agent" : "Disable agent"}
         >
           {disabled
-            ? <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
-            : <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+            ? <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
+            : <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
           }
         </button>
       </div>
@@ -425,15 +425,15 @@ function BuiltinRow({
               aria-label={row.enabled ? "Disable agent" : "Enable agent"}
             >
               {row.enabled
-                ? <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
-                : <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
+                ? <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
+                : <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               }
             </button>
           ) : (
             <span className="p-0.5">
               {row.enabled
-                ? <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
-                : <CircleSlash className="h-3.5 w-3.5" />
+                ? <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
+                : <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               }
             </span>
           )}

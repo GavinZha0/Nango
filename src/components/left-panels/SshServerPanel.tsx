@@ -8,13 +8,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  CircleCheck,
-  CircleSlash,
   Globe,
   Lock,
   Plus,
   RefreshCw,
   Server,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -133,17 +133,17 @@ function SshServerRowItem({
               aria-label={row.enabled ? "Disable SSH server" : "Enable SSH server"}
             >
               {row.enabled ? (
-                <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               ) : (
-                <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
+                <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               )}
             </button>
           ) : (
             <span className="p-0.5">
               {row.enabled ? (
-                <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               ) : (
-                <CircleSlash className="h-3.5 w-3.5" />
+                <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               )}
             </span>
           )}

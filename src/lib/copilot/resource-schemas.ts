@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod";
+import { evalCriteriaSchema } from "@/lib/evaluation/types";
 
 export interface ResourceJSONSchema {
   version: "1.0";
@@ -132,15 +133,19 @@ export const VerificationDraftSchema = z.object({
 export const EvaluationDraftSchema = z.object({
   name: z.string().max(120).optional().describe("Evaluation case display name"),
   description: z.string().optional().describe("Case description"),
-  prompt: z.string().optional().describe("User conversational turn input prompt"),
-  rubric: z.string().optional().describe("Evaluation grading criteria and rubric"),
-  referenceAnswer: z.string().optional().describe("Expected benchmark reference answer"),
+  turns: z.array(z.object({
+    userMessage: z.string().min(1).describe("User message input for this turn"),
+    expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
+  })).optional().describe("Conversation turns list"),
+  criteria: evalCriteriaSchema.optional().describe("Evaluation criteria and constraints"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     description: z.string().optional().describe("Case description"),
-    prompt: z.string().optional().describe("Case turn prompt"),
-    rubric: z.string().optional().describe("Case rubric"),
-    referenceAnswer: z.string().optional().describe("Case reference answer"),
+    turns: z.array(z.object({
+      userMessage: z.string().min(1),
+      expectedOutput: z.string().optional(),
+    })).optional(),
+    criteria: evalCriteriaSchema.optional(),
   }).optional().describe("Selected case data"),
 }).strict();
 

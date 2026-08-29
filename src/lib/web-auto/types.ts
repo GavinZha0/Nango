@@ -1,6 +1,8 @@
 /**
  * Web Auto subsystem — public type surface.
  *
+ * Client-safe: no `server-only`, no Node-only imports.
+ *
  * Hybrid execution engine combining:
  * - Deterministic MCP execution (Playwright via browser_run_code_unsafe)
  * - Deterministic assertions (json_schema, js_expression) 
@@ -8,8 +10,6 @@
  *
  * See docs/web-auto.md.
  */
-
-import "server-only";
 
 import type {
   AssertionSpec,

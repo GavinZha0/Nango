@@ -23,8 +23,8 @@ import {
   FolderUp,
   Globe,
   Lock,
-  CircleCheck,
-  CircleSlash,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -204,17 +204,17 @@ function SkillItem({
               aria-label={row.enabled ? "Disable skill" : "Enable skill"}
             >
               {row.enabled ? (
-                <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               ) : (
-                <CircleSlash className="h-3.5 w-3.5 text-foreground/70" />
+                <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               )}
             </button>
           ) : (
             <span className="p-0.5">
               {row.enabled ? (
-                <CircleCheck className="h-3.5 w-3.5 text-green-400/50" />
+                <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
               ) : (
-                <CircleSlash className="h-3.5 w-3.5" />
+                <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
               )}
             </span>
           )}

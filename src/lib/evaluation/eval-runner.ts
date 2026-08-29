@@ -154,6 +154,30 @@ function extractEvaluatorScores(
   return null;
 }
 
+const STEP_TIMEOUTS = {
+  target_agent_turn: 90_000,
+  evaluator_turn: 90_000,
+} as const;
+
+async function withStepTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  stepName: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${stepName} timed out after ${timeoutMs / 1000}s`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────
 
 export async function runEvalCase(
@@ -173,18 +197,22 @@ export async function runEvalCase(
   for (const turn of input.turns) {
     let targetResult;
     try {
-      targetResult = await runner.start({
-        entityId: input.targetAgentId,
-        credentialId: input.targetCredentialId,
-        entityKind: input.targetEntityKind,
-        task: turn.userMessage,
-        previousMessages: history,
-        threadId: currentThreadId,
-        mode: "sync",
-        initiator: "evaluator",
-        ownerId: input.ownerId,
-        createdBy: input.ownerId,
-      });
+      targetResult = await withStepTimeout(
+        runner.start({
+          entityId: input.targetAgentId,
+          credentialId: input.targetCredentialId,
+          entityKind: input.targetEntityKind,
+          task: turn.userMessage,
+          previousMessages: history,
+          threadId: currentThreadId,
+          mode: "sync",
+          initiator: "evaluator",
+          ownerId: input.ownerId,
+          createdBy: input.ownerId,
+        }),
+        STEP_TIMEOUTS.target_agent_turn,
+        "Target agent turn",
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error(
@@ -254,15 +282,19 @@ export async function runEvalCase(
     }
 
     try {
-      evaluatorResult = await runner.start({
-        entityId: input.evaluatorAgentId,
-        task: currentTask,
-        mode: "sync",
-        initiator: "evaluator",
-        ownerId: input.ownerId,
-        createdBy: input.ownerId,
-        context: { expectedDimensionIds: input.dimensionIds },
-      });
+      evaluatorResult = await withStepTimeout(
+        runner.start({
+          entityId: input.evaluatorAgentId,
+          task: currentTask,
+          mode: "sync",
+          initiator: "evaluator",
+          ownerId: input.ownerId,
+          createdBy: input.ownerId,
+          context: { expectedDimensionIds: input.dimensionIds },
+        }),
+        STEP_TIMEOUTS.evaluator_turn,
+        "Evaluator agent",
+      );
 
       const evaluatorEvents = await readEvents(evaluatorResult.runId);
       scores = extractEvaluatorScores(evaluatorEvents);

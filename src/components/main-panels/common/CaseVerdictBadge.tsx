@@ -2,15 +2,17 @@
 
 import type { ReactNode } from "react";
 import {
-  CircleCheck,
-  CircleX,
-  CircleAlert,
-  CircleSlash,
+  Check,
+  X,
+  AlertTriangle,
   Clock,
+  Loader2,
+  Minus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type UniversalVerdictStatus =
+  | "running"
   | "passed"
   | "failed"
   | "errored"
@@ -28,21 +30,24 @@ export interface CaseVerdictBadgeProps {
 /**
  * CaseVerdictBadge — Unified status indicator icon for test case execution outcomes.
  *
- * Used across Verification, Evaluation, and Web Auto case lists.
+ * Uses clear, non-enclosed status symbols (Check / X / AlertTriangle / Minus)
+ * to avoid visual collision with row-level enable/disable toggles.
  */
 export function CaseVerdictBadge({
   status,
   className,
 }: CaseVerdictBadgeProps): ReactNode {
-  const iconClass = cn("h-3 w-3 shrink-0", className);
+  const iconClass = cn("h-3.5 w-3.5 shrink-0", className);
 
   switch (status) {
+    case "running":
+      return <Loader2 className={cn(iconClass, "animate-spin text-sky-500")} />;
     case "passed":
-      return <CircleCheck className={cn(iconClass, "text-emerald-500")} />;
+      return <Check className={cn(iconClass, "text-emerald-500 stroke-[2.5]")} />;
     case "failed":
-      return <CircleX className={cn(iconClass, "text-red-500")} />;
+      return <X className={cn(iconClass, "text-red-500 stroke-[2.5]")} />;
     case "errored":
-      return <CircleAlert className={cn(iconClass, "text-amber-500")} />;
+      return <AlertTriangle className={cn(iconClass, "text-amber-500")} />;
     case "timeout":
       return <Clock className={cn(iconClass, "text-amber-500")} />;
     case "skipped":
@@ -50,6 +55,6 @@ export function CaseVerdictBadge({
     case null:
     case undefined:
     default:
-      return <CircleSlash className={cn(iconClass, "text-muted-foreground/40")} />;
+      return <Minus className={cn(iconClass, "text-muted-foreground/35")} />;
   }
 }

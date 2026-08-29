@@ -69,17 +69,16 @@ export function NewWebAutoCaseDialog({
           }),
         });
         if (!res.ok) throw new Error("Failed to update case");
-        await mutate((key: string) => typeof key === "string" && key.startsWith(`/api/web-auto-cases?suiteId=${suiteId}`));
+        await mutate(`/api/web-auto-suites/${suiteId}/cases`);
         toast.success("Updated successfully");
         onOpenChange(false);
         return;
       }
 
-      const res = await fetch("/api/web-auto-cases", {
+      const res = await fetch(`/api/web-auto-suites/${suiteId}/cases`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          suiteId,
           name: trimmedName,
           scriptContent: null,
           assertions: [],
@@ -91,7 +90,7 @@ export function NewWebAutoCaseDialog({
       }
       const createdCase = await res.json();
 
-      await mutate((key: string) => typeof key === "string" && key.startsWith(`/api/web-auto-cases?suiteId=${suiteId}`));
+      await mutate(`/api/web-auto-suites/${suiteId}/cases`);
       bumpCaseCount(suiteId, 1);
       setSelectedCaseId(createdCase.id);
       

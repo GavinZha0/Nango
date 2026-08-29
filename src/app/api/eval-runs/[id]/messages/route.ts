@@ -12,7 +12,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, and } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -69,10 +69,19 @@ export const GET = withSession<{ id: string }>(
       return Response.json({ messages: [] });
     }
 
+    const isAdmin = session.user.role === "admin";
+    const whereClause =
+      params.id === "playground" && !isAdmin
+        ? and(
+            eq(EntityRunTable.threadId, targetThreadId),
+            eq(EntityRunTable.ownerId, session.user.id),
+          )
+        : eq(EntityRunTable.threadId, targetThreadId);
+
     const runs = await db
       .select({ id: EntityRunTable.id, inputTask: EntityRunTable.inputTask })
       .from(EntityRunTable)
-      .where(eq(EntityRunTable.threadId, targetThreadId))
+      .where(whereClause)
       .orderBy(asc(EntityRunTable.startedAt));
 
     if (runs.length === 0) {
