@@ -15,7 +15,7 @@ import type {
   AssertionSpec,
   AssertionResult,
   ErrorEnvelope,
-} from "@/lib/verification/types";
+} from "@/lib/assertions";
 import type {
   WebAutoSuiteEntity,
   WebAutoCaseEntity,
@@ -49,14 +49,10 @@ export interface ExpectationAssertion {
 }
 
 /** Extended assertion spec for Web Auto (verification types + expectation) */
-export type WebAutoAssertionSpec = AssertionSpec | ExpectationAssertion;
+export type WebAutoAssertionSpec = AssertionSpec;
 
 /** Extended assertion result for Web Auto */
-export interface WebAutoAssertionResult extends AssertionResult {
-  /** For expectation assertions, includes LLM evaluation details */
-  llmScore?: number;
-  llmFeedback?: string;
-}
+export type WebAutoAssertionResult = AssertionResult;
 
 /** Structured extraction output for successful Playwright MCP execution */
 export interface NormalizedWebAutoOutput {
@@ -105,6 +101,12 @@ export interface WebAutoExecutionOutcome {
   executionOutput: unknown;
   /** Whether output was truncated for persistence */
   outputTruncated: boolean;
+  /** Unified per-assertion verdict list (deterministic & LLM judge) */
+  assertionResults: AssertionResult[];
+  /** Overall LLM score */
+  score?: number;
+  /** Overall LLM feedback */
+  feedback?: string;
   /** Combined verdict from both assertion layers */
   verdict: WebAutoVerdict;
   /** Error envelope if execution failed */
@@ -179,7 +181,10 @@ export interface WriteWebAutoCaseResultInput {
   caseId: number;
   status: "passed" | "failed" | "errored";
   executionOutput: unknown;
-  verdict: WebAutoVerdict;
+  assertionResults?: AssertionResult[];
+  score?: number;
+  feedback?: string;
+  verdict?: WebAutoVerdict;
   error: ErrorEnvelope | null;
   startedAt: number;
   finishedAt?: number;

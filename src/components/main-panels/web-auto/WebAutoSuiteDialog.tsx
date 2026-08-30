@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,6 +23,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { WebAutoSuiteRow, WebAutoTarget } from "@/store/web-auto-store";
+import { useWorkspaceStore } from "@/store/workspace";
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 export interface WebAutoSuiteDialogProps {
   open: boolean;
@@ -47,11 +51,44 @@ export function WebAutoSuiteDialog({
   const isEdit = !!suite;
   const isTarget = isEdit && suite?.parentId === null;
 
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const evaluators = useMemo(
+    () => builtinAgents.filter((a) => a.role === "evaluator"),
+    [builtinAgents],
+  );
+
+  const { data: mcpServers = [] } = useSWR<
+    Array<{ id: string; name: string; enabled?: boolean }>
+  >("/api/mcp-servers", fetcher);
+
+  const autoMatchedPlaywrightServer = useMemo(() => {
+    if (!mcpServers || mcpServers.length === 0) return null;
+    const exactMatch = mcpServers.find(
+      (s) =>
+        s.name.toLowerCase() === "playwright" ||
+        s.name.toLowerCase() === "playwright-mcp",
+    );
+    if (exactMatch) return exactMatch;
+    return (
+      mcpServers.find((s) => s.name.toLowerCase().includes("playwright")) ??
+      null
+    );
+  }, [mcpServers]);
+
   const [name, setName] = useState<string>(suite?.name ?? "");
   const [description, setDescription] = useState<string>(suite?.description ?? "");
   const [selectedTargetId, setSelectedTargetId] = useState<string>("");
   const [newTargetName, setNewTargetName] = useState<string>("");
+  const [selectedEvalId, setSelectedEvalId] = useState<string>(
+    suite?.evaluatorAgentId ?? "",
+  );
+  const [userSelectedMcpId, setUserSelectedMcpId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  const effectiveMcpId =
+    userSelectedMcpId !== null
+      ? userSelectedMcpId
+      : (suite?.mcpServerId ?? defaultMcpServerId ?? autoMatchedPlaywrightServer?.id ?? "");
 
   const [lastOpen, setLastOpen] = useState<boolean>(open);
   const [lastSuiteId, setLastSuiteId] = useState<string | null>(suite?.id ?? null);
@@ -63,6 +100,8 @@ export function WebAutoSuiteDialog({
       setName(suite?.name ?? "");
       setDescription(suite?.description ?? "");
       setNewTargetName("");
+      setSelectedEvalId(suite?.evaluatorAgentId ?? "");
+      setUserSelectedMcpId(suite?.mcpServerId ?? null);
       if (defaultTargetId) {
         setSelectedTargetId(defaultTargetId);
       } else if (targets.length > 0) {
@@ -90,6 +129,8 @@ export function WebAutoSuiteDialog({
           body: JSON.stringify({
             name: name.trim(),
             description: description.trim() || null,
+            evaluatorAgentId: !isTarget && selectedEvalId ? selectedEvalId : null,
+            mcpServerId: !isTarget && effectiveMcpId ? effectiveMcpId : null,
           }),
         });
         if (!res.ok) throw new Error("Failed to update");
@@ -133,7 +174,8 @@ export function WebAutoSuiteDialog({
           name: name.trim(),
           description: description.trim() || null,
           parentId: targetId,
-          mcpServerId: defaultMcpServerId,
+          mcpServerId: effectiveMcpId ? effectiveMcpId : null,
+          evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
         }),
       });
       if (!suiteRes.ok) throw new Error("Failed to create automation suite");
@@ -232,6 +274,66 @@ export function WebAutoSuiteDialog({
               autoFocus={!isCreatingNewTarget}
             />
           </div>
+
+          {/* Evaluator (Only for Suites, not Target groups) */}
+          {!isTarget && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="eval-agent">Evaluator</Label>
+              <Select
+                value={selectedEvalId || "__none__"}
+                onValueChange={(val) => setSelectedEvalId(val === "__none__" ? "" : (val ?? ""))}
+                disabled={isSubmitting}
+              >
+                <SelectTrigger id="eval-agent" className="w-full">
+                  <SelectValue placeholder="None">
+                    {selectedEvalId === "" || selectedEvalId === "__none__"
+                      ? "None"
+                      : evaluators.find((a) => a.id === selectedEvalId)?.name || "None"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__" label="None">
+                    None
+                  </SelectItem>
+                  {evaluators.map((a) => (
+                    <SelectItem key={a.id} value={a.id} label={a.name}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* MCP Server (Only for Suites, not Target groups) */}
+          {!isTarget && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="mcp-server">MCP Server</Label>
+              <Select
+                value={effectiveMcpId || "__none__"}
+                onValueChange={(val) => setUserSelectedMcpId(val === "__none__" ? "" : (val ?? ""))}
+                disabled={isSubmitting}
+              >
+                <SelectTrigger id="mcp-server" className="w-full">
+                  <SelectValue placeholder="None">
+                    {effectiveMcpId === "" || effectiveMcpId === "__none__"
+                      ? "None"
+                      : mcpServers.find((s) => s.id === effectiveMcpId)?.name || "None"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__" label="None">
+                    None
+                  </SelectItem>
+                  {mcpServers.map((s) => (
+                    <SelectItem key={s.id} value={s.id} label={s.name}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Description */}
           <div className="flex flex-col gap-1.5">

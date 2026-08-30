@@ -21,11 +21,11 @@ import {
   TOOL_FAILURE_CAUSE,
   type ToolFailureCause,
 } from "@/lib/runner/tool-failure";
-import { resolveInput } from "./resolve-input";
-import { runAssertions } from "./assertions";
+import { evaluateAssertions, resolveInput } from "@/lib/assertions";
 import { classifyMcpError } from "./error-source";
 import type {
   AssertionSpec,
+  AssertionResult,
   CaseExecutionOutcome,
   ErrorEnvelope,
 } from "./types";
@@ -151,8 +151,12 @@ export async function runMcpCase(
     }
 
     const mcpIsError = isMcpIsError(raw);
-    const assertionResults = runAssertions(raw, input.assertions, resolvedInput, runContext);
-    const allAssertionsPassed = assertionResults.every((r) => r.ok);
+    const outcome = evaluateAssertions(raw, input.assertions, {
+      input: resolvedInput,
+      runContext,
+    });
+    const assertionResults = outcome.deterministicResults;
+    const allAssertionsPassed = outcome.allDeterministicPassed;
     const passed = !mcpIsError && allAssertionsPassed;
 
     let topLineError: ErrorEnvelope | null = null;
@@ -203,12 +207,23 @@ function failedOutcome(args: {
   durationMs: number;
   error: ErrorEnvelope;
   resolvedInput?: Record<string, unknown>;
+  partialAssertionResults?: AssertionResult[];
 }): CaseExecutionOutcome {
+  const assertionResults: AssertionResult[] = [
+    ...(args.partialAssertionResults ?? []),
+    {
+      index: args.partialAssertionResults?.length ?? 0,
+      type: "error",
+      ok: false,
+      errorSource: args.error.source,
+      message: args.error.message,
+    },
+  ];
   return {
     status: "errored",
     resultPayload: null,
     resultTruncated: false,
-    assertionResults: [],
+    assertionResults,
     error: args.error,
     startedAt: args.startedAt,
     durationMs: args.durationMs,

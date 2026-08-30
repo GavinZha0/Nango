@@ -13,7 +13,7 @@ export * from "./types";
 export * as storage from "./storage";
 export { runMcpCase } from "./runner-mcp";
 export { startSuiteRun } from "./run-orchestrator";
-export { runAssertions } from "./assertions";
+export { evaluateAssertions as runAssertions, evaluateAssertions } from "@/lib/assertions";
 export { classifyMcpError } from "./error-source";
 export { publishVerificationFrame } from "./event-bus-channel";
 export { recoverStrandedVerificationRuns } from "./recovery";

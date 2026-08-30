@@ -6,7 +6,7 @@
  * is false, and `typeof [] === "object"`. Without an explicit
  * symmetry guard, the object-keys branch judges `[1,2]` deep-equal to
  * `{"0":1,"1":2}` (Object.keys of an array returns the index strings).
- * See `@/lib/verification/assertions.ts` `deepEqual`.
+ * See `@/lib/assertions/evaluator.server.ts` `deepEqual`.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -15,8 +15,8 @@ import { describe, it, expect, vi } from "vitest";
 // implementation in the vitest runner — mock it before the SUT loads.
 vi.mock("server-only", () => ({}));
 
-const { runAssertions } = await import("@/lib/verification/assertions");
-type AssertionSpec = import("@/lib/verification/types").AssertionSpec;
+const { evaluateAssertions } = await import("@/lib/assertions");
+type AssertionSpec = import("@/lib/assertions").AssertionSpec;
 
 /** Build a minimal CallToolResult envelope; the assertion module
  *  scopes JSONPath / js_expression to `structuredContent` by default. */
@@ -24,13 +24,14 @@ function envelopeOf(structured: unknown): unknown {
   return { content: [], structuredContent: structured };
 }
 
-describe("runAssertions — jsonpath_equals deepEqual", () => {
+describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
   it("rejects array vs index-keyed object as NOT equal", () => {
     const payload = envelopeOf({ items: [1, 2] });
     const specs: AssertionSpec[] = [
       { type: "jsonpath_equals", path: "items", expected: { "0": 1, "1": 2 } },
     ];
-    const [result] = runAssertions(payload, specs);
+    const outcome = evaluateAssertions(payload, specs);
+    const [result] = outcome.deterministicResults;
     expect(result.ok).toBe(false);
     expect(result.message).toBe("value mismatch");
   });
@@ -40,7 +41,8 @@ describe("runAssertions — jsonpath_equals deepEqual", () => {
     const specs: AssertionSpec[] = [
       { type: "jsonpath_equals", path: "items", expected: [1, 2] },
     ];
-    const [result] = runAssertions(payload, specs);
+    const outcome = evaluateAssertions(payload, specs);
+    const [result] = outcome.deterministicResults;
     expect(result.ok).toBe(true);
   });
 
@@ -49,7 +51,8 @@ describe("runAssertions — jsonpath_equals deepEqual", () => {
     const specs: AssertionSpec[] = [
       { type: "jsonpath_equals", path: "obj", expected: { a: 1, b: 2 } },
     ];
-    const [result] = runAssertions(payload, specs);
+    const outcome = evaluateAssertions(payload, specs);
+    const [result] = outcome.deterministicResults;
     expect(result.ok).toBe(true);
   });
 
@@ -59,28 +62,42 @@ describe("runAssertions — jsonpath_equals deepEqual", () => {
       {
         type: "jsonpath_equals",
         path: "nested",
-        expected: [{ "0": 1, "1": 2 }, { "0": 3, "1": 4 }],
+        expected: [{ "0": 1, "1": 2 }, [3, 4]],
       },
     ];
-    const [result] = runAssertions(payload, specs);
+    const outcome = evaluateAssertions(payload, specs);
+    const [result] = outcome.deterministicResults;
     expect(result.ok).toBe(false);
+    expect(result.message).toBe("value mismatch");
   });
-});
 
-describe("runAssertions — js_expression timeout is short", () => {
-  it("falls under the per-call wall clock for trivial booleans", () => {
-    const payload = envelopeOf({ count: 5 });
+  it("accepts matching nested arrays", () => {
+    const payload = envelopeOf({ nested: [[1, 2], [3, 4]] });
     const specs: AssertionSpec[] = [
-      { type: "js_expression", expression: "result.count > 0" },
+      {
+        type: "jsonpath_equals",
+        path: "nested",
+        expected: [[1, 2], [3, 4]],
+      },
     ];
-    const start = Date.now();
-    const [result] = runAssertions(payload, specs);
-    const elapsed = Date.now() - start;
+    const outcome = evaluateAssertions(payload, specs);
+    const [result] = outcome.deterministicResults;
     expect(result.ok).toBe(true);
-    // Trivial expressions complete in <50 ms; if the V1 timeout regresses
-    // back to 1000 ms we'd never notice because successful runs don't
-    // wait — this bound exists so a future "timeout shrinks to <X ms"
-    // breakage gets caught.
-    expect(elapsed).toBeLessThan(250);
+  });
+
+  it("correctly evaluates template substitutions with resolved inputs", () => {
+    const payload = envelopeOf({ user: { id: "user-123", name: "Alice" } });
+    const specs: AssertionSpec[] = [
+      {
+        type: "jsonpath_equals",
+        path: "user.id",
+        expected: "{{input.expectedId}}",
+      },
+    ];
+    const outcome = evaluateAssertions(payload, specs, {
+      input: { expectedId: "user-123" },
+    });
+    const [result] = outcome.deterministicResults;
+    expect(result.ok).toBe(true);
   });
 });

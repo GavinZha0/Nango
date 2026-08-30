@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 import type { AssertionSpec } from "@/lib/assertions";
+import { AssertionVerdictList, LlmFeedbackCard } from "@/components/main-panels/common/verdicts";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -43,7 +44,10 @@ const fetcher = async (url: string) => {
 export interface SingleCaseRunOutcome {
   status: "passed" | "failed" | "errored";
   executionOutput: unknown;
-  verdict: {
+  assertionResults?: import("@/lib/assertions").AssertionResult[];
+  score?: number;
+  feedback?: string;
+  verdict?: {
     deterministic: { passed: boolean; results: Array<{ index: number; ok: boolean; type: string; message?: string; expected?: unknown; actual?: unknown }> };
     llm?: { passed: boolean; score?: number; feedback?: string; expectationResults: Array<{ expectation: string; score: number; feedback: string }> };
     overall: { passed: boolean; reason: string };
@@ -131,11 +135,23 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const displayOutcome = useMemo<SingleCaseRunOutcome | null>(() => {
     if (inHistoryView) {
       if (!runSnapshot || !selectedCaseId) return null;
-      const historyCaseResult = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
+      const historyCaseResult = runSnapshot.results.find((r) => r.caseId === selectedCaseId) as unknown as {
+        status: "passed" | "failed" | "errored";
+        executionOutput: unknown;
+        assertionResults?: import("@/lib/assertions").AssertionResult[];
+        score?: number | null;
+        feedback?: string | null;
+        verdict?: SingleCaseRunOutcome["verdict"];
+        error: { source: string; message: string; details?: unknown } | null;
+        durationMs: number;
+      } | undefined;
       if (!historyCaseResult) return null;
       return {
         status: historyCaseResult.status,
         executionOutput: historyCaseResult.executionOutput,
+        assertionResults: historyCaseResult.assertionResults,
+        score: historyCaseResult.score ?? undefined,
+        feedback: historyCaseResult.feedback ?? undefined,
         verdict: historyCaseResult.verdict,
         error: historyCaseResult.error,
         durationMs: historyCaseResult.durationMs,
@@ -232,12 +248,6 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
       setJsonError(null);
     }
   }, [selectedCase]);
-
-  const deterministicSpecs = useMemo(() => {
-    return draftAssertions.filter(
-      (a) => a.type !== "expectation" && a.type !== "llm_expectation",
-    );
-  }, [draftAssertions]);
 
   const currentCaseInput = (selectedCase?.input ?? {}) as Record<string, unknown>;
   const isDirty = selectedCase && (
@@ -744,117 +754,23 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   </div>
                 </div>
                 <div className="flex flex-col min-h-0 overflow-hidden">
-                  <div className="flex h-8 shrink-0 items-center gap-2 border-t border-border/60 bg-muted/20 px-3">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Verdicts
-                    </span>
-                    {displayOutcome?.verdict && (
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        ({displayOutcome.verdict.deterministic.results.length + (displayOutcome.verdict.llm?.expectationResults.length || 0)})
-                      </span>
-                    )}
-                  </div>
-                  <div className="min-h-0 flex-1 px-3 pb-2 pt-1 overflow-y-auto">
-                    {displayOutcome?.verdict ? (
-                      <div className="space-y-2">
-                        {/* Deterministic Assertions */}
-                        {displayOutcome.verdict.deterministic.results.length === 0 && !displayOutcome.verdict.llm ? (
-                          <div className="text-[11px] text-muted-foreground italic pl-1">
-                            No assertions — smoke test (passes iff script executes without error).
-                          </div>
-                        ) : (
-                          <ul className="space-y-1">
-                            {displayOutcome.verdict.deterministic.results.map((res) => {
-                              const spec = deterministicSpecs[res.index] as Record<string, unknown> | undefined;
-                              return (
-                                <li
-                                  key={res.index}
-                                  className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]"
-                                >
-                                  <span
-                                    className={`shrink-0 font-semibold ${
-                                      res.ok
-                                        ? "text-emerald-600 dark:text-emerald-400"
-                                        : "text-red-600 dark:text-red-400"
-                                    }`}
-                                  >
-                                    {res.ok ? "✓" : "✗"}
-                                  </span>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <span className="text-muted-foreground break-all">
-                                        #{res.index + 1} · {getConditionDescription(res, spec)}
-                                      </span>
-                                      {!res.ok && res.actual !== undefined && (
-                                        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
-                                          ({renderActualValue(res.actual)})
-                                        </span>
-                                      )}
-                                    </div>
-                                    {res.message && res.message !== "value mismatch" && (
-                                      <p className="break-words text-[10px] text-destructive/80 mt-0.5">{res.message}</p>
-                                    )}
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-
-                        {/* LLM Expectations (AI Evaluator) */}
-                        {displayOutcome.verdict.llm && displayOutcome.verdict.llm.expectationResults.length > 0 && (
-                          <div className="space-y-1 pt-1">
-                            {displayOutcome.verdict.llm.feedback && (
-                              <div className="rounded border bg-muted/20 p-2 text-xs text-muted-foreground leading-relaxed mb-1.5">
-                                <span className="font-semibold text-foreground">AI Feedback: </span>
-                                {displayOutcome.verdict.llm.feedback}
-                              </div>
-                            )}
-                            <ul className="space-y-1">
-                              {displayOutcome.verdict.llm.expectationResults.map((exp, idx) => {
-                                const passed = (exp.score ?? 0) >= 60;
-                                return (
-                                  <li
-                                    key={idx}
-                                    className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 text-[11px]"
-                                  >
-                                    <span
-                                      className={`shrink-0 font-semibold ${
-                                        passed
-                                          ? "text-emerald-600 dark:text-emerald-400"
-                                          : "text-red-600 dark:text-red-400"
-                                      }`}
-                                    >
-                                      {passed ? "✓" : "✗"}
-                                    </span>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-start justify-between gap-2">
-                                        <span className="text-muted-foreground break-all">
-                                          Expectation #{idx + 1}: {exp.expectation}
-                                        </span>
-                                        <span className={`shrink-0 font-mono text-[10px] font-semibold ${passed ? "text-emerald-600" : "text-red-600"}`}>
-                                          Score: {exp.score ?? 0}/100
-                                        </span>
-                                      </div>
-                                      {exp.feedback && (
-                                        <p className="break-words text-[10px] text-muted-foreground mt-0.5 leading-normal">
-                                          {exp.feedback}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                        No verdict yet.
-                      </div>
-                    )}
-                  </div>
+                  {displayOutcome?.feedback && (
+                    <div className="p-3 pb-0">
+                      <LlmFeedbackCard
+                        feedback={displayOutcome.feedback}
+                        score={displayOutcome.score}
+                      />
+                    </div>
+                  )}
+                  <AssertionVerdictList
+                    verdicts={
+                      displayOutcome?.assertionResults ??
+                      displayOutcome?.verdict?.deterministic?.results
+                    }
+                    assertions={draftAssertions as unknown as readonly AssertionSpec[]}
+                    error={displayOutcome?.error as import("@/lib/assertions").ErrorEnvelope | null}
+                    title="Verdicts"
+                  />
                 </div>
               </div>
             </div>
@@ -990,55 +906,6 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
       )}
     </div>
   );
-}
-
-function getConditionDescription(
-  verdict: { type: string; path?: string; expected?: unknown },
-  spec?: Record<string, unknown>,
-): string {
-  if (verdict.type === "jsonpath_equals") {
-    const path = verdict.path ?? (spec?.path as string) ?? "";
-    const expected =
-      verdict.expected !== undefined ? verdict.expected : spec?.expected;
-    return `${path || "path"} === ${JSON.stringify(expected)}`;
-  }
-
-  if (verdict.type === "js_expression") {
-    if (spec?.expression && typeof spec.expression === "string") {
-      return spec.expression;
-    }
-    return "js_expression";
-  }
-
-  if (verdict.type === "json_schema") {
-    if (spec?.schema && typeof spec.schema === "object") {
-      const s = spec.schema as {
-        type?: string;
-        properties?: Record<string, unknown>;
-      };
-      const typeStr = s.type ? String(s.type) : "object";
-      const props =
-        s.properties && typeof s.properties === "object"
-          ? Object.keys(s.properties)
-          : [];
-      if (props.length > 0) {
-        return `JSON Schema (properties: ${props.join(", ")})`;
-      }
-      return `JSON Schema (type: ${typeStr})`;
-    }
-    return "json_schema";
-  }
-
-  return verdict.type;
-}
-
-function renderActualValue(val: unknown): string {
-  if (val === undefined) return "";
-  try {
-    return JSON.stringify(val);
-  } catch {
-    return String(val);
-  }
 }
 
 function formatHistoricalTimestamp(dateStr: string): string {

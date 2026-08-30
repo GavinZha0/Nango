@@ -43,6 +43,10 @@ export interface DeterministicCheckInput {
 // ─── Output ─────────────────────────────────────────────────────────
 
 export interface DeterministicCheckOutput {
+  /** Standard assertion results for DB storage and UI rendering */
+  assertionResults: import("@/lib/assertions").AssertionResult[];
+  /** Partitioned LLM judge assertions */
+  llmAssertions: Array<{ index: number; spec: import("@/lib/assertions").LlmJudgeAssertion }>;
   /** Full checklist — LLM items have `passed: null`, deterministic
    *  items have `passed: true/false`. */
   results: CriteriaCheckResult[];
@@ -59,29 +63,22 @@ export interface DeterministicCheckOutput {
 function getAssertionDescription(spec: AssertionSpec): string {
   switch (spec.type) {
     case "jsonpath":
-    case "jsonpath_equals": {
-      const path = spec.path || "path";
-      const op = "operator" in spec ? spec.operator : "==";
-      if (op === "exists") return `${path} exists`;
-      return `${path} ${op} ${JSON.stringify(spec.expected)}`;
-    }
-    case "js_expression":
-      return spec.expression;
-    case "tool_call": {
-      const count = spec.expectedCalls !== undefined ? spec.expectedCalls : 1;
-      if (count === 0) return `forbidden tool: ${spec.toolName}`;
-      return `tool: ${spec.toolName}${count > 1 ? ` (>= ${count} calls)` : ""}`;
-    }
-    case "metric":
-      return `${spec.metric} ${spec.operator} ${spec.threshold}`;
+    case "jsonpath_equals":
+      return `JSONPath ${spec.path} ${"operator" in spec && spec.operator ? spec.operator : "=="} ${JSON.stringify(spec.expected)}`;
     case "json_schema":
-      return "JSON Schema validation";
+      return "JSON Schema Draft 2020-12 validation";
+    case "js_expression":
+      return `JS Expression: ${spec.expression}`;
+    case "tool_call":
+      return `Tool Call ${spec.toolName}${spec.expectedCalls !== undefined ? ` (>= ${spec.expectedCalls})` : ""}`;
+    case "metric":
+      return `Metric ${spec.metric} ${spec.operator} ${spec.threshold}`;
     case "llm_judge":
     case "expectation":
     case "llm_expectation":
-      return spec.expectation;
+      return `LLM Judge: ${spec.expectation}`;
     default:
-      return (spec as { type: string }).type;
+      return "Custom assertion check";
   }
 }
 
@@ -106,7 +103,9 @@ export function runDeterministicChecks(
       metrics: input.metrics,
     });
 
-    for (const r of outcome.deterministicResults) {
+    const assertionResults = outcome.deterministicResults;
+
+    for (const r of assertionResults) {
       const isOk = r.ok;
       const spec = assertions[r.index];
       const desc = spec ? getAssertionDescription(spec) : `${r.type} check`;
@@ -122,6 +121,8 @@ export function runDeterministicChecks(
     }
 
     return {
+      assertionResults,
+      llmAssertions: outcome.llmAssertions,
       results,
       passedCount,
       totalCount,
@@ -215,6 +216,8 @@ export function runDeterministicChecks(
   }
 
   return {
+    assertionResults: [],
+    llmAssertions: [],
     results,
     passedCount,
     totalCount,

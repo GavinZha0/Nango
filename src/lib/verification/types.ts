@@ -24,49 +24,23 @@ export type {
 
 // --- Assertion specs (stored in test_case.assertions jsonb) -------------------
 
-export interface JsonSchemaAssertion {
-  type: "json_schema";
-  /** JSON Schema Draft 2020-12 — evaluated by ajv 8. */
-  schema: Record<string, unknown>;
-}
+import type {
+  AssertionSpec,
+  AssertionResult,
+  AssertionType,
+  JsonSchemaAssertion,
+  JsonPathEqualsAssertion,
+  JsExpressionAssertion,
+} from "@/lib/assertions";
 
-export interface JsonPathEqualsAssertion {
-  type: "jsonpath" | "jsonpath_equals";
-  /** JSONPath expression, e.g. "$.data.user.id". */
-  path: string;
-  operator?: string;
-  /** Deep-equal target. */
-  expected?: unknown;
-}
-
-export interface JsExpressionAssertion {
-  type: "js_expression";
-  /** JS expression evaluated in a `node:vm` sandbox with the tool
-   *  result bound as `result`. Truthy = pass. */
-  expression: string;
-}
-
-export type AssertionSpec =
-  | JsonSchemaAssertion
-  | JsonPathEqualsAssertion
-  | JsExpressionAssertion;
-
-export type AssertionType = AssertionSpec["type"];
-
-// --- Assertion verdicts (stored in test_case_result.assertion_results jsonb) -
-
-export interface AssertionResult {
-  /** Index into the original `assertions` array. */
-  index: number;
-  type: AssertionType;
-  ok: boolean;
-  /** Type-specific context fields. */
-  path?: string;
-  expected?: unknown;
-  actual?: unknown;
-  /** Optional human-readable detail (validator error text, etc.). */
-  message?: string;
-}
+export type {
+  AssertionSpec,
+  AssertionResult,
+  AssertionType,
+  JsonSchemaAssertion,
+  JsonPathEqualsAssertion,
+  JsExpressionAssertion,
+};
 
 // --- Error envelope (stored in test_case_result.error jsonb) -----------------
 

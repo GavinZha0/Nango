@@ -43,6 +43,7 @@ import {
   scoreToLevel,
   barColorForScore,
 } from "@/lib/evaluation/config";
+import { AssertionVerdictRow } from "@/components/main-panels/common/verdicts";
 import { extractTargetCase } from "@/components/main-panels/common";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import { evalCaseActions } from "@/store/evaluation-cases";
@@ -880,7 +881,7 @@ function EvaluationPanel({
               />
             ))}
 
-            {/* Deterministic Assertions — collapsible, shown only when evaluation results are available */}
+            {/* Assertions / Deterministic section — collapsible */}
             {hasAssertionResults && (
               <div className="pt-1">
                 <button
@@ -888,7 +889,7 @@ function EvaluationPanel({
                   onClick={() => setAssertionsExpanded((v) => !v)}
                   className="flex w-full items-center gap-2 group"
                 >
-                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">Deterministic</span>
+                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">Assertions</span>
                   <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                     {assertionScore !== null && (
                       <div
@@ -910,33 +911,20 @@ function EvaluationPanel({
                   <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
                     <ul className="space-y-1">
                       {resultsList.map((item, i) => (
-                        <li
+                        <AssertionVerdictRow
                           key={i}
-                          className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]"
-                        >
-                          <span
-                            className={cn(
-                              "shrink-0 font-semibold",
-                              item.passed
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : "text-red-600 dark:text-red-400",
-                            )}
-                          >
-                            {item.passed ? "✓" : "✗"}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="text-muted-foreground break-all">
-                                #{i + 1} · {item.label}
-                              </span>
-                              {item.passed === false && item.actual !== undefined && (
-                                <span className="shrink-0 text-red-500/80 dark:text-red-400/80 font-mono text-[10px]">
-                                  ({item.actual})
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </li>
+                          verdict={
+                            "type" in item
+                              ? (item as unknown as import("@/lib/assertions").AssertionResult)
+                              : {
+                                  index: i,
+                                  type: (item as CriteriaCheckResult).kind === "metric" ? "metric" : "jsonpath",
+                                  ok: Boolean((item as CriteriaCheckResult).passed),
+                                  message: (item as CriteriaCheckResult).label,
+                                  actual: (item as CriteriaCheckResult).actual,
+                                }
+                          }
+                        />
                       ))}
                     </ul>
                   </div>

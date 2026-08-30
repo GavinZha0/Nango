@@ -296,6 +296,12 @@ export async function writeWebAutoCaseResult(
   input: WriteWebAutoCaseResultInput,
 ): Promise<WebAutoCaseResultEntity> {
   const { truncatedPayload } = truncatePayload(input.executionOutput);
+  const assertionResults =
+    input.assertionResults ??
+    input.verdict?.deterministic?.results ??
+    [];
+  const score = input.score ?? input.verdict?.llm?.score ?? null;
+  const feedback = input.feedback ?? input.verdict?.llm?.feedback ?? null;
 
   const [row] = await db
     .insert(WebAutoCaseResultTable)
@@ -304,7 +310,9 @@ export async function writeWebAutoCaseResult(
       caseId: input.caseId,
       status: input.status,
       executionOutput: truncatedPayload ?? null,
-      verdict: input.verdict as unknown,
+      assertionResults,
+      score,
+      feedback,
       error: input.error as unknown,
       durationMs: input.durationMs,
       startedAt: new Date(input.startedAt),

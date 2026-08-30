@@ -145,12 +145,14 @@ export function EvaluationSuiteEditor({
     if (!runSnapshot || selectedCaseId === null) return undefined;
     const row = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
     if (!row) return undefined;
+    const resultsList = (row.assertionResults ?? (row as unknown as { criteriaResults?: unknown[] }).criteriaResults ?? []) as unknown[];
     return {
       status: row.status as "passed" | "failed" | "errored",
       score: row.score,
       dimensionScores: row.dimensionScores as Record<string, number>,
       criteriaScore: row.criteriaScore,
-      criteriaResults: row.criteriaResults as unknown[],
+      assertionResults: resultsList,
+      criteriaResults: resultsList,
       feedback: row.feedback,
       durationMs: row.durationMs,
       outputTokens: row.outputTokens,
@@ -209,7 +211,11 @@ export function EvaluationSuiteEditor({
     if (!suiteId) return;
     try {
       setIsSuiteRunning(true);
-      const res = await fetch(`/api/eval-suites/${suiteId}/run`, { method: "POST" });
+      const res = await fetch("/api/eval-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suiteId }),
+      });
       if (!res.ok) {
         setIsSuiteRunning(false);
         toast.error("Failed to run evaluation suite");

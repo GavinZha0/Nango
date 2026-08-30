@@ -15,8 +15,8 @@ import "server-only";
 import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { recordRunNotification } from "@/lib/runner/notifications";
+import { evaluateAssertions } from "@/lib/assertions";
 import { runWebAutoMcp } from "./runner-mcp";
-import { runDeterministicAssertions, extractExpectationAssertions } from "./assertions";
 import { runWebAutoEvaluation } from "./evaluator";
 import * as storage from "./storage";
 import type {
@@ -48,10 +48,18 @@ export async function runWebAutoCase(
   const rawInput = (input.case.input ?? {}) as Record<string, unknown>;
   const scriptContent = typeof rawInput.script === "string" ? rawInput.script : null;
   if (!scriptContent) {
+    const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
+      index: 0,
+      type: "error",
+      ok: false,
+      errorSource: "internal",
+      message: "Case has no script content to execute",
+    };
     return {
       status: "errored",
       executionOutput: null,
       outputTruncated: false,
+      assertionResults: [errorAssertionResult],
       verdict: {
         deterministic: { passed: false, results: [] },
         overall: { passed: false, reason: "No script content provided" },
@@ -66,10 +74,18 @@ export async function runWebAutoCase(
   }
 
   if (!input.suite.mcpServerId) {
+    const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
+      index: 0,
+      type: "error",
+      ok: false,
+      errorSource: "internal",
+      message: "Suite has no MCP server configured for Playwright execution",
+    };
     return {
       status: "errored",
       executionOutput: null,
       outputTruncated: false,
+      assertionResults: [errorAssertionResult],
       verdict: {
         deterministic: { passed: false, results: [] },
         overall: { passed: false, reason: "Suite has no MCP server configured" },
@@ -94,10 +110,18 @@ export async function runWebAutoCase(
   });
 
   if (mcpResult.status === "errored") {
+    const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
+      index: 0,
+      type: "error",
+      ok: false,
+      errorSource: mcpResult.error?.source ?? "internal",
+      message: mcpResult.error?.message ?? "MCP execution failed",
+    };
     return {
       status: "errored",
       executionOutput: mcpResult.executionOutput,
       outputTruncated: false,
+      assertionResults: [errorAssertionResult],
       verdict: {
         deterministic: { passed: false, results: [] },
         overall: { passed: false, reason: "MCP execution failed" },
@@ -109,10 +133,18 @@ export async function runWebAutoCase(
   }
 
   if (mcpResult.status === "failed") {
+    const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
+      index: 0,
+      type: "error",
+      ok: false,
+      errorSource: mcpResult.error?.source ?? "upstream",
+      message: mcpResult.error?.message ?? "Playwright execution returned error",
+    };
     return {
       status: "failed",
       executionOutput: mcpResult.executionOutput,
       outputTruncated: false,
+      assertionResults: [errorAssertionResult],
       verdict: {
         deterministic: { passed: false, results: [] },
         overall: { passed: false, reason: "Playwright execution returned error" },
@@ -123,13 +155,16 @@ export async function runWebAutoCase(
     };
   }
 
-  // Step 2: Deterministic assertions
-  const assertions = input.case.assertions as readonly import("./types").WebAutoAssertionSpec[];
-  const deterministicResult = runDeterministicAssertions(
-    mcpResult.executionOutput,
-    assertions,
-    suiteVariables,
-  );
+  // Step 2: Evaluate assertions using universal engine
+  const assertions = (input.case.assertions ?? []) as readonly import("@/lib/assertions").AssertionSpec[];
+  const outcome = evaluateAssertions(mcpResult.executionOutput, assertions, {
+    variables: suiteVariables,
+  });
+
+  const deterministicResult = {
+    passed: outcome.allDeterministicPassed,
+    results: outcome.deterministicResults,
+  };
 
   // Step 3: LLM evaluation (if configured and expectations exist)
   let llmResult: {
@@ -143,8 +178,21 @@ export async function runWebAutoCase(
     }>;
   } | null = null;
 
-  if (input.suite.evaluatorAgentId) {
-    const expectations = extractExpectationAssertions(assertions);
+  if (input.suite.evaluatorAgentId && outcome.llmAssertions.length > 0) {
+    const expectations = outcome.llmAssertions
+      .map((item) => {
+        const exp =
+          item.spec.expectation ||
+          (item.spec as unknown as { description?: string }).description ||
+          "";
+        return {
+          expectation: exp,
+          referenceImage: item.spec.referenceImage,
+          context: item.spec.context,
+        };
+      })
+      .filter((item) => item.expectation.trim().length > 0);
+
     if (expectations.length > 0) {
       try {
         const evalResult = await runWebAutoEvaluation({
@@ -164,7 +212,6 @@ export async function runWebAutoCase(
           { event: "web_auto_llm_evaluation_failed", err },
           "LLM evaluation failed",
         );
-        // LLM evaluation failure doesn't fail the whole case - we log it and continue
         llmResult = {
           passed: false,
           score: 0,
@@ -179,7 +226,28 @@ export async function runWebAutoCase(
     }
   }
 
-  // Step 4: Merge results
+  // Step 4: Merge unified assertionResults array (1:1 with input assertions)
+  const unifiedAssertionResults: import("@/lib/assertions").AssertionResult[] = [
+    ...(deterministicResult.results ?? []),
+  ];
+
+  if (outcome.llmAssertions.length > 0) {
+    outcome.llmAssertions.forEach((item, i) => {
+      const expRes = llmResult?.expectationResults?.[i];
+      unifiedAssertionResults.push({
+        index: item.index,
+        type: "llm_judge",
+        ok: expRes ? expRes.score >= 70 : (llmResult ? llmResult.passed : false),
+        score: expRes?.score ?? llmResult?.score ?? undefined,
+        feedback: expRes?.feedback ?? llmResult?.feedback ?? undefined,
+        expectation: item.spec.expectation,
+        reference: item.spec.reference,
+        referenceImage: item.spec.referenceImage,
+      });
+    });
+    unifiedAssertionResults.sort((a, b) => a.index - b.index);
+  }
+
   const verdict: WebAutoVerdict = {
     deterministic: {
       passed: deterministicResult.passed,
@@ -205,6 +273,9 @@ export async function runWebAutoCase(
     status: overallStatus,
     executionOutput: mcpResult.executionOutput,
     outputTruncated: false,
+    assertionResults: unifiedAssertionResults,
+    score: llmResult?.score,
+    feedback: llmResult?.feedback,
     verdict,
     error: null,
     startedAt,
@@ -377,6 +448,9 @@ async function runWebAutoSuiteCases(
       caseId: c.id,
       status: outcome.status,
       executionOutput: outcome.executionOutput,
+      assertionResults: outcome.assertionResults,
+      score: outcome.score,
+      feedback: outcome.feedback,
       verdict: outcome.verdict,
       error: outcome.error,
       startedAt: outcome.startedAt,

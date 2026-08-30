@@ -33,16 +33,15 @@ import { Loader2, Play, Check, Copy, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { AssertionVerdictList } from "@/components/main-panels/common/verdicts";
 import { formatTimestamp } from "@/components/admin/format";
 import { JsonView } from "@/components/ui/json-view";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { sanitizeWebAutoOutput } from "@/lib/web-auto/image-extractor";
 import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
-  AssertionResult,
   AssertionSpec,
   CaseExecutionOutcome,
-  ErrorEnvelope,
 } from "@/lib/verification/types";
 import { extractTargetCase } from "@/components/main-panels/common";
 import { AssertionsEditor } from "./AssertionsEditor";
@@ -876,147 +875,12 @@ function VerdictsPane({
   readOnly: _readOnly,
   assertions = [],
 }: VerdictsPaneProps): ReactNode {
-  const verdicts: readonly AssertionResult[] = outcome?.assertionResults ?? [];
-  const error: ErrorEnvelope | null = outcome?.error ?? null;
-  const hasContent: boolean = verdicts.length > 0 || !!error;
-
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-t border-border/60 bg-muted/20 px-3">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Verdicts
-        </span>
-        {verdicts.length > 0 && (
-          <span className="text-[10px] text-muted-foreground font-mono">
-            ({verdicts.length})
-          </span>
-        )}
-      </div>
-      <div className="min-h-0 flex-1 px-3 pb-2 pt-2 overflow-y-auto">
-        {hasContent ? (
-          <div className="space-y-2">
-            {error && error.source !== "assertion" && <ErrorView err={error} />}
-            {verdicts.length > 0 && (
-              <ul className="space-y-1">
-                {verdicts.map((r, i) => (
-                  <AssertionVerdictRow 
-                    key={i} 
-                    verdict={r} 
-                    spec={assertions[r.index]} 
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            No verdict yet.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-function ErrorView({ err }: { err: ErrorEnvelope }): ReactNode {
-  return (
-    <div className="rounded border border-destructive/40 bg-destructive/10 p-2">
-      <p className="font-medium text-destructive">
-        [{err.source}] {err.message}
-      </p>
-      {err.details && (
-        <pre className="mt-1 overflow-x-auto text-[10px] text-destructive/80">
-          {JSON.stringify(err.details, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function getConditionDescription(
-  verdict: AssertionResult,
-  spec?: AssertionSpec,
-): string {
-  if (verdict.type === "jsonpath" || verdict.type === "jsonpath_equals") {
-    const path = verdict.path ?? (spec && "path" in spec ? spec.path : "");
-    const op = spec && "operator" in spec ? spec.operator : "==";
-    const expected = verdict.expected !== undefined 
-      ? verdict.expected 
-      : (spec && "expected" in spec ? spec.expected : undefined);
-    if (op === "exists") {
-      return `${path || "path"} exists`;
-    }
-    return `${path || "path"} ${op} ${JSON.stringify(expected)}`;
-  }
-  
-  if (verdict.type === "js_expression") {
-    if (spec && "expression" in spec) {
-      return spec.expression;
-    }
-    return "js_expression";
-  }
-  
-  if (verdict.type === "json_schema") {
-    if (spec && "schema" in spec && spec.schema) {
-      const typeStr = spec.schema.type ? String(spec.schema.type) : "object";
-      const props = spec.schema.properties && typeof spec.schema.properties === "object"
-        ? Object.keys(spec.schema.properties)
-        : [];
-      if (props.length > 0) {
-        return `JSON Schema (properties: ${props.join(", ")})`;
-      }
-      return `JSON Schema (type: ${typeStr})`;
-    }
-    return "json_schema";
-  }
-  
-  return verdict.type;
-}
-
-function AssertionVerdictRow({
-  verdict,
-  spec,
-}: {
-  verdict: AssertionResult;
-  spec?: AssertionSpec;
-}): ReactNode {
-  const renderActualValue = (val: unknown): string => {
-    if (val === undefined) return "";
-    try {
-      return JSON.stringify(val);
-    } catch {
-      return String(val);
-    }
-  };
-
-  return (
-    <li className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]">
-      <span
-        className={cn(
-          "shrink-0 font-semibold",
-          verdict.ok
-            ? "text-emerald-600 dark:text-emerald-400"
-            : "text-red-600 dark:text-red-400",
-        )}
-      >
-        {verdict.ok ? "✓" : "✗"}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <span className="text-muted-foreground break-all">
-            #{verdict.index + 1} · {getConditionDescription(verdict, spec)}
-          </span>
-          {!verdict.ok && verdict.actual !== undefined && (
-            <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
-              ({renderActualValue(verdict.actual)})
-            </span>
-          )}
-        </div>
-        {verdict.message && verdict.message !== "value mismatch" && (
-          <p className="break-words text-[10px] text-destructive/80 mt-0.5">{verdict.message}</p>
-        )}
-      </div>
-    </li>
+    <AssertionVerdictList
+      verdicts={outcome?.assertionResults}
+      assertions={assertions}
+      error={outcome?.error}
+      title="Verdicts"
+    />
   );
 }

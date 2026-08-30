@@ -358,6 +358,8 @@ export interface WriteCaseResultInput {
   score?: number | null;
   dimensionScores?: Record<string, number> | null;
   criteriaScore?: number | null;
+  assertionResults?: unknown;
+  /** Legacy alias for assertionResults */
   criteriaResults?: unknown;
   feedback?: string | null;
   threadId?: string | null;
@@ -371,6 +373,7 @@ export interface WriteCaseResultInput {
 export async function writeCaseResult(
   input: WriteCaseResultInput,
 ): Promise<void> {
+  const results = input.assertionResults ?? input.criteriaResults ?? [];
   await db.insert(EvalCaseResultTable).values({
     runId: input.runId,
     caseId: input.caseId,
@@ -378,7 +381,7 @@ export async function writeCaseResult(
     score: input.score ?? null,
     dimensionScores: input.dimensionScores ?? null,
     criteriaScore: input.criteriaScore ?? null,
-    criteriaResults: input.criteriaResults ?? null,
+    assertionResults: results,
     feedback: input.feedback ?? null,
     threadId: input.threadId ?? null,
     evaluatorThreadId: input.evaluatorThreadId ?? null,

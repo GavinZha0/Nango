@@ -67,6 +67,7 @@ export interface RunEvalCaseResult {
   score: number | null;
   dimensionScores?: Record<string, number>;
   criteriaScore?: number | null;
+  assertionResults?: import("@/lib/assertions").AssertionResult[];
   criteriaResults?: CriteriaCheckResult[];
   feedback?: string | null;
   error?: string;
@@ -469,6 +470,25 @@ export async function runEvalCase(
     baseline: scores.baseline_score,
   };
 
+  const unifiedAssertionResults: import("@/lib/assertions").AssertionResult[] = [
+    ...(checks.assertionResults ?? []),
+  ];
+  if (checks.llmAssertions && checks.llmAssertions.length > 0) {
+    for (const item of checks.llmAssertions) {
+      unifiedAssertionResults.push({
+        index: item.index,
+        type: "llm_judge",
+        ok: (scores.criteria_score ?? scores.baseline_score) >= EVAL_THRESHOLD_PASS,
+        score: scores.criteria_score ?? scores.baseline_score,
+        feedback: scores.feedback,
+        expectation: item.spec.expectation,
+        reference: item.spec.reference,
+        dimensionId: item.spec.dimensionId,
+      });
+    }
+    unifiedAssertionResults.sort((a, b) => a.index - b.index);
+  }
+
   if (input.runId) {
     await storage.writeCaseResult({
       runId: input.runId,
@@ -477,6 +497,7 @@ export async function runEvalCase(
       score: overallScore,
       dimensionScores: finalDimensionScores,
       criteriaScore: criteriaScoreFinal,
+      assertionResults: unifiedAssertionResults,
       criteriaResults: checks.results,
       feedback: scores.feedback,
       threadId: currentThreadId,
@@ -492,6 +513,7 @@ export async function runEvalCase(
     score: overallScore,
     dimensionScores: finalDimensionScores,
     criteriaScore: criteriaScoreFinal,
+    assertionResults: unifiedAssertionResults,
     criteriaResults: checks.results,
     feedback: scores.feedback,
     durationMs,
@@ -511,6 +533,7 @@ async function writeErrorResult(
   deterministicDetails?: {
     criteriaScore?: number | null;
     criteriaResults?: CriteriaCheckResult[];
+    assertionResults?: import("@/lib/assertions").AssertionResult[];
     durationMs?: number;
     outputTokens?: number;
     toolCallCount?: number;
@@ -518,6 +541,15 @@ async function writeErrorResult(
 ): Promise<void> {
   if (!input.runId) return;
   try {
+    const errorAssertionResults: import("@/lib/assertions").AssertionResult[] = [
+      ...(deterministicDetails?.assertionResults ?? []),
+      {
+        index: (deterministicDetails?.assertionResults?.length ?? 0),
+        type: "error",
+        ok: false,
+        message: errorMessage,
+      },
+    ];
     await storage.writeCaseResult({
       runId: input.runId,
       caseId: input.caseId,
@@ -526,6 +558,7 @@ async function writeErrorResult(
       threadId: targetRunId ?? null,
       evaluatorThreadId: evaluatorRunId ?? null,
       criteriaScore: deterministicDetails?.criteriaScore ?? null,
+      assertionResults: errorAssertionResults,
       criteriaResults: deterministicDetails?.criteriaResults ?? [],
       durationMs: deterministicDetails?.durationMs ?? (Date.now() - startMs),
       outputTokens: deterministicDetails?.outputTokens ?? null,

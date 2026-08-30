@@ -2,8 +2,10 @@
  * Universal Assertion Subsystem — server-side evaluation engine.
  *
  * Evaluates deterministic assertions against target payloads, tool execution
- * traces, and execution metrics. Never throws — maps all evaluation issues into
- * structured AssertionResult envelopes.
+ * traces, and execution metrics. Supports full dynamic token and reference
+ * variable interpolation.
+ *
+ * Never throws — maps all evaluation issues into structured AssertionResult envelopes.
  *
  * See docs/verification.md and docs/evaluation.md.
  */
@@ -24,6 +26,7 @@ import type {
   MetricAssertion,
   ToolCallAssertion,
 } from "./types";
+import { substituteInputTemplates } from "./variable-resolver";
 
 const ajv: Ajv2020 = new Ajv2020({ allErrors: true, strict: false });
 
@@ -31,6 +34,7 @@ const JS_EXPRESSION_TIMEOUT_MS = 250;
 
 export interface EvaluateAssertionsOptions {
   input?: unknown;
+  variables?: Record<string, unknown>;
   runContext?: Record<string, unknown>;
   toolCalls?: Array<{ name: string; args?: unknown }>;
   actualToolCallNames?: string[];
@@ -55,6 +59,30 @@ export function evaluateAssertions(
   assertions: readonly AssertionSpec[],
   options: EvaluateAssertionsOptions = {},
 ): EvaluationOutcome {
+  let targetPayload = payload;
+  const runContext: Record<string, unknown> = { ...(options.runContext ?? {}) };
+  if (!runContext.root) {
+    runContext.root = payload;
+  }
+
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "result" in payload &&
+    !("content" in payload)
+  ) {
+    const norm = payload as { result?: unknown; page?: unknown };
+    targetPayload = norm.result;
+    if (norm.page && !runContext.page) {
+      runContext.page = norm.page;
+    }
+  }
+
+  const mergedOptions: EvaluateAssertionsOptions = {
+    ...options,
+    runContext,
+  };
+
   const deterministicResults: AssertionResult[] = [];
   const llmAssertions: Array<{ index: number; spec: LlmJudgeAssertion }> = [];
 
@@ -65,7 +93,7 @@ export function evaluateAssertions(
       continue;
     }
 
-    const result = evaluateSingleDeterministic(spec, payload, index, options);
+    const result = evaluateSingleDeterministic(spec, targetPayload, index, mergedOptions);
     deterministicResults.push(result);
   }
 
@@ -113,10 +141,14 @@ function evaluateJsonPath(
   spec: JsonPathAssertion,
   payload: unknown,
   index: number,
-  _options: EvaluateAssertionsOptions,
+  options: EvaluateAssertionsOptions,
 ): AssertionResult {
   const operator = spec.operator || "==";
-  const expected = spec.expected;
+  const mergedContext: Record<string, unknown> = {
+    ...(options.variables ? { variables: options.variables } : {}),
+    ...(options.runContext ?? {}),
+  };
+  const expected = substituteInputTemplates(spec.expected, options.input, mergedContext);
   const { json, absolutePath } = resolveJsonPathScope(spec.path, payload);
 
   let actualList: unknown[];
@@ -238,7 +270,7 @@ function resolveJsonPathScope(
 export function extractStructuredData(payload: unknown): unknown {
   if (typeof payload !== "object" || payload === null) return {};
 
-  const env = payload as { content?: unknown; structuredContent?: unknown; result?: unknown };
+  const env = payload as { content?: unknown; structuredContent?: unknown; result?: unknown; page?: unknown };
 
   if (env.result !== undefined && env.result !== null) {
     return env.result;
@@ -323,10 +355,21 @@ function evaluateJsExpression(
         : {}),
       result: structured,
       $: structured,
-      root: payload,
+      root: options.runContext?.root ?? payload,
       input: options.input ?? {},
+      variables: options.variables ?? {},
+      ...(options.variables ?? {}),
       ...(options.runContext ?? {}),
     };
+
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "page" in payload &&
+      !(contextObj as Record<string, unknown>).page
+    ) {
+      contextObj.page = (payload as { page?: unknown }).page;
+    }
 
     const ok = runInNewContext(
       `(${spec.expression})`,

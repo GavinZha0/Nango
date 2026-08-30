@@ -2117,9 +2117,10 @@ export const EvalCaseResultTable = pgTable(
     >(),
     /** Case-level criteria score (evaluator expectation score × deterministic pass rate). */
     criteriaScore: integer("criteria_score"),
-    /** Per-item deterministic check results for UI display.
-     *  Array of { label, kind, passed, actual? }. */
-    criteriaResults: jsonb("criteria_results"),
+    /** Unified per-assertion verdict list (deterministic & LLM judge). */
+    assertionResults: jsonb("assertion_results")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** Evaluator's text feedback (2-5 sentences). */
     feedback: text("feedback"),
     /** Thread ID linking to the target agent's entity_run. */
@@ -2358,7 +2359,14 @@ export const WebAutoCaseResultTable = pgTable("web_auto_case_result", {
     .references(() => WebAutoCaseTable.id, { onDelete: "cascade" }),
   status: text("status").notNull(), // 'passed', 'failed', 'errored'
   executionOutput: jsonb("execution_output"),
-  verdict: jsonb("verdict"),
+  /** Unified per-assertion verdict list (deterministic & LLM judge). */
+  assertionResults: jsonb("assertion_results")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  /** Overall LLM evaluation score (0-100). */
+  score: integer("score"),
+  /** Evaluator text feedback. */
+  feedback: text("feedback"),
   error: jsonb("error"),
   durationMs: integer("duration_ms"),
   startedAt: timestamp("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),

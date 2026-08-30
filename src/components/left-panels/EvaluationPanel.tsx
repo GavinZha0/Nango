@@ -373,10 +373,11 @@ export function EvaluationPanel(): ReactNode {
     const key = `${group.agentId}:${group.agentSource}`;
     setRunningAgentKey(key);
     try {
-      const res = await fetch(`/api/eval-agents/${group.agentId}/run`, {
+      const res = await fetch("/api/eval-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          agentId: group.agentId,
           agentSource: group.agentSource,
           credentialId: group.credentialId,
         }),
@@ -394,7 +395,11 @@ export function EvaluationPanel(): ReactNode {
     e.stopPropagation();
     setRunningSuiteId(suiteId);
     try {
-      const res = await fetch(`/api/eval-suites/${suiteId}/run`, { method: "POST" });
+      const res = await fetch("/api/eval-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suiteId }),
+      });
       if (!res.ok) throw new Error(`${res.status}`);
       toast.success("Triggered suite evaluation run");
     } catch {

@@ -2,7 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { evaluateAssertions, type AssertionSpec } from "@/lib/assertions";
+import {
+  evaluateAssertions,
+  resolveInput,
+  substituteInputTemplates,
+  normalizeCaseName,
+  type AssertionSpec,
+} from "@/lib/assertions";
 
 describe("Universal Assertion Subsystem — evaluator engine", () => {
   describe("1. JSONPath assertions with multi-operators", () => {
@@ -98,7 +104,7 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
   });
 
   describe("3. JS Expression assertions", () => {
-    it("evaluates sandboxed expressions", () => {
+    it("evaluates sandboxed expressions with input, variables, and runContext", () => {
       const payload = {
         records: [10, 20, 30],
         meta: { total: 60 },
@@ -106,12 +112,17 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
 
       const assertions: AssertionSpec[] = [
         { type: "js_expression", expression: "result.records.reduce((a, b) => a + b, 0) === result.meta.total" },
+        { type: "js_expression", expression: "input.threshold === 50 && variables.env === 'staging'" },
         { type: "js_expression", expression: "result.records.length > 5" },
       ];
 
-      const outcome = evaluateAssertions(payload, assertions);
+      const outcome = evaluateAssertions(payload, assertions, {
+        input: { threshold: 50 },
+        variables: { env: "staging" },
+      });
       expect(outcome.deterministicResults[0].ok).toBe(true);
-      expect(outcome.deterministicResults[1].ok).toBe(false);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(false);
     });
   });
 
@@ -190,6 +201,75 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.llmAssertions).toHaveLength(2);
       expect(outcome.llmAssertions[0].spec.expectation).toBe("Assistant should explain the policy politely");
       expect(outcome.allDeterministicPassed).toBe(true);
+    });
+  });
+
+  describe("7. Dynamic variable resolution & template substitution", () => {
+    it("resolves dynamic generator tokens ($uuid, $timestamp, $randomString, $int)", () => {
+      const rawInput = {
+        userId: "{{$uuid}}",
+        time: "{{$timestamp}}",
+        nonce: "{{$randomString(10)}}",
+        score: "{{$int(10, 20)}}",
+        nested: {
+          id: "{{$uuidv7}}",
+        },
+      };
+
+      const resolved = resolveInput(rawInput);
+      expect(typeof resolved.userId).toBe("string");
+      expect((resolved.userId as string).length).toBe(36);
+      expect(typeof resolved.time).toBe("number");
+      expect(typeof resolved.nonce).toBe("string");
+      expect((resolved.nonce as string).length).toBe(10);
+      expect(typeof resolved.score).toBe("number");
+      expect(resolved.score as number).toBeGreaterThanOrEqual(10);
+      expect(resolved.score as number).toBeLessThanOrEqual(20);
+    });
+
+    it("substitutes input references in assertions against execution output", () => {
+      const payload = {
+        status: "created",
+        data: {
+          requestId: "req-999",
+          owner: "Alice",
+        },
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "$.data.requestId",
+          operator: "==",
+          expected: "{{input.expectedRequestId}}",
+        },
+        {
+          type: "jsonpath",
+          path: "$.data.owner",
+          operator: "==",
+          expected: "{{variables.ownerName}}",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions, {
+        input: { expectedRequestId: "req-999" },
+        variables: { ownerName: "Alice" },
+      });
+
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+    });
+
+    it("directly substitutes input and variable templates", () => {
+      const template = { greeting: "Hello {{input.name}}", url: "{{variables.host}}/api" };
+      const substituted = substituteInputTemplates(template, { name: "Bob" }, { host: "https://example.com" }) as typeof template;
+      expect(substituted.greeting).toBe("Hello Bob");
+      expect(substituted.url).toBe("https://example.com/api");
+    });
+
+    it("normalizes case names", () => {
+      expect(normalizeCaseName("  Test Case #1: Login Flow! ")).toBe("test_case_1_login_flow");
     });
   });
 });

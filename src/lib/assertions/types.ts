@@ -156,9 +156,18 @@ export interface AssertionResult {
   actual?: unknown;
   /** Optional human-readable explanation */
   message?: string;
-  /** LLM evaluation score (0-100) when evaluated by LLM */
+  /** LLM evaluation score (0-100) */
+  score?: number;
+  /** LLM evaluation explanation / reasoning */
+  feedback?: string;
   llmScore?: number;
   llmFeedback?: string;
+  expectation?: string;
+  reference?: string;
+  dimensionId?: string;
+  referenceImage?: string;
+  errorSource?: string;
+  details?: unknown;
 }
 
 export interface ErrorEnvelope {
