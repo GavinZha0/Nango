@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/GavinZha0/Nango/compare/v0.16.0...v0.17.0) (2026-08-30)
+
+
+### Features
+
+* **agent:** support delegated page snapshot and fix delegation error handling ([bdc4a8d](https://github.com/GavinZha0/Nango/commit/bdc4a8d8f78e3fd63ac48d2803b6ddc585924cdb))
+* **assertions:** unify assertion subsystem and 3-column UI across test modules ([fff3916](https://github.com/GavinZha0/Nango/commit/fff3916ad074b9dda4aeac0b910a1c89c6f84fc0))
+* standardize layout, UI styling, and execution mechanics across test subsystems ([b0f375d](https://github.com/GavinZha0/Nango/commit/b0f375d039a492865d222d523fcfea92fd1bcbd9))
+
+
+### Bug Fixes
+
+* permission issue, certification issue and name issue ([2cb349f](https://github.com/GavinZha0/Nango/commit/2cb349f4211cc4373a5a16a0d147b148eab92a03))
+
 ## [0.16.0](https://github.com/GavinZha0/Nango/compare/v0.15.0...v0.16.0) (2026-08-24)
 
 
