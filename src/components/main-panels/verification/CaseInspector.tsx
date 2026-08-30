@@ -44,7 +44,7 @@ import type {
   CaseExecutionOutcome,
 } from "@/lib/verification/types";
 import { extractTargetCase } from "@/components/main-panels/common";
-import { AssertionsEditor } from "./AssertionsEditor";
+import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 
 const INPUT_PLACEHOLDER = `// Dynamic generator variables:
 // {{$uuid}}             - Standard random UUID v4 string
@@ -605,7 +605,8 @@ export function CaseInspector({
               overrideText={inputOverrideText}
               placeholder={INPUT_PLACEHOLDER}
             />
-            <AssertionsEditor
+            <UniversalAssertionsEditor
+              mode="verification"
               draft={assertionsDraft}
               readOnly={readOnly}
               overrideText={assertionsHistoryNotice}

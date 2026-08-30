@@ -60,8 +60,10 @@ function applyRegexRule(text: string, rule: SafetyPolicyRule): { matched: boolea
     } else {
       return { matched: result as boolean, result: text };
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('timeout')) {
+  } catch (err: unknown) {
+    const errStr = String(err).toLowerCase();
+    const isTimeout = (err as { code?: string })?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT" || errStr.includes("time") || (err instanceof Error && err.message.toLowerCase().includes("time"));
+    if (isTimeout) {
       console.error(`[tool-safety] RE-DOS DETECTED! Regex timeout for rule ${rule.name}`);
       // If it times out due to backtracking, treat it as a block/match for safety
       return { matched: true, result: text }; 
