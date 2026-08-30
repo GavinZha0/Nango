@@ -41,14 +41,6 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    if (!suite.evaluatorAgentId) {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        "Evaluation suite has no evaluator agent assigned.",
-      );
-    }
-
     const { runId, totalCount } = await startEvalSuiteRun({
       suiteId: suite.id,
       ownerId: session.user.id,

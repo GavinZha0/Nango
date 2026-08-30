@@ -188,7 +188,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
     expect(resMissing.status).toBe(404);
   });
 
-  it("5. rejects suite missing evaluator agent (400 Bad Request)", async () => {
+  it("5. succeeds running suite with null evaluator agent (deterministic-only run)", async () => {
     getSessionMock.mockResolvedValue({
       user: editorUser,
       session: { id: "sess-1", userId: editorUser.id },
@@ -199,13 +199,25 @@ describe("POST /api/eval-cases/[id]/run", () => {
       suite: { ...sampleSuite, evaluatorAgentId: null },
     });
 
+    runEvalCaseMock.mockResolvedValue({
+      status: "passed",
+      score: 100,
+      criteriaScore: 100,
+      feedback: "All deterministic assertions passed.",
+    });
+
     const req = new NextRequest("http://localhost/api/eval-cases/42/run", {
       method: "POST",
     });
 
     const res = await POST(req, { params: Promise.resolve({ id: "42" }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.message).toContain("Suite has no evaluator agent assigned");
+    expect(data.status).toBe("passed");
+    expect(runEvalCaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        evaluatorAgentId: null,
+      }),
+    );
   });
 });

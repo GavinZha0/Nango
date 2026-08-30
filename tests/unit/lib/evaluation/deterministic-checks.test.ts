@@ -92,7 +92,7 @@ describe("runDeterministicChecks", () => {
     expect(result.results[0].actual).toBe("12.0s");
   });
 
-  it("leaves LLM-evaluated items as passed=null", () => {
+  it("excludes LLM-evaluated items from deterministic results", () => {
     const criteria: EvalCriteria = {
       expectation: "Should return results",
       assertions: ["delay < 20ms"],
@@ -102,8 +102,7 @@ describe("runDeterministicChecks", () => {
       actualToolCalls: [],
       metrics: BASE_METRICS,
     });
-    const llmItems = result.results.filter((r) => r.passed === null);
-    expect(llmItems).toHaveLength(2);
+    expect(result.results).toHaveLength(0);
     expect(result.totalCount).toBe(0);
     expect(result.passRate).toBe(1.0);
   });

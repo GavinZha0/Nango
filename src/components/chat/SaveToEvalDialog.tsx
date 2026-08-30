@@ -92,14 +92,14 @@ export function SaveToEvalDialog({
         ? turns[0].userMessage.slice(0, 40) + (turns[0].userMessage.length > 40 ? "..." : "")
         : "Draft Case " + new Date().toISOString().slice(0, 10);
 
-      const criteria: Record<string, unknown> = {};
-      if (issue.trim()) criteria.issue = issue.trim();
-      if (expectedOutcome.trim()) criteria.expectation = expectedOutcome.trim();
+      const assertions = expectedOutcome.trim()
+        ? [{ type: "llm_judge", expectation: expectedOutcome.trim() }]
+        : [];
 
       const input: CreateCaseInput = {
         name: caseName,
-        turns,
-        criteria,
+        input: { turns },
+        assertions,
       };
 
       const newCase = await evalCaseActions.create(suiteId, input);

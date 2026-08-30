@@ -24,8 +24,7 @@ import {
   type WebAutoSuiteRow,
   type WebAutoTarget,
 } from "@/store/web-auto-store";
-import { NewWebAutoSuiteDialog } from "@/components/main-panels/web-auto/NewWebAutoSuiteDialog";
-import { WebAutoSuiteEditDialog } from "@/components/main-panels/web-auto/WebAutoSuiteEditDialog";
+import { WebAutoSuiteDialog } from "@/components/main-panels/web-auto/WebAutoSuiteDialog";
 
 const fetcher = (url: string) =>
   fetch(url).then((res) => {
@@ -503,7 +502,7 @@ export function WebAutoPanel(): ReactNode {
       </ScrollArea>
 
       {/* New Suite Dialog */}
-      <NewWebAutoSuiteDialog
+      <WebAutoSuiteDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         targets={tree}
@@ -516,14 +515,16 @@ export function WebAutoPanel(): ReactNode {
       />
 
       {/* Edit Suite Dialog */}
-      <WebAutoSuiteEditDialog
-        open={editingSuite !== null}
-        onOpenChange={(open) => {
-          if (!open) setEditingSuite(null);
-        }}
-        suite={editingSuite}
-        onSaved={() => void mutate()}
-      />
+      {editingSuite && (
+        <WebAutoSuiteDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditingSuite(null);
+          }}
+          suite={editingSuite}
+          onSaved={() => void mutate()}
+        />
+      )}
 
       {/* Delete Confirmation */}
       <DeleteConfirmDialog

@@ -40,8 +40,7 @@ import {
   type VerificationSuiteRow,
   type VerificationServerRow,
 } from "@/store/verification";
-import { VerificationSuiteEditDialog } from "@/components/main-panels/verification/VerificationSuiteEditDialog";
-import { NewVerificationSuiteDialog } from "@/components/main-panels/verification/NewVerificationSuiteDialog";
+import { VerificationSuiteDialog } from "@/components/main-panels/verification/VerificationSuiteDialog";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -578,7 +577,7 @@ export function VerificationPanel(): ReactNode {
       </ScrollArea>
 
       {/* New Suite Dialog */}
-      <NewVerificationSuiteDialog
+      <VerificationSuiteDialog
         open={createSuiteOpen}
         onOpenChange={setCreateSuiteOpen}
         onCreated={(created) => {
@@ -589,15 +588,17 @@ export function VerificationPanel(): ReactNode {
       />
 
       {/* Edit Suite Dialog */}
-      <VerificationSuiteEditDialog
-        open={editingSuite !== null}
-        onOpenChange={(o) => {
-          if (!o) setEditingSuite(null);
-        }}
-        serverName={editingSuite?.serverName ?? "MCP Server"}
-        suite={editingSuite}
-        onSave={handleSuiteSave}
-      />
+      {editingSuite && (
+        <VerificationSuiteDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setEditingSuite(null);
+          }}
+          serverName={editingSuite?.serverName ?? "MCP Server"}
+          suite={editingSuite}
+          onUpdated={handleSuiteSave}
+        />
+      )}
 
       {/* Delete Suite Dialog */}
       <AlertDialog

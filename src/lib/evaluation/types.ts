@@ -340,4 +340,5 @@ export interface CriteriaCheckResult {
   passed: boolean | null;     // null = not yet evaluated (LLM items before evaluator runs)
   score?: number | null;      // 0-100, only for "expectation" kind
   actual?: string;            // actual value for failed checks (e.g. "12.3s" for a metric)
+  message?: string;           // failure explanation or detail
 }

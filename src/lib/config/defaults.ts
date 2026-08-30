@@ -92,6 +92,8 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "eval.threshold.excellent", value: "80", valueType: "number", description: "Score >= this is 'Excellent' (0-100)" },
   { key: "eval.threshold.pass", value: "60", valueType: "number", description: "Score >= this is 'Pass' (0-100)" },
   { key: "eval.threshold.poor", value: "40", valueType: "number", description: "Score >= this is 'Poor'; below is 'Fail' (0-100)" },
+  { key: "eval.step_timeout.target", value: "300", valueType: "number", description: "Target agent turn timeout in seconds" },
+  { key: "eval.step_timeout.evaluator", value: "300", valueType: "number", description: "Evaluator agent turn timeout in seconds" },
   { key: "verification.payload_max_kb", value: "32", valueType: "number", description: "Max KB to save for verification result payload" },
   { key: "mcp.test_snapshot_max_kb", value: "32", valueType: "number", description: "Max KB to save for MCP test snapshots" },
 

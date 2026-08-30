@@ -38,8 +38,7 @@ import {
   type EvalAgentItem,
   type EvalSuiteRow,
 } from "@/store/evaluation";
-import { EvalSuiteEditDialog } from "@/components/main-panels/evaluation/EvalSuiteEditDialog";
-import { NewEvalSuiteDialog } from "@/components/main-panels/evaluation/NewEvalSuiteDialog";
+import { EvalSuiteDialog } from "@/components/main-panels/evaluation/EvalSuiteDialog";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -601,7 +600,7 @@ export function EvaluationPanel(): ReactNode {
       </ScrollArea>
 
       {/* New Suite Dialog */}
-      <NewEvalSuiteDialog
+      <EvalSuiteDialog
         open={createSuiteOpen}
         onOpenChange={setCreateSuiteOpen}
         defaultAgentSource={activeTab === "builtin" ? "builtin" : "backend"}
@@ -614,13 +613,13 @@ export function EvaluationPanel(): ReactNode {
 
       {/* Suite Edit Dialog */}
       {editingSuite && (
-        <EvalSuiteEditDialog
+        <EvalSuiteDialog
           open
           onOpenChange={(open) => {
             if (!open) setEditingSuite(null);
           }}
           suite={editingSuite}
-          onSave={handleSuiteSave}
+          onUpdated={handleSuiteSave}
         />
       )}
 

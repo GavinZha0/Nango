@@ -29,41 +29,51 @@ interface McpServerItem {
   serverTitle?: string | null;
 }
 
-export interface NewVerificationSuiteDialogProps {
+export interface VerificationSuiteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  suite?: { id: string; name: string; description?: string | null; mcpServerId?: string; serverName?: string } | null;
+  serverName?: string;
   defaultServerId?: string;
   onCreated?: (created: VerificationSuiteRow) => void;
+  onUpdated?: (name: string) => Promise<void>;
 }
 
-export function NewVerificationSuiteDialog({
+export function VerificationSuiteDialog({
   open,
   onOpenChange,
+  suite,
+  serverName,
   defaultServerId,
   onCreated,
-}: NewVerificationSuiteDialogProps): ReactNode {
-  const [name, setName] = useState<string>("");
-  const [description, setDescription] = useState<string>("");
-  const [serverId, setServerId] = useState<string>(defaultServerId ?? "");
+  onUpdated,
+}: VerificationSuiteDialogProps): ReactNode {
+  const isEdit = !!suite;
+
+  const [name, setName] = useState<string>(suite?.name ?? "");
+  const [description, setDescription] = useState<string>(suite?.description ?? "");
+  const [serverId, setServerId] = useState<string>(suite?.mcpServerId ?? defaultServerId ?? "");
   const [servers, setServers] = useState<McpServerItem[]>([]);
   const [loadingServers, setLoadingServers] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset form when dialog opens
   const [lastOpen, setLastOpen] = useState<boolean>(open);
-  if (open !== lastOpen) {
+  const [lastSuiteId, setLastSuiteId] = useState<string | undefined>(suite?.id);
+
+  if (open !== lastOpen || suite?.id !== lastSuiteId) {
     setLastOpen(open);
+    setLastSuiteId(suite?.id);
     if (open) {
-      setName("");
-      setDescription("");
-      setServerId(defaultServerId ?? "");
+      setName(suite?.name ?? "");
+      setDescription(suite?.description ?? "");
+      setServerId(suite?.mcpServerId ?? defaultServerId ?? "");
       setError(null);
     }
   }
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || isEdit) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingServers(true);
@@ -85,13 +95,32 @@ export function NewVerificationSuiteDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, defaultServerId]);
+  }, [open, isEdit, defaultServerId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = name.trim();
-    if (!trimmedName || !serverId) {
-      setError("Please provide a suite name and select a server.");
+    if (!trimmedName) {
+      setError("Please provide a suite name.");
+      return;
+    }
+
+    if (isEdit) {
+      setSubmitting(true);
+      setError(null);
+      try {
+        await onUpdated?.(trimmedName);
+        onOpenChange(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    if (!serverId) {
+      setError("Please select an MCP server.");
       return;
     }
 
@@ -118,12 +147,14 @@ export function NewVerificationSuiteDialog({
     }
   };
 
+  const displayServerName = serverName || suite?.serverName || (serverId ? servers.find((s) => s.id === serverId)?.serverTitle || servers.find((s) => s.id === serverId)?.name : "MCP Server");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>New Suite</DialogTitle>
+            <DialogTitle>{isEdit ? "Edit Suite" : "New Suite"}</DialogTitle>
           </DialogHeader>
 
           {error && (
@@ -132,38 +163,50 @@ export function NewVerificationSuiteDialog({
             </p>
           )}
 
+          {/* MCP Server Selection or Readonly */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mcp-server">MCP Server <span className="text-destructive">*</span></Label>
-            <Select
-              required
-              value={serverId}
-              onValueChange={(val) => setServerId(val ?? "")}
-              disabled={loadingServers || submitting || !!defaultServerId}
-            >
-              <SelectTrigger id="mcp-server" className="w-full">
-                <SelectValue placeholder="Select an MCP Server">
-                  {serverId ? (
-                    servers.find((s) => s.id === serverId)?.serverTitle ||
-                    servers.find((s) => s.id === serverId)?.name ||
-                    "Unknown server"
-                  ) : null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {servers.map((s) => (
-                  <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
-                    {s.serverTitle || s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="mcp-server">MCP Server {!isEdit && <span className="text-destructive">*</span>}</Label>
+            {isEdit ? (
+              <Input
+                id="mcp-server"
+                value={displayServerName}
+                disabled
+                className="bg-muted cursor-not-allowed opacity-80"
+              />
+            ) : (
+              <Select
+                required
+                value={serverId}
+                onValueChange={(val) => setServerId(val ?? "")}
+                disabled={loadingServers || submitting || !!defaultServerId}
+              >
+                <SelectTrigger id="mcp-server" className="w-full">
+                  <SelectValue placeholder="Select an MCP Server">
+                    {serverId ? (
+                      servers.find((s) => s.id === serverId)?.serverTitle ||
+                      servers.find((s) => s.id === serverId)?.name ||
+                      "Unknown server"
+                    ) : null}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {servers.map((s) => (
+                    <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
+                      {s.serverTitle || s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
+          {/* Suite Name */}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="suite-name">Suite Name <span className="text-destructive">*</span></Label>
             <Input
               id="suite-name"
               required
+              maxLength={120}
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={submitting}
@@ -171,18 +214,21 @@ export function NewVerificationSuiteDialog({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="suite-desc">Description</Label>
-            <Textarea
-              id="suite-desc"
-              placeholder="Brief description of this suite's scope"
-              rows={3}
-              className="resize-none"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={submitting}
-            />
-          </div>
+          {/* Description (Only in New Mode) */}
+          {!isEdit && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="suite-desc">Description</Label>
+              <Textarea
+                id="suite-desc"
+                placeholder="Brief description of this suite's scope"
+                rows={3}
+                className="resize-none"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          )}
 
           <DialogFooter className="mt-2">
             <Button
@@ -193,7 +239,7 @@ export function NewVerificationSuiteDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !name.trim() || !serverId}>
+            <Button type="submit" disabled={submitting || !name.trim() || (!isEdit && !serverId)}>
               {submitting ? (
                 <>
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Saving…

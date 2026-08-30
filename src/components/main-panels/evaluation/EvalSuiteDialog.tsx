@@ -25,23 +25,29 @@ import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES } from "@/lib/evaluation/types
 import { useWorkspaceStore } from "@/store/workspace";
 import { evalActions, type EvalSuiteRow } from "@/store/evaluation";
 
-export interface NewEvalSuiteDialogProps {
+export interface EvalSuiteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  suite?: EvalSuiteRow | null;
   defaultAgentId?: string;
   defaultAgentSource?: "builtin" | "backend";
   defaultCredentialId?: string | null;
   onCreated?: (created: EvalSuiteRow) => void;
+  onUpdated?: (updated: { name: string; evaluatorAgentId?: string | null; dimensionIds: string[] }) => void;
 }
 
-export function NewEvalSuiteDialog({
+export function EvalSuiteDialog({
   open,
   onOpenChange,
+  suite,
   defaultAgentId,
   defaultAgentSource = "builtin",
   defaultCredentialId,
   onCreated,
-}: NewEvalSuiteDialogProps): ReactNode {
+  onUpdated,
+}: EvalSuiteDialogProps): ReactNode {
+  const isEdit = !!suite;
+
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
   const evaluators = useMemo(
     () => builtinAgents.filter((a) => a.role === "evaluator"),
@@ -53,24 +59,33 @@ export function NewEvalSuiteDialog({
     [builtinAgents],
   );
 
-  const [name, setName] = useState<string>("");
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(defaultAgentId ?? "");
-  const [selectedEvalId, setSelectedEvalId] = useState<string>("");
+  const [name, setName] = useState<string>(suite?.name ?? "");
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(
+    suite?.agentId ?? defaultAgentId ?? "",
+  );
+  const [selectedEvalId, setSelectedEvalId] = useState<string>(
+    suite?.evaluatorAgentId ?? "",
+  );
   const [selectedDims, setSelectedDims] = useState<Set<string>>(
-    new Set(["groundedness", "task_completion"]),
+    new Set(suite?.dimensionIds ?? ["groundedness", "task_completion"]),
   );
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset form when dialog opens
+  // Reset form when dialog opens or suite changes
   const [lastOpen, setLastOpen] = useState<boolean>(open);
-  if (open !== lastOpen) {
+  const [lastSuiteId, setLastSuiteId] = useState<string | undefined>(suite?.id);
+
+  if (open !== lastOpen || suite?.id !== lastSuiteId) {
     setLastOpen(open);
+    setLastSuiteId(suite?.id);
     if (open) {
-      setName("");
-      setSelectedAgentId(defaultAgentId ?? (candidateAgents[0]?.id ?? ""));
-      setSelectedEvalId(evaluators[0]?.id ?? "");
-      setSelectedDims(new Set(["groundedness", "task_completion"]));
+      setName(suite?.name ?? "");
+      setSelectedAgentId(suite?.agentId ?? defaultAgentId ?? (candidateAgents[0]?.id ?? ""));
+      setSelectedEvalId(suite?.evaluatorAgentId ?? (isEdit ? "" : (evaluators[0]?.id ?? "")));
+      setSelectedDims(
+        new Set(suite?.dimensionIds ?? ["groundedness", "task_completion"]),
+      );
       setError(null);
     }
   }
@@ -97,6 +112,17 @@ export function NewEvalSuiteDialog({
       setError("Please provide a suite name.");
       return;
     }
+
+    if (isEdit) {
+      onUpdated?.({
+        name: trimmed,
+        evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
+        dimensionIds: Array.from(selectedDims),
+      });
+      onOpenChange(false);
+      return;
+    }
+
     if (!selectedAgentId) {
       setError("Please select a target agent.");
       return;
@@ -132,7 +158,7 @@ export function NewEvalSuiteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>New Suite</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Suite" : "New Suite"}</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
@@ -142,31 +168,33 @@ export function NewEvalSuiteDialog({
             </p>
           )}
 
-          {/* Target Agent */}
-          <div className="space-y-1.5">
-            <Label htmlFor="target-agent">Target Agent <span className="text-destructive">*</span></Label>
-            <Select
-              required
-              value={selectedAgentId}
-              onValueChange={(val) => setSelectedAgentId(val ?? "")}
-              disabled={submitting || !!defaultAgentId}
-            >
-              <SelectTrigger id="target-agent" className="w-full">
-                <SelectValue placeholder="Select target agent">
-                  {selectedAgentId ? (
-                    candidateAgents.find((a) => a.id === selectedAgentId)?.name || "Unknown agent"
-                  ) : null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {candidateAgents.map((a) => (
-                  <SelectItem key={a.id} value={a.id} label={a.name}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Target Agent (Only in New Mode) */}
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <Label htmlFor="target-agent">Target Agent <span className="text-destructive">*</span></Label>
+              <Select
+                required
+                value={selectedAgentId}
+                onValueChange={(val) => setSelectedAgentId(val ?? "")}
+                disabled={submitting || !!defaultAgentId}
+              >
+                <SelectTrigger id="target-agent" className="w-full">
+                  <SelectValue placeholder="Select target agent">
+                    {selectedAgentId ? (
+                      candidateAgents.find((a) => a.id === selectedAgentId)?.name || "Unknown agent"
+                    ) : null}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {candidateAgents.map((a) => (
+                    <SelectItem key={a.id} value={a.id} label={a.name}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Suite Name */}
           <div className="space-y-1.5">
@@ -183,23 +211,25 @@ export function NewEvalSuiteDialog({
 
           {/* Evaluator Agent */}
           <div className="space-y-1.5">
-            <Label htmlFor="eval-agent">Evaluator <span className="text-destructive">*</span></Label>
+            <Label htmlFor="eval-agent">Evaluator</Label>
             <Select
-              required
               value={selectedEvalId || "__none__"}
               onValueChange={(val) => setSelectedEvalId(val === "__none__" ? "" : (val ?? ""))}
               disabled={submitting}
             >
               <SelectTrigger id="eval-agent" className="w-full">
-                <SelectValue placeholder="Select evaluator agent">
+                <SelectValue placeholder="None">
                   {selectedEvalId === "" || selectedEvalId === "__none__" ? (
-                    "Default (Platform System Evaluator)"
+                    "None (Deterministic only)"
                   ) : (
                     evaluators.find((a) => a.id === selectedEvalId)?.name || "Unknown evaluator"
                   )}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__none__" label="None">
+                  None
+                </SelectItem>
                 {evaluators.map((a) => (
                   <SelectItem key={a.id} value={a.id} label={a.name}>
                     {a.name}

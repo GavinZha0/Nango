@@ -98,6 +98,36 @@ const SCHEMA_TEMPLATES = [
   },
 ];
 
+function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMode): TabType {
+  const hasExpressions = assertions.some((a) => a.type === "js_expression");
+  if (hasExpressions) return "expression";
+
+  const hasPathMatches = assertions.some((a) => a.type === "jsonpath" || a.type === "jsonpath_equals");
+  if (hasPathMatches) return "path_match";
+
+  if (mode === "verification") {
+    const hasSchema = assertions.some((a) => a.type === "json_schema");
+    if (hasSchema) return "schema";
+  }
+
+  if (mode === "evaluation") {
+    const hasToolCalls = assertions.some((a) => a.type === "tool_call");
+    if (hasToolCalls) return "tool_call";
+
+    const hasMetrics = assertions.some((a) => a.type === "metric");
+    if (hasMetrics) return "metric";
+  }
+
+  if (mode === "web-auto" || mode === "evaluation") {
+    const hasLlmJudges = assertions.some(
+      (a) => a.type === "llm_judge" || a.type === "expectation" || a.type === "llm_expectation",
+    );
+    if (hasLlmJudges) return "llm_judge";
+  }
+
+  return "expression";
+}
+
 export function UniversalAssertionsEditor({
   mode,
   assertions: propAssertions,
@@ -122,8 +152,9 @@ export function UniversalAssertionsEditor({
     return propAssertions ?? [];
   }, [draft, propAssertions]);
 
-  const defaultTab: TabType = "expression";
-  const [subTab, setSubTab] = useState<TabType>(defaultTab);
+  const [subTab, setSubTab] = useState<TabType>(() =>
+    computeDefaultTab(currentAssertions, mode),
+  );
 
   const canonicalJson = useMemo(() => {
     if (draft) return draft.text;
@@ -142,6 +173,7 @@ export function UniversalAssertionsEditor({
       prevCanonical: canonicalJson,
     });
     setRawJsonError(draft?.parseError ?? null);
+    setSubTab(computeDefaultTab(currentAssertions, mode));
   }
 
   const rawJsonText = rawJsonState.text;

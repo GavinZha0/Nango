@@ -56,6 +56,35 @@ export interface DeterministicCheckOutput {
 
 // ─── Engine ─────────────────────────────────────────────────────────
 
+function getAssertionDescription(spec: AssertionSpec): string {
+  switch (spec.type) {
+    case "jsonpath":
+    case "jsonpath_equals": {
+      const path = spec.path || "path";
+      const op = "operator" in spec ? spec.operator : "==";
+      if (op === "exists") return `${path} exists`;
+      return `${path} ${op} ${JSON.stringify(spec.expected)}`;
+    }
+    case "js_expression":
+      return spec.expression;
+    case "tool_call": {
+      const count = spec.expectedCalls !== undefined ? spec.expectedCalls : 1;
+      if (count === 0) return `forbidden tool: ${spec.toolName}`;
+      return `tool: ${spec.toolName}${count > 1 ? ` (>= ${count} calls)` : ""}`;
+    }
+    case "metric":
+      return `${spec.metric} ${spec.operator} ${spec.threshold}`;
+    case "json_schema":
+      return "JSON Schema validation";
+    case "llm_judge":
+    case "expectation":
+    case "llm_expectation":
+      return spec.expectation;
+    default:
+      return (spec as { type: string }).type;
+  }
+}
+
 /**
  * Run all deterministic checks against assertions or legacy criteria.
  */
@@ -77,24 +106,16 @@ export function runDeterministicChecks(
       metrics: input.metrics,
     });
 
-    for (const spec of assertions) {
-      if (spec.type === "llm_judge" || spec.type === "expectation" || spec.type === "llm_expectation") {
-        results.push({
-          label: spec.expectation,
-          kind: "expectation",
-          passed: null,
-          score: null,
-        });
-      }
-    }
-
     for (const r of outcome.deterministicResults) {
       const isOk = r.ok;
+      const spec = assertions[r.index];
+      const desc = spec ? getAssertionDescription(spec) : `${r.type} check`;
       results.push({
-        label: r.message ? `${r.type}: ${r.message}` : `${r.type} check`,
+        label: desc,
         kind: r.type === "metric" ? "metric" : (r.type === "tool_call" ? "tool_call" : "assertion"),
         passed: isOk,
-        ...(r.actual !== undefined ? { actual: String(r.actual) } : {}),
+        ...(r.actual !== undefined ? { actual: typeof r.actual === "object" ? JSON.stringify(r.actual) : String(r.actual) } : {}),
+        ...(r.message && r.message !== "value mismatch" && r.message !== "Expression returned falsy" ? { message: r.message } : {}),
       });
       totalCount++;
       if (isOk) passedCount++;
@@ -111,21 +132,6 @@ export function runDeterministicChecks(
   // Case B: Legacy EvalCriteria object
   const criteria = (assertionsOrCriteria ?? {}) as EvalCriteria;
   const textLower = input.agentText.toLowerCase();
-
-  // ── LLM-evaluated (placeholders — evaluator fills these) ────────
-
-  if (criteria.expectation) {
-    results.push({
-      label: criteria.expectation,
-      kind: "expectation",
-      passed: null,
-      score: null,
-    });
-  }
-
-  for (const a of criteria.assertions ?? []) {
-    results.push({ label: a, kind: "assertion", passed: null });
-  }
 
   // ── Deterministic: keywords ─────────────────────────────────────
 

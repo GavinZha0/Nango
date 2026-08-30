@@ -44,14 +44,6 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    if (!suite.evaluatorAgentId) {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        "Suite has no evaluator agent assigned.",
-      );
-    }
-
     const caseInput = (caseRow.input ?? {}) as Record<string, unknown>;
     const turns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
     const assertions = (Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as unknown as EvalCriteria;
@@ -61,7 +53,7 @@ export const POST = withEditor<{ id: string }>(
       targetAgentId: suite.agentId,
       targetCredentialId: suite.credentialId ?? undefined,
       targetEntityKind: suite.agentSource === "builtin" ? undefined : "agent",
-      evaluatorAgentId: suite.evaluatorAgentId,
+      evaluatorAgentId: suite.evaluatorAgentId ?? null,
       dimensionIds: (suite.dimensionIds ?? []) as string[],
       turns,
       criteria: assertions,

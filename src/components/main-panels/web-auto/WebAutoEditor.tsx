@@ -576,6 +576,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
                 <div className="flex flex-col min-h-0 overflow-hidden">
                   <UniversalAssertionsEditor
+                    key={selectedCase?.id ?? "none"}
                     mode="web-auto"
                     assertions={draftAssertions as AssertionSpec[]}
                     onChange={(updated) => setDraftAssertions(updated as Record<string, unknown>[])}
@@ -653,18 +654,18 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     {outputTab === "output" ? (
                       <div className="h-full w-full overflow-auto rounded-md border bg-background/50 p-2 flex flex-col font-mono text-xs">
                         {running ? (
-                          <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+                          <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
                             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                            Executing script & evaluating assertions...
+                            Executing case & evaluating assertions...
                           </div>
                         ) : displayOutcome ? (
                           <pre className="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed font-mono">
                             {formattedOutputText}
                           </pre>
                         ) : (
-                          <pre className="flex-1 text-xs font-mono text-muted-foreground overflow-auto">
-                            {`// Run the case to see output...`}
-                          </pre>
+                          <div className="flex h-full items-center justify-center p-3 text-xs text-muted-foreground font-sans">
+                            Run a case to see the output.
+                          </div>
                         )}
                       </div>
                     ) : (

@@ -822,7 +822,7 @@ interface OutputPaneProps {
  * envelope) once a run has produced one. Before that, shows an
  * in-frame placeholder so the box itself never disappears.
  */
-function OutputPane({ outcome, running, readOnly, runError, hideHeader = false }: OutputPaneProps): ReactNode {
+function OutputPane({ outcome, running, readOnly: _readOnly, runError, hideHeader = false }: OutputPaneProps): ReactNode {
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
       {!hideHeader && (
@@ -833,7 +833,12 @@ function OutputPane({ outcome, running, readOnly, runError, hideHeader = false }
         </div>
       )}
       <div className={cn("min-h-0 flex-1 px-3 pb-2", hideHeader && "pt-2")}>
-        {runError ? (
+        {running ? (
+          <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            Executing case & evaluating assertions...
+          </div>
+        ) : runError ? (
           <div className="h-full w-full overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive font-mono whitespace-pre-wrap">
             {runError}
           </div>
@@ -842,8 +847,8 @@ function OutputPane({ outcome, running, readOnly, runError, hideHeader = false }
             <JsonView data={outcome.resultPayload} defaultExpandDepth={3} />
           </div>
         ) : (
-          <div className="grid h-full place-items-center rounded-md border border-dashed text-[11px] text-muted-foreground">
-            {placeholderText({ outcome, running, readOnly, kind: "output" })}
+          <div className="flex h-full items-center justify-center p-3 text-xs text-muted-foreground">
+            Run a case to see the output.
           </div>
         )}
       </div>
@@ -867,8 +872,8 @@ interface VerdictsPaneProps {
  */
 function VerdictsPane({
   outcome,
-  running,
-  readOnly,
+  running: _running,
+  readOnly: _readOnly,
   assertions = [],
 }: VerdictsPaneProps): ReactNode {
   const verdicts: readonly AssertionResult[] = outcome?.assertionResults ?? [];
@@ -904,8 +909,8 @@ function VerdictsPane({
             )}
           </div>
         ) : (
-          <div className="grid h-full place-items-center rounded-md border border-dashed text-[11px] text-muted-foreground">
-            {placeholderText({ outcome, running, readOnly, kind: "verdicts" })}
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+            No verdict yet.
           </div>
         )}
       </div>
@@ -913,29 +918,6 @@ function VerdictsPane({
   );
 }
 
-/** Centralised text for the OUTPUT / VERDICTS empty-state frames. */
-function placeholderText({
-  outcome,
-  running,
-  readOnly,
-  kind,
-}: {
-  outcome: CaseExecutionOutcome | null;
-  running: boolean;
-  readOnly: boolean;
-  kind: "output" | "verdicts";
-}): string {
-  if (running) return "Running…";
-  if (!outcome) {
-    return readOnly
-      ? "No persisted result for this case in this run."
-      : "Click Run case to see the result.";
-  }
-  // Outcome present but the pane has nothing to show.
-  return kind === "output"
-    ? "No payload returned."
-    : "No assertions — smoke test (passes iff the tool returned without error).";
-}
 
 function ErrorView({ err }: { err: ErrorEnvelope }): ReactNode {
   return (

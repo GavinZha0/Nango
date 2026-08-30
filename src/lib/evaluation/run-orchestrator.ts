@@ -58,9 +58,6 @@ export async function startEvalSuiteRun(
 ): Promise<StartEvalSuiteRunResult> {
   const suite = await storage.getSuiteById(input.suiteId);
   if (!suite) throw new Error(`eval suite not found: ${input.suiteId}`);
-  if (!suite.evaluatorAgentId) {
-    throw new Error("Eval suite has no evaluator agent assigned.");
-  }
 
   const cases =
     input.caseIds && input.caseIds.length > 0
@@ -110,7 +107,7 @@ export async function startEvalSuiteRun(
     ownerId: input.ownerId,
     suiteId: input.suiteId,
     suiteName: suite.name,
-    evaluatorAgentId: suite.evaluatorAgentId,
+    evaluatorAgentId: suite.evaluatorAgentId ?? null,
     dimensionIds: (suite.dimensionIds ?? []) as string[],
     targetAgentId: suite.agentId,
     targetCredentialId: suite.credentialId ?? undefined,
@@ -128,7 +125,7 @@ interface SuiteLoopInput {
   ownerId: string;
   suiteId: string;
   suiteName: string;
-  evaluatorAgentId: string;
+  evaluatorAgentId?: string | null;
   dimensionIds: string[];
   targetAgentId: string;
   targetCredentialId?: string;
@@ -355,7 +352,7 @@ export async function startEvalAgentAllRuns(
     input.ownerId,
     input.isAdmin ?? false,
   );
-  const runnable = allSuites.filter((s) => s.enabled && s.evaluatorAgentId);
+  const runnable = allSuites.filter((s) => s.enabled);
   if (runnable.length === 0) return;
 
   // Background serial execution loop
@@ -385,7 +382,7 @@ export async function startEvalAgentAllRuns(
           ownerId: input.ownerId,
           suiteId: suite.id,
           suiteName: suite.name,
-          evaluatorAgentId: suite.evaluatorAgentId!,
+          evaluatorAgentId: suite.evaluatorAgentId ?? null,
           dimensionIds: (suite.dimensionIds ?? []) as string[],
           targetAgentId: suite.agentId,
           targetCredentialId: suite.credentialId ?? undefined,

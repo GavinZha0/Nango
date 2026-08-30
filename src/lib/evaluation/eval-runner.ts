@@ -31,6 +31,13 @@ import {
 import { buildEvaluationBrief } from "./prompt-builder";
 import type { SubmitEvaluationScoresSuccess } from "./runtime-tools";
 import * as storage from "./storage";
+import { getConfigNumber } from "@/lib/config";
+import {
+  DEFAULT_EVAL_TARGET_TIMEOUT_S,
+  DEFAULT_EVAL_EVALUATOR_TIMEOUT_S,
+  CONFIG_KEY_TARGET_TIMEOUT,
+  CONFIG_KEY_EVALUATOR_TIMEOUT,
+} from "./config";
 
 const log = childLogger({ component: "eval-runner" });
 
@@ -43,8 +50,8 @@ export interface RunEvalCaseInput {
   targetAgentId: string;
   targetCredentialId?: string;
   targetEntityKind?: "agent" | "team" | "workflow";
-  /** Evaluator agent (builtin only). */
-  evaluatorAgentId: string;
+  /** Evaluator agent (builtin only, optional for deterministic-only suites). */
+  evaluatorAgentId?: string | null;
   /** Suite-level dimension IDs. */
   dimensionIds: string[];
   /** Case conversation turns (user messages only). */
@@ -154,11 +161,6 @@ function extractEvaluatorScores(
   return null;
 }
 
-const STEP_TIMEOUTS = {
-  target_agent_turn: 90_000,
-  evaluator_turn: 90_000,
-} as const;
-
 async function withStepTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -185,6 +187,13 @@ export async function runEvalCase(
 ): Promise<RunEvalCaseResult> {
   const startMs = Date.now();
 
+  // Read configurable turn timeouts (default: 180s = 3m)
+  const targetTimeoutSec = await getConfigNumber(CONFIG_KEY_TARGET_TIMEOUT, DEFAULT_EVAL_TARGET_TIMEOUT_S);
+  const targetTimeoutMs = (targetTimeoutSec > 0 ? targetTimeoutSec : DEFAULT_EVAL_TARGET_TIMEOUT_S) * 1000;
+
+  const evaluatorTimeoutSec = await getConfigNumber(CONFIG_KEY_EVALUATOR_TIMEOUT, DEFAULT_EVAL_EVALUATOR_TIMEOUT_S);
+  const evaluatorTimeoutMs = (evaluatorTimeoutSec > 0 ? evaluatorTimeoutSec : DEFAULT_EVAL_EVALUATOR_TIMEOUT_S) * 1000;
+
   // ── ① Dispatch target agent ───────────────────────────────────
 
   const currentThreadId = randomUUID();
@@ -210,7 +219,7 @@ export async function runEvalCase(
           ownerId: input.ownerId,
           createdBy: input.ownerId,
         }),
-        STEP_TIMEOUTS.target_agent_turn,
+        targetTimeoutMs,
         "Target agent turn",
       );
     } catch (err) {
@@ -219,8 +228,8 @@ export async function runEvalCase(
         { event: "target_dispatch_failed", runId: input.runId, caseId: input.caseId, err: message },
         "target agent dispatch failed",
       );
-      await writeErrorResult(input, startMs, `Target agent dispatch failed: ${message}`);
-      return { status: "errored", score: null, error: message };
+      await writeErrorResult(input, startMs, `Target agent dispatch failed: ${message}`, currentThreadId);
+      return { status: "errored", score: null, error: message, threadId: currentThreadId };
     }
 
     if (targetResult.status === "failed") {
@@ -229,8 +238,8 @@ export async function runEvalCase(
         { event: "target_run_failed", runId: input.runId, caseId: input.caseId, targetRunId: targetResult.runId },
         message,
       );
-      await writeErrorResult(input, startMs, message, targetResult.runId);
-      return { status: "errored", score: null, error: message };
+      await writeErrorResult(input, startMs, message, currentThreadId);
+      return { status: "errored", score: null, error: message, threadId: currentThreadId };
     }
 
     finalTargetSummary = targetResult.summary;
@@ -257,6 +266,86 @@ export async function runEvalCase(
     input.criteria as EvalCriteria,
     checkInput,
   );
+
+  // ── Fail-Fast: if deterministic assertions failed, stop immediately with score 0 ──
+  const hasDeterministicFailure =
+    checks.totalCount > 0 && checks.passedCount < checks.totalCount;
+
+  if (hasDeterministicFailure) {
+    const overallScore = 0;
+    const criteriaScoreFinal = 0;
+    const feedback = "Deterministic assertions failed. Evaluator was skipped.";
+
+    if (input.runId) {
+      await storage.writeCaseResult({
+        runId: input.runId,
+        caseId: input.caseId,
+        status: "failed",
+        score: overallScore,
+        dimensionScores: {},
+        criteriaScore: criteriaScoreFinal,
+        criteriaResults: checks.results,
+        feedback,
+        threadId: currentThreadId,
+        evaluatorThreadId: null,
+        durationMs,
+        outputTokens,
+        toolCallCount,
+      });
+    }
+
+    return {
+      status: "failed",
+      score: overallScore,
+      dimensionScores: {},
+      criteriaScore: criteriaScoreFinal,
+      criteriaResults: checks.results,
+      feedback,
+      durationMs,
+      outputTokens,
+      threadId: currentThreadId,
+    };
+  }
+
+  // ── No evaluator agent configured: purely deterministic evaluation ──
+  if (!input.evaluatorAgentId) {
+    const criteriaScoreFinal = 100;
+    const overallScore = 100;
+    const feedback =
+      checks.totalCount > 0
+        ? "All deterministic assertions passed."
+        : "Target execution completed without errors (smoke test).";
+
+    if (input.runId) {
+      await storage.writeCaseResult({
+        runId: input.runId,
+        caseId: input.caseId,
+        status: "passed",
+        score: overallScore,
+        dimensionScores: {},
+        criteriaScore: criteriaScoreFinal,
+        criteriaResults: checks.results,
+        feedback,
+        threadId: currentThreadId,
+        evaluatorThreadId: null,
+        durationMs,
+        outputTokens,
+        toolCallCount,
+      });
+    }
+
+    return {
+      status: "passed",
+      score: overallScore,
+      dimensionScores: {},
+      criteriaScore: criteriaScoreFinal,
+      criteriaResults: checks.results,
+      feedback,
+      durationMs,
+      outputTokens,
+      threadId: currentThreadId,
+    };
+  }
 
   // ── ③ Assemble evaluator prompt ──────────────────────────────
 
@@ -292,7 +381,7 @@ export async function runEvalCase(
           createdBy: input.ownerId,
           context: { expectedDimensionIds: input.dimensionIds },
         }),
-        STEP_TIMEOUTS.evaluator_turn,
+        evaluatorTimeoutMs,
         "Evaluator agent",
       );
 
@@ -325,8 +414,24 @@ export async function runEvalCase(
       { event: "evaluator_failed", runId: input.runId, caseId: input.caseId, evaluatorRunId: evaluatorResult?.runId },
       message,
     );
-    await writeErrorResult(input, startMs, message, currentThreadId, evaluatorResult?.runId);
-    return { status: "errored", score: null, error: message };
+    const criteriaScoreFinal = checks.totalCount > 0 ? 100 : null;
+    await writeErrorResult(input, startMs, message, currentThreadId, evaluatorResult?.runId, {
+      criteriaScore: criteriaScoreFinal,
+      criteriaResults: checks.results,
+      durationMs,
+      outputTokens,
+      toolCallCount,
+    });
+    return {
+      status: "errored",
+      score: null,
+      criteriaScore: criteriaScoreFinal,
+      criteriaResults: checks.results,
+      error: message,
+      threadId: currentThreadId,
+      durationMs,
+      outputTokens,
+    };
   }
 
   // ── ⑤ Compute criteria_score_final ───────────────────────────
@@ -339,16 +444,6 @@ export async function runEvalCase(
   } else if (checks.totalCount > 0) {
     criteriaScoreFinal = Math.round(100 * checks.passRate);
   }
-
-  // Merge LLM-judged assertion/expectation results back into the
-  // checklist. The evaluator's criteria_score covers expectation;
-  // individual assertion verdicts are not broken out in V1.
-  const mergedResults: CriteriaCheckResult[] = checks.results.map((r) => {
-    if (r.kind === "expectation" && llmCriteriaScore !== null) {
-      return { ...r, passed: llmCriteriaScore >= 60, score: llmCriteriaScore };
-    }
-    return r;
-  });
 
   // ── Compute overall case score ───────────────────────────────
 
@@ -382,7 +477,7 @@ export async function runEvalCase(
       score: overallScore,
       dimensionScores: finalDimensionScores,
       criteriaScore: criteriaScoreFinal,
-      criteriaResults: mergedResults,
+      criteriaResults: checks.results,
       feedback: scores.feedback,
       threadId: currentThreadId,
       evaluatorThreadId: evaluatorResult.runId,
@@ -397,7 +492,7 @@ export async function runEvalCase(
     score: overallScore,
     dimensionScores: finalDimensionScores,
     criteriaScore: criteriaScoreFinal,
-    criteriaResults: mergedResults,
+    criteriaResults: checks.results,
     feedback: scores.feedback,
     durationMs,
     outputTokens,
@@ -413,6 +508,13 @@ async function writeErrorResult(
   errorMessage: string,
   targetRunId?: string,
   evaluatorRunId?: string,
+  deterministicDetails?: {
+    criteriaScore?: number | null;
+    criteriaResults?: CriteriaCheckResult[];
+    durationMs?: number;
+    outputTokens?: number;
+    toolCallCount?: number;
+  },
 ): Promise<void> {
   if (!input.runId) return;
   try {
@@ -423,7 +525,11 @@ async function writeErrorResult(
       error: { message: errorMessage },
       threadId: targetRunId ?? null,
       evaluatorThreadId: evaluatorRunId ?? null,
-      durationMs: Date.now() - startMs,
+      criteriaScore: deterministicDetails?.criteriaScore ?? null,
+      criteriaResults: deterministicDetails?.criteriaResults ?? [],
+      durationMs: deterministicDetails?.durationMs ?? (Date.now() - startMs),
+      outputTokens: deterministicDetails?.outputTokens ?? null,
+      toolCallCount: deterministicDetails?.toolCallCount ?? null,
     });
   } catch (err) {
     log.error(

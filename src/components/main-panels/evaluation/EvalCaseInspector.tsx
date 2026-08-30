@@ -3,8 +3,8 @@
 /**
  * EvalCaseInspector — middle + right columns of the evaluation main panel.
  *
- * Middle: multi-turn conversation editor (user messages + JSON criteria + collapsed agent response).
- * Right: evaluation result (overall score, per-dimension score bars, feedback).
+ * Middle: multi-turn conversation editor (user messages + UniversalAssertionsEditor + collapsed agent response).
+ * Right: evaluation result (overall score, per-dimension score bars, checklist, feedback).
  *
  * Header hosts Add Turn and Evaluate buttons.
  */
@@ -18,7 +18,6 @@ import {
   Trash2,
   ChevronDown,
   Check,
-  X,
   MessageSquare,
   Copy,
   Terminal,
@@ -30,7 +29,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   BUILTIN_DIMENSIONS,
-  type EvalCriteria,
   type EvalTurn,
   type CriteriaCheckResult,
 } from "@/lib/evaluation/types";
@@ -140,8 +138,10 @@ export interface ResponseMessage {
 interface ResponseViewerProps {
   messages: ResponseMessage[] | null;
   isLoading: boolean;
+  running: boolean;
   hasRun: boolean;
   turnIndex: number;
+  error?: string | null;
 }
 
 function ToolMessageRow({ msg }: { msg: ResponseMessage }): ReactNode {
@@ -179,19 +179,20 @@ function ToolMessageRow({ msg }: { msg: ResponseMessage }): ReactNode {
   );
 }
 
-function ResponseViewer({ messages, isLoading, hasRun, turnIndex: _turnIndex }: ResponseViewerProps): ReactNode {
-  if (!hasRun) {
+function ResponseViewer({ messages, isLoading, running, hasRun, turnIndex: _turnIndex }: ResponseViewerProps): ReactNode {
+  if (running || isLoading) {
     return (
-      <div className="flex items-center justify-center h-full p-3 text-xs text-muted-foreground">
-        Run the case to see the agent&apos;s response.
+      <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        Executing case & evaluating assertions...
       </div>
     );
   }
 
-  if (isLoading) {
+  if (!hasRun) {
     return (
       <div className="flex items-center justify-center h-full p-3 text-xs text-muted-foreground">
-        <Loader2 className="mr-2 h-3 w-3 animate-spin" /> Loading response...
+        Run a case to see the output.
       </div>
     );
   }
@@ -255,52 +256,6 @@ function ScoreBar({ name, score }: { name: string; score: number | null }): Reac
   );
 }
 
-// ─── Criteria detail (collapsible) ──────────────────────────────────
-
-/** Build UI-side checklist from criteria definition. `passed` is null
- *  (not yet evaluated) until the runner populates real results. */
-function buildCriteriaChecklist(criteria: EvalCriteria, results?: unknown[]): CriteriaCheckResult[] {
-  if (results && results.length > 0) return results as CriteriaCheckResult[];
-  const items: CriteriaCheckResult[] = [];
-
-  // LLM-evaluated
-  if (criteria.expectation) {
-    items.push({ label: criteria.expectation, kind: "expectation", passed: null, score: null });
-  }
-  for (const a of criteria.assertions ?? []) {
-    items.push({ label: a, kind: "assertion", passed: null });
-  }
-
-  // Deterministic
-  for (const kw of criteria.expected_keywords ?? []) {
-    items.push({ label: `keyword: "${kw}"`, kind: "keyword", passed: null });
-  }
-  for (const kw of criteria.unexpected_keywords ?? []) {
-    items.push({ label: `not: "${kw}"`, kind: "keyword", passed: null });
-  }
-  for (const tc of criteria.tool_calls ?? []) {
-    items.push({ label: `tool: ${tc}`, kind: "tool_call", passed: null });
-  }
-
-  // Execution metrics
-  if (criteria.max_duration_s !== undefined) {
-    items.push({ label: `duration ≤ ${criteria.max_duration_s}s`, kind: "metric", passed: null });
-  }
-  if (criteria.max_output_tokens !== undefined) {
-    items.push({ label: `output tokens ≤ ${criteria.max_output_tokens}`, kind: "metric", passed: null });
-  }
-  if (criteria.max_tool_calls !== undefined) {
-    items.push({ label: `tool calls ≤ ${criteria.max_tool_calls}`, kind: "metric", passed: null });
-  }
-
-  return items;
-}
-
-function CriteriaCheckIcon({ passed }: { passed: boolean | null }): ReactNode {
-  if (passed === null) return <span className="h-3.5 w-3.5 rounded-full border border-dashed border-muted-foreground/30" />;
-  if (passed) return <Check className="h-3.5 w-3.5 text-emerald-400" />;
-  return <X className="h-3.5 w-3.5 text-red-400" />;
-}
 
 // Main component
 
@@ -314,6 +269,7 @@ export interface PinnedOutcome {
   durationMs: number | null;
   outputTokens: number | null;
   startedAt: Date | string | null;
+  error?: unknown;
 }
 
 interface EvalCaseInspectorProps {
@@ -351,22 +307,13 @@ export function EvalCaseInspector({
   });
 
   const [assertions, setAssertions] = useState<AssertionSpec[]>(() => {
-    if (Array.isArray(evalCase.assertions) && evalCase.assertions.length > 0) {
+    if (Array.isArray(evalCase.assertions)) {
       return evalCase.assertions as AssertionSpec[];
     }
-    const legacy: AssertionSpec[] = [];
-    const c = (evalCase.criteria ?? {}) as EvalCriteria;
-    if (c.expectation) legacy.push({ type: "llm_judge", expectation: c.expectation, reference: c.reference });
-    for (const kw of c.expected_keywords ?? []) legacy.push({ type: "jsonpath", path: "$.text", operator: "contains", expected: kw });
-    for (const tc of c.tool_calls ?? []) legacy.push({ type: "tool_call", toolName: tc, expectedCalls: 1 });
-    if (c.max_duration_s) legacy.push({ type: "metric", metric: "duration_ms", operator: "<=", threshold: c.max_duration_s * 1000 });
-    if (c.max_output_tokens) legacy.push({ type: "metric", metric: "output_tokens", operator: "<=", threshold: c.max_output_tokens });
-    if (c.max_tool_calls) legacy.push({ type: "metric", metric: "total_tool_calls", operator: "<=", threshold: c.max_tool_calls });
-    return legacy;
+    return [];
   });
 
-  const [criteria, _setCriteria] = useState<EvalCriteria>((evalCase.criteria ?? {}) as EvalCriteria);
-  const [criteriaHasError, setCriteriaHasError] = useState(false);
+  const [assertionsHasError, setAssertionsHasError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [responseTurnIdx, setResponseTurnIdx] = useState<number>(() => Math.max(0, turns.length - 1));
 
@@ -404,7 +351,7 @@ export function EvalCaseInspector({
     JSON.stringify(stripKeys(turns)) !== origTurnsJson ||
     JSON.stringify(assertions) !== origAssertionsJson;
 
-  const canSave = isDirty && !criteriaHasError && !saving;
+  const canSave = isDirty && !assertionsHasError && !saving;
 
   const activeDimensions = suite.dimensionIds;
 
@@ -414,7 +361,7 @@ export function EvalCaseInspector({
 
   const [runOutcome, setRunOutcome] = useState<RunEvalCaseResult | null>(null);
   const [running, setRunning] = useState<boolean>(false);
-  const [_runError, setRunError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   // Derive display scores: prefer pinnedOutcome (history snapshot), then runOutcome (local run), then liveRun, then latest-result SWR
   const liveCaseResult = liveRun.caseResults.get(evalCase.id);
@@ -428,13 +375,13 @@ export function EvalCaseInspector({
       : (runOutcome?.dimensionScores ?? (liveCaseResult?.dimensionScores ?? (historicalResult?.dimensionScores ?? {})));
   }, [pinnedOutcome, runOutcome?.dimensionScores, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
   const displayBaselineScore = displayDimensionScores?.baseline ?? null;
-  const displayCriteriaScore = pinnedOutcome
+  const displayAssertionScore = pinnedOutcome
     ? pinnedOutcome.criteriaScore
     : (runOutcome ? (runOutcome.criteriaScore ?? null) : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null)));
   const displayFeedback = pinnedOutcome
     ? pinnedOutcome.feedback
     : (runOutcome ? (runOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
-  const displayCriteriaResults = pinnedOutcome
+  const displayAssertionResults = pinnedOutcome
     ? pinnedOutcome.criteriaResults
     : (runOutcome ? (runOutcome.criteriaResults ?? null) : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null)));
   const displayDurationMs = pinnedOutcome
@@ -450,7 +397,17 @@ export function EvalCaseInspector({
   const resolvedThreadId = runOutcome?.threadId ?? null;
   const resolvedStatus = pinnedOutcome
     ? pinnedOutcome.status
-    : (running ? "running" : (runOutcome ? runOutcome.status : (liveRun.phase === "idle" ? (historicalResult?.status ?? "idle") : (liveCaseResult?.status ?? "running"))));
+    : (running
+        ? "running"
+        : (runError
+            ? "errored"
+            : (runOutcome
+                ? runOutcome.status
+                : (liveRun.phase === "idle"
+                    ? (historicalResult?.status ?? "idle")
+                    : (liveCaseResult?.status ?? "running")))));
+
+  const displayError = runError ?? runOutcome?.error ?? (pinnedOutcome ? (typeof pinnedOutcome.error === "string" ? pinnedOutcome.error : (pinnedOutcome.error as { message?: string } | undefined)?.message) : null);
 
   // Copilot ambient context & draft integration
   const getCurrentData = useCallback(() => {
@@ -471,7 +428,7 @@ export function EvalCaseInspector({
         suiteName: suite.name,
         name: evalCase.name,
         turns: stripKeys(turns),
-        criteria,
+        assertions,
         isDirty: Boolean(isDirty),
       },
       outcome: (displayScore !== null || resolvedStatus !== "idle")
@@ -481,8 +438,8 @@ export function EvalCaseInspector({
             status: resolvedStatus,
             score: displayScore,
             dimensionScores: displayDimensionScores,
-            criteriaScore: displayCriteriaScore,
-            criteriaResults: displayCriteriaResults ?? [],
+            criteriaScore: displayAssertionScore,
+            criteriaResults: displayAssertionResults ?? [],
             feedback: displayFeedback || null,
           }
         : null,
@@ -491,15 +448,15 @@ export function EvalCaseInspector({
     suite,
     evalCase,
     turns,
-    criteria,
+    assertions,
     isDirty,
     displayScore,
     resolvedStatus,
     pinnedOutcome,
     selectedRunSeq,
     displayDimensionScores,
-    displayCriteriaScore,
-    displayCriteriaResults,
+    displayAssertionScore,
+    displayAssertionResults,
     displayFeedback,
   ]);
 
@@ -601,7 +558,7 @@ export function EvalCaseInspector({
       }
       const res = await fetch(`/api/eval-cases/${evalCase.id}/run`, {
         method: "POST",
-        signal: AbortSignal.timeout(290_000),
+        signal: AbortSignal.timeout(600_000),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -612,7 +569,7 @@ export function EvalCaseInspector({
       setResponseTurnIdx(Math.max(0, turns.length - 1));
     } catch (err) {
       if (err instanceof Error && err.name === "TimeoutError") {
-        setRunError("Evaluation timed out on client side after 290s. Consider reducing turns or testing with shorter prompts.");
+        setRunError("Evaluation timed out on client side after 600s. Consider reducing turns or testing with shorter prompts.");
       } else {
         setRunError(err instanceof Error ? err.message : String(err));
       }
@@ -663,8 +620,9 @@ export function EvalCaseInspector({
               size="sm"
               variant="ghost"
               className={`h-6 w-6 p-0 hover:bg-transparent hover:text-foreground ${isDirty ? "text-amber-500" : "text-muted-foreground"}`}
-              disabled={!canSave || selectedRunSeq !== null}
               onClick={handleSave}
+              disabled={!canSave || saving || selectedRunSeq !== null}
+              title="Save changes"
             >
               {saving ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -675,20 +633,18 @@ export function EvalCaseInspector({
             <Button
               size="sm"
               className="h-6 px-2 text-xs"
-              disabled={!suite.evaluatorAgentId || running || liveRun.phase === "running"}
+              disabled={running || liveRun.phase === "running"}
               title={
-                !suite.evaluatorAgentId
-                  ? "Evaluator not configured"
-                  : running || liveRun.phase === "running"
-                    ? "A run is in progress"
-                    : "Run case"
+                running || liveRun.phase === "running"
+                  ? "A run is in progress"
+                  : "Run case"
               }
               onClick={() => void handleRunSingleCase()}
             >
               {running || liveRun.phase === "running" ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               ) : (
-                <Play className={cn("mr-1 h-3 w-3", suite.evaluatorAgentId ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground")} />
+                <Play className="mr-1 h-3 w-3 fill-green-500 text-green-500" />
               )}
               Run
             </Button>
@@ -725,7 +681,7 @@ export function EvalCaseInspector({
               mode="evaluation"
               assertions={assertions}
               onChange={setAssertions}
-              onErrorChange={(err) => setCriteriaHasError(Boolean(err))}
+              onErrorChange={(err) => setAssertionsHasError(Boolean(err))}
               readOnly={selectedRunSeq !== null}
               saving={saving}
             />
@@ -766,8 +722,10 @@ export function EvalCaseInspector({
               <ResponseViewer
                 messages={filteredMessages}
                 isLoading={messagesLoading}
+                running={running || liveRun.phase === "running"}
                 hasRun={!!resolvedRunId}
                 turnIndex={responseTurnIdx}
+                error={displayError}
               />
             </ScrollArea>
           </div>
@@ -776,17 +734,18 @@ export function EvalCaseInspector({
           <div className="flex min-h-0 flex-col overflow-hidden border-t">
             <EvaluationPanel
               activeDimensions={activeDimensions}
-              criteria={criteria}
               overallScore={displayScore}
               baselineScore={displayBaselineScore}
               dimensionScores={displayDimensionScores}
-              criteriaScore={displayCriteriaScore}
-              criteriaResults={displayCriteriaResults}
+              assertionScore={displayAssertionScore}
+              assertionResults={displayAssertionResults}
               feedback={displayFeedback}
               durationMs={displayDurationMs}
               outputTokens={displayOutputTokens}
               selectedRunSeq={selectedRunSeq}
               startedAt={pinnedOutcome?.startedAt}
+              status={resolvedStatus}
+              error={displayError}
             />
           </div>
         </div>
@@ -799,41 +758,42 @@ export function EvalCaseInspector({
 
 interface EvaluationPanelProps {
   activeDimensions: string[];
-  criteria: EvalCriteria;
   overallScore: number | null;
   baselineScore: number | null;
   dimensionScores: Record<string, number>;
-  criteriaScore: number | null;
-  criteriaResults: unknown[] | null;
+  assertionScore: number | null;
+  assertionResults: unknown[] | null;
   feedback: string | null;
   durationMs: number | null;
   outputTokens: number | null;
   selectedRunSeq?: number | null;
   startedAt?: Date | string | null;
+  status?: string | null;
+  error?: string | null;
 }
 
 function EvaluationPanel({
   activeDimensions,
-  criteria,
   overallScore,
   baselineScore,
   dimensionScores,
-  criteriaScore,
-  criteriaResults,
+  assertionScore,
+  assertionResults,
   feedback,
   durationMs,
   outputTokens,
   selectedRunSeq = null,
   startedAt = null,
+  status = null,
+  error = null,
 }: EvaluationPanelProps): ReactNode {
-  const [criteriaExpanded, setCriteriaExpanded] = useState(true);
+  const [assertionsExpanded, setAssertionsExpanded] = useState(true);
   const tz = useDisplayTimezone();
 
-  const criteriaChecklist = useMemo(
-    () => buildCriteriaChecklist(criteria, criteriaResults ?? undefined),
-    [criteria, criteriaResults],
-  );
-  const hasCriteria = criteriaChecklist.length > 0;
+  const resultsList = Array.isArray(assertionResults) && assertionResults.length > 0
+    ? (assertionResults as CriteriaCheckResult[]).filter((r) => r.kind !== "expectation")
+    : null;
+  const hasAssertionResults = resultsList !== null && resultsList.length > 0;
 
   // Level badge for the header.
   const levelMeta = overallScore !== null
@@ -867,7 +827,7 @@ function EvaluationPanel({
             </span>
           )}
           {/* 2. 打分 + 3. 结果字符串 */}
-          {overallScore !== null && (
+          {overallScore !== null ? (
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-xs font-mono tabular-nums font-semibold">
                 {overallScore}
@@ -878,7 +838,11 @@ function EvaluationPanel({
                 </span>
               )}
             </div>
-          )}
+          ) : status === "errored" ? (
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-red-400 bg-red-500/15">
+              Error
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -916,59 +880,65 @@ function EvaluationPanel({
               />
             ))}
 
-            {/* Criteria Checklist — collapsible */}
-            {hasCriteria && (
+            {/* Deterministic Assertions — collapsible, shown only when evaluation results are available */}
+            {hasAssertionResults && (
               <div className="pt-1">
                 <button
                   type="button"
-                  onClick={() => setCriteriaExpanded((v) => !v)}
+                  onClick={() => setAssertionsExpanded((v) => !v)}
                   className="flex w-full items-center gap-2 group"
                 >
-                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">Checklist</span>
+                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">Deterministic</span>
                   <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                    {criteriaScore !== null && (
+                    {assertionScore !== null && (
                       <div
-                        className={cn("h-full rounded-full transition-all", barColorForScore(criteriaScore))}
-                        style={{ width: `${Math.min(100, criteriaScore)}%` }}
+                        className={cn("h-full rounded-full transition-all", barColorForScore(assertionScore))}
+                        style={{ width: `${Math.min(100, assertionScore)}%` }}
                       />
                     )}
                   </div>
                   <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
-                    {criteriaScore !== null ? `${criteriaScore}` : "—"}
+                    {assertionScore !== null ? `${assertionScore}` : "—"}
                   </span>
                   <ChevronDown className={cn(
                     "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-                    criteriaExpanded && "rotate-180",
+                    assertionsExpanded && "rotate-180",
                   )} />
                 </button>
 
-                {criteriaExpanded && (
+                {assertionsExpanded && (
                   <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
-                    {criteriaChecklist.map((item, i) => (
-                      <div key={i} className="flex items-start gap-1.5">
-                        <div className="mt-0.5 shrink-0">
-                          <CriteriaCheckIcon passed={item.passed} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className={cn(
-                            "text-[11px] break-words",
-                            item.passed === false ? "text-red-400" : "text-muted-foreground",
-                          )}>
-                            {item.label}
-                            {item.actual !== undefined && (
-                              <span className="text-[10px] text-muted-foreground/60 italic ml-1.5">
-                                (actual: {item.actual})
-                              </span>
+                    <ul className="space-y-1">
+                      {resultsList.map((item, i) => (
+                        <li
+                          key={i}
+                          className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1 font-mono text-[11px]"
+                        >
+                          <span
+                            className={cn(
+                              "shrink-0 font-semibold",
+                              item.passed
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-red-600 dark:text-red-400",
                             )}
+                          >
+                            {item.passed ? "✓" : "✗"}
                           </span>
-                          {item.kind === "expectation" && item.score !== null && (
-                            <span className="ml-1.5 text-[10px] font-mono tabular-nums text-muted-foreground">
-                              {item.score}/100
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-muted-foreground break-all">
+                                #{i + 1} · {item.label}
+                              </span>
+                              {item.passed === false && item.actual !== undefined && (
+                                <span className="shrink-0 text-red-500/80 dark:text-red-400/80 font-mono text-[10px]">
+                                  ({item.actual})
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
@@ -979,10 +949,14 @@ function EvaluationPanel({
           <div className="space-y-1.5 pt-2 border-t border-muted">
             <span className="text-[11px] font-semibold text-muted-foreground">Feedback</span>
             <div className={cn(
-              "text-xs text-muted-foreground rounded-md border p-2.5 leading-relaxed",
-              hasResult ? "bg-muted/10 border-border" : "bg-muted/20 border-dashed",
+              "text-xs rounded-md border p-2.5 leading-relaxed whitespace-pre-wrap",
+              error
+                ? "bg-red-500/10 border-red-500/30 text-red-500 dark:text-red-400 font-medium"
+                : hasResult
+                  ? "bg-muted/10 border-border text-muted-foreground"
+                  : "bg-muted/20 border-dashed text-muted-foreground",
             )}>
-              {feedback ?? "No verdict yet."}
+              {error ?? feedback ?? "No verdict yet."}
             </div>
           </div>
         </div>

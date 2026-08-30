@@ -59,3 +59,10 @@ export function barColorForScore(score: number): string {
 export const CONFIG_KEY_EXCELLENT = "eval.threshold.excellent";
 export const CONFIG_KEY_PASS      = "eval.threshold.pass";
 export const CONFIG_KEY_POOR      = "eval.threshold.poor";
+
+/** Default turn timeouts in seconds (5 minutes each). */
+export const DEFAULT_EVAL_TARGET_TIMEOUT_S = 300;
+export const DEFAULT_EVAL_EVALUATOR_TIMEOUT_S = 300;
+
+export const CONFIG_KEY_TARGET_TIMEOUT    = "eval.step_timeout.target";
+export const CONFIG_KEY_EVALUATOR_TIMEOUT = "eval.step_timeout.evaluator";
