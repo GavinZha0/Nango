@@ -14,7 +14,7 @@ import {
   type ReactNode,
   type ChangeEvent,
 } from "react";
-import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, Trash2, ChevronLeft } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, Trash2, ChevronLeft, Star, Webhook, Scale, BookMarked, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -810,6 +810,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                           ...restored,
                           ...(newRole === "evaluator" && nextPrompt.trim() === "" ? { prompt: DEFAULT_EVALUATOR_SYSTEM_PROMPT } : {}),
                           ...(newRole === "evaluator" && nextName.trim() === "" ? { name: "Evaluator" } : {}),
+                          ...(newRole === "tester" && nextName.trim() === "" ? { name: "Tester" } : {}),
                         };
                       });
                       if (form.role === "supervisor") {
@@ -819,17 +820,56 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   }}
                 >
                   <SelectTrigger className="h-8 flex-1 text-xs">
-                    <SelectValue placeholder="Select role" />
+                    <div className="flex items-center gap-1.5 text-xs truncate">
+                      {form.role === "supervisor" && (
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400 shrink-0" />
+                      )}
+                      {form.role === "secretary" && (
+                        <BookMarked className="h-3.5 w-3.5 fill-sky-500/20 text-sky-500 shrink-0" />
+                      )}
+                      {form.role === "evaluator" && (
+                        <Scale className="h-3.5 w-3.5 fill-purple-500/20 text-purple-500 shrink-0" />
+                      )}
+                      {form.role === "tester" && (
+                        <Webhook className="h-3.5 w-3.5 fill-emerald-500/20 text-emerald-500 shrink-0" />
+                      )}
+                      {!form.role && (
+                        <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <span className="capitalize">{form.role ?? "Specialist"}</span>
+                    </div>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="specialist" className="text-xs">Specialist</SelectItem>
+                    <SelectItem value="specialist" className="text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>Specialist</span>
+                      </div>
+                    </SelectItem>
                     <SelectItem value="supervisor" disabled={supervisorSlotTaken} className="text-xs">
-                      Supervisor
+                      <div className="flex items-center gap-1.5">
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                        <span>Supervisor</span>
+                      </div>
                     </SelectItem>
                     <SelectItem value="secretary" disabled={secretarySlotTaken} className="text-xs">
-                      Secretary
+                      <div className="flex items-center gap-1.5">
+                        <BookMarked className="h-3.5 w-3.5 fill-sky-500/20 text-sky-500" />
+                        <span>Secretary</span>
+                      </div>
                     </SelectItem>
-                    <SelectItem value="evaluator" className="text-xs">Evaluator</SelectItem>
+                    <SelectItem value="evaluator" className="text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <Scale className="h-3.5 w-3.5 fill-purple-500/20 text-purple-500" />
+                        <span>Evaluator</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="tester" className="text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <Webhook className="h-3.5 w-3.5 fill-emerald-500/20 text-emerald-500" />
+                        <span>Tester</span>
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <Label htmlFor="state-sharing-toggle" className="text-xs font-normal text-muted-foreground shrink-0 pl-1 cursor-pointer">

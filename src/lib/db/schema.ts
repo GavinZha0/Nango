@@ -543,7 +543,7 @@ export type UserRole = "admin" | "editor" | "user";
 
 /** Built-in agent system-role enum. `null` = regular user-authored
  *  agent. See AGENTS.md ("Supervisor + agent role enum"). */
-export type AgentRole = "supervisor" | "secretary" | "evaluator" | "security";
+export type AgentRole = "supervisor" | "secretary" | "evaluator" | "tester";
 export type ImAccounts = { teams?: string; dingtalk?: string; wechat?: string; slack?: string };
 
 // BuiltIn Agent tables

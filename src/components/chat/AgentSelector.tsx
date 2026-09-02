@@ -1,8 +1,17 @@
 "use client";
 
-import { Fragment, useCallback, useState, useMemo } from "react";
-import type { ReactNode } from "react";
-import { Bot, ChevronDown, ChevronRight, Sparkles, Users } from "lucide-react";
+import { Fragment, useCallback, useState, useMemo, type ReactNode } from "react";
+import {
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
+  Users,
+  Star,
+  Webhook,
+  Scale,
+  BookMarked,
+} from "lucide-react";
 
 import {
   DropdownMenu,
@@ -17,6 +26,21 @@ import type { EntityKind } from "@/lib/backends/types";
 import { cn } from "@/lib/utils";
 import { alphabeticCompare } from "@/lib/utils/sort";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
+
+function AgentIconByRole({ role, className }: { role?: string | null; className?: string }) {
+  switch (role) {
+    case "supervisor":
+      return <Star className={cn("h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500", className)} />;
+    case "tester":
+      return <Webhook className={cn("h-3.5 w-3.5 shrink-0 fill-emerald-500/20 text-emerald-500", className)} />;
+    case "evaluator":
+      return <Scale className={cn("h-3.5 w-3.5 shrink-0 fill-purple-500/20 text-purple-500", className)} />;
+    case "secretary":
+      return <BookMarked className={cn("h-3.5 w-3.5 shrink-0 fill-sky-500/20 text-sky-500", className)} />;
+    default:
+      return <Bot className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground", className)} />;
+  }
+}
 
 /**
  * AgentSelector — compact dropdown that lists every visible backend
@@ -96,10 +120,13 @@ export function AgentSelector({
   const visibleTeams = teams.filter(
     (t) => !disabledBackend.has(agentKey(t.credentialId, t.id)),
   );
-  // System-role agents are hidden from the picker but kept in lookup
+  // System-role agents are hidden from the picker (except tester) but kept in lookup
   // for active-name resolution.
   const enabledBuiltin = useMemo(() => builtinAgents.filter((b) => b.enabled), [builtinAgents]);
-  const visibleBuiltin = useMemo(() => enabledBuiltin.filter((b) => !b.role), [enabledBuiltin]);
+  const visibleBuiltin = useMemo(
+    () => enabledBuiltin.filter((b) => !b.role || b.role === "tester"),
+    [enabledBuiltin],
+  );
   const sortedVisibleBuiltin = useMemo(() => {
     return [...visibleBuiltin].sort((a, b) => alphabeticCompare(a.name, b.name));
   }, [visibleBuiltin]);
@@ -141,6 +168,7 @@ export function AgentSelector({
       name: b.name,
       type: "agent" as const,
       source: "builtin" as const,
+      role: b.role,
       credentialName: b.role === "supervisor" ? "Nango" : "BuiltIn",
       isSupervisor: b.role === "supervisor",
     })),
@@ -214,12 +242,16 @@ export function AgentSelector({
             : "hover:bg-muted",
         )}
       >
-        <ActiveIcon
-          className={cn(
-            "h-3.5 w-3.5 shrink-0",
-            isOnNango ? "text-amber-950 dark:text-amber-100" : "text-muted-foreground",
-          )}
-        />
+        {active?.source === "builtin" && !isOnNango ? (
+          <AgentIconByRole role={active.role} />
+        ) : (
+          <ActiveIcon
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              isOnNango ? "text-amber-950 dark:text-amber-100" : "text-muted-foreground",
+            )}
+          />
+        )}
         <span className="min-w-0 truncate">
           {activeGroup && (
             <span className="text-muted-foreground">{activeGroup} / </span>
@@ -295,7 +327,7 @@ export function AgentSelector({
                   )}
                   onClick={() => onSelect(b.id, "agent", "builtin")}
                 >
-                  <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <AgentIconByRole role={b.role} />
                   <span className="truncate">{b.name}</span>
                 </DropdownMenuItem>
               ))}

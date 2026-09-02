@@ -60,7 +60,7 @@ export const AgentDraftSchema = z.object({
   temperature: z.number().min(0).max(1).optional().describe("Sampling temperature between 0.0 and 1.0"),
   maxSteps: z.number().int().min(1).max(50).optional().describe("Max autonomous tool steps per run"),
   toolApprovalMode: z.enum(["always", "auto", "never"]).optional().describe("Safety gate for tool approvals"),
-  role: z.enum(["supervisor", "secretary", "evaluator"]).nullable().optional().describe("System role assignment"),
+  role: z.enum(["supervisor", "secretary", "evaluator", "tester"]).nullable().optional().describe("System role assignment"),
   sharedStateEnabled: z.boolean().optional().describe("Whether this agent has shared state co-editing enabled"),
   tools: z.object({
     mcp: z.array(z.string()).optional().describe("Array of bound MCP server UUIDs"),

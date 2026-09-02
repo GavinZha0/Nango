@@ -116,7 +116,7 @@ const createSchema = z.object({
   /** System-agent role; `null` / omitted = regular agent. For
    *  `supervisor` the server overwrites name / description / prompt
    *  with canonical values regardless of what the client sent. */
-  role: z.enum(["supervisor", "secretary", "evaluator"]).nullable().optional(),
+  role: z.enum(["supervisor", "secretary", "evaluator", "tester"]).nullable().optional(),
   /** Optional emoji glyph for visual identification.
    *  Stored as a raw Unicode character (1-4 codepoints). */
   icon: z.string().max(8).nullable().optional(),

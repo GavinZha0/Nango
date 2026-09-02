@@ -126,7 +126,7 @@ const updateSchema = z
     description: optionalTrimmedString.optional(),
     /** Monotonic: only `null → system role` is accepted; any other
      *  transition returns 409. See AGENTS.md ("agent `role` enum"). */
-    role: z.enum(["supervisor", "secretary", "evaluator"]).nullable().optional(),
+    role: z.enum(["supervisor", "secretary", "evaluator", "tester"]).nullable().optional(),
     /** Optional emoji glyph; pass `null` to clear. */
     icon: z.string().max(8).nullable().optional(),
     model: nonEmptyString.optional(),

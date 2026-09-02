@@ -16,6 +16,9 @@ import {
   ToggleLeft,
   ToggleRight,
   Star,
+  Webhook,
+  Scale,
+  BookMarked,
 } from "lucide-react";
 import {
   Fragment,
@@ -302,11 +305,52 @@ interface BuiltinRowProps {
   onToggleEnabled: (row: BuiltinAgentRow, next: boolean) => void;
 }
 
+function AgentRoleBadge({ role }: { role?: string | null }) {
+  if (!role) return null;
+
+  switch (role) {
+    case "supervisor":
+      return (
+        <span
+          className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-amber-500/40 text-amber-500 shadow-xs"
+        >
+          <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+        </span>
+      );
+    case "tester":
+      return (
+        <span
+          className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-emerald-500/40 text-emerald-500 shadow-xs"
+        >
+          <Webhook className="h-2.5 w-2.5 fill-emerald-500/20 text-emerald-500" />
+        </span>
+      );
+    case "evaluator":
+      return (
+        <span
+          className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-purple-500/40 text-purple-500 shadow-xs"
+        >
+          <Scale className="h-2.5 w-2.5 fill-purple-500/20 text-purple-500" />
+        </span>
+      );
+    case "secretary":
+      return (
+        <span
+          className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-sky-500/40 text-sky-500 shadow-xs"
+        >
+          <BookMarked className="h-2.5 w-2.5 fill-sky-500/20 text-sky-500" />
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
 /**
  * BuiltinRow — one row in the Builtin agents list.
  *
  * Two-line layout:
- *   Line 1: [icon] [name] [⭐ supervisor?] ............... [model] [vis] [on/off]
+ *   Line 1: [icon + role badge] [name] ............... [model] [vis] [on/off]
  *           ←─── left-aligned identity ───→     ←──── right-aligned metadata ───→
  *   Line 2: description (truncated, muted)
  *
@@ -342,26 +386,24 @@ function BuiltinRow({
       )}
     >
       <div className="flex items-center gap-2">
-        {/* ── Left cluster: identity (icon + name + supervisor flag) ── */}
+        {/* ── Left cluster: identity (icon + role badge + name) ── */}
         <div className="flex flex-1 min-w-0 items-center gap-2">
-          {/* Agent icon — user-chosen emoji or default 🤖. Drawn via the
-              native emoji font (no CDN), fallback chain matches the
-              EmojiPicker for visual consistency. `text-xl` (20 px)
-              mirrors the editor's picker trigger and renders noticeably
-              larger than the surrounding `text-base` name so the glyph
-              acts as the row's primary visual anchor. */}
-          <span
-            aria-hidden
-            className="flex shrink-0 items-center justify-center rounded-md bg-card dark:bg-white border border-border text-xl leading-none"
-            style={{
-              width: "32px",
-              height: "32px",
-              fontFamily:
-                '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif',
-            }}
-          >
-            {resolveAgentIcon(row.icon)}
-          </span>
+          {/* Agent icon with role overlay badge */}
+          <div className="relative shrink-0 flex items-center justify-center">
+            <span
+              aria-hidden
+              className="flex shrink-0 items-center justify-center rounded-md bg-card dark:bg-white border border-border text-xl leading-none"
+              style={{
+                width: "32px",
+                height: "32px",
+                fontFamily:
+                  '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif',
+              }}
+            >
+              {resolveAgentIcon(row.icon)}
+            </span>
+            <AgentRoleBadge role={row.role} />
+          </div>
 
           {/* Name — click to edit for owner or public resources, plain span otherwise. */}
           {isOwner || isPublic ? (
@@ -375,15 +417,6 @@ function BuiltinRow({
             </button>
           ) : (
             <span className="truncate text-base font-medium">{row.name}</span>
-          )}
-
-          {/* Supervisor flag — pinned next to the name so the user's
-              main entry point stays visually distinct in the flat list. */}
-          {row.role === "supervisor" && (
-            <Star
-              className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400"
-              aria-label="Supervisor (Nango)"
-            />
           )}
         </div>
 
