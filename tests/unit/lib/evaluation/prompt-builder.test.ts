@@ -30,11 +30,11 @@ describe("buildEvaluationBrief — Atomic LLM Judge Checklist", () => {
     });
 
     expect(brief).toContain("LLM AS JUDGE ATOMIC CHECKLIST");
-    expect(brief).toContain("Item #1 (Index: 0) [EXPECTATION]:");
+    expect(brief).toContain("[CHECK ITEM 0] [EXPECTATION]:");
     expect(brief).toContain('Target: "Accurately name the poem as 望庐山瀑布"');
-    expect(brief).toContain("Item #2 (Index: 1) [UNEXPECTATION / FORBIDDEN]:");
+    expect(brief).toContain("[CHECK ITEM 1] [UNEXPECTATION / FORBIDDEN]:");
     expect(brief).toContain('Target: "Mention unrelated poems like 静夜思"');
-    expect(brief).toContain("Item #3 (Index: 2) [REFERENCE CONTEXT]:");
+    expect(brief).toContain("[CHECK ITEM 2] [REFERENCE CONTEXT]:");
     expect(brief).toContain('Ground Truth: "日照香炉生紫烟，遥看瀑布挂前川。飞流直下三千尺，疑是银河落九天。"');
     expect(brief).toContain("llm_judge_results (array with one entry for each of the 3 check items above");
     expect(brief).toContain("call `submit_evaluation_scores` EXACTLY ONCE in a single tool call");

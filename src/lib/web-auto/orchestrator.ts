@@ -167,31 +167,16 @@ export async function runWebAutoCase(
   };
 
   // Step 3: LLM evaluation (if configured and expectations exist)
-  let llmResult: {
-    passed: boolean;
-    score?: number;
-    feedback?: string;
-    expectationResults: Array<{
-      expectation: string;
-      score: number;
-      feedback: string;
-    }>;
-  } | null = null;
+  let llmResult: import("./evaluator").WebAutoEvaluationResult | null = null;
 
   if (input.suite.evaluatorAgentId && outcome.llmAssertions.length > 0) {
-    const expectations = outcome.llmAssertions
-      .map((item) => {
-        const exp =
-          item.spec.expectation ||
-          (item.spec as unknown as { description?: string }).description ||
-          "";
-        return {
-          expectation: exp,
-          referenceImage: item.spec.referenceImage,
-          context: item.spec.context,
-        };
-      })
-      .filter((item) => item.expectation.trim().length > 0);
+    const expectations = outcome.llmAssertions.map((item) => ({
+      expectation: item.spec.expectation,
+      unexpectation: item.spec.unexpectation,
+      reference: item.spec.reference,
+      referenceImage: item.spec.referenceImage,
+      context: item.spec.context,
+    }));
 
     if (expectations.length > 0) {
       try {
@@ -201,12 +186,7 @@ export async function runWebAutoCase(
           expectations,
           ownerId: input.ownerId,
         });
-        llmResult = {
-          passed: evalResult.passed,
-          score: evalResult.score,
-          feedback: evalResult.feedback,
-          expectationResults: evalResult.expectationResults,
-        };
+        llmResult = evalResult;
       } catch (err) {
         log.error(
           { event: "web_auto_llm_evaluation_failed", err },
@@ -216,10 +196,14 @@ export async function runWebAutoCase(
           passed: false,
           score: 0,
           feedback: "LLM evaluation failed",
-          expectationResults: expectations.map((exp) => ({
-            expectation: exp.expectation,
+          expectationResults: expectations.map((exp, idx) => ({
+            index: idx,
             score: 0,
+            reason: "LLM evaluation failed",
             feedback: "LLM evaluation failed",
+            expectation: exp.expectation,
+            unexpectation: exp.unexpectation,
+            reference: exp.reference,
           })),
         };
       }
@@ -233,14 +217,23 @@ export async function runWebAutoCase(
 
   if (outcome.llmAssertions.length > 0) {
     outcome.llmAssertions.forEach((item, i) => {
-      const expRes = llmResult?.expectationResults?.[i];
+      const expRes =
+        llmResult?.expectationResults?.find((r) => r.index === i) ??
+        llmResult?.expectationResults?.[i];
+
+      const itemScore = expRes?.score ?? llmResult?.score ?? undefined;
+      const itemOk = itemScore !== undefined ? itemScore >= 60 : (llmResult ? llmResult.passed : false);
+      const itemReason = expRes?.reason || llmResult?.feedback;
+
       unifiedAssertionResults.push({
         index: item.index,
         type: "llm_judge",
-        ok: expRes ? expRes.score >= 60 : (llmResult ? llmResult.passed : false),
-        score: expRes?.score ?? llmResult?.score ?? undefined,
-        feedback: expRes?.feedback ?? llmResult?.feedback ?? undefined,
+        ok: itemOk,
+        score: itemScore,
+        reason: itemReason,
+        feedback: itemReason,
         expectation: item.spec.expectation,
+        unexpectation: item.spec.unexpectation,
         reference: item.spec.reference,
         referenceImage: item.spec.referenceImage,
       });
@@ -268,13 +261,15 @@ export async function runWebAutoCase(
   };
 
   const overallStatus = verdict.overall.passed ? "passed" : "failed";
+  // Gated by deterministic checks: if deterministic assertions failed, score is 0
+  const finalScore = deterministicResult.passed ? llmResult?.score : 0;
 
   return {
     status: overallStatus,
     executionOutput: mcpResult.executionOutput,
     outputTruncated: false,
     assertionResults: unifiedAssertionResults,
-    score: llmResult?.score,
+    score: finalScore,
     feedback: llmResult?.feedback,
     verdict,
     error: null,

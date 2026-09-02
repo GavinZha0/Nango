@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 import type { AssertionSpec } from "@/lib/assertions";
-import { AssertionVerdictList, LlmFeedbackCard } from "@/components/main-panels/common/verdicts";
+import { AssertionVerdictList } from "@/components/main-panels/common/verdicts";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -754,21 +754,14 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   </div>
                 </div>
                 <div className="flex flex-col min-h-0 overflow-hidden">
-                  {displayOutcome?.feedback && (
-                    <div className="p-3 pb-0">
-                      <LlmFeedbackCard
-                        feedback={displayOutcome.feedback}
-                        score={displayOutcome.score}
-                      />
-                    </div>
-                  )}
                   <AssertionVerdictList
                     verdicts={
                       displayOutcome?.assertionResults ??
                       displayOutcome?.verdict?.deterministic?.results
                     }
-                    assertions={draftAssertions as unknown as readonly AssertionSpec[]}
+                    assertions={draftAssertions as unknown as readonly import("@/lib/assertions").AssertionSpec[]}
                     error={displayOutcome?.error as import("@/lib/assertions").ErrorEnvelope | null}
+                    feedback={displayOutcome?.feedback}
                     title="Verdicts"
                   />
                 </div>

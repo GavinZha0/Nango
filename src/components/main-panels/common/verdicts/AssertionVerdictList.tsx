@@ -19,6 +19,7 @@ export interface AssertionVerdictListProps {
   verdicts?: readonly AssertionResult[] | null;
   assertions?: readonly AssertionSpec[];
   error?: ErrorEnvelope | null;
+  feedback?: string | null;
   title?: string;
   emptyText?: string;
   className?: string;
@@ -28,6 +29,7 @@ export function AssertionVerdictList({
   verdicts = [],
   assertions = [],
   error,
+  feedback,
   title = "Verdicts",
   emptyText = "No verdict yet.",
   className = "",
@@ -111,10 +113,30 @@ export function AssertionVerdictList({
                 No failed assertions.
               </div>
             ) : null}
+
+            {/* Feedback section inside Verdicts (aligned with Evaluation style) */}
+            {feedback && (
+              <div className="space-y-1.5 pt-2 border-t border-border/40 mt-3">
+                <span className="text-[11px] font-semibold text-muted-foreground">Feedback</span>
+                <div className="text-xs rounded-md border border-border/40 bg-muted/20 p-2.5 leading-relaxed whitespace-pre-wrap text-muted-foreground font-sans">
+                  {feedback}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            {emptyText}
+          <div className="flex h-full flex-col justify-between">
+            <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+              {emptyText}
+            </div>
+            {feedback && (
+              <div className="space-y-1.5 pt-2 border-t border-border/40 mt-3">
+                <span className="text-[11px] font-semibold text-muted-foreground">Feedback</span>
+                <div className="text-xs rounded-md border border-border/40 bg-muted/20 p-2.5 leading-relaxed whitespace-pre-wrap text-muted-foreground font-sans">
+                  {feedback}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

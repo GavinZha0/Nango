@@ -689,9 +689,9 @@ export function UniversalAssertionsEditor({
                   onClick={() =>
                     addAssertion({
                       type: "metric",
-                      metric: "duration_ms",
+                      metric: "duration_s",
                       operator: "<=",
-                      threshold: 10000,
+                      threshold: 10,
                     })
                   }
                 >
@@ -716,7 +716,7 @@ export function UniversalAssertionsEditor({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="duration_ms">duration_ms</SelectItem>
+                        <SelectItem value="duration_s">duration_s</SelectItem>
                         <SelectItem value="output_tokens">output_tokens</SelectItem>
                         <SelectItem value="total_tool_calls">total_tool_calls</SelectItem>
                       </SelectContent>
@@ -829,22 +829,13 @@ export function UniversalAssertionsEditor({
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
                         if (!val) return;
-                        if (val === "unexpectation") {
-                          updateAssertionAt(idx, {
-                            type: "llm_judge",
-                            unexpectation: currentValue,
-                          });
-                        } else if (val === "reference") {
-                          updateAssertionAt(idx, {
-                            type: "llm_judge",
-                            reference: currentValue,
-                          });
-                        } else {
-                          updateAssertionAt(idx, {
-                            type: "llm_judge",
-                            expectation: currentValue,
-                          });
-                        }
+                        const { expectation: _e, unexpectation: _u, reference: _r, ...rest } =
+                          spec as Record<string, unknown>;
+                        updateAssertionAt(idx, {
+                          ...rest,
+                          type: "llm_judge",
+                          [val]: currentValue,
+                        } as AssertionSpec);
                       }}
                     >
                       <SelectTrigger className="w-36 h-7 text-xs bg-muted/20 border-muted-foreground/20 shrink-0 font-medium">
@@ -889,22 +880,13 @@ export function UniversalAssertionsEditor({
                       value={currentValue}
                       onChange={(e) => {
                         const val = e.target.value;
-                        if (kind === "unexpectation") {
-                          updateAssertionAt(idx, {
-                            type: "llm_judge",
-                            unexpectation: val,
-                          });
-                        } else if (kind === "reference") {
-                          updateAssertionAt(idx, {
-                            type: "llm_judge",
-                            reference: val,
-                          });
-                        } else {
-                          updateAssertionAt(idx, {
-                            type: "llm_judge",
-                            expectation: val,
-                          });
-                        }
+                        const { expectation: _e, unexpectation: _u, reference: _r, ...rest } =
+                          spec as Record<string, unknown>;
+                        updateAssertionAt(idx, {
+                          ...rest,
+                          type: "llm_judge",
+                          [kind]: val,
+                        } as AssertionSpec);
                       }}
                       placeholder={
                         kind === "unexpectation"

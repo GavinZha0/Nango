@@ -18,9 +18,8 @@ import {
   AlertTriangle,
   ChevronRight,
   ChevronDown,
-  Sparkles,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { AssertionResult, AssertionSpec } from "@/lib/assertions";
 
 interface AssertionVerdictRowProps {
@@ -37,10 +36,10 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
     verdict.type === "llm_expectation";
 
   const isOk = verdict.ok;
+  const reasonText = verdict.reason || verdict.feedback;
 
   const hasExpandableDetails =
-    Boolean(verdict.feedback) ||
-    verdict.details !== undefined;
+    Boolean(reasonText) || verdict.details !== undefined;
 
   const toggleExpand = (): void => {
     if (hasExpandableDetails) {
@@ -49,6 +48,16 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
   };
 
   const titleText = formatVerdictTitle(verdict, spec);
+
+  // 3-color dot indicators for LLM Judge
+  const isUnexpectation = Boolean(
+    verdict.unexpectation ||
+      (spec && "unexpectation" in spec && spec.unexpectation),
+  );
+  const isReference = Boolean(
+    (verdict.reference && !verdict.expectation) ||
+      (spec && "reference" in spec && spec.reference && !("expectation" in spec && spec.expectation)),
+  );
 
   return (
     <li className="rounded border border-border/40 bg-background/50 text-xs overflow-hidden transition-colors">
@@ -68,47 +77,50 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
             <XCircle className="h-3.5 w-3.5 text-rose-500 shrink-0" />
           )}
 
-          {/* LLM Judge badge */}
+          {/* Three-color dot for LLM Judge */}
           {isLlmJudge && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1 py-0 border-amber-500/40 text-amber-500 bg-amber-500/10 gap-0.5 shrink-0"
-            >
-              <Sparkles className="h-2 w-2" /> LLM
-            </Badge>
-          )}
-
-          {/* Score badge for LLM Judge */}
-          {isLlmJudge && verdict.score !== undefined && (
-            <Badge
-              variant="outline"
-              className={`text-[9px] px-1 py-0 font-mono font-semibold shrink-0 ${
-                verdict.score >= 60
-                  ? "border-emerald-500/40 text-emerald-500 bg-emerald-500/10"
-                  : "border-rose-500/40 text-rose-500 bg-rose-500/10"
-              }`}
-            >
-              {verdict.score}/100
-            </Badge>
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full shrink-0 shadow-xs",
+                isUnexpectation
+                  ? "bg-rose-500"
+                  : isReference
+                    ? "bg-sky-500"
+                    : "bg-emerald-500",
+              )}
+              title={
+                isUnexpectation
+                  ? "Unexpectation / Forbidden"
+                  : isReference
+                    ? "Reference Context"
+                    : "Expectation"
+              }
+            />
           )}
 
           {/* Title description */}
           <span className="font-mono text-[11px] truncate text-foreground/90 flex-1">
-            {verdict.index >= 0 && !isErrorType ? `#${verdict.index + 1} · ` : ""}
             {titleText}
           </span>
 
-          {/* Inline actual value on failure */}
-          {!isOk && verdict.actual !== undefined && (
+          {/* Inline actual value on failure for deterministic assertions */}
+          {!isOk && !isLlmJudge && verdict.actual !== undefined && (
             <span className="shrink-0 text-red-500/90 dark:text-red-400/90 font-mono text-[10px]">
               ({formatValue(verdict.actual)})
+            </span>
+          )}
+
+          {/* Score for LLM Judge */}
+          {isLlmJudge && verdict.score !== undefined && verdict.score !== null && (
+            <span className="font-mono text-[10px] text-muted-foreground shrink-0 tabular-nums px-1 py-0.5 rounded bg-muted/30 border border-border/20">
+              {verdict.score}
             </span>
           )}
 
           {hasExpandableDetails && (
             <button
               type="button"
-              className="text-muted-foreground/60 hover:text-foreground p-0.5 rounded transition-transform"
+              className="text-muted-foreground/60 hover:text-foreground p-0.5 rounded transition-transform shrink-0"
             >
               {expanded ? (
                 <ChevronDown className="h-3 w-3" />
@@ -120,24 +132,19 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
         </div>
       </div>
 
-      {/* Expandable details */}
+      {/* Expandable details: clean reason text */}
       {expanded && hasExpandableDetails && (
-        <div className="border-t border-border/30 bg-muted/20 px-3 py-2 space-y-1.5 font-mono text-[10px]">
-          {(verdict.feedback || verdict.reason) && (
-            <div className="space-y-0.5">
-              <span className="text-muted-foreground flex items-center gap-1">
-                <Sparkles className="h-2.5 w-2.5 text-amber-500" /> Model Feedback:
-              </span>
-              <p className="font-sans text-xs text-foreground/90 bg-muted/30 p-1.5 rounded border border-border/30 whitespace-pre-wrap">
-                {verdict.reason || verdict.feedback}
-              </p>
-            </div>
+        <div className="border-t border-border/30 bg-muted/20 px-3 py-2 text-xs border-border/40">
+          {reasonText && (
+            <p className="text-muted-foreground leading-relaxed whitespace-pre-wrap text-[11px] font-sans">
+              {reasonText}
+            </p>
           )}
 
-          {verdict.details !== undefined && (
-            <div>
+          {!reasonText && verdict.details !== undefined && (
+            <div className="font-mono text-[10px]">
               <span className="text-muted-foreground">Details: </span>
-              <pre className="mt-0.5 overflow-x-auto text-muted-foreground bg-background/50 p-1 rounded border border-border/20">
+              <pre className="mt-0.5 overflow-x-auto text-muted-foreground bg-background/50 p-1 rounded border border-border/20 text-[10px]">
                 {typeof verdict.details === "object"
                   ? JSON.stringify(verdict.details, null, 2)
                   : String(verdict.details)}

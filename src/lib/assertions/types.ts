@@ -67,7 +67,7 @@ export type ToolCallAssertion = z.infer<typeof toolCallAssertionSchema>;
 // ── 5. Metric & Performance Assertion Schema ─────────────────────────────────
 
 export const metricNameSchema = z.enum([
-  "duration_ms",
+  "duration_s",
   "output_tokens",
   "total_tool_calls",
 ]);

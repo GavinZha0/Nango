@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -109,5 +109,47 @@ describe("runWebAutoEvaluation", () => {
     expect(res.passed).toBe(false);
     expect(res.score).toBe(45);
     expect(res.feedback).toBe("Button was missing in the DOM");
+  });
+
+  it("supports batch llm_judge_results with individual scores and reasons", async () => {
+    mockRunnerStart.mockResolvedValueOnce({ status: "succeeded", runId: "run-eval-4" });
+    mockReadEvents.mockResolvedValueOnce([
+      {
+        type: "tool_call_chunk",
+        payload: {
+          toolName: "submit_evaluation_scores",
+          args: JSON.stringify({
+            baseline_score: 80,
+            llm_judge_results: [
+              { index: 0, score: 95, reason: "Header is perfectly visible." },
+              { index: 1, score: 100, reason: "No error toast appeared." },
+              { index: 2, score: 85, reason: "Matches reference text." },
+            ],
+            feedback: "Overall UI workflow succeeded cleanly.",
+          }),
+        },
+      },
+    ]);
+
+    const res = await runWebAutoEvaluation({
+      evaluatorAgentId: "agent-1",
+      executionOutput: { dom: "<div><h1>Dashboard</h1></div>" },
+      expectations: [
+        { expectation: "Header is visible" },
+        { unexpectation: "Error toast appears" },
+        { reference: "Dashboard" },
+      ],
+      ownerId: "user-1",
+    });
+
+    expect(res.passed).toBe(true);
+    expect(res.score).toBe(93); // avg(95, 100, 85) = 93.33 -> 93
+    expect(res.expectationResults).toHaveLength(3);
+    expect(res.expectationResults[0].score).toBe(95);
+    expect(res.expectationResults[0].reason).toBe("Header is perfectly visible.");
+    expect(res.expectationResults[1].score).toBe(100);
+    expect(res.expectationResults[1].reason).toBe("No error toast appeared.");
+    expect(res.expectationResults[2].score).toBe(85);
+    expect(res.expectationResults[2].reason).toBe("Matches reference text.");
   });
 });

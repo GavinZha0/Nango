@@ -79,9 +79,13 @@ export interface WebAutoVerdict {
     score?: number;
     feedback?: string;
     expectationResults: Array<{
-      expectation: string;
+      index?: number;
       score: number;
-      feedback: string;
+      reason?: string;
+      feedback?: string;
+      expectation?: string;
+      unexpectation?: string;
+      reference?: string;
     }>;
   };
   /** Overall pass/fail (AND of deterministic and LLM if present) */

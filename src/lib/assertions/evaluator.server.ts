@@ -471,8 +471,11 @@ function evaluateMetric(
   let actualValue: number | undefined;
 
   switch (spec.metric) {
-    case "duration_ms":
-      actualValue = metrics.durationMs;
+    case "duration_s":
+      actualValue =
+        metrics.durationMs !== undefined
+          ? Math.round((metrics.durationMs / 1000) * 10) / 10
+          : undefined;
       break;
     case "output_tokens":
       actualValue = metrics.outputTokens;

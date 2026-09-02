@@ -79,8 +79,8 @@ export function buildEvaluationBrief(input: PromptBuilderInput): string {
   if (llmAssertions.length > 0) {
     const checklistBlocks: string[] = [];
     for (let i = 0; i < llmAssertions.length; i++) {
-      const { index, spec } = llmAssertions[i];
-      const itemHeader = `Item #${i + 1} (Index: ${index})`;
+      const { spec } = llmAssertions[i];
+      const itemHeader = `[CHECK ITEM ${i}]`;
       if (spec.expectation) {
         checklistBlocks.push(
           `${itemHeader} [EXPECTATION]:\n` +
@@ -142,7 +142,7 @@ export function buildEvaluationBrief(input: PromptBuilderInput): string {
   }
   if (llmAssertions.length > 0) {
     scoreItems.push(
-      `llm_judge_results (array with one entry for each of the ${llmAssertions.length} check items above, specifying its 'index', 'score' 0-100, and 'reason')`,
+      `llm_judge_results (array with one entry for each of the ${llmAssertions.length} check items above, matching index 0 to ${llmAssertions.length - 1}: [{ index: 0, score: 0-100, reason: "..." }, ...])`,
     );
   }
   scoreItems.push("feedback (2-5 sentence overall summary)");

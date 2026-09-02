@@ -701,20 +701,29 @@ export function EvalCaseInspector({
               Output
             </span>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-            onClick={handleCopyResponse}
-            disabled={!hasResponse}
-            title="Copy response"
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-green-500" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
+          <div className="flex items-center gap-2">
+            {typeof displayDurationMs === "number" && !isNaN(displayDurationMs) && displayDurationMs > 0 && (
+              <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                {displayDurationMs >= 1000
+                  ? `${(displayDurationMs / 1000).toFixed(1)}s`
+                  : `${displayDurationMs}ms`}
+              </span>
             )}
-          </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+              onClick={handleCopyResponse}
+              disabled={!hasResponse}
+              title="Copy response"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-green-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* Output & Verdicts split — strictly 50%/50% matching Left Column */}
@@ -874,13 +883,6 @@ function EvaluationPanel({
           {selectedRunSeq !== null && (
             <span className="text-xs font-semibold text-amber-500 dark:text-amber-400 shrink-0">
               (#{selectedRunSeq}{formattedTime ? ` - ${formattedTime}` : ""})
-            </span>
-          )}
-          {typeof durationMs === "number" && !isNaN(durationMs) && durationMs > 0 && (
-            <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-              {durationMs >= 1000
-                ? `${(durationMs / 1000).toFixed(1)}s`
-                : `${durationMs}ms`}
             </span>
           )}
           {/* Score + level badge */}

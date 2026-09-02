@@ -328,13 +328,21 @@ export async function buildBuiltinAgents(
       );
     }
     
-    const isEvaluator: boolean = spec.role === "evaluator";
+    const isEvaluator: boolean =
+      spec.role === "evaluator" || ctx?.initiator === "evaluator";
     const evaluatorTools: ToolDefinition[] = [];
-    if (isEvaluator && ctx?.context?.expectedDimensionIds) {
-      const { buildSubmitEvaluationScoresTool } = await import("@/lib/evaluation/runtime-tools");
-      evaluatorTools.push(buildSubmitEvaluationScoresTool({ 
-        expectedDimensionIds: ctx.context.expectedDimensionIds as string[] 
-      }));
+    if (isEvaluator) {
+      const { buildSubmitEvaluationScoresTool } = await import(
+        "@/lib/evaluation/runtime-tools"
+      );
+      const dimensionIds = Array.isArray(ctx?.context?.expectedDimensionIds)
+        ? (ctx.context.expectedDimensionIds as string[])
+        : [];
+      evaluatorTools.push(
+        buildSubmitEvaluationScoresTool({
+          expectedDimensionIds: dimensionIds,
+        }),
+      );
     }
     // User-selected built-in tools. Unknown names are dropped — a
     // junction row pointing at a retired tool name must not crash.

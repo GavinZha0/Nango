@@ -471,11 +471,11 @@ export async function runEvalCase(
       const originalIndex = item.index;
       const spec = item.spec;
 
-      // Dual-insurance matching: match by originalIndex, then relative index i
+      // Dual-insurance matching: match by relative index i, array position, or originalIndex fallback
       const itemResult =
-        scores.llm_judge_results?.find((r) => r.index === originalIndex) ??
         scores.llm_judge_results?.find((r) => r.index === i) ??
-        scores.llm_judge_results?.[i];
+        scores.llm_judge_results?.[i] ??
+        scores.llm_judge_results?.find((r) => r.index === originalIndex);
 
       const itemScore =
         itemResult?.score ?? scores.criteria_score ?? scores.baseline_score;

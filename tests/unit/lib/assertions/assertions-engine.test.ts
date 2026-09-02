@@ -172,18 +172,20 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
 
     it("evaluates performance and resource metrics", () => {
       const assertions: AssertionSpec[] = [
-        { type: "metric", metric: "duration_ms", operator: "<=", threshold: 5000 },
+        { type: "metric", metric: "duration_s", operator: "<=", threshold: 5 },
         { type: "metric", metric: "output_tokens", operator: "<", threshold: 1000 },
         { type: "metric", metric: "total_tool_calls", operator: "<=", threshold: 3 },
-        // Failed rule
-        { type: "metric", metric: "duration_ms", operator: "<=", threshold: 2000 },
+        // Failed rule: 3.2s <= 2s is false
+        { type: "metric", metric: "duration_s", operator: "<=", threshold: 2 },
       ];
 
       const outcome = evaluateAssertions({}, assertions, options);
       expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[0].actual).toBe(3.2);
       expect(outcome.deterministicResults[1].ok).toBe(true);
       expect(outcome.deterministicResults[2].ok).toBe(true);
       expect(outcome.deterministicResults[3].ok).toBe(false);
+      expect(outcome.deterministicResults[3].actual).toBe(3.2);
     });
   });
 

@@ -49,7 +49,9 @@ const llmJudgeResultEntry = z.object({
     .number()
     .int()
     .min(0)
-    .describe("0-based index of the LLM Judge check item as specified in the evaluation brief."),
+    .describe(
+      "0-based index matching [CHECK ITEM 0], [CHECK ITEM 1], etc. as specified in the evaluation brief.",
+    ),
   score: z
     .number()
     .int()
