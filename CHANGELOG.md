@@ -5,14 +5,14 @@
 
 ### Features
 
-* **evaluation:** modernize atomic llm_judge assertions, scoring model & verdicts UI ([12495e0](https://github.com/GavinZha0/Nango/commit/12495e0b2b0384e30f5a8765ff443c931ad9bd6b))
-* **verification:** optimize suite editor UI, unify assertions subsystem & support negative testing ([1e5dac5](https://github.com/GavinZha0/Nango/commit/1e5dac5fc434006f722cc34031db78bb646b0213))
-* **web-auto:** align LLM judge prompt, scoring gating, and verdicts UI ([79617f9](https://github.com/GavinZha0/Nango/commit/79617f93a517be2dac991d9e5a7127d21ba1e2f4))
+* **evaluation:** modernize atomic llm_judge assertions, scoring model & verdicts UI ([12495e0](https://github.com/GavinZha0/Nango/commit/12495e0b2b0384e30f5a8765ff443c931ad9bd6b)) by @GavinZha0
+* **verification:** optimize suite editor UI, unify assertions subsystem & support negative testing ([1e5dac5](https://github.com/GavinZha0/Nango/commit/1e5dac5fc434006f722cc34031db78bb646b0213)) by @GavinZha0
+* **web-auto:** align LLM judge prompt, scoring gating, and verdicts UI ([79617f9](https://github.com/GavinZha0/Nango/commit/79617f93a517be2dac991d9e5a7127d21ba1e2f4)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* variable issue of LLM judge ([c5c1c66](https://github.com/GavinZha0/Nango/commit/c5c1c66bc8483bbaa70f3206cad1519e28489468))
+* variable issue of LLM judge ([c5c1c66](https://github.com/GavinZha0/Nango/commit/c5c1c66bc8483bbaa70f3206cad1519e28489468)) by @GavinZha0
 
 ## [0.17.0](https://github.com/GavinZha0/Nango/compare/v0.16.0...v0.17.0) (2026-08-30)
 
