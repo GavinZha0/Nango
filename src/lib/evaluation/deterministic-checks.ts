@@ -63,8 +63,7 @@ export interface DeterministicCheckOutput {
 function getAssertionDescription(spec: AssertionSpec): string {
   switch (spec.type) {
     case "jsonpath":
-    case "jsonpath_equals":
-      return `JSONPath ${spec.path} ${"operator" in spec && spec.operator ? spec.operator : "=="} ${JSON.stringify(spec.expected)}`;
+      return `JSONPath ${spec.path} ${spec.operator ?? "=="} ${JSON.stringify(spec.expected)}`;
     case "json_schema":
       return "JSON Schema Draft 2020-12 validation";
     case "js_expression":

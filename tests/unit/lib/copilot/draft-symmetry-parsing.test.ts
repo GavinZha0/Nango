@@ -49,7 +49,7 @@ describe("Draft Symmetry and Normalization Logic", () => {
           id: 42,
           name: "Search test",
           args: { query: "weather" },
-          assertions: [{ type: "jsonpath_equals", path: "$.status", expected: 200 }],
+          assertions: [{ type: "jsonpath", path: "$.status", expected: 200 }],
         },
       };
 

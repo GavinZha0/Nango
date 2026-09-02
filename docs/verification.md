@@ -116,7 +116,7 @@ per-tool sidecar HTTP probe, which is V2 territory.
 | Type | Description | Example |
 |---|---|---|
 | `json_schema` | Validates against a JSON Schema (Draft 2020-12). | `{"type": "object", "required": ["id"]}` |
-| `jsonpath_equals` | Deep equality check on a JSONPath. | `path: "items[0].id", expected: "abc"` |
+| `jsonpath` | Evaluates a JSONPath query against target operators. | `path: "items[0].id", operator: "==", expected: "abc"` |
 | `js_expression` | Executes a pure JS expression in a restricted `node:vm`. | `result.totalCount > 42` |
 
 - Empty assertions array acts as a smoke test (passes if no upstream error).

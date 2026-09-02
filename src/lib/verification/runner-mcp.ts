@@ -42,14 +42,17 @@ export interface RunMcpCaseInput {
  *
  * Decision table for the returned `status`:
  *
- *   tool throw (transport / mcphub / upstream 4xx-5xx) → "errored"
- *   tool returned `{isError: true}` (MCP server-side)  → "failed"
- *   tool returned + assertions all pass                 → "passed"
- *   tool returned + some assertion failed               → "failed"
- *   tool returned + empty assertions                    → "passed"
+ *   tool throw (transport / mcphub / connection refused) → "errored"
+ *   tool not found on server                             → "errored"
+ *   tool returned + user assertions present:
+ *     - all assertions pass                              → "passed" (supports negative testing)
+ *     - some assertion failed                            → "failed"
+ *   tool returned + empty assertions (smoke test):
+ *     - tool returned isError: false                     → "passed"
+ *     - tool returned isError: true                      → "failed"
  *
- * The `errored` vs `failed` split matches the docs status precedence:
- * infra problems escalate above pure assertion mismatches.
+ * Infra/transport problems escalate to "errored", while tool output (whether
+ * successful or error payload) is evaluated against the user's assertions.
  */
 export async function runMcpCase(
   input: RunMcpCaseInput,
@@ -157,28 +160,36 @@ export async function runMcpCase(
     });
     const assertionResults = outcome.deterministicResults;
     const allAssertionsPassed = outcome.allDeterministicPassed;
-    const passed = !mcpIsError && allAssertionsPassed;
 
+    let passed: boolean;
     let topLineError: ErrorEnvelope | null = null;
-    if (mcpIsError) {
-      // MCP tool itself signalled an error — surface as `upstream`
-      // failure with the MCP content text if available.
-      topLineError = {
-        source: "upstream",
-        message: extractMcpErrorText(raw) ?? "MCP tool returned isError",
-        details: { mcpIsError: true },
-      };
-    } else if (!allAssertionsPassed) {
-      const firstFail = assertionResults.find((r) => !r.ok);
-      if (firstFail) {
+
+    if (input.assertions.length > 0) {
+      // User-defined assertions: pass/fail outcome is strictly governed by assertion verdicts.
+      // Negative testing (e.g. testing root.isError == true) passes when assertions pass.
+      passed = allAssertionsPassed;
+      if (!passed) {
+        const firstFail = assertionResults.find((r) => !r.ok);
+        if (firstFail) {
+          topLineError = {
+            source: "assertion",
+            message: firstFail.message ?? "assertion failed",
+            details: {
+              assertionPath: firstFail.path,
+              expected: firstFail.expected,
+              actual: firstFail.actual,
+            },
+          };
+        }
+      }
+    } else {
+      // Smoke test mode (no assertions configured): passes if tool executed without isError.
+      passed = !mcpIsError;
+      if (mcpIsError) {
         topLineError = {
-          source: "assertion",
-          message: firstFail.message ?? "assertion failed",
-          details: {
-            assertionPath: firstFail.path,
-            expected: firstFail.expected,
-            actual: firstFail.actual,
-          },
+          source: "upstream",
+          message: extractMcpErrorText(raw) ?? "MCP tool returned isError",
+          details: { mcpIsError: true },
         };
       }
     }

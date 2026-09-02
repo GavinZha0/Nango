@@ -1,4 +1,4 @@
-﻿# Web Auto Subsystem
+# Web Auto Subsystem
 
 > **System Status (V1)**
 > - **Playwright MCP Runner** — Shipped. Direct execution of Playwright scripts via `browser_run_code_unsafe` bypassing conversational agent overhead.
@@ -94,7 +94,7 @@ src/lib/web-auto/
 ### 3.2 `assertions.ts` (Deterministic Assertion Engine)
 * **Context Unpacking**: Unpacks structured outputs (`{ result, page }`) so expressions can access `result`, `page`, and `root`.
 * **VM Sandboxing**: Executes `js_expression` assertions inside an isolated Node VM sandbox (`isolated-vm` / Node `vm`), exposing `result`, `$`, `page`, and `input`.
-* **Standard Matchers**: Evaluates `jsonpath_equals` and `json_schema` rules.
+* **Standard Matchers**: Evaluates `jsonpath` and `json_schema` rules.
 * **Expectation Extraction**: Filters out `type: "expectation"` and `type: "llm_expectation"` rules for handoff to the evaluation layer.
 
 ### 3.3 `evaluator.ts` (LLM-as-Judge Layer)

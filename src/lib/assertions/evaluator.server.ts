@@ -114,7 +114,6 @@ function evaluateSingleDeterministic(
 ): AssertionResult {
   switch (spec.type) {
     case "jsonpath":
-    case "jsonpath_equals":
       return evaluateJsonPath(spec as JsonPathAssertion, payload, index, options);
     case "json_schema":
       return evaluateJsonSchema(spec as JsonSchemaAssertion, payload, index);

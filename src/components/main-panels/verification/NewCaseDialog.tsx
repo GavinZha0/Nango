@@ -87,11 +87,22 @@ export function NewCaseDialog({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Compute active server ID by combining form state, props, and suite metadata
+  const effectiveServerId = useMemo(() => {
+    if (form.mcpServerId) return form.mcpServerId;
+    if (serverId) return serverId;
+    if (caseRow?.mcpServerId) return caseRow.mcpServerId;
+    if (form.suiteId) {
+      const match = allSuites.find((s) => s.id === form.suiteId);
+      if (match?.mcpServerId) return match.mcpServerId;
+    }
+    return "";
+  }, [form.mcpServerId, serverId, caseRow?.mcpServerId, form.suiteId, allSuites]);
+
   const suitesList = useMemo(() => {
-    const targetServerId = form.mcpServerId || serverId || caseRow?.mcpServerId;
-    if (!targetServerId) return allSuites;
-    return allSuites.filter((s) => s.mcpServerId === targetServerId);
-  }, [allSuites, form.mcpServerId, serverId, caseRow?.mcpServerId]);
+    if (!effectiveServerId) return allSuites;
+    return allSuites.filter((s) => s.mcpServerId === effectiveServerId);
+  }, [allSuites, effectiveServerId]);
 
   useEffect(() => {
     if (!open) return;
@@ -150,30 +161,26 @@ export function NewCaseDialog({
   }
 
   // Derived tools list from active server metadata
-  const [tools, setTools] = useState<string[]>([]);
-
-  useEffect(() => {
-    const activeServerId = form.mcpServerId;
-    if (!activeServerId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTools([]);
-      return;
-    }
-    const server = servers.find((s) => s.id === activeServerId);
+  const tools = useMemo(() => {
+    if (!effectiveServerId) return [];
+    const server = servers.find((s) => s.id === effectiveServerId);
     const list = (server?.tools ?? []).map((t) => t.name);
-    const sorted = [...list].sort();
-    setTools(sorted);
-  }, [form.mcpServerId, servers]);
+    return [...list].sort();
+  }, [effectiveServerId, servers]);
 
   const trimmedName = form.name.trim();
   const hasValidSuite = form.suiteId !== "";
 
+  const isDirty = caseRow
+    ? trimmedName !== caseRow.name || form.suiteId !== caseRow.suiteId
+    : true;
+
   const canSubmit =
     !submitting &&
     trimmedName.length > 0 &&
-    form.mcpServerId !== "" &&
-    form.toolName !== "" &&
-    hasValidSuite;
+    hasValidSuite &&
+    isDirty &&
+    (caseRow ? true : effectiveServerId !== "" && form.toolName !== "");
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
@@ -181,9 +188,10 @@ export function NewCaseDialog({
     setSubmitError(null);
     try {
       let resultRow: VerificationCaseRow;
+      const targetServerId = effectiveServerId;
 
       if (caseRow) {
-        // Edit mode
+        // Edit mode: allows renaming and/or moving to another suite under same server
         const updated = await caseActions.patch(caseRow, {
           name: trimmedName,
           suiteId: form.suiteId,
@@ -199,7 +207,7 @@ export function NewCaseDialog({
         // Create mode
         const created = await caseActions.create({
           name: trimmedName,
-          mcpServerId: form.mcpServerId,
+          mcpServerId: targetServerId,
           toolName: form.toolName,
           suiteId: form.suiteId,
           input: {},
@@ -213,8 +221,10 @@ export function NewCaseDialog({
         });
       }
 
-      // Refresh cases for this server to ensure the new case appears in the list
-      void caseActions.refreshForServer(form.mcpServerId);
+      // Refresh cases for this server to ensure the changes appear across suites
+      if (targetServerId) {
+        void caseActions.refreshForServer(targetServerId);
+      }
 
       // Trigger store refresh for verification left panel servers list
       void verificationActions.refresh("mcp");
@@ -230,7 +240,7 @@ export function NewCaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -248,11 +258,11 @@ export function NewCaseDialog({
                 MCP Server <span className="text-destructive">*</span>
               </Label>
               {serverId || caseRow ? (
-                <span className="text-sm font-mono truncate">
+                <div className="text-xs font-mono bg-muted/40 border rounded-md px-3 py-2 truncate text-foreground">
                   {servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))?.serverTitle ||
                     servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))?.name ||
                     (caseRow?.mcpServerId || serverId)}
-                </span>
+                </div>
               ) : (
                 <Select
                   value={form.mcpServerId}
@@ -337,7 +347,12 @@ export function NewCaseDialog({
                 MCP Tool <span className="text-destructive">*</span>
               </Label>
               {caseRow ? (
-                <span className="text-sm font-mono truncate">{caseRow.toolName}</span>
+                <div
+                  className="text-xs font-mono bg-muted/40 border rounded-md px-3 py-2 break-all text-foreground select-text"
+                  title={caseRow.toolName ?? undefined}
+                >
+                  {caseRow.toolName}
+                </div>
               ) : (
                 <Select
                   value={form.toolName}
@@ -346,7 +361,7 @@ export function NewCaseDialog({
                   }
                   disabled={!form.mcpServerId}
                 >
-                  <SelectTrigger id="case-tool" className="w-full">
+                  <SelectTrigger id="case-tool" className="w-full font-mono text-xs">
                     <SelectValue
                       placeholder={
                         !form.mcpServerId
@@ -357,9 +372,9 @@ export function NewCaseDialog({
                       {form.toolName ? form.toolName : null}
                     </SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[300px]">
                     {tools.map((t) => (
-                      <SelectItem key={t} value={t} label={t}>
+                      <SelectItem key={t} value={t} label={t} className="font-mono text-xs">
                         {t}
                       </SelectItem>
                     ))}
@@ -404,7 +419,7 @@ export function NewCaseDialog({
               disabled={!canSubmit}
             >
               {submitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-              {caseRow ? "Save" : "Create"}
+              Save
             </Button>
           </DialogFooter>
         </form>

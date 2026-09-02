@@ -177,13 +177,13 @@ export function BaseCaseList<
                   )}
                 >
                   {/* Left: Verdict Status Badge + Clickable Case Name + Extra */}
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-1">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-1.5 py-0.5">
                     <CaseVerdictBadge status={verdict?.status} />
                     <button
                       type="button"
                       onClick={() => onSelectCase(c.id)}
                       className={cn(
-                        "cursor-pointer truncate text-left hover:underline underline-offset-2 flex-1",
+                        "cursor-pointer text-left hover:underline underline-offset-2 flex-1 line-clamp-2 break-words leading-tight",
                         !c.enabled && "text-muted-foreground",
                       )}
                       title={c.name}

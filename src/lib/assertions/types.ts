@@ -29,19 +29,11 @@ export type JsonPathOperator = z.infer<typeof jsonPathOperatorSchema>;
 export const jsonPathAssertionSchema = z.object({
   type: z.literal("jsonpath"),
   path: z.string().min(1).describe("JSONPath query (e.g. $.data.user.id or cached)"),
-  operator: jsonPathOperatorSchema.default("==").describe("Comparison operator"),
+  operator: jsonPathOperatorSchema.optional().describe("Comparison operator (defaults to '==')"),
   expected: z.unknown().optional().describe("Expected comparison target value"),
 });
 
 export type JsonPathAssertion = z.infer<typeof jsonPathAssertionSchema>;
-
-export const jsonPathEqualsAssertionSchema = z.object({
-  type: z.literal("jsonpath_equals"),
-  path: z.string().min(1).describe("JSONPath query"),
-  expected: z.unknown().optional().describe("Expected comparison target value"),
-});
-
-export type JsonPathEqualsAssertion = z.infer<typeof jsonPathEqualsAssertionSchema>;
 
 // ── 2. JSON Schema Assertion Schema ──────────────────────────────────────────
 
@@ -128,7 +120,6 @@ export type ExpectationAssertion = z.infer<typeof expectationAssertionSchema>;
 
 export const assertionSpecSchema = z.discriminatedUnion("type", [
   jsonPathAssertionSchema,
-  jsonPathEqualsAssertionSchema,
   jsonSchemaAssertionSchema,
   jsExpressionAssertionSchema,
   toolCallAssertionSchema,

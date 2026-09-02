@@ -29,7 +29,7 @@ import type {
   AssertionResult,
   AssertionType,
   JsonSchemaAssertion,
-  JsonPathEqualsAssertion,
+  JsonPathAssertion,
   JsExpressionAssertion,
 } from "@/lib/assertions";
 
@@ -38,7 +38,7 @@ export type {
   AssertionResult,
   AssertionType,
   JsonSchemaAssertion,
-  JsonPathEqualsAssertion,
+  JsonPathAssertion,
   JsExpressionAssertion,
 };
 

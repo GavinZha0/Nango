@@ -317,9 +317,23 @@ export function VerificationSuiteEditor({
                 {serverDisplayName} /
               </span>
             )}
-            <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
-              {suiteDisplayName}
-            </h1>
+            {selectedCase ? (
+              <>
+                <span className="text-xs text-muted-foreground truncate">
+                  {suiteDisplayName} /
+                </span>
+                <h1
+                  className="min-w-0 truncate text-sm font-semibold pr-1"
+                  title={selectedCase.name}
+                >
+                  {selectedCase.name}
+                </h1>
+              </>
+            ) : (
+              <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
+                {suiteDisplayName}
+              </h1>
+            )}
           </div>
         </div>
 
@@ -396,7 +410,11 @@ export function VerificationSuiteEditor({
         onOpenChange={(o) => { if (!o) setEditingCase(null); }}
         caseRow={editingCase}
         onCreated={(updated) => {
-          if (selectedCaseId === updated.id) {
+          if (updated.suiteId !== effectiveSuiteId) {
+            if (selectedCaseId === updated.id) {
+              setSelectedCaseId(null);
+            }
+          } else if (selectedCaseId === updated.id) {
             setSelectedCaseId(null);
             queueMicrotask(() => setSelectedCaseId(updated.id));
           }

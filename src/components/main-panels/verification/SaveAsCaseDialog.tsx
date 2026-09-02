@@ -90,26 +90,33 @@ export function SaveAsCaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Save as verification case</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           {/* Server (read-only) */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[100px_1fr] items-center gap-2">
             <Label className="text-muted-foreground">Server</Label>
-            <span className="truncate text-sm font-mono">{serverName}</span>
+            <div className="truncate text-xs font-mono bg-muted/40 border rounded-md px-2.5 py-1.5 text-foreground">
+              {serverName}
+            </div>
           </div>
 
           {/* Tool (read-only) */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[100px_1fr] items-center gap-2">
             <Label className="text-muted-foreground">Tool</Label>
-            <span className="truncate text-sm font-mono">{toolName}</span>
+            <div
+              className="break-all text-xs font-mono bg-muted/40 border rounded-md px-2.5 py-1.5 text-foreground select-text"
+              title={toolName}
+            >
+              {toolName}
+            </div>
           </div>
 
           {/* Case name */}
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+          <div className="grid grid-cols-[100px_1fr] items-center gap-2">
             <Label htmlFor="save-case-name">
               Case name <span className="text-destructive">*</span>
             </Label>

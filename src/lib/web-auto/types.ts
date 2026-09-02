@@ -68,7 +68,7 @@ export interface NormalizedWebAutoOutput {
 
 // --- Verdict structure (stored in web_auto_case_result.verdict jsonb) -----
 export interface WebAutoVerdict {
-  /** Deterministic assertion results (json_schema, js_expression, jsonpath_equals) */
+  /** Deterministic assertion results (json_schema, js_expression, jsonpath) */
   deterministic: {
     passed: boolean;
     results: AssertionResult[];

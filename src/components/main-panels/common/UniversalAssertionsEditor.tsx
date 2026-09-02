@@ -102,7 +102,7 @@ function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMod
   const hasExpressions = assertions.some((a) => a.type === "js_expression");
   if (hasExpressions) return "expression";
 
-  const hasPathMatches = assertions.some((a) => a.type === "jsonpath" || a.type === "jsonpath_equals");
+  const hasPathMatches = assertions.some((a) => a.type === "jsonpath");
   if (hasPathMatches) return "path_match";
 
   if (mode === "verification") {
@@ -202,7 +202,7 @@ export function UniversalAssertionsEditor({
     [currentAssertions],
   );
   const hasPathMatches = useMemo(
-    () => currentAssertions.some((a) => a.type === "jsonpath" || a.type === "jsonpath_equals"),
+    () => currentAssertions.some((a) => a.type === "jsonpath"),
     [currentAssertions],
   );
   const hasSchema = useMemo(
@@ -418,10 +418,10 @@ export function UniversalAssertionsEditor({
 
             <div className="space-y-2">
               {currentAssertions.map((spec, idx) => {
-                if (spec.type !== "jsonpath" && spec.type !== "jsonpath_equals") return null;
+                if (spec.type !== "jsonpath") return null;
                 const path = spec.path;
-                const operator = ("operator" in spec ? spec.operator : "==") as JsonPathOperator;
-                const expectedVal = "expected" in spec ? spec.expected : "";
+                const operator = spec.operator || "==";
+                const expectedVal = spec.expected ?? "";
                 return (
                   <div key={idx} className="flex items-center gap-1.5">
                     <Input

@@ -259,12 +259,12 @@ function validateAssertionsArray(
     if (type !== undefined) {
       if (
         type !== "json_schema" &&
-        type !== "jsonpath_equals" &&
+        type !== "jsonpath" &&
         type !== "js_expression"
       ) {
         return {
           ok: false,
-          error: `Item #${i + 1}: type must be one of json_schema, jsonpath_equals, js_expression.`,
+          error: `Item #${i + 1}: type must be one of jsonpath, json_schema, js_expression.`,
         };
       }
     } else if (
@@ -282,7 +282,7 @@ function validateAssertionsArray(
   // Automatically filter out empty/blank assertions before saving to database
   const assertions = parsed as AssertionSpec[];
   const filtered = assertions.filter((item) => {
-    if (item.type === "jsonpath_equals") {
+    if (item.type === "jsonpath") {
       return item.path && item.path.trim() !== "";
     }
     if (item.type === "js_expression") {

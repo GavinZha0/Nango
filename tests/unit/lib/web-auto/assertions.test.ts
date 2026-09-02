@@ -11,7 +11,7 @@ describe("evaluateAssertions for Web Auto payloads", () => {
       { type: "js_expression", expression: "result.success === true" },
       { type: "expectation", expectation: "Title should be visible" },
       { type: "llm_expectation", expectation: "Card has correct price" },
-      { type: "jsonpath_equals", path: "$.status", expected: "ok" },
+      { type: "jsonpath", path: "$.status", expected: "ok" },
     ];
 
     const outcome = evaluateAssertions({ result: { status: "ok", success: true } }, assertions);
@@ -54,13 +54,13 @@ describe("evaluateAssertions for Web Auto payloads", () => {
     expect(outcome.deterministicResults[3].ok).toBe(false);
   });
 
-  it("evaluates jsonpath_equals and json_schema assertions", () => {
+  it("evaluates jsonpath and json_schema assertions", () => {
     const output = {
       result: { name: "Alice", age: 30 },
     };
 
     const assertions: AssertionSpec[] = [
-      { type: "jsonpath_equals", path: "$.name", expected: "Alice" },
+      { type: "jsonpath", path: "$.name", expected: "Alice" },
       {
         type: "json_schema",
         schema: {

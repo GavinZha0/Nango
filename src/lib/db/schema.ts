@@ -1728,7 +1728,7 @@ export type VerificationSuiteCategory = "mcp" | "workflow";
  *   - mcp suites:      (mcpServerId, toolName) populated; workflowId NULL
  *   - workflow suites: workflowId populated;       (mcpServerId, toolName) NULL
  *
- * `assertions` is a JSON array of `json_schema` | `jsonpath_equals` |
+ * `assertions` is a JSON array of `json_schema` | `jsonpath` |
  * `js_expression` entries. Empty array = smoke test. See
  * docs/verification.md for the wire shape.
  */

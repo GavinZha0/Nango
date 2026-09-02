@@ -24,11 +24,11 @@ function envelopeOf(structured: unknown): unknown {
   return { content: [], structuredContent: structured };
 }
 
-describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
+describe("evaluateAssertions — jsonpath deepEqual", () => {
   it("rejects array vs index-keyed object as NOT equal", () => {
     const payload = envelopeOf({ items: [1, 2] });
     const specs: AssertionSpec[] = [
-      { type: "jsonpath_equals", path: "items", expected: { "0": 1, "1": 2 } },
+      { type: "jsonpath", path: "items", expected: { "0": 1, "1": 2 } },
     ];
     const outcome = evaluateAssertions(payload, specs);
     const [result] = outcome.deterministicResults;
@@ -39,7 +39,7 @@ describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
   it("accepts array vs array of identical contents", () => {
     const payload = envelopeOf({ items: [1, 2] });
     const specs: AssertionSpec[] = [
-      { type: "jsonpath_equals", path: "items", expected: [1, 2] },
+      { type: "jsonpath", path: "items", expected: [1, 2] },
     ];
     const outcome = evaluateAssertions(payload, specs);
     const [result] = outcome.deterministicResults;
@@ -49,7 +49,7 @@ describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
   it("accepts object vs object of identical contents", () => {
     const payload = envelopeOf({ obj: { a: 1, b: 2 } });
     const specs: AssertionSpec[] = [
-      { type: "jsonpath_equals", path: "obj", expected: { a: 1, b: 2 } },
+      { type: "jsonpath", path: "obj", expected: { a: 1, b: 2 } },
     ];
     const outcome = evaluateAssertions(payload, specs);
     const [result] = outcome.deterministicResults;
@@ -60,7 +60,7 @@ describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
     const payload = envelopeOf({ nested: [[1, 2], [3, 4]] });
     const specs: AssertionSpec[] = [
       {
-        type: "jsonpath_equals",
+        type: "jsonpath",
         path: "nested",
         expected: [{ "0": 1, "1": 2 }, [3, 4]],
       },
@@ -75,7 +75,7 @@ describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
     const payload = envelopeOf({ nested: [[1, 2], [3, 4]] });
     const specs: AssertionSpec[] = [
       {
-        type: "jsonpath_equals",
+        type: "jsonpath",
         path: "nested",
         expected: [[1, 2], [3, 4]],
       },
@@ -89,7 +89,7 @@ describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
     const payload = envelopeOf({ user: { id: "user-123", name: "Alice" } });
     const specs: AssertionSpec[] = [
       {
-        type: "jsonpath_equals",
+        type: "jsonpath",
         path: "user.id",
         expected: "{{input.expectedId}}",
       },
@@ -99,5 +99,28 @@ describe("evaluateAssertions — jsonpath_equals deepEqual", () => {
     });
     const [result] = outcome.deterministicResults;
     expect(result.ok).toBe(true);
+  });
+
+  it("evaluates root.isError on error envelope payload for negative test cases", () => {
+    const payload = {
+      isError: true,
+      content: [{ type: "text", text: "Validation error: missing parameter" }],
+    };
+    const specs: AssertionSpec[] = [
+      {
+        type: "js_expression",
+        expression: "root.isError === true",
+      },
+      {
+        type: "jsonpath",
+        path: "$.content[0].type",
+        expected: "text",
+      },
+    ];
+    const outcome = evaluateAssertions(payload, specs);
+    expect(outcome.allDeterministicPassed).toBe(true);
+    expect(outcome.deterministicResults).toHaveLength(2);
+    expect(outcome.deterministicResults[0].ok).toBe(true);
+    expect(outcome.deterministicResults[1].ok).toBe(true);
   });
 });

@@ -47,7 +47,7 @@ Nango currently supports **Single-Form Shared State & Co-Editing** (`propose_pag
 >    - Case tables share uniform column schema: `(id, suite_id, name, input, assertions, enabled, created_by, created_at, updated_at)`.
 >    - Case Result tables standardize on `assertion_results: jsonb` storing 1:1 index-aligned `AssertionResult[]`.
 > 2. **Universal Assertion Engine (`src/lib/assertions`)**:
->    - Single source of truth for 8 assertion types: deterministic (`js_expression`, `jsonpath`, `jsonpath_equals`, `json_schema`, `tool_call`, `metric`) and semantic (`llm_judge`, `llm_expectation`, `expectation`).
+>    - Single source of truth for 7 assertion types: deterministic (`js_expression`, `jsonpath`, `json_schema`, `tool_call`, `metric`) and semantic (`llm_judge`, `llm_expectation`, `expectation`).
 >    - Shared runtime evaluator (`evaluator.server.ts`) supporting variable resolvers (`substituteInputTemplates`), safe VM sandboxing, and deterministic fail-fast (skipping LLM judge when deterministic checks fail).
 > 3. **Shared UI & UX Component Library**:
 >    - `BaseCaseList<T>`: Generic virtualized/filterable case list with `CaseEnableToggle` and pure glyph `CaseVerdictBadge`.
@@ -374,14 +374,14 @@ z.object({
 
 ```typescript
 // Reuses caseInputSchema from wire-schemas.ts and assertionsArraySchema from @/lib/assertions.
-// Agent MUST specify the assertion `type` field explicitly (e.g. 'js_expression', 'jsonpath_equals', 'json_schema').
+// Agent MUST specify the assertion `type` field explicitly (e.g. 'js_expression', 'jsonpath', 'json_schema').
 export const verificationCaseCreateSchema = z.object({
   name: z.string().min(1).max(120).describe("Descriptive name for the test scenario"),
   toolName: z.string().min(1).max(200).describe("MCP tool name this case targets"),
   input: caseInputSchema.default({}).describe("JSON parameter payload matching the tool's inputSchema"),
   assertions: assertionsArraySchema.default([]).describe(
     "Deterministic output assertions. Each entry MUST include an explicit `type` field: " +
-    "'js_expression', 'jsonpath_equals', or 'json_schema'. Do NOT omit `type`."
+    "'js_expression', 'jsonpath', or 'json_schema'. Do NOT omit `type`."
   ),
 }).strict();
 ```
@@ -530,7 +530,7 @@ When binding authoring & remediation tools to a dedicated **Test QA Expert Agent
   - ALWAYS specify the `type` field explicitly on every assertion. Do NOT
     rely on auto-inference.
   - Prefer structural assertions (`json_schema`) for full payload shape.
-  - Use `jsonpath_equals` or `js_expression` for deterministic identifiers and status flags.
+  - Use `jsonpath` or `js_expression` for deterministic identifiers and status flags.
   - Avoid hardcoding dynamic fields (timestamps, random UUIDs) into exact
     match assertions (use dynamic variable expressions like `{{$timestamp}}` where appropriate).
   - For LLM semantic assertions (`llm_judge`), provide clear natural language

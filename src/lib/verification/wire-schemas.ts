@@ -51,32 +51,17 @@ function jsonByteCap(label: string) {
   };
 }
 
-/** Matches {@link JsonSchemaAssertion}. */
-export const jsonSchemaAssertionSchema = z
-  .object({
-    type: z.literal("json_schema"),
-    schema: z
-      .record(z.string(), z.unknown())
-      .superRefine(jsonByteCap("json_schema.schema")),
-  })
-  .strict();
+import {
+  jsonSchemaAssertionSchema,
+  jsonPathAssertionSchema,
+  jsExpressionAssertionSchema,
+} from "@/lib/assertions/types";
 
-/** Matches {@link JsonPathEqualsAssertion}. */
-export const jsonPathEqualsAssertionSchema = z
-  .object({
-    type: z.literal("jsonpath_equals"),
-    path: z.string().min(1).max(500),
-    expected: z.unknown().superRefine(jsonByteCap("jsonpath_equals.expected")),
-  })
-  .strict();
-
-/** Matches {@link JsExpressionAssertion}. */
-export const jsExpressionAssertionSchema = z
-  .object({
-    type: z.literal("js_expression"),
-    expression: z.string().min(1).max(2000),
-  })
-  .strict();
+export {
+  jsonSchemaAssertionSchema,
+  jsonPathAssertionSchema,
+  jsExpressionAssertionSchema,
+};
 
 /**
  * Discriminated union on the canonical `type` field. The runner,
@@ -86,7 +71,7 @@ export const jsExpressionAssertionSchema = z
  */
 const taggedAssertionSchema = z.discriminatedUnion("type", [
   jsonSchemaAssertionSchema,
-  jsonPathEqualsAssertionSchema,
+  jsonPathAssertionSchema,
   jsExpressionAssertionSchema,
 ]);
 
@@ -95,7 +80,7 @@ const taggedAssertionSchema = z.discriminatedUnion("type", [
  * way in — when absent we infer it from the marker field:
  *
  *   - `schema`     → `json_schema`
- *   - `path`       → `jsonpath_equals`
+ *   - `path`       → `jsonpath`
  *   - `expression` → `js_expression`
  *
  * IMPORTANT: this inference only works while the marker fields are
@@ -114,7 +99,7 @@ export const assertionSchema = z.preprocess((raw) => {
   // they are, the `.strict()` per-branch object rejects the unknown
   // marker and surfaces a meaningful zod error.
   if ("schema" in obj) return { ...obj, type: "json_schema" };
-  if ("path" in obj) return { ...obj, type: "jsonpath_equals" };
+  if ("path" in obj) return { ...obj, type: "jsonpath" };
   if ("expression" in obj) return { ...obj, type: "js_expression" };
   return obj; // No marker — let the union emit its native error.
 }, taggedAssertionSchema);

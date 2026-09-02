@@ -167,10 +167,10 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
 
   if (spec) {
     if (spec.type === "js_expression") return spec.expression;
-    if (spec.type === "jsonpath" || spec.type === "jsonpath_equals") {
+    if (spec.type === "jsonpath") {
       const path = verdict.path ?? spec.path ?? "";
-      const op = "operator" in spec && spec.operator ? spec.operator : "==";
-      const expected = verdict.expected !== undefined ? verdict.expected : ("expected" in spec ? spec.expected : undefined);
+      const op = spec.operator ?? "==";
+      const expected = verdict.expected !== undefined ? verdict.expected : spec.expected;
       if (op === "exists") return `${path || "path"} exists`;
       return `${path || "path"} ${op} ${formatValue(expected)}`;
     }
