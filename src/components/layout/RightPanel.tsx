@@ -505,6 +505,8 @@ export function RightPanel(): ReactNode {
           properties={STABLE_EMPTY_PROPS}
           agents__unsafe_dev_only={STABLE_EMPTY_AGENTS}
           selfManagedAgents={STABLE_EMPTY_AGENTS}
+          showDevConsole={false}
+          enableInspector={false}
         >
           <ChatProviderHooks />
           <div

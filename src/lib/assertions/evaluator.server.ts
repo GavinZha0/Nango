@@ -89,7 +89,29 @@ export function evaluateAssertions(
   for (let index = 0; index < assertions.length; index++) {
     const spec = assertions[index];
     if (spec.type === "llm_judge" || spec.type === "expectation" || spec.type === "llm_expectation") {
-      llmAssertions.push({ index, spec: spec as LlmJudgeAssertion });
+      const llmSpec = spec as LlmJudgeAssertion;
+      const mergedContext: Record<string, unknown> = {
+        variables: mergedOptions.variables,
+        ...(mergedOptions.runContext ?? {}),
+      };
+
+      const resolvedSpec: LlmJudgeAssertion = {
+        ...llmSpec,
+        expectation: llmSpec.expectation
+          ? String(substituteInputTemplates(llmSpec.expectation, mergedOptions.input, mergedContext))
+          : undefined,
+        unexpectation: llmSpec.unexpectation
+          ? String(substituteInputTemplates(llmSpec.unexpectation, mergedOptions.input, mergedContext))
+          : undefined,
+        reference: llmSpec.reference
+          ? String(substituteInputTemplates(llmSpec.reference, mergedOptions.input, mergedContext))
+          : undefined,
+        context: llmSpec.context
+          ? llmSpec.context.map((c) => String(substituteInputTemplates(c, mergedOptions.input, mergedContext)))
+          : undefined,
+      };
+
+      llmAssertions.push({ index, spec: resolvedSpec });
       continue;
     }
 

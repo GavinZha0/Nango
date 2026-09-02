@@ -270,6 +270,30 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(substituted.url).toBe("https://example.com/api");
     });
 
+    it("interpolates variable and input templates in LLM Judge assertions", () => {
+      const assertions: AssertionSpec[] = [
+        {
+          type: "llm_judge",
+          expectation: "User name should be {{variables.targetUser}}",
+          unexpectation: "Must not mention {{input.forbiddenKeyword}}",
+          reference: "Standard policy of {{variables.orgName}}",
+          context: ["Testing on environment {{variables.env}}"],
+        },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, {
+        input: { forbiddenKeyword: "ConfidentialSecret" },
+        variables: { targetUser: "Alice", orgName: "Acme Corp", env: "production" },
+      });
+
+      expect(outcome.llmAssertions).toHaveLength(1);
+      const resolvedLlm = outcome.llmAssertions[0].spec;
+      expect(resolvedLlm.expectation).toBe("User name should be Alice");
+      expect(resolvedLlm.unexpectation).toBe("Must not mention ConfidentialSecret");
+      expect(resolvedLlm.reference).toBe("Standard policy of Acme Corp");
+      expect(resolvedLlm.context).toEqual(["Testing on environment production"]);
+    });
+
     it("normalizes case names", () => {
       expect(normalizeCaseName("  Test Case #1: Login Flow! ")).toBe("test_case_1_login_flow");
     });
