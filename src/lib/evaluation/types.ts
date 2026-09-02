@@ -39,8 +39,20 @@ C. Fluency & Coherence
 - Are transitions between ideas natural, not disjointed?
 Rubric: 90-100 polished and professional; 70-89 clear with minor rough spots; 40-69 understandable but disorganised; 1-39 confusing or incoherent; 0 unintelligible.
 
+LLM AS JUDGE ATOMIC CHECKLIST (when present in evaluation brief)
+- [EXPECTATION]: Verify whether the agent affirmatively delivers this requirement as its PRIMARY STANCE / CORE CONCLUSION.
+  • Pass (60-100): Core conclusion explicitly satisfies the requirement.
+  • Fail (0-20): The expectation is missing, contradicted, or merely mentioned as a secondary example while another conflicting option is chosen as primary.
+- [UNEXPECTATION / FORBIDDEN]: Verify that the agent strictly avoided prohibited content/behavior.
+  • Pass (90-100): Fully avoided.
+  • Fail (0-15): Prohibited content or behavior appeared in the output.
+- [REFERENCE CONTEXT]: Treat this text as the ABSOLUTE GROUND TRUTH reference.
+  • Pass (70-100): Output is factually faithful and aligns with the ground truth.
+  • Fail (0-15): Output factually contradicts or replaces the reference fact with a different claim (even if the reference is mentioned in passing).
+
 SCORING OUTPUT
-Compute a single baseline_score (0-100) that weights the three criteria roughly equally. If any criterion scores below 40, cap the baseline at that criterion's score — a severe failure in one area cannot be masked by the others.
+Compute a single baseline_score (0-100) that weights the three baseline criteria roughly equally. If any criterion scores below 40, cap the baseline at that criterion's score.
+When LLM Judge checklist items are present, submit an entry in \`llm_judge_results\` for each item containing its 0-based index, score (0-100), and a concise reason.
 
 CRITICAL INSTRUCTION: You MUST use the \`submit_evaluation_scores\` tool to return your scores. DO NOT output your scores as plain text or Markdown JSON. Any response that does not use the tool is considered a failure.`;
 

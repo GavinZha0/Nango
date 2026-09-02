@@ -91,8 +91,9 @@ export type MetricAssertion = z.infer<typeof metricAssertionSchema>;
 
 export const llmJudgeAssertionSchema = z.object({
   type: z.literal("llm_judge"),
-  expectation: z.string().min(1).describe("Natural language expected behavior or outcome"),
-  reference: z.string().optional().describe("Ground truth or reference answer"),
+  expectation: z.string().min(1).optional().describe("Natural language expected behavior or outcome"),
+  unexpectation: z.string().min(1).optional().describe("Natural language prohibited or unexpected behavior"),
+  reference: z.string().min(1).optional().describe("Ground truth reference context"),
   dimensionId: z.string().optional().describe("Optional evaluation dimension identifier"),
   context: z.array(z.string()).optional().describe("Supplementary context notes"),
   referenceImage: z.string().optional().describe("Visual reference screenshot (Web Auto)"),
@@ -103,6 +104,7 @@ export type LlmJudgeAssertion = z.infer<typeof llmJudgeAssertionSchema>;
 export const llmExpectationAssertionSchema = z.object({
   type: z.literal("llm_expectation"),
   expectation: z.string().min(1),
+  unexpectation: z.string().optional(),
   reference: z.string().optional(),
 });
 
@@ -111,6 +113,7 @@ export type LlmExpectationAssertion = z.infer<typeof llmExpectationAssertionSche
 export const expectationAssertionSchema = z.object({
   type: z.literal("expectation"),
   expectation: z.string().min(1),
+  unexpectation: z.string().optional(),
   reference: z.string().optional(),
 });
 
@@ -150,10 +153,12 @@ export interface AssertionResult {
   /** LLM evaluation score (0-100) */
   score?: number;
   /** LLM evaluation explanation / reasoning */
+  reason?: string;
   feedback?: string;
   llmScore?: number;
   llmFeedback?: string;
   expectation?: string;
+  unexpectation?: string;
   reference?: string;
   dimensionId?: string;
   referenceImage?: string;

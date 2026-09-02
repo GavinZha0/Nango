@@ -237,7 +237,7 @@ export async function runWebAutoCase(
       unifiedAssertionResults.push({
         index: item.index,
         type: "llm_judge",
-        ok: expRes ? expRes.score >= 70 : (llmResult ? llmResult.passed : false),
+        ok: expRes ? expRes.score >= 60 : (llmResult ? llmResult.passed : false),
         score: expRes?.score ?? llmResult?.score ?? undefined,
         feedback: expRes?.feedback ?? llmResult?.feedback ?? undefined,
         expectation: item.spec.expectation,

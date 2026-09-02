@@ -773,13 +773,13 @@ export function UniversalAssertionsEditor({
           </div>
         )}
 
-        {/* 6. LLM Judge Tab (Stochastic: expectation & optional reference) */}
+        {/* 6. LLM Judge Tab (Atomic: expectation, unexpectation, or reference) */}
         {activeTab === "llm_judge" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground block">
-                  • Evaluated by LLM Judge: Natural language expectations and reference criteria.
+                  • Evaluated by LLM Judge: Atomic checks for expected outcomes, forbidden constraints, or reference facts.
                 </Label>
               </div>
               {!readOnly && (
@@ -803,40 +803,120 @@ export function UniversalAssertionsEditor({
                   spec.type !== "llm_expectation"
                 )
                   return null;
-                const exp = "expectation" in spec ? spec.expectation : "";
-                const ref = "reference" in spec ? spec.reference : "";
+
+                const kind =
+                  "unexpectation" in spec && spec.unexpectation !== undefined
+                    ? "unexpectation"
+                    : "reference" in spec && spec.reference !== undefined && !("expectation" in spec && spec.expectation)
+                      ? "reference"
+                      : "expectation";
+
+                const currentValue =
+                  kind === "unexpectation"
+                    ? (spec as { unexpectation?: string }).unexpectation ?? ""
+                    : kind === "reference"
+                      ? (spec as { reference?: string }).reference ?? ""
+                      : (spec as { expectation?: string }).expectation ?? "";
+
                 return (
-                  <div key={idx} className="flex items-start gap-1.5 rounded-md border border-border/40 bg-muted/10 p-2">
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Input
-                        value={exp}
-                        onChange={(e) =>
+                  <div
+                    key={idx}
+                    className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/10 p-1.5"
+                  >
+                    {/* Compact mode dropdown selector with 3-color ball indicators */}
+                    <Select
+                      value={kind}
+                      disabled={readOnly}
+                      onValueChange={(val: string | null) => {
+                        if (!val) return;
+                        if (val === "unexpectation") {
                           updateAssertionAt(idx, {
-                            ...spec,
                             type: "llm_judge",
-                            expectation: e.target.value,
-                            reference: ref,
-                          })
-                        }
-                        placeholder="Expectation: e.g. The output should explain the refund steps clearly"
-                        disabled={readOnly}
-                        className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-                      />
-                      <Input
-                        value={ref ?? ""}
-                        onChange={(e) =>
+                            unexpectation: currentValue,
+                          });
+                        } else if (val === "reference") {
                           updateAssertionAt(idx, {
-                            ...spec,
                             type: "llm_judge",
-                            expectation: exp,
-                            reference: e.target.value,
-                          })
+                            reference: currentValue,
+                          });
+                        } else {
+                          updateAssertionAt(idx, {
+                            type: "llm_judge",
+                            expectation: currentValue,
+                          });
                         }
-                        placeholder="Optional Reference: e.g. 1-3 business days standard turnaround"
-                        disabled={readOnly}
-                        className="h-7 text-xs bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
-                      />
-                    </div>
+                      }}
+                    >
+                      <SelectTrigger className="w-36 h-7 text-xs bg-muted/20 border-muted-foreground/20 shrink-0 font-medium">
+                        <SelectValue>
+                          <span
+                            className={cn(
+                              "h-2 w-2 rounded-full shrink-0 shadow-xs",
+                              kind === "unexpectation"
+                                ? "bg-rose-500"
+                                : kind === "reference"
+                                  ? "bg-sky-500"
+                                  : "bg-emerald-500"
+                            )}
+                          />
+                          <span>
+                            {kind === "unexpectation"
+                              ? "Unexpectation"
+                              : kind === "reference"
+                                ? "Reference"
+                                : "Expectation"}
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="expectation">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 shadow-xs" />
+                          <span>Expectation</span>
+                        </SelectItem>
+                        <SelectItem value="unexpectation">
+                          <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 shadow-xs" />
+                          <span>Unexpectation</span>
+                        </SelectItem>
+                        <SelectItem value="reference">
+                          <span className="h-2 w-2 rounded-full bg-sky-500 shrink-0 shadow-xs" />
+                          <span>Reference</span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Single atomic input box */}
+                    <Input
+                      value={currentValue}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (kind === "unexpectation") {
+                          updateAssertionAt(idx, {
+                            type: "llm_judge",
+                            unexpectation: val,
+                          });
+                        } else if (kind === "reference") {
+                          updateAssertionAt(idx, {
+                            type: "llm_judge",
+                            reference: val,
+                          });
+                        } else {
+                          updateAssertionAt(idx, {
+                            type: "llm_judge",
+                            expectation: val,
+                          });
+                        }
+                      }}
+                      placeholder={
+                        kind === "unexpectation"
+                          ? "Prohibited behavior (e.g. Must not mention competitors or leak secrets)"
+                          : kind === "reference"
+                            ? "Ground truth context (e.g. Standard turnaround is 1-3 business days)"
+                            : "Expected outcome (e.g. Output should explain refund steps clearly)"
+                      }
+                      disabled={readOnly}
+                      className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                    />
+
                     {!readOnly && (
                       <Button
                         type="button"

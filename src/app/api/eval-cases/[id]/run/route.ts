@@ -13,7 +13,8 @@ import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { loadCase } from "@/lib/evaluation/access";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
-import type { EvalCriteria, EvalTurn } from "@/lib/evaluation/types";
+import type { AssertionSpec } from "@/lib/assertions";
+import type { EvalTurn } from "@/lib/evaluation/types";
 
 export const maxDuration = 300;
 
@@ -46,7 +47,7 @@ export const POST = withEditor<{ id: string }>(
 
     const caseInput = (caseRow.input ?? {}) as Record<string, unknown>;
     const turns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
-    const assertions = (Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as unknown as EvalCriteria;
+    const assertions = (Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as AssertionSpec[];
 
     const outcome = await runEvalCase({
       caseId: caseRow.id,
@@ -56,7 +57,7 @@ export const POST = withEditor<{ id: string }>(
       evaluatorAgentId: suite.evaluatorAgentId ?? null,
       dimensionIds: (suite.dimensionIds ?? []) as string[],
       turns,
-      criteria: assertions,
+      assertions,
       ownerId: session.user.id,
     });
 

@@ -44,6 +44,24 @@ const dimensionScoreEntry = z.object({
     .describe("One-sentence justification for this dimension score."),
 });
 
+const llmJudgeResultEntry = z.object({
+  index: z
+    .number()
+    .int()
+    .min(0)
+    .describe("0-based index of the LLM Judge check item as specified in the evaluation brief."),
+  score: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .describe("Score for this check item (0-100, >= 60 is Pass)."),
+  reason: z
+    .string()
+    .min(1)
+    .describe("Concise reason/justification for why this item passed or failed."),
+});
+
 export const submitEvaluationScoresSchema = z.object({
   baseline_score: z
     .number()
@@ -71,13 +89,16 @@ export const submitEvaluationScoresSchema = z.object({
     .max(100)
     .optional()
     .describe(
-      "Score (0–100) for the case-level criteria (expectation). " +
-      "Evaluate how well the agent's actual output matches the " +
-      "expected behaviour described in the Expectation section of " +
-      "the evaluation brief. Also consider the deterministic check " +
-      "results provided (keywords, tool calls, assertions) — " +
-      "failures there indicate the output did not meet concrete " +
-      "requirements. Omit if no expectation was provided.",
+      "Overall score (0–100) for the case-level criteria/assertions. " +
+      "Omit if no criteria or LLM judge assertions were provided.",
+    ),
+  llm_judge_results: z
+    .array(llmJudgeResultEntry)
+    .optional()
+    .describe(
+      "Per-item results for the LLM Judge checklist. " +
+      "Include one entry for EVERY check item listed in the evaluation brief. " +
+      "Submit all items together in this single call.",
     ),
   feedback: z
     .string()
@@ -101,6 +122,11 @@ export interface SubmitEvaluationScoresSuccess {
   /** LLM-judged expectation score (0-100). `null` when no
    *  expectation was provided in the case criteria. */
   criteria_score: number | null;
+  llm_judge_results?: Array<{
+    index: number;
+    score: number;
+    reason: string;
+  }>;
   feedback: string;
 }
 
@@ -136,9 +162,9 @@ export function buildSubmitEvaluationScoresTool(opts: {
     description:
       "Submit your evaluation scores. Call this tool EXACTLY ONCE " +
       "after you have finished analysing the conversation. " +
-      "Include baseline_score (always required) and one entry per " +
-      "dimension listed in the evaluation brief. Do NOT invent " +
-      "dimensions that were not requested.",
+      "Include baseline_score (always required), one entry per " +
+      "dimension listed in the evaluation brief, and llm_judge_results " +
+      "for each check item if present. Do NOT invent dimensions that were not requested.",
     parameters: submitEvaluationScoresSchema,
     execute: async (
       args: SubmitEvaluationScoresArgs,
@@ -183,6 +209,7 @@ export function buildSubmitEvaluationScoresTool(opts: {
         baseline_score: args.baseline_score,
         dimension_scores: dimensionScores,
         criteria_score: args.criteria_score ?? null,
+        llm_judge_results: args.llm_judge_results,
         feedback: args.feedback,
       };
     },

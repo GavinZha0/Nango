@@ -74,8 +74,14 @@ function getAssertionDescription(spec: AssertionSpec): string {
       return `Metric ${spec.metric} ${spec.operator} ${spec.threshold}`;
     case "llm_judge":
     case "expectation":
-    case "llm_expectation":
-      return `LLM Judge: ${spec.expectation}`;
+    case "llm_expectation": {
+      const label =
+        ("expectation" in spec && spec.expectation) ? spec.expectation :
+        ("unexpectation" in spec && spec.unexpectation) ? `[Unexpectation] ${spec.unexpectation}` :
+        ("reference" in spec && spec.reference) ? `[Reference] ${spec.reference}` :
+        "LLM Judge";
+      return `LLM Judge: ${label}`;
+    }
     default:
       return "Custom assertion check";
   }

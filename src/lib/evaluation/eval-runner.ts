@@ -23,7 +23,8 @@ import { readEvents } from "@/lib/runner/event-store";
 import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventEntity } from "@/lib/db/schema";
 
-import type { EvalCriteria, CriteriaCheckResult } from "./types";
+import type { AssertionSpec } from "@/lib/assertions";
+import type { CriteriaCheckResult } from "./types";
 import {
   runDeterministicChecks,
   type DeterministicCheckInput,
@@ -56,8 +57,8 @@ export interface RunEvalCaseInput {
   dimensionIds: string[];
   /** Case conversation turns (user messages only). */
   turns: Array<{ userMessage: string }>;
-  /** Case criteria. */
-  criteria: EvalCriteria;
+  /** Case assertions (deterministic + LLM judge). */
+  assertions: readonly AssertionSpec[];
   /** Session user ID — used as ownerId for runner dispatch. */
   ownerId: string;
 }
@@ -146,6 +147,23 @@ function extractEvaluatorScores(
         }
       }
 
+      const llmJudgeResults: Array<{ index: number; score: number; reason: string }> = [];
+      if (Array.isArray(args.llm_judge_results)) {
+        for (const item of args.llm_judge_results) {
+          if (
+            typeof item === "object" && item !== null &&
+            typeof (item as { index?: unknown }).index === "number" &&
+            typeof (item as { score?: unknown }).score === "number"
+          ) {
+            llmJudgeResults.push({
+              index: (item as { index: number }).index,
+              score: (item as { score: number }).score,
+              reason: typeof (item as { reason?: unknown }).reason === "string" ? (item as { reason: string }).reason : "",
+            });
+          }
+        }
+      }
+
       return {
         ok: true,
         baseline_score: args.baseline_score as number,
@@ -153,6 +171,7 @@ function extractEvaluatorScores(
         criteria_score: typeof args.criteria_score === "number"
           ? args.criteria_score
           : null,
+        llm_judge_results: llmJudgeResults.length > 0 ? llmJudgeResults : undefined,
         feedback: args.feedback as string,
       };
     } catch {
@@ -258,13 +277,14 @@ export async function runEvalCase(
 
   // ── ② Deterministic checks ───────────────────────────────────
 
+  const assertions = input.assertions ?? [];
   const checkInput: DeterministicCheckInput = {
     agentText: finalTargetSummary,
     actualToolCalls,
     metrics: { durationMs, outputTokens, toolCallCount },
   };
   const checks = runDeterministicChecks(
-    input.criteria as EvalCriteria,
+    assertions,
     checkInput,
   );
 
@@ -353,7 +373,7 @@ export async function runEvalCase(
   const conversationText = buildConversationText(history);
   const brief = buildEvaluationBrief({
     dimensionIds: input.dimensionIds,
-    criteria: input.criteria as EvalCriteria,
+    assertions,
     checkResults: checks.results,
     conversationText,
   });
@@ -435,33 +455,85 @@ export async function runEvalCase(
     };
   }
 
-  // ── ⑤ Compute criteria_score_final ───────────────────────────
+  // ── ⑤ Process LLM Judge check results & compute criteriaScoreFinal ──
 
-  const llmCriteriaScore = scores.criteria_score;
-  let criteriaScoreFinal: number | null = null;
+  const { EVAL_THRESHOLD_PASS } = await import("./config");
 
-  if (llmCriteriaScore !== null) {
-    criteriaScoreFinal = Math.round(llmCriteriaScore * checks.passRate);
-  } else if (checks.totalCount > 0) {
-    criteriaScoreFinal = Math.round(100 * checks.passRate);
+  const unifiedAssertionResults: import("@/lib/assertions").AssertionResult[] = [
+    ...(checks.assertionResults ?? []),
+  ];
+
+  const llmJudgeScoresList: number[] = [];
+
+  if (checks.llmAssertions && checks.llmAssertions.length > 0) {
+    for (let i = 0; i < checks.llmAssertions.length; i++) {
+      const item = checks.llmAssertions[i];
+      const originalIndex = item.index;
+      const spec = item.spec;
+
+      // Dual-insurance matching: match by originalIndex, then relative index i
+      const itemResult =
+        scores.llm_judge_results?.find((r) => r.index === originalIndex) ??
+        scores.llm_judge_results?.find((r) => r.index === i) ??
+        scores.llm_judge_results?.[i];
+
+      const itemScore =
+        itemResult?.score ?? scores.criteria_score ?? scores.baseline_score;
+      const itemOk = itemScore >= EVAL_THRESHOLD_PASS;
+      const itemReason = itemResult?.reason || scores.feedback;
+
+      llmJudgeScoresList.push(itemScore);
+
+      unifiedAssertionResults.push({
+        index: originalIndex,
+        type: "llm_judge",
+        ok: itemOk,
+        score: itemScore,
+        reason: itemReason,
+        feedback: itemReason,
+        expectation: spec.expectation,
+        unexpectation: spec.unexpectation,
+        reference: spec.reference,
+        dimensionId: spec.dimensionId,
+      });
+    }
+    unifiedAssertionResults.sort((a, b) => a.index - b.index);
   }
 
-  // ── Compute overall case score ───────────────────────────────
+  // ── Compute overall case score with 2/3 Case Judge + 1/3 General Dimensions ──
+  const generalDimScores: number[] = [scores.baseline_score];
+  const customDimScores = Object.values(scores.dimension_scores);
+  if (customDimScores.length > 0) {
+    generalDimScores.push(...customDimScores);
+  }
+  const avgGeneralDimScore =
+    generalDimScores.reduce((a, b) => a + b, 0) / generalDimScores.length;
 
-  const scoreComponents: number[] = [scores.baseline_score];
-  const dimScoreValues = Object.values(scores.dimension_scores);
-  if (dimScoreValues.length > 0) scoreComponents.push(...dimScoreValues);
-  if (criteriaScoreFinal !== null) scoreComponents.push(criteriaScoreFinal);
-  const overallScore = Math.round(
-    scoreComponents.reduce((a, b) => a + b, 0) / scoreComponents.length,
-  );
+  let semanticScore: number;
+  let criteriaScoreFinal: number | null = null;
+
+  if (llmJudgeScoresList.length > 0) {
+    const avgCaseJudgeScore =
+      llmJudgeScoresList.reduce((a, b) => a + b, 0) / llmJudgeScoresList.length;
+    // 2/3 Case-specific LLM Judge + 1/3 General Quality Dimensions
+    semanticScore = (2 / 3) * avgCaseJudgeScore + (1 / 3) * avgGeneralDimScore;
+    criteriaScoreFinal = Math.round(avgCaseJudgeScore * checks.passRate);
+  } else if (scores.criteria_score !== null) {
+    semanticScore = (2 / 3) * scores.criteria_score + (1 / 3) * avgGeneralDimScore;
+    criteriaScoreFinal = Math.round(scores.criteria_score * checks.passRate);
+  } else {
+    // No case-specific LLM Judge: 100% General Quality Dimensions
+    semanticScore = avgGeneralDimScore;
+    if (checks.totalCount > 0) {
+      criteriaScoreFinal = Math.round(100 * checks.passRate);
+    }
+  }
+
+  // Gated by deterministic checks pass rate (e.g. 0 on deterministic failure)
+  const overallScore = Math.round(semanticScore * checks.passRate);
 
   // ── Determine pass/fail ──────────────────────────────────────
-
-  // Import threshold at call time (not module scope) so admin
-  // config changes take effect without restart.
-  const { EVAL_THRESHOLD_PASS } = await import("./config");
-  const passed = overallScore >= EVAL_THRESHOLD_PASS;
+  const passed = overallScore >= EVAL_THRESHOLD_PASS && checks.passRate === 1.0;
 
   // ── ⑥ Write result ──────────────────────────────────────────
 
@@ -469,25 +541,6 @@ export async function runEvalCase(
     ...scores.dimension_scores,
     baseline: scores.baseline_score,
   };
-
-  const unifiedAssertionResults: import("@/lib/assertions").AssertionResult[] = [
-    ...(checks.assertionResults ?? []),
-  ];
-  if (checks.llmAssertions && checks.llmAssertions.length > 0) {
-    for (const item of checks.llmAssertions) {
-      unifiedAssertionResults.push({
-        index: item.index,
-        type: "llm_judge",
-        ok: (scores.criteria_score ?? scores.baseline_score) >= EVAL_THRESHOLD_PASS,
-        score: scores.criteria_score ?? scores.baseline_score,
-        feedback: scores.feedback,
-        expectation: item.spec.expectation,
-        reference: item.spec.reference,
-        dimensionId: item.spec.dimensionId,
-      });
-    }
-    unifiedAssertionResults.sort((a, b) => a.index - b.index);
-  }
 
   if (input.runId) {
     await storage.writeCaseResult({

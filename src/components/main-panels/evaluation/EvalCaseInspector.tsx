@@ -18,6 +18,7 @@ import {
   Trash2,
   ChevronDown,
   Check,
+  X,
   MessageSquare,
   Copy,
   Terminal,
@@ -265,6 +266,7 @@ export interface PinnedOutcome {
   score: number | null;
   dimensionScores: Record<string, number>;
   criteriaScore: number | null;
+  assertionResults?: unknown[];
   criteriaResults: unknown[];
   feedback: string | null;
   durationMs: number | null;
@@ -383,8 +385,8 @@ export function EvalCaseInspector({
     ? pinnedOutcome.feedback
     : (runOutcome ? (runOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
   const displayAssertionResults = pinnedOutcome
-    ? pinnedOutcome.criteriaResults
-    : (runOutcome ? (runOutcome.criteriaResults ?? null) : (liveCaseResult?.criteriaResults ?? (historicalResult?.criteriaResults ?? null)));
+    ? (pinnedOutcome.assertionResults ?? pinnedOutcome.criteriaResults)
+    : (runOutcome ? (runOutcome.assertionResults ?? runOutcome.criteriaResults ?? null) : (liveCaseResult?.assertionResults ?? (historicalResult?.assertionResults ?? (historicalResult?.criteriaResults ?? null))));
   const displayDurationMs = pinnedOutcome
     ? pinnedOutcome.durationMs
     : (runOutcome ? (runOutcome.durationMs ?? null) : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null)));
@@ -778,7 +780,7 @@ function EvaluationPanel({
   overallScore,
   baselineScore,
   dimensionScores,
-  assertionScore,
+  assertionScore: _assertionScore,
   assertionResults,
   feedback,
   durationMs,
@@ -789,12 +791,66 @@ function EvaluationPanel({
   error = null,
 }: EvaluationPanelProps): ReactNode {
   const [assertionsExpanded, setAssertionsExpanded] = useState(true);
+  const [llmJudgeExpanded, setLlmJudgeExpanded] = useState(true);
+  const [expandedLlmIndices, setExpandedLlmIndices] = useState<Set<number>>(new Set());
   const tz = useDisplayTimezone();
 
-  const resultsList = Array.isArray(assertionResults) && assertionResults.length > 0
-    ? (assertionResults as CriteriaCheckResult[]).filter((r) => r.kind !== "expectation")
-    : null;
-  const hasAssertionResults = resultsList !== null && resultsList.length > 0;
+  const toggleLlmItem = (idx: number) => {
+    setExpandedLlmIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const { deterministicResults, llmJudgeResults } = useMemo(() => {
+    const rawList = Array.isArray(assertionResults) ? assertionResults : [];
+    const det: Array<import("@/lib/assertions").AssertionResult | CriteriaCheckResult> = [];
+    const llm: Array<import("@/lib/assertions").AssertionResult> = [];
+
+    for (const item of rawList) {
+      if (!item || typeof item !== "object") continue;
+      const typed = item as Record<string, unknown>;
+      if (
+        typed.type === "llm_judge" ||
+        typed.type === "expectation" ||
+        typed.type === "llm_expectation" ||
+        typed.kind === "expectation"
+      ) {
+        llm.push(item as import("@/lib/assertions").AssertionResult);
+      } else {
+        det.push(item as import("@/lib/assertions").AssertionResult);
+      }
+    }
+    return { deterministicResults: det, llmJudgeResults: llm };
+  }, [assertionResults]);
+
+  const hasDeterministicResults = deterministicResults.length > 0;
+  const hasLlmJudgeResults = llmJudgeResults.length > 0;
+
+  // Deterministic score / pass rate
+  const deterministicScore = useMemo(() => {
+    if (deterministicResults.length === 0) return null;
+    const passed = deterministicResults.filter((r) => {
+      if ("ok" in r) return Boolean(r.ok);
+      if ("passed" in r) return Boolean(r.passed);
+      return false;
+    }).length;
+    return Math.round((passed / deterministicResults.length) * 100);
+  }, [deterministicResults]);
+
+  // LLM Judge score
+  const llmJudgeScore = useMemo(() => {
+    if (llmJudgeResults.length === 0) return null;
+    const scoredItems = llmJudgeResults.filter((r) => typeof r.score === "number");
+    if (scoredItems.length > 0) {
+      const sum = scoredItems.reduce((acc, curr) => acc + (curr.score ?? 0), 0);
+      return Math.round(sum / scoredItems.length);
+    }
+    const passedCount = llmJudgeResults.filter((r) => r.ok).length;
+    return Math.round((passedCount / llmJudgeResults.length) * 100);
+  }, [llmJudgeResults]);
 
   // Level badge for the header.
   const levelMeta = overallScore !== null
@@ -814,7 +870,7 @@ function EvaluationPanel({
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {/* 1. 执行时间 */}
+          {/* Execution timestamp */}
           {selectedRunSeq !== null && (
             <span className="text-xs font-semibold text-amber-500 dark:text-amber-400 shrink-0">
               (#{selectedRunSeq}{formattedTime ? ` - ${formattedTime}` : ""})
@@ -827,7 +883,7 @@ function EvaluationPanel({
                 : `${durationMs}ms`}
             </span>
           )}
-          {/* 2. 打分 + 3. 结果字符串 */}
+          {/* Score + level badge */}
           {overallScore !== null ? (
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-xs font-mono tabular-nums font-semibold">
@@ -881,8 +937,8 @@ function EvaluationPanel({
               />
             ))}
 
-            {/* Assertions / Deterministic section — collapsible */}
-            {hasAssertionResults && (
+            {/* 1. Assertions (Deterministic) — collapsible */}
+            {hasDeterministicResults && (
               <div className="pt-1">
                 <button
                   type="button"
@@ -891,15 +947,15 @@ function EvaluationPanel({
                 >
                   <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">Assertions</span>
                   <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                    {assertionScore !== null && (
+                    {deterministicScore !== null && (
                       <div
-                        className={cn("h-full rounded-full transition-all", barColorForScore(assertionScore))}
-                        style={{ width: `${Math.min(100, assertionScore)}%` }}
+                        className={cn("h-full rounded-full transition-all", barColorForScore(deterministicScore))}
+                        style={{ width: `${Math.min(100, deterministicScore)}%` }}
                       />
                     )}
                   </div>
                   <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
-                    {assertionScore !== null ? `${assertionScore}` : "—"}
+                    {deterministicScore !== null ? `${deterministicScore}` : "—"}
                   </span>
                   <ChevronDown className={cn(
                     "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
@@ -910,12 +966,12 @@ function EvaluationPanel({
                 {assertionsExpanded && (
                   <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
                     <ul className="space-y-1">
-                      {resultsList.map((item, i) => (
+                      {deterministicResults.map((item, i) => (
                         <AssertionVerdictRow
                           key={i}
                           verdict={
                             "type" in item
-                              ? (item as unknown as import("@/lib/assertions").AssertionResult)
+                              ? (item as import("@/lib/assertions").AssertionResult)
                               : {
                                   index: i,
                                   type: (item as CriteriaCheckResult).kind === "metric" ? "metric" : "jsonpath",
@@ -926,6 +982,125 @@ function EvaluationPanel({
                           }
                         />
                       ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 2. LLM as Judge (Stochastic / Semantic) — collapsible */}
+            {hasLlmJudgeResults && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setLlmJudgeExpanded((v) => !v)}
+                  className="flex w-full items-center gap-2 group"
+                >
+                  <span className="w-28 shrink-0 truncate text-xs text-muted-foreground text-left font-medium">LLM as Judge</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                    {llmJudgeScore !== null && (
+                      <div
+                        className={cn("h-full rounded-full transition-all", barColorForScore(llmJudgeScore))}
+                        style={{ width: `${Math.min(100, llmJudgeScore)}%` }}
+                      />
+                    )}
+                  </div>
+                  <span className="w-8 shrink-0 text-right text-xs font-mono tabular-nums">
+                    {llmJudgeScore !== null ? `${llmJudgeScore}` : "—"}
+                  </span>
+                  <ChevronDown className={cn(
+                    "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
+                    llmJudgeExpanded && "rotate-180",
+                  )} />
+                </button>
+
+                {llmJudgeExpanded && (
+                  <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
+                    <ul className="space-y-1">
+                      {llmJudgeResults.map((item, i) => {
+                        const isOk = Boolean(item.ok);
+                        const isExpanded = expandedLlmIndices.has(i);
+                        const targetText =
+                          item.expectation ||
+                          item.unexpectation ||
+                          item.reference ||
+                          item.message ||
+                          "LLM Judge Check";
+
+                        const isUnexpectation = Boolean(item.unexpectation);
+                        const isReference = Boolean(item.reference && !item.expectation);
+
+                        return (
+                          <li key={i} className="text-xs">
+                            <button
+                              type="button"
+                              onClick={() => toggleLlmItem(i)}
+                              className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-muted/40 group"
+                            >
+                              {/* Status icon: ✓ (Green) or ✗ (Red) */}
+                              {isOk ? (
+                                <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              ) : (
+                                <X className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                              )}
+
+                              {/* Three-color ball dot */}
+                              {isUnexpectation ? (
+                                <span
+                                  className="h-2 w-2 rounded-full bg-rose-500 shrink-0 shadow-xs"
+                                  title="Unexpectation / Forbidden"
+                                />
+                              ) : isReference ? (
+                                <span
+                                  className="h-2 w-2 rounded-full bg-sky-500 shrink-0 shadow-xs"
+                                  title="Reference Context"
+                                />
+                              ) : (
+                                <span
+                                  className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 shadow-xs"
+                                  title="Expectation"
+                                />
+                              )}
+
+                              {/* Truncated single line text */}
+                              <span className="truncate flex-1 text-foreground/90 font-mono text-[11px]">
+                                {targetText}
+                              </span>
+
+                              {/* Small score badge if present */}
+                              {item.score !== undefined && item.score !== null && (
+                                <span className="font-mono text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                                  {item.score}
+                                </span>
+                              )}
+
+                              <ChevronDown className={cn(
+                                "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform",
+                                isExpanded && "rotate-180",
+                              )} />
+                            </button>
+
+                            {/* Expandable details view */}
+                            {isExpanded && (
+                              <div className="mt-1 ml-6 space-y-1.5 rounded-md bg-muted/20 p-2 text-xs border border-border/40">
+                                {(item.reason || item.feedback) && (
+                                  <p className="text-muted-foreground leading-relaxed whitespace-pre-wrap text-[11px]">
+                                    {item.reason || item.feedback}
+                                  </p>
+                                )}
+                                {item.reference && (
+                                  <div className="space-y-0.5 pt-1 border-t border-border/30">
+                                    <span className="font-semibold text-muted-foreground text-[10px] uppercase">Reference:</span>
+                                    <p className="text-muted-foreground/80 font-mono text-[10px] leading-relaxed whitespace-pre-wrap bg-background/50 p-1.5 rounded border border-border/30">
+                                      {item.reference}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}

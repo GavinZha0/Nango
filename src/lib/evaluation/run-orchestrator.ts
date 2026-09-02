@@ -18,7 +18,8 @@ import { publish } from "@/lib/runner/event-bus";
 import { runEvalCase, type RunEvalCaseResult } from "./eval-runner";
 import { recordRunNotification } from "@/lib/runner/notifications";
 import * as storage from "./storage";
-import type { EvalCriteria, EvalTurn } from "./types";
+import type { AssertionSpec } from "@/lib/assertions";
+import type { EvalTurn } from "./types";
 
 const log = childLogger({ component: "eval-orchestrator" });
 
@@ -161,7 +162,7 @@ async function runAllCases(
   for (const c of input.cases) {
     const caseInput = (c.input ?? {}) as Record<string, unknown>;
     const caseTurns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
-    const caseAssertions = (Array.isArray(c.assertions) ? c.assertions : []) as unknown as EvalCriteria;
+    const caseAssertions = (Array.isArray(c.assertions) ? c.assertions : []) as AssertionSpec[];
 
     let result: RunEvalCaseResult;
     try {
@@ -175,7 +176,7 @@ async function runAllCases(
         evaluatorAgentId: input.evaluatorAgentId,
         dimensionIds: input.dimensionIds,
         turns: caseTurns,
-        criteria: caseAssertions,
+        assertions: caseAssertions,
         ownerId: input.ownerId,
       });
     } catch (err) {
@@ -202,6 +203,7 @@ async function runAllCases(
       score: result.score,
       dimensionScores: result.dimensionScores,
       criteriaScore: result.criteriaScore,
+      assertionResults: result.assertionResults,
       criteriaResults: result.criteriaResults,
       feedback: result.feedback,
       durationMs: result.durationMs,

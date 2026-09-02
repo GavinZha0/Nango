@@ -83,7 +83,7 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
             <Badge
               variant="outline"
               className={`text-[9px] px-1 py-0 font-mono font-semibold shrink-0 ${
-                verdict.score >= 70
+                verdict.score >= 60
                   ? "border-emerald-500/40 text-emerald-500 bg-emerald-500/10"
                   : "border-rose-500/40 text-rose-500 bg-rose-500/10"
               }`}
@@ -104,37 +104,32 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
               ({formatValue(verdict.actual)})
             </span>
           )}
-        </div>
 
-        {/* Expand toggle for feedback/details */}
-        {hasExpandableDetails && (
-          <button
-            type="button"
-            className="text-muted-foreground/60 hover:text-foreground shrink-0 p-0.5 ml-1"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded((prev) => !prev);
-            }}
-          >
-            {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-          </button>
-        )}
+          {hasExpandableDetails && (
+            <button
+              type="button"
+              className="text-muted-foreground/60 hover:text-foreground p-0.5 rounded transition-transform"
+            >
+              {expanded ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Expandable details drawer */}
-      {expanded && (
+      {/* Expandable details */}
+      {expanded && hasExpandableDetails && (
         <div className="border-t border-border/30 bg-muted/20 px-3 py-2 space-y-1.5 font-mono text-[10px]">
-          {verdict.feedback && (
+          {(verdict.feedback || verdict.reason) && (
             <div className="space-y-0.5">
               <span className="text-muted-foreground flex items-center gap-1">
                 <Sparkles className="h-2.5 w-2.5 text-amber-500" /> Model Feedback:
               </span>
               <p className="font-sans text-xs text-foreground/90 bg-muted/30 p-1.5 rounded border border-border/30 whitespace-pre-wrap">
-                {verdict.feedback}
+                {verdict.reason || verdict.feedback}
               </p>
             </div>
           )}
@@ -162,7 +157,14 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
   }
 
   if (verdict.type === "llm_judge" || verdict.type === "expectation" || verdict.type === "llm_expectation") {
-    return verdict.expectation ?? (spec && "expectation" in spec ? spec.expectation : "LLM Expectation");
+    const verdictText = verdict.expectation || verdict.unexpectation || verdict.reference;
+    if (verdictText) return verdictText;
+    if (spec) {
+      if ("expectation" in spec && spec.expectation) return spec.expectation;
+      if ("unexpectation" in spec && spec.unexpectation) return spec.unexpectation;
+      if ("reference" in spec && spec.reference) return spec.reference;
+    }
+    return "LLM Judge";
   }
 
   if (spec) {
