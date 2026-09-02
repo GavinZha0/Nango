@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -25,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { useRunSnapshot } from "@/hooks/useRunSnapshot";
 import { useVerificationRunStream } from "@/hooks/useVerificationRunStream";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
-import { CaseInspector } from "@/components/main-panels/verification/CaseInspector";
+import { CaseInspector, type CaseInspectorDraftHandle } from "@/components/main-panels/verification/CaseInspector";
 import type {
   AssertionResult,
   CaseExecutionOutcome,
@@ -54,31 +55,6 @@ export interface VerificationSuiteEditorProps {
   /** Legacy prop support for server-level row if routed from old page. */
   row?: { id: string; name: string; serverTitle?: string | null };
   onBack?: () => void;
-}
-
-function EmptyVerificationCopilotSync({
-  suite,
-}: {
-  suite: { id: string; name: string; caseCount: number };
-}) {
-  const getCurrentData = useCallback(
-    () => ({
-      suite,
-      selectedCase: null,
-      outcome: null,
-    }),
-    [suite],
-  );
-
-  useCopilotDraft({
-    resourceType: "verification",
-    resourceId: suite?.id ?? null,
-    isReadOnly: false,
-    getCurrentData,
-    applyDraft: () => {},
-  });
-
-  return null;
 }
 
 export function VerificationSuiteEditor({
@@ -263,14 +239,76 @@ export function VerificationSuiteEditor({
   const suiteDisplayName = suiteData?.name || legacyRow?.name || "Verification Suite";
   const serverDisplayName = suiteData?.serverTitle || suiteData?.serverName || legacyRow?.serverTitle || null;
 
-  const suiteMeta = useMemo(
-    () => ({
-      id: effectiveSuiteId ?? "",
-      name: suiteDisplayName,
-      caseCount: cases.length,
-    }),
-    [effectiveSuiteId, suiteDisplayName, cases.length],
-  );
+  const caseInspectorHandleRef = useRef<CaseInspectorDraftHandle | null>(null);
+  const [inspectorVersion, setInspectorVersion] = useState(0);
+  const notifyInspectorChange = useCallback(() => {
+    setInspectorVersion((v) => v + 1);
+  }, []);
+
+  const casesSitemap = useMemo(() => {
+    return cases.map((c) => ({
+      id: c.id,
+      name: c.name,
+      toolName: c.toolName ?? null,
+      enabled: c.enabled,
+    }));
+  }, [cases]);
+
+  const getCurrentData = useCallback(() => {
+    void inspectorVersion;
+    const handle = caseInspectorHandleRef.current;
+    let selectedCasePayload = null;
+    let outcomePayload = null;
+
+    if (selectedCase) {
+      const draft = handle?.getCurrentDraft();
+      selectedCasePayload = {
+        id: selectedCase.id,
+        suiteId: selectedCase.suiteId,
+        name: selectedCase.name,
+        toolName: selectedCase.toolName ?? null,
+        input: draft?.input ?? selectedCase.input ?? {},
+        assertions: draft?.assertions ?? selectedCase.assertions ?? [],
+        isDirty: Boolean(draft?.isDirty),
+      };
+      outcomePayload = handle ? handle.getDisplayedOutcome() : null;
+    }
+
+    return {
+      suite: {
+        id: effectiveSuiteId ?? "",
+        name: suiteDisplayName,
+        serverId: suiteData?.mcpServerId ?? null,
+        serverName: serverDisplayName ?? null,
+        caseCount: cases.length,
+      },
+      cases: casesSitemap,
+      selectedCase: selectedCasePayload,
+      outcome: outcomePayload,
+    };
+  }, [
+    effectiveSuiteId,
+    suiteDisplayName,
+    suiteData?.mcpServerId,
+    serverDisplayName,
+    cases.length,
+    casesSitemap,
+    selectedCase,
+    inspectorVersion,
+  ]);
+
+  const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    if (!caseInspectorHandleRef.current) return [];
+    return caseInspectorHandleRef.current.applyDraft(draft);
+  }, []);
+
+  const { clearDraftState } = useCopilotDraft({
+    resourceType: "verification",
+    resourceId: effectiveSuiteId ?? null,
+    isReadOnly: inHistoryView,
+    getCurrentData,
+    applyDraft,
+  });
 
   if (suiteLoading && !suiteData) {
     return (
@@ -295,7 +333,6 @@ export function VerificationSuiteEditor({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {!selectedCase && <EmptyVerificationCopilotSync suite={suiteMeta} />}
 
       {/* Top Header */}
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-4">
@@ -385,6 +422,11 @@ export function VerificationSuiteEditor({
                 pinnedOutcome={pinnedOutcome}
                 historyMeta={historyMeta}
                 onExitHistoryView={exitHistoryView}
+                onBindDraftHandle={(h) => {
+                  caseInspectorHandleRef.current = h;
+                }}
+                onSaveSuccess={clearDraftState}
+                onDataChange={notifyInspectorChange}
               />
             ) : (
               <div className="grid h-full place-items-center px-8 text-center text-xs text-muted-foreground">

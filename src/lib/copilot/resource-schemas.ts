@@ -6,7 +6,6 @@
  */
 
 import { z } from "zod";
-import { evalCriteriaSchema } from "@/lib/evaluation/types";
 
 export interface ResourceJSONSchema {
   version: "1.0";
@@ -110,14 +109,14 @@ export const WebAutoDraftSchema = z.object({
     script: z.string().optional().describe("Playwright automation script code"),
     steps: z.string().optional().describe("Natural language test steps"),
   }).passthrough().optional().describe("Test case input containing script and steps"),
-  assertions: z.array(z.any()).optional().describe("List of JS or LLM assertions"),
+  assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("List of assertion specs: array of { type: 'js_expression' | 'jsonpath' | 'llm_judge', ... }"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     input: z.object({
       script: z.string().optional().describe("Script code"),
       steps: z.string().optional().describe("Test steps"),
     }).passthrough().optional().describe("Case input data"),
-    assertions: z.array(z.any()).optional().describe("Case assertions"),
+    assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("Case assertion specs"),
   }).optional().describe("Selected case data"),
 }).strict();
 
@@ -125,12 +124,12 @@ export const VerificationDraftSchema = z.object({
   name: z.string().max(120).optional().describe("Verification case display name"),
   description: z.string().optional().describe("Case goal and scenario"),
   input: z.record(z.string(), z.unknown()).optional().describe("Input arguments payload"),
-  assertions: z.union([z.string(), z.array(z.any())]).optional().describe("Output assertion rules"),
+  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Output assertion specs: array of { type: 'jsonpath' | 'js_expression' | 'json_schema', ... } or JSON string"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     description: z.string().optional().describe("Case description"),
     input: z.record(z.string(), z.unknown()).optional().describe("Case input payload"),
-    assertions: z.union([z.string(), z.array(z.any())]).optional().describe("Case assertions"),
+    assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Case assertion specs"),
   }).optional().describe("Selected case data"),
 }).strict();
 
@@ -143,22 +142,20 @@ export const EvaluationDraftSchema = z.object({
       expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
     })).optional(),
   }).passthrough().optional().describe("Case input structure"),
-  assertions: z.union([z.string(), z.array(z.any())]).optional().describe("Case assertions list"),
+  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'llm_judge' | 'jsonpath' | 'js_expression' | 'metric' | 'tool_call', ... } or JSON string"),
   turns: z.array(z.object({
     userMessage: z.string().min(1).describe("User message input for this turn"),
     expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
   })).optional().describe("Conversation turns list"),
-  criteria: evalCriteriaSchema.optional().describe("Evaluation criteria and constraints"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     description: z.string().optional().describe("Case description"),
     input: z.record(z.string(), z.unknown()).optional(),
-    assertions: z.union([z.string(), z.array(z.any())]).optional(),
+    assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional(),
     turns: z.array(z.object({
       userMessage: z.string().min(1),
       expectedOutput: z.string().optional(),
     })).optional(),
-    criteria: evalCriteriaSchema.optional(),
   }).optional().describe("Selected case data"),
 }).strict();
 

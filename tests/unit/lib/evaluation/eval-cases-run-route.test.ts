@@ -102,9 +102,9 @@ describe("POST /api/eval-cases/[id]/run", () => {
     const expectedOutcome = {
       score: 95,
       dimensionScores: { helpfulness: 90, clarity: 100 },
-      criteriaScore: 100,
+      assertionScore: 100,
       feedback: "Agent response was clear, polite, and aligned with constraints.",
-      criteriaResults: [],
+      assertionResults: [],
       status: "passed",
       durationMs: 1450,
       outputTokens: 86,
@@ -202,7 +202,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
     runEvalCaseMock.mockResolvedValue({
       status: "passed",
       score: 100,
-      criteriaScore: 100,
+      assertionScore: 100,
       feedback: "All deterministic assertions passed.",
     });
 

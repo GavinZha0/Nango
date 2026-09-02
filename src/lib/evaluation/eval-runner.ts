@@ -24,7 +24,6 @@ import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventEntity } from "@/lib/db/schema";
 
 import type { AssertionSpec } from "@/lib/assertions";
-import type { CriteriaCheckResult } from "./types";
 import {
   runDeterministicChecks,
   type DeterministicCheckInput,
@@ -67,9 +66,8 @@ export interface RunEvalCaseResult {
   status: "passed" | "failed" | "errored";
   score: number | null;
   dimensionScores?: Record<string, number>;
-  criteriaScore?: number | null;
+  assertionScore?: number | null;
   assertionResults?: import("@/lib/assertions").AssertionResult[];
-  criteriaResults?: CriteriaCheckResult[];
   feedback?: string | null;
   error?: string;
   durationMs?: number;
@@ -294,7 +292,7 @@ export async function runEvalCase(
 
   if (hasDeterministicFailure) {
     const overallScore = 0;
-    const criteriaScoreFinal = 0;
+    const assertionScoreFinal = 0;
     const feedback = "Deterministic assertions failed. Evaluator was skipped.";
 
     if (input.runId) {
@@ -304,8 +302,8 @@ export async function runEvalCase(
         status: "failed",
         score: overallScore,
         dimensionScores: {},
-        criteriaScore: criteriaScoreFinal,
-        criteriaResults: checks.results,
+        assertionScore: assertionScoreFinal,
+        assertionResults: checks.assertionResults,
         feedback,
         threadId: currentThreadId,
         evaluatorThreadId: null,
@@ -319,8 +317,8 @@ export async function runEvalCase(
       status: "failed",
       score: overallScore,
       dimensionScores: {},
-      criteriaScore: criteriaScoreFinal,
-      criteriaResults: checks.results,
+      assertionScore: assertionScoreFinal,
+      assertionResults: checks.assertionResults,
       feedback,
       durationMs,
       outputTokens,
@@ -330,7 +328,7 @@ export async function runEvalCase(
 
   // ── No evaluator agent configured: purely deterministic evaluation ──
   if (!input.evaluatorAgentId) {
-    const criteriaScoreFinal = 100;
+    const assertionScoreFinal = 100;
     const overallScore = 100;
     const feedback =
       checks.totalCount > 0
@@ -344,8 +342,8 @@ export async function runEvalCase(
         status: "passed",
         score: overallScore,
         dimensionScores: {},
-        criteriaScore: criteriaScoreFinal,
-        criteriaResults: checks.results,
+        assertionScore: assertionScoreFinal,
+        assertionResults: checks.assertionResults,
         feedback,
         threadId: currentThreadId,
         evaluatorThreadId: null,
@@ -359,8 +357,8 @@ export async function runEvalCase(
       status: "passed",
       score: overallScore,
       dimensionScores: {},
-      criteriaScore: criteriaScoreFinal,
-      criteriaResults: checks.results,
+      assertionScore: assertionScoreFinal,
+      assertionResults: checks.assertionResults,
       feedback,
       durationMs,
       outputTokens,
@@ -435,10 +433,10 @@ export async function runEvalCase(
       { event: "evaluator_failed", runId: input.runId, caseId: input.caseId, evaluatorRunId: evaluatorResult?.runId },
       message,
     );
-    const criteriaScoreFinal = checks.totalCount > 0 ? 100 : null;
+    const assertionScoreFinal = checks.totalCount > 0 ? 100 : null;
     await writeErrorResult(input, startMs, message, currentThreadId, evaluatorResult?.runId, {
-      criteriaScore: criteriaScoreFinal,
-      criteriaResults: checks.results,
+      assertionScore: assertionScoreFinal,
+      assertionResults: checks.assertionResults,
       durationMs,
       outputTokens,
       toolCallCount,
@@ -446,8 +444,8 @@ export async function runEvalCase(
     return {
       status: "errored",
       score: null,
-      criteriaScore: criteriaScoreFinal,
-      criteriaResults: checks.results,
+      assertionScore: assertionScoreFinal,
+      assertionResults: checks.assertionResults,
       error: message,
       threadId: currentThreadId,
       durationMs,
@@ -455,7 +453,7 @@ export async function runEvalCase(
     };
   }
 
-  // ── ⑤ Process LLM Judge check results & compute criteriaScoreFinal ──
+  // ── ⑤ Process LLM Judge check results & compute assertionScoreFinal ──
 
   const { EVAL_THRESHOLD_PASS } = await import("./config");
 
@@ -510,22 +508,22 @@ export async function runEvalCase(
     generalDimScores.reduce((a, b) => a + b, 0) / generalDimScores.length;
 
   let semanticScore: number;
-  let criteriaScoreFinal: number | null = null;
+  let assertionScoreFinal: number | null = null;
 
   if (llmJudgeScoresList.length > 0) {
     const avgCaseJudgeScore =
       llmJudgeScoresList.reduce((a, b) => a + b, 0) / llmJudgeScoresList.length;
     // 2/3 Case-specific LLM Judge + 1/3 General Quality Dimensions
     semanticScore = (2 / 3) * avgCaseJudgeScore + (1 / 3) * avgGeneralDimScore;
-    criteriaScoreFinal = Math.round(avgCaseJudgeScore * checks.passRate);
+    assertionScoreFinal = Math.round(avgCaseJudgeScore * checks.passRate);
   } else if (scores.criteria_score !== null) {
     semanticScore = (2 / 3) * scores.criteria_score + (1 / 3) * avgGeneralDimScore;
-    criteriaScoreFinal = Math.round(scores.criteria_score * checks.passRate);
+    assertionScoreFinal = Math.round(scores.criteria_score * checks.passRate);
   } else {
     // No case-specific LLM Judge: 100% General Quality Dimensions
     semanticScore = avgGeneralDimScore;
     if (checks.totalCount > 0) {
-      criteriaScoreFinal = Math.round(100 * checks.passRate);
+      assertionScoreFinal = Math.round(100 * checks.passRate);
     }
   }
 
@@ -549,9 +547,8 @@ export async function runEvalCase(
       status: passed ? "passed" : "failed",
       score: overallScore,
       dimensionScores: finalDimensionScores,
-      criteriaScore: criteriaScoreFinal,
+      assertionScore: assertionScoreFinal,
       assertionResults: unifiedAssertionResults,
-      criteriaResults: checks.results,
       feedback: scores.feedback,
       threadId: currentThreadId,
       evaluatorThreadId: evaluatorResult.runId,
@@ -565,9 +562,8 @@ export async function runEvalCase(
     status: passed ? "passed" : "failed",
     score: overallScore,
     dimensionScores: finalDimensionScores,
-    criteriaScore: criteriaScoreFinal,
+    assertionScore: assertionScoreFinal,
     assertionResults: unifiedAssertionResults,
-    criteriaResults: checks.results,
     feedback: scores.feedback,
     durationMs,
     outputTokens,
@@ -584,8 +580,7 @@ async function writeErrorResult(
   targetRunId?: string,
   evaluatorRunId?: string,
   deterministicDetails?: {
-    criteriaScore?: number | null;
-    criteriaResults?: CriteriaCheckResult[];
+    assertionScore?: number | null;
     assertionResults?: import("@/lib/assertions").AssertionResult[];
     durationMs?: number;
     outputTokens?: number;
@@ -610,9 +605,8 @@ async function writeErrorResult(
       error: { message: errorMessage },
       threadId: targetRunId ?? null,
       evaluatorThreadId: evaluatorRunId ?? null,
-      criteriaScore: deterministicDetails?.criteriaScore ?? null,
+      assertionScore: deterministicDetails?.assertionScore ?? null,
       assertionResults: errorAssertionResults,
-      criteriaResults: deterministicDetails?.criteriaResults ?? [],
       durationMs: deterministicDetails?.durationMs ?? (Date.now() - startMs),
       outputTokens: deterministicDetails?.outputTokens ?? null,
       toolCallCount: deterministicDetails?.toolCallCount ?? null,

@@ -27,7 +27,7 @@
  * current DB definition.
  */
 
-import { useState, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react";
 import { Loader2, Play, Check, Copy, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,6 @@ import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { AssertionVerdictList } from "@/components/main-panels/common/verdicts";
 import { formatTimestamp } from "@/components/admin/format";
 import { JsonView } from "@/components/ui/json-view";
-import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { sanitizeWebAutoOutput } from "@/lib/web-auto/image-extractor";
 import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
@@ -98,6 +97,29 @@ export interface CaseInspectorProps {
    *  returns to live view as the rerun fires. No-op outside history
    *  mode (we always invoke; the parent should make it idempotent). */
   onExitHistoryView?: () => void;
+  /** Binds the child draft state & applyDraft handle to the parent editor's unified copilot synchronization. */
+  onBindDraftHandle?: (handle: CaseInspectorDraftHandle | null) => void;
+  /** Callback fired after a successful manual save to reset copilot draft state in parent. */
+  onSaveSuccess?: () => void;
+  /** Callback fired whenever draft content, dirty state, or outcome changes to notify parent. */
+  onDataChange?: () => void;
+}
+
+export interface CaseInspectorDraftHandle {
+  getCurrentDraft: () => {
+    input: unknown;
+    assertions: unknown;
+    isDirty: boolean;
+  };
+  getDisplayedOutcome: () => {
+    source: "live" | "history";
+    historySeq?: number;
+    status: string;
+    error: unknown;
+    assertionResults: unknown[];
+    output: unknown;
+  } | null;
+  applyDraft: (draft: Record<string, unknown>) => string[];
 }
 
 // --- useJsonDraft hook ------------------------------------------------------
@@ -301,10 +323,13 @@ function validateAssertionsArray(
 
 export function CaseInspector({
   caseRow,
-  serverMeta = null,
+  serverMeta: _serverMeta = null,
   pinnedOutcome,
   historyMeta = null,
   onExitHistoryView,
+  onBindDraftHandle,
+  onSaveSuccess,
+  onDataChange,
 }: CaseInspectorProps): ReactNode {
   const tz = useDisplayTimezone();
 
@@ -344,8 +369,8 @@ export function CaseInspector({
   const showHistoryChrome: boolean =
     historyMeta !== null && runOutcome === null;
 
-  // Copilot ambient context & draft integration
-  const getCurrentData = useCallback(() => {
+  // Copilot ambient context & draft integration (bound to parent suite synchronization)
+  const getCurrentDraft = useCallback(() => {
     let currentInput: unknown = caseRow.input ?? {};
     if (inputDraft.text.trim()) {
       try {
@@ -364,46 +389,23 @@ export function CaseInspector({
     }
 
     return {
-      server: {
-        id: serverMeta?.id ?? caseRow.mcpServerId ?? "",
-        name: serverMeta?.name ?? "MCP Server",
-        caseCount: serverMeta?.caseCount ?? 1,
-      },
-      selectedCase: {
-        id: caseRow.id,
-        suiteId: caseRow.suiteId,
-        suiteName: caseRow.suiteName || "Suite",
-        name: caseRow.name,
-        toolName: caseRow.toolName ?? null,
-        input: currentInput,
-        assertions: currentAssertions,
-        isDirty: Boolean(inputDraft.isDirty || assertionsDraft.isDirty),
-      },
-      outcome: displayedOutcome
-        ? {
-            source: showHistoryChrome ? "history" : "live",
-            ...(showHistoryChrome && historyMeta ? { historySeq: historyMeta.seq } : {}),
-            status: displayedOutcome.status,
-            error: displayedOutcome.error || null,
-            verdict: {
-              passed: displayedOutcome.status === "passed",
-              results: displayedOutcome.assertionResults || [],
-            },
-            output: sanitizeWebAutoOutput(displayedOutcome.resultPayload),
-          }
-        : null,
-    } as Record<string, unknown>;
-  }, [
-    serverMeta,
-    caseRow,
-    inputDraft.text,
-    inputDraft.isDirty,
-    assertionsDraft.text,
-    assertionsDraft.isDirty,
-    displayedOutcome,
-    showHistoryChrome,
-    historyMeta,
-  ]);
+      input: currentInput,
+      assertions: currentAssertions,
+      isDirty: Boolean(inputDraft.isDirty || assertionsDraft.isDirty),
+    };
+  }, [caseRow.input, caseRow.assertions, inputDraft.text, inputDraft.isDirty, assertionsDraft.text, assertionsDraft.isDirty]);
+
+  const getDisplayedOutcome = useCallback(() => {
+    if (!displayedOutcome) return null;
+    return {
+      source: (showHistoryChrome ? "history" : "live") as "live" | "history",
+      ...(showHistoryChrome && historyMeta ? { historySeq: historyMeta.seq } : {}),
+      status: displayedOutcome.status,
+      error: displayedOutcome.error || null,
+      assertionResults: displayedOutcome.assertionResults || [],
+      output: sanitizeWebAutoOutput(displayedOutcome.resultPayload),
+    };
+  }, [displayedOutcome, showHistoryChrome, historyMeta]);
 
   const applyDraft = useCallback(
     (draft: Record<string, unknown>) => {
@@ -434,13 +436,29 @@ export function CaseInspector({
     [caseRow.id, inputDraft, assertionsDraft],
   );
 
-  const { clearDraftState } = useCopilotDraft({
-    resourceType: "verification",
-    resourceId: String(caseRow.id),
-    isReadOnly: Boolean(showHistoryChrome),
-    getCurrentData,
-    applyDraft,
-  });
+  useEffect(() => {
+    if (!onBindDraftHandle) return;
+    onBindDraftHandle({
+      getCurrentDraft,
+      getDisplayedOutcome,
+      applyDraft,
+    });
+    return () => {
+      onBindDraftHandle(null);
+    };
+  }, [onBindDraftHandle, getCurrentDraft, getDisplayedOutcome, applyDraft]);
+
+  // Notify parent suite of any internal edits, dirty toggles, or outcome changes
+  useEffect(() => {
+    onDataChange?.();
+  }, [
+    onDataChange,
+    displayedOutcome,
+    inputDraft.text,
+    inputDraft.isDirty,
+    assertionsDraft.text,
+    assertionsDraft.isDirty,
+  ]);
 
   // Manual save handler
   const handleSave = useCallback(async (): Promise<void> => {
@@ -451,9 +469,9 @@ export function CaseInspector({
     if (!inputOk || !assertionsOk) {
       setRunError("Fix the JSON errors before saving.");
     } else {
-      clearDraftState();
+      onSaveSuccess?.();
     }
-  }, [inputDraft, assertionsDraft, clearDraftState]);
+  }, [inputDraft, assertionsDraft, onSaveSuccess]);
 
   // Check if any draft has unsaved changes
   const hasUnsavedChanges = inputDraft.isDirty || assertionsDraft.isDirty;

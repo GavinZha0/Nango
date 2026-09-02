@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { EvalCaseList } from "@/components/main-panels/evaluation/EvalCaseList";
 import { EvalCaseEditDialog } from "@/components/main-panels/evaluation/EvalCaseEditDialog";
-import { EvalCaseInspector } from "@/components/main-panels/evaluation/EvalCaseInspector";
 import { useEvaluationRunStream } from "@/hooks/useEvaluationRunStream";
 import { useEvalRunSnapshot } from "@/hooks/useEvalRunSnapshot";
 import { RecentRunsBanner } from "@/components/main-panels/RecentRunsBanner";
@@ -31,6 +30,7 @@ import { useWorkspaceStore } from "@/store/workspace";
 import { useShallow } from "zustand/react/shallow";
 import type { EntityDescriptor } from "@/lib/backends/types";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { EvalCaseInspector, type EvalCaseInspectorDraftHandle } from "@/components/main-panels/evaluation/EvalCaseInspector";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -42,42 +42,6 @@ export interface EvaluationSuiteEditorProps {
   /** The active evaluation suite ID. */
   suiteId: string;
   onBack?: () => void;
-}
-
-function EmptyEvaluationCopilotSync({
-  suite,
-}: {
-  suite: EvalSuiteRow | null;
-}) {
-  const getCurrentData = useCallback(
-    () => ({
-      suite: suite
-        ? {
-            id: suite.id,
-            name: suite.name,
-            description: suite.description ?? null,
-            agentId: suite.agentId,
-            agentSource: suite.agentSource,
-            evaluatorAgentId: suite.evaluatorAgentId,
-            dimensionIds: suite.dimensionIds,
-            caseCount: 0,
-          }
-        : null,
-      selectedCase: null,
-      outcome: null,
-    }),
-    [suite],
-  );
-
-  useCopilotDraft({
-    resourceType: "evaluation",
-    resourceId: suite?.id ?? null,
-    isReadOnly: false,
-    getCurrentData,
-    applyDraft: () => {},
-  });
-
-  return null;
 }
 
 export function EvaluationSuiteEditor({
@@ -145,14 +109,13 @@ export function EvaluationSuiteEditor({
     if (!runSnapshot || selectedCaseId === null) return undefined;
     const row = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
     if (!row) return undefined;
-    const resultsList = (row.assertionResults ?? (row as unknown as { criteriaResults?: unknown[] }).criteriaResults ?? []) as unknown[];
+    const resultsList = (row.assertionResults ?? []) as unknown[];
     return {
       status: row.status as "passed" | "failed" | "errored",
       score: row.score,
       dimensionScores: row.dimensionScores as Record<string, number>,
-      criteriaScore: row.criteriaScore,
+      assertionScore: (row as unknown as { assertionScore?: number }).assertionScore ?? row.criteriaScore ?? null,
       assertionResults: resultsList,
-      criteriaResults: resultsList,
       feedback: row.feedback,
       durationMs: row.durationMs,
       outputTokens: row.outputTokens,
@@ -191,6 +154,76 @@ export function EvaluationSuiteEditor({
     () => cases.find((c) => c.id === selectedCaseId) ?? null,
     [cases, selectedCaseId],
   );
+
+  const caseInspectorHandleRef = useRef<EvalCaseInspectorDraftHandle | null>(null);
+  const [inspectorVersion, setInspectorVersion] = useState(0);
+  const notifyInspectorChange = useCallback(() => {
+    setInspectorVersion((v) => v + 1);
+  }, []);
+
+  const casesSitemap = useMemo(() => {
+    return cases.map((c) => ({
+      id: c.id,
+      name: c.name,
+      enabled: c.enabled,
+    }));
+  }, [cases]);
+
+  const getCurrentData = useCallback(() => {
+    void inspectorVersion;
+    const handle = caseInspectorHandleRef.current;
+    let selectedCasePayload = null;
+    let outcomePayload = null;
+
+    if (selectedCase) {
+      const draft = handle?.getCurrentDraft();
+      const caseInput = (selectedCase.input ?? {}) as Record<string, unknown>;
+      const fallbackTurns = Array.isArray(caseInput.turns)
+        ? (caseInput.turns as unknown[])
+        : (Array.isArray(selectedCase.turns) ? selectedCase.turns : []);
+
+      selectedCasePayload = {
+        id: selectedCase.id,
+        suiteId: selectedCase.suiteId,
+        name: selectedCase.name,
+        turns: draft?.turns ?? fallbackTurns,
+        assertions: draft?.assertions ?? selectedCase.assertions ?? [],
+        isDirty: Boolean(draft?.isDirty),
+      };
+      outcomePayload = handle ? handle.getDisplayedOutcome() : null;
+    }
+
+    return {
+      suite: suiteData
+        ? {
+            id: suiteData.id,
+            name: suiteData.name,
+            description: suiteData.description ?? null,
+            agentId: suiteData.agentId,
+            agentSource: suiteData.agentSource,
+            evaluatorAgentId: suiteData.evaluatorAgentId,
+            dimensionIds: suiteData.dimensionIds,
+            caseCount: cases.length,
+          }
+        : null,
+      cases: casesSitemap,
+      selectedCase: selectedCasePayload,
+      outcome: outcomePayload,
+    };
+  }, [suiteData, cases.length, casesSitemap, selectedCase, inspectorVersion]);
+
+  const applyDraft = useCallback((draft: Record<string, unknown>) => {
+    if (!caseInspectorHandleRef.current) return [];
+    return caseInspectorHandleRef.current.applyDraft(draft);
+  }, []);
+
+  const { clearDraftState } = useCopilotDraft({
+    resourceType: "evaluation",
+    resourceId: suiteId ?? null,
+    isReadOnly: Boolean(selectedRunId !== null),
+    getCurrentData,
+    applyDraft,
+  });
 
   useEffect(() => {
     if (selectedCaseId !== null && !selectedCase) {
@@ -343,8 +376,6 @@ export function EvaluationSuiteEditor({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {!selectedCase && <EmptyEvaluationCopilotSync suite={suiteData} />}
-
       {/* Header */}
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -416,6 +447,11 @@ export function EvaluationSuiteEditor({
                 pinnedRunId={selectedRunId ?? (isLiveTerminal ? activeRunId : null)}
                 selectedRunSeq={selectedRunSeq}
                 onExitHistoryView={exitHistoryView}
+                onBindDraftHandle={(h) => {
+                  caseInspectorHandleRef.current = h;
+                }}
+                onSaveSuccess={clearDraftState}
+                onDataChange={notifyInspectorChange}
               />
             ) : (
               <div className="grid h-full place-items-center px-8 text-center text-xs text-muted-foreground">

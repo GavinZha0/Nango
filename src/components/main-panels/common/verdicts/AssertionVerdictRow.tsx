@@ -185,7 +185,18 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
     }
     if (spec.type === "json_schema") return "JSON Schema validation";
     if (spec.type === "tool_call") return `Tool: ${spec.toolName}`;
-    if (spec.type === "metric") return `Metric: ${spec.metric} ${spec.operator} ${spec.threshold}`;
+    if (spec.type === "metric") return `${spec.metric} ${spec.operator} ${spec.threshold}`;
+  }
+
+  if (verdict.type === "metric") {
+    if (verdict.expected !== undefined) {
+      return `${formatValue(verdict.expected)}`;
+    }
+    if (verdict.message) {
+      return verdict.message
+        .replace(/^Metric:\s*/i, "")
+        .replace(/^Metric\s+/i, "");
+    }
   }
 
   if (verdict.path) {
@@ -195,7 +206,14 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
     return verdict.path;
   }
 
-  return verdict.message || verdict.type;
+  if (verdict.message) {
+    return verdict.message
+      .replace(/^JS Expression:\s*/i, "")
+      .replace(/^Metric:\s*/i, "")
+      .replace(/^Metric\s+/i, "");
+  }
+
+  return verdict.type;
 }
 
 function formatValue(v: unknown): string {

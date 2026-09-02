@@ -67,11 +67,11 @@ function getAssertionDescription(spec: AssertionSpec): string {
     case "json_schema":
       return "JSON Schema Draft 2020-12 validation";
     case "js_expression":
-      return `JS Expression: ${spec.expression}`;
+      return spec.expression;
     case "tool_call":
       return `Tool Call ${spec.toolName}${spec.expectedCalls !== undefined ? ` (>= ${spec.expectedCalls})` : ""}`;
     case "metric":
-      return `Metric ${spec.metric} ${spec.operator} ${spec.threshold}`;
+      return `${spec.metric} ${spec.operator} ${spec.threshold}`;
     case "llm_judge":
     case "expectation":
     case "llm_expectation": {

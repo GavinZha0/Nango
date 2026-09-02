@@ -258,6 +258,14 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const canSave = Boolean(isDirty) && !jsonError && !saving;
 
   // Copilot ambient context & draft integration
+  const casesSitemap = useMemo(() => {
+    return (cases ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      enabled: c.enabled,
+    }));
+  }, [cases]);
+
   const getCurrentData = useCallback(() => {
     return {
       suite: {
@@ -267,6 +275,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         timeoutSec: selectedSuite?.timeoutSec ?? 300,
         caseCount: cases?.length ?? 0,
       },
+      cases: casesSitemap,
       selectedCase: selectedCase
         ? {
             id: selectedCase.id,
@@ -285,7 +294,9 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
             ...(inHistoryView && selectedRunSeq !== null ? { historySeq: selectedRunSeq } : {}),
             status: displayOutcome.status,
             error: displayOutcome.error || null,
-            verdict: displayOutcome.verdict || null,
+            assertionResults: displayOutcome.assertionResults ?? [],
+            score: displayOutcome.score ?? (displayOutcome.verdict?.llm?.score ?? null),
+            feedback: displayOutcome.feedback ?? (displayOutcome.verdict?.llm?.feedback ?? null),
             output: sanitizeWebAutoOutput(displayOutcome.executionOutput),
           }
         : null,
@@ -293,7 +304,8 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   }, [
     selectedSuite,
     suiteId,
-    cases,
+    cases?.length,
+    casesSitemap,
     selectedCase,
     draftSteps,
     draftScript,
@@ -336,7 +348,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const { clearDraftState } = useCopilotDraft({
     resourceType: "web-auto",
     resourceId: suiteId ?? null,
-    isReadOnly: false,
+    isReadOnly: inHistoryView,
     getCurrentData,
     applyDraft,
   });

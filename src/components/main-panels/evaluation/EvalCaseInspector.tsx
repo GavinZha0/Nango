@@ -9,7 +9,7 @@
  * Header hosts Add Turn and Evaluate buttons.
  */
 
-import { useState, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react";
 import {
   Play,
   Loader2,
@@ -48,7 +48,6 @@ import { AssertionVerdictRow } from "@/components/main-panels/common/verdicts";
 import { extractTargetCase } from "@/components/main-panels/common";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
 import { evalCaseActions } from "@/store/evaluation-cases";
-import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 
 /** EvalTurn with a stable React key (runtime-only, not persisted). */
 interface KeyedTurn extends EvalTurn {
@@ -265,9 +264,8 @@ export interface PinnedOutcome {
   status: "passed" | "failed" | "errored";
   score: number | null;
   dimensionScores: Record<string, number>;
-  criteriaScore: number | null;
+  assertionScore?: number | null;
   assertionResults?: unknown[];
-  criteriaResults: unknown[];
   feedback: string | null;
   durationMs: number | null;
   outputTokens: number | null;
@@ -275,7 +273,26 @@ export interface PinnedOutcome {
   error?: unknown;
 }
 
-interface EvalCaseInspectorProps {
+export interface EvalCaseInspectorDraftHandle {
+  getCurrentDraft: () => {
+    turns: EvalTurn[];
+    assertions: AssertionSpec[];
+    isDirty: boolean;
+  };
+  getDisplayedOutcome: () => {
+    source: "live" | "history";
+    historySeq?: number;
+    status: string;
+    score: number | null;
+    dimensionScores: Record<string, number> | null;
+    assertionScore: number | null;
+    assertionResults: unknown[];
+    feedback: string | null;
+  } | null;
+  applyDraft: (draft: Record<string, unknown>) => string[];
+}
+
+export interface EvalCaseInspectorProps {
   evalCase: EvalCaseRow;
   suite: EvalSuiteRow;
   liveRun: EvaluationRunLiveState;
@@ -284,12 +301,44 @@ interface EvalCaseInspectorProps {
   pinnedRunId?: string | null;
   selectedRunSeq?: number | null;
   onExitHistoryView?: () => void;
+  onBindDraftHandle?: (handle: EvalCaseInspectorDraftHandle | null) => void;
+  onSaveSuccess?: () => void;
+  onDataChange?: () => void;
 }
 
 // CONTRACT: parent renders <EvalCaseInspector key={evalCase.id} />,
 // so the counter resets on case switch via remount.
 let nextTurnKey = 0;
 function mintKey(): number { return nextTurnKey++; }
+
+/**
+ * Deep semantic equality comparison that ignores object key order
+ * and filters out undefined values, avoiding false-dirty flags caused
+ * by PostgreSQL jsonb re-ordering.
+ */
+function isDeepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null || typeof a !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!isDeepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const ak = Object.keys(ao).filter((k) => ao[k] !== undefined);
+  const bk = Object.keys(bo).filter((k) => bo[k] !== undefined);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!Object.prototype.hasOwnProperty.call(bo, k)) return false;
+    if (!isDeepEqual(ao[k], bo[k])) return false;
+  }
+  return true;
+}
 
 export function EvalCaseInspector({
   evalCase,
@@ -300,6 +349,9 @@ export function EvalCaseInspector({
   pinnedRunId,
   selectedRunSeq = null,
   onExitHistoryView,
+  onBindDraftHandle,
+  onSaveSuccess,
+  onDataChange,
 }: EvalCaseInspectorProps): ReactNode {
   const [turns, setTurns] = useState<KeyedTurn[]>(() => {
     const caseInput = (evalCase.input ?? {}) as Record<string, unknown>;
@@ -336,23 +388,26 @@ export function EvalCaseInspector({
     return kt.map(({ _key: _, ...rest }) => rest);
   }
 
-  // Snapshot original values for dirty comparison (stable across renders).
-  const origTurnsJson = useMemo(() => {
+  // Extract original baseline values for semantic dirty comparison
+  const origTurns = useMemo(() => {
     const caseInput = (evalCase.input ?? {}) as Record<string, unknown>;
-    const rawTurns = Array.isArray(caseInput.turns)
-      ? caseInput.turns
-      : (Array.isArray(evalCase.turns) ? evalCase.turns : []);
-    return JSON.stringify(rawTurns);
+    return Array.isArray(caseInput.turns)
+      ? (caseInput.turns as EvalTurn[])
+      : (Array.isArray(evalCase.turns) ? (evalCase.turns as EvalTurn[]) : []);
   }, [evalCase.input, evalCase.turns]);
 
-  const origAssertionsJson = useMemo(() => {
-    if (Array.isArray(evalCase.assertions)) return JSON.stringify(evalCase.assertions);
-    return JSON.stringify([]);
+  const origAssertions = useMemo(() => {
+    return Array.isArray(evalCase.assertions) ? (evalCase.assertions as AssertionSpec[]) : [];
   }, [evalCase.assertions]);
 
-  const isDirty =
-    JSON.stringify(stripKeys(turns)) !== origTurnsJson ||
-    JSON.stringify(assertions) !== origAssertionsJson;
+  const strippedCurrentTurns = useMemo(() => stripKeys(turns), [turns]);
+
+  const isDirty = useMemo(() => {
+    return (
+      !isDeepEqual(strippedCurrentTurns, origTurns) ||
+      !isDeepEqual(assertions, origAssertions)
+    );
+  }, [strippedCurrentTurns, origTurns, assertions, origAssertions]);
 
   const canSave = isDirty && !assertionsHasError && !saving;
 
@@ -379,14 +434,16 @@ export function EvalCaseInspector({
   }, [pinnedOutcome, runOutcome?.dimensionScores, liveCaseResult?.dimensionScores, historicalResult?.dimensionScores]);
   const displayBaselineScore = displayDimensionScores?.baseline ?? null;
   const displayAssertionScore = pinnedOutcome
-    ? pinnedOutcome.criteriaScore
-    : (runOutcome ? (runOutcome.criteriaScore ?? null) : (liveCaseResult?.criteriaScore ?? (historicalResult?.criteriaScore ?? null)));
+    ? (pinnedOutcome.assertionScore ?? null)
+    : (runOutcome ? (runOutcome.assertionScore ?? null) : (liveCaseResult?.assertionScore ?? null));
   const displayFeedback = pinnedOutcome
     ? pinnedOutcome.feedback
     : (runOutcome ? (runOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
-  const displayAssertionResults = pinnedOutcome
-    ? (pinnedOutcome.assertionResults ?? pinnedOutcome.criteriaResults)
-    : (runOutcome ? (runOutcome.assertionResults ?? runOutcome.criteriaResults ?? null) : (liveCaseResult?.assertionResults ?? (historicalResult?.assertionResults ?? (historicalResult?.criteriaResults ?? null))));
+  const displayAssertionResults = useMemo(() => {
+    return pinnedOutcome
+      ? (pinnedOutcome.assertionResults ?? null)
+      : (runOutcome ? (runOutcome.assertionResults ?? null) : (liveCaseResult?.assertionResults ?? (historicalResult?.assertionResults ?? null)));
+  }, [pinnedOutcome, runOutcome, liveCaseResult?.assertionResults, historicalResult?.assertionResults]);
   const displayDurationMs = pinnedOutcome
     ? pinnedOutcome.durationMs
     : (runOutcome ? (runOutcome.durationMs ?? null) : (liveCaseResult?.durationMs ?? (historicalResult?.durationMs ?? null)));
@@ -412,47 +469,28 @@ export function EvalCaseInspector({
 
   const displayError = runError ?? runOutcome?.error ?? (pinnedOutcome ? (typeof pinnedOutcome.error === "string" ? pinnedOutcome.error : (pinnedOutcome.error as { message?: string } | undefined)?.message) : null);
 
-  // Copilot ambient context & draft integration
-  const getCurrentData = useCallback(() => {
+  // Copilot ambient context & draft integration (bound to parent suite synchronization)
+  const getCurrentDraft = useCallback(() => {
     return {
-      suite: {
-        id: suite.id,
-        name: suite.name,
-        description: suite.description ?? null,
-        agentId: suite.agentId,
-        agentSource: suite.agentSource,
-        evaluatorAgentId: suite.evaluatorAgentId,
-        dimensionIds: suite.dimensionIds,
-        caseCount: 0,
-      },
-      selectedCase: {
-        id: evalCase.id,
-        suiteId: evalCase.suiteId,
-        suiteName: suite.name,
-        name: evalCase.name,
-        turns: stripKeys(turns),
-        assertions,
-        isDirty: Boolean(isDirty),
-      },
-      outcome: (displayScore !== null || resolvedStatus !== "idle")
-        ? {
-            source: pinnedOutcome ? "history" : "live",
-            ...(pinnedOutcome && selectedRunSeq !== null ? { historySeq: selectedRunSeq } : {}),
-            status: resolvedStatus,
-            score: displayScore,
-            dimensionScores: displayDimensionScores,
-            criteriaScore: displayAssertionScore,
-            criteriaResults: displayAssertionResults ?? [],
-            feedback: displayFeedback || null,
-          }
-        : null,
-    } as Record<string, unknown>;
+      turns: stripKeys(turns),
+      assertions,
+      isDirty: Boolean(isDirty),
+    };
+  }, [turns, assertions, isDirty]);
+
+  const getDisplayedOutcome = useCallback(() => {
+    if (displayScore === null && resolvedStatus === "idle") return null;
+    return {
+      source: (pinnedOutcome ? "history" : "live") as "live" | "history",
+      ...(pinnedOutcome && selectedRunSeq !== null ? { historySeq: selectedRunSeq } : {}),
+      status: resolvedStatus,
+      score: displayScore,
+      dimensionScores: displayDimensionScores,
+      assertionScore: displayAssertionScore,
+      assertionResults: displayAssertionResults ?? [],
+      feedback: displayFeedback || null,
+    };
   }, [
-    suite,
-    evalCase,
-    turns,
-    assertions,
-    isDirty,
     displayScore,
     resolvedStatus,
     pinnedOutcome,
@@ -480,35 +518,78 @@ export function EvalCaseInspector({
         applied.push("turns");
       }
     }
-    if (sc.assertions !== undefined && Array.isArray(sc.assertions)) {
-      setAssertions(sc.assertions as AssertionSpec[]);
-      applied.push("assertions");
+    if (sc.assertions !== undefined) {
+      let targetAssertions: unknown = sc.assertions;
+      if (typeof targetAssertions === "string") {
+        try {
+          targetAssertions = JSON.parse(targetAssertions);
+        } catch {
+          targetAssertions = undefined;
+        }
+      }
+      if (Array.isArray(targetAssertions)) {
+        setAssertions(targetAssertions as AssertionSpec[]);
+        applied.push("assertions");
+      }
     }
     if (draft.selectedCase) applied.push("selectedCase");
     return applied;
   }, [evalCase.id]);
 
-  const { clearDraftState } = useCopilotDraft({
-    resourceType: "evaluation",
-    resourceId: String(evalCase.id),
-    isReadOnly: false,
-    getCurrentData,
-    applyDraft,
-  });
+  useEffect(() => {
+    if (!onBindDraftHandle) return;
+    onBindDraftHandle({
+      getCurrentDraft,
+      getDisplayedOutcome,
+      applyDraft,
+    });
+    return () => {
+      onBindDraftHandle(null);
+    };
+  }, [onBindDraftHandle, getCurrentDraft, getDisplayedOutcome, applyDraft]);
+
+  // Notify parent suite of any internal edits, dirty toggles, or outcome changes
+  useEffect(() => {
+    onDataChange?.();
+  }, [
+    onDataChange,
+    turns,
+    assertions,
+    isDirty,
+    displayScore,
+    resolvedStatus,
+    displayAssertionResults,
+    displayFeedback,
+    displayAssertionScore,
+  ]);
 
   const handleSave = useCallback(async (): Promise<void> => {
     if (!canSave) return;
     setSaving(true);
-    await evalCaseActions.patch(
-      { id: evalCase.id, suiteId: evalCase.suiteId },
-      {
-        input: { turns: stripKeys(turns) },
-        assertions: assertions,
-      },
-    );
-    setSaving(false);
-    clearDraftState();
-  }, [canSave, evalCase.id, evalCase.suiteId, turns, assertions, clearDraftState]);
+    try {
+      const stripped = stripKeys(turns);
+      const savedRow = await evalCaseActions.patch(
+        { id: evalCase.id, suiteId: evalCase.suiteId },
+        {
+          input: { turns: stripped },
+          assertions: assertions,
+        },
+      );
+      if (savedRow) {
+        if (Array.isArray(savedRow.assertions)) {
+          setAssertions(savedRow.assertions as AssertionSpec[]);
+        }
+        const savedInput = (savedRow.input ?? {}) as Record<string, unknown>;
+        const rawTurns = Array.isArray(savedInput.turns)
+          ? (savedInput.turns as EvalTurn[])
+          : (Array.isArray(savedRow.turns) ? (savedRow.turns as EvalTurn[]) : []);
+        setTurns(rawTurns.map((t) => ({ ...t, _key: mintKey() })));
+      }
+      onSaveSuccess?.();
+    } finally {
+      setSaving(false);
+    }
+  }, [canSave, evalCase.id, evalCase.suiteId, turns, assertions, onSaveSuccess]);
 
   const messagesUrl = resolvedRunId === "playground" && resolvedThreadId
     ? `/api/eval-runs/playground/messages?caseId=${evalCase.id}&threadId=${resolvedThreadId}`
@@ -746,6 +827,7 @@ export function EvalCaseInspector({
           <div className="flex min-h-0 flex-col overflow-hidden border-t">
             <EvaluationPanel
               activeDimensions={activeDimensions}
+              assertions={assertions}
               overallScore={displayScore}
               baselineScore={displayBaselineScore}
               dimensionScores={displayDimensionScores}
@@ -770,6 +852,7 @@ export function EvalCaseInspector({
 
 interface EvaluationPanelProps {
   activeDimensions: string[];
+  assertions?: AssertionSpec[];
   overallScore: number | null;
   baselineScore: number | null;
   dimensionScores: Record<string, number>;
@@ -786,6 +869,7 @@ interface EvaluationPanelProps {
 
 function EvaluationPanel({
   activeDimensions,
+  assertions = [],
   overallScore,
   baselineScore,
   dimensionScores,
@@ -968,22 +1052,30 @@ function EvaluationPanel({
                 {assertionsExpanded && (
                   <div className="mt-2 ml-1 space-y-1 border-l-2 border-muted pl-3">
                     <ul className="space-y-1">
-                      {deterministicResults.map((item, i) => (
-                        <AssertionVerdictRow
-                          key={i}
-                          verdict={
-                            "type" in item
-                              ? (item as import("@/lib/assertions").AssertionResult)
-                              : {
-                                  index: i,
-                                  type: (item as CriteriaCheckResult).kind === "metric" ? "metric" : "jsonpath",
-                                  ok: Boolean((item as CriteriaCheckResult).passed),
-                                  message: (item as CriteriaCheckResult).label,
-                                  actual: (item as CriteriaCheckResult).actual,
-                                }
-                          }
-                        />
-                      ))}
+                      {deterministicResults.map((item, i) => {
+                        const resIndex =
+                          "index" in item && typeof item.index === "number"
+                            ? item.index
+                            : i;
+                        const matchingSpec = assertions?.[resIndex];
+                        return (
+                          <AssertionVerdictRow
+                            key={i}
+                            verdict={
+                              "type" in item
+                                ? (item as import("@/lib/assertions").AssertionResult)
+                                : {
+                                    index: i,
+                                    type: (item as CriteriaCheckResult).kind === "metric" ? "metric" : "jsonpath",
+                                    ok: Boolean((item as CriteriaCheckResult).passed),
+                                    message: (item as CriteriaCheckResult).label,
+                                    actual: (item as CriteriaCheckResult).actual,
+                                  }
+                            }
+                            spec={matchingSpec}
+                          />
+                        );
+                      })}
                     </ul>
                   </div>
                 )}

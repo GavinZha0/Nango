@@ -18,9 +18,8 @@ export interface EvalCaseLive {
   status: "passed" | "failed" | "errored";
   score: number | null;
   dimensionScores?: Record<string, number>;
-  criteriaScore?: number | null;
+  assertionScore?: number | null;
   assertionResults?: unknown[];
-  criteriaResults?: unknown[];
   feedback?: string | null;
   durationMs?: number | null;
   outputTokens?: number | null;
@@ -107,9 +106,8 @@ export function useEvaluationRunStream(
             status: frame.status as EvalCaseLive["status"],
             score: (frame.score as number) ?? null,
             dimensionScores: frame.dimensionScores as Record<string, number>,
-            criteriaScore: (frame.criteriaScore as number) ?? null,
-            assertionResults: frame.assertionResults as unknown[],
-            criteriaResults: frame.criteriaResults as unknown[],
+            assertionScore: ((frame.assertionScore ?? frame.criteriaScore) as number) ?? null,
+            assertionResults: (frame.assertionResults ?? []) as unknown[],
             feedback: (frame.feedback as string) ?? null,
             durationMs: (frame.durationMs as number) ?? null,
             outputTokens: (frame.outputTokens as number) ?? null,
