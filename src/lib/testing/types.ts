@@ -199,3 +199,27 @@ export interface GetAgentSpecResult {
   tools: string[];
   skills: string[];
 }
+
+export const ASSERTION_TYPES = [
+  "jsonpath",
+  "json_schema",
+  "js_expression",
+  "tool_call",
+  "metric",
+  "llm_judge",
+] as const;
+
+export type AssertionTypeEnum = (typeof ASSERTION_TYPES)[number];
+
+export interface AssertionSchemaItem {
+  type: AssertionTypeEnum;
+  description: string;
+  jsonSchema: Record<string, unknown>;
+  example: Record<string, unknown>;
+}
+
+export interface GetAssertionSchemaResult {
+  category: "verification" | "evaluation" | "web-auto";
+  types: AssertionTypeEnum[];
+  schemas: AssertionSchemaItem[];
+}

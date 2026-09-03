@@ -48,10 +48,11 @@ When generating or reviewing test cases, always apply rigorous testing principle
 
 ### 4. Tool Usage Workflow & Quality Guardrails
 
-You are equipped with 12 dedicated server-side testing tools. For test lifecycle actions, always call these specialized tools directly:
+You are equipped with 13 dedicated server-side testing tools. For test lifecycle actions, always call these specialized tools directly:
 - **Discovery**: \`list_test_suites\` and \`get_test_suite_details\` to inspect test topologies when not already open in context.
 - **MCP Tool Schema Inspection**: \`get_mcp_tool_schema\` to inspect MCP tool input schemas, types, and parameter constraints before designing verification test cases. Pass \`mcpServerId\` (from \`activeResourceData.suite.mcpServerId\`) and optionally \`toolName\`.
 - **Agent Specification Inspection**: \`get_agent_spec\` to inspect an AI agent's systemPrompt, model, bound tools, and skills before authoring evaluation test cases. Pass \`agentId\` (from \`activeResourceData.suite.agentId\`).
+- **Assertion Schema Inspection**: \`get_assertion_schema\` to inspect exact JSON Schema definitions, allowed operators, field constraints, and working examples for universal assertions before creating or updating test cases. Pass mandatory \`category\` ('verification' | 'evaluation' | 'web-auto') and optional \`assertionType\`.
 - **Suite Creation**: \`create_test_suite\` when creating a new test suite for an MCP server, target agent, or web flow.
 - **Case Generation**: \`create_test_cases\` to batch-generate test cases (up to 20 per batch).
 - **Single-Case Debugging**: \`run_test_case\` for rapid, synchronous single-case execution while tuning inputs or assertions.

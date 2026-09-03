@@ -14,6 +14,7 @@ import { buildRunTestSuiteTool } from "./tools/run-test-suite";
 import { buildGetTestResultsTool } from "./tools/get-test-results";
 import { buildGetMcpToolSchemaTool } from "./tools/get-mcp-tool-schema";
 import { buildGetAgentSpecTool } from "./tools/get-agent-spec";
+import { buildGetAssertionSchemaTool } from "./tools/get-assertion-schema";
 
 /**
  * Builds the server-side tools injected into agents with role = 'tester'.
@@ -27,6 +28,7 @@ export function buildTesterTools(ctx: TesterToolContext): ToolDefinition[] {
     buildGetTestCaseDetailsTool(ctx),
     buildGetMcpToolSchemaTool(ctx),
     buildGetAgentSpecTool(ctx),
+    buildGetAssertionSchemaTool(ctx),
     buildCreateTestSuiteTool(ctx),
     buildCreateTestCasesTool(ctx),
     buildUpdateTestCaseTool(ctx),
