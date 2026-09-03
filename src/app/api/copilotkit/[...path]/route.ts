@@ -23,7 +23,8 @@ class BackendStubAgent extends BaseAbstractAgent {
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { runWithAgents } from "@/lib/backends/runtime.server";
 import { CREDENTIAL_ID_HEADER, CREDENTIAL_ID_PATTERN } from "@/lib/http/chat-headers";
-import { ApiError, withSession } from "@/lib/http/route-handlers";
+import { ApiError, withSession, type Session } from "@/lib/http/route-handlers";
+import { isAdmin, isEditor } from "@/lib/auth/permissions";
 import { runner } from "@/lib/runner";
 import type { EntityKind } from "@/lib/backends/types";
 
@@ -112,13 +113,16 @@ async function handleInfoRequest(
   });
 }
 
-async function handler(req: NextRequest, userId: string, log: Logger): Promise<Response> {
+async function handler(req: NextRequest, session: Session, log: Logger): Promise<Response> {
+  const userId = session.user.id;
   const pathname = new URL(req.url).pathname;
 
   // If a /builtin request was matched by this catch-all, delegate to the builtin runner.
   if (pathname.startsWith("/api/copilotkit/builtin")) {
     return runner.runBuiltinChatRequest(req, {
       userId,
+      isAdmin: isAdmin(session),
+      isEditor: isEditor(session),
       requestId: crypto.randomUUID(),
       log,
     });
@@ -203,9 +207,9 @@ async function handler(req: NextRequest, userId: string, log: Logger): Promise<R
 }
 
 export const GET = withSession<RouteParams>(ROUTE, async ({ req, session, log }) => {
-  return handler(req, session.user.id, log);
+  return handler(req, session, log);
 });
 
 export const POST = withSession<RouteParams>(ROUTE, async ({ req, session, log }) => {
-  return handler(req, session.user.id, log);
+  return handler(req, session, log);
 });

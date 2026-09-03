@@ -13,6 +13,7 @@ import {
   WebAutoCaseTable,
 } from "@/lib/db/schema";
 import { canEditResource } from "@/lib/auth/permissions";
+import { isUniqueViolation } from "@/lib/http/validation";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
   testCategorySchema,
@@ -20,10 +21,11 @@ import {
   type TesterToolContext,
   type UpdateTestCaseResult,
 } from "../types";
+import { normalizeAndValidateAssertions } from "../assertion-validation";
 
 export const updateTestCaseSchema = z.object({
   category: testCategorySchema.describe(
-    "Required test category: 'verification' (MCP/Workflow), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
+    "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
   ),
   caseId: z
     .number()
@@ -147,13 +149,26 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         if (enabled !== undefined) updates.enabled = enabled;
         if (toolName !== undefined) updates.toolName = toolName;
         if (input !== undefined) updates.input = input;
-        if (assertions !== undefined) updates.assertions = assertions;
+        if (assertions !== undefined) {
+          updates.assertions = normalizeAndValidateAssertions(assertions, existing.caseRow.name);
+        }
 
-        const [updated] = await db
-          .update(VerificationCaseTable)
-          .set(updates)
-          .where(eq(VerificationCaseTable.id, caseId))
-          .returning();
+        let updated: typeof VerificationCaseTable.$inferSelect | undefined;
+        try {
+          const res = await db
+            .update(VerificationCaseTable)
+            .set(updates)
+            .where(eq(VerificationCaseTable.id, caseId))
+            .returning();
+          updated = res[0];
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            throw new Error(
+              `Failed to update verification case #${caseId}: a test case named '${updates.name ?? ""}' already exists in this suite.`,
+            );
+          }
+          throw err;
+        }
 
         if (!updated) {
           throw new Error(`Failed to update verification case #${caseId}.`);
@@ -204,18 +219,31 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         };
         if (name !== undefined) updates.name = name;
         if (enabled !== undefined) updates.enabled = enabled;
-        if (assertions !== undefined) updates.assertions = assertions;
+        if (assertions !== undefined) {
+          updates.assertions = normalizeAndValidateAssertions(assertions, existing.caseRow.name);
+        }
         if (turns !== undefined) {
           updates.input = {
             turns: turns.map((userText) => ({ userMessage: userText })),
           };
         }
 
-        const [updated] = await db
-          .update(EvalCaseTable)
-          .set(updates)
-          .where(eq(EvalCaseTable.id, caseId))
-          .returning();
+        let updated: typeof EvalCaseTable.$inferSelect | undefined;
+        try {
+          const res = await db
+            .update(EvalCaseTable)
+            .set(updates)
+            .where(eq(EvalCaseTable.id, caseId))
+            .returning();
+          updated = res[0];
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            throw new Error(
+              `Failed to update evaluation case #${caseId}: a test case named '${updates.name ?? ""}' already exists in this suite.`,
+            );
+          }
+          throw err;
+        }
 
         if (!updated) {
           throw new Error(`Failed to update evaluation case #${caseId}.`);
@@ -268,7 +296,9 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         };
         if (name !== undefined) updates.name = name;
         if (enabled !== undefined) updates.enabled = enabled;
-        if (assertions !== undefined) updates.assertions = assertions;
+        if (assertions !== undefined) {
+          updates.assertions = normalizeAndValidateAssertions(assertions, existing.caseRow.name);
+        }
         if (script !== undefined || steps !== undefined) {
           const existingInput = (existing.caseRow.input ?? {}) as Record<string, unknown>;
           updates.input = {

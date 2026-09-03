@@ -21,6 +21,10 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/access/agent-visibility", () => ({
+  isAgentVisibleTo: vi.fn().mockResolvedValue(true),
+}));
+
 describe("create_test_suite tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,7 +89,12 @@ describe("create_test_suite tool", () => {
 
       // Server lookup succeeds
       mockLimit.mockResolvedValueOnce([
-        { id: "server-uuid-1", name: "github-mcp" },
+        {
+          id: "server-uuid-1",
+          name: "github-mcp",
+          visibility: "private",
+          createdBy: "user-123",
+        },
       ]);
 
       mockReturning.mockResolvedValueOnce([
@@ -113,6 +122,25 @@ describe("create_test_suite tool", () => {
       expect(result.suite.serverName).toBe("github-mcp");
       expect(result.suite.caseCount).toBe(0);
       expect(result.suite.enabled).toBe(true);
+    });
+
+    it("rejects binding another user's private MCP server", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: "server-other",
+          name: "secret-mcp",
+          visibility: "private",
+          createdBy: "other-user",
+        },
+      ]);
+
+      await expect(
+        tool.execute!({
+          category: "verification",
+          name: "Hacked Suite",
+          serverId: "server-other",
+        }),
+      ).rejects.toThrow(/not found or access denied/);
     });
 
     it("creates evaluation suite requiring agentId", async () => {
@@ -148,6 +176,19 @@ describe("create_test_suite tool", () => {
       expect(result.suite.agentId).toBe("support-agent");
       expect(result.suite.caseCount).toBe(0);
       expect(result.suite.enabled).toBe(true);
+    });
+
+    it("rejects binding an agent that is not visible to the user", async () => {
+      const { isAgentVisibleTo } = await import("@/lib/access/agent-visibility");
+      vi.mocked(isAgentVisibleTo).mockResolvedValueOnce(false);
+
+      await expect(
+        tool.execute!({
+          category: "evaluation",
+          name: "Secret Agent Suite",
+          agentId: "private-agent-other",
+        }),
+      ).rejects.toThrow(/not found or access denied/);
     });
 
     it("creates web-auto suite auto-discovering playwright server", async () => {

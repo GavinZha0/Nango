@@ -13,6 +13,7 @@ import {
   WebAutoCaseTable,
 } from "@/lib/db/schema";
 import { canEditResource } from "@/lib/auth/permissions";
+import { isUniqueViolation } from "@/lib/http/validation";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
   testCategorySchema,
@@ -20,6 +21,7 @@ import {
   type CreateTestCasesResult,
   type TesterToolContext,
 } from "../types";
+import { normalizeAndValidateAssertions } from "../assertion-validation";
 
 export const createCaseItemSchema = z.object({
   name: z
@@ -67,7 +69,7 @@ export const createCaseItemSchema = z.object({
 
 export const createTestCasesSchema = z.object({
   category: testCategorySchema.describe(
-    "Required test category: 'verification' (MCP/Workflow), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
+    "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
   ),
   suiteId: z
     .string()
@@ -79,6 +81,28 @@ export const createTestCasesSchema = z.object({
     .max(20)
     .describe("Array of test cases to create in batch (1 to 20 items)."),
 });
+
+function findConflictingCaseNames(cases: Array<{ name: string }>, existingNames: string[]): string[] {
+  const existingSet = new Set(existingNames);
+  const conflicts: string[] = [];
+
+  for (const c of cases) {
+    if (existingSet.has(c.name)) {
+      conflicts.push(`'${c.name}'`);
+    }
+  }
+
+  const seen = new Set<string>();
+  for (const c of cases) {
+    if (seen.has(c.name)) {
+      conflicts.push(`'${c.name}' (duplicate in batch)`);
+    } else {
+      seen.add(c.name);
+    }
+  }
+
+  return Array.from(new Set(conflicts));
+}
 
 export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition {
   return defineTool({
@@ -115,27 +139,43 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
           throw new Error(`Permission denied: You cannot create cases in this suite.`);
         }
 
-        const inserted = await db.transaction(async (tx) => {
-          return tx
-            .insert(VerificationCaseTable)
-            .values(
-              cases.map((c) => ({
-                suiteId,
-                name: c.name,
-                toolName: c.toolName ?? null,
-                input: c.input ?? {},
-                assertions: c.assertions ?? [],
-                enabled: false, // Contract: always false
-                createdBy: ctx.userId,
-              })),
-            )
-            .returning({
-              id: VerificationCaseTable.id,
-              name: VerificationCaseTable.name,
-              toolName: VerificationCaseTable.toolName,
-              assertions: VerificationCaseTable.assertions,
-            });
-        });
+        let inserted: Array<{ id: number; name: string; toolName: string | null; assertions: unknown }>;
+        try {
+          inserted = await db.transaction(async (tx) => {
+            return tx
+              .insert(VerificationCaseTable)
+              .values(
+                cases.map((c) => ({
+                  suiteId,
+                  name: c.name,
+                  toolName: c.toolName ?? null,
+                  input: c.input ?? {},
+                  assertions: normalizeAndValidateAssertions(c.assertions ?? [], c.name),
+                  enabled: false, // Contract: always false
+                  createdBy: ctx.userId,
+                })),
+              )
+              .returning({
+                id: VerificationCaseTable.id,
+                name: VerificationCaseTable.name,
+                toolName: VerificationCaseTable.toolName,
+                assertions: VerificationCaseTable.assertions,
+              });
+          });
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            const existing = await db
+              .select({ name: VerificationCaseTable.name })
+              .from(VerificationCaseTable)
+              .where(eq(VerificationCaseTable.suiteId, suiteId));
+            const conflicts = findConflictingCaseNames(cases, existing.map((r) => r.name));
+            const conflictMsg = conflicts.length > 0 ? conflicts.join(", ") : "one or more cases";
+            throw new Error(
+              `Failed to create test cases: duplicate case name(s) [${conflictMsg}] already exist in suite '${suiteId}'. Please modify the conflicting case names to be unique.`,
+            );
+          }
+          throw err;
+        }
 
         const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
           id: row.id,
@@ -177,30 +217,46 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
           throw new Error(`Permission denied: You cannot create cases in this suite.`);
         }
 
-        const inserted = await db.transaction(async (tx) => {
-          return tx
-            .insert(EvalCaseTable)
-            .values(
-              cases.map((c) => {
-                const formattedTurns = (c.turns ?? []).map((userText) => ({
-                  userMessage: userText,
-                }));
-                return {
-                  suiteId,
-                  name: c.name,
-                  input: { turns: formattedTurns },
-                  assertions: c.assertions ?? [],
-                  enabled: false, // Contract: always false
-                  createdBy: ctx.userId,
-                };
-              }),
-            )
-            .returning({
-              id: EvalCaseTable.id,
-              name: EvalCaseTable.name,
-              assertions: EvalCaseTable.assertions,
-            });
-        });
+        let inserted: Array<{ id: number; name: string; assertions: unknown }>;
+        try {
+          inserted = await db.transaction(async (tx) => {
+            return tx
+              .insert(EvalCaseTable)
+              .values(
+                cases.map((c) => {
+                  const formattedTurns = (c.turns ?? []).map((userText) => ({
+                    userMessage: userText,
+                  }));
+                  return {
+                    suiteId,
+                    name: c.name,
+                    input: { turns: formattedTurns },
+                    assertions: normalizeAndValidateAssertions(c.assertions ?? [], c.name),
+                    enabled: false, // Contract: always false
+                    createdBy: ctx.userId,
+                  };
+                }),
+              )
+              .returning({
+                id: EvalCaseTable.id,
+                name: EvalCaseTable.name,
+                assertions: EvalCaseTable.assertions,
+              });
+          });
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            const existing = await db
+              .select({ name: EvalCaseTable.name })
+              .from(EvalCaseTable)
+              .where(eq(EvalCaseTable.suiteId, suiteId));
+            const conflicts = findConflictingCaseNames(cases, existing.map((r) => r.name));
+            const conflictMsg = conflicts.length > 0 ? conflicts.join(", ") : "one or more cases";
+            throw new Error(
+              `Failed to create test cases: duplicate case name(s) [${conflictMsg}] already exist in suite '${suiteId}'. Please modify the conflicting case names to be unique.`,
+            );
+          }
+          throw err;
+        }
 
         const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
           id: row.id,
@@ -252,7 +308,7 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
                   script: c.script ?? "",
                   steps: c.steps ?? [],
                 },
-                assertions: c.assertions ?? [],
+                assertions: normalizeAndValidateAssertions(c.assertions ?? [], c.name),
                 enabled: false, // Contract: always false
                 createdBy: ctx.userId,
               })),

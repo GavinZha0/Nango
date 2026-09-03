@@ -9,7 +9,7 @@ Status: Active Specification · Target Subsystems: Verification, Evaluation, Web
 Nango supports a dual-tier testing automation paradigm:
 1. **Form Copilot Ambient Context**: Lightweight WYSIWYG perception for all agents when `sharedStateEnabled: true` is active.
 2. **Dedicated Tester Agent (`role: 'tester'`)**: An autonomous Senior Software Development Engineer in Test (SDET) and QA Architect equipped with full-lifecycle server-side tools to discover, generate, execute, diagnose, and remediate test assets across three core subsystems:
-   - **Verification Subsystem (`docs/verification.md`)**: Deterministic testing of MCP Server tools and orchestrated backend workflows.
+   - **Verification Subsystem (`docs/verification.md`)**: Deterministic testing dedicated exclusively to MCP Server tools.
    - **Evaluation Subsystem (`docs/evaluation.md`)**: Stochastic LLM-as-Judge conversational agent evaluation across multi-turn dialogues.
    - **Web Auto Subsystem (`docs/web-auto.md`)**: Playwright-based browser end-to-end automation with dual-tier assertions (JS VM sandbox & LLM evaluation).
 

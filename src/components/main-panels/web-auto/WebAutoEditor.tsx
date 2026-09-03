@@ -29,7 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
+import { cn, isDeepEqual } from "@/lib/utils";
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 import type { AssertionSpec } from "@/lib/assertions";
@@ -253,7 +253,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const isDirty = selectedCase && (
     draftScript !== ((currentCaseInput.script as string) || "") ||
     draftSteps !== ((currentCaseInput.steps as string) || "") ||
-    JSON.stringify(draftAssertions) !== JSON.stringify(Array.isArray(selectedCase.assertions) ? selectedCase.assertions : [])
+    !isDeepEqual(draftAssertions, Array.isArray(selectedCase.assertions) ? selectedCase.assertions : [])
   );
   const canSave = Boolean(isDirty) && !jsonError && !saving;
 

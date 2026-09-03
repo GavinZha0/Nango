@@ -26,7 +26,7 @@ import type { AssertionSpec } from "@/lib/assertions";
 
 export const runTestCaseSchema = z.object({
   category: testCategorySchema.describe(
-    "Required test category: 'verification' (MCP/Workflow), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
+    "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
   ),
   caseId: z
     .number()

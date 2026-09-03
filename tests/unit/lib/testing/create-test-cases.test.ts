@@ -262,5 +262,36 @@ describe("create_test_cases tool", () => {
         ]),
       );
     });
+
+    it("handles unique violation by returning the conflicting case name", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: testSuiteId,
+          mcpServerId: "server-1",
+          visibility: "private",
+          createdBy: "user-123",
+        },
+      ]);
+
+      const uniqueError = new Error("duplicate key value violates unique constraint");
+      (uniqueError as unknown as { code: string }).code = "23505";
+      mockReturning.mockRejectedValueOnce(uniqueError);
+
+      mockWhere
+        .mockReturnValueOnce({ limit: mockLimit })
+        .mockResolvedValueOnce([
+          { name: "Existing Case 1" },
+        ]);
+
+      await expect(
+        tool.execute!({
+          category: "verification",
+          suiteId: testSuiteId,
+          cases: [
+            { name: "Existing Case 1", toolName: "tool1" },
+          ],
+        }),
+      ).rejects.toThrow(/duplicate case name\(s\) \['Existing Case 1'\] already exist/);
+    });
   });
 });

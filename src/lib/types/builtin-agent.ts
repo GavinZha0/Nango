@@ -58,11 +58,12 @@ export interface BoundToolRow {
 
 /**
  * Resolve effective `sharedStateEnabled` flag for an agent.
- * Defaults to true for supervisor role, false for other agents.
+ * Defaults to true for supervisor and tester roles, false for other agents.
  */
 export function resolveSharedStateEnabled(
   agent?: { sharedStateEnabled?: boolean | null; role?: AgentRole | string | null } | null,
 ): boolean {
   if (!agent) return false;
-  return agent.sharedStateEnabled ?? (agent.role === "supervisor");
+  return agent.sharedStateEnabled ?? (agent.role === "supervisor" || agent.role === "tester");
 }
+

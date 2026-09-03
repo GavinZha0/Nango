@@ -810,6 +810,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                           ...prev,
                           role: newRole,
                           ...restored,
+                          ...(newRole === "tester" ? { sharedStateEnabled: true } : {}),
                           ...(newRole === "evaluator" && nextPrompt.trim() === "" ? { prompt: DEFAULT_EVALUATOR_SYSTEM_PROMPT } : {}),
                           ...(newRole === "evaluator" && nextName.trim() === "" ? { name: "Evaluator" } : {}),
                           ...(newRole === "tester" && nextPrompt.trim() === "" ? { prompt: DEFAULT_TESTER_SYSTEM_PROMPT } : {}),

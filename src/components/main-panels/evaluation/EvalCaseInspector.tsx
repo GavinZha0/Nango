@@ -27,7 +27,7 @@ import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { cn, isDeepEqual } from "@/lib/utils";
 import {
   BUILTIN_DIMENSIONS,
   type EvalTurn,
@@ -311,34 +311,7 @@ export interface EvalCaseInspectorProps {
 let nextTurnKey = 0;
 function mintKey(): number { return nextTurnKey++; }
 
-/**
- * Deep semantic equality comparison that ignores object key order
- * and filters out undefined values, avoiding false-dirty flags caused
- * by PostgreSQL jsonb re-ordering.
- */
-function isDeepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (a === null || b === null || typeof a !== "object") return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!isDeepEqual(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const ak = Object.keys(ao).filter((k) => ao[k] !== undefined);
-  const bk = Object.keys(bo).filter((k) => bo[k] !== undefined);
-  if (ak.length !== bk.length) return false;
-  for (const k of ak) {
-    if (!Object.prototype.hasOwnProperty.call(bo, k)) return false;
-    if (!isDeepEqual(ao[k], bo[k])) return false;
-  }
-  return true;
-}
+
 
 export function EvalCaseInspector({
   evalCase,

@@ -20,7 +20,7 @@ import {
 
 export const listTestSuitesSchema = z.object({
   category: testCategorySchema.describe(
-    "Required test category: 'verification' (MCP/Workflow), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
+    "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
   ),
   suiteId: z
     .string()

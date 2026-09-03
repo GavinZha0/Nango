@@ -17,11 +17,13 @@ import {
   type SuiteSummaryItem,
   type TesterToolContext,
 } from "../types";
+import { canViewResource } from "@/lib/auth/permissions";
+import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
 import { isUniqueViolation } from "@/lib/http/validation";
 
 export const createTestSuiteSchema = z.object({
   category: testCategorySchema.describe(
-    "Required test category: 'verification' (MCP/Workflow), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
+    "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
   ),
   name: z
     .string()
@@ -87,13 +89,24 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
         }
 
         const [serverRow] = await db
-          .select({ id: McpServerTable.id, name: McpServerTable.name })
+          .select({
+            id: McpServerTable.id,
+            name: McpServerTable.name,
+            visibility: McpServerTable.visibility,
+            createdBy: McpServerTable.createdBy,
+          })
           .from(McpServerTable)
           .where(eq(McpServerTable.id, serverId))
           .limit(1);
 
-        if (!serverRow) {
-          throw new Error(`MCP Server '${serverId}' not found.`);
+        const serverRBAC = {
+          source: "local" as const,
+          visibility: serverRow?.visibility as "private" | "public",
+          createdBy: serverRow?.createdBy ?? null,
+        };
+
+        if (!serverRow || !canViewResource(serverRBAC, ctx)) {
+          throw new Error(`MCP Server '${serverId}' not found or access denied.`);
         }
 
         try {
@@ -139,6 +152,21 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
       if (category === "evaluation") {
         if (!agentId) {
           throw new Error("'agentId' (target Agent ID) is required when creating an evaluation suite.");
+        }
+
+        const effectiveSource = agentSource ?? "builtin";
+        if (effectiveSource === "builtin") {
+          const visible = await isAgentVisibleTo(agentId, ctx.userId);
+          if (!visible) {
+            throw new Error(`Target agent '${agentId}' not found or access denied.`);
+          }
+        }
+
+        if (evaluatorAgentId) {
+          const evalVisible = await isAgentVisibleTo(evaluatorAgentId, ctx.userId);
+          if (!evalVisible) {
+            throw new Error(`Evaluator agent '${evaluatorAgentId}' not found or access denied.`);
+          }
         }
 
         try {
