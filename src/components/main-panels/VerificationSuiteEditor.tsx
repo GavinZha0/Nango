@@ -278,7 +278,7 @@ export function VerificationSuiteEditor({
       suite: {
         id: effectiveSuiteId ?? "",
         name: suiteDisplayName,
-        serverId: suiteData?.mcpServerId ?? null,
+        mcpServerId: suiteData?.mcpServerId ?? null,
         serverName: serverDisplayName ?? null,
         caseCount: cases.length,
       },

@@ -169,3 +169,33 @@ export interface GetTestResultsResult {
   suiteName: string;
   runs: TestRunResultItem[];
 }
+
+export interface McpToolSpecItem {
+  name: string;
+  description: string | null;
+  inputSchema: Record<string, unknown>;
+  enabled: boolean;
+}
+
+export interface GetMcpToolSchemaResult {
+  mcpServerId: string;
+  serverName: string;
+  serverTitle: string | null;
+  serverDescription: string | null;
+  instructions: string | null;
+  tool?: McpToolSpecItem;
+  toolCount?: number;
+  tools?: McpToolSpecItem[];
+}
+
+export interface GetAgentSpecResult {
+  agentId: string;
+  name: string;
+  description: string | null;
+  role: string | null;
+  model: string;
+  modelProvider: string;
+  systemPrompt: string | null;
+  tools: string[];
+  skills: string[];
+}

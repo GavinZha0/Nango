@@ -45,6 +45,7 @@ import { useInteractiveTools } from "@/hooks/useInteractiveTools";
 import { useCopilotSharedStateSync } from "@/hooks/useCopilotSharedState";
 import { useRole } from "@/hooks/useRole";
 import { SaveToEvalDialog } from "@/components/chat/SaveToEvalDialog";
+import { useTestMutationSubscriber } from "@/hooks/useTestMutationSubscriber";
 
 // Chat-error classification
 
@@ -386,6 +387,7 @@ function ChatProviderHooks(): ReactNode {
   }, [activeAgentId, builtinAgents, agents, teams]);
 
   const { agent } = useAgent({ agentId: isAgentKnown ? activeAgentId : undefined });
+  useTestMutationSubscriber(agent);
 
   // threadId eager-capture
   useEffect(() => {
