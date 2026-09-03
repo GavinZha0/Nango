@@ -344,6 +344,14 @@ export async function buildBuiltinAgents(
         }),
       );
     }
+
+    const isTester: boolean = spec.role === "tester";
+    const testerTools: ToolDefinition[] = [];
+    if (isTester && ctx?.userId) {
+      const { buildTesterTools } = await import("@/lib/testing/tester-tools.server");
+      testerTools.push(...buildTesterTools({ userId: ctx.userId }));
+    }
+
     // User-selected built-in tools. Unknown names are dropped — a
     // junction row pointing at a retired tool name must not crash.
     // Binding-implied tools are built directly above, not here.
@@ -376,6 +384,8 @@ export async function buildBuiltinAgents(
       providers.length > 0
       || skillsRuntime.tools.length > 0
       || supervisorTools.length > 0
+      || evaluatorTools.length > 0
+      || testerTools.length > 0
       || builtinTools.length > 0
       || dataSourceTools.length > 0
       || sshTools.length > 0
@@ -478,6 +488,13 @@ export async function buildBuiltinAgents(
       "delete_schedule",
       // Evaluator system tool
       "submit_evaluation_scores",
+      // Tester execution, discovery & forensic tools
+      "list_test_suites",
+      "get_test_suite_details",
+      "get_test_case_details",
+      "get_test_results",
+      "run_test_case",
+      "run_test_suite",
       // Ambient read-only
       "get_current_datetime",
       "list_ssh_hosts",
@@ -517,6 +534,7 @@ export async function buildBuiltinAgents(
       ...skillsRuntime.tools,
       ...supervisorTools,
       ...evaluatorTools,
+      ...testerTools,
       ...builtinTools,
       ...dataSourceTools,
       ...sshTools,

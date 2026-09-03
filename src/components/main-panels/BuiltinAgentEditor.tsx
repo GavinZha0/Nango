@@ -41,6 +41,7 @@ import {
 } from "@/lib/constants/supervisor";
 import type { AgentRole } from "@/lib/db/schema";
 import { DEFAULT_EVALUATOR_SYSTEM_PROMPT } from "@/lib/evaluation/types";
+import { DEFAULT_TESTER_SYSTEM_PROMPT } from "@/lib/testing/prompt";
 export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 import { resolveSharedStateEnabled, type BuiltinAgentRow, type BoundToolRow } from "@/lib/types/builtin-agent";
 
@@ -803,6 +804,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                         const restored = prev.role === "supervisor" && snap ? snap : {};
                         const nextName = (prev.role === "supervisor" ? snap?.name : undefined) ?? prev.name;
                         const nextPrompt = (prev.role === "supervisor" ? snap?.prompt : undefined) ?? prev.prompt;
+                        const nextDescription = (prev.role === "supervisor" ? snap?.description : undefined) ?? prev.description;
                         
                         return {
                           ...prev,
@@ -810,7 +812,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                           ...restored,
                           ...(newRole === "evaluator" && nextPrompt.trim() === "" ? { prompt: DEFAULT_EVALUATOR_SYSTEM_PROMPT } : {}),
                           ...(newRole === "evaluator" && nextName.trim() === "" ? { name: "Evaluator" } : {}),
+                          ...(newRole === "tester" && nextPrompt.trim() === "" ? { prompt: DEFAULT_TESTER_SYSTEM_PROMPT } : {}),
                           ...(newRole === "tester" && nextName.trim() === "" ? { name: "Tester" } : {}),
+                          ...(newRole === "tester" && (!nextDescription || nextDescription.trim() === "") ? { description: "Autonomous Software Test Engineer (SDET) responsible for full test lifecycle management." } : {}),
                         };
                       });
                       if (form.role === "supervisor") {

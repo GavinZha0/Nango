@@ -1,0 +1,281 @@
+import "server-only";
+
+import { z } from "zod";
+import { and, eq, or } from "drizzle-orm";
+
+import { db } from "@/lib/db";
+import {
+  VerificationSuiteTable,
+  VerificationCaseTable,
+  EvalSuiteTable,
+  EvalCaseTable,
+  WebAutoSuiteTable,
+  WebAutoCaseTable,
+} from "@/lib/db/schema";
+import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
+import {
+  testCategorySchema,
+  type CreatedCaseItem,
+  type CreateTestCasesResult,
+  type TesterToolContext,
+} from "../types";
+
+export const createCaseItemSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .describe("Descriptive name of the test case."),
+
+  // Verification specific
+  toolName: z
+    .string()
+    .trim()
+    .optional()
+    .describe("Target tool name from the suite's MCP server (required for verification)."),
+  input: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("Tool argument input payload (e.g. { query: 'Azure' })."),
+
+  // Evaluation specific: simple plain text prompt strings for multi-turn user prompts
+  turns: z
+    .array(z.string().min(1))
+    .optional()
+    .describe("List of user prompt texts representing multi-turn conversational inputs (required for evaluation)."),
+
+  // Web Auto specific
+  script: z
+    .string()
+    .optional()
+    .describe("Playwright automation script (Node.js/JS)."),
+  steps: z
+    .array(z.record(z.string(), z.unknown()))
+    .optional()
+    .describe("Visual recorder actions list."),
+
+  // Universal assertions list
+  assertions: z
+    .array(z.record(z.string(), z.unknown()))
+    .default([])
+    .describe(
+      "Assertion specifications list. Supported types: 'js_expression', 'jsonpath', 'json_schema', 'metric', 'tool_call', 'llm_judge'.",
+    ),
+});
+
+export const createTestCasesSchema = z.object({
+  category: testCategorySchema.describe(
+    "Required test category: 'verification' (MCP/Workflow), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
+  ),
+  suiteId: z
+    .string()
+    .uuid()
+    .describe("The target suite ID where test cases will be created."),
+  cases: z
+    .array(createCaseItemSchema)
+    .min(1)
+    .max(20)
+    .describe("Array of test cases to create in batch (1 to 20 items)."),
+});
+
+export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition {
+  return defineTool({
+    name: "create_test_cases",
+    description: [
+      "Create one or multiple test cases in batch under a target test suite.",
+      "Newly created test cases are always initialized with enabled: false for safety (must be reviewed before activation).",
+      "Supports 'verification' (toolName + input), 'evaluation' (turns of user prompts), and 'web-auto' (script + steps).",
+    ].join(" "),
+    parameters: createTestCasesSchema,
+    execute: async ({ category, suiteId, cases }): Promise<CreateTestCasesResult> => {
+      if (category === "verification") {
+        const [suiteRow] = await db
+          .select({
+            id: VerificationSuiteTable.id,
+            mcpServerId: VerificationSuiteTable.mcpServerId,
+            visibility: VerificationSuiteTable.visibility,
+            createdBy: VerificationSuiteTable.createdBy,
+          })
+          .from(VerificationSuiteTable)
+          .where(
+            and(
+              eq(VerificationSuiteTable.id, suiteId),
+              ctx.isAdmin
+                ? undefined
+                : or(
+                    eq(VerificationSuiteTable.visibility, "public"),
+                    eq(VerificationSuiteTable.createdBy, ctx.userId),
+                  ),
+            ),
+          )
+          .limit(1);
+
+        if (!suiteRow) {
+          throw new Error(`Verification suite '${suiteId}' not found or access denied.`);
+        }
+
+        const inserted = await db
+          .insert(VerificationCaseTable)
+          .values(
+            cases.map((c) => ({
+              suiteId,
+              name: c.name,
+              toolName: c.toolName ?? null,
+              input: c.input ?? {},
+              assertions: c.assertions ?? [],
+              enabled: false, // Contract: always false
+              createdBy: ctx.userId,
+            })),
+          )
+          .returning({
+            id: VerificationCaseTable.id,
+            name: VerificationCaseTable.name,
+            toolName: VerificationCaseTable.toolName,
+            assertions: VerificationCaseTable.assertions,
+          });
+
+        const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
+          id: row.id,
+          name: row.name,
+          toolName: row.toolName ?? null,
+          enabled: false,
+          assertionCount: Array.isArray(row.assertions) ? row.assertions.length : 0,
+        }));
+
+        return {
+          category,
+          suiteId,
+          createdCount: createdCases.length,
+          cases: createdCases,
+        };
+      }
+
+      if (category === "evaluation") {
+        const [suiteRow] = await db
+          .select({
+            id: EvalSuiteTable.id,
+            visibility: EvalSuiteTable.visibility,
+            createdBy: EvalSuiteTable.createdBy,
+          })
+          .from(EvalSuiteTable)
+          .where(
+            and(
+              eq(EvalSuiteTable.id, suiteId),
+              ctx.isAdmin
+                ? undefined
+                : or(
+                    eq(EvalSuiteTable.visibility, "public"),
+                    eq(EvalSuiteTable.createdBy, ctx.userId),
+                  ),
+            ),
+          )
+          .limit(1);
+
+        if (!suiteRow) {
+          throw new Error(`Evaluation suite '${suiteId}' not found or access denied.`);
+        }
+
+        const inserted = await db
+          .insert(EvalCaseTable)
+          .values(
+            cases.map((c) => {
+              const formattedTurns = (c.turns ?? []).map((userText) => ({
+                userMessage: userText,
+              }));
+              return {
+                suiteId,
+                name: c.name,
+                input: { turns: formattedTurns },
+                assertions: c.assertions ?? [],
+                enabled: false, // Contract: always false
+                createdBy: ctx.userId,
+              };
+            }),
+          )
+          .returning({
+            id: EvalCaseTable.id,
+            name: EvalCaseTable.name,
+            assertions: EvalCaseTable.assertions,
+          });
+
+        const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
+          id: row.id,
+          name: row.name,
+          enabled: false,
+          assertionCount: Array.isArray(row.assertions) ? row.assertions.length : 0,
+        }));
+
+        return {
+          category,
+          suiteId,
+          createdCount: createdCases.length,
+          cases: createdCases,
+        };
+      }
+
+      if (category === "web-auto") {
+        const [suiteRow] = await db
+          .select({
+            id: WebAutoSuiteTable.id,
+            visibility: WebAutoSuiteTable.visibility,
+            createdBy: WebAutoSuiteTable.createdBy,
+          })
+          .from(WebAutoSuiteTable)
+          .where(
+            and(
+              eq(WebAutoSuiteTable.id, suiteId),
+              ctx.isAdmin
+                ? undefined
+                : or(
+                    eq(WebAutoSuiteTable.visibility, "public"),
+                    eq(WebAutoSuiteTable.createdBy, ctx.userId),
+                  ),
+            ),
+          )
+          .limit(1);
+
+        if (!suiteRow) {
+          throw new Error(`Web Auto suite '${suiteId}' not found or access denied.`);
+        }
+
+        const inserted = await db
+          .insert(WebAutoCaseTable)
+          .values(
+            cases.map((c) => ({
+              suiteId,
+              name: c.name,
+              input: {
+                script: c.script ?? "",
+                steps: c.steps ?? [],
+              },
+              assertions: c.assertions ?? [],
+              enabled: false, // Contract: always false
+              createdBy: ctx.userId,
+            })),
+          )
+          .returning({
+            id: WebAutoCaseTable.id,
+            name: WebAutoCaseTable.name,
+            assertions: WebAutoCaseTable.assertions,
+          });
+
+        const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
+          id: row.id,
+          name: row.name,
+          enabled: false,
+          assertionCount: Array.isArray(row.assertions) ? row.assertions.length : 0,
+        }));
+
+        return {
+          category,
+          suiteId,
+          createdCount: createdCases.length,
+          cases: createdCases,
+        };
+      }
+
+      throw new Error(`Unsupported category: ${category}`);
+    },
+  });
+}
