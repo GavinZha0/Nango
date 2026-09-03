@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { and, eq, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -12,6 +12,7 @@ import {
   WebAutoSuiteTable,
   WebAutoCaseTable,
 } from "@/lib/db/schema";
+import { canEditResource } from "@/lib/auth/permissions";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
   testCategorySchema,
@@ -98,42 +99,43 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
             createdBy: VerificationSuiteTable.createdBy,
           })
           .from(VerificationSuiteTable)
-          .where(
-            and(
-              eq(VerificationSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(VerificationSuiteTable.visibility, "public"),
-                    eq(VerificationSuiteTable.createdBy, ctx.userId),
-                  ),
-            ),
-          )
+          .where(eq(VerificationSuiteTable.id, suiteId))
           .limit(1);
 
         if (!suiteRow) {
-          throw new Error(`Verification suite '${suiteId}' not found or access denied.`);
+          throw new Error(`Verification suite '${suiteId}' not found.`);
         }
 
-        const inserted = await db
-          .insert(VerificationCaseTable)
-          .values(
-            cases.map((c) => ({
-              suiteId,
-              name: c.name,
-              toolName: c.toolName ?? null,
-              input: c.input ?? {},
-              assertions: c.assertions ?? [],
-              enabled: false, // Contract: always false
-              createdBy: ctx.userId,
-            })),
-          )
-          .returning({
-            id: VerificationCaseTable.id,
-            name: VerificationCaseTable.name,
-            toolName: VerificationCaseTable.toolName,
-            assertions: VerificationCaseTable.assertions,
-          });
+        const suiteRBAC = {
+          visibility: suiteRow.visibility as "private" | "public",
+          createdBy: suiteRow.createdBy,
+        };
+
+        if (!canEditResource(suiteRBAC, ctx)) {
+          throw new Error(`Permission denied: You cannot create cases in this suite.`);
+        }
+
+        const inserted = await db.transaction(async (tx) => {
+          return tx
+            .insert(VerificationCaseTable)
+            .values(
+              cases.map((c) => ({
+                suiteId,
+                name: c.name,
+                toolName: c.toolName ?? null,
+                input: c.input ?? {},
+                assertions: c.assertions ?? [],
+                enabled: false, // Contract: always false
+                createdBy: ctx.userId,
+              })),
+            )
+            .returning({
+              id: VerificationCaseTable.id,
+              name: VerificationCaseTable.name,
+              toolName: VerificationCaseTable.toolName,
+              assertions: VerificationCaseTable.assertions,
+            });
+        });
 
         const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
           id: row.id,
@@ -159,45 +161,46 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
             createdBy: EvalSuiteTable.createdBy,
           })
           .from(EvalSuiteTable)
-          .where(
-            and(
-              eq(EvalSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(EvalSuiteTable.visibility, "public"),
-                    eq(EvalSuiteTable.createdBy, ctx.userId),
-                  ),
-            ),
-          )
+          .where(eq(EvalSuiteTable.id, suiteId))
           .limit(1);
 
         if (!suiteRow) {
-          throw new Error(`Evaluation suite '${suiteId}' not found or access denied.`);
+          throw new Error(`Evaluation suite '${suiteId}' not found.`);
         }
 
-        const inserted = await db
-          .insert(EvalCaseTable)
-          .values(
-            cases.map((c) => {
-              const formattedTurns = (c.turns ?? []).map((userText) => ({
-                userMessage: userText,
-              }));
-              return {
-                suiteId,
-                name: c.name,
-                input: { turns: formattedTurns },
-                assertions: c.assertions ?? [],
-                enabled: false, // Contract: always false
-                createdBy: ctx.userId,
-              };
-            }),
-          )
-          .returning({
-            id: EvalCaseTable.id,
-            name: EvalCaseTable.name,
-            assertions: EvalCaseTable.assertions,
-          });
+        const suiteRBAC = {
+          visibility: suiteRow.visibility as "private" | "public",
+          createdBy: suiteRow.createdBy,
+        };
+
+        if (!canEditResource(suiteRBAC, ctx)) {
+          throw new Error(`Permission denied: You cannot create cases in this suite.`);
+        }
+
+        const inserted = await db.transaction(async (tx) => {
+          return tx
+            .insert(EvalCaseTable)
+            .values(
+              cases.map((c) => {
+                const formattedTurns = (c.turns ?? []).map((userText) => ({
+                  userMessage: userText,
+                }));
+                return {
+                  suiteId,
+                  name: c.name,
+                  input: { turns: formattedTurns },
+                  assertions: c.assertions ?? [],
+                  enabled: false, // Contract: always false
+                  createdBy: ctx.userId,
+                };
+              }),
+            )
+            .returning({
+              id: EvalCaseTable.id,
+              name: EvalCaseTable.name,
+              assertions: EvalCaseTable.assertions,
+            });
+        });
 
         const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
           id: row.id,
@@ -222,43 +225,44 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
             createdBy: WebAutoSuiteTable.createdBy,
           })
           .from(WebAutoSuiteTable)
-          .where(
-            and(
-              eq(WebAutoSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(WebAutoSuiteTable.visibility, "public"),
-                    eq(WebAutoSuiteTable.createdBy, ctx.userId),
-                  ),
-            ),
-          )
+          .where(eq(WebAutoSuiteTable.id, suiteId))
           .limit(1);
 
         if (!suiteRow) {
-          throw new Error(`Web Auto suite '${suiteId}' not found or access denied.`);
+          throw new Error(`Web Auto suite '${suiteId}' not found.`);
         }
 
-        const inserted = await db
-          .insert(WebAutoCaseTable)
-          .values(
-            cases.map((c) => ({
-              suiteId,
-              name: c.name,
-              input: {
-                script: c.script ?? "",
-                steps: c.steps ?? [],
-              },
-              assertions: c.assertions ?? [],
-              enabled: false, // Contract: always false
-              createdBy: ctx.userId,
-            })),
-          )
-          .returning({
-            id: WebAutoCaseTable.id,
-            name: WebAutoCaseTable.name,
-            assertions: WebAutoCaseTable.assertions,
-          });
+        const suiteRBAC = {
+          visibility: suiteRow.visibility as "private" | "public",
+          createdBy: suiteRow.createdBy,
+        };
+
+        if (!canEditResource(suiteRBAC, ctx)) {
+          throw new Error(`Permission denied: You cannot create cases in this suite.`);
+        }
+
+        const inserted = await db.transaction(async (tx) => {
+          return tx
+            .insert(WebAutoCaseTable)
+            .values(
+              cases.map((c) => ({
+                suiteId,
+                name: c.name,
+                input: {
+                  script: c.script ?? "",
+                  steps: c.steps ?? [],
+                },
+                assertions: c.assertions ?? [],
+                enabled: false, // Contract: always false
+                createdBy: ctx.userId,
+              })),
+            )
+            .returning({
+              id: WebAutoCaseTable.id,
+              name: WebAutoCaseTable.name,
+              assertions: WebAutoCaseTable.assertions,
+            });
+        });
 
         const createdCases: CreatedCaseItem[] = inserted.map((row) => ({
           id: row.id,

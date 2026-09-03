@@ -21,14 +21,41 @@ export function isValidRole(value: unknown): value is UserRole {
   return typeof value === "string" && (VALID_ROLES as readonly string[]).includes(value);
 }
 
-export function isAdmin(session: Session): boolean {
-  return session.user.role === "admin";
+export interface AuthContext {
+  userId: string;
+  isAdmin?: boolean;
+  isEditor?: boolean;
+}
+
+export type SessionOrAuth = Session | AuthContext;
+
+function resolveAuth(auth: SessionOrAuth): {
+  userId: string;
+  isAdmin: boolean;
+  isEditor: boolean;
+} {
+  if ("user" in auth) {
+    const r = auth.user.role;
+    return {
+      userId: auth.user.id,
+      isAdmin: r === "admin",
+      isEditor: r === "admin" || r === "editor",
+    };
+  }
+  return {
+    userId: auth.userId,
+    isAdmin: Boolean(auth.isAdmin),
+    isEditor: Boolean(auth.isAdmin || auth.isEditor),
+  };
+}
+
+export function isAdmin(session: SessionOrAuth): boolean {
+  return resolveAuth(session).isAdmin;
 }
 
 /** True for both `admin` and `editor`. */
-export function isEditor(session: Session): boolean {
-  const r = session.user.role;
-  return r === "admin" || r === "editor";
+export function isEditor(session: SessionOrAuth): boolean {
+  return resolveAuth(session).isEditor;
 }
 
 // Resource shape (subset of skill / mcp_server / builtin_agent rows)
@@ -44,11 +71,12 @@ export interface ResourceWithRBAC {
 /** Can the session see this row at all? */
 export function canViewResource(
   resource: ResourceWithRBAC,
-  session: Session,
+  session: SessionOrAuth,
 ): boolean {
-  if (isAdmin(session)) return true;
+  const auth = resolveAuth(session);
+  if (auth.isAdmin) return true;
   if (resource.visibility === "public") return true;
-  return resource.createdBy === session.user.id;
+  return resource.createdBy === auth.userId;
 }
 
 /**
@@ -57,13 +85,14 @@ export function canViewResource(
  */
 export function canEditResource(
   resource: ResourceWithRBAC,
-  session: Session,
+  session: SessionOrAuth,
 ): boolean {
+  const auth = resolveAuth(session);
   if (resource.source === "builtin") return false;
-  if (!isEditor(session)) return false;
-  if (isAdmin(session)) return true;
+  if (!auth.isEditor) return false;
+  if (auth.isAdmin) return true;
   if (resource.visibility === "public") return true;
-  return resource.createdBy === session.user.id;
+  return resource.createdBy === auth.userId;
 }
 
 /**
@@ -72,18 +101,19 @@ export function canEditResource(
  */
 export function canDeleteResource(
   resource: ResourceWithRBAC,
-  session: Session,
+  session: SessionOrAuth,
 ): boolean {
+  const auth = resolveAuth(session);
   if (resource.source === "builtin") return false;
-  if (isAdmin(session)) return true;
-  if (!isEditor(session)) return false;
-  return resource.createdBy === session.user.id;
+  if (auth.isAdmin) return true;
+  if (!auth.isEditor) return false;
+  return resource.createdBy === auth.userId;
 }
 
 /** Same gate as delete — change visibility / toggle enabled. */
 export function canChangeVisibility(
   resource: ResourceWithRBAC,
-  session: Session,
+  session: SessionOrAuth,
 ): boolean {
   return canDeleteResource(resource, session);
 }
@@ -104,12 +134,13 @@ export const canToggleEnabled = canChangeVisibility;
  *       .where(visibilitySql(session, SkillTable.visibility, SkillTable.createdBy));
  */
 export function visibilitySql(
-  session: Session,
+  session: SessionOrAuth,
   visibilityCol: AnyPgColumn | PgColumn,
   createdByCol: AnyPgColumn | PgColumn,
 ): SQL {
-  if (isAdmin(session)) {
+  const auth = resolveAuth(session);
+  if (auth.isAdmin) {
     return sql`true`;
   }
-  return sql`(${visibilityCol} = 'public' OR ${createdByCol} = ${session.user.id})`;
+  return sql`(${visibilityCol} = 'public' OR ${createdByCol} = ${auth.userId})`;
 }

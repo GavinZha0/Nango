@@ -52,14 +52,14 @@ describe("delete_test_case tool", () => {
   });
 
   describe("Tool Execution", () => {
-    const ctx = { userId: "user-123", isAdmin: false };
+    const ctx = { userId: "user-123", isAdmin: false, isEditor: true };
     const tool = buildDeleteTestCaseTool(ctx);
 
     it("has tool name delete_test_case", () => {
       expect(tool.name).toBe("delete_test_case");
     });
 
-    it("throws error when case is not found or access denied", async () => {
+    it("throws error when case is not found", async () => {
       mockLimit.mockResolvedValueOnce([]);
 
       await expect(
@@ -67,10 +67,44 @@ describe("delete_test_case tool", () => {
           category: "verification",
           caseId: 999,
         }),
-      ).rejects.toThrow(/not found or access denied/);
+      ).rejects.toThrow(/not found/);
     });
 
-    it("deletes verification case and returns caseName and suiteId", async () => {
+    it("rejects non-author editor from deleting a public suite case", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Public Shared Case" },
+          suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
+        },
+      ]);
+
+      await expect(
+        tool.execute!({
+          category: "verification",
+          caseId: 101,
+        }),
+      ).rejects.toThrow(/Permission denied: Only the suite author or an admin can delete cases/);
+    });
+
+    it("allows admin to delete cases created by other users in public suites", async () => {
+      const adminTool = buildDeleteTestCaseTool({ userId: "admin-user", isAdmin: true, isEditor: true });
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Public Shared Case" },
+          suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
+        },
+      ]);
+
+      const result = (await adminTool.execute!({
+        category: "verification",
+        caseId: 101,
+      })) as DeleteTestCaseResult;
+
+      expect(result.deleted).toBe(true);
+      expect(result.caseId).toBe(101);
+    });
+
+    it("deletes verification case and returns caseName and suiteId when author", async () => {
       mockLimit.mockResolvedValueOnce([
         {
           caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Docs Search Case" },
@@ -92,7 +126,7 @@ describe("delete_test_case tool", () => {
       expect(mockDelete).toHaveBeenCalled();
     });
 
-    it("deletes evaluation case and returns caseName", async () => {
+    it("deletes evaluation case and returns caseName when author", async () => {
       mockLimit.mockResolvedValueOnce([
         {
           caseRow: { id: 201, suiteId: "suite-eval-uuid", name: "Refund Case" },
@@ -111,7 +145,7 @@ describe("delete_test_case tool", () => {
       expect(result.caseName).toBe("Refund Case");
     });
 
-    it("deletes web-auto case and returns caseName", async () => {
+    it("deletes web-auto case and returns caseName when author", async () => {
       mockLimit.mockResolvedValueOnce([
         {
           caseRow: { id: 301, suiteId: "suite-web-uuid", name: "Checkout UI" },

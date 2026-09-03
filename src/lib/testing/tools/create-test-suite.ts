@@ -78,6 +78,9 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
       agentSource,
       evaluatorAgentId,
     }): Promise<CreateTestSuiteResult> => {
+      if (!ctx.isEditor && !ctx.isAdmin) {
+        throw new Error("Permission denied: Editor or admin role required to create test suites.");
+      }
       if (category === "verification") {
         if (!serverId) {
           throw new Error("'serverId' (target MCP server ID) is required when creating a verification suite.");

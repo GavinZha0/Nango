@@ -18,6 +18,10 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: (args: unknown) => mockSelect(args),
     insert: (table: unknown) => mockInsert(table),
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) =>
+      cb({
+        insert: (table: unknown) => mockInsert(table),
+      }),
   },
 }));
 
@@ -82,7 +86,7 @@ describe("create_test_cases tool", () => {
   });
 
   describe("Tool Execution", () => {
-    const ctx = { userId: "user-123", isAdmin: false };
+    const ctx = { userId: "user-123", isAdmin: false, isEditor: true };
     const tool = buildCreateTestCasesTool(ctx);
     const testSuiteId = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 
@@ -90,7 +94,7 @@ describe("create_test_cases tool", () => {
       expect(tool.name).toBe("create_test_cases");
     });
 
-    it("throws error when suite is not found or access denied", async () => {
+    it("throws error when suite is not found", async () => {
       mockLimit.mockResolvedValueOnce([]);
 
       await expect(
@@ -99,7 +103,7 @@ describe("create_test_cases tool", () => {
           suiteId: testSuiteId,
           cases: [{ name: "Case 1", toolName: "test_tool" }],
         }),
-      ).rejects.toThrow(/not found or access denied/);
+      ).rejects.toThrow(/not found/);
     });
 
     it("creates verification cases in batch with enabled=false strictly enforced", async () => {

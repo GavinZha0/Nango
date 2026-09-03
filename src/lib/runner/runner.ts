@@ -433,6 +433,8 @@ class RunnerImpl implements Runner {
       ({ agents, borrowed, degradations, supervisorRunHolders } =
         await buildBuiltinAgents(agentIds, requestLog, {
           userId,
+          isAdmin: args.isAdmin,
+          isEditor: args.isEditor,
           mode,
           runId: runId ?? undefined,
           pageContext: peek?.pageContext,

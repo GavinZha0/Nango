@@ -7,6 +7,7 @@ import type { Logger } from "pino";
 
 import { runner } from "@/lib/runner";
 import { withSession } from "@/lib/http/route-handlers";
+import { isAdmin, isEditor } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,13 @@ type RouteParams = { path: string[] };
 
 async function handler(
   req: NextRequest,
-  args: { userId: string; requestId: string; log: Logger },
+  args: {
+    userId: string;
+    isAdmin?: boolean;
+    isEditor?: boolean;
+    requestId: string;
+    log: Logger;
+  },
 ): Promise<Response> {
   return runner.runBuiltinChatRequest(req, args);
 }
@@ -23,6 +30,8 @@ async function handler(
 export const GET = withSession<RouteParams>(ROUTE, async ({ req, session, requestId, log }) => {
   return handler(req, {
     userId: session.user.id,
+    isAdmin: isAdmin(session),
+    isEditor: isEditor(session),
     requestId,
     log,
   });
@@ -31,6 +40,8 @@ export const GET = withSession<RouteParams>(ROUTE, async ({ req, session, reques
 export const POST = withSession<RouteParams>(ROUTE, async ({ req, session, requestId, log }) => {
   return handler(req, {
     userId: session.user.id,
+    isAdmin: isAdmin(session),
+    isEditor: isEditor(session),
     requestId,
     log,
   });

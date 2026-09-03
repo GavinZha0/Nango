@@ -57,14 +57,14 @@ describe("update_test_case tool", () => {
   });
 
   describe("Tool Execution", () => {
-    const ctx = { userId: "user-123", isAdmin: false };
+    const ctx = { userId: "user-123", isAdmin: false, isEditor: true };
     const tool = buildUpdateTestCaseTool(ctx);
 
     it("has tool name update_test_case", () => {
       expect(tool.name).toBe("update_test_case");
     });
 
-    it("throws error when no fields to update are passed", async () => {
+    it("requires at least one field to update", async () => {
       await expect(
         tool.execute!({
           category: "verification",
@@ -73,7 +73,7 @@ describe("update_test_case tool", () => {
       ).rejects.toThrow(/At least one field/);
     });
 
-    it("throws error when case is not found or access denied", async () => {
+    it("throws error when case is not found", async () => {
       mockLimit.mockResolvedValueOnce([]);
 
       await expect(
@@ -82,7 +82,53 @@ describe("update_test_case tool", () => {
           caseId: 999,
           enabled: true,
         }),
-      ).rejects.toThrow(/not found or access denied/);
+      ).rejects.toThrow(/not found/);
+    });
+
+    it("rejects non-editor from editing cases in a suite", async () => {
+      const nonEditorTool = buildUpdateTestCaseTool({ userId: "user-999", isEditor: false, isAdmin: false });
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 101, suiteId: "suite-ver-uuid" },
+          suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "user-123" },
+        },
+      ]);
+
+      await expect(
+        nonEditorTool.execute!({
+          category: "verification",
+          caseId: 101,
+          name: "Attempted edit",
+        }),
+      ).rejects.toThrow(/Permission denied: You do not have permission to edit cases in this suite/);
+    });
+
+    it("allows non-author editor to update a public suite case (collaborative editing)", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 101, suiteId: "suite-ver-uuid" },
+          suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
+        },
+      ]);
+
+      mockReturning.mockResolvedValueOnce([
+        {
+          id: 101,
+          suiteId: "suite-ver-uuid",
+          name: "Public Case - Collaboratively Updated",
+          enabled: true,
+          assertions: [],
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "verification",
+        caseId: 101,
+        name: "Public Case - Collaboratively Updated",
+      })) as UpdateTestCaseResult;
+
+      expect(result.updated).toBe(true);
+      expect(result.case.name).toBe("Public Case - Collaboratively Updated");
     });
 
     it("updates verification case with enabled=true and new assertions", async () => {

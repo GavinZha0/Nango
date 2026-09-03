@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { and, eq, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -12,6 +12,7 @@ import {
   WebAutoSuiteTable,
   WebAutoCaseTable,
 } from "@/lib/db/schema";
+import { canDeleteResource } from "@/lib/auth/permissions";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
   testCategorySchema,
@@ -51,21 +52,20 @@ export function buildDeleteTestCaseTool(ctx: TesterToolContext): ToolDefinition 
             VerificationSuiteTable,
             eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id),
           )
-          .where(
-            and(
-              eq(VerificationCaseTable.id, caseId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(VerificationSuiteTable.visibility, "public"),
-                    eq(VerificationSuiteTable.createdBy, ctx.userId),
-                  ),
-            ),
-          )
+          .where(eq(VerificationCaseTable.id, caseId))
           .limit(1);
 
         if (!existing) {
-          throw new Error(`Verification case #${caseId} not found or access denied.`);
+          throw new Error(`Verification case #${caseId} not found.`);
+        }
+
+        const suiteRBAC = {
+          visibility: existing.suite.visibility as "private" | "public",
+          createdBy: existing.suite.createdBy,
+        };
+
+        if (!canDeleteResource(suiteRBAC, ctx)) {
+          throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
         }
 
         await db
@@ -92,21 +92,20 @@ export function buildDeleteTestCaseTool(ctx: TesterToolContext): ToolDefinition 
             EvalSuiteTable,
             eq(EvalCaseTable.suiteId, EvalSuiteTable.id),
           )
-          .where(
-            and(
-              eq(EvalCaseTable.id, caseId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(EvalSuiteTable.visibility, "public"),
-                    eq(EvalSuiteTable.createdBy, ctx.userId),
-                  ),
-            ),
-          )
+          .where(eq(EvalCaseTable.id, caseId))
           .limit(1);
 
         if (!existing) {
-          throw new Error(`Evaluation case #${caseId} not found or access denied.`);
+          throw new Error(`Evaluation case #${caseId} not found.`);
+        }
+
+        const suiteRBAC = {
+          visibility: existing.suite.visibility as "private" | "public",
+          createdBy: existing.suite.createdBy,
+        };
+
+        if (!canDeleteResource(suiteRBAC, ctx)) {
+          throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
         }
 
         await db
@@ -133,21 +132,20 @@ export function buildDeleteTestCaseTool(ctx: TesterToolContext): ToolDefinition 
             WebAutoSuiteTable,
             eq(WebAutoCaseTable.suiteId, WebAutoSuiteTable.id),
           )
-          .where(
-            and(
-              eq(WebAutoCaseTable.id, caseId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(WebAutoSuiteTable.visibility, "public"),
-                    eq(WebAutoSuiteTable.createdBy, ctx.userId),
-                  ),
-            ),
-          )
+          .where(eq(WebAutoCaseTable.id, caseId))
           .limit(1);
 
         if (!existing) {
-          throw new Error(`Web Auto case #${caseId} not found or access denied.`);
+          throw new Error(`Web Auto case #${caseId} not found.`);
+        }
+
+        const suiteRBAC = {
+          visibility: existing.suite.visibility as "private" | "public",
+          createdBy: existing.suite.createdBy,
+        };
+
+        if (!canDeleteResource(suiteRBAC, ctx)) {
+          throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
         }
 
         await db

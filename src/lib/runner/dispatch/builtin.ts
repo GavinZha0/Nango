@@ -106,6 +106,8 @@ export interface BuiltinAgentsMap {
 
 export interface BuiltinBuildContext {
   userId: string;
+  isAdmin?: boolean;
+  isEditor?: boolean;
   runId?: string;
   /** Active orchestration mode. Only consulted for supervisor agents. */
   mode?: OrchestrationModeId | EntityRunMode;
@@ -349,7 +351,13 @@ export async function buildBuiltinAgents(
     const testerTools: ToolDefinition[] = [];
     if (isTester && ctx?.userId) {
       const { buildTesterTools } = await import("@/lib/testing/tester-tools.server");
-      testerTools.push(...buildTesterTools({ userId: ctx.userId }));
+      testerTools.push(
+        ...buildTesterTools({
+          userId: ctx.userId,
+          isAdmin: ctx.isAdmin,
+          isEditor: ctx.isEditor,
+        }),
+      );
     }
 
     // User-selected built-in tools. Unknown names are dropped — a

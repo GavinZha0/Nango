@@ -21,10 +21,11 @@ import { z } from "zod";
 export function useCopilotSharedStateSync() {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
-  const { agent } = useAgent({ agentId: activeAgentId || undefined });
+  const activeAgent = builtinAgents.find((a) => a.id === activeAgentId);
+  const validAgentId = activeAgent ? activeAgentId : undefined;
+  const { agent } = useAgent({ agentId: validAgentId });
   const pathname = usePathname();
 
-  const activeAgent = builtinAgents.find((a) => a.id === activeAgentId);
   const isSharedStateEnabled = resolveSharedStateEnabled(activeAgent);
 
   const setGlobalState = useCopilotStateStore((s) => s.setState);

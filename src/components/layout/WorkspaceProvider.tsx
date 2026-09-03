@@ -213,9 +213,13 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
             setActiveAgent(supervisor.id, "agent", "builtin");
             return;
           }
+          const { activeAgentId } = useWorkspaceStore.getState();
+          const isCurrentActiveValid = Boolean(
+            activeAgentId && rows.some((r) => r.id === activeAgentId),
+          );
           const first = rows.find((r) => r.enabled);
-          if (first) {
-            tryAutoSelect(first.id, "agent", "builtin");
+          if (first && (!activeAgentId || !isCurrentActiveValid)) {
+            setActiveAgent(first.id, "agent", "builtin");
           }
         });
 

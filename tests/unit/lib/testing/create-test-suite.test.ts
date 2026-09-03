@@ -56,11 +56,22 @@ describe("create_test_suite tool", () => {
   });
 
   describe("Tool Execution", () => {
-    const ctx = { userId: "user-123", isAdmin: false };
+    const ctx = { userId: "user-123", isAdmin: false, isEditor: true };
     const tool = buildCreateTestSuiteTool(ctx);
 
     it("has tool name create_test_suite", () => {
       expect(tool.name).toBe("create_test_suite");
+    });
+
+    it("rejects non-editor callers", async () => {
+      const nonEditorTool = buildCreateTestSuiteTool({ userId: "user-999", isEditor: false, isAdmin: false });
+      await expect(
+        nonEditorTool.execute!({
+          category: "verification",
+          name: "MCP Suite",
+          serverId: "server-uuid-1",
+        }),
+      ).rejects.toThrow(/Editor or admin role required/);
     });
 
     it("creates verification suite requiring serverId", async () => {

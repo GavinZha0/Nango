@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth/client";
 import { useSidebarStore } from "@/store/sidebar";
+import { useWorkspaceStore } from "@/store/workspace";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +59,18 @@ function UserMenu(): ReactNode {
 
   async function handleSignOut(): Promise<void> {
     await authClient.signOut();
+    useWorkspaceStore.setState({
+      activeAgentId: "",
+      runtimeThreadId: null,
+      explicitThreadId: null,
+      agents: [],
+      teams: [],
+      workflows: [],
+      builtinAgents: [],
+      backendCredentials: [],
+      agentsLoaded: false,
+      lastChatError: null,
+    });
     router.push("/sign-in");
     router.refresh();
   }

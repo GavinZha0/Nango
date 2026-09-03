@@ -1,51 +1,38 @@
 # Test Automation Copilot & Closed-Loop QA Architecture
 
-Status: Active Specification · Target Subsystems: Verification (P1), Evaluation (P2), Web Auto (P3) · Last Updated: 2026-09-02
+Status: Active Specification · Target Subsystems: Verification, Evaluation, Web Auto · Last Updated: 2026-09-02
 
 ---
 
-## 1. Product Positioning & Core Philosophy
+## 1. Product Architecture & Philosophy
 
-Nango currently supports **Single-Form Shared State & Co-Editing** (`propose_page_edit` via `docs/shared-state.md`), which allows the Copilot agent to stage non-destructive field-level edits into the currently open editor form.
-
-**Test Automation Copilot** extends this capability from single-field editing into a **dedicated `role: 'tester'` AI agent** orchestrating the **full-lifecycle, closed-loop QA workflow** across three test harnesses:
-1. **Verification Subsystem (`docs/verification.md`)**: Deterministic MCP Tool & Workflow testing.
-2. **Evaluation Subsystem (`docs/evaluation.md`)**: Stochastic LLM-as-Judge conversational agent evaluation.
-3. **Web Auto Subsystem (`docs/web-auto.md`)**: Playwright-based browser end-to-end automation.
+Nango supports a dual-tier testing automation paradigm:
+1. **Form Copilot Ambient Context**: Lightweight WYSIWYG perception for all agents when `sharedStateEnabled: true` is active.
+2. **Dedicated Tester Agent (`role: 'tester'`)**: An autonomous Senior Software Development Engineer in Test (SDET) and QA Architect equipped with full-lifecycle server-side tools to discover, generate, execute, diagnose, and remediate test assets across three core subsystems:
+   - **Verification Subsystem (`docs/verification.md`)**: Deterministic testing of MCP Server tools and orchestrated backend workflows.
+   - **Evaluation Subsystem (`docs/evaluation.md`)**: Stochastic LLM-as-Judge conversational agent evaluation across multi-turn dialogues.
+   - **Web Auto Subsystem (`docs/web-auto.md`)**: Playwright-based browser end-to-end automation with dual-tier assertions (JS VM sandbox & LLM evaluation).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                Closed-Loop Tester Agent Lifecycle                                │
 │                                                                                                  │
-│  [1. WYSIWYG Page Ctx] ──► [2. Schema Synthesis] ──► [3. Matrix Planning] ──► [4. Batch Creation]│
-│     (Slim Index + Focus)      (get_*_schema/spec)        (Happy / Bound / Neg)   (create_test_cases)│
+│  [1. Ambient Context] ──► [2. Suite Discovery] ──► [3. Matrix Planning] ──► [4. Batch Creation] │
+│     (Slim Index + Focus)     (list_test_suites)       (Equivalence / BVA)    (create_test_cases) │
 │                                                                                       │          │
 │                                                                                       ▼          │
-│  [8. HTML Report / Outcome] ◄── [7. Smart Repair] ◄── [6. Run RCA] ◄── [5. Auto Execution]       │
-│     (generate_html_page)        (update_test_case)    (get_run_details)  (run_test_suite)        │
+│  [8. Remediation/Active] ◄── [7. Root-Cause RCA] ◄── [6. Batch Run] ◄── [5. Single Debug]       │
+│     (update_test_case)       (get_test_results)     (run_test_suite)      (run_test_case)        │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.1 Core Tenets & Differentiations
-
-| Dimension | Form Copilot Edit (`propose_page_edit`) | Test Automation Copilot (`role: 'tester'`) |
-| :--- | :--- | :--- |
-| **Agent Persona** | General Built-in / Supervisor Agent | **Dedicated `role: 'tester'` QA Expert Agent** |
-| **Tool Mounting** | Manual user binding or frontend tool | **Automatic Kernel Mounting** (zero configuration, zero tool pollution) |
-| **Ambient Context Model** | Heavy full-suite serialization | **WYSIWYG Slim Index + Active Focus** (`{ suite, cases: [index], selectedCase: [full], outcome: [current] }`) |
-| **Outcome Semantic** | N/A | **Strict WYSIWYG**: Reflects whatever is actively rendered on screen (live Playground run or user-selected historical run) |
-| **Deep Dive Model** | Passive / all-in-memory | **Index First ➔ Drill-down on Demand** (via `get_test_case_detail`) |
-| **Operation Target** | Single active form field | Multi-case CRUD + Suite Execution + RCA Diagnostics + HTML Reports |
-| **Persistence Model** | Staged in React memory (Save Button) | Direct DB transaction with safe write barrier (`enabled = false`) |
-| **SWR Cache Sync** | Client state mutates locally | Server tool completion triggers SWR `mutate()` on left panel |
-
 ---
 
-## 2. Dedicated Tester Agent Role & Automatic Tool Mounting
+## 2. Dedicated Tester Agent Role & Tool Mounting
 
-### 2.1 Role Schema Definition (`builtin_agent.role`)
+### 2.1 Role Schema (`builtin_agent.role`)
 
-In `src/lib/db/schema.ts`, the `AgentRole` union is extended to include `"tester"`:
+The `AgentRole` union includes `"tester"` in `src/lib/db/schema.ts`:
 
 ```typescript
 export type AgentRole = "supervisor" | "secretary" | "evaluator" | "tester";
@@ -53,57 +40,31 @@ export type AgentRole = "supervisor" | "secretary" | "evaluator" | "tester";
 
 ### 2.2 Kernel Auto-Mounting Contract
 
-When an agent with `role === "tester"` is dispatched in `src/lib/runner/dispatch/builtin.ts`:
-- All testing tools (CRUD, Execution, Diagnostics) are **automatically constructed and mounted** into the agent's tool execution scope.
-- Normal assistant / supervisor agents receive **zero testing tools**, eliminating prompt context pollution and tool hallucinations.
-- Normal agents with `sharedStateEnabled: true` still have access to the ambient WYSIWYG page context to answer queries and propose form edits, but cannot execute raw DB mutation tools.
-- `userId` is captured via closure at factory build time for multi-tenant RBAC enforcement.
+When an agent with `spec.role === "tester"` is dispatched in `src/lib/runner/dispatch/builtin.ts`:
+- All 10 testing lifecycle tools are **automatically constructed and mounted** into the agent's tool execution scope via `buildTesterTools(ctx)`.
+- Standard supervisor / assistant agents receive **zero testing tools**, eliminating tool hallucinations and prompt pollution.
+- `userId` and `isAdmin` are strictly captured via **factory function closure** at construction time (`buildTesterTools({ userId: ctx.userId, isAdmin })`), enforcing multi-tenant RBAC without exposing user IDs to model parameters.
+- Execution and diagnostic tools (`run_test_case`, `run_test_suite`, `get_test_results`, `list_test_suites`, `get_test_suite_details`, `get_test_case_details`) are registered in `APPROVAL_EXEMPT_TOOLS` to guarantee uninterrupted autonomous test pipelines.
+- Tool errors are automatically captured and wrapped into structured failure objects `{ isError: true, message, toolName }` by the kernel middleware pipeline (`wrapTools`), maintaining unbroken chat session streams.
 
-```
-BuiltinAgent.role === "tester"
-  │
-  ├── 1. Asset & Case Management (CRUD)
-  │     ├── get_test_case_detail({ kind, caseId })
-  │     ├── create_test_cases({ kind, suiteId?, cases: [...] })
-  │     ├── update_test_case({ kind, caseId, patch: {...} })
-  │     └── delete_test_cases({ kind, caseIds: [...] })
-  │
-  ├── 2. Suite & Case Execution
-  │     ├── run_test_suite({ kind, suiteId })
-  │     └── run_test_case({ kind, caseId })
-  │
-  ├── 3. Diagnostics & Root Cause Analysis (RCA)
-  │     ├── get_test_run_details({ kind, runId, failedOnly?, caseId? })
-  │     ├── get_mcp_tool_schema({ serverId, toolName? })
-  │     └── get_target_agent_spec({ agentId })
-  │
-  └── 4. Deliverables & Reporting
-        ├── generate_html_page (ECharts visual test report)
-        └── save_outcome (Workspace Asset archival)
-```
+### 2.3 System Prompt & Editor Defaults
+
+- **System Prompt**: Built-in default prompt defined in `src/lib/testing/prompt.ts` (`DEFAULT_TESTER_SYSTEM_PROMPT`). It instructs the agent on the three-pillar test pyramid, Equivalence Partitioning (EP), Boundary Value Analysis (BVA), negative testing, structured RCA reports, and strict human review policies.
+- **UI Integration**: In `BuiltinAgentEditor.tsx`, selecting the `Tester` role automatically pre-fills:
+  - `prompt`: `DEFAULT_TESTER_SYSTEM_PROMPT` (if empty)
+  - `name`: `"Tester"` (if empty)
+  - `description`: `"Autonomous Software Test Engineer (SDET) responsible for full test lifecycle management."` (if empty)
 
 ---
 
-## 3. Standardized WYSIWYG Page Context Specification
+## 3. Standardized Ambient Page Context (WYSIWYG)
 
-### 3.1 Design Philosophy: "What You See Is What The Agent Gets"
-
-To perfectly balance **Token Efficiency**, **In-Memory Draft Awareness**, and **Cross-Agent Compatibility**, the page context adheres to two foundational rules:
-
-1. **Macro Sibling Cases as Slim Index**: The suite's 30+ sibling test cases are published only as a lightweight sitemap index (`{ id, name, enabled }`), capping ambient token usage at ~80 tokens.
-2. **Micro Active Case as Full In-Memory Detail**: The single currently selected test case (`selectedCase`) provides full un-saved draft scripts, input parameters, assertions, and dirty state.
-3. **Outcome Strict WYSIWYG Synchronization**: The `outcome` field strictly mirrors what is **currently visible on the user's screen**:
-   - If viewing a live Playground execution ➔ `outcome` carries the live in-memory result (`source: "live"`).
-   - If the user clicked a historical run in the recent runs banner ➔ `outcome` carries that exact user-selected historical execution snapshot (`source: "history", historySeq: N`).
-   - If no run has occurred or been selected ➔ `outcome: null`.
-   - Agents **never** guess or asynchronously fetch unrelated background runs without user instruction.
-
-### 3.2 Canonical Context Schema
+When any agent interacts with test suite editors, the ambient page context adheres to strict token efficiency and WYSIWYG synchronization:
 
 ```typescript
 export interface TestModulePageContext {
-  /** Subsystem identifier */
-  kind: "verification" | "evaluation" | "web_auto";
+  /** Subsystem identifier: 'verification' | 'evaluation' | 'web-auto' */
+  kind: "verification" | "evaluation" | "web-auto";
 
   /** Suite Metadata */
   suite: {
@@ -119,7 +80,7 @@ export interface TestModulePageContext {
     };
   };
 
-  /** Lightweight Sibling Case Index (Sitemap) */
+  /** Lightweight Sibling Case Index (~80 tokens) */
   cases: Array<{
     id: number;
     name: string;
@@ -132,9 +93,7 @@ export interface TestModulePageContext {
     name: string;
     enabled: boolean;
     isDirty: boolean;
-    /** Raw input parameters, script body, or conversation turns */
     input: Record<string, unknown>;
-    /** Full universal assertions array */
     assertions: unknown[];
   } | null;
 
@@ -145,119 +104,143 @@ export interface TestModulePageContext {
     status: "passed" | "failed" | "running";
     error?: unknown;
     verdict?: unknown;
-    /** Trimmed execution output (sanitized to prevent massive Base64 token waste) */
     output?: unknown;
   } | null;
 }
 ```
 
-**Token Footprint**: ~400–600 tokens total (down from 30K+), achieving a 98% reduction while maintaining 100% active state fidelity.
-
 ---
 
-## 4. Universal Tester Tool Specifications
+## 4. Implemented Tester Tool Specifications (10 Tools)
 
-### 4.1 Case Management Tools (CRUD)
+All tools are located under `src/lib/testing/tools/` and accept `category: "verification" | "evaluation" | "web-auto"`.
 
-#### 1. `get_test_case_detail`
-- **Parameters**: `kind: "verification" | "evaluation" | "web_auto"`, `caseId: number`.
-- **Returns**: Full persisted `{ id, suiteId, name, input, assertions, enabled, createdAt, updatedAt }`.
+### 4.1 Discovery & Topology Tools
 
-#### 2. `create_test_cases`
+#### 1. `list_test_suites`
+- **Parameters**: `category` (required).
+- **Behavior**: Retrieves all accessible suites for the given category with metadata (id, name, description, case counts, enabled counts, target bindings).
+
+#### 2. `get_test_suite_details`
+- **Parameters**: `category`, `suiteId` (UUID).
+- **Behavior**: Retrieves complete suite configuration along with its lightweight child cases array (`[{ id, name, enabled }]`).
+
+### 4.2 Suite & Case Management Tools (CRUD)
+
+#### 3. `create_test_suite`
 - **Parameters**:
-  - `kind: "verification" | "evaluation" | "web_auto"`
-  - `suiteId?: string` (UUID, optional — triggers Lazy Suite creation if omitted)
-  - `targetContext?: { mcpServerId?: string, targetAgentId?: string }`
-  - `cases: Array<CaseCreatePayload>` (Max 20 per call)
-- **Write Barrier**: All created cases default to **`enabled = false`** and `createdBy = ctx.userId`.
-- **De-duplication**: Cases matching existing names in the target suite are skipped and reported in `{ skipped: [...] }`.
+  - `category`
+  - `name`: string (1–120 chars)
+  - `description?`: string
+  - `mcpServerId?`: string (required for `verification`)
+  - `targetAgentId?`: string (required for `evaluation`)
+- **Behavior**: Creates a new test suite. For `web-auto`, automatically detects the active Playwright MCP server without requiring user input. Enforces uniqueness on suite names per user.
 
-#### 3. `update_test_case`
+#### 4. `get_test_case_details`
+- **Parameters**: `category`, `caseId` (integer).
+- **Behavior**: Retrieves full persisted case details including input payloads, multi-turn prompts (`turns`), scripts, and parsed assertions array.
+
+#### 5. `create_test_cases`
 - **Parameters**:
-  - `kind: "verification" | "evaluation" | "web_auto"`
-  - `caseId: number`
-  - `patch: { name?, input?, assertions?, enabled? }`
-- **Returns**: `{ ok: true, caseId, modifiedFields: string[] }`.
+  - `category`
+  - `suiteId`: UUID
+  - `cases`: Array of case payloads (max 20)
+    - `name`: string
+    - `toolName?`: string (verification)
+    - `input?`: JSON object (verification)
+    - `turns?`: string[] (evaluation user prompts)
+    - `script?`: string (web-auto Playwright code)
+    - `steps?`: string (web-auto natural language steps)
+    - `assertions`: Array of assertion specs (`js_expression`, `jsonpath`, `json_schema`, `metric`, `tool_call`, `llm_judge`)
+- **Safety Contract (Write Barrier)**: **All newly created cases are hardcoded to `enabled: false`** upon insertion. Requires explicit human review before activation.
 
-#### 4. `delete_test_cases`
+#### 6. `update_test_case`
 - **Parameters**:
-  - `kind: "verification" | "evaluation" | "web_auto"`
-  - `caseIds: number[]` (Max 20 per call)
-- **Returns**: `{ ok: true, deletedCount: number }`.
+  - `category`, `caseId`
+  - Partial fields: `name`, `enabled`, `toolName`, `input`, `turns`, `script`, `steps`, `assertions`.
+- **Behavior**: Applies partial patch to the specified case. Used for assertion tuning, prompt refinement, or activating approved cases (`enabled: true`).
 
----
+#### 7. `delete_test_case`
+- **Parameters**: `category`, `caseId`.
+- **Behavior**: Permanently deletes the test case and cascades removal of associated execution results. Returns `{ category, deleted: true, caseId, suiteId, caseName }`.
 
-### 4.2 Execution & Diagnostic Tools
+### 4.3 Execution & Diagnostic Tools
 
-#### 1. `run_test_suite` & `run_test_case`
-- **`run_test_suite({ kind, suiteId })`**: Dispatches an async suite run on the runner, returns `{ runId, status: "dispatched" }`.
-- **`run_test_case({ kind, caseId })`**: Runs an in-memory Playground execution (zero DB writes), returns immediate `runOutcome`.
+#### 8. `run_test_case` (Synchronous Debugging)
+- **Parameters**: `category`, `caseId`.
+- **Behavior**: Directly executes a single case end-to-end against the target runtime (`runMcpCase`, `runEvalCase`, or `runWebAutoCase`). Returns execution status, duration, detailed assertion evaluation outcomes, score, and error message.
 
-#### 2. `get_test_run_details`
+#### 9. `run_test_suite` (Asynchronous Batch Regression)
+- **Parameters**: `category`, `suiteId`.
+- **Behavior**: Dispatches an asynchronous batch run across all enabled test cases via the subsystem orchestrator (`startSuiteRun`, `startEvalSuiteRun`, `startWebAutoSuiteRun`). Immediately returns `{ runId, status: "running", totalCases }` without blocking the conversation turn.
+
+#### 10. `get_test_results` (Diagnostics & RCA)
 - **Parameters**:
-  - `kind: "verification" | "evaluation" | "web_auto"`
-  - `runId: string`
-  - `failedOnly?: boolean` (Default: `true`)
-  - `caseId?: number` (Optional single-case deep dive)
-- **Summary-First Protection**:
-  - Summarizes overall pass/fail stats and lists failing cases with 1:1 `assertionResults` diffs.
-  - Automatically truncates large execution outputs / base64 images unless `caseId` is explicitly targeted.
+  - `category`
+  - `runId?`: UUID (Specific run query mode)
+  - `suiteId?`: UUID (Trend comparison query mode)
+  - `last?`: integer (1 to 10, default `1`)
+  - `failedOnly?`: boolean (default `false`)
+- **Behavior**:
+  - **Single Run Inspection (`runId` or `last=1`)**: Returns run summary and case-level diagnostic records with formatted assertion diffs.
+  - **Historical Comparison (`suiteId` + `last>1`)**: Returns trend metrics across runs (pass rate, scores, duration) for regression evaluation.
+  - **`failedOnly=true`**: Filters out passed cases to isolate failing assertions for root cause analysis.
 
 ---
 
-### 4.3 Deliverables & Reporting Tools
+## 5. Codebase Organization
 
-#### 1. `generate_html_page` (Interactive Report)
-- Generates a standalone HTML dashboard including:
-  - Pass/Fail Pie Chart & Latency Histograms (via CDN ECharts).
-  - Categorized failure triage list (Bug vs Assertion Drift vs Flake).
-  - Expandable assertion diffs.
+```
+src/lib/testing/
+├── index.ts                      # Testing module export barrel
+├── prompt.ts                     # DEFAULT_TESTER_SYSTEM_PROMPT
+├── types.ts                      # Shared interfaces and Zod schemas
+├── tester-tools.server.ts        # buildTesterTools factory
+└── tools/
+    ├── list-test-suites.ts       # Tool 1: list_test_suites
+    ├── get-test-suite-details.ts # Tool 2: get_test_suite_details
+    ├── create-test-suite.ts      # Tool 3: create_test_suite
+    ├── get-test-case-details.ts  # Tool 4: get_test_case_details
+    ├── create-test-cases.ts      # Tool 5: create_test_cases
+    ├── update-test-case.ts       # Tool 6: update_test_case
+    ├── delete-test-case.ts       # Tool 7: delete_test_case
+    ├── run-test-case.ts          # Tool 8: run_test_case
+    ├── run-test-suite.ts         # Tool 9: run_test_suite
+    └── get-test-results.ts       # Tool 10: get_test_results
 
-#### 2. `save_outcome` (Workspace Asset Archival)
-- Saves the generated test report directly into the user's Workspace Outcome registry for historical auditing.
-
----
-
-## 5. Subsystem Case Schemas
-
-### 5.1 Verification (`kind: "verification"`)
-- `input`: `Record<string, unknown>` (MCP tool arguments).
-- `assertions`: `assertionsArraySchema` supporting `js_expression`, `jsonpath`, `json_schema`.
-
-### 5.2 Evaluation (`kind: "evaluation"`)
-- `input`: `{ turns: Array<{ userMessage: string }> }`.
-- `assertions`: `assertionsArraySchema` supporting:
-  - `llm_judge`: with `expectation`, `unexpectation`, or `reference`.
-  - `tool_call`: expected tool name & argument matches.
-  - `metric`: `duration_s` (seconds, 1 decimal place), `output_tokens`, `total_tool_calls`.
-
-### 5.3 Web Auto (`kind: "web_auto"`)
-- `input`: `{ script: string, steps?: string }` (Playwright script body).
-- `assertions`: `assertionsArraySchema` supporting `js_expression`, `jsonpath`, `json_schema`, and `llm_judge`.
-
----
-
-## 6. SWR Real-Time Mutation Protocol
-
-To ensure immediate frontend UI reflection when the Tester Agent performs DB operations:
-
-```typescript
-// Client-side observation in ChatProviderHooks
-// When a tester tool returns { ok: true, suiteId }, mutate corresponding SWR cache:
-const isTestingTool = (toolName: string) =>
-  ["create_test_cases", "update_test_case", "delete_test_cases"].includes(toolName);
-
-if (isTestingTool(result.toolName) && result.suiteId) {
-  mutate(`/api/${result.kind}-suites/${result.suiteId}/cases`);
-}
+tests/unit/lib/testing/
+├── list-test-suites.test.ts
+├── get-test-suite-details.test.ts
+├── create-test-suite.test.ts
+├── get-test-case-details.test.ts
+├── create-test-cases.test.ts
+├── update-test-case.test.ts
+├── delete-test-case.test.ts
+├── run-test-case.test.ts
+├── run-test-suite.test.ts
+└── get-test-results.test.ts      # 63 unit tests total (100% passing)
 ```
 
 ---
 
-## 7. Implementation Roadmap
+## 6. Pending Items & Next Steps
 
-| Phase | Milestone | Deliverables |
-| :--- | :--- | :--- |
-| **Phase 1 (P1)** | **`role: 'tester'` & WYSIWYG Context Alignment** | 1. Extend `AgentRole` to include `"tester"` in `src/lib/db/schema.ts`.<br>2. Extend `BuiltinAgentEditor` to support Tester role selection.<br>3. Implement kernel auto-mounting in `runner/dispatch/builtin.ts`.<br>4. Align Slim WYSIWYG Context across `VerificationSuiteEditor`, `EvaluationSuiteEditor`, `WebAutoEditor`. |
-| **Phase 2 (P2)** | **Universal Tester Tools Implementation** | 1. Implement `src/lib/authoring/` tool modules (CRUD, Execution, Diagnostics).<br>2. Implement SWR auto-mutation hooks.<br>3. Factory unit tests covering RBAC, write barriers, and de-duplication. |
-| **Phase 3 (P3)** | **Tester Agent Prompting & Reporting** | 1. QA Expert system prompt block configuration.<br>2. HTML Test Report generator with ECharts.<br>3. End-to-end integration tests across Verification, Evaluation, and Web Auto. |
+The following capabilities are queued for upcoming milestones:
+
+### 6.1 Frontend SWR Real-Time Mutation Protocol
+- **Objective**: Ensure immediate UI synchronization on the left-panel case trees and suite lists when the Tester Agent executes mutation tools.
+- **Scope**:
+  - Wire SWR cache invalidation hooks in the Chat Provider / Copilot response listener.
+  - When `create_test_cases`, `create_test_suite`, `update_test_case`, or `delete_test_case` succeeds, trigger SWR `mutate()` on `/api/{category}-suites/{suiteId}/cases` and `/api/{category}-suites`.
+
+### 6.2 Visual Test Reporting Deliverables
+- **Objective**: Enable the Tester Agent to generate standalone, interactive deliverables.
+- **Scope**:
+  - Implement `generate_html_page` (or integrate with existing outcome artifact generators) to produce visual QA dashboards using CDN ECharts (pass/fail distribution, duration distributions, categorization of assertion failures).
+  - Enable direct archival to Workspace Assets via `save_outcome`.
+
+### 6.3 End-to-End Multi-Turn Scenario Verification
+- **Objective**: Full conversational integration tests covering user-to-agent interactions.
+- **Scope**:
+  - Verify complete lifecycle prompts: *"Inspect this MCP server, plan 5 boundary test cases, execute them, and report results"*.
+  - Validate that human review gating (`enabled: false`) is adhered to in conversational flows.

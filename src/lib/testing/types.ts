@@ -7,6 +7,7 @@ export const testCategorySchema = z.enum(["verification", "evaluation", "web-aut
 export interface TesterToolContext {
   userId: string;
   isAdmin?: boolean;
+  isEditor?: boolean;
 }
 
 export interface SuiteSummaryItem {

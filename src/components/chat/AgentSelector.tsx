@@ -26,6 +26,7 @@ import type { EntityKind } from "@/lib/backends/types";
 import { cn } from "@/lib/utils";
 import { alphabeticCompare } from "@/lib/utils/sort";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
+import { useRole } from "@/hooks/useRole";
 
 function AgentIconByRole({ role, className }: { role?: string | null; className?: string }) {
   switch (role) {
@@ -120,12 +121,13 @@ export function AgentSelector({
   const visibleTeams = teams.filter(
     (t) => !disabledBackend.has(agentKey(t.credentialId, t.id)),
   );
-  // System-role agents are hidden from the picker (except tester) but kept in lookup
+  const { isEditor } = useRole();
+  // System-role agents are hidden from the picker (except tester for editors/admins) but kept in lookup
   // for active-name resolution.
   const enabledBuiltin = useMemo(() => builtinAgents.filter((b) => b.enabled), [builtinAgents]);
   const visibleBuiltin = useMemo(
-    () => enabledBuiltin.filter((b) => !b.role || b.role === "tester"),
-    [enabledBuiltin],
+    () => enabledBuiltin.filter((b) => !b.role || (b.role === "tester" && isEditor)),
+    [enabledBuiltin, isEditor],
   );
   const sortedVisibleBuiltin = useMemo(() => {
     return [...visibleBuiltin].sort((a, b) => alphabeticCompare(a.name, b.name));

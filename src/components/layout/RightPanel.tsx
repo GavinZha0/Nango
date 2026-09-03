@@ -369,10 +369,23 @@ function ChatProviderHooks(): ReactNode {
   // docs/chat-flow-audit.md.
   const storedThreadId = useWorkspaceStore((s) => s.runtimeThreadId);
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const agents = useWorkspaceStore((s) => s.agents);
+  const teams = useWorkspaceStore((s) => s.teams);
   const setChatError = useWorkspaceStore((s) => s.setChatError);
   const clearChatError = useWorkspaceStore((s) => s.clearChatError);
   const { copilotkit } = useCopilotKit();
-  const { agent } = useAgent({ agentId: activeAgentId || undefined });
+
+  const isAgentKnown = useMemo(() => {
+    if (!activeAgentId) return false;
+    return (
+      builtinAgents.some((b) => b.id === activeAgentId) ||
+      agents.some((a) => a.id === activeAgentId) ||
+      teams.some((t) => t.id === activeAgentId)
+    );
+  }, [activeAgentId, builtinAgents, agents, teams]);
+
+  const { agent } = useAgent({ agentId: isAgentKnown ? activeAgentId : undefined });
 
   // threadId eager-capture
   useEffect(() => {

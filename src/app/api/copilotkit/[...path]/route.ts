@@ -115,6 +115,15 @@ async function handleInfoRequest(
 async function handler(req: NextRequest, userId: string, log: Logger): Promise<Response> {
   const pathname = new URL(req.url).pathname;
 
+  // If a /builtin request was matched by this catch-all, delegate to the builtin runner.
+  if (pathname.startsWith("/api/copilotkit/builtin")) {
+    return runner.runBuiltinChatRequest(req, {
+      userId,
+      requestId: crypto.randomUUID(),
+      log,
+    });
+  }
+
   // /threads/*, /transcribe — no agent map needed.
   if (EMPTY_BOOKKEEPING_PATTERN.test(pathname)) {
     return Response.json(EMPTY_RUNTIME_INFO);

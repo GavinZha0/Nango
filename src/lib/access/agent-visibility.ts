@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { BuiltinAgentTable, UserTable } from "@/lib/db/schema";
@@ -17,10 +17,11 @@ export async function isAgentVisibleTo(
   agentId: string,
   userId: string,
 ): Promise<boolean> {
-  const rows: Array<{ visibility: string; createdBy: string | null }> = await db
+  const rows = await db
     .select({
       visibility: BuiltinAgentTable.visibility,
       createdBy: BuiltinAgentTable.createdBy,
+      role: BuiltinAgentTable.role,
     })
     .from(BuiltinAgentTable)
     .where(
@@ -40,7 +41,14 @@ export async function isAgentVisibleTo(
     .from(UserTable)
     .where(eq(UserTable.id, userId))
     .limit(1);
-  const isAdmin = userRows[0]?.role === "admin";
+  const userRole = userRows[0]?.role;
+  const isAdmin = userRole === "admin";
+  const isEditor = userRole === "editor" || isAdmin;
+
+  // Tester agents are restricted to editors and admins
+  if (row.role === "tester" && !isEditor) {
+    return false;
+  }
 
   return row.visibility === "public" || row.createdBy === userId || isAdmin;
 }
@@ -60,7 +68,9 @@ export async function listVisibleAgentIds(userId: string): Promise<string[]> {
     .from(UserTable)
     .where(eq(UserTable.id, userId))
     .limit(1);
-  const isAdmin = userRows[0]?.role === "admin";
+  const userRole = userRows[0]?.role;
+  const isAdmin = userRole === "admin";
+  const isEditor = userRole === "editor" || isAdmin;
 
   const rows: Array<{ id: string }> = await db
     .select({ id: BuiltinAgentTable.id })
@@ -68,6 +78,12 @@ export async function listVisibleAgentIds(userId: string): Promise<string[]> {
     .where(
       and(
         eq(BuiltinAgentTable.enabled, true),
+        !isEditor
+          ? or(
+              isNull(BuiltinAgentTable.role),
+              ne(BuiltinAgentTable.role, "tester"),
+            )
+          : undefined,
         isAdmin
           ? undefined
           : or(

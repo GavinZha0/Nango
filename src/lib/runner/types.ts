@@ -79,6 +79,8 @@ export type { EntityRunEventType, EntityRunStatus, EntityRunMode, EntityRunIniti
 /** Per-request context for built-in chat dispatch. */
 export interface RunBuiltinChatRequestArgs {
   userId: string;
+  isAdmin?: boolean;
+  isEditor?: boolean;
   requestId: string;
   log: import("pino").Logger;
 }

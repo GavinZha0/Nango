@@ -1,13 +1,13 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { BuiltinAgentTable, BuiltinAgentToolTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
-import { visibilitySql } from "@/lib/auth/permissions";
+import { isEditor, visibilitySql } from "@/lib/auth/permissions";
 import {
   isUniqueViolation,
   nonEmptyString,
@@ -35,8 +35,9 @@ const ROUTE = "/api/builtin-agents";
 export const GET = withSession(ROUTE, async ({ req, session }) => {
   const url = new URL(req.url);
   const rawRole = url.searchParams.get("role");
-  const parsed = rawRole ? z.enum(["supervisor", "secretary", "evaluator"]).safeParse(rawRole) : null;
+  const parsed = rawRole ? z.enum(["supervisor", "secretary", "evaluator", "tester"]).safeParse(rawRole) : null;
   const roleParam: AgentRole | null = parsed?.success ? parsed.data : null;
+  const canAccessTester = isEditor(session);
   const rows = await db
     .select({
       id: BuiltinAgentTable.id,
@@ -81,6 +82,12 @@ export const GET = withSession(ROUTE, async ({ req, session }) => {
           BuiltinAgentTable.createdBy,
         ),
         roleParam ? eq(BuiltinAgentTable.role, roleParam) : undefined,
+        !canAccessTester
+          ? or(
+              isNull(BuiltinAgentTable.role),
+              ne(BuiltinAgentTable.role, "tester"),
+            )
+          : undefined,
       )
     )
     .orderBy(desc(BuiltinAgentTable.createdAt));
