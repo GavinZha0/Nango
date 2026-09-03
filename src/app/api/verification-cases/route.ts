@@ -16,7 +16,7 @@ import { normalizeCaseName } from "@/lib/verification/resolve-input";
 
 const ROUTE = "/api/verification-cases";
 
-const mcpCaseSchema = z.object({
+const createSchema = z.object({
   mcpServerId: z.string().uuid(),
   toolName: z.string().min(1).max(200),
   name: z.string().trim().min(1).max(120),
@@ -26,45 +26,32 @@ const mcpCaseSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-const workflowCaseSchema = z.object({
-  workflowId: z.string().uuid(),
-  name: z.string().trim().min(1).max(120),
-  input: caseInputSchema.optional(),
-  assertions: assertionsArraySchema.optional(),
-  enabled: z.boolean().optional(),
-});
-
-const createSchema = z.union([mcpCaseSchema, workflowCaseSchema]);
-
 // POST /api/verification-cases
-// Unified endpoint to create a case. Handles backend-level lazy suite creation.
+// Endpoint to create an MCP verification case. Handles backend-level lazy suite creation.
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
-  const isMcp = "mcpServerId" in body;
+  const { mcpServerId, suiteId: reqSuiteId } = body;
 
   let suiteId: string;
 
-  if (isMcp) {
-    const { mcpServerId, suiteId: reqSuiteId } = body as z.infer<typeof mcpCaseSchema>;
-
-    if (reqSuiteId) {
-      suiteId = reqSuiteId;
-    } else {
-      // 1. Find if a suite already exists for this mcpServerId
-      const [existingSuite] = await db
-        .select()
-        .from(VerificationSuiteTable)
-        .where(
-          and(
-            eq(VerificationSuiteTable.mcpServerId, mcpServerId),
-            eq(VerificationSuiteTable.createdBy, session.user.id),
-          )
+  if (reqSuiteId) {
+    suiteId = reqSuiteId;
+  } else {
+    // 1. Find if a suite already exists for this mcpServerId
+    const [existingSuite] = await db
+      .select()
+      .from(VerificationSuiteTable)
+      .where(
+        and(
+          eq(VerificationSuiteTable.mcpServerId, mcpServerId),
+          eq(VerificationSuiteTable.createdBy, session.user.id),
         )
-        .limit(1);
+      )
+      .limit(1);
 
-      if (existingSuite) {
-        suiteId = existingSuite.id;
-      } else {
+    if (existingSuite) {
+      suiteId = existingSuite.id;
+    } else {
       // Try to fetch server title/name for suite name
       const [server] = await db
         .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
@@ -89,38 +76,6 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         })
         .returning();
       suiteId = newSuite.id;
-      }
-    }
-  } else {
-    // Workflow validation is coming in V2, but we placeholder the lazy-suite creation here.
-    const { workflowId } = body;
-    const [existingSuite] = await db
-      .select()
-      .from(VerificationSuiteTable)
-      .where(
-        and(
-          eq(VerificationSuiteTable.workflowId, workflowId),
-          eq(VerificationSuiteTable.createdBy, session.user.id),
-        )
-      )
-      .limit(1);
-
-    if (existingSuite) {
-      suiteId = existingSuite.id;
-    } else {
-      const [newSuite] = await db
-        .insert(VerificationSuiteTable)
-        .values({
-          name: `workflow-${workflowId}`,
-          description: `Automatically created verification suite for workflow ${workflowId}`,
-          category: "workflow",
-          workflowId,
-          visibility: "private",
-          createdBy: session.user.id,
-          updatedBy: session.user.id,
-        })
-        .returning();
-      suiteId = newSuite.id;
     }
   }
 
@@ -131,7 +86,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       .values({
         suiteId,
         name: normalizeCaseName(body.name),
-        toolName: isMcp ? (body as z.infer<typeof mcpCaseSchema>).toolName : null,
+        toolName: body.toolName,
         input: body.input ?? {},
         assertions: (body.assertions ?? []) as unknown,
         enabled: body.enabled ?? true,

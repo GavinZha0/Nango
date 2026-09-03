@@ -34,9 +34,7 @@ import { cn } from "@/lib/utils";
 import { alphabeticCompare } from "@/lib/utils/sort";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 import {
-  useVerificationStore,
   verificationActions,
-  type VerificationCategory,
   type VerificationSuiteRow,
   type VerificationServerRow,
 } from "@/store/verification";
@@ -47,11 +45,6 @@ const fetcher = async (url: string) => {
   if (!res.ok) throw new Error("Failed to fetch data");
   return res.json();
 };
-
-const CATEGORIES: ReadonlyArray<{ id: VerificationCategory; label: string }> = [
-  { id: "mcp", label: "MCP" },
-  { id: "workflow", label: "Workflow" },
-];
 
 interface ServerTreeGroup {
   id: string; // mcpServerId
@@ -284,11 +277,6 @@ export function VerificationPanel(): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
 
-  const category = useVerificationStore((s) => s.category);
-  const setCategory = (c: VerificationCategory): void => {
-    useVerificationStore.getState().setCategory(c);
-  };
-
   // Derive active suite ID from /verification/[id]
   const activeSuiteMatch = pathname.match(/^\/verification\/([^/]+)/);
   const activeSuiteId = activeSuiteMatch && activeSuiteMatch[1] !== "server" ? activeSuiteMatch[1] : null;
@@ -301,7 +289,7 @@ export function VerificationPanel(): ReactNode {
 
   // 2. Fetch suites
   const { data: suiteRows, error: suiteError, isLoading: suiteLoading, mutate: mutateSuites } = useSWR<VerificationSuiteRow[]>(
-    `/api/verification-suites?category=${category}`,
+    "/api/verification-suites",
     fetcher,
   );
 
@@ -316,7 +304,7 @@ export function VerificationPanel(): ReactNode {
 
   // Build tree grouping (alphabetical sort on servers and suites, filter out empty servers)
   const treeGroups = useMemo<ServerTreeGroup[]>(() => {
-    if (category !== "mcp" || !serverRows) return [];
+    if (!serverRows) return [];
 
     const suitesByServer = new Map<string, VerificationSuiteRow[]>();
     for (const suite of suiteRows ?? []) {
@@ -343,7 +331,7 @@ export function VerificationPanel(): ReactNode {
       .sort((a, b) =>
         alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name),
       );
-  }, [category, serverRows, suiteRows]);
+  }, [serverRows, suiteRows]);
 
   const [runningServerId, setRunningServerId] = useState<string | null>(null);
   const [runningSuiteId, setRunningSuiteId] = useState<string | null>(null);
@@ -462,34 +450,11 @@ export function VerificationPanel(): ReactNode {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Category Tabs + Action Toolbar */}
-      <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
-        {CATEGORIES.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => setCategory(c.id)}
-            className={cn(
-              "flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-              category === c.id
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-            aria-pressed={category === c.id}
-          >
-            {c.label}
-            <span
-              className={cn(
-                "rounded-full px-1.5 py-0.2 text-[9px] font-mono",
-                category === c.id
-                  ? "bg-primary/20 text-foreground"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {c.id === "mcp" ? treeGroups.length : 0}
-            </span>
-          </button>
-        ))}
+      {/* MCP Verification Header + Action Toolbar */}
+      <div className="flex h-9 items-center justify-between border-b bg-muted/40 px-3 py-1.5">
+        <span className="text-xs font-semibold tracking-tight text-foreground">
+          MCP Verification
+        </span>
 
         <div className="ml-auto flex items-center gap-1">
           <Button
@@ -506,7 +471,7 @@ export function VerificationPanel(): ReactNode {
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
             onClick={() => {
               void mutateServers();
               void mutateSuites();
@@ -531,11 +496,7 @@ export function VerificationPanel(): ReactNode {
             </p>
           )}
 
-          {category === "workflow" ? (
-            <p className="px-4 py-4 text-xs text-muted-foreground">
-              Workflow verification is coming in a later release.
-            </p>
-          ) : isTreeLoading && treeGroups.length === 0 ? (
+          {isTreeLoading && treeGroups.length === 0 ? (
             <div className="p-4 text-center text-xs text-muted-foreground flex justify-center items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading targets…
             </div>

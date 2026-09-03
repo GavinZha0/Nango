@@ -12,18 +12,19 @@ import { and, asc, eq, sql } from "drizzle-orm";
 
 const ROUTE = "/api/verification-suites";
 
-// GET /api/verification-suites?category=mcp|workflow
-// Returns visible suites in the requested category (alphabetical).
+// GET /api/verification-suites
+// Returns visible MCP verification suites (alphabetical).
 
 export const GET = withEditor(ROUTE, async ({ req, session }) => {
-  const category = new URL(req.url).searchParams.get("category");
-  if (category !== "mcp" && category !== "workflow") {
+  const categoryParam = new URL(req.url).searchParams.get("category");
+  if (categoryParam && categoryParam !== "mcp") {
     throw new ApiError(
       "VALIDATION_FAILED",
       400,
-      "Query param `category` must be 'mcp' or 'workflow'.",
+      "Verification suites are exclusively for MCP.",
     );
   }
+  const category = "mcp";
 
   // Projection mirrors `select()` but pulls a correlated COUNT for the
   // case rows of each suite, so the left-panel can render a badge
@@ -76,9 +77,8 @@ const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
-    category: z.enum(["mcp", "workflow"]),
+    category: z.literal("mcp").optional().default("mcp"),
     mcpServerId: z.string().uuid().optional().nullable(),
-    workflowId: z.string().uuid().optional().nullable(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),
   })
@@ -97,7 +97,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         description: body.description ?? null,
         category: body.category,
         mcpServerId: body.mcpServerId ?? null,
-        workflowId: body.workflowId ?? null,
+        workflowId: null,
         visibility: body.visibility ?? "private",
         timeoutSec: body.timeoutSec ?? 300,
         createdBy: session.user.id,

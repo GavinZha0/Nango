@@ -1,19 +1,15 @@
 # Verification Subsystem
 
-> **Status (V1)**
+> **Status**
 > - **MCP tool tests** — shipped end-to-end. Schema, runner, SSE
 >   pipeline, suite/case CRUD, single-case rerun, suite run with
 >   live updates, history-view via the recent-runs banner, and the
 >   `(input snapshot, output, assertion verdicts, error envelope)`
->   inspector are all in place. Everything in §2–§8 (excluding the
->   workflow callouts) describes the current implementation.
-> - **Workflow tests** — schema-level only. The left-panel tab
->   lists workflow suites; the editor renders a "coming soon"
->   placeholder. No runner, no case CRUD, no API. Tracked in §5.3,
->   §7.1, §8.5, and §11.
+>   inspector are all in place.
+> - The verification subsystem is dedicated exclusively to **MCP tool contract verification**.
 >
 > **Position in the product**: a *deterministic* assert-on-output
-> harness. Stochastic / quality-grade evaluation of agents lives in
+> harness for MCP tools. Stochastic / quality-grade evaluation of agents lives in
 > the separate **Eval** subsystem (`docs/evaluation.md`).
 
 This document is the single source of truth for the Verification subsystem.
@@ -53,12 +49,10 @@ Four new tables. Nothing in the existing schema changes.
 
 | Table | Purpose | Key Columns |
 |---|---|---|
-| `verification_suite` | Groups cases. | `id`, `name`, `category` (mcp/workflow), `timeout_sec` |
-| `verification_case` | An individual test case. | `id`, `suite_id`, `mcp_server_id`, `tool_name`, `workflow_id`, `input`, `assertions` |
+| `verification_suite` | Groups cases. | `id`, `name`, `category` ('mcp'), `timeout_sec` |
+| `verification_case` | An individual test case. | `id`, `suite_id`, `mcp_server_id`, `tool_name`, `input`, `assertions` |
 | `verification_run` | A suite execution. | `id`, `suite_id`, `status`, counts (`passed`, `failed`, etc.) |
 | `verification_case_result`| Outcome of a case. | `id`, `verification_run_id`, `verification_case_id`, `status`, `input_snapshot`, `result_payload`, `assertion_results`, `error` |
-
-*Note: `verification_case` enforces XOR between (mcp_server_id + tool_name) and workflow_id.*
 
 #### Why MCP cases do **not** write `entity_run`
 
@@ -68,8 +62,7 @@ a single function invocation against `mcp/provider-pool`. Threading
 tool calls through the runner would inflate the kernel's contract,
 add zombie-sweep concerns to a synchronous code path, and provide no
 extra forensics value (the result is already in
-`verification_case_result.result_payload`). Workflow cases go through the
-runner because Nango internal workflows already do.
+`verification_case_result.result_payload`).
 
 ---
 
@@ -135,7 +128,7 @@ All routes are wrapped by `withEditor(routePath, handler)` from
 
 | Method & Path                                       | Purpose |
 |-----------------------------------------------------|---------|
-| `GET    /api/verification-suites?category=mcp\|workflow`    | List suites filtered by category. |
+| `GET    /api/verification-suites`                           | List visible MCP verification suites. |
 | `POST   /api/verification-suites`                           | Create a suite. |
 | `GET    /api/verification-suites/[id]`                      | Suite metadata + case summary. |
 | `PATCH  /api/verification-suites/[id]`                      | Update name / description / enabled / visibility / `timeout_sec`. |
@@ -148,12 +141,6 @@ All routes are wrapped by `withEditor(routePath, handler)` from
 | `POST   /api/verification-runs`                             | Body `{ suiteId }` → start async suite run; returns `{ runId }`. |
 | `GET    /api/verification-suites/[id]/runs?offset=0&limit=5`| Paginated history for the banner. Returns `{ rows: VerificationRunEntity[], total: number }` — `total` drives both absolute chip numbering (`#N`) and a precise "more older runs?" guard for the pagination buttons. |
 | `GET    /api/verification-runs/[id]`                        | Run header + all `verification_case_result` rows. Returns `{ run, results }`. Used by `useRunSnapshot` for both the just-completed-run inspector view AND history-view chip selection. |
-
-### 7.1 V1 stubs (workflow)
-
-The workflow CRUD routes are not registered in V1 — attempting to
-create a case in a `category='workflow'` suite returns
-`501 Not Implemented` with `code: "WORKFLOW_TESTS_V2"`.
 
 ---
 
@@ -191,7 +178,6 @@ user-authored.
 
 ## 11. Future Roadmap
 
-- **Workflow verification cases**: Stubbed today; will reuse `runner.start` to test full workflows.
 - **Shareable history-view URLs**: Promote UI state to `?run=<id>`.
 - **AI-assisted case generation**: Supervisor tool to bulk-author test cases.
 - **Schedule-driven regression**: Hook suites into the scheduler.

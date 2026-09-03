@@ -34,7 +34,6 @@ export interface VerificationCaseRow {
   name: string;
   mcpServerId?: string | null;
   toolName?: string | null;
-  workflowId?: string | null;
   input: Record<string, unknown>;
   assertions: AssertionSpec[];
   enabled: boolean;

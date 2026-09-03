@@ -12,7 +12,7 @@
  *   - Failure-tolerant: errored/failed/timeout cases do NOT abort
  *   - Suite timeout marks remaining cases as `skipped`
  *   - SSE frames published per case + at start/end
- *   - V1: MCP cases only (workflow cases throw `WORKFLOW_TESTS_V2`)
+ *   - MCP cases only
  */
 
 import "server-only";
@@ -152,10 +152,6 @@ export async function startSuiteRun(
 ): Promise<StartSuiteRunResult> {
   const suite = await storage.getSuiteById(input.suiteId);
   if (!suite) throw new Error(`verification suite not found: ${input.suiteId}`);
-  if (suite.category !== "mcp") {
-    // V1 stops here. V2 will branch into a workflow runner.
-    throw new Error("WORKFLOW_TESTS_V2");
-  }
 
   const cases = await storage.listEnabledCasesForRun(input.suiteId);
   const run = await storage.createRun({

@@ -2,9 +2,7 @@
 
 import { create } from "zustand";
 
-import type { VerificationSuiteCategory } from "@/lib/verification/types";
-
-export type VerificationCategory = VerificationSuiteCategory;
+export type VerificationCategory = "mcp";
 export type VerificationVisibility = "private" | "public";
 
 export interface VerificationSuiteRow {
@@ -41,7 +39,6 @@ export interface VerificationCaseRow {
   name: string;
   mcpServerId: string | null;
   toolName: string | null;
-  workflowId: string | null;
   input: Record<string, unknown>;
   assertions: unknown;
   enabled: boolean;
@@ -51,8 +48,8 @@ export interface VerificationCaseRow {
 
 interface VerificationState {
   category: VerificationCategory;
-  items: Record<VerificationCategory, VerificationSuiteRow[]>;
-  loaded: Record<VerificationCategory, boolean>;
+  items: { mcp: VerificationSuiteRow[] };
+  loaded: { mcp: boolean };
   loading: boolean;
   error: string | null;
 
@@ -67,9 +64,8 @@ interface VerificationState {
 
 const EMPTY_PER_CATEGORY = {
   mcp: [] as VerificationSuiteRow[],
-  workflow: [] as VerificationSuiteRow[],
 };
-const NEVER_LOADED = { mcp: false, workflow: false };
+const NEVER_LOADED = { mcp: false };
 
 export const useVerificationStore = create<VerificationState>()((set) => ({
   category: "mcp",
@@ -100,7 +96,6 @@ export const useVerificationStore = create<VerificationState>()((set) => ({
     set((s) => ({
       items: {
         mcp: s.items.mcp.filter((it) => it.id !== id),
-        workflow: s.items.workflow.filter((it) => it.id !== id),
       },
     })),
   bumpCaseCount: (suiteId, delta) =>
@@ -122,7 +117,6 @@ export const useVerificationStore = create<VerificationState>()((set) => ({
       return {
         items: {
           mcp: bumpIn(s.items.mcp),
-          workflow: bumpIn(s.items.workflow),
         },
       };
     }),
@@ -131,7 +125,7 @@ export const useVerificationStore = create<VerificationState>()((set) => ({
 export interface CreateSuiteInput {
   name: string;
   description?: string | null;
-  category: VerificationCategory;
+  category?: VerificationCategory;
   mcpServerId?: string | null;
   visibility?: VerificationVisibility;
   timeoutSec?: number;
@@ -153,18 +147,13 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 export const verificationActions = {
-  async refresh(category?: VerificationCategory): Promise<void> {
-    const cat = category ?? useVerificationStore.getState().category;
+  async refresh(_category?: VerificationCategory): Promise<void> {
     useVerificationStore.getState().setLoading(true);
     try {
-      if (cat === "mcp") {
-        const res = await fetch(`/api/verification-servers`);
-        if (!res.ok) throw new Error(await readErrorMessage(res));
-        const items = (await res.json()) as VerificationServerRow[];
-        useVerificationStore.getState().setItemsFor("mcp", items as unknown as VerificationSuiteRow[]);
-      } else {
-        useVerificationStore.getState().setItemsFor("workflow", []);
-      }
+      const res = await fetch(`/api/verification-servers`);
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const items = (await res.json()) as VerificationServerRow[];
+      useVerificationStore.getState().setItemsFor("mcp", items as unknown as VerificationSuiteRow[]);
     } catch (err) {
       useVerificationStore
         .getState()

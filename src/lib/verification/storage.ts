@@ -119,7 +119,6 @@ export interface VerificationCaseRunItem {
   updatedAt: Date;
   mcpServerId: string | null;
   toolName: string | null;
-  workflowId: string | null;
 }
 
 /** Enabled cases of a suite, sorted in natural numeric-aware name order. */
@@ -138,7 +137,6 @@ export async function listEnabledCasesForRun(
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
       toolName: VerificationCaseTable.toolName,
-      workflowId: VerificationSuiteTable.workflowId,
     })
     .from(VerificationCaseTable)
     .innerJoin(
@@ -171,7 +169,6 @@ export async function listEnabledCasesForServerRun(
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
       toolName: VerificationCaseTable.toolName,
-      workflowId: VerificationSuiteTable.workflowId,
     })
     .from(VerificationCaseTable)
     .innerJoin(
@@ -321,8 +318,7 @@ export async function writeCaseResult(
       runId: input.runId,
       caseId: input.caseId,
       status: input.outcome.status,
-      // V1: MCP cases only — entity_run_id always null. V2 will set
-      // this from runner.start for workflow cases.
+      // MCP cases only — entity_run_id always null.
       entityRunId: null,
       inputSnapshot: input.inputSnapshot,
       resultPayload: truncatedPayload ?? null,

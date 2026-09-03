@@ -42,14 +42,6 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    if (suite.category === "workflow") {
-      throw new ApiError(
-        "NOT_IMPLEMENTED",
-        501,
-        "Workflow verification cases are coming in a later release.",
-        { code: "WORKFLOW_TESTS_V2" },
-      );
-    }
     if (!suite.mcpServerId || !caseRow.toolName) {
       throw new ApiError(
         "BAD_REQUEST",

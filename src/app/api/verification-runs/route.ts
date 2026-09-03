@@ -56,24 +56,12 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       );
     }
 
-    try {
-      const { runId, totalCount } = await startSuiteRun({
-        suiteId: suite.id,
-        ownerId: session.user.id,
-        triggeredBy: "manual",
-      });
-      return NextResponse.json({ runId, totalCount }, { status: 202 });
-    } catch (err) {
-      if (err instanceof Error && err.message === "WORKFLOW_TESTS_V2") {
-        throw new ApiError(
-          "NOT_IMPLEMENTED",
-          501,
-          "Workflow verification suites are coming in a later release.",
-          { code: "WORKFLOW_TESTS_V2" },
-        );
-      }
-      throw err;
-    }
+    const { runId, totalCount } = await startSuiteRun({
+      suiteId: suite.id,
+      ownerId: session.user.id,
+      triggeredBy: "manual",
+    });
+    return NextResponse.json({ runId, totalCount }, { status: 202 });
   } else {
     // Run all suites under this MCP server
     const [server] = await db

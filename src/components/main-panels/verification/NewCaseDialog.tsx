@@ -123,7 +123,7 @@ export function NewCaseDialog({
         if (!cancelled) setLoadingServers(false);
       });
 
-    fetch("/api/verification-suites?category=mcp")
+    fetch("/api/verification-suites")
       .then((res) => (res.ok ? res.json() : []))
       .then((rows: Array<{ id: string; name: string; mcpServerId?: string | null }>) => {
         if (cancelled) return;
