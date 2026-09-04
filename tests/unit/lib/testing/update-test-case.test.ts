@@ -54,6 +54,26 @@ describe("update_test_case tool", () => {
       });
       expect(invalidCaseId.success).toBe(false);
     });
+
+    it("rejects category-inapplicable fields", () => {
+      // verification rejects turns (evaluation-only field)
+      expect(
+        updateTestCaseSchema.safeParse({
+          category: "verification",
+          caseId: 101,
+          turns: ["Hi"],
+        }).success,
+      ).toBe(false);
+
+      // evaluation rejects toolName (verification-only field)
+      expect(
+        updateTestCaseSchema.safeParse({
+          category: "evaluation",
+          caseId: 101,
+          toolName: "my_tool",
+        }).success,
+      ).toBe(false);
+    });
   });
 
   describe("Tool Execution", () => {
@@ -212,7 +232,7 @@ describe("update_test_case tool", () => {
           caseRow: {
             id: 301,
             suiteId: "suite-web-uuid",
-            input: { script: "old", steps: [] },
+            input: { script: "old", steps: "" },
           },
           suite: { id: "suite-web-uuid", visibility: "private", createdBy: "user-123" },
         },
@@ -226,7 +246,7 @@ describe("update_test_case tool", () => {
           enabled: true,
           input: {
             script: "await page.goto('/checkout-v2');",
-            steps: [],
+            steps: "",
           },
           assertions: [],
         },
@@ -240,6 +260,29 @@ describe("update_test_case tool", () => {
 
       expect(result.category).toBe("web-auto");
       expect(result.case.script).toBe("await page.goto('/checkout-v2');");
+    });
+
+    it("handles web-auto unique violation with friendly conflict message", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 301, suiteId: "suite-web-uuid" },
+          suite: { id: "suite-web-uuid", visibility: "private", createdBy: "user-123" },
+        },
+      ]);
+
+      const uniqueError = new Error("duplicate key value violates unique constraint");
+      (uniqueError as unknown as { code: string }).code = "23505";
+      mockReturning.mockRejectedValueOnce(uniqueError);
+
+      await expect(
+        tool.execute!({
+          category: "web-auto",
+          caseId: 301,
+          name: "Duplicate UI Case",
+        }),
+      ).rejects.toThrow(
+        /Failed to update web-auto case #301: a test case named 'Duplicate UI Case' already exists in this suite/,
+      );
     });
   });
 });

@@ -76,12 +76,32 @@ describe("create_test_cases tool", () => {
         ],
       });
       expect(valid.success).toBe(true);
-      if (valid.success) {
+      if (valid.success && valid.data.category === "evaluation") {
         expect(valid.data.cases[0]?.turns).toEqual([
           "Hello, what is your return policy?",
           "Can I return opened software?",
         ]);
       }
+    });
+
+    it("rejects category-inapplicable case fields", () => {
+      // evaluation rejects toolName (verification-only field)
+      expect(
+        createTestCasesSchema.safeParse({
+          category: "evaluation",
+          suiteId: validUuid,
+          cases: [{ name: "Case 1", turns: ["Hi"], toolName: "my_tool" }],
+        }).success,
+      ).toBe(false);
+
+      // web-auto rejects turns (evaluation-only field)
+      expect(
+        createTestCasesSchema.safeParse({
+          category: "web-auto",
+          suiteId: validUuid,
+          cases: [{ name: "Case 1", script: "await page.goto('/');", turns: ["Hi"] }],
+        }).success,
+      ).toBe(false);
     });
   });
 
@@ -257,7 +277,7 @@ describe("create_test_cases tool", () => {
           expect.objectContaining({
             name: "Checkout UI",
             enabled: false,
-            input: { script: "await page.goto('/checkout');", steps: [] },
+            input: { script: "await page.goto('/checkout');", steps: "" },
           }),
         ]),
       );
@@ -292,6 +312,28 @@ describe("create_test_cases tool", () => {
           ],
         }),
       ).rejects.toThrow(/duplicate case name\(s\) \['Existing Case 1'\] already exist/);
+    });
+
+    it("handles web-auto unique violation with friendly conflict message", async () => {
+      mockLimit.mockResolvedValueOnce([
+        { id: testSuiteId, visibility: "private", createdBy: "user-123" },
+      ]);
+
+      const uniqueError = new Error("duplicate key value violates unique constraint");
+      (uniqueError as unknown as { code: string }).code = "23505";
+      mockReturning.mockRejectedValueOnce(uniqueError);
+
+      mockWhere
+        .mockReturnValueOnce({ limit: mockLimit })
+        .mockResolvedValueOnce([{ name: "Existing UI Case" }]);
+
+      await expect(
+        tool.execute!({
+          category: "web-auto",
+          suiteId: testSuiteId,
+          cases: [{ name: "Existing UI Case", script: "await page.goto('/');" }],
+        }),
+      ).rejects.toThrow(/duplicate case name\(s\) \['Existing UI Case'\] already exist/);
     });
   });
 });

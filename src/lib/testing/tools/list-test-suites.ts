@@ -51,7 +51,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
             id: VerificationSuiteTable.id,
             name: VerificationSuiteTable.name,
             description: VerificationSuiteTable.description,
-            serverId: VerificationSuiteTable.mcpServerId,
+            mcpServerId: VerificationSuiteTable.mcpServerId,
             serverName: McpServerTable.name,
             caseCount: sql<number>`(
               select count(*)::int from "verification_case"
@@ -84,7 +84,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
           id: r.id,
           name: r.name,
           description: r.description ?? null,
-          serverId: r.serverId ?? null,
+          mcpServerId: r.mcpServerId ?? null,
           serverName: r.serverName ?? null,
           caseCount: Number(r.caseCount ?? 0),
           enabled: Boolean(r.enabled),

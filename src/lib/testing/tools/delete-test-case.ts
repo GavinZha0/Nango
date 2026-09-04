@@ -4,14 +4,6 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import {
-  VerificationSuiteTable,
-  VerificationCaseTable,
-  EvalSuiteTable,
-  EvalCaseTable,
-  WebAutoSuiteTable,
-  WebAutoCaseTable,
-} from "@/lib/db/schema";
 import { canDeleteResource } from "@/lib/auth/permissions";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
@@ -19,6 +11,7 @@ import {
   type DeleteTestCaseResult,
   type TesterToolContext,
 } from "../types";
+import { CASE_CATEGORY_CONFIG } from "../category-config";
 
 export const deleteTestCaseSchema = z.object({
   category: testCategorySchema.describe(
@@ -41,127 +34,45 @@ export function buildDeleteTestCaseTool(ctx: TesterToolContext): ToolDefinition 
     ].join(" "),
     parameters: deleteTestCaseSchema,
     execute: async ({ category, caseId }): Promise<DeleteTestCaseResult> => {
-      if (category === "verification") {
-        const [existing] = await db
-          .select({
-            caseRow: VerificationCaseTable,
-            suite: VerificationSuiteTable,
-          })
-          .from(VerificationCaseTable)
-          .innerJoin(
-            VerificationSuiteTable,
-            eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id),
-          )
-          .where(eq(VerificationCaseTable.id, caseId))
-          .limit(1);
+      const config = CASE_CATEGORY_CONFIG[category];
 
-        if (!existing) {
-          throw new Error(`Verification case #${caseId} not found.`);
-        }
+      const [existing] = await db
+        .select({
+          caseRow: config.caseTable,
+          suite: config.suiteTable,
+        })
+        .from(config.caseTable)
+        .innerJoin(
+          config.suiteTable,
+          eq(config.caseTable.suiteId, config.suiteTable.id),
+        )
+        .where(eq(config.caseTable.id, caseId))
+        .limit(1);
 
-        const suiteRBAC = {
-          visibility: existing.suite.visibility as "private" | "public",
-          createdBy: existing.suite.createdBy,
-        };
-
-        if (!canDeleteResource(suiteRBAC, ctx)) {
-          throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
-        }
-
-        await db
-          .delete(VerificationCaseTable)
-          .where(eq(VerificationCaseTable.id, caseId));
-
-        return {
-          category,
-          deleted: true,
-          caseId,
-          suiteId: existing.caseRow.suiteId,
-          caseName: existing.caseRow.name,
-        };
+      if (!existing) {
+        throw new Error(`${config.label} case #${caseId} not found.`);
       }
 
-      if (category === "evaluation") {
-        const [existing] = await db
-          .select({
-            caseRow: EvalCaseTable,
-            suite: EvalSuiteTable,
-          })
-          .from(EvalCaseTable)
-          .innerJoin(
-            EvalSuiteTable,
-            eq(EvalCaseTable.suiteId, EvalSuiteTable.id),
-          )
-          .where(eq(EvalCaseTable.id, caseId))
-          .limit(1);
+      const suiteRBAC = {
+        visibility: existing.suite.visibility as "private" | "public",
+        createdBy: existing.suite.createdBy,
+      };
 
-        if (!existing) {
-          throw new Error(`Evaluation case #${caseId} not found.`);
-        }
-
-        const suiteRBAC = {
-          visibility: existing.suite.visibility as "private" | "public",
-          createdBy: existing.suite.createdBy,
-        };
-
-        if (!canDeleteResource(suiteRBAC, ctx)) {
-          throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
-        }
-
-        await db
-          .delete(EvalCaseTable)
-          .where(eq(EvalCaseTable.id, caseId));
-
-        return {
-          category,
-          deleted: true,
-          caseId,
-          suiteId: existing.caseRow.suiteId,
-          caseName: existing.caseRow.name,
-        };
+      if (!canDeleteResource(suiteRBAC, ctx)) {
+        throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
       }
 
-      if (category === "web-auto") {
-        const [existing] = await db
-          .select({
-            caseRow: WebAutoCaseTable,
-            suite: WebAutoSuiteTable,
-          })
-          .from(WebAutoCaseTable)
-          .innerJoin(
-            WebAutoSuiteTable,
-            eq(WebAutoCaseTable.suiteId, WebAutoSuiteTable.id),
-          )
-          .where(eq(WebAutoCaseTable.id, caseId))
-          .limit(1);
+      await db
+        .delete(config.caseTable)
+        .where(eq(config.caseTable.id, caseId));
 
-        if (!existing) {
-          throw new Error(`Web Auto case #${caseId} not found.`);
-        }
-
-        const suiteRBAC = {
-          visibility: existing.suite.visibility as "private" | "public",
-          createdBy: existing.suite.createdBy,
-        };
-
-        if (!canDeleteResource(suiteRBAC, ctx)) {
-          throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
-        }
-
-        await db
-          .delete(WebAutoCaseTable)
-          .where(eq(WebAutoCaseTable.id, caseId));
-
-        return {
-          category,
-          deleted: true,
-          caseId,
-          suiteId: existing.caseRow.suiteId,
-          caseName: existing.caseRow.name,
-        };
-      }
-
-      throw new Error(`Unsupported category: ${category}`);
+      return {
+        category,
+        deleted: true,
+        caseId,
+        suiteId: existing.caseRow.suiteId,
+        caseName: existing.caseRow.name,
+      };
     },
   });
 }

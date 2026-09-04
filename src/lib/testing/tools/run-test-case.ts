@@ -19,6 +19,7 @@ import {
   type RunTestCaseResult,
   type TesterToolContext,
 } from "../types";
+import { formatAssertionResultItem } from "../format-assertion";
 import { runMcpCase } from "@/lib/verification/runner-mcp";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
 import { runWebAutoCase } from "@/lib/web-auto/orchestrator";
@@ -34,36 +35,6 @@ export const runTestCaseSchema = z.object({
     .positive()
     .describe("The integer ID of the test case to execute."),
 });
-
-function formatAssertionResultItem(
-  result: import("@/lib/assertions").AssertionResult,
-  spec?: AssertionSpec,
-): CaseAssertionResultItem {
-  let description = result.type;
-  if (spec) {
-    if (spec.type === "js_expression") description = spec.expression;
-    else if (spec.type === "jsonpath")
-      description = `${spec.path} ${spec.operator ?? "=="} ${JSON.stringify(spec.expected)}`;
-    else if (spec.type === "json_schema") description = "JSON Schema validation";
-    else if (spec.type === "metric")
-      description = `${spec.metric} ${spec.operator} ${spec.threshold}`;
-    else if (spec.type === "tool_call") description = `Tool: ${spec.toolName}`;
-    else if ("expectation" in spec && spec.expectation) description = spec.expectation;
-  } else if (result.message) {
-    description = result.message
-      .replace(/^JS Expression:\s*/i, "")
-      .replace(/^Metric:\s*/i, "");
-  } else if (result.path) {
-    description = result.path;
-  }
-
-  return {
-    type: result.type,
-    description,
-    passed: Boolean(result.ok),
-    message: result.message ?? result.reason ?? result.feedback ?? null,
-  };
-}
 
 export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
   return defineTool({
@@ -119,7 +90,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
 
         const assertionResults: CaseAssertionResultItem[] = (
           outcome.assertionResults ?? []
-        ).map((r, idx) => formatAssertionResultItem(r, specs[idx]));
+        ).map((r) => formatAssertionResultItem(r, specs[r.index]));
 
         const status =
           outcome.status === "errored"
@@ -183,6 +154,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           caseId: caseRow.id,
           targetAgentId: suite.agentId,
           targetCredentialId: suite.credentialId ?? undefined,
+          agentSource: suite.agentSource === "backend" ? "backend" : "builtin",
           evaluatorAgentId: suite.evaluatorAgentId,
           dimensionIds: (suite.dimensionIds ?? []) as string[],
           turns,
@@ -192,7 +164,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
 
         const assertionResults: CaseAssertionResultItem[] = (
           outcome.assertionResults ?? []
-        ).map((r, idx) => formatAssertionResultItem(r, specs[idx]));
+        ).map((r) => formatAssertionResultItem(r, specs[r.index]));
 
         const status =
           outcome.status === "errored"
@@ -248,11 +220,6 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           throw new Error(`Web Auto suite '${suite.id}' has no Playwright MCP server configured.`);
         }
 
-        const rawInput = (caseRow.input ?? {}) as Record<string, unknown>;
-        if (!rawInput.script || typeof rawInput.script !== "string") {
-          throw new Error(`Web Auto case #${caseId} has no script content to execute.`);
-        }
-
         const specs = (caseRow.assertions ?? []) as readonly AssertionSpec[];
         const outcome = await runWebAutoCase({
           caseId: caseRow.id,
@@ -264,7 +231,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
 
         const assertionResults: CaseAssertionResultItem[] = (
           outcome.assertionResults ?? []
-        ).map((r, idx) => formatAssertionResultItem(r, specs[idx]));
+        ).map((r) => formatAssertionResultItem(r, specs[r.index]));
 
         const status =
           outcome.status === "errored"

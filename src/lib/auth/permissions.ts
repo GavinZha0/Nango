@@ -4,8 +4,10 @@
 
 import "server-only";
 
-import { sql, type SQL } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 
+import { db } from "@/lib/db";
+import { UserTable } from "@/lib/db/schema";
 import type { Session } from "@/lib/http/route-handlers";
 import type {
   AnyPgColumn,
@@ -56,6 +58,27 @@ export function isAdmin(session: SessionOrAuth): boolean {
 /** True for both `admin` and `editor`. */
 export function isEditor(session: SessionOrAuth): boolean {
   return resolveAuth(session).isEditor;
+}
+
+/**
+ * DB-backed role resolution for dispatch paths that only carry ownerId
+ * (schedule / evaluator / async programmatic runs) — no session exists.
+ * SECURITY: fail-closed — an unknown user resolves to plain `user` role.
+ */
+export async function resolveAuthContext(
+  userId: string,
+): Promise<{ userId: string; isAdmin: boolean; isEditor: boolean }> {
+  const rows = await db
+    .select({ role: UserTable.role })
+    .from(UserTable)
+    .where(eq(UserTable.id, userId))
+    .limit(1);
+  const role = rows[0]?.role;
+  return {
+    userId,
+    isAdmin: role === "admin",
+    isEditor: role === "admin" || role === "editor",
+  };
 }
 
 // Resource shape (subset of skill / mcp_server / builtin_agent rows)

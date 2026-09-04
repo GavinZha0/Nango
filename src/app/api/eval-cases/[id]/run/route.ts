@@ -53,7 +53,7 @@ export const POST = withEditor<{ id: string }>(
       caseId: caseRow.id,
       targetAgentId: suite.agentId,
       targetCredentialId: suite.credentialId ?? undefined,
-      targetEntityKind: suite.agentSource === "builtin" ? undefined : "agent",
+      agentSource: suite.agentSource === "builtin" ? "builtin" : "backend",
       evaluatorAgentId: suite.evaluatorAgentId ?? null,
       dimensionIds: (suite.dimensionIds ?? []) as string[],
       turns,

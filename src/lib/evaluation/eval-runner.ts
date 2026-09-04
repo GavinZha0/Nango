@@ -49,6 +49,10 @@ export interface RunEvalCaseInput {
   /** Target agent identity. */
   targetAgentId: string;
   targetCredentialId?: string;
+  /** "builtin" = built-in agent; "backend" = backend platform agent (e.g. Agno). */
+  agentSource: "builtin" | "backend";
+  /** Backend entity interface kind (agent | team | workflow). Only used for
+   *  backend targets; defaults to "agent". */
   targetEntityKind?: "agent" | "team" | "workflow";
   /** Evaluator agent (builtin only, optional for deterministic-only suites). */
   evaluatorAgentId?: string | null;
@@ -212,6 +216,13 @@ export async function runEvalCase(
   const evaluatorTimeoutSec = await getConfigNumber(CONFIG_KEY_EVALUATOR_TIMEOUT, DEFAULT_EVAL_EVALUATOR_TIMEOUT_S);
   const evaluatorTimeoutMs = (evaluatorTimeoutSec > 0 ? evaluatorTimeoutSec : DEFAULT_EVAL_EVALUATOR_TIMEOUT_S) * 1000;
 
+  // Backend platform agents (e.g. Agno) expose distinct entity interfaces
+  // (agent | team | workflow); built-in targets are always dispatched as a
+  // plain agent. Only "agent" is exercised today, so backend targets default
+  // to "agent" while keeping the escape hatch for future entity kinds.
+  const targetEntityKind: "agent" | "team" | "workflow" | undefined =
+    input.agentSource === "builtin" ? undefined : (input.targetEntityKind ?? "agent");
+
   // ── ① Dispatch target agent ───────────────────────────────────
 
   const currentThreadId = randomUUID();
@@ -228,7 +239,7 @@ export async function runEvalCase(
         runner.start({
           entityId: input.targetAgentId,
           credentialId: input.targetCredentialId,
-          entityKind: input.targetEntityKind,
+          entityKind: targetEntityKind,
           task: turn.userMessage,
           previousMessages: history,
           threadId: currentThreadId,

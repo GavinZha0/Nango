@@ -5,10 +5,11 @@ import { z } from "zod";
 
 import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
-import { McpServerTable, WebAutoSuiteTable } from "@/lib/db/schema";
+import { WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
-import { and, asc, eq, ilike, sql } from "drizzle-orm";
+import { discoverPublicPlaywrightMcpServer } from "@/lib/web-auto/discovery.server";
+import { asc, eq, sql } from "drizzle-orm";
 
 const ROUTE = "/api/web-auto-suites";
 
@@ -75,30 +76,9 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   // Enforce 2-level nesting: A suite's parent must be a top-level group (parentId is null)
   if (body.parentId) {
     if (!mcpServerId) {
-      // Auto-discover default Playwright MCP server if not explicitly passed
-      const [playwrightServer] = await db
-        .select({ id: McpServerTable.id })
-        .from(McpServerTable)
-        .where(
-          and(
-            eq(McpServerTable.enabled, true),
-            ilike(McpServerTable.name, "%playwright%"),
-          ),
-        )
-        .limit(1);
-
-      if (playwrightServer) {
-        mcpServerId = playwrightServer.id;
-      } else {
-        const [anyServer] = await db
-          .select({ id: McpServerTable.id })
-          .from(McpServerTable)
-          .where(eq(McpServerTable.enabled, true))
-          .limit(1);
-        if (anyServer) {
-          mcpServerId = anyServer.id;
-        }
-      }
+      // Auto-discover the shared PUBLIC Playwright MCP server. When none is
+      // configured, leave mcpServerId null and let the user pick explicitly.
+      mcpServerId = await discoverPublicPlaywrightMcpServer();
     }
 
     const [parentSuite] = await db

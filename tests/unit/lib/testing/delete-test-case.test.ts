@@ -163,5 +163,27 @@ describe("delete_test_case tool", () => {
       expect(result.caseId).toBe(301);
       expect(result.caseName).toBe("Checkout UI");
     });
+
+    it.each([
+      ["verification", "suite-ver-uuid", 401],
+      ["evaluation", "suite-eval-uuid", 402],
+      ["web-auto", "suite-web-uuid", 403],
+    ] as const)("deletes %s case identically (three-branch equivalence)", async (category, suiteId, caseId) => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: caseId, suiteId, name: "Shared Case" },
+          suite: { id: suiteId, visibility: "private", createdBy: "user-123" },
+        },
+      ]);
+
+      const result = (await tool.execute!({ category, caseId })) as DeleteTestCaseResult;
+
+      expect(result.category).toBe(category);
+      expect(result.deleted).toBe(true);
+      expect(result.caseId).toBe(caseId);
+      expect(result.suiteId).toBe(suiteId);
+      expect(result.caseName).toBe("Shared Case");
+      expect(mockDelete).toHaveBeenCalled();
+    });
   });
 });

@@ -43,7 +43,7 @@ export type AgentRole = "supervisor" | "secretary" | "evaluator" | "tester";
 When an agent with `spec.role === "tester"` is dispatched in `src/lib/runner/dispatch/builtin.ts`:
 - All 13 testing lifecycle tools are **automatically constructed and mounted** into the agent's tool execution scope via `buildTesterTools(ctx)`.
 - Standard supervisor / assistant agents receive **zero testing tools**, eliminating tool hallucinations and prompt pollution.
-- `userId` and `isAdmin` are strictly captured via **factory function closure** at construction time (`buildTesterTools({ userId: ctx.userId, isAdmin })`), enforcing multi-tenant RBAC without exposing user IDs to model parameters.
+- `userId`, `isAdmin`, and `isEditor` are strictly captured via **factory function closure** at construction time (`buildTesterTools({ userId: ctx.userId, isAdmin, isEditor })`), enforcing multi-tenant RBAC without exposing user IDs to model parameters.
 - Execution and diagnostic tools (`run_test_case`, `run_test_suite`, `get_test_results`, `list_test_suites`, `get_test_suite_details`, `get_test_case_details`, `get_mcp_tool_schema`, `get_agent_spec`, `get_assertion_schema`) are registered in `APPROVAL_EXEMPT_TOOLS` to guarantee uninterrupted autonomous test pipelines.
 - Tool errors are automatically captured and wrapped into structured failure objects `{ isError: true, message, toolName }` by the kernel middleware pipeline (`defineTool`), maintaining unbroken chat session streams.
 
@@ -75,7 +75,7 @@ export interface TestModulePageContext {
     target?: {
       mcpServerId?: string;
       serverName?: string;
-      targetAgentId?: string;
+      agentId?: string;
       agentName?: string;
     };
   };
@@ -136,6 +136,7 @@ All tools are located under `src/lib/testing/tools/` and wrap execution in `defi
 #### 4. `get_agent_spec` (Agent Behavior Inspection)
 - **Parameters**: `agentId`: UUID (required)
 - **Behavior**: Retrieves system prompt, language model configuration, bound MCP/database/SSH tools, and attached skills for a target built-in agent. Enforces tenant visibility checks. Essential for designing conversational evaluation test cases without guessing agent capabilities.
+- **Security note**: Intentionally returns the **full system prompt** of any agent visible to the caller (including `public` agents) — a deliberate disclosure required for authoring evaluation cases. Treat public agents' system prompts as tenant-readable, and do not store secrets in `builtin_agent.prompt`.
 
 #### 5. `get_assertion_schema` (Universal Assertion Contract Inspection)
 - **Parameters**:
@@ -154,7 +155,7 @@ All tools are located under `src/lib/testing/tools/` and wrap execution in `defi
   - `name`: string (1–120 chars)
   - `description?`: string
   - `mcpServerId?`: string (required for `verification`)
-  - `targetAgentId?`: string (required for `evaluation`)
+  - `agentId?`: string (required for `evaluation`)
 - **Behavior**: Creates a new test suite. For `web-auto`, automatically detects the active Playwright MCP server without requiring user input. Enforces uniqueness on suite names per user.
 
 #### 7. `get_test_case_details`
@@ -172,7 +173,7 @@ All tools are located under `src/lib/testing/tools/` and wrap execution in `defi
     - `turns?`: string[] (evaluation user prompts)
     - `script?`: string (web-auto Playwright code)
     - `steps?`: string (web-auto natural language steps)
-    - `assertions`: Array of assertion specs (`js_expression`, `jsonpath`, `json_schema`, `metric`, `tool_call`, `llm_judge`)
+    - `assertions`: Array of assertion specs. Supported types are category-scoped: `verification` → `jsonpath`, `json_schema`, `js_expression`; `evaluation` → `jsonpath`, `js_expression`, `llm_judge`, `metric`, `tool_call`; `web-auto` → `js_expression`, `jsonpath`, `llm_judge`. Inspect exact contracts via `get_assertion_schema`.
 - **Safety Contract (Write Barrier)**: **All newly created cases are hardcoded to `enabled: false`** upon insertion. Requires explicit human review before activation.
 
 #### 9. `update_test_case`
@@ -272,6 +273,7 @@ tests/unit/
     ├── get-mcp-tool-schema.test.ts
     ├── get-agent-spec.test.ts
     ├── get-assertion-schema.test.ts
+    ├── assertion-validation.test.ts
     ├── create-test-suite.test.ts
     ├── get-test-case-details.test.ts
     ├── create-test-cases.test.ts
@@ -280,7 +282,7 @@ tests/unit/
     ├── run-test-case.test.ts
     ├── run-test-suite.test.ts
     ├── get-test-results.test.ts
-    └── cache-invalidation.test.ts        # 108 unit tests across 15 test files (100% passing)
+    └── cache-invalidation.test.ts        # 120 unit tests across 15 test files (100% passing)
 ```
 
 ---

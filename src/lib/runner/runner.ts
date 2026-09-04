@@ -27,6 +27,7 @@ import {
   isAgentVisibleTo,
   listVisibleAgentIds,
 } from "@/lib/access/agent-visibility";
+import { resolveAuthContext } from "@/lib/auth/permissions";
 import { getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 import { flushLangfuse, withTrace } from "@/lib/observability/langfuse";
@@ -1090,6 +1091,10 @@ class RunnerImpl implements Runner {
       component: "runner",
       programmatic: true,
     });
+    // Programmatic dispatches carry only ownerId — resolve the owner's
+    // role flags so tool-level RBAC (e.g. tester tools) behaves
+    // identically to interactive dispatch. Fail-closed for unknown users.
+    const { isAdmin, isEditor } = await resolveAuthContext(input.ownerId);
     const { agents, borrowed, degradations } = await buildBuiltinAgents(
       [input.entityId],
       programmaticLog,
@@ -1099,7 +1104,14 @@ class RunnerImpl implements Runner {
       // back to the server timezone. Safe re: supervisor side-effects:
       // catalog excludes system-role agents, so the supervisor branch
       // in buildBuiltinAgents never fires on this path.
-      { userId: input.ownerId, mode: input.mode, initiator: input.initiator, context: input.context },
+      {
+        userId: input.ownerId,
+        isAdmin,
+        isEditor,
+        mode: input.mode,
+        initiator: input.initiator,
+        context: input.context,
+      },
     );
     const builtinAgent = agents[input.entityId];
     if (!builtinAgent) {

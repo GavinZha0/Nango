@@ -147,6 +147,7 @@ describe("run_test_suite tool", () => {
           name: "UI Smoke Tests",
           visibility: "private",
           createdBy: "user-123",
+          mcpServerId: "playwright-server-uuid",
         },
       ]);
 
@@ -164,6 +165,27 @@ describe("run_test_suite tool", () => {
       expect(result.runId).toBe("run-web-789");
       expect(result.totalCases).toBe(3);
       expect(mockStartWebAutoSuiteRun).toHaveBeenCalled();
+    });
+
+    it("rejects a web-auto suite run without a Playwright MCP server", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: validSuiteId,
+          name: "UI Smoke Tests",
+          visibility: "private",
+          createdBy: "user-123",
+          mcpServerId: null,
+        },
+      ]);
+
+      await expect(
+        tool.execute!({
+          category: "web-auto",
+          suiteId: validSuiteId,
+        }),
+      ).rejects.toThrow(/has no Playwright MCP server configured/);
+
+      expect(mockStartWebAutoSuiteRun).not.toHaveBeenCalled();
     });
   });
 });

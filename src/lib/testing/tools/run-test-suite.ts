@@ -132,6 +132,7 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
             name: WebAutoSuiteTable.name,
             visibility: WebAutoSuiteTable.visibility,
             createdBy: WebAutoSuiteTable.createdBy,
+            mcpServerId: WebAutoSuiteTable.mcpServerId,
           })
           .from(WebAutoSuiteTable)
           .where(
@@ -149,6 +150,10 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
 
         if (!suite) {
           throw new Error(`Web Auto suite '${suiteId}' not found or access denied.`);
+        }
+
+        if (!suite.mcpServerId) {
+          throw new Error(`Web Auto suite '${suite.id}' has no Playwright MCP server configured.`);
         }
 
         const runResult = await startWebAutoSuiteRun({

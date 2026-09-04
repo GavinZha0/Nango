@@ -3,7 +3,8 @@ import "server-only";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { BuiltinAgentTable, UserTable } from "@/lib/db/schema";
+import { BuiltinAgentTable } from "@/lib/db/schema";
+import { resolveAuthContext } from "@/lib/auth/permissions";
 
 /**
  * Returns false (no throw) for non-existent / disabled / not-owned-
@@ -36,14 +37,7 @@ export async function isAgentVisibleTo(
   if (!row) return false;
 
   // Admin users bypass visibility rules and can view all enabled agents
-  const userRows = await db
-    .select({ role: UserTable.role })
-    .from(UserTable)
-    .where(eq(UserTable.id, userId))
-    .limit(1);
-  const userRole = userRows[0]?.role;
-  const isAdmin = userRole === "admin";
-  const isEditor = userRole === "editor" || isAdmin;
+  const { isAdmin, isEditor } = await resolveAuthContext(userId);
 
   // Tester agents are restricted to editors and admins
   if (row.role === "tester" && !isEditor) {
@@ -63,14 +57,7 @@ export async function isAgentVisibleTo(
  * indexed point lookup already knows.
  */
 export async function listVisibleAgentIds(userId: string): Promise<string[]> {
-  const userRows = await db
-    .select({ role: UserTable.role })
-    .from(UserTable)
-    .where(eq(UserTable.id, userId))
-    .limit(1);
-  const userRole = userRows[0]?.role;
-  const isAdmin = userRole === "admin";
-  const isEditor = userRole === "editor" || isAdmin;
+  const { isAdmin, isEditor } = await resolveAuthContext(userId);
 
   const rows: Array<{ id: string }> = await db
     .select({ id: BuiltinAgentTable.id })

@@ -9,6 +9,7 @@ import {
   toolCallAssertionSchema,
   metricAssertionSchema,
   llmJudgeAssertionSchema,
+  CATEGORY_TYPE_MAPPING,
 } from "@/lib/assertions/types";
 import {
   ASSERTION_TYPES,
@@ -17,15 +18,6 @@ import {
   type GetAssertionSchemaResult,
   type TesterToolContext,
 } from "../types";
-
-const CATEGORY_TYPE_MAPPING: Record<
-  "verification" | "evaluation" | "web-auto",
-  AssertionTypeEnum[]
-> = {
-  verification: ["jsonpath", "json_schema", "js_expression"],
-  evaluation: ["jsonpath", "js_expression", "llm_judge", "metric", "tool_call"],
-  "web-auto": ["js_expression", "jsonpath", "llm_judge"],
-};
 
 function buildSchemaItem(type: AssertionTypeEnum): AssertionSchemaItem {
   switch (type) {
@@ -160,7 +152,9 @@ export function buildGetAssertionSchemaTool(ctx: TesterToolContext): ToolDefinit
         );
       }
 
-      const targetTypes = args.assertionType ? [args.assertionType] : validTypes;
+      const targetTypes: AssertionTypeEnum[] = args.assertionType
+        ? [args.assertionType]
+        : [...validTypes];
       const schemas = targetTypes.map((t) => buildSchemaItem(t));
 
       return {

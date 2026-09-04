@@ -21,7 +21,6 @@ import {
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
   testCategorySchema,
-  type CaseAssertionResultItem,
   type CaseResultDiagnosticItem,
   type GetTestResultsResult,
   type RunSummaryItem,
@@ -29,6 +28,7 @@ import {
   type TesterToolContext,
 } from "../types";
 import type { AssertionResult } from "@/lib/assertions";
+import { formatAssertionResultItem } from "../format-assertion";
 
 export const getTestResultsSchema = z.object({
   category: testCategorySchema.describe(
@@ -58,26 +58,6 @@ export const getTestResultsSchema = z.object({
     .optional()
     .describe("If true, filters case-level results to only include failed or errored cases for rapid root-cause triage."),
 });
-
-function formatAssertionResultItem(
-  r: AssertionResult,
-): CaseAssertionResultItem {
-  let description = r.type;
-  if (r.path) {
-    description = `${r.path} == ${JSON.stringify(r.expected)}`;
-  } else if (r.message) {
-    description = r.message
-      .replace(/^JS Expression:\s*/i, "")
-      .replace(/^Metric:\s*/i, "");
-  }
-
-  return {
-    type: r.type,
-    description,
-    passed: Boolean(r.ok),
-    message: r.message ?? r.reason ?? r.feedback ?? null,
-  };
-}
 
 export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition {
   return defineTool({
@@ -215,7 +195,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   status: cr.result.status,
                   durationMs: cr.result.durationMs,
                   error: rawError?.message ?? null,
-                  assertionResults: rawAssertions.map(formatAssertionResultItem),
+                  assertionResults: rawAssertions.map((r) => formatAssertionResultItem(r)),
                 };
               });
           }
@@ -353,7 +333,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   score: cr.result.score,
                   feedback: cr.result.feedback,
                   error: rawError?.message ?? null,
-                  assertionResults: rawAssertions.map(formatAssertionResultItem),
+                  assertionResults: rawAssertions.map((r) => formatAssertionResultItem(r)),
                 };
               });
           }
@@ -491,7 +471,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   score: cr.result.score,
                   feedback: cr.result.feedback,
                   error: rawError?.message ?? null,
-                  assertionResults: rawAssertions.map(formatAssertionResultItem),
+                  assertionResults: rawAssertions.map((r) => formatAssertionResultItem(r)),
                 };
               });
           }

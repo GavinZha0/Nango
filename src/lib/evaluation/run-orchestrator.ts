@@ -171,8 +171,7 @@ async function runAllCases(
         caseId: c.id,
         targetAgentId: input.targetAgentId,
         targetCredentialId: input.targetCredentialId,
-        targetEntityKind:
-          input.targetAgentSource === "builtin" ? undefined : "agent",
+        agentSource: input.targetAgentSource === "builtin" ? "builtin" : "backend",
         evaluatorAgentId: input.evaluatorAgentId,
         dimensionIds: input.dimensionIds,
         turns: caseTurns,

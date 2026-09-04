@@ -17,15 +17,14 @@ export interface SuiteSummaryItem {
   enabled: boolean;
   visibility: "private" | "public";
   caseCount: number;
-  // Verification specific
-  serverId?: string | null;
+  // MCP server binding (verification + web-auto)
+  mcpServerId?: string | null;
   serverName?: string | null;
   // Evaluation specific
   agentId?: string | null;
   agentSource?: string | null;
   evaluatorAgentId?: string | null;
   // Web Auto specific
-  mcpServerId?: string | null;
   timeoutSec?: number | null;
 }
 
@@ -62,7 +61,7 @@ export interface CaseDetailsItem {
   turns?: unknown[];
   // Web Auto specific
   script?: string | null;
-  steps?: unknown[] | null;
+  steps?: string | null;
 }
 
 export interface TestCaseDetailsResult {

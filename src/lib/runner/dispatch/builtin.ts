@@ -503,6 +503,9 @@ export async function buildBuiltinAgents(
       "get_test_results",
       "run_test_case",
       "run_test_suite",
+      "get_mcp_tool_schema",
+      "get_agent_spec",
+      "get_assertion_schema",
       // Ambient read-only
       "get_current_datetime",
       "list_ssh_hosts",

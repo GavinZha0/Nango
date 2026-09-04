@@ -171,3 +171,33 @@ export interface ErrorEnvelope {
   message: string;
   details?: Record<string, unknown>;
 }
+
+// ── 9. Category Assertion-Type Contract ─────────────────────────────────────
+
+/** Canonical assertion type names (legacy `expectation` variants excluded). */
+export type AssertionTypeName =
+  | "jsonpath"
+  | "json_schema"
+  | "js_expression"
+  | "tool_call"
+  | "metric"
+  | "llm_judge";
+
+export type TestCategoryName = "verification" | "evaluation" | "web-auto";
+
+/**
+ * Single source of truth for the assertion types each test category supports.
+ * Consumed by `get_assertion_schema`, tester tool descriptions, and the tester
+ * system prompt. See docs/test-automation-copilot.md.
+ *
+ * CONTRACT: runtime evaluators may tolerate a superset (e.g. json_schema on
+ * evaluation/web-auto), but only the types listed here are contract-supported.
+ */
+export const CATEGORY_TYPE_MAPPING: Record<
+  TestCategoryName,
+  readonly AssertionTypeName[]
+> = {
+  verification: ["jsonpath", "json_schema", "js_expression"],
+  evaluation: ["jsonpath", "js_expression", "llm_judge", "metric", "tool_call"],
+  "web-auto": ["js_expression", "jsonpath", "llm_judge"],
+};

@@ -161,7 +161,7 @@ export function buildGetTestCaseDetailsTool(ctx: TesterToolContext): ToolDefinit
           name: row.caseRow.name,
           enabled: Boolean(row.caseRow.enabled),
           script: typeof caseInput.script === "string" ? caseInput.script : null,
-          steps: Array.isArray(caseInput.steps) ? caseInput.steps : null,
+          steps: typeof caseInput.steps === "string" ? caseInput.steps : null,
           assertions: Array.isArray(row.caseRow.assertions) ? row.caseRow.assertions : [],
         };
 

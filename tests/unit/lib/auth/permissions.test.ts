@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+  },
+}));
 
 import {
   canViewResource,
@@ -10,9 +16,27 @@ import {
   isAdmin,
   isEditor,
   isValidRole,
+  resolveAuthContext,
   type ResourceWithRBAC,
 } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/http/route-handlers";
+
+const { db } = await import("@/lib/db");
+
+/**
+ * Stub the chained drizzle builder
+ *   db.select(...).from(...).where(...).limit(1)
+ * to resolve with `rows`.
+ */
+function mockUserLookup(rows: Array<{ role: string | null }>): void {
+  vi.mocked(db.select).mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue(rows),
+      }),
+    }),
+  } as unknown as ReturnType<typeof db.select>);
+}
 
 // Helpers
 
@@ -136,5 +160,44 @@ describe("canChangeVisibility", () => {
 
   it("rejects builtin resources", () => {
     expect(canChangeVisibility(resource({ source: "builtin" }), session("admin"))).toBe(false);
+  });
+});
+
+// ── resolveAuthContext (DB-backed, programmatic dispatch) ───────────
+
+describe("resolveAuthContext", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ["admin", true, true],
+    ["editor", false, true],
+    ["user", false, false],
+  ])("maps role '%s' to isAdmin=%s / isEditor=%s", async (role, isAdmin, isEditor) => {
+    mockUserLookup([{ role }]);
+    await expect(resolveAuthContext("user-1")).resolves.toEqual({
+      userId: "user-1",
+      isAdmin,
+      isEditor,
+    });
+  });
+
+  it("fails closed for an unknown user (no role row)", async () => {
+    mockUserLookup([]);
+    await expect(resolveAuthContext("ghost")).resolves.toEqual({
+      userId: "ghost",
+      isAdmin: false,
+      isEditor: false,
+    });
+  });
+
+  it("fails closed for a null role", async () => {
+    mockUserLookup([{ role: null }]);
+    await expect(resolveAuthContext("user-1")).resolves.toEqual({
+      userId: "user-1",
+      isAdmin: false,
+      isEditor: false,
+    });
   });
 });

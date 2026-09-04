@@ -25,6 +25,10 @@ vi.mock("@/lib/access/agent-visibility", () => ({
   isAgentVisibleTo: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock("@/lib/web-auto/discovery.server", () => ({
+  discoverPublicPlaywrightMcpServer: vi.fn(),
+}));
+
 describe("create_test_suite tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -40,15 +44,19 @@ describe("create_test_suite tool", () => {
   });
 
   describe("Schema Validation", () => {
+    const validUuid = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
+
     it("requires category and non-empty name", () => {
       const valid = createTestSuiteSchema.safeParse({
         category: "verification",
         name: "My Suite",
+        mcpServerId: validUuid,
       });
       expect(valid.success).toBe(true);
 
       const missingName = createTestSuiteSchema.safeParse({
         category: "verification",
+        mcpServerId: validUuid,
       });
       expect(missingName.success).toBe(false);
 
@@ -56,6 +64,38 @@ describe("create_test_suite tool", () => {
         name: "My Suite",
       });
       expect(missingCategory.success).toBe(false);
+    });
+
+    it("rejects category-inapplicable fields (discriminated union)", () => {
+      // verification requires mcpServerId
+      expect(
+        createTestSuiteSchema.safeParse({ category: "verification", name: "My Suite" }).success,
+      ).toBe(false);
+
+      // evaluation requires agentId
+      expect(
+        createTestSuiteSchema.safeParse({ category: "evaluation", name: "My Suite" }).success,
+      ).toBe(false);
+
+      // evaluation rejects mcpServerId (verification/web-auto-only field)
+      expect(
+        createTestSuiteSchema.safeParse({
+          category: "evaluation",
+          name: "My Suite",
+          agentId: "agent-1",
+          mcpServerId: validUuid,
+        }).success,
+      ).toBe(false);
+
+      // verification rejects agentId (evaluation-only field)
+      expect(
+        createTestSuiteSchema.safeParse({
+          category: "verification",
+          name: "My Suite",
+          mcpServerId: validUuid,
+          agentId: "agent-1",
+        }).success,
+      ).toBe(false);
     });
   });
 
@@ -73,20 +113,12 @@ describe("create_test_suite tool", () => {
         nonEditorTool.execute!({
           category: "verification",
           name: "MCP Suite",
-          serverId: "server-uuid-1",
+          mcpServerId: "server-uuid-1",
         }),
       ).rejects.toThrow(/Editor or admin role required/);
     });
 
-    it("creates verification suite requiring serverId", async () => {
-      // Missing serverId throws
-      await expect(
-        tool.execute!({
-          category: "verification",
-          name: "MCP Verification Suite",
-        }),
-      ).rejects.toThrow(/serverId.*required/);
-
+    it("creates verification suite", async () => {
       // Server lookup succeeds
       mockLimit.mockResolvedValueOnce([
         {
@@ -113,12 +145,12 @@ describe("create_test_suite tool", () => {
         category: "verification",
         name: "MCP Verification Suite",
         description: "PR tools suite",
-        serverId: "server-uuid-1",
+        mcpServerId: "server-uuid-1",
       })) as CreateTestSuiteResult;
 
       expect(result.category).toBe("verification");
       expect(result.suite.id).toBe("suite-ver-uuid");
-      expect(result.suite.serverId).toBe("server-uuid-1");
+      expect(result.suite.mcpServerId).toBe("server-uuid-1");
       expect(result.suite.serverName).toBe("github-mcp");
       expect(result.suite.caseCount).toBe(0);
       expect(result.suite.enabled).toBe(true);
@@ -138,20 +170,12 @@ describe("create_test_suite tool", () => {
         tool.execute!({
           category: "verification",
           name: "Hacked Suite",
-          serverId: "server-other",
+          mcpServerId: "server-other",
         }),
       ).rejects.toThrow(/not found or access denied/);
     });
 
-    it("creates evaluation suite requiring agentId", async () => {
-      // Missing agentId throws
-      await expect(
-        tool.execute!({
-          category: "evaluation",
-          name: "Support Agent Benchmark",
-        }),
-      ).rejects.toThrow(/agentId.*required/);
-
+    it("creates evaluation suite", async () => {
       mockReturning.mockResolvedValueOnce([
         {
           id: "suite-eval-uuid",
@@ -191,11 +215,9 @@ describe("create_test_suite tool", () => {
       ).rejects.toThrow(/not found or access denied/);
     });
 
-    it("creates web-auto suite auto-discovering playwright server", async () => {
-      // Auto-discovers Playwright server
-      mockLimit.mockResolvedValueOnce([
-        { id: "playwright-server-uuid" },
-      ]);
+    it("creates web-auto suite auto-discovering the public playwright server", async () => {
+      const { discoverPublicPlaywrightMcpServer } = await import("@/lib/web-auto/discovery.server");
+      vi.mocked(discoverPublicPlaywrightMcpServer).mockResolvedValueOnce("playwright-server-uuid");
 
       mockReturning.mockResolvedValueOnce([
         {
@@ -219,6 +241,70 @@ describe("create_test_suite tool", () => {
       expect(result.suite.mcpServerId).toBe("playwright-server-uuid");
       expect(result.suite.caseCount).toBe(0);
       expect(result.suite.enabled).toBe(true);
+    });
+
+    it("leaves web-auto suite mcpServerId null when no public playwright server exists", async () => {
+      const { discoverPublicPlaywrightMcpServer } = await import("@/lib/web-auto/discovery.server");
+      vi.mocked(discoverPublicPlaywrightMcpServer).mockResolvedValueOnce(null);
+
+      mockReturning.mockResolvedValueOnce([
+        {
+          id: "suite-web-empty-uuid",
+          name: "E2E Checkout Flow",
+          description: null,
+          mcpServerId: null,
+          timeoutSec: 300,
+          enabled: true,
+          visibility: "private",
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "web-auto",
+        name: "E2E Checkout Flow",
+      })) as CreateTestSuiteResult;
+
+      expect(result.suite.mcpServerId).toBeNull();
+    });
+
+    it("binds an explicitly provided private playwright server", async () => {
+      mockLimit.mockResolvedValueOnce([
+        { id: "private-pw-uuid", visibility: "private", createdBy: "user-123" },
+      ]);
+
+      mockReturning.mockResolvedValueOnce([
+        {
+          id: "suite-web-manual-uuid",
+          name: "E2E Checkout Flow",
+          description: null,
+          mcpServerId: "private-pw-uuid",
+          timeoutSec: 300,
+          enabled: true,
+          visibility: "private",
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "web-auto",
+        name: "E2E Checkout Flow",
+        mcpServerId: "private-pw-uuid",
+      })) as CreateTestSuiteResult;
+
+      expect(result.suite.mcpServerId).toBe("private-pw-uuid");
+    });
+
+    it("rejects an explicit mcpServerId that is another user's private server", async () => {
+      mockLimit.mockResolvedValueOnce([
+        { id: "other-pw", visibility: "private", createdBy: "other-user" },
+      ]);
+
+      await expect(
+        tool.execute!({
+          category: "web-auto",
+          name: "Hacked Suite",
+          mcpServerId: "other-pw",
+        }),
+      ).rejects.toThrow(/not found or access denied/);
     });
   });
 });

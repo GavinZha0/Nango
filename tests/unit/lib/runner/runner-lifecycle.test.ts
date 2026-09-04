@@ -44,6 +44,30 @@ vi.mock("@/lib/credentials/lookup", () => ({
   onCredentialCacheInvalidated: vi.fn(),
 }));
 
+const { buildBuiltinAgentsMock } = vi.hoisted(() => ({
+  buildBuiltinAgentsMock: vi.fn(),
+}));
+
+vi.mock("@/lib/runner/dispatch/builtin", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/lib/runner/dispatch/builtin")
+  >();
+  return {
+    ...actual,
+    buildBuiltinAgents: buildBuiltinAgentsMock,
+  };
+});
+
+vi.mock("@/lib/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db")>();
+  return {
+    ...actual,
+    db: {
+      select: vi.fn(),
+    },
+  };
+});
+
 import { runner } from "@/lib/runner";
 import { ApiError } from "@/lib/http/route-handlers";
 import type { childLogger } from "@/lib/observability/logger";
@@ -186,6 +210,90 @@ describe("Runner — Execution Kernel & Lifecycle", () => {
           log: loggerMock,
         }),
       ).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe("buildAgentForProgrammatic — owner role resolution", () => {
+    /** Regression: programmatic dispatches (schedule / evaluator / async)
+     *  previously built tester tools with isEditor/isAdmin undefined, so
+     *  every write tool failed closed even for the run owner. The build
+     *  must hand the dispatcher a full RBAC context resolved from the
+     *  owner's DB role. */
+    async function mockOwnerRole(role: string | null): Promise<void> {
+      const { db } = await import("@/lib/db");
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ role }]),
+          }),
+        }),
+      } as unknown as ReturnType<typeof db.select>);
+    }
+
+    function programmaticInput() {
+      return {
+        entityId: "11111111-1111-1111-1111-111111111111",
+        ownerId: "user-1",
+        task: "run tests",
+        mode: "sync",
+        initiator: "schedule",
+      } as unknown as Parameters<typeof runner.start>[0];
+    }
+
+    function dispatchContext(): Record<string, unknown> {
+      expect(buildBuiltinAgentsMock).toHaveBeenCalledTimes(1);
+      return buildBuiltinAgentsMock.mock.calls[0][2] as Record<string, unknown>;
+    }
+
+    beforeEach(() => {
+      buildBuiltinAgentsMock.mockResolvedValue({
+        agents: {},
+        borrowed: [],
+        degradations: new Map(),
+        supervisorRunHolders: new Map(),
+      });
+    });
+
+    it("resolves an editor owner into isEditor=true for tool RBAC", async () => {
+      await mockOwnerRole("editor");
+
+      const build = (
+        runner as unknown as {
+          buildAgentForProgrammatic: (i: unknown, k: string) => Promise<unknown>;
+        }
+      ).buildAgentForProgrammatic.bind(runner);
+
+      await expect(build(programmaticInput(), "agent")).rejects.toThrow(
+        /could not be resolved/,
+      );
+
+      expect(dispatchContext()).toMatchObject({
+        userId: "user-1",
+        isAdmin: false,
+        isEditor: true,
+        mode: "sync",
+        initiator: "schedule",
+      });
+    });
+
+    it("resolves an admin owner into isAdmin=true for tool RBAC", async () => {
+      await mockOwnerRole("admin");
+
+      const build = (
+        runner as unknown as {
+          buildAgentForProgrammatic: (i: unknown, k: string) => Promise<unknown>;
+        }
+      ).buildAgentForProgrammatic.bind(runner);
+
+      await expect(build(programmaticInput(), "agent")).rejects.toThrow(
+        /could not be resolved/,
+      );
+
+      expect(dispatchContext()).toMatchObject({
+        userId: "user-1",
+        isAdmin: true,
+        isEditor: true,
+      });
     });
   });
 });

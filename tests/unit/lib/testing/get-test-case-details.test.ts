@@ -145,7 +145,7 @@ describe("get_test_case_details tool", () => {
             enabled: false,
             input: {
               script: "await page.goto('/login');",
-              steps: [{ action: "goto", url: "/login" }],
+              steps: "1. Navigate to /login",
             },
             assertions: [{ type: "js_expression", expression: "page.url.includes('/login')" }],
           },
@@ -165,7 +165,7 @@ describe("get_test_case_details tool", () => {
       expect(result.category).toBe("web-auto");
       expect(result.case.id).toBe(301);
       expect(result.case.script).toBe("await page.goto('/login');");
-      expect(result.case.steps).toEqual([{ action: "goto", url: "/login" }]);
+      expect(result.case.steps).toEqual("1. Navigate to /login");
       expect(result.case.assertions).toHaveLength(1);
     });
   });

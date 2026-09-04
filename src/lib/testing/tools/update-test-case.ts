@@ -16,23 +16,18 @@ import { canEditResource } from "@/lib/auth/permissions";
 import { isUniqueViolation } from "@/lib/http/validation";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
-  testCategorySchema,
   type CaseDetailsItem,
   type TesterToolContext,
   type UpdateTestCaseResult,
 } from "../types";
 import { normalizeAndValidateAssertions } from "../assertion-validation";
 
-export const updateTestCaseSchema = z.object({
-  category: testCategorySchema.describe(
-    "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
-  ),
+const updateCommonFields = {
   caseId: z
     .number()
     .int()
     .positive()
     .describe("The integer ID of the test case to update."),
-
   name: z
     .string()
     .trim()
@@ -40,45 +35,64 @@ export const updateTestCaseSchema = z.object({
     .max(120)
     .optional()
     .describe("Optional new descriptive name for the test case."),
-
   enabled: z
     .boolean()
     .optional()
     .describe("Optional toggle to enable or disable the case (e.g. true to activate after review)."),
-
-  // Verification specific
-  toolName: z
-    .string()
-    .trim()
-    .optional()
-    .describe("Optional updated tool name."),
-  input: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe("Optional updated tool arguments payload."),
-
-  // Evaluation specific
-  turns: z
-    .array(z.string().min(1))
-    .optional()
-    .describe("Optional updated multi-turn user prompt texts."),
-
-  // Web Auto specific
-  script: z
-    .string()
-    .optional()
-    .describe("Optional updated Playwright script."),
-  steps: z
-    .array(z.record(z.string(), z.unknown()))
-    .optional()
-    .describe("Optional updated recorder steps list."),
-
-  // Universal assertions
   assertions: z
     .array(z.record(z.string(), z.unknown()))
     .optional()
-    .describe("Optional updated list of assertion specifications (replaces existing assertions)."),
-});
+    .describe(
+      "Optional updated list of assertion specifications (replaces existing assertions). Supported types are category-scoped — inspect with get_assertion_schema.",
+    ),
+};
+
+export const updateTestCaseSchema = z.discriminatedUnion("category", [
+  z.object({
+    category: z.literal("verification"),
+    ...updateCommonFields,
+    toolName: z.string().trim().optional().describe("Optional updated tool name."),
+    input: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe("Optional updated tool arguments payload."),
+  }).strict(),
+  z.object({
+    category: z.literal("evaluation"),
+    ...updateCommonFields,
+    turns: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Optional updated multi-turn user prompt texts."),
+  }).strict(),
+  z.object({
+    category: z.literal("web-auto"),
+    ...updateCommonFields,
+    script: z
+      .string()
+      .optional()
+      .describe("Optional updated Playwright script."),
+    steps: z
+      .string()
+      .optional()
+      .describe("Optional updated natural language test steps (non-executable documentation)."),
+  }).strict(),
+]);
+
+/** Throw a friendly duplicate-name error on a unique violation during an update.
+ *  Shared by all three categories so a branch can't drop conflict handling. */
+function throwUpdateCaseNameConflict(
+  err: unknown,
+  category: string,
+  caseId: number,
+  name: unknown,
+): never {
+  if (!isUniqueViolation(err)) throw err;
+  const nameStr = typeof name === "string" ? name : "";
+  throw new Error(
+    `Failed to update ${category} case #${caseId}: a test case named '${nameStr}' already exists in this suite.`,
+  );
+}
 
 export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition {
   return defineTool({
@@ -89,33 +103,19 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
       "Use this tool to repair broken assertions, adjust input parameters, or activate cases after review.",
     ].join(" "),
     parameters: updateTestCaseSchema,
-    execute: async ({
-      category,
-      caseId,
-      name,
-      enabled,
-      toolName,
-      input,
-      turns,
-      script,
-      steps,
-      assertions,
-    }): Promise<UpdateTestCaseResult> => {
-      const hasAnyField =
-        name !== undefined ||
-        enabled !== undefined ||
-        toolName !== undefined ||
-        input !== undefined ||
-        turns !== undefined ||
-        script !== undefined ||
-        steps !== undefined ||
-        assertions !== undefined;
+    execute: async (params): Promise<UpdateTestCaseResult> => {
+      if (params.category === "verification") {
+        const { category, caseId, name, enabled, toolName, input, assertions } = params;
+        const hasAnyField =
+          name !== undefined ||
+          enabled !== undefined ||
+          toolName !== undefined ||
+          input !== undefined ||
+          assertions !== undefined;
 
-      if (!hasAnyField) {
-        throw new Error("At least one field to update must be provided.");
-      }
-
-      if (category === "verification") {
+        if (!hasAnyField) {
+          throw new Error("At least one field to update must be provided.");
+        }
         const [existing] = await db
           .select({
             caseRow: VerificationCaseTable,
@@ -162,12 +162,7 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
             .returning();
           updated = res[0];
         } catch (err) {
-          if (isUniqueViolation(err)) {
-            throw new Error(
-              `Failed to update verification case #${caseId}: a test case named '${updates.name ?? ""}' already exists in this suite.`,
-            );
-          }
-          throw err;
+          throwUpdateCaseNameConflict(err, "verification", caseId, updates.name);
         }
 
         if (!updated) {
@@ -187,7 +182,14 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         return { category, updated: true, case: caseDetails };
       }
 
-      if (category === "evaluation") {
+      if (params.category === "evaluation") {
+        const { category, caseId, name, enabled, turns, assertions } = params;
+        const hasAnyField =
+          name !== undefined || enabled !== undefined || turns !== undefined || assertions !== undefined;
+
+        if (!hasAnyField) {
+          throw new Error("At least one field to update must be provided.");
+        }
         const [existing] = await db
           .select({
             caseRow: EvalCaseTable,
@@ -237,12 +239,7 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
             .returning();
           updated = res[0];
         } catch (err) {
-          if (isUniqueViolation(err)) {
-            throw new Error(
-              `Failed to update evaluation case #${caseId}: a test case named '${updates.name ?? ""}' already exists in this suite.`,
-            );
-          }
-          throw err;
+          throwUpdateCaseNameConflict(err, "evaluation", caseId, updates.name);
         }
 
         if (!updated) {
@@ -264,7 +261,14 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         return { category, updated: true, case: caseDetails };
       }
 
-      if (category === "web-auto") {
+      if (params.category === "web-auto") {
+        const { category, caseId, name, enabled, script, steps, assertions } = params;
+        const hasAnyField =
+          name !== undefined || enabled !== undefined || script !== undefined || steps !== undefined || assertions !== undefined;
+
+        if (!hasAnyField) {
+          throw new Error("At least one field to update must be provided.");
+        }
         const [existing] = await db
           .select({
             caseRow: WebAutoCaseTable,
@@ -303,15 +307,21 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
           const existingInput = (existing.caseRow.input ?? {}) as Record<string, unknown>;
           updates.input = {
             script: script !== undefined ? script : (existingInput.script ?? ""),
-            steps: steps !== undefined ? steps : (existingInput.steps ?? []),
+            steps: steps !== undefined ? steps : (typeof existingInput.steps === "string" ? existingInput.steps : ""),
           };
         }
 
-        const [updated] = await db
-          .update(WebAutoCaseTable)
-          .set(updates)
-          .where(eq(WebAutoCaseTable.id, caseId))
-          .returning();
+        let updated: typeof WebAutoCaseTable.$inferSelect | undefined;
+        try {
+          const res = await db
+            .update(WebAutoCaseTable)
+            .set(updates)
+            .where(eq(WebAutoCaseTable.id, caseId))
+            .returning();
+          updated = res[0];
+        } catch (err) {
+          throwUpdateCaseNameConflict(err, "web-auto", caseId, updates.name);
+        }
 
         if (!updated) {
           throw new Error(`Failed to update web-auto case #${caseId}.`);
@@ -325,14 +335,14 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
           name: updated.name,
           enabled: Boolean(updated.enabled),
           script: typeof caseInput.script === "string" ? caseInput.script : null,
-          steps: Array.isArray(caseInput.steps) ? caseInput.steps : null,
+          steps: typeof caseInput.steps === "string" ? caseInput.steps : null,
           assertions: Array.isArray(updated.assertions) ? updated.assertions : [],
         };
 
         return { category, updated: true, case: caseDetails };
       }
 
-      throw new Error(`Unsupported category: ${category}`);
+      throw new Error("Unsupported category.");
     },
   });
 }
