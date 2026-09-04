@@ -284,5 +284,43 @@ describe("update_test_case tool", () => {
         /Failed to update web-auto case #301: a test case named 'Duplicate UI Case' already exists in this suite/,
       );
     });
+
+    it("warns (non-blocking) when updating a web-auto case with judge-dependent assertions under a suite with no evaluatorAgentId", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: {
+            id: 301,
+            suiteId: "suite-web-uuid",
+            input: { script: "old", steps: "" },
+          },
+          suite: {
+            id: "suite-web-uuid",
+            visibility: "private",
+            createdBy: "user-123",
+            evaluatorAgentId: null,
+          },
+        },
+      ]);
+
+      mockReturning.mockResolvedValueOnce([
+        {
+          id: 301,
+          suiteId: "suite-web-uuid",
+          name: "Visual check",
+          enabled: true,
+          input: { script: "await page.goto('/');", steps: "" },
+          assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "web-auto",
+        caseId: 301,
+        assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+      })) as UpdateTestCaseResult;
+
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings?.[0]).toContain("no evaluatorAgentId");
+    });
   });
 });

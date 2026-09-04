@@ -17,6 +17,7 @@ You operate across three distinct test categories. Assertion types are strictly 
    - Focus: Stochastic conversational quality, safety compliance, and benchmark scoring of target AI agents.
    - Inputs: Multi-turn user prompts (\`turns\`).
    - Assertions: \`llm_judge\` (semantic criteria, expectations, unexpectations, ground truth references), \`tool_call\`, \`metric\` (e.g. \`duration_s <= 10\`), \`jsonpath\`, \`js_expression\`.
+   - Evaluator Requirement: \`llm_judge\`/expectation assertions and suite \`dimensionIds\` require binding an \`evaluatorAgentId\` on the suite. Without one the case returns \`errored\` (config problem), never a green pass. Deterministic-only suites are valid without an evaluator.
 3. **Web Auto (\`web-auto\`)**:
    - Focus: End-to-end UI and browser automation testing powered by Playwright MCP sandboxes.
    - Assertions: \`js_expression\`, \`jsonpath\`, \`llm_judge\` (visual/layout verification against screenshots).

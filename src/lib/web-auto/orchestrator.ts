@@ -15,7 +15,7 @@ import "server-only";
 import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { recordRunNotification } from "@/lib/runner/notifications";
-import { evaluateAssertions } from "@/lib/assertions";
+import { evaluateAssertions, REASON_EVALUATOR_NOT_CONFIGURED } from "@/lib/assertions";
 import { runWebAutoMcp } from "./runner-mcp";
 import { runWebAutoEvaluation } from "./evaluator";
 import * as storage from "./storage";
@@ -166,10 +166,14 @@ export async function runWebAutoCase(
     results: outcome.deterministicResults,
   };
 
+  const llmRequired = outcome.llmAssertions.length > 0;
+  const evaluatorAgentId = input.suite.evaluatorAgentId;
+  const evaluatorConfigured = evaluatorAgentId !== null;
+
   // Step 3: LLM evaluation (if configured and expectations exist)
   let llmResult: import("./evaluator").WebAutoEvaluationResult | null = null;
 
-  if (input.suite.evaluatorAgentId && outcome.llmAssertions.length > 0) {
+  if (evaluatorAgentId && llmRequired) {
     const expectations = outcome.llmAssertions.map((item) => ({
       expectation: item.spec.expectation,
       unexpectation: item.spec.unexpectation,
@@ -181,7 +185,7 @@ export async function runWebAutoCase(
     if (expectations.length > 0) {
       try {
         const evalResult = await runWebAutoEvaluation({
-          evaluatorAgentId: input.suite.evaluatorAgentId,
+          evaluatorAgentId,
           executionOutput: mcpResult.executionOutput,
           expectations,
           ownerId: input.ownerId,
@@ -217,28 +221,79 @@ export async function runWebAutoCase(
 
   if (outcome.llmAssertions.length > 0) {
     outcome.llmAssertions.forEach((item, i) => {
-      const expRes =
-        llmResult?.expectationResults?.find((r) => r.index === i) ??
-        llmResult?.expectationResults?.[i];
-
-      const itemScore = expRes?.score ?? llmResult?.score ?? undefined;
-      const itemOk = itemScore !== undefined ? itemScore >= 60 : (llmResult ? llmResult.passed : false);
-      const itemReason = expRes?.reason || llmResult?.feedback;
-
-      unifiedAssertionResults.push({
+      const base = {
         index: item.index,
-        type: "llm_judge",
-        ok: itemOk,
-        score: itemScore,
-        reason: itemReason,
-        feedback: itemReason,
+        type: "llm_judge" as const,
         expectation: item.spec.expectation,
         unexpectation: item.spec.unexpectation,
         reference: item.spec.reference,
         referenceImage: item.spec.referenceImage,
+      };
+
+      if (!llmResult) {
+        // Evaluator agent not configured: the LLM judge portion was skipped.
+        // Mark it as not evaluated (never a scored 0 failure) so the UI can
+        // render an amber "not evaluated" row instead of a red failure.
+        unifiedAssertionResults.push({
+          ...base,
+          ok: false,
+          skipped: true,
+          reason: REASON_EVALUATOR_NOT_CONFIGURED,
+        });
+        return;
+      }
+
+      const expRes =
+        llmResult.expectationResults?.find((r) => r.index === i) ??
+        llmResult.expectationResults?.[i];
+
+      const itemScore = expRes?.score ?? llmResult.score ?? undefined;
+      const itemReason = expRes?.reason || llmResult.feedback;
+
+      unifiedAssertionResults.push({
+        ...base,
+        ok: itemScore !== undefined ? itemScore >= 60 : llmResult.passed,
+        score: itemScore,
+        reason: itemReason,
+        feedback: itemReason,
       });
     });
     unifiedAssertionResults.sort((a, b) => a.index - b.index);
+  }
+
+  // ── Status & error classification ─────────────────────────────────────
+  //
+  // When a case requires an evaluator that is not configured, the LLM judge
+  // portion was skipped (rows marked `skipped` above). Deterministic failures
+  // still surface as `failed` — they are real defects and must not be masked
+  // by the configuration error. Otherwise the verdict is incomplete, so we
+  // report `errored` (never `passed`, never a fabricated 0 score).
+  const evaluatorMissing = llmRequired && !evaluatorConfigured;
+  const missingEvaluatorMessage =
+    `${REASON_EVALUATOR_NOT_CONFIGURED} Suite '${input.suiteId}': bind an ` +
+    `evaluatorAgentId (or drop the llm_judge assertions) before running this case.`;
+
+  let status: "passed" | "failed" | "errored";
+  let statusReason: string;
+  let statusError: ErrorEnvelope | null = null;
+
+  if (!deterministicResult.passed) {
+    status = "failed";
+    statusReason = "Deterministic assertions failed";
+  } else if (evaluatorMissing) {
+    status = "errored";
+    statusReason = missingEvaluatorMessage;
+    statusError = {
+      source: "config",
+      message: missingEvaluatorMessage,
+      details: { missing: "evaluatorAgentId", suiteId: input.suiteId },
+    };
+  } else if (llmResult && !llmResult.passed) {
+    status = "failed";
+    statusReason = "LLM evaluation failed";
+  } else {
+    status = "passed";
+    statusReason = "All assertions passed";
   }
 
   const verdict: WebAutoVerdict = {
@@ -255,43 +310,34 @@ export async function runWebAutoCase(
         }
       : undefined,
     overall: {
-      passed: deterministicResult.passed && (llmResult ? llmResult.passed : true),
-      reason: buildOverallReason(deterministicResult.passed, llmResult?.passed),
+      passed: status === "passed",
+      reason: statusReason,
     },
   };
 
-  const overallStatus = verdict.overall.passed ? "passed" : "failed";
-  // Gated by deterministic checks: if deterministic assertions failed, score is 0
-  const finalScore = deterministicResult.passed ? llmResult?.score : 0;
+  // An errored (incomplete) outcome never carries a numeric score: `null` is
+  // the honest signal for "no judge result", while 0 would read as a graded
+  // failure of the target. Deterministic failures keep the existing 0-score
+  // override (they ARE graded failures of the target).
+  const finalScore: number | undefined =
+    status === "errored"
+      ? undefined
+      : deterministicResult.passed
+        ? (llmResult?.score ?? undefined)
+        : 0;
 
   return {
-    status: overallStatus,
+    status,
     executionOutput: mcpResult.executionOutput,
     outputTruncated: false,
     assertionResults: unifiedAssertionResults,
     score: finalScore,
     feedback: llmResult?.feedback,
     verdict,
-    error: null,
+    error: statusError,
     startedAt,
     durationMs: Date.now() - startedAt,
   };
-}
-
-function buildOverallReason(
-  deterministicPassed: boolean,
-  llmPassed?: boolean,
-): string {
-  if (deterministicPassed && (llmPassed === undefined || llmPassed)) {
-    return "All assertions passed";
-  }
-  if (!deterministicPassed) {
-    return "Deterministic assertions failed";
-  }
-  if (llmPassed === false) {
-    return "LLM evaluation failed";
-  }
-  return "Mixed assertion results";
 }
 
 // ─── Suite execution ───────────────────────────────────────────────────

@@ -82,6 +82,9 @@ export interface CreateTestCasesResult {
   suiteId: string;
   createdCount: number;
   cases: CreatedCaseItem[];
+  /** Non-blocking configuration warnings surfaced to the agent (e.g. llm_judge
+   *  assertions created under a suite that binds no evaluator agent). */
+  warnings?: string[];
 }
 
 export interface CreateTestSuiteResult {
@@ -93,6 +96,8 @@ export interface UpdateTestCaseResult {
   category: TestCategory;
   updated: true;
   case: CaseDetailsItem;
+  /** Non-blocking configuration warnings surfaced to the agent. */
+  warnings?: string[];
 }
 
 export interface DeleteTestCaseResult {

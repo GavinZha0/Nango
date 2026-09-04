@@ -1,4 +1,21 @@
-import { assertionSpecSchema } from "@/lib/assertions/types";
+import { assertionSpecSchema, isJudgeDependentType } from "@/lib/assertions/types";
+
+/** Standard warning for suites that hold llm_judge/expectation assertions but
+ *  bind no evaluator agent — such cases return `errored` (never a silent pass). */
+export const WARNING_EVALUATOR_MISSING =
+  "Suite has no evaluatorAgentId: cases with llm_judge/expectation assertions return 'errored' when run. Bind an evaluator agent or keep only deterministic assertions.";
+
+/** True when any assertion requires an LLM evaluator agent (llm_judge,
+ *  expectation, llm_expectation). Used to warn when a suite has no evaluator. */
+export function containsJudgeDependentAssertions(
+  assertions: unknown[] | undefined | null,
+): boolean {
+  if (!Array.isArray(assertions)) return false;
+  return assertions.some((a) => {
+    if (!a || typeof a !== "object" || Array.isArray(a)) return false;
+    return isJudgeDependentType(String((a as Record<string, unknown>).type ?? ""));
+  });
+}
 
 /**
  * Normalizes common model formatting aliases and performs lightweight

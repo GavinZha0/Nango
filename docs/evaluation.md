@@ -38,7 +38,9 @@ Complementary to **Verification** (deterministic assert-on-output).
 
 **Baseline** — baked into the evaluator's system prompt. Three
 sub-criteria with scoring rubrics (0–100). Uses strict-bias policy
-and a min-cap rule.
+and a min-cap rule. Baseline and dimensions are judge-scored: they are
+evaluated only when the suite binds an Evaluator Agent — see §3.3 for
+the evaluator-not-configured contract.
 
 **Dimensions** — 5 builtin specialized dimensions, each with a full
 evaluation prompt (OBJECTIVE → STEPS → RULES → RUBRIC). Designed
@@ -97,6 +99,36 @@ Finalize: aggregate passed/failed/errored counts → eval_run
 
 Recovery: stranded `eval_run` rows (`status='running'`) are swept
 to `errored` on boot via `instrumentation.ts`.
+
+### 3.3 Evaluator-Not-Configured System Contract
+
+A case that depends on an LLM evaluator — any judge-dependent assertion
+(`llm_judge`, `expectation`, `llm_expectation`) **or** a suite that selects
+`dimensionIds` (baseline + dimensions are judge-scored) — cannot produce a
+verdict when the suite binds no Evaluator Agent (`evaluatorAgentId` is null):
+
+- **Dimension-bearing suites** (`dimensionIds.length > 0`): every case
+  short-circuits to `errored` **before dispatching the target agent** — this is
+  a suite-level configuration error.
+- **Judge-only cases** (all assertions judge-dependent): short-circuit to
+  `errored` before dispatch — there is nothing executable without a judge.
+- **Mixed cases** (deterministic + judge assertions): still run. Deterministic
+  assertions are evaluated and can expose real defects. Deterministic failure →
+  `failed` (score `0`, fail-fast); deterministic pass → `errored` (score `null`).
+- **Pure deterministic cases** (no judge assertions, no dimensions): run
+  normally and pass/fail on deterministic checks (score `100` / `0`). This
+  deterministic-only mode does not require an evaluator.
+
+Result rows: judge assertions that were not evaluated are persisted with
+`skipped: true`, `ok: false`, **no numeric `score`**, and an explanatory
+`reason`. They render amber **"Not evaluated"** and are excluded from failed
+tallies. The same `skipped` placeholders fill judge rows on fail-fast,
+evaluator-failure, and config-error paths so `assertion_results` stays aligned
+1:1 with the case's `assertions` array (absolute indices preserved).
+
+**Contract: `errored` ⇒ `score` and `assertionScore` are `null`. A missing
+evaluator is a configuration problem — never a graded `0` ("model is bad") and
+never a silent green pass with unjudged assertions.**
 
 ---
 

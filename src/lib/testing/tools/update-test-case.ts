@@ -20,7 +20,7 @@ import {
   type TesterToolContext,
   type UpdateTestCaseResult,
 } from "../types";
-import { normalizeAndValidateAssertions } from "../assertion-validation";
+import { normalizeAndValidateAssertions, WARNING_EVALUATOR_MISSING, containsJudgeDependentAssertions } from "../assertion-validation";
 
 const updateCommonFields = {
   caseId: z
@@ -258,7 +258,24 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
           assertions: Array.isArray(updated.assertions) ? updated.assertions : [],
         };
 
-        return { category, updated: true, case: caseDetails };
+        // Non-blocking config warning: judge-dependent assertions under a suite
+        // with no evaluator agent return `errored` when run (never a silent pass).
+        const updatedAssertions = Array.isArray(updated.assertions) ? updated.assertions : [];
+        const warnings: string[] = [];
+        if (
+          !existing.suite.evaluatorAgentId &&
+          (containsJudgeDependentAssertions(assertions) ||
+            containsJudgeDependentAssertions(updatedAssertions))
+        ) {
+          warnings.push(WARNING_EVALUATOR_MISSING);
+        }
+
+        return {
+          category,
+          updated: true,
+          case: caseDetails,
+          ...(warnings.length > 0 ? { warnings } : {}),
+        };
       }
 
       if (params.category === "web-auto") {
@@ -339,7 +356,25 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
           assertions: Array.isArray(updated.assertions) ? updated.assertions : [],
         };
 
-        return { category, updated: true, case: caseDetails };
+        // Same config warning as the evaluation branch: judge-dependent
+        // assertions under a suite with no evaluator agent return `errored`
+        // when run (never a silent pass).
+        const updatedAssertions = Array.isArray(updated.assertions) ? updated.assertions : [];
+        const warnings: string[] = [];
+        if (
+          !existing.suite.evaluatorAgentId &&
+          (containsJudgeDependentAssertions(assertions) ||
+            containsJudgeDependentAssertions(updatedAssertions))
+        ) {
+          warnings.push(WARNING_EVALUATOR_MISSING);
+        }
+
+        return {
+          category,
+          updated: true,
+          case: caseDetails,
+          ...(warnings.length > 0 ? { warnings } : {}),
+        };
       }
 
       throw new Error("Unsupported category.");

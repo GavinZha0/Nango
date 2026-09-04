@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Info,
   ChevronRight,
   ChevronDown,
 } from "lucide-react";
@@ -30,6 +31,7 @@ interface AssertionVerdictRowProps {
 export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps): ReactNode {
   const [expanded, setExpanded] = useState<boolean>(false);
   const isErrorType = verdict.type === "error";
+  const isSkipped = verdict.skipped === true;
   const isLlmJudge =
     verdict.type === "llm_judge" ||
     verdict.type === "expectation" ||
@@ -71,6 +73,11 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
           {/* Status icon */}
           {isErrorType ? (
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          ) : isSkipped ? (
+            <Info
+              className="h-3.5 w-3.5 text-amber-500 shrink-0"
+              aria-label="Not evaluated"
+            />
           ) : isOk ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
           ) : (
@@ -82,18 +89,22 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
             <span
               className={cn(
                 "h-2 w-2 rounded-full shrink-0 shadow-xs",
-                isUnexpectation
-                  ? "bg-rose-500"
-                  : isReference
-                    ? "bg-sky-500"
-                    : "bg-emerald-500",
+                isSkipped
+                  ? "bg-amber-500"
+                  : isUnexpectation
+                    ? "bg-rose-500"
+                    : isReference
+                      ? "bg-sky-500"
+                      : "bg-emerald-500",
               )}
               title={
-                isUnexpectation
-                  ? "Unexpectation / Forbidden"
-                  : isReference
-                    ? "Reference Context"
-                    : "Expectation"
+                isSkipped
+                  ? "Not evaluated"
+                  : isUnexpectation
+                    ? "Unexpectation / Forbidden"
+                    : isReference
+                      ? "Reference Context"
+                      : "Expectation"
               }
             />
           )}
@@ -102,6 +113,13 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
           <span className="font-mono text-[11px] truncate text-foreground/90 flex-1">
             {titleText}
           </span>
+
+          {/* Skipped / not-evaluated marker */}
+          {isSkipped && (
+            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+              Not evaluated
+            </span>
+          )}
 
           {/* Inline actual value on failure for deterministic assertions */}
           {!isOk && !isLlmJudge && verdict.actual !== undefined && (

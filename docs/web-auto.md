@@ -185,9 +185,33 @@ Severity: ERRORED > FAILED > PASSED
 | Playwright script runtime error (page crash / syntax) | `failed` | Tool-level execution failure (`isError: true`) |
 | Deterministic assertion mismatch | `failed` | Test condition failed |
 | LLM expectation score `< 60` | `failed` | Visual / semantic criteria failed |
+| LLM expectation(s) present but suite binds no Evaluator Agent | `errored` | Configuration error (`error.source = "config"`) — LLM judge half not evaluated |
 | Script succeeded & all assertions passed | `passed` | Test passed |
 
----
+### 6.1 Evaluator-Not-Configured Contract
+
+When a case contains judge-dependent assertions (`llm_judge`, `expectation`,
+`llm_expectation`) but its suite does not bind an Evaluator Agent
+(`evaluatorAgentId` is null):
+
+- The Playwright script and deterministic assertions **still execute** — an
+  existing script is executable work, so script runtime errors surface as real
+  `failed` defects and are never masked by the configuration problem.
+- Each judge-dependent assertion is stored with `skipped: true`, `ok: false`,
+  **no numeric `score`**, and the shared reason `"Evaluator agent is not
+  configured; the LLM judge portion of this case was not evaluated."` The UI
+  renders these rows amber **"Not evaluated"** and excludes them from failed
+  tallies / the failed-only filter.
+- Final status: deterministic failure → `failed` (score `0`); deterministic
+  pass → `errored` (score `null`, `error.source = "config"` with
+  `details.missing = "evaluatorAgentId"`).
+- A case with **no script and only** judge-dependent assertions short-circuits
+  to `errored` before execution.
+
+**Contract: an `errored` outcome never carries a numeric score (`null`), and
+skipped judge rows never carry a score.** A missing evaluator is a
+configuration problem — it must never surface as a graded `0` ("the target is
+bad") or as a green pass with silently dropped judge rows.
 
 ## 7. Pending Features & Future Roadmap
 

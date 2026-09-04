@@ -25,6 +25,14 @@ import type { EntityRunEventEntity } from "@/lib/db/schema";
 
 import type { AssertionSpec } from "@/lib/assertions";
 import {
+  isJudgeDependentType,
+  REASON_DIMENSIONS_REQUIRE_EVALUATOR,
+  REASON_EVALUATOR_NOT_CONFIGURED,
+  REASON_SKIPPED_DETERMINISTIC_GATE,
+  type AssertionResult,
+  type LlmJudgeAssertion,
+} from "@/lib/assertions";
+import {
   runDeterministicChecks,
   type DeterministicCheckInput,
 } from "./deterministic-checks";
@@ -202,6 +210,108 @@ async function withStepTimeout<T>(
   }
 }
 
+const REASON_EVALUATOR_FAILED =
+  "Evaluator failed to return scores after retries; LLM judge assertions were not evaluated.";
+
+/**
+ * Append `skipped` placeholder rows for LLM judge assertions that could not be
+ * evaluated, preserving absolute indices so stored `assertionResults` always
+ * stays aligned 1:1 with the case's `assertions` array. Skipped rows carry no
+ * score — they mean "not evaluated", never "judged as 0".
+ */
+function withSkippedJudgeRows(
+  evaluatedRows: readonly AssertionResult[],
+  llmAssertions: ReadonlyArray<{ index: number; spec: LlmJudgeAssertion }>,
+  reason: string,
+): AssertionResult[] {
+  const rows: AssertionResult[] = [...evaluatedRows];
+  for (const { index, spec } of llmAssertions) {
+    rows.push({
+      index,
+      type: "llm_judge",
+      ok: false,
+      skipped: true,
+      reason,
+      expectation: spec.expectation,
+      unexpectation: spec.unexpectation,
+      reference: spec.reference,
+      dimensionId: spec.dimensionId,
+    });
+  }
+  rows.sort((a, b) => a.index - b.index);
+  return rows;
+}
+
+/** Scan raw specs (before the engine ran) for judge-dependent items — used to
+ *  short-circuit cases that have nothing executable without an evaluator. */
+function judgeAssertionsFromSpecs(
+  assertions: readonly AssertionSpec[],
+): Array<{ index: number; spec: LlmJudgeAssertion }> {
+  const out: Array<{ index: number; spec: LlmJudgeAssertion }> = [];
+  for (let i = 0; i < assertions.length; i += 1) {
+    const a = assertions[i];
+    if (isJudgeDependentType(a.type)) {
+      out.push({ index: i, spec: a as LlmJudgeAssertion });
+    }
+  }
+  return out;
+}
+
+/**
+ * Terminal `errored` outcome for a configuration problem (missing evaluator).
+ * Score stays null — a missing judge is not a graded 0. Persists when part of
+ * a suite run. `extraRows` are already-evaluated deterministic results (kept
+ * for diagnostics); judge rows are appended as `skipped` so stored rows stay
+ * aligned 1:1 with the assertions array.
+ */
+async function configErrorOutcome(
+  input: RunEvalCaseInput,
+  startMs: number,
+  message: string,
+  extraRows: readonly AssertionResult[] = [],
+  skippedJudgeRows?: Array<{ index: number; spec: LlmJudgeAssertion }>,
+): Promise<RunEvalCaseResult> {
+  const assertionResults = withSkippedJudgeRows(
+    extraRows,
+    skippedJudgeRows ?? [],
+    message,
+  );
+  const error = {
+    source: "config",
+    message,
+    details: { missing: "evaluatorAgentId", caseId: input.caseId },
+  };
+
+  if (input.runId) {
+    await storage.writeCaseResult({
+      runId: input.runId,
+      caseId: input.caseId,
+      status: "errored",
+      score: null,
+      dimensionScores: {},
+      assertionScore: null,
+      assertionResults,
+      feedback: message,
+      threadId: null,
+      evaluatorThreadId: null,
+      durationMs: Date.now() - startMs,
+      outputTokens: null,
+      toolCallCount: null,
+      error,
+    });
+  }
+
+  return {
+    status: "errored",
+    score: null,
+    dimensionScores: {},
+    assertionResults,
+    feedback: message,
+    error: message,
+    durationMs: Date.now() - startMs,
+  };
+}
+
 // ─── Main ───────────────────────────────────────────────────────────
 
 export async function runEvalCase(
@@ -222,6 +332,23 @@ export async function runEvalCase(
   // to "agent" while keeping the escape hatch for future entity kinds.
   const targetEntityKind: "agent" | "team" | "workflow" | undefined =
     input.agentSource === "builtin" ? undefined : (input.targetEntityKind ?? "agent");
+
+  // ── Pre-flight: evaluator-dependent work without an evaluator ─────────
+  // A dimension-bearing suite, or a case whose assertions are ALL judge
+  // dependent, cannot produce any verdict without an evaluator agent. Error out
+  // before dispatching the target (which would only burn model calls). Mixed
+  // cases DO run — deterministic assertions can still expose real defects — and
+  // are resolved after the deterministic checks below.
+  if (!input.evaluatorAgentId) {
+    if ((input.dimensionIds ?? []).length > 0) {
+      return configErrorOutcome(input, startMs, REASON_DIMENSIONS_REQUIRE_EVALUATOR);
+    }
+    const specs = input.assertions ?? [];
+    const judgeSpecs = judgeAssertionsFromSpecs(specs);
+    if (judgeSpecs.length > 0 && judgeSpecs.length === specs.length) {
+      return configErrorOutcome(input, startMs, REASON_EVALUATOR_NOT_CONFIGURED, [], judgeSpecs);
+    }
+  }
 
   // ── ① Dispatch target agent ───────────────────────────────────
 
@@ -305,6 +432,14 @@ export async function runEvalCase(
     const overallScore = 0;
     const assertionScoreFinal = 0;
     const feedback = "Deterministic assertions failed. Evaluator was skipped.";
+    // LLM judge assertions were not evaluated — keep them as `skipped` rows so
+    // the stored assertionResults stays 1:1 with the assertions array instead
+    // of silently dropping the judge half (index holes).
+    const finalAssertionResults = withSkippedJudgeRows(
+      checks.assertionResults,
+      checks.llmAssertions,
+      REASON_SKIPPED_DETERMINISTIC_GATE,
+    );
 
     if (input.runId) {
       await storage.writeCaseResult({
@@ -314,7 +449,7 @@ export async function runEvalCase(
         score: overallScore,
         dimensionScores: {},
         assertionScore: assertionScoreFinal,
-        assertionResults: checks.assertionResults,
+        assertionResults: finalAssertionResults,
         feedback,
         threadId: currentThreadId,
         evaluatorThreadId: null,
@@ -329,7 +464,7 @@ export async function runEvalCase(
       score: overallScore,
       dimensionScores: {},
       assertionScore: assertionScoreFinal,
-      assertionResults: checks.assertionResults,
+      assertionResults: finalAssertionResults,
       feedback,
       durationMs,
       outputTokens,
@@ -337,8 +472,23 @@ export async function runEvalCase(
     };
   }
 
-  // ── No evaluator agent configured: purely deterministic evaluation ──
+  // ── No evaluator agent configured ──────────────────────────────
   if (!input.evaluatorAgentId) {
+    // Mixed case: the deterministic portion passed (a deterministic failure
+    // would have returned in the fail-fast branch above), but the LLM judge
+    // half cannot run — the verdict is incomplete, never a pass.
+    if (checks.llmAssertions.length > 0) {
+      return configErrorOutcome(
+        input,
+        startMs,
+        REASON_EVALUATOR_NOT_CONFIGURED,
+        checks.assertionResults,
+        checks.llmAssertions,
+      );
+    }
+
+    // Purely deterministic evaluation (no judge-dependent assertions and no
+    // suite dimensions — pre-flight rejected those combinations above).
     const assertionScoreFinal = 100;
     const overallScore = 100;
     const feedback =
@@ -445,9 +595,16 @@ export async function runEvalCase(
       message,
     );
     const assertionScoreFinal = checks.totalCount > 0 ? 100 : null;
+    // Keep deterministic results and mark the judge half as not evaluated so
+    // stored rows stay aligned 1:1 with the assertions array (no index holes).
+    const finalAssertionResults = withSkippedJudgeRows(
+      checks.assertionResults,
+      checks.llmAssertions,
+      REASON_EVALUATOR_FAILED,
+    );
     await writeErrorResult(input, startMs, message, currentThreadId, evaluatorResult?.runId, {
       assertionScore: assertionScoreFinal,
-      assertionResults: checks.assertionResults,
+      assertionResults: finalAssertionResults,
       durationMs,
       outputTokens,
       toolCallCount,
@@ -456,7 +613,7 @@ export async function runEvalCase(
       status: "errored",
       score: null,
       assertionScore: assertionScoreFinal,
-      assertionResults: checks.assertionResults,
+      assertionResults: finalAssertionResults,
       error: message,
       threadId: currentThreadId,
       durationMs,

@@ -20,7 +20,7 @@ import {
   type CreateTestCasesResult,
   type TesterToolContext,
 } from "../types";
-import { normalizeAndValidateAssertions } from "../assertion-validation";
+import { normalizeAndValidateAssertions, WARNING_EVALUATOR_MISSING, containsJudgeDependentAssertions } from "../assertion-validation";
 import { CATEGORY_TYPE_MAPPING } from "@/lib/assertions/types";
 
 // Generated from the shared contract so the tool description cannot drift
@@ -239,6 +239,7 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
             id: EvalSuiteTable.id,
             visibility: EvalSuiteTable.visibility,
             createdBy: EvalSuiteTable.createdBy,
+            evaluatorAgentId: EvalSuiteTable.evaluatorAgentId,
           })
           .from(EvalSuiteTable)
           .where(eq(EvalSuiteTable.id, suiteId))
@@ -303,11 +304,19 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
           assertionCount: Array.isArray(row.assertions) ? row.assertions.length : 0,
         }));
 
+        // Non-blocking config warning: judge-dependent assertions under a suite
+        // with no evaluator agent return `errored` when run (never a silent pass).
+        const warnings: string[] = [];
+        if (!suiteRow.evaluatorAgentId && cases.some((c) => containsJudgeDependentAssertions(c.assertions))) {
+          warnings.push(WARNING_EVALUATOR_MISSING);
+        }
+
         return {
           category,
           suiteId,
           createdCount: createdCases.length,
           cases: createdCases,
+          ...(warnings.length > 0 ? { warnings } : {}),
         };
       }
 
@@ -318,6 +327,7 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
             id: WebAutoSuiteTable.id,
             visibility: WebAutoSuiteTable.visibility,
             createdBy: WebAutoSuiteTable.createdBy,
+            evaluatorAgentId: WebAutoSuiteTable.evaluatorAgentId,
           })
           .from(WebAutoSuiteTable)
           .where(eq(WebAutoSuiteTable.id, suiteId))
@@ -380,11 +390,20 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
           assertionCount: Array.isArray(row.assertions) ? row.assertions.length : 0,
         }));
 
+        // Same config warning as the evaluation branch: judge-dependent
+        // assertions under a suite with no evaluator agent return `errored`
+        // when run (never a silent pass).
+        const warnings: string[] = [];
+        if (!suiteRow.evaluatorAgentId && cases.some((c) => containsJudgeDependentAssertions(c.assertions))) {
+          warnings.push(WARNING_EVALUATOR_MISSING);
+        }
+
         return {
           category,
           suiteId,
           createdCount: createdCases.length,
           cases: createdCases,
+          ...(warnings.length > 0 ? { warnings } : {}),
         };
       }
 

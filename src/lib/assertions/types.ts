@@ -164,12 +164,54 @@ export interface AssertionResult {
   referenceImage?: string;
   errorSource?: string;
   details?: unknown;
+  /**
+   * True when this assertion was NOT evaluated (e.g. an llm_judge row whose
+   * suite has no evaluator agent configured, or a judge row gated out by a
+   * deterministic failure). Renders as "not evaluated", never as a scored
+   * failure.
+   * CONTRACT: only ever serialize `true`. Never write `skipped: false` for a
+   * normal row — `undefined` keys drop out of jsonb on write, and a
+   * `false` key injected on the client would break isDeepEqual dirty checks.
+   */
+  skipped?: boolean;
 }
 
 export interface ErrorEnvelope {
   source: string;
   message: string;
   details?: Record<string, unknown>;
+}
+
+/**
+ * Standard reason attached to skipped llm_judge rows and to the error envelope
+ * when a case requires LLM evaluation but its suite binds no evaluator agent.
+ * Shared across Evaluation & Web Auto so both modules describe the condition
+ * identically (config problem — never a 0-score "model was bad" signal).
+ */
+export const REASON_EVALUATOR_NOT_CONFIGURED =
+  "Evaluator agent is not configured; the LLM judge portion of this case was not evaluated.";
+
+/** Reason on llm_judge rows gated out by a deterministic assertion failure. */
+export const REASON_SKIPPED_DETERMINISTIC_GATE =
+  "Skipped: deterministic assertion(s) failed before this item was evaluated.";
+
+/** Error message when an eval suite selects dimensions but binds no evaluator. */
+export const REASON_DIMENSIONS_REQUIRE_EVALUATOR =
+  "Suite dimensions require an evaluator agent; no evaluatorAgentId is configured.";
+
+/**
+ * Assertion types evaluated by an LLM evaluator agent rather than by code.
+ * Single source of truth for the "judge-dependent" type set.
+ */
+export type JudgeDependentType = "llm_judge" | "expectation" | "llm_expectation";
+
+/**
+ * True for assertion types that are evaluated by an LLM evaluator agent rather
+ * than by code: `llm_judge` plus the legacy `expectation` / `llm_expectation`
+ * aliases. Shared so every module classifies "judge-dependent" identically.
+ */
+export function isJudgeDependentType(type: string): type is JudgeDependentType {
+  return type === "llm_judge" || type === "expectation" || type === "llm_expectation";
 }
 
 // ── 9. Category Assertion-Type Contract ─────────────────────────────────────

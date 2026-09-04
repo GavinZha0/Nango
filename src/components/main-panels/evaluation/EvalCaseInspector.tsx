@@ -19,6 +19,7 @@ import {
   ChevronDown,
   Check,
   X,
+  Info,
   MessageSquare,
   Copy,
   Terminal,
@@ -906,16 +907,18 @@ function EvaluationPanel({
     return Math.round((passed / deterministicResults.length) * 100);
   }, [deterministicResults]);
 
-  // LLM Judge score
+  // LLM Judge score. Skipped ("not evaluated") rows never contribute a score —
+  // when every judge row was skipped, the section shows a dash instead of 0.
   const llmJudgeScore = useMemo(() => {
-    if (llmJudgeResults.length === 0) return null;
-    const scoredItems = llmJudgeResults.filter((r) => typeof r.score === "number");
+    const evaluated = llmJudgeResults.filter((r) => r.skipped !== true);
+    if (evaluated.length === 0) return null;
+    const scoredItems = evaluated.filter((r) => typeof r.score === "number");
     if (scoredItems.length > 0) {
       const sum = scoredItems.reduce((acc, curr) => acc + (curr.score ?? 0), 0);
       return Math.round(sum / scoredItems.length);
     }
-    const passedCount = llmJudgeResults.filter((r) => r.ok).length;
-    return Math.round((passedCount / llmJudgeResults.length) * 100);
+    const passedCount = evaluated.filter((r) => r.ok).length;
+    return Math.round((passedCount / evaluated.length) * 100);
   }, [llmJudgeResults]);
 
   // Level badge for the header.
@@ -1086,6 +1089,7 @@ function EvaluationPanel({
                     <ul className="space-y-1">
                       {llmJudgeResults.map((item, i) => {
                         const isOk = Boolean(item.ok);
+                        const isSkipped = item.skipped === true;
                         const isExpanded = expandedLlmIndices.has(i);
                         const targetText =
                           item.expectation ||
@@ -1104,15 +1108,25 @@ function EvaluationPanel({
                               onClick={() => toggleLlmItem(i)}
                               className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-muted/40 group"
                             >
-                              {/* Status icon: ✓ (Green) or ✗ (Red) */}
+                              {/* Status icon: ✓ (Green), amber Info (not evaluated), or ✗ (Red) */}
                               {isOk ? (
                                 <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              ) : isSkipped ? (
+                                <Info
+                                  className="h-3.5 w-3.5 text-amber-500 shrink-0"
+                                  aria-label="Not evaluated"
+                                />
                               ) : (
                                 <X className="h-3.5 w-3.5 text-rose-500 shrink-0" />
                               )}
 
                               {/* Three-color ball dot */}
-                              {isUnexpectation ? (
+                              {isSkipped ? (
+                                <span
+                                  className="h-2 w-2 rounded-full bg-amber-500 shrink-0 shadow-xs"
+                                  title="Not evaluated"
+                                />
+                              ) : isUnexpectation ? (
                                 <span
                                   className="h-2 w-2 rounded-full bg-rose-500 shrink-0 shadow-xs"
                                   title="Unexpectation / Forbidden"
@@ -1133,6 +1147,13 @@ function EvaluationPanel({
                               <span className="truncate flex-1 text-foreground/90 font-mono text-[11px]">
                                 {targetText}
                               </span>
+
+                              {/* Skipped / not-evaluated chip */}
+                              {isSkipped && (
+                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                  Not evaluated
+                                </span>
+                              )}
 
                               {/* Small score badge if present */}
                               {item.score !== undefined && item.score !== null && (

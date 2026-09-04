@@ -54,12 +54,16 @@ export function AssertionVerdictList({
     });
   }
 
+  // Skipped rows are "not evaluated", not failures — exclude them from the
+  // failed tally and the failed-only filter so amber rows never masquerade as
+  // target defects.
+  const skippedCount = list.filter((r) => r.skipped === true).length;
   const filtered = filterFailedOnly
-    ? list.filter((r) => !r.ok)
+    ? list.filter((r) => !r.ok && r.skipped !== true)
     : list;
 
   const passedCount = list.filter((r) => r.ok).length;
-  const failedCount = list.length - passedCount;
+  const failedCount = list.length - passedCount - skippedCount;
   const hasContent = list.length > 0;
 
   return (
@@ -73,6 +77,11 @@ export function AssertionVerdictList({
           {list.length > 0 && (
             <span className="text-[10px] text-muted-foreground font-mono">
               ({list.length})
+            </span>
+          )}
+          {skippedCount > 0 && (
+            <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400">
+              · {skippedCount} skipped
             </span>
           )}
         </div>

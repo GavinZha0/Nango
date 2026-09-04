@@ -335,5 +335,71 @@ describe("create_test_cases tool", () => {
         }),
       ).rejects.toThrow(/duplicate case name\(s\) \['Existing UI Case'\] already exist/);
     });
+
+    it("warns (non-blocking) when creating llm_judge cases under an evaluation suite with no evaluatorAgentId", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: testSuiteId,
+          visibility: "private",
+          createdBy: "user-123",
+          evaluatorAgentId: null,
+        },
+      ]);
+      mockReturning.mockResolvedValueOnce([
+        {
+          id: 1,
+          name: "Judge case",
+          assertions: [{ type: "llm_judge", expectation: "clear answer" }],
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "evaluation",
+        suiteId: testSuiteId,
+        cases: [
+          {
+            name: "Judge case",
+            turns: ["hello"],
+            assertions: [{ type: "llm_judge", expectation: "clear answer" }],
+          },
+        ],
+      })) as CreateTestCasesResult;
+
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings?.[0]).toContain("no evaluatorAgentId");
+    });
+
+    it("warns (non-blocking) when creating llm_judge cases under a web-auto suite with no evaluatorAgentId", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: testSuiteId,
+          visibility: "private",
+          createdBy: "user-123",
+          evaluatorAgentId: null,
+        },
+      ]);
+      mockReturning.mockResolvedValueOnce([
+        {
+          id: 2,
+          name: "Visual check",
+          assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "web-auto",
+        suiteId: testSuiteId,
+        cases: [
+          {
+            name: "Visual check",
+            script: "await page.goto('/');",
+            assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+          },
+        ],
+      })) as CreateTestCasesResult;
+
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings?.[0]).toContain("no evaluatorAgentId");
+    });
   });
 });
