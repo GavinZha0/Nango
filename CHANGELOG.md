@@ -5,18 +5,18 @@
 
 ### Features
 
-* new agent role Tester for auto-test ([a7a4b47](https://github.com/GavinZha0/Nango/commit/a7a4b4785cfb5f2295bc89719e57a94299dca7aa))
-* **testing:** add full-lifecycle tools and system prompt for tester role ([827e749](https://github.com/GavinZha0/Nango/commit/827e749e38d91021cadfabf5a52fa22299dc8291))
-* **testing:** add get_assertion_schema tool for universal assertions ([550f69d](https://github.com/GavinZha0/Nango/commit/550f69dbd0c90b6ac3f600304a959a4702175469))
-* **testing:** add spec inspection tools and real-time mutation refresh ([85fb46e](https://github.com/GavinZha0/Nango/commit/85fb46e02d99513b80d45515592bdafbd2fd08ec))
-* **testing:** harden tester copilot, prompt decoupling, and rbac isolation ([ab26415](https://github.com/GavinZha0/Nango/commit/ab26415a2c2a6777ae09c37ed00c2ba0242f2fdb))
+* new agent role Tester for auto-test ([a7a4b47](https://github.com/GavinZha0/Nango/commit/a7a4b4785cfb5f2295bc89719e57a94299dca7aa)) by @GavinZha0
+* **testing:** add full-lifecycle tools and system prompt for tester role ([827e749](https://github.com/GavinZha0/Nango/commit/827e749e38d91021cadfabf5a52fa22299dc8291)) by @GavinZha0
+* **testing:** add get_assertion_schema tool for universal assertions ([550f69d](https://github.com/GavinZha0/Nango/commit/550f69dbd0c90b6ac3f600304a959a4702175469)) by @GavinZha0
+* **testing:** add spec inspection tools and real-time mutation refresh ([85fb46e](https://github.com/GavinZha0/Nango/commit/85fb46e02d99513b80d45515592bdafbd2fd08ec)) by @GavinZha0
+* **testing:** harden tester copilot, prompt decoupling, and rbac isolation ([ab26415](https://github.com/GavinZha0/Nango/commit/ab26415a2c2a6777ae09c37ed00c2ba0242f2fdb)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **testing:** align tester tools with orchestrators and unify category schemas ([fe05dac](https://github.com/GavinZha0/Nango/commit/fe05dac2705733c47b56dd4ed9d1bab557df9c28))
-* **testing:** fix false-green verdicts, skipped assertions, and 1:1 index alignment ([d284981](https://github.com/GavinZha0/Nango/commit/d284981b61621b4d266f473772eeca85d190d3dd))
-* **testing:** harden tester rbac, fix agent visibility and state sync ([96fc936](https://github.com/GavinZha0/Nango/commit/96fc936140cd32acf3a3ff9417355b59b2107f18))
+* **testing:** align tester tools with orchestrators and unify category schemas ([fe05dac](https://github.com/GavinZha0/Nango/commit/fe05dac2705733c47b56dd4ed9d1bab557df9c28)) by @GavinZha0
+* **testing:** fix false-green verdicts, skipped assertions, and 1:1 index alignment ([d284981](https://github.com/GavinZha0/Nango/commit/d284981b61621b4d266f473772eeca85d190d3dd)) by @GavinZha0
+* **testing:** harden tester rbac, fix agent visibility and state sync ([96fc936](https://github.com/GavinZha0/Nango/commit/96fc936140cd32acf3a3ff9417355b59b2107f18)) by @GavinZha0
 
 ## [0.18.0](https://github.com/GavinZha0/Nango/compare/v0.17.0...v0.18.0) (2026-09-02)
 
