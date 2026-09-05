@@ -37,8 +37,7 @@ export default async function AuthLayout({
               Turn ideas into reality, together.
             </p>
             <p className="mt-3 text-sm leading-relaxed text-white/60">
-              Nango — an AI-first artifact workspace. Generate dashboards,
-              images, and reports through natural conversation. Everything
+              Nango — an AI-first artifact workspace. Everything
               you create is saved, not just a chat message.
             </p>
           </div>

@@ -87,9 +87,10 @@ const CHIP = "rounded-sm px-1 py-0.5 text-[10px] leading-none font-mono";
 
 function ModelChip({ modelId }: { modelId?: string }) {
   if (!modelId) return null;
-  const label = modelId.length > 12 ? `${modelId.slice(0, 11)}…` : modelId;
   return (
-    <span className="font-mono text-[11px] text-foreground/70">{label}</span>
+    <span className="font-mono text-[11px] text-foreground/70 truncate min-w-0 shrink" title={modelId}>
+      {modelId}
+    </span>
   );
 }
 
@@ -231,19 +232,22 @@ function BackendRow({
       )}
     >
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 min-w-0 items-center gap-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
           {onOpenDetail ? (
             <button
               type="button"
-              className="cursor-pointer truncate text-left text-base font-medium hover:underline hover:underline-offset-2"
+              className="cursor-pointer truncate text-left text-base font-medium hover:underline hover:underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
               onClick={onOpenDetail}
               aria-label={`Open ${name} details`}
             >
               {name}
             </button>
           ) : (
-            <span className="truncate text-base font-medium">{name}</span>
+            <span className="truncate text-base font-medium shrink-0 max-w-[calc(100%-2.25rem)]">{name}</span>
           )}
+          {/* Model chip — sits next to the name so it truncates before the
+              name when the panel narrows. */}
+          <ModelChip modelId={modelId} />
           {kind === "team" && (memberCount ?? 0) > 0 && (
             <span
               className={cn(CHIP, "flex shrink-0 items-center gap-0.5 bg-muted text-foreground/70")}
@@ -263,18 +267,18 @@ function BackendRow({
           )}
           {/* Version chip — same visual treatment as the MCP panel's
               `v{version}` label so users see the same metadata in the
-              same place across the two left panels. */}
+              same place across the two left panels. Truncates before
+              the name when the panel narrows. */}
           {version && (
-            <span className="text-xs font-normal text-muted-foreground/60 shrink-0">
+            <span className="text-xs font-normal text-muted-foreground/60 truncate min-w-0 shrink" title={`v${version}`}>
               v{version}
             </span>
           )}
         </div>
-        <ModelChip modelId={modelId} />
         <button
           type="button"
           onClick={() => onToggleDisabled(id, !disabled)}
-          className="cursor-pointer shrink-0 rounded p-0.5 hover:text-foreground"
+          className="ml-auto cursor-pointer shrink-0 rounded p-0.5 hover:text-foreground"
           aria-label={disabled ? "Enable agent" : "Disable agent"}
         >
           {disabled
@@ -386,8 +390,8 @@ function BuiltinRow({
       )}
     >
       <div className="flex items-center gap-2">
-        {/* ── Left cluster: identity (icon + role badge + name) ── */}
-        <div className="flex flex-1 min-w-0 items-center gap-2">
+        {/* ── Left cluster: identity (icon + name + model) ── */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           {/* Agent icon with role overlay badge */}
           <div className="relative shrink-0 flex items-center justify-center">
             <span
@@ -406,24 +410,28 @@ function BuiltinRow({
           </div>
 
           {/* Name — click to edit for owner or public resources, plain span otherwise. */}
+          {/* shrink-0 + max-w protects the name from being squeezed; the ModelChip
+              carries the truncation budget when the panel narrows. */}
           {isOwner || isPublic ? (
             <button
               type="button"
-              className="cursor-pointer truncate text-left text-base font-medium hover:underline hover:underline-offset-2"
+              className="cursor-pointer truncate text-left text-base font-medium hover:underline hover:underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
               onClick={() => onEdit(row)}
               aria-label={`Edit ${row.name}`}
             >
               {row.name}
             </button>
           ) : (
-            <span className="truncate text-base font-medium">{row.name}</span>
+            <span className="truncate text-base font-medium shrink-0 max-w-[calc(100%-2.25rem)]">{row.name}</span>
           )}
+
+          {/* Model chip — sits next to the name (like MCP version) so it truncates
+              before the name when the panel is squeezed. */}
+          <ModelChip modelId={row.model} />
         </div>
 
-        {/* ── Right cluster: model + visibility + enabled toggle ── */}
-        <div className="flex shrink-0 items-center gap-2">
-          <ModelChip modelId={row.model} />
-
+        {/* ── Right cluster: visibility + enabled toggle ── */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           {/* Visibility — public/private. Click toggles for owner or admin. */}
           {canChangeVisibility ? (
             <button

@@ -3,7 +3,7 @@
 
   <h1>Nango</h1>
 
-  <p><strong>面向小团队的 AI 原生协作工作空间 — 专为数据分析而构建。</strong></p>
+  <p><strong>面向小团队的 AI 原生协作工作空间</strong></p>
 
   <p>
     与 <strong>Nango</strong> 聊天，你的 AI 队友。将一次性答案转化为
@@ -118,6 +118,8 @@ docker compose pull && docker compose up -d
 |---|---|---|
 | `nango-app` | Nango Next.js 服务器（启动时自动运行 DB 迁移） | `9300` |
 | `nango-db`  | PostgreSQL 18 | `5433` → `5432` |
+| `sandbox`   | dify-sandbox（隔离的 Python/Node.js 代码执行沙箱） | `8194` |
+| `playwright`| Playwright MCP（浏览器自动化） | `8931` |
 | `sensevoice`| SenseVoice ASR 语音识别服务 | `10085` → `8000` |
 
 然后打开 **http://localhost:9300**。

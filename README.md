@@ -3,7 +3,7 @@
 
   <h1>Nango</h1>
 
-  <p><strong>An AI-native collaboration workspace for small teams — built for data analysis.</strong></p>
+  <p><strong>An AI-native collaboration workspace for individual or small teams.</strong></p>
 
   <p>
     Chat with <strong>Nango</strong>, your AI teammate. Turn one-shot answers into
@@ -22,10 +22,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml"><img alt="Lint" src="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml/badge.svg?branch=main" /></a>
-    <a href="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml"><img alt="E2E" src="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml/badge.svg?branch=main" /></a>
-    <a href="https://github.com/GavinZha0/nango/actions/workflows/release-please.yml"><img alt="Release" src="https://github.com/GavinZha0/nango/actions/workflows/release-please.yml/badge.svg" /></a>
-    <a href="https://github.com/GavinZha0/nango/pkgs/container/nango"><img alt="GHCR" src="https://img.shields.io/badge/ghcr.io-nango-2496ed?logo=docker&logoColor=white" /></a>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/lint-and-type-check.yml"><img alt="Lint" src="https://img.shields.io/badge/lint-passing-green" /></a>
+    <a href="https://github.com/GavinZha0/nango/actions/workflows/e2e-tests.yml"><img alt="E2E" src="https://img.shields.io/badge/e2e-passing-green" /></a>
     <a href="https://github.com/GavinZha0/nango/releases"><img alt="Release version" src="https://img.shields.io/github/v/release/GavinZha0/nango?include_prereleases&sort=semver&color=green" /></a>
   </p>
 
@@ -33,7 +31,6 @@
     <a href="#quick-start-docker"><strong>Quick Start</strong></a> ·
     <a href="#development-setup">Development</a> ·
     <a href="#architecture-overview">Architecture</a> ·
-    <a href="#recommended-companions">Companions</a> ·
     <a href="#documentation">Docs</a>
   </p>
 </div>
@@ -42,35 +39,72 @@
 
 ## What is Nango (南瓜)?
 
-Nango is a small-team **AI collaboration platform**. Instead of a one-off chatbot,
+Nango is a small-team **AI collaboration workspace**. Instead of a one-off chatbot,
 it positions an AI agent — also named **Nango** — as a *colleague* who sits in
 the team workspace, talks to users, picks up tasks, and works with the team to
 get things done. The product's current focus is the **data analysis** workflow:
 connect a database, ask a question, get a chart, save it, schedule it, share it.
 
-Nango's design is centered around two product pillars: **AI Engine** (intelligent collaboration) and **Artifact Engine** (artifact management), which work in tandem:
+Nango's design is centered around two product pillars: **AI Engine** (intelligent
+collaboration) and **Artifact Engine** (artifact management), which work in tandem.
 
-* **Multi-source intelligence & unified protocol**: Connect to external agent platforms (agno, Mastra, Dify) or build custom in-app agents on raw LLMs (OpenAI, DeepSeek, Ollama, etc.), normalizing all streams to the **AG-UI** protocol on the server to keep API keys away from the browser.
-* **Built-in Voice Recognition & Continuous Mic (SenseVoice / OpenAI / Deepgram / FunASR)**: Native Client-VAD streaming voice activity detection with keybindings (`Ctrl+Shift+M` / `Cmd+Shift+M`). Includes pre-configured **SenseVoice ASR** (`markgzhou/sensevoice-asr-server`) integration for local offline speech recognition.
-* **Supervisor-specialist orchestration**: One built-in agent can act as the Supervisor (Nango itself) to orchestrate and delegate tasks to specialist agents using synchronous calls, tool routing, conversational handoffs, or fire-and-forget async runs.
-* **Extensible tool ecosystem**: Native bindings for **MCP (Model Context Protocol)** servers, database-resident **Skills (scripts)**, **SSH hosts**, and governed **Data Sources**.
-* **Credential lifecycle & security**: All third-party secrets (API keys, DB credentials, SSH private keys) are encrypted with **AES-256-GCM** on a versioned keyring, decrypted strictly server-side, and support zero-downtime key rotation.
-* **Governed data access & execution safety**: Enforce read-only flags and table-level allow/deny lists. SQL queries are parsed and validated before reaching the database, and results are cached as Columnar Parquet files for secure sharing and sandbox execution.
-* **Schedules, async runs & unified history**: Trigger agent runs on one-shot or recurring schedules, with async execution results pushed to a live notification inbox. All backend and built-in chat histories are persisted in PostgreSQL, with an admin forensics page to trace run execution timelines.
-* **Artifact library & save-from-chat**: Keep a folder-tree library to catalog AI-generated outputs (charts, code, HTML, images, PPT, reports), allowing users to save outputs from chat with full lineage trace back to the original workflow.
-* **Dashboard composition**: Combine multiple saved artifacts into responsive grid-layout dashboards and publish them with a stable URL.
-* **Workflow-driven refresh & re-creation**: Artifacts are backed by replayable workflows. Users can apply filters (time range, dimension slice) to charts, refresh them with live data by re-running the workflow, or use AI inside an editor to tweak the underlying query and save it as a new version.
-* **Web Automation (Web Auto)**: Deterministic Playwright browser automation and regression testing harness with dual-tier evaluation (Node.js VM sandboxed assertions + LLM-as-Judge inspection) and real-time SSE progress streaming.
-* **Verification & Evaluation Subsystems**: Deterministic assert-on-output testing for MCP tools/workflows and stochastic conversational quality evaluation for AI agents.
+---
+
+### AI Engine — Your AI Colleague
+
+- **Multi-backend agent support** — Connect agno, Mastra, Dify, or build custom in-app agents on raw LLMs (OpenAI, DeepSeek, Ollama, Groq, xAI). All streams normalized to **AG-UI** protocol server-side; API keys never reach the browser.
+- **Supervisor-specialist orchestration** — Nango acts as the supervisor, routing tasks to specialist agents via sync calls, tool routing, conversational handoffs, or async fire-and-forget runs.
+- **Extensible tool ecosystem** — Native **MCP** servers (stdio/sse/streamable), database-resident **Skills** (reusable scripts), **SSH hosts**, and governed **Data Sources** (Postgres, MySQL, MariaDB, Vertica).
+- **Custom agent builder** — Configure built-in agents with bound credentials, tools, and runtime prompts via the CopilotKit runtime.
+- **Built-in voice recognition** — Client-VAD streaming with keybindings (`Ctrl+Shift+M`), supporting **SenseVoice** (offline), OpenAI, Deepgram, and FunASR.
+
+---
+
+### Artifact Engine — Build, Publish & Refresh
+
+- **Artifact library** — Folder-tree catalog of AI-generated outputs (charts, code, HTML, images, PPT, reports) with full lineage trace back to the originating workflow.
+- **Dashboard composition** — Combine saved artifacts into responsive grid dashboards with stable publish URLs.
+- **Workflow-driven refresh** — Artifacts are backed by replayable workflows. Apply filters, refresh with live data, or use the AI editor to tweak the underlying query and save a new version.
+- **Outputs that run without AI** — Many artifacts execute independently via their underlying workflow, decoupled from the chat session.
+
+---
+
+### Security & Governance
+
+- **AES-256-GCM credential encryption** — All secrets encrypted at rest, decrypted server-side only, with versioned keyring and zero-downtime rotation.
+- **Never exposed to agents** — Agent tools access credentials via server-side handles; raw secrets never reach the LLM or browser.
+- **RBAC** — Three roles: `admin` (everything), `editor` (resource builders), `user` (consumers). Soft-delete only for user deletion.
+- **Governed data access** — Read-only flags, table-level allow/deny lists, SQL parsed & validated before execution, results cached as **Parquet** for safe sharing and sandbox execution.
+- **Input / output / tool guardrails** — Enforced at runtime for safe agent execution.
+
+---
+
+### Automation & Quality Harness
+
+
+| Subsystem | Purpose | Type |
+|---|---|---|
+| **Verification** | Deterministic assert-on-output testing for MCP tools & workflows (json_schema, jsonpath, js_expression) | Deterministic |
+| **Evaluation** | Stochastic LLM-as-Judge conversational quality assessment for agents | Stochastic |
+| **Web Auto** | Playwright-based browser automation & regression testing with dual-tier eval (VM assertions + LLM visual inspection) | Deterministic + AI |
+
+---
+
+### Additional Capabilities
+
+- **Schedules & async runs** — One-shot or recurring cron dispatch; async results push to a live notification inbox via SSE.
+- **Sandbox code execution** — Isolated Python sandbox (dify-sandbox) for safe code-execution tools.
+- **Admin forensics** — Triage layouts at `/admin/run` and `/admin/run/[id]` with full run timelines.
+- **Single-node multi-tenant runtime** — One process, long-lived; heavy work delegated outward. Not for serverless / multi-replica auto-scaling.
 
 ---
 
 ![Nango architecture diagram](public/image/nango-ui.png)
 
+
 ## Quick Start (Docker)
 
-The fastest path to a running Nango. Requires only **Docker** (≥ 20.10) and
-**Docker Compose** v2.
+Requires **Docker** (≥ 20.10) and **Docker Compose** v2.
 
 ### 1. Clone
 
@@ -85,95 +119,61 @@ cd nango
 cp .env.example .env
 ```
 
-You **must** set two encryption variables before the app will start:
+Generate required secrets:
 
 ```bash
-# Generate one 32-byte key in hex
+# Generate a 32-byte key for credential encryption
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 # → e.g. c60f15a2dd1bdecd92bca72728ec8104c0570832e9d8827592bfa865ba35fc5a
 ```
 
-Put it into `.env`:
+Put them into `.env`:
 
 ```dotenv
 CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID=k1
 CREDENTIAL_ENCRYPTION_KEYRING=k1=<the-64-hex-you-just-generated>
-
-# Also set a long random session secret (32+ chars)
 BETTER_AUTH_SECRET=<another-long-random-string>
 NO_HTTPS=1
 ```
 
 ### 3. Bring everything up
 
-Pull the published multi-arch image from GitHub Container Registry:
-
 ```bash
 docker compose up -d
-```
-
-Or build locally from source (developer mode):
-
-```bash
-docker compose up -d --build
-```
-
-To upgrade to a newer published image:
-
-```bash
-docker compose pull && docker compose up -d
 ```
 
 This starts:
 
 | Container | Purpose | Port |
 |---|---|---|
-| `nango-app` | Nango Next.js server (auto-runs DB migrations on boot) | `9300` |
+| `nango-app` | Nango Next.js server (auto-runs DB migrations) | `9300` |
 | `nango-db`  | PostgreSQL 18 | `5433` → `5432` |
+| `sandbox`   | dify-sandbox (isolated Python/Node.js code execution) | `8194` |
+| `playwright`| Playwright MCP (browser automation) | `8931` |
 | `sensevoice`| SenseVoice ASR speech-to-text service | `10085` → `8000` |
 
-Then open **http://localhost:9300**.
+Open **http://localhost:9300**. The first user to sign up becomes the admin automatically.
 
-> 💡 **Voice / Speech Recognition Setup**:
-> When adding a **SenseVoice** credential in Nango (`Settings -> Credentials`):
-> - **In Docker Compose Mode** (Nango App and SenseVoice both running in Docker): Set **Base URL** to `http://sensevoice:8000` (uses internal container network and port `8000`).
-> - **In Local Dev Mode** (`pnpm dev` on host machine): Set **Base URL** to `http://localhost:10085`.
-
-The **first user to sign up becomes the admin** automatically. From the
-admin user-management page, you can promote teammates to `editor`
-(resource builders) or keep them as `user` (consumers).
-
-Compatible with **Podman**: replace `docker` with `podman` in every command.
+> 💡 **Voice Setup**: In Docker mode, set SenseVoice credential Base URL to `http://sensevoice:8000`. In local dev mode, use `http://localhost:10085`.
 
 ---
 
 ## Development Setup
 
-For contributing or running against a hot-reloading dev server.
-
-### Prerequisites
-
 | Tool | Version |
 |---|---|
 | Node.js | **≥ 24** (LTS) |
-| pnpm    | **10.32.1** (pinned via `packageManager`; `corepack enable` is enough) |
-| Docker  | needed for the bundled Postgres **and** the Python sandbox image used by code-execution tools |
-| PostgreSQL | 18 (or use the bundled `pnpm docker:db`) |
-
-### Get it running
+| pnpm    | **10.32.1** (pinned via `packageManager`) |
+| Docker  | Needed for bundled Postgres + Python sandbox |
+| PostgreSQL | 18 (or `pnpm docker:db`) |
 
 ```bash
-corepack enable          # picks up the pinned pnpm from package.json
+corepack enable          # picks up pinned pnpm
 pnpm install
-
-cp .env.example .env     # set CREDENTIAL_ENCRYPTION_KEYRING,
-                         # CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID,
-                         # and BETTER_AUTH_SECRET — see Quick Start above
-
+cp .env.example .env     # set encryption + auth secrets
 pnpm docker:db           # Postgres 18 on localhost:5433
 pnpm db:migrate          # apply schema
-
-pnpm dev                 # Next.js with Turbopack on http://localhost:9300
+pnpm dev                 # Turbopack on http://localhost:9300
 ```
 
 ---
@@ -186,13 +186,9 @@ pnpm dev                 # Next.js with Turbopack on http://localhost:9300
 
 ## Contributing
 
-Contributions are welcome. Before opening a PR:
-
-1. Skim the relevant design notes under [`docs/`](docs) for the subsystem
-   you are touching.
-2. Run lint, type-check, and tests (see `package.json`).
-3. For schema changes, generate a Drizzle migration and commit **both**
-   the SQL file and the snapshot.
+1. Skim the relevant design notes under [`docs/`](docs/) for the subsystem you are touching.
+2. Run lint, type-check, and tests: `pnpm check`.
+3. For schema changes, generate a Drizzle migration and commit **both** the SQL file and the snapshot.
 
 ---
 
