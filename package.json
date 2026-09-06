@@ -64,7 +64,7 @@
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "echarts": "^6.1.0",
-    "emoji-picker-react": "^4.19.1",
+    "emoji-picker-react": "^4.19.4",
     "jsonpath-plus": "^10.4.0",
     "jszip": "^3.10.1",
     "langfuse": "^3.38.20",
