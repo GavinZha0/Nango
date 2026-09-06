@@ -44,6 +44,8 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           .select({
             id: VerificationSuiteTable.id,
             name: VerificationSuiteTable.name,
+            mcpServerId: VerificationSuiteTable.mcpServerId,
+            enabled: VerificationSuiteTable.enabled,
             visibility: VerificationSuiteTable.visibility,
             createdBy: VerificationSuiteTable.createdBy,
           })
@@ -63,6 +65,14 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
 
         if (!suite) {
           throw new Error(`Verification suite '${suiteId}' not found or access denied.`);
+        }
+
+        // CONTRACT: suites detached from a deleted MCP server stay
+        // browsable/editable but are never runnable (see 0020 migration).
+        if (!suite.mcpServerId) {
+          throw new Error(
+            `Verification suite '${suite.name}' is detached from its MCP server (the server was deleted) and can no longer be run.`,
+          );
         }
 
         const runResult = await startSuiteRun({

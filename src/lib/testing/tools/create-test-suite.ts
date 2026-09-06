@@ -90,6 +90,7 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
           .select({
             id: McpServerTable.id,
             name: McpServerTable.name,
+            serverTitle: McpServerTable.serverTitle,
             visibility: McpServerTable.visibility,
             createdBy: McpServerTable.createdBy,
           })
@@ -115,6 +116,7 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
               description: description ?? null,
               category: "mcp",
               mcpServerId: mcpServerId,
+              mcpServerName: serverRow.serverTitle || serverRow.name,
               enabled: true,
               visibility: "private",
               timeoutSec: 300,

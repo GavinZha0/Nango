@@ -124,6 +124,18 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[1].ok).toBe(true);
       expect(outcome.deterministicResults[2].ok).toBe(false);
     });
+
+
+    it("never exposes the page handle to js_expression", () => {
+      const payload = { result: { status: "ok", count: 5 }, page: { evaluate: () => "host-secret" } };
+      const assertions: AssertionSpec[] = [
+        { type: "js_expression", expression: "result.count === 5" },
+        { type: "js_expression", expression: "typeof page !== 'undefined'" },
+      ];
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(false);
+    });
   });
 
   describe("4. Tool Call Trajectory assertions", () => {

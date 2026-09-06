@@ -21,7 +21,7 @@ Traditional agentic web navigation is prone to non-determinism, hallucinations, 
    Test cases are authored as direct Playwright scripts (Node.js/JavaScript). They execute inside an isolated browser automation sandbox via the `browser_run_code_unsafe` tool hosted on Playwright MCP servers. The scripts handle DOM interaction, navigation, data extraction, and visual state capture.
 2. **Dual-Tier Evaluation**:
    The execution yields structured results and visual/DOM snapshots which are evaluated through two complementary layers:
-   - **Tier 1: Deterministic Assertions**: Evaluated instantaneously in a sandboxed Node VM without model calls (e.g. `result.success === true`, `page.url.includes('/dashboard')`, JSON Schema validation).
+   - **Tier 1: Deterministic Assertions**: Evaluated instantaneously in a hardened Node VM context without model calls (e.g. `result.success === true`, `root.page.url.includes('/dashboard')`, JSON Schema validation). The `page` handle itself is never injected — page metadata is reachable only via `root.page.*`.
    - **Tier 2: LLM Evaluator Assertions**: Natural language expectations (e.g., "Verify that the success toast banner is prominently visible") evaluated by a dedicated Evaluator Agent inspecting the captured DOM and screenshots.
 
 ```
@@ -92,8 +92,8 @@ src/lib/web-auto/
 * **Fault Tolerance**: Never throws. All network, MCP server, tool wrapper, and upstream protocol errors are classified into structured outcomes.
 
 ### 3.2 `assertions.ts` (Deterministic Assertion Engine)
-* **Context Unpacking**: Unpacks structured outputs (`{ result, page }`) so expressions can access `result`, `page`, and `root`.
-* **VM Sandboxing**: Executes `js_expression` assertions inside an isolated Node VM sandbox (`isolated-vm` / Node `vm`), exposing `result`, `$`, `page`, and `input`.
+* **Context Unpacking**: Unpacks structured outputs (`{ result, page }`) so assertions can access `result` and `root` (the `page` handle is never exposed to the assertion sandbox).
+* **VM Sandboxing**: Executes `js_expression` assertions in a hardened Node `vm` context — inputs are JSON-deep-copied to strip host handles before injection, exposing `result`, `$`, `input`, `variables`, and `root` (hardened, not a true isolate).
 * **Standard Matchers**: Evaluates `jsonpath` and `json_schema` rules.
 * **Expectation Extraction**: Filters out `type: "expectation"` and `type: "llm_expectation"` rules for handoff to the evaluation layer.
 

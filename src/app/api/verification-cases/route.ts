@@ -70,6 +70,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
           description: `Automatically created verification suite for ${serverName}`,
           category: "mcp",
           mcpServerId,
+          mcpServerName: serverName,
           visibility: "private",
           createdBy: session.user.id,
           updatedBy: session.user.id,

@@ -141,6 +141,20 @@
       "when": 1787920000000,
       "tag": "0019_unify_assertion_results",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788650206179,
+      "tag": "0020_verification_server_detach",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788652253918,
+      "tag": "0021_verification_suite_server_name",
+      "breakpoints": true
     }
   ]
 }

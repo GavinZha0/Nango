@@ -65,7 +65,7 @@ export function VerificationSuiteEditor({
   const effectiveSuiteId = propSuiteId ?? legacyRow?.id;
 
   // 1. Fetch Suite details if suiteId is present
-  const { data: suiteData, error: suiteError, isLoading: suiteLoading } = useSWR<VerificationSuiteRow & { mcpServerId?: string; serverTitle?: string; serverName?: string }>(
+  const { data: suiteData, error: suiteError, isLoading: suiteLoading } = useSWR<VerificationSuiteRow & { mcpServerId?: string | null; mcpServerName?: string | null; serverTitle?: string; serverName?: string }>(
     effectiveSuiteId ? `/api/verification-suites/${effectiveSuiteId}` : null,
     fetcher,
   );
@@ -186,6 +186,13 @@ export function VerificationSuiteEditor({
 
   const handleRunSuite = async (): Promise<void> => {
     if (!effectiveSuiteId) return;
+    // Suites detached from a deleted MCP server are not runnable (0020).
+    if (suiteDetached) {
+      setStartError(
+        "Verification suite is detached from its MCP server (the server was deleted) and can no longer be run.",
+      );
+      return;
+    }
     setStartError(null);
     try {
       const res = await fetch("/api/verification-runs", {
@@ -237,7 +244,17 @@ export function VerificationSuiteEditor({
       : null;
 
   const suiteDisplayName = suiteData?.name || legacyRow?.name || "Verification Suite";
-  const serverDisplayName = suiteData?.serverTitle || suiteData?.serverName || legacyRow?.serverTitle || null;
+  const serverDisplayName =
+    suiteData?.serverTitle ||
+    suiteData?.serverName ||
+    // Detached suites (server row deleted) fall back to the denormalized
+    // name captured at creation.
+    suiteData?.mcpServerName ||
+    legacyRow?.serverTitle ||
+    null;
+  // True once the suite detail has loaded without an MCP server binding —
+  // the server row was deleted and the suite is now detached (0020).
+  const suiteDetached = Boolean(suiteData) && !suiteData?.mcpServerId;
 
   const caseInspectorHandleRef = useRef<CaseInspectorDraftHandle | null>(null);
   const [inspectorVersion, setInspectorVersion] = useState(0);
@@ -405,6 +422,7 @@ export function VerificationSuiteEditor({
             onSelectCase={setSelectedCaseId}
             onNewCase={() => setNewCaseOpen(true)}
             onRunSuite={handleRunSuite}
+            runDisabled={suiteDetached}
             onToggleCaseEnabled={handleToggleCaseEnabled}
             onRequestEditCase={setEditingCase}
             onRequestDeleteCase={setDeletingCase}
@@ -419,6 +437,7 @@ export function VerificationSuiteEditor({
                 key={selectedCase.id}
                 caseRow={selectedCase}
                 serverMeta={{ id: suiteData?.mcpServerId ?? "", name: serverDisplayName ?? "", caseCount: cases.length }}
+                runDisabled={suiteDetached}
                 pinnedOutcome={pinnedOutcome}
                 historyMeta={historyMeta}
                 onExitHistoryView={exitHistoryView}
@@ -439,7 +458,7 @@ export function VerificationSuiteEditor({
 
       <NewCaseDialog
         suiteId={effectiveSuiteId}
-        serverId={suiteData?.mcpServerId}
+        serverId={suiteData?.mcpServerId ?? undefined}
         open={newCaseOpen}
         onOpenChange={setNewCaseOpen}
         onCreated={(created) => setSelectedCaseId(created.id)}
@@ -447,7 +466,7 @@ export function VerificationSuiteEditor({
 
       <NewCaseDialog
         suiteId={effectiveSuiteId}
-        serverId={suiteData?.mcpServerId}
+        serverId={suiteData?.mcpServerId ?? undefined}
         open={editingCase !== null}
         onOpenChange={(o) => { if (!o) setEditingCase(null); }}
         caseRow={editingCase}

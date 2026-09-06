@@ -56,6 +56,16 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       );
     }
 
+    // CONTRACT: suites detached from a deleted MCP server stay browsable
+    // and editable but are never runnable (see 0020 migration).
+    if (!suite.mcpServerId) {
+      throw new ApiError(
+        "BAD_REQUEST",
+        400,
+        "Verification suite is detached from its MCP server (the server was deleted) and can no longer be run.",
+      );
+    }
+
     const { runId, totalCount } = await startSuiteRun({
       suiteId: suite.id,
       ownerId: session.user.id,

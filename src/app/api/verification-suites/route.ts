@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
-import { VerificationSuiteTable } from "@/lib/db/schema";
+import { McpServerTable, VerificationSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -36,6 +36,7 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
       description: VerificationSuiteTable.description,
       category: VerificationSuiteTable.category,
       mcpServerId: VerificationSuiteTable.mcpServerId,
+      mcpServerName: VerificationSuiteTable.mcpServerName,
       workflowId: VerificationSuiteTable.workflowId,
       visibility: VerificationSuiteTable.visibility,
       enabled: VerificationSuiteTable.enabled,
@@ -87,6 +88,21 @@ const createSchema = z
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
 
+  // Snapshot the bound server's display name onto the suite (0021) so the
+  // left panel can still group by server name after the server is deleted.
+  let mcpServerName: string | null = null;
+  if (body.mcpServerId) {
+    const [server] = await db
+      .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
+      .from(McpServerTable)
+      .where(eq(McpServerTable.id, body.mcpServerId))
+      .limit(1);
+    if (!server) {
+      throw new ApiError("NOT_FOUND", 404, "MCP server not found.");
+    }
+    mcpServerName = server.serverTitle || server.name;
+  }
+
   // Global name uniqueness is enforced by the DB UNIQUE constraint
   // — surface as 409 if it trips so the UI can show a nice message.
   try {
@@ -97,6 +113,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         description: body.description ?? null,
         category: body.category,
         mcpServerId: body.mcpServerId ?? null,
+        mcpServerName,
         workflowId: null,
         visibility: body.visibility ?? "private",
         timeoutSec: body.timeoutSec ?? 300,

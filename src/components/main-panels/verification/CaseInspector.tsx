@@ -67,6 +67,9 @@ export interface CaseInspectorProps {
     name: string;
     caseCount: number;
   } | null;
+  /** True when the owning suite is detached from a deleted MCP server —
+   *  greys the Run button (editing / history / delete stay available). */
+  runDisabled?: boolean;
   /**
    * Outcome supplied by the parent — the persisted suite-run result
    * for this case from a run snapshot (just-completed live run OR an
@@ -324,6 +327,7 @@ function validateAssertionsArray(
 export function CaseInspector({
   caseRow,
   serverMeta: _serverMeta = null,
+  runDisabled = false,
   pinnedOutcome,
   historyMeta = null,
   onExitHistoryView,
@@ -599,8 +603,8 @@ export function CaseInspector({
                 size="sm"
                 className="h-6 px-2 text-xs"
                 onClick={() => void handleRunCase()}
-                disabled={running || !caseRow.enabled}
-                title="Run case"
+                disabled={running || !caseRow.enabled || runDisabled}
+                title={runDisabled ? "Suite is detached from its MCP server" : "Run case"}
               >
                 {running ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />

@@ -61,11 +61,11 @@ function buildSchemaItem(type: AssertionTypeEnum): AssertionSchemaItem {
       return {
         type: "js_expression",
         description:
-          "Executes a custom JavaScript expression in a secure VM sandbox against output variables (e.g. `output.items.length > 0`). Passes if expression evaluates to truthy.",
+          "Executes a custom JavaScript expression in a hardened VM sandbox against sanitized bindings `result`/`$`/`root`/`input`/`variables` (e.g. `result.items.length > 0`). Passes if expression evaluates to truthy.",
         jsonSchema: cleanSchema,
         example: {
           type: "js_expression",
-          expression: "Array.isArray(output.items) && output.items.length > 0",
+          expression: "Array.isArray(result.items) && result.items.length > 0",
         },
       };
     }

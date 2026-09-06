@@ -47,11 +47,13 @@ const fetcher = async (url: string) => {
 };
 
 interface ServerTreeGroup {
-  id: string; // mcpServerId
+  id: string; // mcpServerId — or a `detached:<name>` synthetic key when the server row is gone
   name: string;
   serverTitle: string | null;
   serverDescription: string | null;
   enabled: boolean;
+  /** True for groups whose MCP server row was deleted — Run server is disabled. */
+  detached: boolean;
   suites: VerificationSuiteRow[];
 }
 
@@ -64,6 +66,8 @@ interface SuiteRowItemProps {
   onEditSuite: (e: React.MouseEvent) => void;
   onDeleteSuite: (e: React.MouseEvent) => void;
   running: boolean;
+  /** True when the suite is detached from a deleted MCP server — Run is greyed out. */
+  runDisabled?: boolean;
 }
 
 function SuiteRowItem({
@@ -75,6 +79,7 @@ function SuiteRowItem({
   onEditSuite,
   onDeleteSuite,
   running,
+  runDisabled = false,
 }: SuiteRowItemProps): ReactNode {
   const isPublic = suite.visibility === "public";
   const { canChangeVisibility, canDelete } = useResourcePermissions({
@@ -111,8 +116,8 @@ function SuiteRowItem({
         <button
           type="button"
           onClick={onRunSuite}
-          disabled={running || !suite.enabled}
-          title="Run"
+          disabled={running || !suite.enabled || runDisabled}
+          title={runDisabled ? "Suite is detached from its MCP server" : "Run"}
           className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
         >
           {running ? (
@@ -223,8 +228,8 @@ function ServerGroupNode({
           <button
             type="button"
             onClick={(e) => onRunServer(group.id, e)}
-            disabled={isServerRunning || !group.enabled}
-            title="Run"
+            disabled={isServerRunning || !group.enabled || group.detached}
+            title={group.detached ? "Server deleted" : "Run"}
             className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
           >
             {isServerRunning ? (
@@ -264,6 +269,7 @@ function ServerGroupNode({
                 onEditSuite={(e) => onEditSuite(suite, e)}
                 onDeleteSuite={(e) => onDeleteSuite(suite, e)}
                 running={runningSuiteId === suite.id}
+                runDisabled={!suite.mcpServerId}
               />
             ))
           )}
@@ -303,34 +309,58 @@ export function VerificationPanel(): ReactNode {
   };
 
   // Build tree grouping (alphabetical sort on servers and suites, filter out empty servers)
+  // Suites whose MCP server row was deleted (mcpServerId NULL) are grouped
+  // under their denormalized mcpServerName snapshot so the two-level
+  // server -> suite hierarchy and its display names survive server
+  // deletion; only the Run buttons on those suites are greyed out.
   const treeGroups = useMemo<ServerTreeGroup[]>(() => {
     if (!serverRows) return [];
 
     const suitesByServer = new Map<string, VerificationSuiteRow[]>();
+    const detachedByName = new Map<string, VerificationSuiteRow[]>();
     for (const suite of suiteRows ?? []) {
       const serverId = (suite as unknown as { mcpServerId?: string }).mcpServerId;
       if (serverId) {
         const list = suitesByServer.get(serverId) ?? [];
         list.push(suite);
         suitesByServer.set(serverId, list);
+      } else {
+        const serverName =
+          (suite as unknown as { mcpServerName?: string | null }).mcpServerName ||
+          "Unknown Server";
+        const list = detachedByName.get(serverName) ?? [];
+        list.push(suite);
+        detachedByName.set(serverName, list);
       }
     }
 
-    return serverRows
+    const liveGroups = serverRows
       .map((s) => ({
         id: s.id,
         name: s.name,
         serverTitle: s.serverTitle,
         serverDescription: s.serverDescription,
         enabled: s.enabled,
+        detached: false,
         suites: (suitesByServer.get(s.id) ?? []).sort((a, b) =>
           alphabeticCompare(a.name, b.name),
         ),
       }))
-      .filter((g) => g.suites.length > 0)
-      .sort((a, b) =>
-        alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name),
-      );
+      .filter((g) => g.suites.length > 0);
+
+    const detachedGroups = [...detachedByName.entries()].map(([serverName, suites]) => ({
+      id: `detached:${serverName}`,
+      name: serverName,
+      serverTitle: serverName,
+      serverDescription: null,
+      enabled: true,
+      detached: true,
+      suites: suites.sort((a, b) => alphabeticCompare(a.name, b.name)),
+    }));
+
+    return [...liveGroups, ...detachedGroups].sort((a, b) =>
+      alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name),
+    );
   }, [serverRows, suiteRows]);
 
   const [runningServerId, setRunningServerId] = useState<string | null>(null);
@@ -352,9 +382,9 @@ export function VerificationPanel(): ReactNode {
         body: JSON.stringify({ mcpServerId: serverId }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Triggered server regression run");
+      toast.success("Triggered server run");
     } catch {
-      toast.error("Failed to start regression run");
+      toast.error("Failed to start server run");
     } finally {
       setRunningServerId(null);
     }
@@ -429,11 +459,44 @@ export function VerificationPanel(): ReactNode {
     if (!deletingServer) return;
     setDeleting(true);
     try {
+      if (deletingServer.detached) {
+        // Detached group: no MCP server row exists (the synthetic group id
+        // must never hit the server-scoped DELETE endpoint). Delete owned
+        // suites via the per-suite endpoints — per-suite RBAC applies, so
+        // suites owned by others are skipped with a 403.
+        let deleted = 0;
+        let skipped = 0;
+        for (const suite of deletingServer.suites) {
+          try {
+            await verificationActions.remove(suite.id);
+            deleted++;
+          } catch {
+            skipped++;
+          }
+        }
+        toast.success(
+          skipped > 0
+            ? `Deleted ${deleted} suite${deleted === 1 ? "" : "s"} (${skipped} skipped — owned by others)`
+            : `Deleted ${deleted} suite${deleted === 1 ? "" : "s"}`,
+        );
+        void mutateServers();
+        void mutateSuites();
+        router.push("/verification");
+        return;
+      }
       const res = await fetch(`/api/verification-servers/${deletingServer.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Deleted all server verification data");
+      const { deleted, skipped } = (await res.json()) as {
+        deleted: number;
+        skipped: number;
+      };
+      toast.success(
+        skipped > 0
+          ? `Deleted ${deleted} suite${deleted === 1 ? "" : "s"} (${skipped} skipped — owned by others)`
+          : `Deleted ${deleted} suite${deleted === 1 ? "" : "s"}`,
+      );
       void mutateServers();
       void mutateSuites();
       router.push("/verification");
@@ -536,7 +599,6 @@ export function VerificationPanel(): ReactNode {
           }))}
         </div>
       </ScrollArea>
-
       {/* New Suite Dialog */}
       <VerificationSuiteDialog
         open={createSuiteOpen}
@@ -607,8 +669,9 @@ export function VerificationPanel(): ReactNode {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Server Verification Data</AlertDialogTitle>
             <AlertDialogDescription>
-              Permanently delete all verification suites and cases under{" "}
-              <strong>{deletingServer?.serverTitle || deletingServer?.name}</strong>? This action cannot be undone.
+              Permanently delete the verification suites you own under{" "}
+              <strong>{deletingServer?.serverTitle || deletingServer?.name}</strong>? Suites owned
+              by others are kept. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

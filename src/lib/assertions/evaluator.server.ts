@@ -362,6 +362,11 @@ function evaluateJsonSchema(
 
 // ── 3. JS Expression Evaluation ──────────────────────────────────────────────
 
+// QUIRK: js_expression 沙箱是"浅加固"而非安全边界。JSON 深拷贝 + 剥离 page
+// 只能缩小攻击面（宿主类实例/page 句柄不再被直接暴露），但 node:vm 的
+// `constructor.constructor("return process")()` 逃逸在深拷贝后依然可行
+// (Node 24 实测可拿到 process/pid)，故此处不构成安全隔离，信任域 = editor。
+// 真正隔离需 isolated-vm / 子进程。断言判决不再注入 page 句柄。
 function evaluateJsExpression(
   spec: JsExpressionAssertion,
   payload: unknown,
@@ -370,27 +375,23 @@ function evaluateJsExpression(
 ): AssertionResult {
   try {
     const structured = extractStructuredData(payload);
-    const contextObj: Record<string, unknown> = {
-      ...(typeof structured === "object" && structured !== null && !Array.isArray(structured)
-        ? (structured as Record<string, unknown>)
-        : {}),
-      result: structured,
-      $: structured,
-      root: options.runContext?.root ?? payload,
-      input: options.input ?? {},
-      variables: options.variables ?? {},
-      ...(options.variables ?? {}),
-      ...(options.runContext ?? {}),
-    };
+    const flat = sanitizeForSandbox(structured) as Record<string, unknown> | null;
+    const input =
+      (sanitizeForSandbox(options.input ?? {}) as Record<string, unknown>) ?? {};
+    const variables =
+      (sanitizeForSandbox(options.variables ?? {}) as Record<string, unknown>) ?? {};
+    const root = sanitizeForSandbox(options.runContext?.root ?? payload);
 
-    if (
-      typeof payload === "object" &&
-      payload !== null &&
-      "page" in payload &&
-      !(contextObj as Record<string, unknown>).page
-    ) {
-      contextObj.page = (payload as { page?: unknown }).page;
-    }
+    // 白名单注入纯数据；不再展开 options.runContext → 自动剥离 page 及任意宿主句柄。
+    const contextObj = Object.freeze({
+      ...(flat && typeof flat === "object" && !Array.isArray(flat) ? flat : {}),
+      result: flat,
+      $: flat,
+      root,
+      input,
+      variables,
+      ...variables,
+    });
 
     const ok = runInNewContext(
       `(${spec.expression})`,
@@ -546,6 +547,18 @@ function evaluateMetric(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Deep-copy a value into plain, host-free JSON data before it enters the
+ *  js_expression sandbox. Functions / host handles (e.g. Playwright page) and
+ *  cyclic structures are dropped rather than smuggled into `node:vm`. */
+function sanitizeForSandbox(value: unknown): unknown {
+  if (value === undefined || typeof value === "function") return null;
+  try {
+    return JSON.parse(JSON.stringify(value ?? null));
+  } catch {
+    return null;
+  }
+}
 
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message;

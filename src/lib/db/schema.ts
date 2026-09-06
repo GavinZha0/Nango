@@ -1675,9 +1675,18 @@ export const VerificationSuiteTable = pgTable(
     /** Left-panel tab + case target shape. */
     category: text("category").notNull(), // "mcp" | "workflow"
     // --- target (moved from case to suite in Server->Suite(Tool)->Case refactor) ---
+    // SECURITY: ON DELETE SET NULL — deleting an MCP server must never
+    // cascade-delete verification suites/cases/history. Detached suites
+    // (mcpServerId NULL, workflowId NULL) stay browsable/editable; only
+    // running is refused. See the widened target XOR check below.
     mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
-      onDelete: "cascade",
+      onDelete: "set null",
     }),
+    /** Denormalized "last known" display name of the bound MCP server,
+     *  captured at suite creation. Kept so detached suites (server row
+     *  deleted) still group and display under their server's name in the
+     *  left panel. Live server rows always win for display when present. */
+    mcpServerName: text("mcp_server_name"),
     workflowId: uuid("workflow_id"),
 
     enabled: boolean("enabled").notNull().default(true),
@@ -1702,13 +1711,12 @@ export const VerificationSuiteTable = pgTable(
     uniqueIndex("verification_suite_mcp_user_name_idx").on(t.mcpServerId, t.name, t.createdBy),
     // Unique suite per Workflow per user
     uniqueIndex("verification_suite_workflow_user_idx").on(t.workflowId, t.createdBy),
-    // XOR target: MCP shape OR workflow shape, never both / neither.
+    // XOR target: MCP shape OR workflow shape, never both. Both NULL is
+    // legal post server-deletion (detached suite — see FK SECURITY note).
     check(
       "verification_suite_target_xor",
-      sql`(
-        (${t.mcpServerId} IS NOT NULL AND ${t.workflowId} IS NULL)
-        OR
-        (${t.mcpServerId} IS NULL AND ${t.workflowId} IS NOT NULL)
+      sql`NOT (
+        ${t.mcpServerId} IS NOT NULL AND ${t.workflowId} IS NOT NULL
       )`,
     ),
   ],
@@ -1786,8 +1794,11 @@ export const VerificationRunTable = pgTable(
     id: uuid("id").primaryKey().notNull().defaultRandom(),
     suiteId: uuid("suite_id")
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
+    // SECURITY: SET NULL — run history must survive MCP server deletion
+    // (cascade here would silently destroy runs/results even after the
+    // suite FK itself was made SET NULL).
     mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
-      onDelete: "cascade",
+      onDelete: "set null",
     }),
     /** Lifecycle: running | passed | failed | errored | timeout.
      *  Precedence on close: timeout > errored > failed > passed. */

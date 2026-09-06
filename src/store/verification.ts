@@ -10,6 +10,11 @@ export interface VerificationSuiteRow {
   name: string;
   description: string | null;
   category: VerificationCategory;
+  /** NULL when the bound MCP server row was deleted (detached suite). */
+  mcpServerId: string | null;
+  /** Denormalized display name captured at creation — groups detached
+   *  suites in the left panel after their server row is gone. */
+  mcpServerName: string | null;
   visibility: VerificationVisibility;
   enabled: boolean;
   timeoutSec: number;

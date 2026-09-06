@@ -86,6 +86,8 @@ describe("run_test_suite tool", () => {
         {
           id: validSuiteId,
           name: "MCP Verification Suite",
+          mcpServerId: "11111111-1111-4111-8111-111111111111",
+          enabled: true,
           visibility: "private",
           createdBy: "user-123",
         },
@@ -112,6 +114,27 @@ describe("run_test_suite tool", () => {
         ownerId: "user-123",
         triggeredBy: "manual",
       });
+    });
+
+    it("throws error when the verification suite is detached from its MCP server", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: validSuiteId,
+          name: "MCP Verification Suite",
+          mcpServerId: null,
+          enabled: true,
+          visibility: "private",
+          createdBy: "user-123",
+        },
+      ]);
+
+      await expect(
+        tool.execute!({
+          category: "verification",
+          suiteId: validSuiteId,
+        }),
+      ).rejects.toThrow(/detached from its MCP server/);
+      expect(mockStartSuiteRun).not.toHaveBeenCalled();
     });
 
     it("dispatches evaluation suite run", async () => {

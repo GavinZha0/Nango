@@ -48,7 +48,7 @@ export type JsonSchemaAssertion = z.infer<typeof jsonSchemaAssertionSchema>;
 
 export const jsExpressionAssertionSchema = z.object({
   type: z.literal("js_expression"),
-  expression: z.string().min(1).describe("JavaScript expression evaluated in sandbox (truthy = pass)"),
+  expression: z.string().min(1).describe("JavaScript expression evaluated against sanitized `result`/`$`/`root`/`input`/`variables` (truthy = pass). Hardened, not a true isolate."),
 });
 
 export type JsExpressionAssertion = z.infer<typeof jsExpressionAssertionSchema>;

@@ -31,7 +31,7 @@ describe("evaluateAssertions for Web Auto payloads", () => {
     expect(outcome.deterministicResults).toHaveLength(0);
   });
 
-  it("evaluates JS expressions with unpacked result, page, and root contexts", () => {
+  it("evaluates JS expressions with result/root contexts and never injects page", () => {
     const output = {
       result: { count: 42, active: true },
       page: { title: "Dashboard", url: "https://example.com" },
@@ -39,8 +39,8 @@ describe("evaluateAssertions for Web Auto payloads", () => {
 
     const assertions: AssertionSpec[] = [
       { type: "js_expression", expression: "result.count === 42" },
-      { type: "js_expression", expression: "page.title === 'Dashboard'" },
-      { type: "js_expression", expression: "root.result.active === true" },
+      { type: "js_expression", expression: "typeof page === 'undefined'" },
+      { type: "js_expression", expression: "root.page.url === 'https://example.com'" },
       { type: "js_expression", expression: "result.count < 10" }, // will fail
     ];
 
@@ -49,8 +49,8 @@ describe("evaluateAssertions for Web Auto payloads", () => {
     expect(outcome.allDeterministicPassed).toBe(false);
     expect(outcome.deterministicResults).toHaveLength(4);
     expect(outcome.deterministicResults[0].ok).toBe(true);
-    expect(outcome.deterministicResults[1].ok).toBe(true);
-    expect(outcome.deterministicResults[2].ok).toBe(true);
+    expect(outcome.deterministicResults[1].ok).toBe(true); // page binding stripped
+    expect(outcome.deterministicResults[2].ok).toBe(true); // page metadata reachable via root
     expect(outcome.deterministicResults[3].ok).toBe(false);
   });
 
