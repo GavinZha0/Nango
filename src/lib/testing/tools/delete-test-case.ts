@@ -4,7 +4,6 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { canDeleteResource } from "@/lib/auth/permissions";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
   testCategorySchema,
@@ -53,13 +52,27 @@ export function buildDeleteTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         throw new Error(`${config.label} case #${caseId} not found.`);
       }
 
-      const suiteRBAC = {
-        visibility: existing.suite.visibility as "private" | "public",
-        createdBy: existing.suite.createdBy,
-      };
+      // Visibility pre-gate, mirroring the REST routes (opaque not-found for
+      // suites the caller cannot see).
+      const isVisible =
+        ctx.isAdmin ||
+        existing.suite.visibility === "public" ||
+        existing.suite.createdBy === ctx.userId;
+      if (!isVisible) {
+        throw new Error(`${config.label} case #${caseId} not found.`);
+      }
 
-      if (!canDeleteResource(suiteRBAC, ctx)) {
-        throw new Error(`Permission denied: Only the suite author or an admin can delete cases.`);
+      // CONTRACT (unified delete rule across all three test modules, REST
+      // and tool): case author OR suite author OR admin. The tool previously
+      // only checked the suite row, which locked case authors out of
+      // deleting their own cases inside someone else's shared suite.
+      const isAdminUser = ctx.isAdmin;
+      const isCaseAuthor = existing.caseRow.createdBy === ctx.userId;
+      const isSuiteAuthor = existing.suite.createdBy === ctx.userId;
+      if (!isAdminUser && !isCaseAuthor && !isSuiteAuthor) {
+        throw new Error(
+          "Permission denied: Only the case author, the suite author, or an admin can delete cases.",
+        );
       }
 
       await db

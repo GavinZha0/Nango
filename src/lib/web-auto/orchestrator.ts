@@ -613,10 +613,12 @@ async function persistAndPublishError(args: {
     caseId: args.caseId,
     status: "errored",
     executionOutput: null,
-    verdict: {
-      deterministic: { passed: false, results: [] },
-      overall: { passed: false, reason: args.error.message },
-    },
+    // NB: write the real columns directly — the legacy `verdict` shape is
+    // only digested by a fallback in writeWebAutoCaseResult and carried no
+    // data for an errored case anyway (F17 cleanup).
+    assertionResults: [],
+    score: null,
+    feedback: null,
     error: args.error,
     startedAt: Date.now(),
     durationMs: 0,

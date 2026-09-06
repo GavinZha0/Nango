@@ -1,7 +1,8 @@
 import "server-only";
 
 import { z } from "zod";
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { visibilitySql } from "@/lib/auth/permissions";
 
 import { db } from "@/lib/db";
 import {
@@ -70,12 +71,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
               eq(VerificationSuiteTable.category, "mcp"),
               suiteId ? eq(VerificationSuiteTable.id, suiteId) : undefined,
               enabledOnly ? eq(VerificationSuiteTable.enabled, true) : undefined,
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(VerificationSuiteTable.visibility, "public"),
-                    eq(VerificationSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, VerificationSuiteTable.visibility, VerificationSuiteTable.createdBy),
             ),
           )
           .orderBy(asc(VerificationSuiteTable.name));
@@ -111,12 +107,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
             and(
               suiteId ? eq(EvalSuiteTable.id, suiteId) : undefined,
               enabledOnly ? eq(EvalSuiteTable.enabled, true) : undefined,
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(EvalSuiteTable.visibility, "public"),
-                    eq(EvalSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, EvalSuiteTable.visibility, EvalSuiteTable.createdBy),
             ),
           )
           .orderBy(asc(EvalSuiteTable.name));
@@ -152,12 +143,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
             and(
               suiteId ? eq(WebAutoSuiteTable.id, suiteId) : undefined,
               enabledOnly ? eq(WebAutoSuiteTable.enabled, true) : undefined,
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(WebAutoSuiteTable.visibility, "public"),
-                    eq(WebAutoSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, WebAutoSuiteTable.visibility, WebAutoSuiteTable.createdBy),
             ),
           )
           .orderBy(asc(WebAutoSuiteTable.name));

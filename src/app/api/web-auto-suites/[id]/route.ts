@@ -3,7 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { canEditResource, ResourceWithRBAC, canDeleteResource, canViewResource } from "@/lib/auth/permissions";
+import { canEditResource, canChangeVisibility, ResourceWithRBAC, canDeleteResource, canViewResource } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
@@ -62,11 +62,32 @@ export const PATCH = withEditor<{ id: string }>(
       throw new ApiError("NOT_FOUND", 404, "Suite not found");
     }
 
-    if (!canEditResource(suite as unknown as ResourceWithRBAC, session)) {
+    // Content edits (name / description / nesting / variables / bindings)
+    // vs flag edits (enabled / visibility) use the two distinct permission
+    // gates, matching the verification / evaluation suite PATCH convention.
+    const contentEdit =
+      body.name !== undefined
+      || body.description !== undefined
+      || body.parentId !== undefined
+      || body.variables !== undefined
+      || body.timeoutSec !== undefined
+      || body.evaluatorAgentId !== undefined
+      || body.mcpServerId !== undefined;
+    const flagEdit =
+      body.enabled !== undefined || body.visibility !== undefined;
+
+    if (contentEdit && !canEditResource(suite as unknown as ResourceWithRBAC, session)) {
       throw new ApiError(
         "FORBIDDEN",
         403,
         "You do not have permission to edit this suite.",
+      );
+    }
+    if (flagEdit && !canChangeVisibility(suite as unknown as ResourceWithRBAC, session)) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "Only the creator or an admin can change visibility / enabled.",
       );
     }
 

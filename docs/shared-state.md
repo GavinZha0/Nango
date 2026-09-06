@@ -4,7 +4,7 @@ Status: Active (Production Standard) · Last Updated: 2026-08-26
 
 ## 1. Product Positioning & Core Goals
 
-Shared State is an ambient **UX & Bidirectional CoAgent Orchestration Capability** linking the client-side React UI state with the CopilotKit Built-in Agent runtime (Supervisor / Nango).
+Shared State is an ambient **UX & Bidirectional CoAgent Orchestration Capability** linking the client-side React UI state with the CopilotKit Built-in Agent runtime. It applies to every built-in agent with `sharedStateEnabled` (default-on for `supervisor` and `tester` roles) — the Test Automation Copilot's tester agents rely on it to perceive the open verification / evaluation / web-auto editors (see `docs/test-automation-copilot.md` §3).
 
 ### 1.1 Core Goals
 1. **Real-time Context Awareness**: The Agent continuously perceives the user's focus, including active page view (`activeView`, `activeUrl`), open resource identifier (`activeResourceId`), and real-time form data values (`activeResourceData`).
@@ -86,9 +86,9 @@ All schemas are defined in `src/lib/copilot/resource-schemas.ts` and registered 
 | **Data Source** | `/datasource` | `DataSourceDraftSchema` | `name` (max 63), `description`, `provider` (postgres/mysql/mariadb/vertica), `credentialId`, `host`, `port` (1-65535), `database`, `params`, `readOnly`, `tableAllowlist`, `tableDenylist` | Amber Save Button (`bg-amber-600`) |
 | **SSH Server** | `/ssh-server` | `SshServerDraftSchema` | `name` (max 63), `description`, `credentialId`, `host`, `port` (1-65535, def 22), `knownHostFingerprint`, `commandAllow`, `commandApprove`, `commandDeny`, `loginShell` | Amber Save Button (`bg-amber-600`) |
 | **MCP Tool Test** | `/mcp` | `McpDraftSchema` | `selectedToolName`, `args` (JSON parameters object) | Live parameter binding |
-| **Web Auto** | `/web-auto` | `WebAutoDraftSchema` | `name`, `description`, `scriptContent`, `assertions`, `selectedCase` (`name`, `description`, `scriptContent`, `assertions`) | Amber Save Icon (`text-amber-500`) |
-| **Verification** | `/verification` | `VerificationDraftSchema` | `name`, `description`, `input`, `assertions`, `selectedCase` (`name`, `description`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
-| **Evaluation** | `/evaluation` | `EvaluationDraftSchema` | `name`, `description`, `prompt`, `rubric`, `referenceAnswer`, `selectedCase` (`name`, `description`, `prompt`, `rubric`, `referenceAnswer`) | Amber Save Icon (`text-amber-500`) |
+| **Web Auto** | `/web-auto` | `WebAutoDraftSchema` | `name`, `input` (`script`, `steps`), `assertions` (`js_expression` / `jsonpath` / `llm_judge`), `selectedCase` (`name`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
+| **Verification** | `/verification` | `VerificationDraftSchema` | `name`, `description`, `input`, `assertions` (`jsonpath` / `js_expression` / `json_schema`; array or JSON string), `selectedCase` (`name`, `description`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
+| **Evaluation** | `/evaluation` | `EvaluationDraftSchema` | `name`, `description`, `input` (`turns`: `userMessage` / `expectedOutput`), `assertions` (`llm_judge` / `jsonpath` / `js_expression` / `metric` / `tool_call`), `turns`, `selectedCase` (`name`, `description`, `input`, `assertions`, `turns`) | Amber Save Icon (`text-amber-500`) |
 
 ---
 

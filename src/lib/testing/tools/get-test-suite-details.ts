@@ -1,7 +1,8 @@
 import "server-only";
 
 import { z } from "zod";
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { visibilitySql } from "@/lib/auth/permissions";
 
 import { db } from "@/lib/db";
 import {
@@ -65,12 +66,7 @@ export function buildGetTestSuiteDetailsTool(ctx: TesterToolContext): ToolDefini
           .where(
             and(
               eq(VerificationSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(VerificationSuiteTable.visibility, "public"),
-                    eq(VerificationSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, VerificationSuiteTable.visibility, VerificationSuiteTable.createdBy),
             ),
           )
           .limit(1);
@@ -133,12 +129,7 @@ export function buildGetTestSuiteDetailsTool(ctx: TesterToolContext): ToolDefini
           .where(
             and(
               eq(EvalSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(EvalSuiteTable.visibility, "public"),
-                    eq(EvalSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, EvalSuiteTable.visibility, EvalSuiteTable.createdBy),
             ),
           )
           .limit(1);
@@ -199,12 +190,7 @@ export function buildGetTestSuiteDetailsTool(ctx: TesterToolContext): ToolDefini
           .where(
             and(
               eq(WebAutoSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(WebAutoSuiteTable.visibility, "public"),
-                    eq(WebAutoSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, WebAutoSuiteTable.visibility, WebAutoSuiteTable.createdBy),
             ),
           )
           .limit(1);

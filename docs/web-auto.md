@@ -58,10 +58,23 @@ Web Auto is backed by 4 domain tables in PostgreSQL (`src/lib/db/schema.ts`):
 
 | Table | Purpose | Primary Key | Key Columns |
 |---|---|---|---|
-| `web_auto_suite` | Groups test cases and defines runtime configurations. | UUID v4 | `id`, `parent_id` (for groups), `name`, `description`, `variables`, `mcp_server_id`, `evaluator_agent_id`, `timeout_sec`, `visibility`, `created_by` |
-| `web_auto_case` | Individual test case definition. | UUID v4 | `id`, `suite_id`, `name`, `description`, `script_content`, `assertions`, `enabled`, `created_by` |
-| `web_auto_run` | Suite-level execution batch run record. | UUID v4 | `id`, `suite_id`, `status` (`running`, `passed`, `failed`, `errored`), `passed`, `failed`, `errored`, `started_at`, `finished_at`, `created_by` |
-| `web_auto_case_result` | Detailed outcome of an individual case within a run. | BigInt Identity | `id`, `run_id`, `case_id`, `status`, `execution_output`, `verdict`, `error`, `created_at` |
+| `web_auto_suite` | Groups test cases and defines runtime configurations. | UUID v4 | `id`, `parent_id` (for groups, FK cascade), `name`, `description`, `variables`, `mcp_server_id` (FK **SET NULL**), `evaluator_agent_id` (FK **SET NULL**), `timeout_sec`, `visibility`, `created_by` |
+| `web_auto_case` | Individual test case definition. | BigInt Identity | `id`, `suite_id` (FK cascade), `name`, `input` (jsonb), `assertions`, `enabled`, `created_by` |
+| `web_auto_run` | Suite-level execution batch run record. | UUID v4 | `id`, `suite_id` (FK cascade), `status` (`running`, `passed`, `failed`, `errored`), `passed`, `failed`, `errored`, `started_at`, `finished_at`, `created_by` |
+| `web_auto_case_result` | Detailed outcome of an individual case within a run. | BigInt Identity | `id`, `run_id` (FK cascade), `case_id` (FK cascade), `status`, `execution_output`, `assertion_results`, `score`, `feedback`, `error`, `created_at` |
+
+**MCP server lifecycle**: deleting a Playwright MCP server only detaches the bound
+suites (`mcp_server_id` → NULL) — suites, cases, runs and results are all kept.
+Unbound suites stay editable and browsable; running them is refused with a
+"Playwright not configured" indication (greyed Run buttons in the panel/editor,
+structured `errored` outcomes at the runner layer, explicit tool errors for the
+tester agent).
+
+**RBAC**: suite runs require suite edit permission + `enabled` + a Playwright
+binding; case moves validate the target suite (existence, edit permission, same
+Playwright server); case deletion follows the unified rule across all three test
+modules — **case author OR suite author OR admin** (private suites are opaque 404
+to non-viewers).
 
 ### 2.2 Hierarchical Organization
 
@@ -77,12 +90,14 @@ Suites support a strict **2-level hierarchy**:
 ```
 src/lib/web-auto/
 ├── runner-mcp.ts     # Playwright MCP execution & Markdown output parser
-├── assertions.ts     # Deterministic assertion engine & expectation extractor
 ├── evaluator.ts      # Evaluator Agent integration for natural language checks
 ├── orchestrator.ts   # Case and Suite execution loops & SSE event emission
 ├── storage.ts        # Database access and transaction layer
 ├── recovery.ts       # Server boot crash recovery scanner
 └── types.ts          # Core interfaces, verdicts, and SSE frame definitions
+
+The deterministic assertion engine lives in the unified `src/lib/assertions/`
+subsystem (shared with Verification and Evaluation) — see `docs/verification.md`.
 ```
 
 ### 3.1 `runner-mcp.ts` (Playwright MCP Execution Layer)
@@ -91,7 +106,7 @@ src/lib/web-auto/
 * **Output Normalization (`parsePlaywrightOutput`)**: Parses the MCP result payload. Strips Markdown section envelopes (`### Result`, `### Page`, `### Events`) and code block fences (` ```json `), extracting clean JSON outputs and page metadata (URL, Title, Console).
 * **Fault Tolerance**: Never throws. All network, MCP server, tool wrapper, and upstream protocol errors are classified into structured outcomes.
 
-### 3.2 `assertions.ts` (Deterministic Assertion Engine)
+### 3.2 Deterministic Assertion Engine (unified: `src/lib/assertions/`)
 * **Context Unpacking**: Unpacks structured outputs (`{ result, page }`) so assertions can access `result` and `root` (the `page` handle is never exposed to the assertion sandbox).
 * **VM Sandboxing**: Executes `js_expression` assertions in a hardened Node `vm` context — inputs are JSON-deep-copied to strip host handles before injection, exposing `result`, `$`, `input`, `variables`, and `root` (hardened, not a true isolate).
 * **Standard Matchers**: Evaluates `jsonpath` and `json_schema` rules.
@@ -217,11 +232,9 @@ bad") or as a green pass with silently dropped judge rows.
 
 The following capabilities represent planned features and ongoing extensions:
 
-### 7.1 Suite-Level Variables Resolution & UI Configuration
-* **Script Template Interpolation**: Interpolate suite-level `variables` (e.g. `{{baseUrl}}`, `{{username}}`, `{{password}}`) and generator tokens (`{{$uuid}}`, `{{$timestamp}}`, `{{$randomString}}`) into `scriptContent` prior to MCP execution.
-* **Assertion Sandbox Binding**: Expose `variables` (as `input`) in the VM sandbox for `js_expression` assertions (e.g. `result.url === input.baseUrl + '/dashboard'`).
-* **Variables Editor in Suite Dialog**: Enhance `NewWebAutoSuiteDialog.tsx` with a dedicated Variables JSON editor to manage suite-level constants and parameters.
-* **Suite Settings Header Entry**: Provide a direct settings icon in `WebAutoEditor` header for quick inspection and updates of suite parameters, variables, and MCP bindings.
+### 7.1 Suite-Level Variables — Partially Implemented
+* **Implemented**: suite-level `variables` (jsonb) are resolved by the orchestrator and injected into the assertion sandbox as the `variables` binding (plus `input`) — `js_expression` assertions can reference e.g. `variables.baseUrl`.
+* **Pending**: script template interpolation (`{{baseUrl}}`, `{{$uuid}}`, `{{$timestamp}}` tokens inside `scriptContent` before MCP execution), a dedicated Variables editor in `NewWebAutoSuiteDialog.tsx`, and a suite-settings header entry in `WebAutoEditor.tsx`.
 
 ### 7.2 Visual Steps Table (v2 UX Polish)
 * Replace the raw JSON Execution Output pane with an interactive **Steps Table**.

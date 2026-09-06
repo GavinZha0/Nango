@@ -14,12 +14,18 @@ const GENERATORS: Record<string, Generator> = {
   timestamp: () => Date.now(),
   isoTimestamp: () => new Date().toISOString(),
   int: (args) => {
-    const [min, max] = args;
+    const [a, b] = args;
     if (args.length >= 2) {
-      return randomInt(min, max + 1);
+      // QUIRK: normalize swapped/negative bounds — crypto.randomInt throws
+      // ERR_INVALID_ARG_VALUE on min > max, which would pierce the
+      // runMcpCase never-throws contract (F19).
+      const lo = Math.trunc(Math.min(a, b));
+      const hi = Math.trunc(Math.max(a, b));
+      return randomInt(lo, hi + 1);
     }
     if (args.length === 1) {
-      return randomInt(0, min + 1);
+      const upper = Math.trunc(Math.max(a, 0));
+      return randomInt(0, upper + 1);
     }
     return randomInt(0, 2 ** 31);
   },

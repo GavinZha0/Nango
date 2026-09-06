@@ -10,9 +10,10 @@
 
 import "server-only";
 
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { visibilitySql } from "@/lib/auth/permissions";
 import { alphabeticCompare } from "@/lib/utils/sort";
 import {
   VerificationCaseResultTable,
@@ -153,9 +154,21 @@ export async function listEnabledCasesForRun(
   return rows.sort((a, b) => alphabeticCompare(a.name, b.name));
 }
 
-/** Enabled cases of an entire MCP server, sorted in natural numeric-aware toolName and case name order. */
+/** Visibility scope for user-triggered queries. Shape matches the
+ *  AuthContext accepted by `visibilitySql`; omit (or admin) = no filter —
+ *  reserved for system contexts such as the boot recovery sweep. */
+export interface VerificationViewer {
+  userId: string;
+  isAdmin: boolean;
+  isEditor: boolean;
+}
+
+/** Enabled cases of an entire MCP server, sorted in natural numeric-aware toolName and case name order.
+ *  SECURITY: pass `viewer` for user-triggered runs so foreign private
+ *  suites never execute; omit it only in system contexts (recovery sweep). */
 export async function listEnabledCasesForServerRun(
   mcpServerId: string,
+  viewer?: VerificationViewer,
 ): Promise<VerificationCaseRunItem[]> {
   const rows = await db
     .select({
@@ -179,6 +192,13 @@ export async function listEnabledCasesForServerRun(
       and(
         eq(VerificationSuiteTable.mcpServerId, mcpServerId),
         eq(VerificationCaseTable.enabled, true),
+        viewer
+          ? visibilitySql(
+              viewer,
+              VerificationSuiteTable.visibility,
+              VerificationSuiteTable.createdBy,
+            )
+          : undefined,
       ),
     )
     .orderBy(VerificationCaseTable.toolName, VerificationCaseTable.name);
@@ -345,6 +365,40 @@ export async function listResultsByRun(
     .select()
     .from(VerificationCaseResultTable)
     .where(eq(VerificationCaseResultTable.runId, runId))
+    .orderBy(VerificationCaseResultTable.startedAt);
+}
+
+/** SECURITY: viewer-scoped variant of {@link listResultsByRun} for
+ *  server-wide runs — a server row being visible must NOT expose other
+ *  users' private suites' case results (input snapshots / outputs /
+ *  assertion diffs). Rows whose case belongs to a suite outside the
+ *  viewer's visibility are omitted. Suite-scoped runs never need this
+ *  (their results all belong to one already-gated suite). */
+export async function listResultsByRunForViewer(
+  runId: string,
+  viewer: VerificationViewer,
+): Promise<VerificationCaseResultEntity[]> {
+  return db
+    .select(getTableColumns(VerificationCaseResultTable))
+    .from(VerificationCaseResultTable)
+    .innerJoin(
+      VerificationCaseTable,
+      eq(VerificationCaseResultTable.caseId, VerificationCaseTable.id),
+    )
+    .innerJoin(
+      VerificationSuiteTable,
+      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id),
+    )
+    .where(
+      and(
+        eq(VerificationCaseResultTable.runId, runId),
+        visibilitySql(
+          viewer,
+          VerificationSuiteTable.visibility,
+          VerificationSuiteTable.createdBy,
+        ),
+      ),
+    )
     .orderBy(VerificationCaseResultTable.startedAt);
 }
 

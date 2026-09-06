@@ -8,6 +8,8 @@ import { db } from "@/lib/db";
 import { VerificationCaseTable, VerificationSuiteTable, McpServerTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { canEditResource } from "@/lib/auth/permissions";
+import { loadVisibleSuite } from "@/lib/verification/access";
 import {
   assertionsArraySchema,
   caseInputSchema,
@@ -35,7 +37,27 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   let suiteId: string;
 
   if (reqSuiteId) {
-    suiteId = reqSuiteId;
+    // SECURITY: an explicit suiteId is client input — never trust it.
+    // loadVisibleSuite enforces visibility (opaque 404 for foreign private
+    // suites); insertion additionally requires suite-level edit, matching
+    // the tester tool (create-test-cases) and the eval/web-auto endpoints.
+    const suite = await loadVisibleSuite(reqSuiteId, session);
+    if (
+      !canEditResource(
+        {
+          visibility: suite.visibility as "private" | "public",
+          createdBy: suite.createdBy,
+        },
+        session,
+      )
+    ) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "You cannot add cases to this verification suite.",
+      );
+    }
+    suiteId = suite.id;
   } else {
     // 1. Find if a suite already exists for this mcpServerId
     const [existingSuite] = await db

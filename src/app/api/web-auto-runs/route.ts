@@ -3,7 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { canViewResource, ResourceWithRBAC } from "@/lib/auth/permissions";
+import { canViewResource, canEditResource, ResourceWithRBAC } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
@@ -36,6 +36,20 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       404,
       `Web Auto suite with ID "${body.suiteId}" not found or access denied.`,
     );
+  }
+
+  // CONTRACT: suite runs are an edit-level action (user decision, aligned
+  // with verification / eval run endpoints) and respect the enabled flag.
+  if (!canEditResource(suite as unknown as ResourceWithRBAC, session)) {
+    throw new ApiError(
+      "FORBIDDEN",
+      403,
+      "You do not have permission to run this suite.",
+    );
+  }
+
+  if (!suite.enabled) {
+    throw new ApiError("BAD_REQUEST", 400, "Suite is disabled.");
   }
 
   if (!suite.mcpServerId) {

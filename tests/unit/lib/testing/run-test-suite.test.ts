@@ -137,11 +137,33 @@ describe("run_test_suite tool", () => {
       expect(mockStartSuiteRun).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["verification", "Verification suite"],
+      ["evaluation", "Evaluation suite"],
+      ["web-auto", "Web Auto suite"],
+    ] as const)("rejects running a disabled %s suite", async (category, label) => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          id: validSuiteId,
+          name: "Disabled Suite",
+          enabled: false,
+          visibility: "private",
+          createdBy: "user-123",
+          mcpServerId: "playwright-server-uuid",
+        },
+      ]);
+
+      await expect(
+        tool.execute!({ category, suiteId: validSuiteId }),
+      ).rejects.toThrow(new RegExp(`${label} 'Disabled Suite' is disabled\\.`));
+    });
+
     it("dispatches evaluation suite run", async () => {
       mockLimit.mockResolvedValueOnce([
         {
           id: validSuiteId,
           name: "Support Benchmark Suite",
+          enabled: true,
           visibility: "public",
           createdBy: "other-user",
         },
@@ -168,6 +190,7 @@ describe("run_test_suite tool", () => {
         {
           id: validSuiteId,
           name: "UI Smoke Tests",
+          enabled: true,
           visibility: "private",
           createdBy: "user-123",
           mcpServerId: "playwright-server-uuid",

@@ -70,10 +70,10 @@ describe("delete_test_case tool", () => {
       ).rejects.toThrow(/not found/);
     });
 
-    it("rejects non-author editor from deleting a public suite case", async () => {
+    it("rejects unrelated editor from deleting a public suite case", async () => {
       mockLimit.mockResolvedValueOnce([
         {
-          caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Public Shared Case" },
+          caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Public Shared Case", createdBy: "someone-else" },
           suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
         },
       ]);
@@ -83,7 +83,41 @@ describe("delete_test_case tool", () => {
           category: "verification",
           caseId: 101,
         }),
-      ).rejects.toThrow(/Permission denied: Only the suite author or an admin can delete cases/);
+      ).rejects.toThrow(/Permission denied: Only the case author, the suite author, or an admin can delete cases/);
+    });
+
+    it("allows the case author to delete their own case in someone else's suite", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 102, suiteId: "suite-ver-uuid", name: "My Shared Case", createdBy: "user-123" },
+          suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
+        },
+      ]);
+
+      const result = (await tool.execute!({
+        category: "verification",
+        caseId: 102,
+      })) as DeleteTestCaseResult;
+
+      expect(result.deleted).toBe(true);
+      expect(result.caseId).toBe(102);
+    });
+
+    it("cases in invisible private suites are opaque not-found (visibility pre-gate)", async () => {
+      mockLimit.mockResolvedValueOnce([
+        {
+          caseRow: { id: 103, suiteId: "suite-ver-uuid", name: "Hidden Case", createdBy: "user-123" },
+          suite: { id: "suite-ver-uuid", visibility: "private", createdBy: "other-user" },
+        },
+      ]);
+
+      await expect(
+        tool.execute!({
+          category: "verification",
+          caseId: 103,
+        }),
+      ).rejects.toThrow(/not found/);
+      expect(mockDelete).not.toHaveBeenCalled();
     });
 
     it("allows admin to delete cases created by other users in public suites", async () => {

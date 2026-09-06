@@ -186,8 +186,8 @@ export interface WriteWebAutoCaseResultInput {
   status: "passed" | "failed" | "errored";
   executionOutput: unknown;
   assertionResults?: AssertionResult[];
-  score?: number;
-  feedback?: string;
+  score?: number | null;
+  feedback?: string | null;
   verdict?: WebAutoVerdict;
   error: ErrorEnvelope | null;
   startedAt: number;

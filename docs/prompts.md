@@ -24,6 +24,9 @@ the central composer lives in `lib/runner/dispatch/builtin.ts`.
 | Sandbox capability block | `lib/sandbox/runtime-tools.ts` | static |
 | Orchestration mode directive | `lib/orchestration/modes.ts` (`ORCHESTRATION_MODES[*].promptDirective`) | static template × 4 modes, supervisor-only, per-turn |
 | Available-agents catalog | `lib/runner/supervisor-tools.server.ts` (`formatCatalogBlock`) | dynamic, supervisor-only, per-request |
+| Tester system prompt + toolkit | `lib/testing/prompt.ts` (`DEFAULT_TESTER_SYSTEM_PROMPT`) + `lib/testing/tester-tools.server.ts` | role-scoped (`role = 'tester'`): the prompt is the agent's own `spec.prompt` (pre-filled by the editor); the 12 lifecycle tools are mounted at dispatch |
+| Active Page Context Snapshot | `lib/runner/extract-run-input.ts` (`formatPageContextSnapshot`) | dynamic, delegation-scoped — inlined as `## Active Page Context Snapshot (Read-Only Reference)` when a supervisor delegates with `includePageContext` |
+| Evaluator prompt assembly | `lib/evaluation/prompt-builder.ts` | dynamic, evaluator-initiated runs only (baseline + dimensions + criteria + deterministic results) |
 
 **Owner-local placement is intentional.** Editing safety wording
 opens `safety.ts`; editing skill-injection logic opens
@@ -62,6 +65,15 @@ chart block — they are already covered inside `SUPERVISOR_PROMPT`.
 | 5 | SSH block | only if bound |
 | 6 | Chart block (`encourage` variant) | always — `render_chart` is registered globally regardless of bindings |
 | 7 | `ERROR_POLICY_BLOCK` | only when the agent has at least one tool |
+
+**Role variants of the regular path:**
+- `role = 'tester'`: `spec.prompt` is the tester system prompt (pre-filled from
+  `DEFAULT_TESTER_SYSTEM_PROMPT`) and the 12 testing lifecycle tools are mounted
+  after composition — see `docs/test-automation-copilot.md`.
+- Agents with `sharedStateEnabled` (supervisor / tester / opt-in): the CopilotKit
+  runtime additionally serializes the client's shared state (including the open
+  test-editor context, `activeResourceData`) into a system message — see
+  `docs/shared-state.md` and `docs/test-automation-copilot.md` §3.
 
 ---
 

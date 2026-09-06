@@ -49,7 +49,7 @@ When generating or reviewing test cases, always apply rigorous testing principle
 
 ### 4. Tool Usage Workflow & Quality Guardrails
 
-You are equipped with 13 dedicated server-side testing tools. For test lifecycle actions, always call these specialized tools directly:
+You are equipped with 12 dedicated server-side testing tools. For test lifecycle actions, always call these specialized tools directly:
 - **Discovery**: \`list_test_suites\` and \`get_test_suite_details\` to inspect test topologies when not already open in context.
 - **MCP Tool Schema Inspection**: \`get_mcp_tool_schema\` to inspect MCP tool input schemas, types, and parameter constraints before designing verification test cases. Pass \`mcpServerId\` (from \`activeResourceData.suite.mcpServerId\`) and optionally \`toolName\`.
 - **Agent Specification Inspection**: \`get_agent_spec\` to inspect an AI agent's systemPrompt, model, bound tools, and skills before authoring evaluation test cases. Pass \`agentId\` (from \`activeResourceData.suite.agentId\`).
@@ -60,7 +60,7 @@ You are equipped with 13 dedicated server-side testing tools. For test lifecycle
 - **Suite Regression**: \`run_test_suite\` to asynchronously dispatch a full suite run across all enabled cases.
 - **Diagnosis & Root-Cause Analysis (RCA)**: \`get_test_results\` to query execution summaries or inspect detailed failure causes (\`failedOnly: true\`).
 - **Remediation & Activation**: \`update_test_case\` to repair failing assertions, adjust input payloads, or activate approved cases (\`enabled: true\`).
-- **Housekeeping**: \`delete_test_case\` to permanently remove obsolete or duplicate test cases.
+- **Deletion is human-only**: Test case deletion is performed by users in the UI. You do NOT have a delete tool — never attempt to delete, never promise deletion, and direct the user to the UI when a case becomes obsolete.
 
 ### 5. Creation & Activation Lifecycle Guidance
 

@@ -3,7 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { canEditResource, ResourceWithRBAC, canDeleteResource } from "@/lib/auth/permissions";
+import { canEditResource, canViewResource, ResourceWithRBAC } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { WebAutoCaseTable, WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
@@ -35,8 +35,10 @@ export const PATCH = withEditor<{ id: string }>(
     // Get case and its parent suite to check permissions
     const [existing] = await db
       .select({
+        suiteId: WebAutoCaseTable.suiteId,
         suiteVisibility: WebAutoSuiteTable.visibility,
         suiteCreatedBy: WebAutoSuiteTable.createdBy,
+        suiteMcpServerId: WebAutoSuiteTable.mcpServerId,
       })
       .from(WebAutoCaseTable)
       .innerJoin(WebAutoSuiteTable, eq(WebAutoSuiteTable.id, WebAutoCaseTable.suiteId))
@@ -53,6 +55,41 @@ export const PATCH = withEditor<{ id: string }>(
         403,
         "You do not have permission to edit this case.",
       );
+    }
+
+    // CONTRACT: moving a case re-binds its execution context — validate the
+    // target suite exactly like the verification module (existence, edit
+    // permission, same Playwright server).
+    if (body.suiteId !== undefined && body.suiteId !== existing.suiteId) {
+      const [target] = await db
+        .select({
+          visibility: WebAutoSuiteTable.visibility,
+          createdBy: WebAutoSuiteTable.createdBy,
+          mcpServerId: WebAutoSuiteTable.mcpServerId,
+        })
+        .from(WebAutoSuiteTable)
+        .where(eq(WebAutoSuiteTable.id, body.suiteId))
+        .limit(1);
+
+      if (!target) {
+        throw new ApiError("BAD_REQUEST", 400, "Target web auto suite not found.");
+      }
+
+      if (!canEditResource(target as unknown as ResourceWithRBAC, session)) {
+        throw new ApiError(
+          "FORBIDDEN",
+          403,
+          "You cannot move cases to this target suite.",
+        );
+      }
+
+      if (existing.suiteMcpServerId !== target.mcpServerId) {
+        throw new ApiError(
+          "BAD_REQUEST",
+          400,
+          "Cannot move case to a suite belonging to a different Playwright server.",
+        );
+      }
     }
 
     const [updated] = await db
@@ -80,6 +117,7 @@ export const DELETE = withEditor<{ id: string }>(
 
     const [existing] = await db
       .select({
+        caseCreatedBy: WebAutoCaseTable.createdBy,
         suiteVisibility: WebAutoSuiteTable.visibility,
         suiteCreatedBy: WebAutoSuiteTable.createdBy,
       })
@@ -91,11 +129,21 @@ export const DELETE = withEditor<{ id: string }>(
       throw new ApiError("NOT_FOUND", 404, "Case not found");
     }
 
-    if (!canDeleteResource({ visibility: existing.suiteVisibility, createdBy: existing.suiteCreatedBy } as unknown as ResourceWithRBAC, session)) {
+    // Opaque 404 first — private suite membership must not be discoverable.
+    if (!canViewResource({ visibility: existing.suiteVisibility, createdBy: existing.suiteCreatedBy } as unknown as ResourceWithRBAC, session)) {
+      throw new ApiError("NOT_FOUND", 404, "Case not found");
+    }
+
+    // CONTRACT (unified delete rule across all three test modules):
+    // case author OR suite author OR admin.
+    const isAdminUser = session.user.role === "admin";
+    const isCaseAuthor = existing.caseCreatedBy === session.user.id;
+    const isSuiteAuthor = existing.suiteCreatedBy === session.user.id;
+    if (!isAdminUser && !isCaseAuthor && !isSuiteAuthor) {
       throw new ApiError(
         "FORBIDDEN",
         403,
-        "You do not have permission to delete this case.",
+        "Only the case creator, the suite creator, or an admin can delete this case.",
       );
     }
 

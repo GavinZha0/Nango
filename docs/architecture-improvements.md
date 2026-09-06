@@ -1,6 +1,8 @@
 # Architecture Improvements Plan
 
-> Status: **Proposed** — architecture-level improvements only (no feature/business additions).
+> Status: **In Progress** — P0/P1 foundation shipped (middleware pipeline, Tool
+> Risk Registry, guardrail subsystem incl. admin UI); P2–P8 queued. Last
+> verified: 2026-09-06 (statuses below audited against source).
 
 Scope: consolidated improvement plan derived from a review of the current
 codebase, source-study of six open-source agent projects (DeerFlow, Hermes,
@@ -457,21 +459,21 @@ Legend — **Tier:** INV=invariant, CFG=configurable. **Status:** ✅ shipped,
 | G3 | **SSH command policy** | execution | Dangerous shell commands per host | Regex allow/deny per `ssh_server`, deny-precedence, empty-allowlist = deny-all, fail-closed on bad regex | INV (per-host lists are admin config) | ✅ |
 | G4 | **Sandbox isolation** | execution | Unisolated LLM code on host | Docker isolation; `subprocess` degraded is fail-closed unless `sandbox.allow_insecure` | INV + one toggle | ✅ (BUG-11) |
 | G5 | **Credential confinement** | execution | Secret leak to browser/prompt/agent | AES-256-GCM; decrypted keys only in server memory, consumed by trusted adapters | INV | ✅ |
-| G6 | **Tool approval (HITL)** | pipeline | Unwanted destructive/sensitive tool calls | `ToolApprovalMiddleware` gates on risk; mode `auto/always/never` per agent | CFG | ✅ (regex) → 🔧 (risk) |
-| G7 | **Tool Risk Registry** | pipeline | Fragile name-guessing; approval bypass | Co-located `risk` default per tool + `assessArgs` (SSH/SQL) + DB override; fail-closed for undeclared | CFG | 🔧 N1-B |
+| G6 | **Tool approval (HITL)** | pipeline | Unwanted destructive/sensitive tool calls | `ToolApprovalMiddleware` gates on risk; mode `auto/always/never` per agent | CFG | ✅ (risk-based) |
+| G7 | **Tool Risk Registry** | pipeline | Fragile name-guessing; approval bypass | `risk-registry.ts` — code-declared defaults + MCP annotations + `tool_risk_override` DB table; fail-closed for undeclared; `assessArgs` (SSH/SQL) | CFG | ✅ |
 | G8 | **Tool error handling** | pipeline | UI hang / unrecoverable throw | `ToolErrorHandlingMiddleware` → `{isError,message}` envelope | (always-on) | ✅ |
-| G9 | **Tool-result sanitization** | pipeline | Indirect injection via tool/MCP/web output | Neutralize framework tags in *external* results | CFG (toggle) | 🅿 |
-| G10 | **Untrusted-context wrapping** | pipeline/prompt | Indirect injection | Wrap external content in guard markers + stable-layer policy ("data, not instructions") | CFG (toggle) | 🅿 |
-| G11 | **Loop detection** | pipeline | Token burn from repeated identical calls | Break N consecutive identical tool calls | CFG (toggle + N) | 🅿 |
+| G9 | **Tool-result sanitization** | pipeline | Indirect injection via tool/MCP/web output | `sanitizer.ts` neutralize framework tags in *external* results; `guardrail.result_sanitization.enabled` | CFG (toggle) | ✅ |
+| G10 | **Untrusted-context wrapping** | pipeline/prompt | Indirect injection | `untrusted-context.ts` guard markers (`<<<UNTRUSTED_SOURCE_DATA>>>`) + stable-layer policy ("data, not instructions") | CFG (toggle) | ✅ |
+| G11 | **Loop detection** | pipeline | Token burn from repeated identical calls | `loop-detection.ts`; `guardrail.loop_detection.enabled` + threshold config | CFG (toggle + N) | ✅ |
 | G12 | **Token budget** | run/pipeline | Runaway cost | Hard cap → `stop_reason: token_capped` (needs Run-layer) | CFG (cap) | ⏳ |
-| G13 | **Output redaction** | output | PII / secret echoed in reply | Regex redaction of model output before stream/persist | CFG (patterns) | 🅿 |
+| G13 | **Output redaction** | output | PII / secret echoed in reply | `output-safety.ts` `redactSensitiveText` + `DEFAULT_REDACTION_RULES` applied before stream/persist | CFG (patterns) | ✅ |
 | G14 | **HTML CSP** | output | Exfiltration from `generate_html_page` | Inject CSP meta (inline ok, `connect-src 'none'`) | INV (+strictness) | 🅿 |
 | G15 | **Renderer no-eval** | output | Same-origin JS from LLM output (charts) | ECharts no `new Function` + iframe (deferred) | INV | ✅ (eval) / ⏳ (iframe) |
 | G16 | **Rate limiting** | input | Resource exhaustion / abuse | In-memory token bucket per-user + global | CFG (rpm) | 🅿 |
 | G17 | **Input validation** | input | Oversized / malformed input | Length / encoding caps | CFG (limits) | 🅿 |
-| G18 | **Prompt-injection patterns** | input | Direct injection (weak / defense-in-depth) | Regex on user input; `block`/`warn`/`log` via `safety_policy` | CFG (patterns) | 🅿 |
+| G18 | **Prompt-injection patterns** | input | Direct injection (weak / defense-in-depth) | `input-safety.ts` regex on user input; `guardrail.input_safety.enabled`; `block`/`warn`/`log` via `safety_policy` | CFG (patterns) | ✅ |
 | G19 | **Inspector agent** | cross | Ambiguous content needing judgment | Optional LLM second opinion on `warn` cases; bound model | CFG (bind) | ⏳ |
-| G20 | **Headless deny** | pipeline | Approval-required tools in no-user runs | Immediate deny when `isHeadless && !headlessAllowed` | CFG (per risk) | 🔧 N1-B |
+| G20 | **Headless deny** | pipeline | Approval-required tools in no-user runs | `isHeadless` on MiddlewareContext; immediate deny when `isHeadless && !headlessAllowed` | CFG (per risk) | ✅ |
 | G21 | **Skill-script scan** | execution | Malicious imported skill scripts | Static scan (import + pre-exec) for external skills; Docker is the boundary | CFG (toggle) | 🅿 |
 | G22 | **Prompt safety block** | prompt (soft) | Secret disclosure / disallowed content (LLM may ignore) | `SAFETY_POLICY_BLOCK` system text | CFG (text) | ✅ |
 
@@ -487,8 +489,7 @@ Legend — **Tier:** INV=invariant, CFG=configurable. **Status:** ✅ shipped,
 | G3 SSH policy | E | O* | E | — | E |
 | G4 Sandbox | E | — | E | — | E |
 | G5 Credential | E | E | E | E | E |
-| G6/G7 Approval+Risk | E | O | E(N1-C) | O | E |
-| G8 Error handling | E | — | E(N1-C) | E | E |
+| G6/G7 Approval+Risk | E | O | E(N1-C) | O | E || G8 Error handling | E | — | E(N1-C) | E | E |
 | G9/G10 Sanitize/wrap | E | O | E | — | E |
 | G11 Loop / G12 Budget | E | O | E | — | E |
 | G13 Output redaction | E | O | — | — | E |
@@ -535,7 +536,8 @@ bypassable.")
 - **N1-B.1** — code-declared risk defaults + registry + risk-based approval +
   fail-closed + `assessArgs` + headless deny. No UI. (G6/G7/G20) ✅
 - **P1 Wave 1 (Sub-step 3.1 & 3.2)** — `tool_risk_override`, `safety_policy`, `safety_interception_log` DB tables, `AgentRole = 'security'`, core `guardrail-service.ts`, `/api/admin/guardrails` API route. ✅
-- **P1 Wave 2 (Sub-step 3.3)** — Single-page `/admin/guardrails` UI (4 Tabs, 14-Node Serpentine Pipeline Visualizer with Drawer cards, Micro Tool Risk Table, Micro Content/Model Rules Table, Audit Log Table). 🔧 (In Progress)
+- **P1 Wave 2 (Sub-step 3.3)** — Single-page `/admin/guardrails` UI (4 Tabs, 14-Node Serpentine Pipeline Visualizer with Drawer cards, Micro Tool Risk Table, Micro Content/Model Rules Table, Audit Log Table). ✅ (shipped: `GuardrailPipelineVisualizer` / `ToolRiskTable` / `ContentSafetyTable` / `InterceptionLogsTable` / `GuardrailDashboard`)
+- **Post-Wave-2 middlewares** — G9 sanitization, G10 untrusted-context wrapping, G11 loop detection, G13 output redaction, G17/G18 input safety all shipped as configurable middlewares (see catalog statuses).
 
 ---
 
@@ -905,15 +907,15 @@ inheritance.
 
 "Now → Next → Later" — review each stage against real usage before the next.
 
-> **Current focus (pre-launch pivot).** The project is not yet live, so the
-> remaining security/correctness bugs are **not** the critical path — the
-> foundation is. Active work is **NEXT 1 § Tool Pipeline refactor + Tool Risk
-> Registry** (the unified insertion point all later guardrails plug into).
-> The remaining **NOW-B** items are deferred; the **artifact-family** bugs
-> (BUG-5 visibility incl. `shared→public` rename, BUG-6 workflow→artifact FK)
-> move into the upcoming **artifacts rework** (large feature effort). BUG-1(B),
-> BUG-2, the skill scanner, route audit, and CSP/headers remain queued but
-> non-urgent.
+> **Current focus (post-foundation).** NEXT 1's core is **shipped**: the
+> middleware pipeline, Tool Risk Registry (+ DB overrides + headless deny), the
+> `/admin/guardrails` control plane, and the sanitization / untrusted-context /
+> loop-detection / output-redaction / input-safety middlewares are all live.
+> Remaining NEXT 1 tails: **N1-C** (unify the workflow tool catalog and confirm
+> MCP/verification/evaluation paths flow through the pipeline) and the **N1-D**
+> remainder (full RunAdmission, concurrency limits, audit integrity). NOW-B
+> items stay deferred; the artifact-family bugs (BUG-5, BUG-6) ride the
+> **artifacts rework** (dashboards + filters already shipped).
 
 ```
 NOW-A: Direct fixes (code-exec sinks + binding)                 ~1 week
@@ -930,15 +932,20 @@ NOW-A: Direct fixes (code-exec sinks + binding)                 ~1 week
 
 NOW-B: Shared correctness & hygiene            [DEFERRED — non-urgent, pre-launch]
 ├── BUG-5 artifact shared visibility + shared→public rename   → ARTIFACTS REWORK
+│     (dashboards + artifact filters already shipped; visibility fix open)
 ├── BUG-6 workflow→artifact FK (CASCADE→SET NULL)             → ARTIFACTS REWORK
+│     (verified 2026-09-06: still CASCADE)
 ├── BUG-1 (B): workflow save-time owner-scoped data_source resolution (queued)
 ├── BUG-2 content-addressed cache + opaque dataset handle + policy invalidation (queued)
 ├── BUG-14 credential FK (CASCADE→SET NULL) + FK audit (queued)
+│     (verified 2026-09-06: entity_run.credentialId still CASCADE)
 ├── Skill import/pre-execution scanner (BUG-10 residual) (queued)
-├── Route role audit ; HTML CSP + headers ; input length/rate limits (queued)
+├── Route role audit  [PARTIAL — skills/data-sources POST are withEditor;
+│     some list routes still withSession by design for consumers]
+├── HTML CSP + headers ; input length/rate limits (queued)
 └── Tests for the above
 
-NEXT 1: Foundation — Tool Pipeline + Risk Registry   [ACTIVE]   ~2 weeks
+NEXT 1: Foundation — Tool Pipeline + Risk Registry   [CORE SHIPPED — N1-C/N1-D tails open]
 ├── N1-A  Pipeline scaffolding (behavior-preserving, zero-risk)  [DONE]
 │   ├── lib/agent-pipeline/{types,compose,middlewares}.ts — ToolMiddleware
 │   │     (wrapToolCall primitive + before/after sugar via defineToolMiddleware)
@@ -947,21 +954,24 @@ NEXT 1: Foundation — Tool Pipeline + Risk Registry   [ACTIVE]   ~2 weeks
 │   ├── runToolApprovalGate extracted from tool-approval → ToolApprovalMiddleware (order 40)
 │   └── dispatch/builtin.ts .map() → composeToolPipeline().wrap ;
 │         full suite green (1415), behavior identical. MCP still on wrapToolApproval (N1-C)
-├── N1-B  Tool Risk Registry (the real upgrade)
-│   ├── tool-risk.ts — ToolRiskMeta + name→meta registry; builtin tools declare;
-│   │     MCP derives from readOnlyHint/destructiveHint (default high)
-│   ├── ToolApprovalMiddleware reads risk metadata (fail-closed: undeclared →
-│   │     approve); retire regex/writeKeywords + obsolete BUG-9 field read
-│   └── Wire isHeadless + headlessAllowed → headless deny policy
-├── N1-C  Unify remaining local-enforce paths
+├── N1-B  Tool Risk Registry  [DONE]
+│   ├── risk-registry.ts — ToolRiskMeta + builtin registry; MCP derives from
+│   │     readOnlyHint/destructiveHint (default medium, fail-closed for undeclared)
+│   ├── ToolApprovalMiddleware reads risk metadata; regex/writeKeywords retired
+│   ├── isHeadless + headlessAllowed → G20 headless deny  [DONE]
+│   └── tool_risk_override DB table + /admin/guardrails row-level overrides  [DONE]
+├── N1-C  Unify remaining local-enforce paths  [OPEN]
 │   └── Apply pipeline to the workflow tool catalog (currently unwrapped);
-│         confirm MCP + verification + evaluation flow through it; backend = observe
-└── N1-D  Rest of resource protection (follows A–C)
+│         verification + evaluation flow through it; backend = observe
+└── N1-D  Rest of resource protection  [PARTIAL]
     ├── Full RunAdmission (credential structural binding, resource cross-check,
-    │     mode/initiator consistency)
-    ├── Global + per-user concurrency limits (bucketed; sub-run exempt) + schedule overlap
-    ├── Event-persistence redaction + audit integrity (dropped_event_count)
-    └── New middlewares: ToolResultSanitization, LoopDetection
+    │     mode/initiator consistency)  [OPEN]
+    ├── Global + per-user concurrency limits (bucketed; sub-run exempt)
+    │     + schedule overlap  [OPEN]
+    ├── Event-persistence redaction + audit integrity (dropped_event_count)  [OPEN]
+    └── New middlewares: ToolResultSanitization (G9) ✅, LoopDetection (G11) ✅,
+          + input-safety (G17/G18) ✅, output redaction (G13) ✅,
+          untrusted-context wrapping (G10) ✅
 
 NEXT 2: Workflow product foundation                             ~3 weeks
 ├── Workflow independent list/read/run

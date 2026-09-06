@@ -26,9 +26,10 @@ Key system capabilities:
 | **Multi-backend agent integration** | Connect heterogeneous agent platforms (agno / Mastra / Dify); browser sees a uniform **AG-UI protocol** | `src/lib/backends/` |
 | **Built-in Agent + MCP** | Build agents in-app via the CopilotKit runtime; extend tools through the Model Context Protocol (MCP) | `src/lib/builtin-agents/agent-pool.ts`, `src/lib/mcp/provider-pool.ts` |
 | **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs; permanent Artifact library via Save | `src/lib/artifacts/` |
-| **Verification Subsystem** | Deterministic quality gate for testing MCP tools and workflows using assertions | `src/lib/verification/` ([docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
+| **Verification Subsystem** | Deterministic quality gate for testing MCP tool integrations using assertions | `src/lib/verification/` ([docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | **Evaluation Subsystem** | Stochastic quality assessment for agent conversations using LLM-as-Judge | `src/lib/evaluation/` ([docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 | **Web Auto Subsystem** | Deterministic Playwright-based browser automation & regression testing with dual-tier evaluation | `src/lib/web-auto/` ([docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
+| **Test Automation Copilot** | `tester`-role agent with 12 lifecycle tools + WYSIWYG editor context across the three test subsystems | `src/lib/testing/`, `src/lib/assertions/` ([docs/test-automation-copilot.md](file:///d:/AI/nango/docs/test-automation-copilot.md)) |
 
 ---
 
@@ -72,7 +73,7 @@ Key system capabilities:
 │  /api/copilotkit/[...path]   ──►  Backend chat → Runner → AG-UI     │
 │  /api/copilotkit/builtin/... ──►  Built-in chat → Runner → AG-UI    │
 │  /api/{agents, mcp, skills}       Resource configs & lifecycles      │
-│  /api/{verification, eval}        Test suites, cases & run loops     │
+│  /api/{verification, eval, web-auto}-*   Test suites, cases & run loops     │
 │  /api/{schedules, notifications}  Triggers & live user notifications │
 │  /api/runs/stream                 SSE: notifications + finalized     │
 │  /api/admin/{credentials, runs}   Admin credentials & forensics      │
@@ -211,7 +212,9 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `/api/builtin-agents`, `/[id]` | CRUD | Built-in agent + tool bindings (incl. `role` enum) | session |
 | `/api/mcp-servers`, `/[id]/discover`, `/[id]/call-tool` | CRUD/RPC | MCP server registration, tool discovery, invocation | session |
 | `/api/skills`, `/api/skills/[id]`, `/api/skills/[id]/files/[...]` | CRUD | Skills CRUD + helper-file read | session |
-| `/api/web-auto/suites`, `/cases`, `/runs` | CRUD/RPC | Web Auto suites, cases, execution batches and case results | session |
+| `/api/verification-suites[/id]`, `/api/verification-cases/[id]`, `/api/verification-runs[/id]`, `/api/verification-servers/[id]` | CRUD/RPC | Verification suites, cases, runs (suite + server-wide, viewer-scoped) and results | editor |
+| `/api/eval-suites[/id]`, `/api/eval-cases/[id]`, `/api/eval-runs[/id]` | CRUD/RPC | Evaluation suites, cases, runs (suite + agent batch) and results | editor |
+| `/api/web-auto-suites[/id]`, `/api/web-auto-cases/[id]`, `/api/web-auto-runs[/id]` | CRUD/RPC | Web Auto suites, cases, execution batches and case results | editor |
 | `/api/media/tool-image/[id]` | GET | Stream temporary media cache images produced by MCP tools | session |
 | `/api/notifications`, `/api/notifications/[id]` | GET/POST/PATCH/DELETE | Inbox list / mark-all-read / mark-read / delete | session |
 | `/api/runs/stream` | GET (SSE) | Live notification + `run_finalized` stream keyed by ownerId. Notification frames carry `id: <uuidv7>`; on EventSource auto-reconnect we replay missed `notification` rows via `Last-Event-ID` (header or `?lastEventId=`), capped at 200 rows per resume. | session |
@@ -245,7 +248,11 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `credentials/invalidation.ts` | Cross-cutting helpers: `invalidateForCredentialChange` and `invalidateForMcpServerChange`. Call from any write path. |
 | `mcp/client-providers.ts` | `createGracefulMcpProvider` — degrade MCP failures without aborting agent runs; supports `mcp.execution_timeout` |
 | `media/temp-media-cache.ts` | In-memory LRU buffer cache for tool-emitted images with TTL and streaming endpoint |
-| `web-auto/` | Web Auto subsystem: Playwright MCP runner, JS VM sandboxed assertions, evaluator agent bridge, and crash recovery scanner (see [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
+| `web-auto/` | Web Auto subsystem: Playwright MCP runner, evaluator agent bridge, and crash recovery scanner (see [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
+| `assertions/` | Unified assertion engine shared by all three test subsystems: JSONPath, JSON Schema, hardened `node:vm` JS expressions, LLM-judge handoff (see `docs/test-automation-copilot.md` §4) |
+| `testing/` | Test Automation Copilot: `tester`-role tool factory (12 lifecycle tools), system prompt, category config, client cache invalidation (see [docs/test-automation-copilot.md](file:///d:/AI/nango/docs/test-automation-copilot.md)) |
+| `verification/` | Verification subsystem: MCP runner, run orchestrators, recovery, viewer-scoped storage (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
+| `evaluation/` | Evaluation subsystem: eval runner, orchestrator, prompt builder, deterministic checks, storage (see [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 | `runner/runner.ts` | Execution kernel: `runChatRequest` (backend) / `runBuiltinChatRequest` (built-in) / `start` (programmatic, sync + async). Every dispatch produces an `entity_run` row. Sync runs timeout after `runner.sync_timeout` (default 300s); async runs timeout after `runner.async_timeout` (default 1800s / 30 min). Both are configurable in the admin config table. |
 | `runner/persisting-agent.ts` | AG-UI event tee — wraps every dispatched agent so the event stream both reaches the browser and persists into `entity_run_event`. Storage is **coalesced**: TEXT_MESSAGE_CONTENT / REASONING_MESSAGE_CONTENT deltas are buffered in memory and flushed to a single `message` / `reasoning` row at each natural boundary (tool call, message-id change, stream end). The browser still sees real-time deltas on the wire. |
 | `runner/event-bus.ts` | In-process pub/sub keyed by `ownerId`, surfaced via `/api/runs/stream` SSE; `globalThis` slot for HMR safety. |
@@ -411,7 +418,7 @@ Lookup paths (server-side only):
 | Built-in Agents | `builtin_agent`, `builtin_agent_tool` | Agent definition + tool bindings (discriminated union) |
 | Tool sources | `mcp_server`, `skill`, `skill_file` | MCP server / DB-resident Skill (helper bytes in `skill_file.content::bytea`) |
 | Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards |
-| Verification | `verification_suite`, `verification_case`, `verification_run`, `verification_case_result` | Deterministic assert-on-output testing for tools and workflows (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
+| Verification | `verification_suite`, `verification_case`, `verification_run`, `verification_case_result` | Deterministic assert-on-output testing for MCP tools. Deleting an MCP server detaches suites (`mcp_server_id` → SET NULL; `mcp_server_name` snapshot kept) instead of cascading (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | Evaluation | `eval_suite`, `eval_case`, `eval_run`, `eval_case_result` | Stochastic quality evaluations using LLM-as-Judge (see [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 | Web Auto | `web_auto_suite`, `web_auto_case`, `web_auto_run`, `web_auto_case_result` | Deterministic Playwright browser automation suites, cases, runs & results (see [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
 

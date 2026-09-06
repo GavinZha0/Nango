@@ -62,6 +62,9 @@ export interface StartServerRunInput {
   mcpServerId: string;
   ownerId: string;
   triggeredBy: "manual" | "schedule";
+  /** SECURITY: set for user-triggered runs so case selection stays inside
+   *  the triggerer's visible suites; omit for system contexts (recovery). */
+  viewer?: { userId: string; isAdmin: boolean; isEditor: boolean };
 }
 
 export interface StartSuiteRunResult {
@@ -86,7 +89,10 @@ export async function startServerRun(
   }
 
   const serverName = server.serverTitle || server.name;
-  const cases = await storage.listEnabledCasesForServerRun(input.mcpServerId);
+  const cases = await storage.listEnabledCasesForServerRun(
+    input.mcpServerId,
+    input.viewer,
+  );
   const run = await storage.createRun({
     mcpServerId: input.mcpServerId,
     totalCount: cases.length,

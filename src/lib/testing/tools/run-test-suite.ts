@@ -1,7 +1,8 @@
 import "server-only";
 
 import { z } from "zod";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { visibilitySql } from "@/lib/auth/permissions";
 
 import { db } from "@/lib/db";
 import {
@@ -53,12 +54,7 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           .where(
             and(
               eq(VerificationSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(VerificationSuiteTable.visibility, "public"),
-                    eq(VerificationSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, VerificationSuiteTable.visibility, VerificationSuiteTable.createdBy),
             ),
           )
           .limit(1);
@@ -73,6 +69,11 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           throw new Error(
             `Verification suite '${suite.name}' is detached from its MCP server (the server was deleted) and can no longer be run.`,
           );
+        }
+
+        // Mirror the REST run gate: disabled suites refuse to run.
+        if (!suite.enabled) {
+          throw new Error(`Verification suite '${suite.name}' is disabled.`);
         }
 
         const runResult = await startSuiteRun({
@@ -97,6 +98,7 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           .select({
             id: EvalSuiteTable.id,
             name: EvalSuiteTable.name,
+            enabled: EvalSuiteTable.enabled,
             visibility: EvalSuiteTable.visibility,
             createdBy: EvalSuiteTable.createdBy,
           })
@@ -104,18 +106,18 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           .where(
             and(
               eq(EvalSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(EvalSuiteTable.visibility, "public"),
-                    eq(EvalSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, EvalSuiteTable.visibility, EvalSuiteTable.createdBy),
             ),
           )
           .limit(1);
 
         if (!suite) {
           throw new Error(`Evaluation suite '${suiteId}' not found or access denied.`);
+        }
+
+        // Mirror the REST run gate: disabled suites refuse to run.
+        if (!suite.enabled) {
+          throw new Error(`Evaluation suite '${suite.name}' is disabled.`);
         }
 
         const runResult = await startEvalSuiteRun({
@@ -140,6 +142,7 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           .select({
             id: WebAutoSuiteTable.id,
             name: WebAutoSuiteTable.name,
+            enabled: WebAutoSuiteTable.enabled,
             visibility: WebAutoSuiteTable.visibility,
             createdBy: WebAutoSuiteTable.createdBy,
             mcpServerId: WebAutoSuiteTable.mcpServerId,
@@ -148,12 +151,7 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
           .where(
             and(
               eq(WebAutoSuiteTable.id, suiteId),
-              ctx.isAdmin
-                ? undefined
-                : or(
-                    eq(WebAutoSuiteTable.visibility, "public"),
-                    eq(WebAutoSuiteTable.createdBy, ctx.userId),
-                  ),
+              visibilitySql(ctx, WebAutoSuiteTable.visibility, WebAutoSuiteTable.createdBy),
             ),
           )
           .limit(1);
@@ -164,6 +162,11 @@ export function buildRunTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
 
         if (!suite.mcpServerId) {
           throw new Error(`Web Auto suite '${suite.id}' has no Playwright MCP server configured.`);
+        }
+
+        // Mirror the REST run gate: disabled suites refuse to run.
+        if (!suite.enabled) {
+          throw new Error(`Web Auto suite '${suite.name}' is disabled.`);
         }
 
         const runResult = await startWebAutoSuiteRun({

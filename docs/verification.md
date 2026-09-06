@@ -49,10 +49,17 @@ Four new tables. Nothing in the existing schema changes.
 
 | Table | Purpose | Key Columns |
 |---|---|---|
-| `verification_suite` | Groups cases. | `id`, `name`, `category` ('mcp'), `timeout_sec` |
-| `verification_case` | An individual test case. | `id`, `suite_id`, `mcp_server_id`, `tool_name`, `input`, `assertions` |
-| `verification_run` | A suite execution. | `id`, `suite_id`, `status`, counts (`passed`, `failed`, etc.) |
+| `verification_suite` | Groups cases. | `id`, `name`, `category` ('mcp'), `mcp_server_id` (FK **SET NULL**), `mcp_server_name` (denormalized display snapshot), `timeout_sec` |
+| `verification_case` | An individual test case. | `id`, `suite_id` (FK cascade), `tool_name`, `input`, `assertions` |
+| `verification_run` | A suite execution. | `id`, `suite_id` (FK cascade), `mcp_server_id` (FK **SET NULL**), `status`, counts (`passed`, `failed`, etc.) |
 | `verification_case_result`| Outcome of a case. | `id`, `verification_run_id`, `verification_case_id`, `status`, `input_snapshot`, `result_payload`, `assertion_results`, `error` |
+
+**MCP server lifecycle (detached suites)**: deleting an MCP server detaches its
+suites (`mcp_server_id` → NULL) instead of destroying them — suites, cases, run
+history and results are all kept, and the denormalized `mcp_server_name` keeps
+the left panel grouping intact. Detached suites stay editable/browsable but are
+never runnable: run requests fail with a structured "detached" error at both
+the REST and tester-tool layers.
 
 #### Why MCP cases do **not** write `entity_run`
 
@@ -118,7 +125,8 @@ per-tool sidecar HTTP probe, which is V2 territory.
 ## 5. Execution
 
 - **Single-case run**: Synchronous. Updates UI state but does NOT write to the database.
-- **Suite run**: Asynchronous, serial. Creates `verification_run` and `verification_case_result` rows. Publishes SSE updates. Tolerant to individual case failures.
+- **Suite run**: Asynchronous, serial. Creates `verification_run` and `verification_case_result` rows. Publishes SSE updates. Tolerant to individual case failures. Gated on suite edit permission, `enabled`, and a live MCP binding.
+- **Server-wide run** (`mcpServerId` in `POST /api/verification-runs`): executes all enabled cases under one server, **scoped to the triggerer's visible suites** — foreign private suites never execute, and run results are filtered by the same visibility on read. The boot recovery sweep reads unscoped (system context).
 - **Real-Time Updates (SSE)**: Publishes `run_started`, `case_finished`, and `run_finished` over the existing `/api/runs/stream` event bus. The client hook `useVerificationRunStream` drives the UI.
 
 ## 7. API Routes
@@ -135,12 +143,15 @@ All routes are wrapped by `withEditor(routePath, handler)` from
 | `DELETE /api/verification-suites/[id]`                      | Cascade-delete cases + runs + results. |
 | `GET    /api/verification-suites/[id]/cases`                | List cases (alphabetical). |
 | `POST   /api/verification-suites/[id]/cases`                | Create a case. `CHECK` enforced server-side. |
-| `PATCH  /api/verification-cases/[id]`                       | Update name / input / assertions / enabled. |
+| `PATCH  /api/verification-cases/[id]`                       | Update name / input / assertions / enabled / `suiteId` (moves validate the target suite: existence + edit permission + same MCP server). |
 | `DELETE /api/verification-cases/[id]`                       | Delete a case. |
 | `POST   /api/verification-cases/[id]/run`                   | **Synchronous** single-case run; does not persist. |
 | `POST   /api/verification-runs`                             | Body `{ suiteId }` → start async suite run; returns `{ runId }`. |
 | `GET    /api/verification-suites/[id]/runs?offset=0&limit=5`| Paginated history for the banner. Returns `{ rows: VerificationRunEntity[], total: number }` — `total` drives both absolute chip numbering (`#N`) and a precise "more older runs?" guard for the pagination buttons. |
-| `GET    /api/verification-runs/[id]`                        | Run header + all `verification_case_result` rows. Returns `{ run, results }`. Used by `useRunSnapshot` for both the just-completed-run inspector view AND history-view chip selection. |
+| `GET    /api/verification-runs/[id]`                        | Run header + all `verification_case_result` rows. Returns `{ run, results, visibleCount }`. Used by `useRunSnapshot` for both the just-completed-run inspector view AND history-view chip selection. Server-wide runs scope `results` to the viewer's visible suites. |
+| `GET    /api/verification-servers`                          | List MCP servers that have verification suites (left-panel tree groups), with per-user visibility and suite counts. |
+| `DELETE /api/verification-servers/[id]`                     | Bulk cleanup: deletes only the suites the caller may delete (per-suite `canDeleteResource`; admin deletes all). Returns `{ deleted, skipped }`. Non-uuid ids → 404. |
+| `GET    /api/verification-servers/[id]/cases`, `.../runs`    | Cross-suite per-server listings for the left panel and the server-run history banner. |
 
 ---
 
@@ -159,9 +170,13 @@ The UI is built around `/verification/[id]`, consisting of three columns: a left
 
 | Action | Required role |
 |---|---|
-| List / view suites, cases, runs, results | `editor`+ |
-| Create / edit / delete suites, cases | `editor`+ |
-| Run case (sync) or suite (async) | `editor`+ |
+| List / view suites, cases, runs, results | `editor`+ (resource visibility applies) |
+| Create / edit suites, cases | `editor`+ (`canEditResource` — public suites are collaboratively editable) |
+| Delete a suite | Suite author or admin (`canDeleteResource`) |
+| Delete a case | Case author OR suite author OR admin (unified rule across all three test modules) |
+| Bulk-delete suites under an MCP server | Per-suite `canDeleteResource` — editors delete only their own suites |
+| Run case (sync) or suite (async) | Suite edit permission + `enabled` + live MCP binding |
+| Server-wide run | Server visibility (view) — but case selection and results are scoped to the triggerer's visible suites |
 | Schedule a suite (V2, via `schedule` row with `entity_kind='verification_suite'`) | `editor`+ |
 
 The Verification page is wired to the `editor` group on the LeftToolbar.
@@ -172,14 +187,14 @@ user-authored.
 
 ## 10. Operational Notes
 
-- **Payload truncation**: `result_payload` is capped at 24 KB. Assertions evaluate on the full payload before truncation.
+- **Payload truncation**: `result_payload` is capped at 32 KB by default (configurable via `verification.payload_max_kb`). Assertions evaluate on the full payload before truncation.
 - **Concurrency**: MCP cases reuse clients from `mcp/provider-pool`.
 - **Schema drift**: Assertions are editable after runs; history-view strictly shows the historical `assertion_results` verdicts, not the latest definitions.
 
 ## 11. Future Roadmap
 
 - **Shareable history-view URLs**: Promote UI state to `?run=<id>`.
-- **AI-assisted case generation**: Supervisor tool to bulk-author test cases.
 - **Schedule-driven regression**: Hook suites into the scheduler.
-- **Result blob storage**: Offload >24 KB payloads if needed.
+- ~~**AI-assisted case generation**~~: Shipped — see `docs/test-automation-copilot.md` (Tester agent + ambient context).
+- **Result blob storage**: Offload large payloads if needed.
 

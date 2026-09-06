@@ -54,7 +54,22 @@ export const GET = withEditor<{ id: string }>(
       throw new ApiError("BAD_REQUEST", 400, "Invalid run data.");
     }
 
-    const results = await storage.listResultsByRun(run.id);
-    return NextResponse.json({ run, results });
+    // SECURITY: server-wide runs may contain other users' private suites'
+    // results — the server row being visible must not expose them.
+    // Suite-scoped runs are fully gated by loadVisibleSuite above, so
+    // their results all belong to one already-visible suite.
+    const viewer = {
+      userId: session.user.id,
+      isAdmin: session.user.role === "admin",
+      isEditor: true,
+    };
+    const results = run.suiteId
+      ? await storage.listResultsByRun(run.id)
+      : await storage.listResultsByRunForViewer(run.id, viewer);
+
+    // Run-header counts cover the whole run; rows outside the viewer's
+    // visibility are omitted above, so surface the visible row count to
+    // avoid "totals > visible results" confusion in the UI.
+    return NextResponse.json({ run, results, visibleCount: results.length });
   },
 );

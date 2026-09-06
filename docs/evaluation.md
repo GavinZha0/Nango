@@ -173,13 +173,14 @@ dimension IDs; rejects unknown or missing dimensions.
 |---|---|---|
 | `POST` | `/api/eval-suites/[id]/run` | Start async suite run (202 + runId) |
 | `POST` | `/api/eval-cases/[id]/run` | Synchronous playground single case run (200, no DB writes) |
+| `GET` | `/api/eval-cases/[id]/latest-result` | Latest persisted case result for the case inspector. Visibility-gated via `loadCase` (opaque 404 for foreign private cases). |
 | `GET` | `/api/eval-suites/[id]/runs` | Paginated run history |
 | `GET` | `/api/eval-runs/[id]` | Run detail + case results |
 | `GET` | `/api/eval-runs/[id]/messages` | Conversation replay for a case |
 | `GET/POST/PATCH/DELETE` | `/api/eval-suites/**`, `/api/eval-cases/**` | Suite + case CRUD |
 | `GET` | `/api/eval-suites/agents` | Agents with eval suites (left panel) |
 
-All routes wrapped by `withEditor` and protected by `canEditResource` / `canViewResource` RBAC checks.
+All routes wrapped by `withEditor` and protected by `canEditResource` / `canViewResource` RBAC checks. Case deletion follows the unified rule across all three test modules: **case author OR suite author OR admin**.
 
 ---
 
@@ -226,8 +227,8 @@ All routes wrapped by `withEditor` and protected by `canEditResource` / `canView
 
 - **Custom dimensions** — user-authored dimensions with custom prompts
   (`builtin: false`).
-- **Batch agent runs** — "Run all suites" from the left panel.
+- **Batch agent runs (UI)** — agent-level batch evaluation exists at the API
+  layer (`POST /api/eval-runs` with `agentId`); a left-panel "run all" entry
+  is still open.
 - **Score trending** — per-case score history chart across runs.
 - **Schedule-driven evaluation** — hook suites into the scheduler.
-- **Full RecentRunsBanner** — paginated run history per suite with
-  detailed breakdown.

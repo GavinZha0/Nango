@@ -28,7 +28,6 @@ import {
 import type {
   WriteWebAutoCaseResultInput,
   WriteWebAutoRunInput,
-  WebAutoVerdict,
   ErrorEnvelope,
 } from "./types";
 import { getConfigNumber } from "@/lib/config";
@@ -387,10 +386,12 @@ export async function writeErroredCaseResults(
         caseId,
         status: "errored" as const,
         executionOutput: null,
-        verdict: {
-          deterministic: { passed: false, results: [] },
-          overall: { passed: false, reason: "Run was stranded by a process crash" },
-        } satisfies WebAutoVerdict,
+        // NB: the legacy `verdict` column no longer exists — passing it here
+        // was silently dropped by Drizzle, leaving assertion_results at its
+        // empty default. These are the real columns (F17 fix).
+        assertionResults: [],
+        score: null,
+        feedback: null,
         error: {
           source: "crashed",
           message: "Run was stranded by a process crash before this case executed.",

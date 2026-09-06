@@ -109,6 +109,13 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       mcpServerId: server.id,
       ownerId: session.user.id,
       triggeredBy: "manual",
+      // SECURITY: scope the run to suites visible to the triggerer —
+      // a public server must not execute foreign private suites' cases.
+      viewer: {
+        userId: session.user.id,
+        isAdmin: session.user.role === "admin",
+        isEditor: true,
+      },
     });
     return NextResponse.json({ runId, totalCount }, { status: 202 });
   }
