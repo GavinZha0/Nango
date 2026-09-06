@@ -98,9 +98,9 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
   return defineTool({
     name: "update_test_case",
     description: [
-      "Update fields on an existing test case (partial update).",
+      "Update fields on an existing test case directly in the database (partial update, immediate effect, no user confirmation step).",
       "Supports modifying name, enabled status, inputs/turns/scripts, and assertions list.",
-      "Use this tool to repair broken assertions, adjust input parameters, or activate cases after review.",
+      "Best suited for background updates, batch operations, off-screen cases, or when the user explicitly requests automatic saving.",
     ].join(" "),
     parameters: updateTestCaseSchema,
     execute: async (params): Promise<UpdateTestCaseResult> => {
