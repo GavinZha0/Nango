@@ -377,10 +377,11 @@ export async function buildBuiltinAgents(
           hasSandbox: builtinToolNames.has("run_code_in_sandbox"),
         });
 
-    // HTML page prompt block — usage policy for the opt-in
-    // `generate_html_page` server tool. Same skip logic as chart.
+    // HTML page prompt block — usage policy for `generate_html_page`.
+    // Unlike chart, HTML is available to supervisor (default-enabled
+    // on Nango for reports/dashboards).
     const hasHtmlPage = builtinToolNames.has("generate_html_page");
-    const htmlPagePromptBlock: string = (isSupervisor || !hasHtmlPage)
+    const htmlPagePromptBlock: string = !hasHtmlPage
       ? ""
       : buildHtmlPagePromptBlock();
 
