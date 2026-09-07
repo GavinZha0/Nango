@@ -1,7 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { mockRunnerStart, mockReadEvents, mockWriteCaseResult, mockGetConfigNumber } =
   vi.hoisted(() => ({
     mockRunnerStart: vi.fn(),
@@ -26,10 +24,6 @@ vi.mock("@/lib/evaluation/storage", () => ({
 
 vi.mock("@/lib/config", () => ({
   getConfigNumber: (...args: unknown[]) => mockGetConfigNumber(...args),
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 const { runEvalCase } = await import("@/lib/evaluation/eval-runner");

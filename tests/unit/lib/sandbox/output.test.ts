@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({
   getConfig: (_key: string, defaultValue: string) => defaultValue,
   getConfigNumber: (_key: string, defaultValue: number) => defaultValue,

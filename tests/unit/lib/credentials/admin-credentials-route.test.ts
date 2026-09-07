@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomBytes } from "crypto";
 
-vi.mock("server-only", () => ({}));
-
 const KEY_K1: string = randomBytes(32).toString("hex");
 process.env.CREDENTIAL_ENCRYPTION_KEYRING = `k1=${KEY_K1}`;
 process.env.CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID = "k1";
@@ -13,26 +11,6 @@ const { getSessionMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-test-cred-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 const { invalidateForCredentialChangeMock } = vi.hoisted(() => ({

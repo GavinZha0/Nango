@@ -16,8 +16,6 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Drizzle's chained builder — each test reconfigures the chain via
 // `mockRow(...)` so behaviour stays explicit per-case.
 const mockDb = {

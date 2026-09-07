@@ -1,7 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const selectWhere = vi.fn();
 const updateWhere = vi.fn().mockResolvedValue(undefined);
 
@@ -29,10 +27,6 @@ vi.mock("@/lib/db/schema", () => ({
     status: "status",
     startedAt: "started_at",
   },
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
 }));
 
 const mockRecordNotification = vi.fn().mockResolvedValue(null);

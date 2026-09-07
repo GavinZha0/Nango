@@ -10,8 +10,6 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Sequenced query queue: each chained call (`db.select().from().where()...`)
 // shifts the next pre-canned result. Tests push the rows they expect
 // the service to consume in order.

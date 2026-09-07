@@ -9,8 +9,6 @@
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 import { updateArtifact } from "@/lib/artifacts/update-artifact";
 import { getNode, updateNode } from "@/lib/artifacts/service";
 import { validate } from "@/lib/workflows/spec/validate";

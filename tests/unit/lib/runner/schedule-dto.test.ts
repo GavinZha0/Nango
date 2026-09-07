@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db/schema", () => ({}));
 
 // Mock the scheduler's nextFireAt — schedule-dto.ts imports it

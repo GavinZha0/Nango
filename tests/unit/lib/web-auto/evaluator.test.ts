@@ -1,7 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const mockRunnerStart = vi.fn();
 const mockReadEvents = vi.fn();
 
@@ -13,10 +11,6 @@ vi.mock("@/lib/runner", () => ({
 
 vi.mock("@/lib/runner/event-store", () => ({
   readEvents: (...args: unknown[]) => mockReadEvents(...args),
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 const { runWebAutoEvaluation } = await import("@/lib/web-auto/evaluator");

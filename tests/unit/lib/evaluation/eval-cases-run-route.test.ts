@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock, runEvalCaseMock, loadCaseMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   runEvalCaseMock: vi.fn(),
@@ -18,26 +16,6 @@ vi.mock("@/lib/evaluation/eval-runner", () => ({
 
 vi.mock("@/lib/evaluation/access", () => ({
   loadCase: loadCaseMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-eval-run-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 import { NextRequest } from "next/server";

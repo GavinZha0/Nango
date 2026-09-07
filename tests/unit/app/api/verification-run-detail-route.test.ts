@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const {
   getSessionMock,
   getRunByIdMock,
@@ -18,26 +16,6 @@ const {
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-verification-run-detail-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -59,12 +37,13 @@ vi.mock("@/lib/verification/storage", () => ({
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/verification-runs/[id]/route";
 import { db } from "@/lib/db";
+import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
 const RUN_ID = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 
-const me = { id: "user-me-1", email: "me@example.com", name: "Me", role: "editor" };
-const admin = { id: "user-admin-1", email: "a@example.com", name: "Admin", role: "admin" };
+const me = { ...EDITOR_USER, id: "user-me-1" };
+const admin = ADMIN_USER;
 
 function makeRequest(): NextRequest {
   return new NextRequest(`http://localhost/api/verification-runs/${RUN_ID}`, {
@@ -75,7 +54,7 @@ function makeRequest(): NextRequest {
 describe("GET /api/verification-runs/[id] — result scoping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: me });
+    getSessionMock.mockResolvedValue(createMockSession(me));
     listResultsByRunMock.mockResolvedValue([{ id: "result-1" }, { id: "result-2" }]);
     listResultsByRunForViewerMock.mockResolvedValue([{ id: "result-1" }]);
   });
@@ -119,7 +98,7 @@ describe("GET /api/verification-runs/[id] — result scoping", () => {
   });
 
   it("3. admin viewing a server-scoped run sees all results (isAdmin passthrough)", async () => {
-    getSessionMock.mockResolvedValue({ user: admin });
+    getSessionMock.mockResolvedValue(createMockSession(admin));
     getRunByIdMock.mockResolvedValue({ id: RUN_ID, suiteId: null, mcpServerId: SERVER_ID });
     vi.mocked(db.select).mockReturnValue({
       from: vi.fn().mockReturnValue({

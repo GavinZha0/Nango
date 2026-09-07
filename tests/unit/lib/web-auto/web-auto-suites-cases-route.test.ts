@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock, selectMock, insertMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   selectMock: vi.fn(),
@@ -10,26 +8,6 @@ const { getSessionMock, selectMock, insertMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-web-auto-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/db", () => ({

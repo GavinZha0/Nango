@@ -27,31 +27,6 @@ vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
 }));
 
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
-  newRequestId: () => "test-request-id",
-  logger: { info: () => {}, warn: () => {}, error: () => {} },
-}));
-
-// `server-only` blocks evaluation outside a Next.js server context.
-// Stub it to a no-op for tests.
-vi.mock("server-only", () => ({}));
-
 import { NextRequest, NextResponse } from "next/server";
 
 import {

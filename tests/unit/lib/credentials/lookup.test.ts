@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock server-only (it throws when imported outside Next.js server context)
-vi.mock("server-only", () => ({}));
-
 // Mock the DB module
 vi.mock("@/lib/db", () => ({
   db: {
@@ -15,10 +12,6 @@ vi.mock("@/lib/db", () => ({
 }));
 
 // Mock logger to suppress expected ERROR output during decryption-failure tests
-vi.mock("@/lib/observability/logger", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
 
 // Mock config service (lookup.ts imports getConfigMs)
 vi.mock("@/lib/config", () => ({

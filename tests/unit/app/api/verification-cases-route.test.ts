@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock, loadVisibleSuiteMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   loadVisibleSuiteMock: vi.fn(),
@@ -9,26 +7,6 @@ const { getSessionMock, loadVisibleSuiteMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-verification-cases-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/verification/access", () => ({
@@ -46,15 +24,12 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/verification-cases/route";
 import { ApiError } from "@/lib/http/route-handlers";
 import { db } from "@/lib/db";
+import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
 const SUITE_ID = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 
-const me = { id: "user-me-1", email: "me@example.com", name: "Me", role: "editor" };
-
-function sessionFor(user: { id: string; role: string }) {
-  return { user };
-}
+const me = { ...EDITOR_USER, id: "user-me-1" };
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest("http://localhost/api/verification-cases", {
@@ -67,7 +42,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 describe("POST /api/verification-cases — explicit suiteId RBAC", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue(sessionFor(me));
+    getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
   it("1. rejects inserting a case into a foreign private suite (403, no insert)", async () => {
@@ -131,9 +106,7 @@ describe("POST /api/verification-cases — explicit suiteId RBAC", () => {
   });
 
   it("4. admin may insert into any visible suite", async () => {
-    getSessionMock.mockResolvedValue(
-      sessionFor({ id: "user-admin-1", role: "admin" }),
-    );
+    getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
     loadVisibleSuiteMock.mockResolvedValue({
       id: SUITE_ID,
       visibility: "private",

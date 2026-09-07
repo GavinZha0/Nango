@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 import { wrapToolApproval } from "@/lib/runner/tool-approval";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 

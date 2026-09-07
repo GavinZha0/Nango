@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHash } from "node:crypto";
 
-vi.mock("server-only", () => ({}));
-
 let mockMaxOutputBytes = 1_048_576;
 vi.mock("@/lib/config", () => ({
   getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,

@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getAgentCredentialConfigByIdMock } = vi.hoisted(() => ({
   getAgentCredentialConfigByIdMock: vi.fn(),
 }));

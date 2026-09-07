@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 vi.mock("@/lib/config", () => ({
   // Mirror real defaults so the test exercises the production path.
   getConfig: (_key: string, defaultValue: string) => defaultValue,

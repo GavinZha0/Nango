@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/db/schema", () => ({ NotificationTable: {} }));
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
-}));
 vi.mock("@/lib/runner/event-bus", () => ({
   publish: vi.fn(),
 }));

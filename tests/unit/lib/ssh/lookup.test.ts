@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Captured DB query state — tests drive it per-case.
 const dbState: { rows: unknown[] } = { rows: [] };
 

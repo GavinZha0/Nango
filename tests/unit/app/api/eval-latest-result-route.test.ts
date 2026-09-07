@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock, loadCaseMock, getLatestCaseResultMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   loadCaseMock: vi.fn(),
@@ -10,26 +8,6 @@ const { getSessionMock, loadCaseMock, getLatestCaseResultMock } = vi.hoisted(() 
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-eval-latest-result-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/evaluation/access", () => ({
@@ -43,8 +21,9 @@ vi.mock("@/lib/evaluation/storage", () => ({
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/eval-cases/[id]/latest-result/route";
 import { ApiError } from "@/lib/http/route-handlers";
+import { EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
-const me = { id: "user-me-1", email: "me@example.com", name: "Me", role: "editor" };
+const me = { ...EDITOR_USER, id: "user-me-1" };
 
 function makeRequest(id: string): NextRequest {
   return new NextRequest(`http://localhost/api/eval-cases/${id}/latest-result`, {
@@ -53,9 +32,11 @@ function makeRequest(id: string): NextRequest {
 }
 
 describe("GET /api/eval-cases/[id]/latest-result — visibility enforcement", () => {
+  const mockSession = createMockSession(me);
+
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: me });
+    getSessionMock.mockResolvedValue(mockSession);
   });
 
   it("1. returns the latest result for a visible case", async () => {
@@ -66,7 +47,7 @@ describe("GET /api/eval-cases/[id]/latest-result — visibility enforcement", ()
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.score).toBe(88);
-    expect(loadCaseMock).toHaveBeenCalledWith(42, { user: me });
+    expect(loadCaseMock).toHaveBeenCalledWith(42, mockSession);
   });
 
   it("2. foreign private cases are opaque 404 (via loadCase), result never queried", async () => {

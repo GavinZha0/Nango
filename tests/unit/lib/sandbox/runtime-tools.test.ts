@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Mock the active-adapter resolver before importing runtime-tools.
 const mockRun = vi.fn();
 vi.mock("@/lib/sandbox/registry.server", () => ({

@@ -1,6 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
+import { describe, expect, it } from "vitest";
 
 import { evaluateToolRisk } from "@/lib/agent-pipeline/risk-registry";
 import { toolApprovalMiddleware } from "@/lib/agent-pipeline/middlewares";

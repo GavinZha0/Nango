@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn().mockReturnThis(),
@@ -9,11 +7,6 @@ vi.mock("@/lib/db", () => ({
     where: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockResolvedValue([]),
   },
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 vi.mock("@/lib/credentials/crypto", () => ({

@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // We mock the upstream provider factory so the pool never opens a real
 // MCP connection during tests. Each call to `createGracefulMcpProvider`
 // is a separate fake provider with its own `close()` spy, letting us

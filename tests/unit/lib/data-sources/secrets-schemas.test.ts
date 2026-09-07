@@ -1,6 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
+import { describe, expect, it } from "vitest";
 
 import { PostgresSecretsSchema } from "@/lib/data-sources/postgres/adapter";
 import { MysqlSecretsSchema } from "@/lib/data-sources/mysql/adapter";

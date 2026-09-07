@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // buildUserToolCatalog now queries owner-visible data sources (BUG-1)
 // to scope the extract_dataset_by_sql allowed set. Stub the DB read.
 vi.mock("@/lib/db", () => ({

@@ -1,7 +1,5 @@
 ﻿import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const mockSelectStrandedWebAutoRuns = vi.fn();
 const mockListWrittenCaseIdsForWebAutoRun = vi.fn();
 const mockListEnabledWebAutoCasesForRun = vi.fn();
@@ -14,10 +12,6 @@ vi.mock("@/lib/web-auto/storage", () => ({
   listEnabledWebAutoCasesForRun: (...args: unknown[]) => mockListEnabledWebAutoCasesForRun(...args),
   writeErroredCaseResults: (...args: unknown[]) => mockWriteErroredCaseResults(...args),
   markStrandedWebAutoRunsAsErrored: (...args: unknown[]) => mockMarkStrandedWebAutoRunsAsErrored(...args),
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 const { recoverStrandedWebAutoRuns } = await import("@/lib/web-auto/recovery");

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db/schema", () => ({}));
 
 import { subscribe, publish, type RunnerEvent } from "@/lib/runner/event-bus";

@@ -1,33 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-web-auto-cases-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -41,6 +19,7 @@ vi.mock("@/lib/db", () => ({
 import { NextRequest } from "next/server";
 import { PATCH, DELETE } from "@/app/api/web-auto-cases/[id]/route";
 import { db } from "@/lib/db";
+import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
 const CASE_ID = 42;
 const SUITE_A = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
@@ -48,7 +27,7 @@ const SUITE_B = "b2c3d4e5-f6a7-4b9c-8d1e-2f3a4b5c6d7e";
 const SERVER_1 = "11111111-1111-4111-8111-111111111111";
 const SERVER_2 = "22222222-2222-4222-8222-222222222222";
 
-const me = { id: "user-me-1", email: "me@example.com", name: "Me", role: "editor" };
+const me = { ...EDITOR_USER, id: "user-me-1" };
 
 // A collaborator-owned public suite: editors may edit content and move
 // cases within it, but the delete gate below still applies per-case.
@@ -114,7 +93,7 @@ function deleteRequest(): NextRequest {
 describe("PATCH /api/web-auto-cases/[id] — suiteId move validation (F7-2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: me });
+    getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
   it("1. moving into a foreign private suite is forbidden (403)", async () => {
@@ -177,7 +156,7 @@ describe("PATCH /api/web-auto-cases/[id] — suiteId move validation (F7-2)", ()
 describe("DELETE /api/web-auto-cases/[id] — unified delete rule (F7-3)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: me });
+    getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
   it("1. the case author can delete their own case in someone else's public suite", async () => {
@@ -192,9 +171,9 @@ describe("DELETE /api/web-auto-cases/[id] — unified delete rule (F7-3)", () =>
   });
 
   it("2. the suite author can delete a foreign case in their own suite", async () => {
-    getSessionMock.mockResolvedValue({
-      user: { id: "user-other-1", email: "o@example.com", name: "Other", role: "editor" },
-    });
+    getSessionMock.mockResolvedValue(
+      createMockSession({ id: "user-other-1", email: "o@example.com", name: "Other", role: "editor" }),
+    );
     mockExisting({ ...existingInForeignPublicSuite, caseCreatedBy: me.id });
     mockDelete();
 
@@ -232,9 +211,7 @@ describe("DELETE /api/web-auto-cases/[id] — unified delete rule (F7-3)", () =>
   });
 
   it("5. admin can delete any visible case", async () => {
-    getSessionMock.mockResolvedValue({
-      user: { id: "user-admin-1", email: "a@example.com", name: "Admin", role: "admin" },
-    });
+    getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
     mockExisting({ ...existingInForeignPublicSuite, caseCreatedBy: "user-other-2" });
     mockDelete();
 

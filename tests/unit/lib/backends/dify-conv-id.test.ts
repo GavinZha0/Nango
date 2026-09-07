@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { lastValueFrom } from "rxjs";
 import { toArray } from "rxjs/operators";
 
-vi.mock("server-only", () => ({}));
-
 // Stub thread-state DAO so we control persisted conv_id without touching the DB.
 const getThreadProviderState = vi.fn();
 const setThreadProviderState = vi.fn().mockResolvedValue(undefined);

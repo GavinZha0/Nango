@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock, inArrayMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   inArrayMock: vi.fn(),
@@ -9,26 +7,6 @@ const { getSessionMock, inArrayMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-verification-servers-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -49,36 +27,13 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 import { NextRequest } from "next/server";
 import { DELETE } from "@/app/api/verification-servers/[id]/route";
 import { db } from "@/lib/db";
+import { ADMIN_USER, REGULAR_USER, createMockUser, createMockSession } from "tests/unit/fixtures";
 
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 
-const ownerUser = {
-  id: "user-owner-1",
-  email: "owner@example.com",
-  name: "Owner",
-  role: "editor",
-};
-
-const otherUser = {
-  id: "user-other-1",
-  email: "other@example.com",
-  name: "Other",
-  role: "editor",
-};
-
-const adminUser = {
-  id: "user-admin-1",
-  email: "admin@example.com",
-  name: "Admin",
-  role: "admin",
-};
-
-function sessionFor(user: {
-  id: string;
-  role: string;
-}): { user: { id: string; role: string } } | null {
-  return { user };
-}
+const ownerUser = createMockUser({ id: "user-owner-1", email: "owner@example.com", name: "Owner", role: "editor" });
+const otherUser = createMockUser({ id: "user-other-1", email: "other@example.com", name: "Other", role: "editor" });
+const adminUser = ADMIN_USER;
 
 const ownSuite = {
   id: "suite-own-1",
@@ -121,7 +76,7 @@ describe("DELETE /api/verification-servers/[id]", () => {
   });
 
   it("1. admin deletes all suites under the server (cascade is legal)", async () => {
-    getSessionMock.mockResolvedValue(sessionFor(adminUser));
+    getSessionMock.mockResolvedValue(createMockSession(adminUser));
     mockSuites([ownSuite, foreignSuiteA, foreignSuiteB]);
 
     const res = await DELETE(makeRequest(), {
@@ -139,7 +94,7 @@ describe("DELETE /api/verification-servers/[id]", () => {
   });
 
   it("2. editor deletes only own suites and reports skipped foreign suites", async () => {
-    getSessionMock.mockResolvedValue(sessionFor(ownerUser));
+    getSessionMock.mockResolvedValue(createMockSession(ownerUser));
     mockSuites([ownSuite, foreignSuiteA, foreignSuiteB]);
 
     const res = await DELETE(makeRequest(), {
@@ -156,7 +111,7 @@ describe("DELETE /api/verification-servers/[id]", () => {
   });
 
   it("3. editor owning no suites performs no deletion at all", async () => {
-    getSessionMock.mockResolvedValue(sessionFor(otherUser));
+    getSessionMock.mockResolvedValue(createMockSession(otherUser));
     mockSuites([ownSuite]);
 
     const res = await DELETE(makeRequest(), {
@@ -181,9 +136,7 @@ describe("DELETE /api/verification-servers/[id]", () => {
   });
 
   it("5. rejects non-editor roles (403 Forbidden)", async () => {
-    getSessionMock.mockResolvedValue(
-      sessionFor({ id: "user-basic-1", role: "user" }),
-    );
+    getSessionMock.mockResolvedValue(createMockSession(REGULAR_USER));
 
     const res = await DELETE(makeRequest(), {
       params: Promise.resolve({ id: SERVER_ID }),
@@ -193,7 +146,7 @@ describe("DELETE /api/verification-servers/[id]", () => {
   });
 
   it("6. rejects non-uuid ids (synthetic detached keys) with 404 instead of a Postgres 22P02", async () => {
-    getSessionMock.mockResolvedValue(sessionFor(adminUser));
+    getSessionMock.mockResolvedValue(createMockSession(adminUser));
 
     const res = await DELETE(makeRequest(), {
       params: Promise.resolve({ id: "detached:Hugging Face" }),

@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // db is queried in a deterministic order per call: isAdminUser (UserTable)
 // → [workflow visibility | parent-run owner]. A FIFO queue returns the
 // next result for each `.limit()`. isAgentVisibleTo / credential lookups

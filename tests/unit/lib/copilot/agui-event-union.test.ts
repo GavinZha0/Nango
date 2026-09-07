@@ -1,6 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
+import { describe, it, expect } from "vitest";
 
 const { EventType } = await import("@/lib/copilot/index.server");
 type AgUiEvent = import("@/lib/copilot/index.server").AgUiEvent;

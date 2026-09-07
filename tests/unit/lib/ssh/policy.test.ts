@@ -1,6 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
+import { describe, it, expect } from "vitest";
 
 const { evaluateCommandPolicy } = await import("@/lib/ssh/policy");
 

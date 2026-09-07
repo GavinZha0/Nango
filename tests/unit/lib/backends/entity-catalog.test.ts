@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Module-under-test deps. The credential lookup and the provider
 // registry are both imported eagerly inside entity-catalog.ts, so
 // we have to mock them at the module-graph level.
@@ -23,15 +21,6 @@ vi.mock("@/lib/backends/registry.server", () => ({
       },
     },
   },
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
 }));
 
 import { EntityCatalog } from "@/lib/backends/entity-catalog";

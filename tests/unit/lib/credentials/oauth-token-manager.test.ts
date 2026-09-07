@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock server-only (it throws when imported outside Next.js server context)
-vi.mock("server-only", () => ({}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
 vi.mock("@/lib/config", () => ({
   getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
 }));

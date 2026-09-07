@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 vi.mock("@/lib/credentials/lookup", () => ({
   getEnabledInfrastructureCredentialByProvider: vi.fn().mockResolvedValue({
     id: "cred-1",

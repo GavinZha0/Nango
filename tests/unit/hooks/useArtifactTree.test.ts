@@ -6,9 +6,7 @@
  * tree-walk helpers that are pure data transforms.
  */
 
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
+import { describe, it, expect } from "vitest";
 
 const { indexById, pathOf } = await import("@/hooks/useArtifactTree");
 import type { ArtifactNode } from "@/hooks/useArtifactTree";

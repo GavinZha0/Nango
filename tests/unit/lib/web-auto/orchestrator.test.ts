@@ -1,7 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const mockRunWebAutoMcp = vi.fn();
 const mockRunWebAutoEvaluation = vi.fn();
 const mockPublish = vi.fn();
@@ -35,10 +33,6 @@ vi.mock("@/lib/web-auto/storage", () => ({
   createWebAutoRun: (...args: unknown[]) => mockCreateWebAutoRun(...args),
   finalizeWebAutoRun: (...args: unknown[]) => mockFinalizeWebAutoRun(...args),
   writeWebAutoCaseResult: (...args: unknown[]) => mockWriteWebAutoCaseResult(...args),
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 const { runWebAutoCase, startWebAutoSuiteRun } = await import(

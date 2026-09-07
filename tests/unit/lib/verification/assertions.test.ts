@@ -9,11 +9,10 @@
  * See `@/lib/assertions/evaluator.server.ts` `deepEqual`.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 // `server-only` is a Next.js boundary marker with no installed
 // implementation in the vitest runner — mock it before the SUT loads.
-vi.mock("server-only", () => ({}));
 
 const { evaluateAssertions } = await import("@/lib/assertions");
 type AssertionSpec = import("@/lib/assertions").AssertionSpec;

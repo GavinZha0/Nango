@@ -26,8 +26,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // defineTool is just a typed identity helper — keeping the wrapping
 // transparent lets the test reach `tool.execute` directly.
 vi.mock("@/lib/copilot/index.server", () => ({

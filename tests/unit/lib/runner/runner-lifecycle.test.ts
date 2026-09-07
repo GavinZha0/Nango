@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-
 const { recordRunStartMock, finalizeRunMock, recordEventMock } = vi.hoisted(() => ({
   recordRunStartMock: vi.fn(),
   finalizeRunMock: vi.fn().mockResolvedValue(undefined),
@@ -11,17 +10,6 @@ vi.mock("@/lib/runner/event-store", () => ({
   recordRunStart: recordRunStartMock,
   finalizeRun: finalizeRunMock,
   recordEvent: recordEventMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-  }),
 }));
 
 vi.mock("@/lib/observability/langfuse", () => ({
@@ -152,7 +140,6 @@ vi.mock("@/lib/orchestration/modes", () => ({
   ORCHESTRATION_MODE_HEADER: "x-orchestration-mode",
   resolveOrchestrationMode: resolveOrchestrationModeMock,
 }));
-
 
 vi.mock("@/lib/copilot/index.server", () => ({
   EventType: {

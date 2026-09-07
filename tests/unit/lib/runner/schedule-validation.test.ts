@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: {} }));
-vi.mock("@/lib/observability/logger", () => ({
-  childLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
 vi.mock("@/lib/runner", () => ({ runner: {} }));
 vi.mock("@/lib/config", () => ({
   getConfig: () => "",

@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Chained select / insert builders are stubbed per-test via setSelectRows /
 // setInsertImpl so we can assert the DB is consulted on cache miss but
 // NOT on cache hit (the hot-path optimisation under test).

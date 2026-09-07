@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY, of } from "rxjs";
 
-vi.mock("server-only", () => ({}));
-
 // ---- Stub the persistence helpers / lower layer ----
 
 // PersistingAgent: capture constructor args; produce an object whose

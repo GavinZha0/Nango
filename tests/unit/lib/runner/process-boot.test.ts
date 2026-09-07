@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const fakeRow = { id: "boot-1", startedAt: new Date("2025-01-01") };
 const insertReturning = vi.fn().mockResolvedValue([fakeRow]);
 vi.mock("@/lib/db", () => ({

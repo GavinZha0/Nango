@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // Mock subsystem builders so the catalog test does not transitively
 // load Docker / sandbox bootstrapping or the web-search DB layer.
 vi.mock("@/lib/sandbox/runtime-tools", () => ({

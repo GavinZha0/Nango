@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const {
   getSessionMock,
   startEvalSuiteRunMock,
@@ -33,43 +31,22 @@ vi.mock("@/lib/access/agent-visibility", () => ({
   isAgentVisibleTo: isAgentVisibleToMock,
 }));
 
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-eval-run-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
-}));
-
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/eval-runs/route";
+import { EDITOR_USER, createMockUser, createMockSession } from "tests/unit/fixtures";
 
 describe("POST /api/eval-runs", () => {
   const editorUser = {
+    ...EDITOR_USER,
     id: "11111111-1111-4111-8111-111111111111",
-    email: "editor@example.com",
-    name: "Editor",
-    role: "editor",
   };
 
-  const otherUser = {
+  const otherUser = createMockUser({
     id: "22222222-2222-4222-8222-222222222222",
     email: "other@example.com",
     name: "Other",
     role: "editor",
-  };
+  });
 
   const sampleSuite = {
     id: "33333333-3333-4333-8333-333333333333",
@@ -83,7 +60,7 @@ describe("POST /api/eval-runs", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: editorUser, session: {} });
+    getSessionMock.mockResolvedValue(createMockSession(editorUser));
     loadSuiteMock.mockResolvedValue(sampleSuite);
     startEvalSuiteRunMock.mockResolvedValue({
       runId: "01918a3b-uuidv7",

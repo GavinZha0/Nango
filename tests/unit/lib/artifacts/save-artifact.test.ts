@@ -1,7 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 import { saveArtifact, type SaveArtifactInput, type SaveArtifactDeps } from "@/lib/artifacts/save-artifact";
 import { ArtifactTable, WorkflowTable } from "@/lib/db/schema";
 import type { EntityRunEventEntity } from "@/lib/db/schema";

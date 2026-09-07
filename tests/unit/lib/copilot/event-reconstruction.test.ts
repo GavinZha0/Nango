@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { firstValueFrom, toArray } from "rxjs";
 
-vi.mock("server-only", () => ({}));
-
 // Mock drizzle's chain — two `select-from-where-orderBy` calls per
 // `reconstructFromDb` invocation: one for runs, one for events. We
 // stage the return values per call.

@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 import { composeToolPipeline, defineToolMiddleware } from "@/lib/agent-pipeline/compose";
 import type { MiddlewareContext, ToolCall, ToolMiddleware } from "@/lib/agent-pipeline/types";
 

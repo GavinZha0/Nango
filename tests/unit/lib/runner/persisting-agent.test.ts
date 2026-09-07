@@ -11,7 +11,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Observable, Subject } from "rxjs";
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/db/schema", () => ({
   EntityRunTable: {},

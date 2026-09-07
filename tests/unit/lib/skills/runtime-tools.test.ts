@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 // `getDbSkillStorage` is the only external surface runtime-tools.ts
 // touches besides the sandbox adapter — mock both so we can assert
 // the wiring shape without standing up Postgres or a real sandbox.

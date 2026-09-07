@@ -15,5 +15,18 @@
 // is irrelevant — no test makes auth callbacks.
 process.env.BETTER_AUTH_URL ??= "http://localhost:9300";
 
-import { vi } from "vitest";
+import { vi, afterEach } from "vitest";
+import { sharedLoggerSpies, resetSharedLogger } from "./helpers/mock-refs";
+
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/lib/observability/logger", () => ({
+  newRequestId: () => "test-request-id",
+  childLogger: () => sharedLoggerSpies,
+  logger: sharedLoggerSpies,
+  timed: async (_log: unknown, _event: unknown, fn: () => Promise<unknown>) => fn(),
+}));
+
+afterEach(() => {
+  resetSharedLogger();
+});

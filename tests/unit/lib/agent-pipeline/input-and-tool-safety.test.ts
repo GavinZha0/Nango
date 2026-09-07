@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { recordInterceptionLogMock, getGuardrailConfigCacheMock } = vi.hoisted(() => ({
   recordInterceptionLogMock: vi.fn().mockResolvedValue(undefined),
   getGuardrailConfigCacheMock: vi.fn(),

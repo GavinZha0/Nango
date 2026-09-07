@@ -1,33 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-web-auto-patch-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -40,10 +18,11 @@ vi.mock("@/lib/db", () => ({
 import { NextRequest } from "next/server";
 import { PATCH } from "@/app/api/web-auto-suites/[id]/route";
 import { db } from "@/lib/db";
+import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
 const SUITE_ID = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 
-const me = { id: "user-me-1", email: "me@example.com", name: "Me", role: "editor" };
+const me = { ...EDITOR_USER, id: "user-me-1" };
 
 // A collaborator-visible suite: editors can edit its content but may not
 // flip visibility/enabled — that gate belongs to the author or an admin.
@@ -76,7 +55,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 describe("PATCH /api/web-auto-suites/[id] — content vs visibility gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: me });
+    getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
   it("1. non-author cannot flip visibility on a public suite (403, no update)", async () => {
@@ -120,9 +99,7 @@ describe("PATCH /api/web-auto-suites/[id] — content vs visibility gates", () =
   });
 
   it("5. admin can change visibility of any suite", async () => {
-    getSessionMock.mockResolvedValue({
-      user: { id: "user-admin-1", email: "a@example.com", name: "Admin", role: "admin" },
-    });
+    getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
     mockDbSuite(foreignPublicSuite);
 
     const res = await PATCH(makeRequest({ visibility: "private" }), {

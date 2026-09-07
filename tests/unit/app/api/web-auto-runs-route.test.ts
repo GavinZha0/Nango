@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
 const { getSessionMock, startWebAutoSuiteRunMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   startWebAutoSuiteRunMock: vi.fn(),
@@ -9,26 +7,6 @@ const { getSessionMock, startWebAutoSuiteRunMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
-}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  newRequestId: () => "req-web-auto-runs-123",
-  childLogger: () => ({
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    trace: () => {},
-    child: () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      fatal: () => {},
-      trace: () => {},
-    }),
-  }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -44,11 +22,12 @@ vi.mock("@/lib/web-auto/orchestrator", () => ({
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/web-auto-runs/route";
 import { db } from "@/lib/db";
+import { EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
 const SUITE_ID = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 
-const me = { id: "user-me-1", email: "me@example.com", name: "Me", role: "editor" };
+const me = { ...EDITOR_USER, id: "user-me-1" };
 
 function makeRequest(): NextRequest {
   return new NextRequest("http://localhost/api/web-auto-runs", {
@@ -61,7 +40,7 @@ function makeRequest(): NextRequest {
 describe("POST /api/web-auto-runs — run gate (F7-1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ user: me });
+    getSessionMock.mockResolvedValue(createMockSession(me));
     startWebAutoSuiteRunMock.mockResolvedValue({ runId: "run-1", totalCount: 3 });
   });
 

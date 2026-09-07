@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
-vi.mock("@/lib/observability/logger", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
-
 vi.mock("@/lib/config", () => ({
   getConfig: (_key: string, defaultValue: string) => defaultValue,
   getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
