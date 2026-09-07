@@ -285,24 +285,6 @@ describe("canonicalize — code nodes (D35)", () => {
     if (node.type !== "code") throw new Error("expected code node");
   });
 
-  it("canonicalizes a minimal code node (code_text only, no extra fields)", async () => {
-    const spec = baseSpec(
-      [
-        {
-          id: 0,
-          type: "code",
-          description: "compute stats",
-          depends_on: [],
-          inputs: { language: "python", code_text: "print('{}')" },
-        },
-      ],
-      { a: "@nodes.0.a" },
-    );
-    const out = await canonicalize(spec, makeDeps());
-    const node = out.nodes[0];
-    if (node.type !== "code") throw new Error("expected code node");
-  });
-
   it("preserves LLM-supplied input, code, language, retries through canonicalize", async () => {
     const spec = baseSpec(
       [

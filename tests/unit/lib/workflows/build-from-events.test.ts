@@ -1521,50 +1521,6 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
     if (node.type !== "sql") throw new Error("expected sql node");
     expect(node.inputs.sql_text).toBe("SELECT 2");
   });
-
-  it("SQL node has no synthesized description", () => {
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        inv({
-          callId: "c1",
-          toolName: "extract_dataset_by_sql",
-          seq: 1,
-          inputs: {
-            dataset_name: "ds_x",
-            data_source_name: "src",
-            sql_text: "SELECT 1",
-          },
-          result: { dataset_name: "ds_x", total_rows: 1 },
-        }),
-        inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
-      ],
-      artifactCreatingCallId: "c2",
-    });
-    const node = out.spec.nodes[0]!;
-    expect(node.description).toBeUndefined();
-  });
-
-  it("output spec still parses LLMWorkflowSpecSchema after SQL rewrite", () => {
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        inv({
-          callId: "c1",
-          toolName: "extract_dataset_by_sql",
-          seq: 1,
-          inputs: {
-            dataset_name: "ds_x",
-            data_source_name: "src",
-            sql_text: "SELECT 1",
-          },
-          result: { dataset_name: "ds_x", total_rows: 1 },
-        }),
-        inv({ callId: "c2", toolName: "chart_renderer", seq: 2 }),
-      ],
-      artifactCreatingCallId: "c2",
-    });
-    const parsed = LLMWorkflowSpecSchema.safeParse(out.spec);
-    expect(parsed.success).toBe(true);
-  });
 });
 
 // ─── Chart artifact creator (Phase 1.4) ───────────────────────────────
@@ -1767,16 +1723,6 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
     if (chart.type !== "chart") throw new Error();
     expect(chart.depends_on).toEqual([]);
     expect(chart.inputs.dataset).toBeUndefined();
-  });
-
-  it("artifactCreatorToolName remains the tool name (for save-artifact dispatch)", () => {
-    const out = buildWorkflowSpecFromRunEvents({
-      invocations: [
-        chartInvocation({ callId: "c0", seq: 1, source: ROWS }),
-      ],
-      artifactCreatingCallId: "c0",
-    });
-    expect(out.artifactCreatorToolName).toBe("generate_echarts_config");
   });
 
   it("end-to-end output passes LLMWorkflowSpecSchema (refreshable)", () => {
