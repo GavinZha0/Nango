@@ -5,28 +5,20 @@ import {
 } from "@/lib/testing/tools/get-test-case-details";
 import type { TestCaseDetailsResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockInnerJoin = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 describe("get_test_case_details tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ innerJoin: mockInnerJoin });
-    mockInnerJoin.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -59,7 +51,7 @@ describe("get_test_case_details tool", () => {
     });
 
     it("throws error when case is not found", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock._chain.limit.mockResolvedValueOnce([]);
 
       await expect(
         tool.execute!({ category: "verification", caseId: 999 }),
@@ -67,7 +59,7 @@ describe("get_test_case_details tool", () => {
     });
 
     it("returns case configuration for verification", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: {
             id: 101,
@@ -104,7 +96,7 @@ describe("get_test_case_details tool", () => {
     });
 
     it("returns case configuration for evaluation", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: {
             id: 201,
@@ -136,7 +128,7 @@ describe("get_test_case_details tool", () => {
     });
 
     it("returns case configuration for web-auto", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: {
             id: 301,

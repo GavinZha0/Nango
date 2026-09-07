@@ -31,9 +31,9 @@ vi.mock("@/lib/access/agent-visibility", () => ({
   isAgentVisibleTo: isAgentVisibleToMock,
 }));
 
-import { NextRequest } from "next/server";
 import { POST } from "@/app/api/eval-runs/route";
-import { EDITOR_USER, createMockUser, createMockSession } from "tests/unit/fixtures";
+import { createMockRequest } from "tests/unit/helpers";
+import { EDITOR_USER, createMockUser, createMockSession, createMockEvalSuite } from "tests/unit/fixtures";
 
 describe("POST /api/eval-runs", () => {
   const editorUser = {
@@ -48,7 +48,7 @@ describe("POST /api/eval-runs", () => {
     role: "editor",
   });
 
-  const sampleSuite = {
+  const sampleSuite = createMockEvalSuite({
     id: "33333333-3333-4333-8333-333333333333",
     name: "Customer Support Suite",
     agentId: "agent-support-1",
@@ -56,7 +56,7 @@ describe("POST /api/eval-runs", () => {
     enabled: true,
     visibility: "private",
     createdBy: editorUser.id,
-  };
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -71,10 +71,9 @@ describe("POST /api/eval-runs", () => {
   });
 
   it("successfully starts single suite evaluation (202 Accepted)", async () => {
-    const req = new NextRequest("http://localhost:9300/api/eval-runs", {
+    const req = createMockRequest("/api/eval-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ suiteId: sampleSuite.id }),
+      body: { suiteId: sampleSuite.id },
     });
 
     const res = await POST(req, { params: Promise.resolve({}) });
@@ -92,13 +91,12 @@ describe("POST /api/eval-runs", () => {
   });
 
   it("successfully starts agent-level batch evaluation (202 Accepted)", async () => {
-    const req = new NextRequest("http://localhost:9300/api/eval-runs", {
+    const req = createMockRequest("/api/eval-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         agentId: "agent-support-1",
         agentSource: "builtin",
-      }),
+      },
     });
 
     const res = await POST(req, { params: Promise.resolve({}) });
@@ -117,27 +115,20 @@ describe("POST /api/eval-runs", () => {
     });
   });
 
-  it("rejects request if neither or both suiteId and agentId are provided (400)", async () => {
-    const neitherReq = new NextRequest("http://localhost:9300/api/eval-runs", {
+  it.each([
+    { scenario: "neither suiteId nor agentId", body: {} },
+    {
+      scenario: "both suiteId and agentId",
+      body: { suiteId: sampleSuite.id, agentId: "agent-support-1" },
+    },
+  ])("rejects request if $scenario (400)", async ({ body }) => {
+    const req = createMockRequest("/api/eval-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body,
     });
 
-    const resNeither = await POST(neitherReq, { params: Promise.resolve({}) });
-    expect(resNeither.status).toBe(400);
-
-    const bothReq = new NextRequest("http://localhost:9300/api/eval-runs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        suiteId: sampleSuite.id,
-        agentId: "agent-support-1",
-      }),
-    });
-
-    const resBoth = await POST(bothReq, { params: Promise.resolve({}) });
-    expect(resBoth.status).toBe(400);
+    const res = await POST(req, { params: Promise.resolve({}) });
+    expect(res.status).toBe(400);
   });
 
   it("rejects run on disabled suite with 400 Bad Request", async () => {
@@ -146,10 +137,9 @@ describe("POST /api/eval-runs", () => {
       enabled: false,
     });
 
-    const req = new NextRequest("http://localhost:9300/api/eval-runs", {
+    const req = createMockRequest("/api/eval-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ suiteId: sampleSuite.id }),
+      body: { suiteId: sampleSuite.id },
     });
 
     const res = await POST(req, { params: Promise.resolve({}) });
@@ -165,10 +155,9 @@ describe("POST /api/eval-runs", () => {
       visibility: "private",
     });
 
-    const req = new NextRequest("http://localhost:9300/api/eval-runs", {
+    const req = createMockRequest("/api/eval-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ suiteId: sampleSuite.id }),
+      body: { suiteId: sampleSuite.id },
     });
 
     const res = await POST(req, { params: Promise.resolve({}) });
@@ -180,13 +169,12 @@ describe("POST /api/eval-runs", () => {
   it("returns 404 when target builtin agent is not visible", async () => {
     isAgentVisibleToMock.mockResolvedValueOnce(false);
 
-    const req = new NextRequest("http://localhost:9300/api/eval-runs", {
+    const req = createMockRequest("/api/eval-runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         agentId: "private-agent-999",
         agentSource: "builtin",
-      }),
+      },
     });
 
     const res = await POST(req, { params: Promise.resolve({}) });

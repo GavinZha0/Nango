@@ -18,11 +18,10 @@ vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: vi.fn(),
-  },
-}));
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
 vi.mock("@/lib/verification/access", () => ({
   loadVisibleSuite: loadVisibleSuiteMock,
@@ -34,10 +33,12 @@ vi.mock("@/lib/verification/storage", () => ({
   listResultsByRunForViewer: listResultsByRunForViewerMock,
 }));
 
-import { NextRequest } from "next/server";
 import { GET } from "@/app/api/verification-runs/[id]/route";
 import { db } from "@/lib/db";
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
 import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 const RUN_ID = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
@@ -45,8 +46,8 @@ const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 const me = { ...EDITOR_USER, id: "user-me-1" };
 const admin = ADMIN_USER;
 
-function makeRequest(): NextRequest {
-  return new NextRequest(`http://localhost/api/verification-runs/${RUN_ID}`, {
+function makeRequest() {
+  return createMockRequest(`/api/verification-runs/${RUN_ID}`, {
     method: "GET",
   });
 }
@@ -54,6 +55,7 @@ function makeRequest(): NextRequest {
 describe("GET /api/verification-runs/[id] — result scoping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMock.$reset();
     getSessionMock.mockResolvedValue(createMockSession(me));
     listResultsByRunMock.mockResolvedValue([{ id: "result-1" }, { id: "result-2" }]);
     listResultsByRunForViewerMock.mockResolvedValue([{ id: "result-1" }]);
@@ -75,13 +77,7 @@ describe("GET /api/verification-runs/[id] — result scoping", () => {
 
   it("2. server-scoped runs filter results by viewer visibility", async () => {
     getRunByIdMock.mockResolvedValue({ id: RUN_ID, suiteId: null, mcpServerId: SERVER_ID });
-    vi.mocked(db.select).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ id: SERVER_ID, enabled: true }]),
-        }),
-      }),
-    } as unknown as ReturnType<typeof db.select>);
+    dbMock._chain.limit.mockResolvedValueOnce([{ id: SERVER_ID, enabled: true }]);
 
     const res = await GET(makeRequest(), { params: Promise.resolve({ id: RUN_ID }) });
     expect(res.status).toBe(200);
@@ -100,13 +96,7 @@ describe("GET /api/verification-runs/[id] — result scoping", () => {
   it("3. admin viewing a server-scoped run sees all results (isAdmin passthrough)", async () => {
     getSessionMock.mockResolvedValue(createMockSession(admin));
     getRunByIdMock.mockResolvedValue({ id: RUN_ID, suiteId: null, mcpServerId: SERVER_ID });
-    vi.mocked(db.select).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ id: SERVER_ID, enabled: true }]),
-        }),
-      }),
-    } as unknown as ReturnType<typeof db.select>);
+    dbMock._chain.limit.mockResolvedValueOnce([{ id: SERVER_ID, enabled: true }]);
 
     await GET(makeRequest(), { params: Promise.resolve({ id: RUN_ID }) });
 
@@ -119,13 +109,7 @@ describe("GET /api/verification-runs/[id] — result scoping", () => {
 
   it("4. server-scoped runs on invisible servers stay opaque 404", async () => {
     getRunByIdMock.mockResolvedValue({ id: RUN_ID, suiteId: null, mcpServerId: SERVER_ID });
-    vi.mocked(db.select).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    } as unknown as ReturnType<typeof db.select>);
+    dbMock._chain.limit.mockResolvedValueOnce([]);
 
     const res = await GET(makeRequest(), { params: Promise.resolve({ id: RUN_ID }) });
     expect(res.status).toBe(404);

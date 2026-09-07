@@ -9,12 +9,10 @@ vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: vi.fn(),
-    delete: vi.fn(),
-  },
-}));
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
 vi.mock("drizzle-orm", async (importOriginal) => {
   const actual = await importOriginal<typeof import("drizzle-orm")>();
@@ -24,10 +22,12 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   };
 });
 
-import { NextRequest } from "next/server";
 import { DELETE } from "@/app/api/verification-servers/[id]/route";
 import { db } from "@/lib/db";
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
 import { ADMIN_USER, REGULAR_USER, createMockUser, createMockSession } from "tests/unit/fixtures";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -54,18 +54,11 @@ const foreignSuiteB = {
 };
 
 function mockSuites(suites: Array<typeof ownSuite>): void {
-  vi.mocked(db.select).mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue(suites),
-    }),
-  } as unknown as ReturnType<typeof db.select>);
-  vi.mocked(db.delete).mockReturnValue({
-    where: vi.fn().mockResolvedValue(undefined),
-  } as unknown as ReturnType<typeof db.delete>);
+  dbMock._chain.where.mockResolvedValueOnce(suites);
 }
 
-function makeRequest(): NextRequest {
-  return new NextRequest(`http://localhost/api/verification-servers/${SERVER_ID}`, {
+function makeRequest() {
+  return createMockRequest(`/api/verification-servers/${SERVER_ID}`, {
     method: "DELETE",
   });
 }
@@ -73,6 +66,7 @@ function makeRequest(): NextRequest {
 describe("DELETE /api/verification-servers/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMock.$reset();
   });
 
   it("1. admin deletes all suites under the server (cascade is legal)", async () => {

@@ -18,15 +18,15 @@ vi.mock("@/lib/evaluation/storage", () => ({
   getLatestCaseResult: getLatestCaseResultMock,
 }));
 
-import { NextRequest } from "next/server";
 import { GET } from "@/app/api/eval-cases/[id]/latest-result/route";
 import { ApiError } from "@/lib/http/route-handlers";
+import { createMockRequest } from "tests/unit/helpers";
 import { EDITOR_USER, createMockSession } from "tests/unit/fixtures";
 
 const me = { ...EDITOR_USER, id: "user-me-1" };
 
-function makeRequest(id: string): NextRequest {
-  return new NextRequest(`http://localhost/api/eval-cases/${id}/latest-result`, {
+function makeRequest(id: string) {
+  return createMockRequest(`/api/eval-cases/${id}/latest-result`, {
     method: "GET",
   });
 }

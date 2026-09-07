@@ -8,18 +8,17 @@ vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-  },
-}));
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-import { NextRequest } from "next/server";
 import { PATCH, DELETE } from "@/app/api/web-auto-cases/[id]/route";
 import { db } from "@/lib/db";
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
 import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 const CASE_ID = 42;
 const SUITE_A = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
@@ -39,53 +38,30 @@ const existingInForeignPublicSuite = {
 };
 
 function mockExisting(row: Record<string, unknown>): void {
-  vi.mocked(db.select).mockReturnValueOnce({
-    from: vi.fn().mockReturnValue({
-      innerJoin: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([row]),
-      }),
-    }),
-  } as unknown as ReturnType<typeof db.select>);
+  dbMock._chain.where.mockResolvedValueOnce([row]);
 }
 
 function mockTarget(row: Record<string, unknown> | null): void {
-  vi.mocked(db.select).mockReturnValueOnce({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue(row ? [row] : []),
-      }),
-    }),
-  } as unknown as ReturnType<typeof db.select>);
+  dbMock._chain.limit.mockResolvedValueOnce(row ? [row] : []);
 }
 
 function mockUpdate(): void {
-  vi.mocked(db.update).mockReturnValue({
-    set: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([{ id: CASE_ID }]),
-      }),
-    }),
-  } as unknown as ReturnType<typeof db.update>);
+  dbMock._chain.returning.mockResolvedValueOnce([{ id: CASE_ID }]);
 }
 
 function mockDelete(): void {
-  vi.mocked(db.delete).mockReturnValue({
-    where: vi.fn().mockReturnValue({
-      returning: vi.fn().mockResolvedValue([{ id: CASE_ID }]),
-    }),
-  } as unknown as ReturnType<typeof db.delete>);
+  dbMock._chain.returning.mockResolvedValueOnce([{ id: CASE_ID }]);
 }
 
-function patchRequest(body: Record<string, unknown>): NextRequest {
-  return new NextRequest(`http://localhost/api/web-auto-cases/${CASE_ID}`, {
+function patchRequest(body: Record<string, unknown>) {
+  return createMockRequest(`/api/web-auto-cases/${CASE_ID}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
 }
 
-function deleteRequest(): NextRequest {
-  return new NextRequest(`http://localhost/api/web-auto-cases/${CASE_ID}`, {
+function deleteRequest() {
+  return createMockRequest(`/api/web-auto-cases/${CASE_ID}`, {
     method: "DELETE",
   });
 }
@@ -93,6 +69,7 @@ function deleteRequest(): NextRequest {
 describe("PATCH /api/web-auto-cases/[id] — suiteId move validation (F7-2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMock.$reset();
     getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
@@ -159,66 +136,63 @@ describe("DELETE /api/web-auto-cases/[id] — unified delete rule (F7-3)", () =>
     getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
-  it("1. the case author can delete their own case in someone else's public suite", async () => {
-    mockExisting({ ...existingInForeignPublicSuite, caseCreatedBy: me.id });
-    mockDelete();
-
-    const res = await DELETE(deleteRequest(), {
-      params: Promise.resolve({ id: String(CASE_ID) }),
-    });
-    expect(res.status).toBe(200);
-    expect(db.delete).toHaveBeenCalledTimes(1);
-  });
-
-  it("2. the suite author can delete a foreign case in their own suite", async () => {
-    getSessionMock.mockResolvedValue(
-      createMockSession({ id: "user-other-1", email: "o@example.com", name: "Other", role: "editor" }),
-    );
-    mockExisting({ ...existingInForeignPublicSuite, caseCreatedBy: me.id });
-    mockDelete();
-
-    const res = await DELETE(deleteRequest(), {
-      params: Promise.resolve({ id: String(CASE_ID) }),
-    });
-    expect(res.status).toBe(200);
-    expect(db.delete).toHaveBeenCalledTimes(1);
-  });
-
-  it("3. an unrelated editor is forbidden (403)", async () => {
-    mockExisting({ ...existingInForeignPublicSuite, caseCreatedBy: "user-other-2" });
-
-    const res = await DELETE(deleteRequest(), {
-      params: Promise.resolve({ id: String(CASE_ID) }),
-    });
-    expect(res.status).toBe(403);
-    expect(db.delete).not.toHaveBeenCalled();
-  });
-
-  it("4. private foreign suites are opaque 404 regardless of authorship", async () => {
+  it.each([
+    {
+      scenario: "case author can delete their own case in someone else's public suite",
+      caller: me,
+      caseAuthor: me.id,
+      suiteVisibility: "public",
+      expectedStatus: 200,
+    },
+    {
+      scenario: "suite author can delete a foreign case in their own suite",
+      caller: { id: "user-other-1", email: "o@example.com", name: "Other", role: "editor" as const },
+      caseAuthor: me.id,
+      suiteVisibility: "public",
+      expectedStatus: 200,
+    },
+    {
+      scenario: "an unrelated editor is forbidden (403)",
+      caller: me,
+      caseAuthor: "user-other-2",
+      suiteVisibility: "public",
+      expectedStatus: 403,
+    },
+    {
+      scenario: "private foreign suites are opaque 404 regardless of authorship",
+      caller: me,
+      caseAuthor: me.id,
+      suiteVisibility: "private",
+      expectedStatus: 404,
+    },
+    {
+      scenario: "admin can delete any visible case",
+      caller: ADMIN_USER,
+      caseAuthor: "user-other-2",
+      suiteVisibility: "public",
+      expectedStatus: 200,
+    },
+  ])("$scenario", async ({ caller, caseAuthor, suiteVisibility, expectedStatus }) => {
+    getSessionMock.mockResolvedValue(createMockSession(caller));
     mockExisting({
       suiteId: SUITE_A,
-      suiteVisibility: "private",
+      suiteVisibility,
       suiteCreatedBy: "user-other-1",
       suiteMcpServerId: SERVER_1,
-      caseCreatedBy: me.id,
+      caseCreatedBy: caseAuthor,
     });
+    if (expectedStatus === 200) {
+      mockDelete();
+    }
 
     const res = await DELETE(deleteRequest(), {
       params: Promise.resolve({ id: String(CASE_ID) }),
     });
-    expect(res.status).toBe(404);
-    expect(db.delete).not.toHaveBeenCalled();
-  });
-
-  it("5. admin can delete any visible case", async () => {
-    getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
-    mockExisting({ ...existingInForeignPublicSuite, caseCreatedBy: "user-other-2" });
-    mockDelete();
-
-    const res = await DELETE(deleteRequest(), {
-      params: Promise.resolve({ id: String(CASE_ID) }),
-    });
-    expect(res.status).toBe(200);
-    expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(expectedStatus);
+    if (expectedStatus === 200) {
+      expect(db.delete).toHaveBeenCalledTimes(1);
+    } else {
+      expect(db.delete).not.toHaveBeenCalled();
+    }
   });
 });

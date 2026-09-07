@@ -5,17 +5,15 @@ import {
 } from "@/lib/testing/tools/run-test-suite";
 import type { RunTestSuiteResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 // Mock orchestrators
 const mockStartSuiteRun = vi.fn();
@@ -36,11 +34,7 @@ vi.mock("@/lib/web-auto/orchestrator", () => ({
 describe("run_test_suite tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -71,7 +65,7 @@ describe("run_test_suite tool", () => {
     });
 
     it("throws error when suite is not found or access denied", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock.$enqueue([]);
 
       await expect(
         tool.execute!({
@@ -82,7 +76,7 @@ describe("run_test_suite tool", () => {
     });
 
     it("dispatches verification suite run", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validSuiteId,
           name: "MCP Verification Suite",
@@ -117,7 +111,7 @@ describe("run_test_suite tool", () => {
     });
 
     it("throws error when the verification suite is detached from its MCP server", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validSuiteId,
           name: "MCP Verification Suite",
@@ -142,7 +136,7 @@ describe("run_test_suite tool", () => {
       ["evaluation", "Evaluation suite"],
       ["web-auto", "Web Auto suite"],
     ] as const)("rejects running a disabled %s suite", async (category, label) => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validSuiteId,
           name: "Disabled Suite",
@@ -159,7 +153,7 @@ describe("run_test_suite tool", () => {
     });
 
     it("dispatches evaluation suite run", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validSuiteId,
           name: "Support Benchmark Suite",
@@ -186,7 +180,7 @@ describe("run_test_suite tool", () => {
     });
 
     it("dispatches web-auto suite run", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validSuiteId,
           name: "UI Smoke Tests",
@@ -214,7 +208,7 @@ describe("run_test_suite tool", () => {
     });
 
     it("rejects a web-auto suite run without a Playwright MCP server", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validSuiteId,
           name: "UI Smoke Tests",

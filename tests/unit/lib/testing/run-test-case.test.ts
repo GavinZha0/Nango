@@ -5,18 +5,15 @@ import {
 } from "@/lib/testing/tools/run-test-case";
 import type { RunTestCaseResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockInnerJoin = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 // Mock runners
 const mockRunMcpCase = vi.fn();
@@ -37,12 +34,7 @@ vi.mock("@/lib/web-auto/orchestrator", () => ({
 describe("run_test_case tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ innerJoin: mockInnerJoin });
-    mockInnerJoin.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -70,7 +62,7 @@ describe("run_test_case tool", () => {
     });
 
     it("throws error when case is not found or access denied", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock.$enqueue([]);
 
       await expect(
         tool.execute!({
@@ -81,7 +73,7 @@ describe("run_test_case tool", () => {
     });
 
     it("runs verification case and returns outcome with assertion results", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           caseRow: {
             id: 101,
@@ -128,7 +120,7 @@ describe("run_test_case tool", () => {
     });
 
     it("runs evaluation case and returns score, feedback, and assertions", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           caseRow: {
             id: 201,
@@ -168,7 +160,7 @@ describe("run_test_case tool", () => {
     });
 
     it("runs web-auto case and returns outcome", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           caseRow: {
             id: 301,

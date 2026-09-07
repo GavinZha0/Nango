@@ -5,28 +5,22 @@ import {
 } from "@/lib/testing/tools/get-mcp-tool-schema";
 import type { GetMcpToolSchemaResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 describe("get_mcp_tool_schema tool", () => {
   const validMcpServerId = "a1b2c3d4-e5f6-4a8b-9c0d-1e2f3a4b5c6d";
 
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -82,7 +76,7 @@ describe("get_mcp_tool_schema tool", () => {
     ];
 
     it("throws error if MCP server not found or access denied", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock.$enqueue([]);
 
       const tool = buildGetMcpToolSchemaTool({ userId: "user-1" });
       await expect(
@@ -91,7 +85,7 @@ describe("get_mcp_tool_schema tool", () => {
     });
 
     it("returns all tools when toolName is omitted", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validMcpServerId,
           name: "postgres-mcp",
@@ -122,7 +116,7 @@ describe("get_mcp_tool_schema tool", () => {
     });
 
     it("returns specific tool schema when toolName is provided", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validMcpServerId,
           name: "postgres-mcp",
@@ -152,7 +146,7 @@ describe("get_mcp_tool_schema tool", () => {
     });
 
     it("throws descriptive error when toolName does not exist on server", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: validMcpServerId,
           name: "postgres-mcp",

@@ -8,17 +8,17 @@ vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: vi.fn(),
-    update: vi.fn(),
-  },
-}));
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-import { NextRequest } from "next/server";
 import { PATCH } from "@/app/api/web-auto-suites/[id]/route";
 import { db } from "@/lib/db";
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
 import { ADMIN_USER, EDITOR_USER, createMockSession } from "tests/unit/fixtures";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 const SUITE_ID = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d";
 
@@ -30,31 +30,21 @@ const foreignPublicSuite = { visibility: "public", createdBy: "user-other-1" };
 const ownSuite = { visibility: "private", createdBy: me.id };
 
 function mockDbSuite(suite: { visibility: string; createdBy: string }): void {
-  vi.mocked(db.select).mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue([suite]),
-    }),
-  } as unknown as ReturnType<typeof db.select>);
-  vi.mocked(db.update).mockReturnValue({
-    set: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([{ id: SUITE_ID, ...suite }]),
-      }),
-    }),
-  } as unknown as ReturnType<typeof db.update>);
+  dbMock._chain.where.mockResolvedValueOnce([suite]);
+  dbMock._chain.returning.mockResolvedValueOnce([{ id: SUITE_ID, ...suite }]);
 }
 
-function makeRequest(body: Record<string, unknown>): NextRequest {
-  return new NextRequest(`http://localhost/api/web-auto-suites/${SUITE_ID}`, {
+function makeRequest(body: Record<string, unknown>) {
+  return createMockRequest(`/api/web-auto-suites/${SUITE_ID}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
 }
 
 describe("PATCH /api/web-auto-suites/[id] — content vs visibility gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMock.$reset();
     getSessionMock.mockResolvedValue(createMockSession(me));
   });
 

@@ -5,34 +5,20 @@ import {
 } from "@/lib/testing/tools/delete-test-case";
 import type { DeleteTestCaseResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockInnerJoin = vi.fn();
-const mockWhereSelect = vi.fn();
-const mockLimit = vi.fn();
-const mockDelete = vi.fn();
-const mockWhereDelete = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-    delete: (table: unknown) => mockDelete(table),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 describe("delete_test_case tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ innerJoin: mockInnerJoin });
-    mockInnerJoin.mockReturnValue({ where: mockWhereSelect });
-    mockWhereSelect.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
-
-    mockDelete.mockReturnValue({ where: mockWhereDelete });
-    mockWhereDelete.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -60,7 +46,7 @@ describe("delete_test_case tool", () => {
     });
 
     it("throws error when case is not found", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock._chain.limit.mockResolvedValueOnce([]);
 
       await expect(
         tool.execute!({
@@ -71,7 +57,7 @@ describe("delete_test_case tool", () => {
     });
 
     it("rejects unrelated editor from deleting a public suite case", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Public Shared Case", createdBy: "someone-else" },
           suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
@@ -87,7 +73,7 @@ describe("delete_test_case tool", () => {
     });
 
     it("allows the case author to delete their own case in someone else's suite", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 102, suiteId: "suite-ver-uuid", name: "My Shared Case", createdBy: "user-123" },
           suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
@@ -104,7 +90,7 @@ describe("delete_test_case tool", () => {
     });
 
     it("cases in invisible private suites are opaque not-found (visibility pre-gate)", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 103, suiteId: "suite-ver-uuid", name: "Hidden Case", createdBy: "user-123" },
           suite: { id: "suite-ver-uuid", visibility: "private", createdBy: "other-user" },
@@ -117,12 +103,12 @@ describe("delete_test_case tool", () => {
           caseId: 103,
         }),
       ).rejects.toThrow(/not found/);
-      expect(mockDelete).not.toHaveBeenCalled();
+      expect(db.delete).not.toHaveBeenCalled();
     });
 
     it("allows admin to delete cases created by other users in public suites", async () => {
       const adminTool = buildDeleteTestCaseTool({ userId: "admin-user", isAdmin: true, isEditor: true });
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Public Shared Case" },
           suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
@@ -139,7 +125,7 @@ describe("delete_test_case tool", () => {
     });
 
     it("deletes verification case and returns caseName and suiteId when author", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 101, suiteId: "suite-ver-uuid", name: "Docs Search Case" },
           suite: { id: "suite-ver-uuid", visibility: "private", createdBy: "user-123" },
@@ -157,11 +143,11 @@ describe("delete_test_case tool", () => {
       expect(result.suiteId).toBe("suite-ver-uuid");
       expect(result.caseName).toBe("Docs Search Case");
 
-      expect(mockDelete).toHaveBeenCalled();
+      expect(db.delete).toHaveBeenCalled();
     });
 
     it("deletes evaluation case and returns caseName when author", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 201, suiteId: "suite-eval-uuid", name: "Refund Case" },
           suite: { id: "suite-eval-uuid", visibility: "public", createdBy: "user-123" },
@@ -180,7 +166,7 @@ describe("delete_test_case tool", () => {
     });
 
     it("deletes web-auto case and returns caseName when author", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: 301, suiteId: "suite-web-uuid", name: "Checkout UI" },
           suite: { id: "suite-web-uuid", visibility: "private", createdBy: "user-123" },
@@ -203,7 +189,7 @@ describe("delete_test_case tool", () => {
       ["evaluation", "suite-eval-uuid", 402],
       ["web-auto", "suite-web-uuid", 403],
     ] as const)("deletes %s case identically (three-branch equivalence)", async (category, suiteId, caseId) => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           caseRow: { id: caseId, suiteId, name: "Shared Case" },
           suite: { id: suiteId, visibility: "private", createdBy: "user-123" },
@@ -217,7 +203,7 @@ describe("delete_test_case tool", () => {
       expect(result.caseId).toBe(caseId);
       expect(result.suiteId).toBe(suiteId);
       expect(result.caseName).toBe("Shared Case");
-      expect(mockDelete).toHaveBeenCalled();
+      expect(db.delete).toHaveBeenCalled();
     });
   });
 });

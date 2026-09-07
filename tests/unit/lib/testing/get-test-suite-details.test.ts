@@ -5,34 +5,20 @@ import {
 } from "@/lib/testing/tools/get-test-suite-details";
 import type { TestSuiteDetailsResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockLeftJoin = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
-const mockOrderBy = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 describe("get_test_suite_details tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({
-      leftJoin: mockLeftJoin,
-      where: mockWhere,
-      orderBy: mockOrderBy,
-    });
-    mockLeftJoin.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy });
-    mockLimit.mockResolvedValue([]);
-    mockOrderBy.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -73,7 +59,7 @@ describe("get_test_suite_details tool", () => {
     });
 
     it("throws error when suite is not found", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock._chain.limit.mockResolvedValueOnce([]);
 
       await expect(
         tool.execute!({ category: "verification", suiteId: testSuiteId }),
@@ -81,7 +67,7 @@ describe("get_test_suite_details tool", () => {
     });
 
     it("returns suite details and lightweight case topology for verification", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           id: testSuiteId,
           name: "MCP Search Tools",
@@ -94,7 +80,7 @@ describe("get_test_suite_details tool", () => {
         },
       ]);
 
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           id: 101,
           name: "Search Docs",
@@ -149,7 +135,7 @@ describe("get_test_suite_details tool", () => {
     });
 
     it("returns suite details and cases for evaluation", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           id: testSuiteId,
           name: "Support Agent Eval",
@@ -163,7 +149,7 @@ describe("get_test_suite_details tool", () => {
         },
       ]);
 
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           id: 201,
           name: "Greeting Case",
@@ -188,7 +174,7 @@ describe("get_test_suite_details tool", () => {
     });
 
     it("returns suite details and cases for web-auto", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           id: testSuiteId,
           name: "Checkout UI",
@@ -201,7 +187,7 @@ describe("get_test_suite_details tool", () => {
         },
       ]);
 
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           id: 301,
           name: "Submit Order Form",

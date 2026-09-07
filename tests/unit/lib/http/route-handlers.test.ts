@@ -33,16 +33,18 @@ import {
   ApiError,
   apiError,
   withAdmin,
+  withEditor,
   withSession,
 } from "@/lib/http/route-handlers";
+import { createMockRequest } from "tests/unit/helpers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeRequest(
   url: string = "https://app.test/api/x",
   method: string = "GET",
-): NextRequest {
-  return new NextRequest(url, { method });
+) {
+  return createMockRequest(url, { method });
 }
 
 function emptyParams(): { params: Promise<Record<string, never>> } {
@@ -53,7 +55,6 @@ interface UserSession {
   user: { id: string; role: string };
 }
 
-const adminSession: UserSession = { user: { id: "u1", role: "admin" } };
 const userSession: UserSession = { user: { id: "u2", role: "user" } };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -205,22 +206,70 @@ describe("withSession", () => {
   });
 });
 
-describe("withAdmin", () => {
-  it("returns 403 FORBIDDEN when authed but not admin", async () => {
-    getSessionMock.mockResolvedValueOnce(userSession);
+describe("withEditor", () => {
+  it.each([
+    { role: "admin", allowed: true },
+    { role: "editor", allowed: true },
+    { role: "user", allowed: false },
+  ])("role '$role' access -> allowed: $allowed", async ({ role, allowed }) => {
+    getSessionMock.mockResolvedValueOnce({ user: { id: "u-role", role } });
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+    const route = withEditor("/api/editor/x", handler);
+
+    const res = await route(makeRequest(), emptyParams());
+
+    if (allowed) {
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } else {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        ok: false,
+        code: "FORBIDDEN",
+        message: "Editor role required to access this resource.",
+        requestId: "test-request-id",
+      });
+      expect(handler).not.toHaveBeenCalled();
+    }
+  });
+
+  it("returns 401 UNAUTHENTICATED when no session (delegates to withSession)", async () => {
+    getSessionMock.mockResolvedValueOnce(null);
     const handler = vi.fn();
+    const route = withEditor("/api/editor/x", handler);
+
+    const res = await route(makeRequest(), emptyParams());
+
+    expect(res.status).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe("withAdmin", () => {
+  it.each([
+    { role: "admin", allowed: true },
+    { role: "editor", allowed: false },
+    { role: "user", allowed: false },
+  ])("role '$role' access -> allowed: $allowed", async ({ role, allowed }) => {
+    getSessionMock.mockResolvedValueOnce({ user: { id: "u-role", role } });
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
     const route = withAdmin("/api/admin/x", handler);
 
     const res = await route(makeRequest(), emptyParams());
 
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      ok: false,
-      code: "FORBIDDEN",
-      message: "Admin role required to access this resource.",
-      requestId: "test-request-id",
-    });
-    expect(handler).not.toHaveBeenCalled();
+    if (allowed) {
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } else {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        ok: false,
+        code: "FORBIDDEN",
+        message: "Admin role required to access this resource.",
+        requestId: "test-request-id",
+      });
+      expect(handler).not.toHaveBeenCalled();
+    }
   });
 
   it("returns 401 UNAUTHENTICATED when no session (delegates to withSession)", async () => {
@@ -232,17 +281,5 @@ describe("withAdmin", () => {
 
     expect(res.status).toBe(401);
     expect(handler).not.toHaveBeenCalled();
-  });
-
-  it("invokes handler when role === admin", async () => {
-    getSessionMock.mockResolvedValueOnce(adminSession);
-    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
-    const route = withAdmin("/api/admin/x", handler);
-
-    const res = await route(makeRequest(), emptyParams());
-
-    expect(res.status).toBe(200);
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][0].session).toBe(adminSession);
   });
 });

@@ -8,19 +8,10 @@ vi.mock("@/lib/auth/auth-instance", () => ({
   getSession: getSessionMock,
 }));
 
-import { NextRequest } from "next/server";
-import { GET, PATCH } from "@/app/api/admin/guardrails/route";
-import { db } from "@/lib/db";
 
-vi.mock("@/lib/db", () => {
-  return {
-    db: {
-      select: vi.fn(),
-      insert: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
 });
 
 vi.mock("@/lib/agent-pipeline/guardrail-service", () => ({
@@ -45,52 +36,42 @@ vi.mock("@/lib/config", async (importOriginal) => {
   };
 });
 
+import { GET, PATCH } from "@/app/api/admin/guardrails/route";
+import { db } from "@/lib/db";
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
+import { ADMIN_USER, createMockSession } from "tests/unit/fixtures";
+
+const dbMock = db as unknown as MockDrizzleDb;
+
 describe("API /api/admin/guardrails", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({
-      user: { id: "admin-user-id", role: "admin" },
-      session: { id: "sess-1" },
-    });
+    dbMock.$reset();
+    getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
   });
 
   it("GET returns posture, builtin tools, and interception logs", async () => {
-    // First db.select call: configs query — from() resolves directly to []
-    const mockConfigsChain = {
-      from: vi.fn().mockResolvedValue([]),
-    };
+    const interceptionLogs = [
+      {
+        id: 1,
+        runId: "run-123",
+        stage: "tool_call",
+        category: "tool_risk",
+        action: "require_approval",
+        severity: "high",
+        toolName: "run_ssh_command",
+        payload: { command: "rm -rf /" },
+        createdAt: new Date(),
+        agentName: "Search Agent",
+        userName: "Admin",
+      },
+    ];
 
-    // Second db.select call: interception logs query — from → leftJoin* → orderBy → limit
-    const mockLogsChain = {
-      from: vi.fn().mockImplementation(() => {
-        const chain: Record<string, unknown> = {};
-        chain.leftJoin = vi.fn().mockReturnValue(chain);
-        chain.orderBy = vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([
-            {
-              id: 1,
-              runId: "run-123",
-              stage: "tool_call",
-              category: "tool_risk",
-              action: "require_approval",
-              severity: "high",
-              toolName: "run_ssh_command",
-              payload: { command: "rm -rf /" },
-              createdAt: new Date(),
-              agentName: "Search Agent",
-              userName: "Admin",
-            },
-          ]),
-        });
-        return chain;
-      }),
-    };
+    // First query resolves [] on from(); second query resolves interceptionLogs on limit()
+    dbMock._chain.from.mockResolvedValueOnce([]);
+    dbMock._chain.limit.mockResolvedValueOnce(interceptionLogs);
 
-    vi.mocked(db.select)
-      .mockReturnValueOnce(mockConfigsChain as unknown as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(mockLogsChain as unknown as ReturnType<typeof db.select>);
-
-    const req = new NextRequest("http://localhost:9300/api/admin/guardrails");
+    const req = createMockRequest("/api/admin/guardrails");
     const res = await GET(req, { params: Promise.resolve({}) });
 
     expect(res.status).toBe(200);
@@ -102,24 +83,11 @@ describe("API /api/admin/guardrails", () => {
   });
 
   it("PATCH creates/updates tool overrides and safety policies", async () => {
-    const mockSelectChain = {
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]), // insert new override
-        }),
-      }),
-    };
-    const mockInsertChain = {
-      values: vi.fn().mockResolvedValue(undefined),
-    };
+    dbMock._chain.limit.mockResolvedValueOnce([]);
 
-    vi.mocked(db.select).mockReturnValue(mockSelectChain as unknown as ReturnType<typeof db.select>);
-    vi.mocked(db.insert).mockReturnValue(mockInsertChain as unknown as ReturnType<typeof db.insert>);
-
-    const req = new NextRequest("http://localhost:9300/api/admin/guardrails", {
+    const req = createMockRequest("/api/admin/guardrails", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         toolOverride: {
           source: "mcp",
           mcpServerId: "00000000-0000-0000-0000-000000000000",
@@ -135,7 +103,7 @@ describe("API /api/admin/guardrails", () => {
           action: "redact",
           severity: "high",
         },
-      }),
+      },
     });
 
     const res = await PATCH(req, { params: Promise.resolve({}) });

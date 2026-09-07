@@ -5,38 +5,20 @@ import {
 } from "@/lib/testing/tools/update-test-case";
 import type { UpdateTestCaseResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockInnerJoin = vi.fn();
-const mockWhereSelect = vi.fn();
-const mockLimit = vi.fn();
-const mockUpdate = vi.fn();
-const mockSet = vi.fn();
-const mockWhereUpdate = vi.fn();
-const mockReturning = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-    update: (table: unknown) => mockUpdate(table),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 describe("update_test_case tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ innerJoin: mockInnerJoin });
-    mockInnerJoin.mockReturnValue({ where: mockWhereSelect });
-    mockWhereSelect.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
-
-    mockUpdate.mockReturnValue({ set: mockSet });
-    mockSet.mockReturnValue({ where: mockWhereUpdate });
-    mockWhereUpdate.mockReturnValue({ returning: mockReturning });
-    mockReturning.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -94,7 +76,7 @@ describe("update_test_case tool", () => {
     });
 
     it("throws error when case is not found", async () => {
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock.$enqueue([]);
 
       await expect(
         tool.execute!({
@@ -107,7 +89,7 @@ describe("update_test_case tool", () => {
 
     it("rejects non-editor from editing cases in a suite", async () => {
       const nonEditorTool = buildUpdateTestCaseTool({ userId: "user-999", isEditor: false, isAdmin: false });
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           caseRow: { id: 101, suiteId: "suite-ver-uuid" },
           suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "user-123" },
@@ -124,22 +106,23 @@ describe("update_test_case tool", () => {
     });
 
     it("allows non-author editor to update a public suite case (collaborative editing)", async () => {
-      mockLimit.mockResolvedValueOnce([
-        {
-          caseRow: { id: 101, suiteId: "suite-ver-uuid" },
-          suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
-        },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: 101,
-          suiteId: "suite-ver-uuid",
-          name: "Public Case - Collaboratively Updated",
-          enabled: true,
-          assertions: [],
-        },
-      ]);
+      dbMock.$enqueue(
+        [
+          {
+            caseRow: { id: 101, suiteId: "suite-ver-uuid" },
+            suite: { id: "suite-ver-uuid", visibility: "public", createdBy: "other-user" },
+          },
+        ],
+        [
+          {
+            id: 101,
+            suiteId: "suite-ver-uuid",
+            name: "Public Case - Collaboratively Updated",
+            enabled: true,
+            assertions: [],
+          },
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "verification",
@@ -152,24 +135,25 @@ describe("update_test_case tool", () => {
     });
 
     it("updates verification case with enabled=true and new assertions", async () => {
-      mockLimit.mockResolvedValueOnce([
-        {
-          caseRow: { id: 101, suiteId: "suite-ver-uuid" },
-          suite: { id: "suite-ver-uuid", visibility: "private", createdBy: "user-123" },
-        },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: 101,
-          suiteId: "suite-ver-uuid",
-          name: "Docs Search - Updated",
-          toolName: "microsoft_docs_search",
-          enabled: true,
-          input: { query: "Azure SDK" },
-          assertions: [{ type: "js_expression", expression: "root.isError == false" }],
-        },
-      ]);
+      dbMock.$enqueue(
+        [
+          {
+            caseRow: { id: 101, suiteId: "suite-ver-uuid" },
+            suite: { id: "suite-ver-uuid", visibility: "private", createdBy: "user-123" },
+          },
+        ],
+        [
+          {
+            id: 101,
+            suiteId: "suite-ver-uuid",
+            name: "Docs Search - Updated",
+            toolName: "microsoft_docs_search",
+            enabled: true,
+            input: { query: "Azure SDK" },
+            assertions: [{ type: "js_expression", expression: "root.isError == false" }],
+          },
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "verification",
@@ -186,7 +170,7 @@ describe("update_test_case tool", () => {
       expect(result.case.name).toBe("Docs Search - Updated");
       expect(result.case.assertions).toHaveLength(1);
 
-      expect(mockSet).toHaveBeenCalledWith(
+      expect(dbMock._chain.set).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Docs Search - Updated",
           enabled: true,
@@ -195,25 +179,26 @@ describe("update_test_case tool", () => {
     });
 
     it("updates evaluation case turns", async () => {
-      mockLimit.mockResolvedValueOnce([
-        {
-          caseRow: { id: 201, suiteId: "suite-eval-uuid" },
-          suite: { id: "suite-eval-uuid", visibility: "public", createdBy: "user-123" },
-        },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: 201,
-          suiteId: "suite-eval-uuid",
-          name: "Refund Case",
-          enabled: true,
-          input: {
-            turns: [{ userMessage: "Updated refund question" }],
+      dbMock.$enqueue(
+        [
+          {
+            caseRow: { id: 201, suiteId: "suite-eval-uuid" },
+            suite: { id: "suite-eval-uuid", visibility: "public", createdBy: "user-123" },
           },
-          assertions: [],
-        },
-      ]);
+        ],
+        [
+          {
+            id: 201,
+            suiteId: "suite-eval-uuid",
+            name: "Refund Case",
+            enabled: true,
+            input: {
+              turns: [{ userMessage: "Updated refund question" }],
+            },
+            assertions: [],
+          },
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "evaluation",
@@ -227,30 +212,31 @@ describe("update_test_case tool", () => {
     });
 
     it("updates web-auto case script", async () => {
-      mockLimit.mockResolvedValueOnce([
-        {
-          caseRow: {
+      dbMock.$enqueue(
+        [
+          {
+            caseRow: {
+              id: 301,
+              suiteId: "suite-web-uuid",
+              input: { script: "old", steps: "" },
+            },
+            suite: { id: "suite-web-uuid", visibility: "private", createdBy: "user-123" },
+          },
+        ],
+        [
+          {
             id: 301,
             suiteId: "suite-web-uuid",
-            input: { script: "old", steps: "" },
+            name: "Checkout UI",
+            enabled: true,
+            input: {
+              script: "await page.goto('/checkout-v2');",
+              steps: "",
+            },
+            assertions: [],
           },
-          suite: { id: "suite-web-uuid", visibility: "private", createdBy: "user-123" },
-        },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: 301,
-          suiteId: "suite-web-uuid",
-          name: "Checkout UI",
-          enabled: true,
-          input: {
-            script: "await page.goto('/checkout-v2');",
-            steps: "",
-          },
-          assertions: [],
-        },
-      ]);
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "web-auto",
@@ -263,7 +249,7 @@ describe("update_test_case tool", () => {
     });
 
     it("handles web-auto unique violation with friendly conflict message", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           caseRow: { id: 301, suiteId: "suite-web-uuid" },
           suite: { id: "suite-web-uuid", visibility: "private", createdBy: "user-123" },
@@ -272,7 +258,7 @@ describe("update_test_case tool", () => {
 
       const uniqueError = new Error("duplicate key value violates unique constraint");
       (uniqueError as unknown as { code: string }).code = "23505";
-      mockReturning.mockRejectedValueOnce(uniqueError);
+      dbMock._chain.returning.mockRejectedValueOnce(uniqueError);
 
       await expect(
         tool.execute!({
@@ -286,32 +272,33 @@ describe("update_test_case tool", () => {
     });
 
     it("warns (non-blocking) when updating a web-auto case with judge-dependent assertions under a suite with no evaluatorAgentId", async () => {
-      mockLimit.mockResolvedValueOnce([
-        {
-          caseRow: {
+      dbMock.$enqueue(
+        [
+          {
+            caseRow: {
+              id: 301,
+              suiteId: "suite-web-uuid",
+              input: { script: "old", steps: "" },
+            },
+            suite: {
+              id: "suite-web-uuid",
+              visibility: "private",
+              createdBy: "user-123",
+              evaluatorAgentId: null,
+            },
+          },
+        ],
+        [
+          {
             id: 301,
             suiteId: "suite-web-uuid",
-            input: { script: "old", steps: "" },
+            name: "Visual check",
+            enabled: true,
+            input: { script: "await page.goto('/');", steps: "" },
+            assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
           },
-          suite: {
-            id: "suite-web-uuid",
-            visibility: "private",
-            createdBy: "user-123",
-            evaluatorAgentId: null,
-          },
-        },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: 301,
-          suiteId: "suite-web-uuid",
-          name: "Visual check",
-          enabled: true,
-          input: { script: "await page.goto('/');", steps: "" },
-          assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
-        },
-      ]);
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "web-auto",

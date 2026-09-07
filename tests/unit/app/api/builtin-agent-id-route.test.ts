@@ -16,50 +16,32 @@ vi.mock("@/lib/cache/invalidation", () => ({
   invalidateForAgentChange: invalidateForAgentChangeMock,
 }));
 
-const { dbMock } = vi.hoisted(() => {
-  const queryMock = {
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    leftJoin: vi.fn().mockReturnThis(),
-    set: vi.fn().mockReturnThis(),
-    values: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockReturnThis(),
-  };
-  return {
-    dbMock: {
-      select: vi.fn().mockReturnValue(queryMock),
-      update: vi.fn().mockReturnValue(queryMock),
-      insert: vi.fn().mockReturnValue(queryMock),
-      delete: vi.fn().mockReturnValue(queryMock),
-      transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(dbMock)),
-      _queryMock: queryMock,
-    },
-  };
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
 });
 
-vi.mock("@/lib/db", () => ({
-  db: dbMock,
-}));
-
-import { NextRequest } from "next/server";
 import { GET, PATCH, DELETE } from "@/app/api/builtin-agents/[id]/route";
+import { db } from "@/lib/db";
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
+import { EDITOR_USER, createMockSession } from "tests/unit/fixtures";
+
+const dbMock = db as unknown as MockDrizzleDb;
+
+const me = { ...EDITOR_USER, id: "user-1" };
 
 describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({
-      user: { id: "user-1", email: "user@nango.dev", role: "editor" },
-      session: { id: "sess-1", userId: "user-1" },
-    });
+    dbMock.$reset();
+    getSessionMock.mockResolvedValue(createMockSession(me));
   });
 
   describe("GET /api/builtin-agents/[id]", () => {
     it("returns 404 when agent is not found or not visible to user", async () => {
-      dbMock._queryMock.limit.mockResolvedValueOnce([]);
+      dbMock._chain.limit.mockResolvedValueOnce([]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-1");
+      const req = createMockRequest("/api/builtin-agents/agent-1");
       const res = await GET(req, { params: Promise.resolve({ id: "agent-1" }) });
 
       expect(res.status).toBe(404);
@@ -84,10 +66,10 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         },
       ];
 
-      dbMock._queryMock.limit.mockResolvedValueOnce([mockAgent]);
-      dbMock._queryMock.orderBy.mockResolvedValueOnce(mockTools);
+      dbMock._chain.limit.mockResolvedValueOnce([mockAgent]);
+      dbMock._chain.orderBy.mockResolvedValueOnce(mockTools);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-1");
+      const req = createMockRequest("/api/builtin-agents/agent-1");
       const res = await GET(req, { params: Promise.resolve({ id: "agent-1" }) });
 
       expect(res.status).toBe(200);
@@ -106,12 +88,11 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         visibility: "private",
         createdBy: "user-1",
       };
-      dbMock._queryMock.limit.mockResolvedValueOnce([existingAgent]);
+      dbMock._chain.limit.mockResolvedValueOnce([existingAgent]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-1", {
+      const req = createMockRequest("/api/builtin-agents/agent-1", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "secretary" }),
+        body: { role: "secretary" },
       });
 
       const res = await PATCH(req, { params: Promise.resolve({ id: "agent-1" }) });
@@ -130,12 +111,11 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         visibility: "public",
         createdBy: "user-1",
       };
-      dbMock._queryMock.limit.mockResolvedValueOnce([existingSupervisor]);
+      dbMock._chain.limit.mockResolvedValueOnce([existingSupervisor]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-sup", {
+      const req = createMockRequest("/api/builtin-agents/agent-sup", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Custom Name", prompt: "Hacked Prompt" }),
+        body: { name: "Custom Name", prompt: "Hacked Prompt" },
       });
 
       const res = await PATCH(req, { params: Promise.resolve({ id: "agent-sup" }) });
@@ -152,12 +132,11 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         visibility: "public",
         createdBy: "user-999", // Different user
       };
-      dbMock._queryMock.limit.mockResolvedValueOnce([otherUserAgent]);
+      dbMock._chain.limit.mockResolvedValueOnce([otherUserAgent]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-other", {
+      const req = createMockRequest("/api/builtin-agents/agent-other", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility: "private" }),
+        body: { visibility: "private" },
       });
 
       const res = await PATCH(req, { params: Promise.resolve({ id: "agent-other" }) });
@@ -181,13 +160,12 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         description: "New Desc",
       };
 
-      dbMock._queryMock.limit.mockResolvedValueOnce([myAgent]);
-      dbMock._queryMock.returning.mockResolvedValueOnce([updatedAgent]);
+      dbMock._chain.limit.mockResolvedValueOnce([myAgent]);
+      dbMock._chain.returning.mockResolvedValueOnce([updatedAgent]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-me", {
+      const req = createMockRequest("/api/builtin-agents/agent-me", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "New Name", description: "New Desc" }),
+        body: { name: "New Name", description: "New Desc" },
       });
 
       const res = await PATCH(req, { params: Promise.resolve({ id: "agent-me" }) });
@@ -205,9 +183,9 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         visibility: "private",
         createdBy: "user-someone-else",
       };
-      dbMock._queryMock.limit.mockResolvedValueOnce([otherUserAgent]);
+      dbMock._chain.limit.mockResolvedValueOnce([otherUserAgent]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-del-1", {
+      const req = createMockRequest("/api/builtin-agents/agent-del-1", {
         method: "DELETE",
       });
 
@@ -224,9 +202,9 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
         visibility: "private",
         createdBy: "user-1",
       };
-      dbMock._queryMock.limit.mockResolvedValueOnce([myAgent]);
+      dbMock._chain.limit.mockResolvedValueOnce([myAgent]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents/agent-del-2", {
+      const req = createMockRequest("/api/builtin-agents/agent-del-2", {
         method: "DELETE",
       });
 

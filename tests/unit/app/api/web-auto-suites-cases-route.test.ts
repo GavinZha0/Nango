@@ -17,8 +17,8 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/web-auto-suites/[id]/cases/route";
+import { createMockRequest } from "tests/unit/helpers";
 import { EDITOR_USER, createMockWebAutoSuite } from "tests/unit/fixtures";
 
 describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
@@ -67,12 +67,14 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         }),
       }));
 
-      const req = new NextRequest(`http://localhost/api/web-auto-suites/${validSuiteId}/cases`, { method: "GET" });
+      const req = createMockRequest(`/api/web-auto-suites/${validSuiteId}/cases`, { method: "GET" });
       const res = await GET(req, { params: Promise.resolve({ id: validSuiteId }) });
 
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(Array.isArray(data)).toBe(true);
+      expect(data).toHaveLength(2);
+      expect(data[0].name).toBe("case_a");
     });
 
     it("2. returns 404 for invalid UUID format", async () => {
@@ -81,7 +83,7 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         session: { id: "sess-1", userId: user.id },
       });
 
-      const req = new NextRequest("http://localhost/api/web-auto-suites/invalid-uuid/cases", { method: "GET" });
+      const req = createMockRequest("/api/web-auto-suites/invalid-uuid/cases", { method: "GET" });
       const res = await GET(req, { params: Promise.resolve({ id: "invalid-uuid" }) });
 
       expect(res.status).toBe(404);
@@ -105,7 +107,7 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         }),
       }));
 
-      const req = new NextRequest(`http://localhost/api/web-auto-suites/${validSuiteId}/cases`, { method: "GET" });
+      const req = createMockRequest(`/api/web-auto-suites/${validSuiteId}/cases`, { method: "GET" });
       const res = await GET(req, { params: Promise.resolve({ id: validSuiteId }) });
 
       expect(res.status).toBe(404); // Unified visibility: non-visible returns 404
@@ -149,16 +151,15 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         }),
       }));
 
-      const req = new NextRequest(`http://localhost/api/web-auto-suites/${validSuiteId}/cases`, {
+      const req = createMockRequest(`/api/web-auto-suites/${validSuiteId}/cases`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: "test_checkout_flow",
           input: {
             script: "console.log('run')",
             steps: "Test checkout",
           },
-        }),
+        },
       });
 
       const res = await POST(req, { params: Promise.resolve({ id: validSuiteId }) });
@@ -196,12 +197,11 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         }),
       }));
 
-      const req = new NextRequest(`http://localhost/api/web-auto-suites/${validSuiteId}/cases`, {
+      const req = createMockRequest(`/api/web-auto-suites/${validSuiteId}/cases`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: "test_checkout_flow",
-        }),
+        },
       });
 
       const res = await POST(req, { params: Promise.resolve({ id: validSuiteId }) });

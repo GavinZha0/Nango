@@ -2,27 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { listTestSuitesSchema, buildListTestSuitesTool } from "@/lib/testing/tools/list-test-suites";
 import type { ListTestSuitesResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockLeftJoin = vi.fn();
-const mockWhere = vi.fn();
-const mockOrderBy = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 describe("list_test_suites tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ leftJoin: mockLeftJoin, where: mockWhere, orderBy: mockOrderBy });
-    mockLeftJoin.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ orderBy: mockOrderBy });
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -66,7 +59,7 @@ describe("list_test_suites tool", () => {
     });
 
     it("queries verification suites and returns mapped fields", async () => {
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           id: "suite-ver-1",
           name: "MCP Docs Suite",
@@ -96,7 +89,7 @@ describe("list_test_suites tool", () => {
     });
 
     it("queries evaluation suites and returns mapped fields", async () => {
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           id: "suite-eval-1",
           name: "Support Agent Eval",
@@ -128,7 +121,7 @@ describe("list_test_suites tool", () => {
     });
 
     it("queries web-auto suites and returns mapped fields", async () => {
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           id: "suite-web-1",
           name: "Checkout UI Test",

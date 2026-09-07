@@ -5,21 +5,15 @@ import {
 } from "@/lib/testing/tools/create-test-suite";
 import type { CreateTestSuiteResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
-const mockInsert = vi.fn();
-const mockValues = vi.fn();
-const mockReturning = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-    insert: (table: unknown) => mockInsert(table),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 vi.mock("@/lib/access/agent-visibility", () => ({
   isAgentVisibleTo: vi.fn().mockResolvedValue(true),
@@ -32,15 +26,7 @@ vi.mock("@/lib/web-auto/discovery.server", () => ({
 describe("create_test_suite tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockResolvedValue([]);
-
-    mockInsert.mockReturnValue({ values: mockValues });
-    mockValues.mockReturnValue({ returning: mockReturning });
-    mockReturning.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -120,26 +106,27 @@ describe("create_test_suite tool", () => {
 
     it("creates verification suite", async () => {
       // Server lookup succeeds
-      mockLimit.mockResolvedValueOnce([
-        {
-          id: "server-uuid-1",
-          name: "github-mcp",
-          visibility: "private",
-          createdBy: "user-123",
-        },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: "suite-ver-uuid",
-          name: "MCP Verification Suite",
-          description: "PR tools suite",
-          category: "mcp",
-          mcpServerId: "server-uuid-1",
-          enabled: true,
-          visibility: "private",
-        },
-      ]);
+      dbMock.$enqueue(
+        [
+          {
+            id: "server-uuid-1",
+            name: "github-mcp",
+            visibility: "private",
+            createdBy: "user-123",
+          },
+        ],
+        [
+          {
+            id: "suite-ver-uuid",
+            name: "MCP Verification Suite",
+            description: "PR tools suite",
+            category: "mcp",
+            mcpServerId: "server-uuid-1",
+            enabled: true,
+            visibility: "private",
+          },
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "verification",
@@ -157,7 +144,7 @@ describe("create_test_suite tool", () => {
     });
 
     it("rejects binding another user's private MCP server", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: "server-other",
           name: "secret-mcp",
@@ -176,7 +163,7 @@ describe("create_test_suite tool", () => {
     });
 
     it("creates evaluation suite", async () => {
-      mockReturning.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: "suite-eval-uuid",
           name: "Support Agent Benchmark",
@@ -219,7 +206,7 @@ describe("create_test_suite tool", () => {
       const { discoverPublicPlaywrightMcpServer } = await import("@/lib/web-auto/discovery.server");
       vi.mocked(discoverPublicPlaywrightMcpServer).mockResolvedValueOnce("playwright-server-uuid");
 
-      mockReturning.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: "suite-web-uuid",
           name: "E2E Checkout Flow",
@@ -247,7 +234,7 @@ describe("create_test_suite tool", () => {
       const { discoverPublicPlaywrightMcpServer } = await import("@/lib/web-auto/discovery.server");
       vi.mocked(discoverPublicPlaywrightMcpServer).mockResolvedValueOnce(null);
 
-      mockReturning.mockResolvedValueOnce([
+      dbMock.$enqueue([
         {
           id: "suite-web-empty-uuid",
           name: "E2E Checkout Flow",
@@ -268,21 +255,22 @@ describe("create_test_suite tool", () => {
     });
 
     it("binds an explicitly provided private playwright server", async () => {
-      mockLimit.mockResolvedValueOnce([
-        { id: "private-pw-uuid", visibility: "private", createdBy: "user-123" },
-      ]);
-
-      mockReturning.mockResolvedValueOnce([
-        {
-          id: "suite-web-manual-uuid",
-          name: "E2E Checkout Flow",
-          description: null,
-          mcpServerId: "private-pw-uuid",
-          timeoutSec: 300,
-          enabled: true,
-          visibility: "private",
-        },
-      ]);
+      dbMock.$enqueue(
+        [
+          { id: "private-pw-uuid", visibility: "private", createdBy: "user-123" },
+        ],
+        [
+          {
+            id: "suite-web-manual-uuid",
+            name: "E2E Checkout Flow",
+            description: null,
+            mcpServerId: "private-pw-uuid",
+            timeoutSec: 300,
+            enabled: true,
+            visibility: "private",
+          },
+        ],
+      );
 
       const result = (await tool.execute!({
         category: "web-auto",
@@ -294,7 +282,7 @@ describe("create_test_suite tool", () => {
     });
 
     it("rejects an explicit mcpServerId that is another user's private server", async () => {
-      mockLimit.mockResolvedValueOnce([
+      dbMock.$enqueue([
         { id: "other-pw", visibility: "private", createdBy: "other-user" },
       ]);
 

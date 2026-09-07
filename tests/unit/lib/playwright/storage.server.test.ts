@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -9,7 +9,7 @@ import {
   readPlaywrightScreenshot,
 } from "@/lib/playwright/storage.server";
 import { GET } from "@/app/api/media/playwright-files/route";
-import { NextRequest } from "next/server";
+import { createMockRequest } from "tests/unit/helpers";
 
 describe("Playwright Storage Server", () => {
   let tmpDir: string;
@@ -94,7 +94,7 @@ describe("Playwright Storage Server", () => {
 
   describe("GET /api/media/playwright-files route", () => {
     it("returns 400 when file param is missing", async () => {
-      const req = new NextRequest("http://localhost:9300/api/media/playwright-files");
+      const req = createMockRequest("/api/media/playwright-files");
       const res = await GET(req);
       expect(res.status).toBe(400);
       const json = await res.json();
@@ -102,9 +102,9 @@ describe("Playwright Storage Server", () => {
     });
 
     it("returns 404 when file does not exist", async () => {
-      const req = new NextRequest(
-        "http://localhost:9300/api/media/playwright-files?file=missing.png",
-      );
+      const req = createMockRequest("/api/media/playwright-files", {
+        searchParams: { file: "missing.png" },
+      });
       const res = await GET(req);
       expect(res.status).toBe(404);
       const json = await res.json();
@@ -115,9 +115,9 @@ describe("Playwright Storage Server", () => {
       const filePath = path.join(tmpDir, "test.png");
       fs.writeFileSync(filePath, Buffer.from("test-content"));
 
-      const req = new NextRequest(
-        "http://localhost:9300/api/media/playwright-files?file=test.png",
-      );
+      const req = createMockRequest("/api/media/playwright-files", {
+        searchParams: { file: "test.png" },
+      });
       const res = await GET(req);
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")).toBe("image/png");

@@ -5,19 +5,15 @@ import {
 } from "@/lib/testing/tools/get-agent-spec";
 import type { GetAgentSpecResult } from "@/lib/testing/types";
 
-// Mock db
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockLeftJoin = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
-const mockOrderBy = vi.fn();
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (args: unknown) => mockSelect(args),
-  },
-}));
+import { db } from "@/lib/db";
+import type { MockDrizzleDb } from "tests/unit/helpers";
+
+const dbMock = db as unknown as MockDrizzleDb;
 
 // Mock visibility
 const mockIsAgentVisibleTo = vi.fn();
@@ -31,17 +27,7 @@ describe("get_agent_spec tool", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({
-      leftJoin: mockLeftJoin,
-      where: mockWhere,
-      orderBy: mockOrderBy,
-    });
-    mockLeftJoin.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy });
-    mockLimit.mockResolvedValue([]);
-    mockOrderBy.mockResolvedValue([]);
+    dbMock.$reset();
   });
 
   describe("Schema Validation", () => {
@@ -77,7 +63,7 @@ describe("get_agent_spec tool", () => {
 
     it("throws error if agent row does not exist", async () => {
       mockIsAgentVisibleTo.mockResolvedValueOnce(true);
-      mockLimit.mockResolvedValueOnce([]);
+      dbMock._chain.limit.mockResolvedValueOnce([]);
 
       const tool = buildGetAgentSpecTool({ userId: "user-1" });
       await expect(
@@ -88,7 +74,7 @@ describe("get_agent_spec tool", () => {
     it("returns agent specification with system prompt, bound tools, and skills", async () => {
       mockIsAgentVisibleTo.mockResolvedValueOnce(true);
 
-      mockLimit.mockResolvedValueOnce([
+      dbMock._chain.limit.mockResolvedValueOnce([
         {
           id: validAgentId,
           name: "SupportAgent",
@@ -100,7 +86,7 @@ describe("get_agent_spec tool", () => {
         },
       ]);
 
-      mockOrderBy.mockResolvedValueOnce([
+      dbMock._chain.orderBy.mockResolvedValueOnce([
         {
           toolType: "builtin_tool",
           builtinTool: "web_search",

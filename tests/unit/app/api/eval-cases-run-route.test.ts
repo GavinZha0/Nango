@@ -18,10 +18,16 @@ vi.mock("@/lib/evaluation/access", () => ({
   loadCase: loadCaseMock,
 }));
 
-import { NextRequest } from "next/server";
 import { POST } from "@/app/api/eval-cases/[id]/run/route";
 import { ApiError } from "@/lib/http/route-handlers";
+import { createMockRequest } from "tests/unit/helpers";
 import { EDITOR_USER, createMockEvalSuite } from "tests/unit/fixtures";
+
+function makeRequest(id: string = "42") {
+  return createMockRequest(`/api/eval-cases/${id}/run`, {
+    method: "POST",
+  });
+}
 
 describe("POST /api/eval-cases/[id]/run", () => {
   const editorUser = EDITOR_USER;
@@ -34,8 +40,8 @@ describe("POST /api/eval-cases/[id]/run", () => {
   };
 
   const sampleSuite = createMockEvalSuite({
-    id: "suite-uuid-1",
-    name: "Customer Support Agent Eval",
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "Customer Support Quality Suite",
     agentId: "agent-target-1",
     agentSource: "builtin",
     evaluatorAgentId: "evaluator-agent-1",
@@ -86,11 +92,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
 
     runEvalCaseMock.mockResolvedValue(expectedOutcome);
 
-    const req = new NextRequest("http://localhost/api/eval-cases/42/run", {
-      method: "POST",
-    });
-
-    const res = await POST(req, { params: Promise.resolve({ id: "42" }) });
+    const res = await POST(makeRequest("42"), { params: Promise.resolve({ id: "42" }) });
     expect(res.status).toBe(200);
 
     const data = await res.json();
@@ -110,11 +112,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
   it("2. rejects unauthenticated requests (401 Unauthorized)", async () => {
     getSessionMock.mockResolvedValue(null);
 
-    const req = new NextRequest("http://localhost/api/eval-cases/42/run", {
-      method: "POST",
-    });
-
-    const res = await POST(req, { params: Promise.resolve({ id: "42" }) });
+    const res = await POST(makeRequest("42"), { params: Promise.resolve({ id: "42" }) });
     expect(res.status).toBe(401);
   });
 
@@ -129,11 +127,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
       suite: sampleSuite, // owned by editorUser, private
     });
 
-    const req = new NextRequest("http://localhost/api/eval-cases/42/run", {
-      method: "POST",
-    });
-
-    const res = await POST(req, { params: Promise.resolve({ id: "42" }) });
+    const res = await POST(makeRequest("42"), { params: Promise.resolve({ id: "42" }) });
     expect(res.status).toBe(403);
     const data = await res.json();
     expect(data.message).toContain("You cannot run cases in this evaluation suite");
@@ -146,19 +140,13 @@ describe("POST /api/eval-cases/[id]/run", () => {
     });
 
     // Invalid string ID
-    const reqInvalid = new NextRequest("http://localhost/api/eval-cases/invalid-id/run", {
-      method: "POST",
-    });
-    const resInvalid = await POST(reqInvalid, { params: Promise.resolve({ id: "invalid-id" }) });
+    const resInvalid = await POST(makeRequest("invalid-id"), { params: Promise.resolve({ id: "invalid-id" }) });
     expect(resInvalid.status).toBe(404);
 
     // Case not found in DB
     loadCaseMock.mockRejectedValue(new ApiError("NOT_FOUND", 404, "Eval case not found."));
 
-    const reqMissing = new NextRequest("http://localhost/api/eval-cases/999/run", {
-      method: "POST",
-    });
-    const resMissing = await POST(reqMissing, { params: Promise.resolve({ id: "999" }) });
+    const resMissing = await POST(makeRequest("999"), { params: Promise.resolve({ id: "999" }) });
     expect(resMissing.status).toBe(404);
   });
 
@@ -180,11 +168,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
       feedback: "All deterministic assertions passed.",
     });
 
-    const req = new NextRequest("http://localhost/api/eval-cases/42/run", {
-      method: "POST",
-    });
-
-    const res = await POST(req, { params: Promise.resolve({ id: "42" }) });
+    const res = await POST(makeRequest("42"), { params: Promise.resolve({ id: "42" }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("passed");
