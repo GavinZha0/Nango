@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
+  };
+});
 
 import {
   InvalidSkillPathError,

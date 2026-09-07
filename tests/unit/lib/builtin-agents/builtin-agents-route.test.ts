@@ -16,34 +16,17 @@ vi.mock("@/lib/cache/invalidation", () => ({
   invalidateForAgentChange: invalidateForAgentChangeMock,
 }));
 
-const { dbMock } = vi.hoisted(() => {
-  const queryMock = {
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    leftJoin: vi.fn().mockReturnThis(),
-    set: vi.fn().mockReturnThis(),
-    values: vi.fn().mockReturnThis(),
-    returning: vi.fn(),
-  };
-  return {
-    dbMock: {
-      select: vi.fn().mockReturnValue(queryMock),
-      insert: vi.fn().mockReturnValue(queryMock),
-      update: vi.fn().mockReturnValue(queryMock),
-      delete: vi.fn().mockReturnValue(queryMock),
-      transaction: vi.fn(async (callback) => callback(dbMock)),
-      _queryMock: queryMock,
-    },
-  };
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
+import { createMockBuiltinAgent, createMockSession, EDITOR_USER, ADMIN_USER } from "tests/unit/fixtures";
+
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
 });
 
-vi.mock("@/lib/db", () => ({
-  db: dbMock,
-}));
+import { db } from "@/lib/db";
+const dbMock = db as unknown as MockDrizzleDb;
 
-import { NextRequest } from "next/server";
 import { GET as listAgents, POST as createAgent } from "@/app/api/builtin-agents/route";
 import {
   PATCH as updateAgent,
@@ -56,13 +39,14 @@ const TEST_UUID = "123e4567-e89b-12d3-a456-426614174000";
 describe("Builtin Agents API — RBAC & Security Boundaries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMock.$reset();
   });
 
   describe("Authentication & RBAC Enforcement", () => {
     it("rejects unauthenticated requests on GET with 401", async () => {
       getSessionMock.mockResolvedValue(null);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents");
+      const req = createMockRequest("/api/builtin-agents");
       const res = await listAgents(req, { params: Promise.resolve({}) });
 
       expect(res.status).toBe(401);
@@ -76,15 +60,14 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
         session: { id: "sess-1" },
       });
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents", {
+      const req = createMockRequest("/api/builtin-agents", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: "My Custom Agent",
           model: "gpt-4o",
           modelProvider: "openai",
           credentialId: TEST_UUID,
-        }),
+        },
       });
 
       const res = await createAgent(req, { params: Promise.resolve({}) });
@@ -94,32 +77,28 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
     });
 
     it("allows 'editor' role to create custom agent", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "editor-1", role: "editor", email: "editor@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(EDITOR_USER));
 
-      const createdAgent = {
+      const createdAgent = createMockBuiltinAgent({
         id: "223e4567-e89b-12d3-a456-426614174000",
         name: "Test Agent",
         model: "gpt-4o",
         modelProvider: "openai",
         credentialId: TEST_UUID,
-        createdBy: "editor-1",
+        createdBy: EDITOR_USER.id,
         visibility: "private",
-      };
+      });
 
-      dbMock._queryMock.returning.mockResolvedValueOnce([createdAgent]);
+      dbMock._chain.returning.mockResolvedValueOnce([createdAgent]);
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents", {
+      const req = createMockRequest("/api/builtin-agents", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: "Test Agent",
           model: "gpt-4o",
           modelProvider: "openai",
           credentialId: TEST_UUID,
-        }),
+        },
       });
 
       const res = await createAgent(req, { params: Promise.resolve({}) });
@@ -131,10 +110,7 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
 
   describe("Supervisor Role & Identity Protection", () => {
     it("overwrites name, description and prompt when creating a supervisor agent", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "admin-1", role: "admin", email: "admin@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
 
       let insertedValues: Record<string, unknown> | null = null;
       dbMock.insert.mockImplementationOnce(() => ({
@@ -146,17 +122,16 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
         }),
       }));
 
-      const req = new NextRequest("http://localhost:9300/api/builtin-agents", {
+      const req = createMockRequest("/api/builtin-agents", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: "Fake Supervisor Name",
           description: "Fake description",
           role: "supervisor",
           model: "gpt-4o",
           modelProvider: "openai",
           credentialId: TEST_UUID,
-        }),
+        },
       });
 
       const res = await createAgent(req, { params: Promise.resolve({}) });
@@ -167,33 +142,26 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
     });
 
     it("rejects renaming or modifying identity of an existing supervisor agent", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "admin-1", role: "admin", email: "admin@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
 
-      dbMock._queryMock.limit.mockResolvedValueOnce([
-        {
+      dbMock._chain.limit.mockResolvedValueOnce([
+        createMockBuiltinAgent({
           id: "sup-1",
-          createdBy: "admin-1",
+          createdBy: ADMIN_USER.id,
           visibility: "private",
           role: "supervisor",
           name: SUPERVISOR_NAME,
           description: SUPERVISOR_DESCRIPTION,
           prompt: "supervisor instructions",
-        },
+        }),
       ]);
 
-      const req = new NextRequest(
-        "http://localhost:9300/api/builtin-agents/sup-1",
-        {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            name: "Hacked Nango Name",
-          }),
+      const req = createMockRequest("/api/builtin-agents/sup-1", {
+        method: "PATCH",
+        body: {
+          name: "Hacked Nango Name",
         },
-      );
+      });
 
       const res = await updateAgent(req, { params: Promise.resolve({ id: "sup-1" }) });
       expect(res.status).toBe(409);
@@ -209,18 +177,17 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
         session: { id: "sess-1" },
       });
 
-      dbMock._queryMock.limit.mockResolvedValueOnce([
-        {
+      dbMock._chain.limit.mockResolvedValueOnce([
+        createMockBuiltinAgent({
           id: "victim-agent",
           createdBy: "user-victim",
           visibility: "private",
-        },
+        }),
       ]);
 
-      const req = new NextRequest(
-        "http://localhost:9300/api/builtin-agents/victim-agent",
-        { method: "DELETE" },
-      );
+      const req = createMockRequest("/api/builtin-agents/victim-agent", {
+        method: "DELETE",
+      });
 
       const res = await deleteAgent(req, { params: Promise.resolve({ id: "victim-agent" }) });
       expect(res.status).toBe(403);
@@ -228,23 +195,19 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
     });
 
     it("allows admin or creator to delete agent and triggers cache invalidation", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "admin-1", role: "admin", email: "admin@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
 
-      dbMock._queryMock.limit.mockResolvedValueOnce([
-        {
+      dbMock._chain.limit.mockResolvedValueOnce([
+        createMockBuiltinAgent({
           id: "victim-agent",
           createdBy: "user-victim",
           visibility: "private",
-        },
+        }),
       ]);
 
-      const req = new NextRequest(
-        "http://localhost:9300/api/builtin-agents/victim-agent",
-        { method: "DELETE" },
-      );
+      const req = createMockRequest("/api/builtin-agents/victim-agent", {
+        method: "DELETE",
+      });
 
       const res = await deleteAgent(req, { params: Promise.resolve({ id: "victim-agent" }) });
       expect(res.status).toBe(204);

@@ -4,12 +4,16 @@ import * as path from "node:path";
 const CACHE_ROOT = path.resolve("/data/cache-test");
 const TMP_DIR = path.resolve("/tmp/sandbox-abc");
 
-vi.mock("@/lib/config", () => ({
-  getConfig: (key: string, defaultValue: string) => {
-    if (key === "datasource.cache_root") return CACHE_ROOT;
-    return defaultValue;
-  },
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: (key: string, defaultValue: string) => {
+      if (key === "datasource.cache_root") return CACHE_ROOT;
+      return defaultValue;
+    },
+  };
+});
 
 import {
   buildMapping,

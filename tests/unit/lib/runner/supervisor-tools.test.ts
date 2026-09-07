@@ -173,11 +173,15 @@ vi.mock("@/lib/observability/logger", () => ({
   }),
 }));
 
-vi.mock("@/lib/config", () => ({
-  getConfigNumber: hoisted.getConfigNumberMock,
-  getConfig: vi.fn().mockReturnValue(""),
-  getConfigMs: vi.fn().mockReturnValue(0),
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigNumber: hoisted.getConfigNumberMock,
+    getConfig: vi.fn().mockReturnValue(""),
+    getConfigMs: vi.fn().mockReturnValue(0),
+  };
+});
 
 vi.mock("@/lib/orchestration/display-name", () => ({
   computeDisplayName: hoisted.computeDisplayNameMock,

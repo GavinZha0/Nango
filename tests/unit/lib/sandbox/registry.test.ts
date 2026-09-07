@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  getConfig: (_key: string, defaultValue: string) => defaultValue,
-  getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
-  getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-  getConfigBoolean: (_key: string, defaultValue: boolean) => defaultValue,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: (_key: string, defaultValue: string) => defaultValue,
+    getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
+    getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
+    getConfigBoolean: (_key: string, defaultValue: boolean) => defaultValue,
+  };
+});
 
 import {
   ADAPTERS,

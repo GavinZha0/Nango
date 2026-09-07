@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
+  };
+});
 
 // Subscriber registry — the manager calls `onCredentialCacheInvalidated`
 // once at module load. We capture the callback so tests can drive it.

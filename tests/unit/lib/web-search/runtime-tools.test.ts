@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  getConfig: (_key: string, defaultValue: string) => defaultValue,
-  getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-  getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: (_key: string, defaultValue: string) => defaultValue,
+    getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
+    getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
+  };
+});
 
 // Resolver mock — the runtime tool consults this; we'll swap per-test.
 const resolveSearchCredential = vi.fn();

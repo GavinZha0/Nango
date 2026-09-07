@@ -21,25 +21,33 @@ vi.mock("@/lib/evaluation/access", () => ({
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/eval-cases/[id]/run/route";
 import { ApiError } from "@/lib/http/route-handlers";
+import { EDITOR_USER, createMockEvalSuite } from "tests/unit/fixtures";
 
 describe("POST /api/eval-cases/[id]/run", () => {
-  const editorUser = {
-    id: "user-editor-1",
-    email: "editor@example.com",
-    name: "Editor",
-    role: "editor",
-  };
+  const editorUser = EDITOR_USER;
 
   const otherUser = {
     id: "user-other-1",
     email: "other@example.com",
     name: "Other",
-    role: "editor",
+    role: "editor" as const,
   };
+
+  const sampleSuite = createMockEvalSuite({
+    id: "suite-uuid-1",
+    name: "Customer Support Agent Eval",
+    agentId: "agent-target-1",
+    agentSource: "builtin",
+    evaluatorAgentId: "evaluator-agent-1",
+    visibility: "private",
+    createdBy: editorUser.id,
+    dimensionIds: ["helpfulness", "clarity"],
+    credentialId: null,
+  });
 
   const sampleCase = {
     id: 42,
-    suiteId: "suite-uuid-1",
+    suiteId: sampleSuite.id,
     name: "test_greeting_flow",
     description: "Evaluates standard greeting conversation",
     turns: [
@@ -48,18 +56,6 @@ describe("POST /api/eval-cases/[id]/run", () => {
     criteria: {
       constraints: ["Be polite and concise"],
     },
-  };
-
-  const sampleSuite = {
-    id: "suite-uuid-1",
-    name: "Customer Support Agent Eval",
-    agentId: "agent-target-1",
-    agentSource: "builtin",
-    evaluatorAgentId: "evaluator-agent-1",
-    visibility: "private",
-    createdBy: "user-editor-1",
-    dimensionIds: ["helpfulness", "clarity"],
-    credentialId: null,
   };
 
   beforeEach(() => {

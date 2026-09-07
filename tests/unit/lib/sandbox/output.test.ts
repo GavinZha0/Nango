@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  getConfig: (_key: string, defaultValue: string) => defaultValue,
-  getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: (_key: string, defaultValue: string) => defaultValue,
+    getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
+  };
+});
 
 import {
   processStderr,

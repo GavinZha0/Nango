@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  // Mirror real defaults so the test exercises the production path.
-  getConfig: (_key: string, defaultValue: string) => defaultValue,
-  getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: (_key: string, defaultValue: string) => defaultValue,
+    getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
+  };
+});
 
 const { exaProvider, ExaHttpError } = await import("@/lib/web-search/exa.server");
 

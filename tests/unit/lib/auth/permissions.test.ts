@@ -1,10 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: vi.fn(),
-  },
-}));
+vi.mock("@/lib/db", async () => {
+  const { createDbStub } = await import("tests/unit/helpers");
+  return { db: createDbStub() };
+});
 
 import {
   canViewResource,
@@ -18,8 +17,10 @@ import {
   type ResourceWithRBAC,
 } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/http/route-handlers";
+import type { MockDbStub } from "tests/unit/helpers";
 
 const { db } = await import("@/lib/db");
+const dbStub = db as unknown as MockDbStub;
 
 /**
  * Stub the chained drizzle builder
@@ -27,13 +28,7 @@ const { db } = await import("@/lib/db");
  * to resolve with `rows`.
  */
 function mockUserLookup(rows: Array<{ role: string | null }>): void {
-  vi.mocked(db.select).mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue(rows),
-      }),
-    }),
-  } as unknown as ReturnType<typeof db.select>);
+  dbStub._chain.limit.mockResolvedValueOnce(rows);
 }
 
 // Helpers

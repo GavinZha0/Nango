@@ -2,11 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/runner", () => ({ runner: {} }));
-vi.mock("@/lib/config", () => ({
-  getConfig: () => "",
-  getConfigNumber: () => 0,
-  getConfigMs: () => 0,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: () => "",
+    getConfigNumber: () => 0,
+    getConfigMs: () => 0,
+  };
+});
 
 import { validateScheduleTarget } from "@/lib/runner/schedule-validation";
 import { validateTriggerSpec, isValidTimezone } from "@/lib/runner/scheduler";

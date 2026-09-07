@@ -13,10 +13,13 @@ vi.mock("@/lib/db", () => ({
 
 // Mock logger to suppress expected ERROR output during decryption-failure tests
 
-// Mock config service (lookup.ts imports getConfigMs)
-vi.mock("@/lib/config", () => ({
-  getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
+  };
+});
 
 // Mock the crypto module
 vi.mock("@/lib/credentials/crypto", () => ({

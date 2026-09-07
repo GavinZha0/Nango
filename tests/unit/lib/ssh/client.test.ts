@@ -2,13 +2,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 let mockMaxOutputBytes = 1_048_576;
-vi.mock("@/lib/config", () => ({
-  getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-  getConfigNumber: (key: string, defaultValue: number) => {
-    if (key === "ssh.max_output_bytes") return mockMaxOutputBytes;
-    return defaultValue;
-  },
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
+    getConfigNumber: (key: string, defaultValue: number) => {
+      if (key === "ssh.max_output_bytes") return mockMaxOutputBytes;
+      return defaultValue;
+    },
+  };
+});
 
 // ── Mock node-ssh ─────────────────────────────────────────────────────────
 //

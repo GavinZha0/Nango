@@ -21,35 +21,17 @@ vi.mock("@/lib/cache/invalidation", () => ({
   invalidateForCredentialChange: invalidateForCredentialChangeMock,
 }));
 
-const { dbMock } = vi.hoisted(() => {
-  const queryMock = {
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    groupBy: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    leftJoin: vi.fn().mockReturnThis(),
-    as: vi.fn().mockReturnThis(),
-    set: vi.fn().mockReturnThis(),
-    values: vi.fn().mockReturnThis(),
-    returning: vi.fn(),
-    then: vi.fn(),
-  };
-  return {
-    dbMock: {
-      select: vi.fn().mockReturnValue(queryMock),
-      insert: vi.fn().mockReturnValue(queryMock),
-      update: vi.fn().mockReturnValue(queryMock),
-      delete: vi.fn().mockReturnValue(queryMock),
-      _queryMock: queryMock,
-    },
-  };
+import { createMockRequest, type MockDrizzleDb } from "tests/unit/helpers";
+import { createMockCredential, createMockSession, ADMIN_USER } from "tests/unit/fixtures";
+
+vi.mock("@/lib/db", async () => {
+  const { createDrizzleMock } = await import("tests/unit/helpers");
+  return { db: createDrizzleMock() };
 });
 
-vi.mock("@/lib/db", () => ({
-  db: dbMock,
-}));
+import { db } from "@/lib/db";
+const dbMock = db as unknown as MockDrizzleDb;
 
-import { NextRequest } from "next/server";
 import { GET as listCredentials, POST as createCredential } from "@/app/api/admin/credentials/route";
 import { DELETE as deleteCredential } from "@/app/api/admin/credentials/[id]/route";
 
@@ -58,13 +40,14 @@ const TEST_CRED_ID = "123e4567-e89b-12d3-a456-426614174000";
 describe("Admin Credentials API — Security & Data Protection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMock.$reset();
   });
 
   describe("RBAC Access Guard", () => {
     it("rejects unauthenticated requests with 401", async () => {
       getSessionMock.mockResolvedValue(null);
 
-      const req = new NextRequest("http://localhost:9300/api/admin/credentials");
+      const req = createMockRequest("/api/admin/credentials");
       const res = await listCredentials(req, { params: Promise.resolve({}) });
 
       expect(res.status).toBe(401);
@@ -78,7 +61,7 @@ describe("Admin Credentials API — Security & Data Protection", () => {
         session: { id: "sess-1" },
       });
 
-      const req = new NextRequest("http://localhost:9300/api/admin/credentials");
+      const req = createMockRequest("/api/admin/credentials");
       const res = await listCredentials(req, { params: Promise.resolve({}) });
 
       expect(res.status).toBe(403);
@@ -89,12 +72,9 @@ describe("Admin Credentials API — Security & Data Protection", () => {
 
   describe("Secret Masking & Key Preview on Creation", () => {
     it("creates credential with encrypted payload and returns masked preview without plaintext secret", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "admin-1", role: "admin", email: "admin@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
 
-      const savedCred = {
+      const { encryptedPayload: _omit, ...savedCred } = createMockCredential({
         id: TEST_CRED_ID,
         name: "OpenAI Prod Key",
         type: "api_key",
@@ -102,22 +82,19 @@ describe("Admin Credentials API — Security & Data Protection", () => {
         provider: "openai",
         metadata: { keyPreview: "...3456" },
         enabled: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      });
 
-      dbMock._queryMock.returning.mockResolvedValueOnce([savedCred]);
+      dbMock._chain.returning.mockResolvedValueOnce([savedCred]);
 
-      const req = new NextRequest("http://localhost:9300/api/admin/credentials", {
+      const req = createMockRequest("/api/admin/credentials", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: "OpenAI Prod Key",
           type: "api_key",
           serviceType: "llm",
           provider: "openai",
           payload: { apiKey: "sk-proj-super-secret-key-123456" },
-        }),
+        },
       });
 
       const res = await createCredential(req, { params: Promise.resolve({}) });
@@ -133,28 +110,17 @@ describe("Admin Credentials API — Security & Data Protection", () => {
 
   describe("Dependency Protection & Deletion Safety", () => {
     it("blocks deleting credential with 409 CONFLICT if in use by agents or MCP servers", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "admin-1", role: "admin", email: "admin@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
 
-      // Mock agentUsage = 2, mcpUsage = 1
-      dbMock.select
-        .mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue([{ count: 2 }]),
-          }),
-        })
-        .mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue([{ count: 1 }]),
-          }),
-        });
-
-      const req = new NextRequest(
-        `http://localhost:9300/api/admin/credentials/${TEST_CRED_ID}`,
-        { method: "DELETE" },
+      // Mock agentUsage = 2, mcpUsage = 1 via $enqueue
+      dbMock.$enqueue(
+        [{ count: 2 }],
+        [{ count: 1 }],
       );
+
+      const req = createMockRequest(`/api/admin/credentials/${TEST_CRED_ID}`, {
+        method: "DELETE",
+      });
 
       const res = await deleteCredential(req, {
         params: Promise.resolve({ id: TEST_CRED_ID }),
@@ -169,30 +135,19 @@ describe("Admin Credentials API — Security & Data Protection", () => {
     });
 
     it("allows deletion when no dependencies exist and invalidates cache", async () => {
-      getSessionMock.mockResolvedValue({
-        user: { id: "admin-1", role: "admin", email: "admin@example.com" },
-        session: { id: "sess-1" },
-      });
+      getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
 
-      // Mock agentUsage = 0, mcpUsage = 0
-      dbMock.select
-        .mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue([{ count: 0 }]),
-          }),
-        })
-        .mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue([{ count: 0 }]),
-          }),
-        });
-
-      dbMock._queryMock.returning.mockResolvedValueOnce([{ id: TEST_CRED_ID }]);
-
-      const req = new NextRequest(
-        `http://localhost:9300/api/admin/credentials/${TEST_CRED_ID}`,
-        { method: "DELETE" },
+      // Mock agentUsage = 0, mcpUsage = 0 via $enqueue
+      dbMock.$enqueue(
+        [{ count: 0 }],
+        [{ count: 0 }],
       );
+
+      dbMock._chain.returning.mockResolvedValueOnce([{ id: TEST_CRED_ID }]);
+
+      const req = createMockRequest(`/api/admin/credentials/${TEST_CRED_ID}`, {
+        method: "DELETE",
+      });
 
       const res = await deleteCredential(req, {
         params: Promise.resolve({ id: TEST_CRED_ID }),

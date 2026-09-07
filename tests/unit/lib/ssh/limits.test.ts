@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/lib/config", () => ({
-  getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
-  getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
+    getConfigNumber: (_key: string, defaultValue: number) => defaultValue,
+  };
+});
 
 const { getSshLimits } = await import("@/lib/ssh/limits");
 

@@ -22,9 +22,13 @@ vi.mock("@/lib/evaluation/storage", () => ({
   writeCaseResult: (...args: unknown[]) => mockWriteCaseResult(...args),
 }));
 
-vi.mock("@/lib/config", () => ({
-  getConfigNumber: (...args: unknown[]) => mockGetConfigNumber(...args),
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigNumber: (...args: unknown[]) => mockGetConfigNumber(...args),
+  };
+});
 
 const { runEvalCase } = await import("@/lib/evaluation/eval-runner");
 

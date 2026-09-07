@@ -9,9 +9,13 @@ vi.mock("@/lib/credentials/lookup", () => ({
   onCredentialCacheInvalidated: vi.fn(),
 }));
 
-vi.mock("@/lib/config", () => ({
-  getConfig: vi.fn().mockReturnValue("builtin,frontend,proxy_errors"),
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: vi.fn().mockReturnValue("builtin,frontend,proxy_errors"),
+  };
+});
 
 const { langfuseTraceMock, langfuseInstanceMock } = vi.hoisted(() => {
   const traceMock = {

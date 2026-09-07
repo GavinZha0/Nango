@@ -36,10 +36,14 @@ vi.mock("@/lib/agent-pipeline/guardrail-service", () => ({
   DEFAULT_SAFETY_POLICIES: [],
 }));
 
-vi.mock("@/lib/config", () => ({
-  updateConfig: vi.fn().mockResolvedValue(undefined),
-  invalidateConfigCache: vi.fn(),
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    updateConfig: vi.fn().mockResolvedValue(undefined),
+    invalidateConfigCache: vi.fn(),
+  };
+});
 
 describe("API /api/admin/guardrails", () => {
   beforeEach(() => {

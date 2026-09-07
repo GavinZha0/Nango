@@ -19,20 +19,16 @@ vi.mock("@/lib/db", () => ({
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/web-auto-suites/[id]/cases/route";
+import { EDITOR_USER, createMockWebAutoSuite } from "tests/unit/fixtures";
 
 describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
-  const user = {
-    id: "user-editor-1",
-    email: "editor@example.com",
-    name: "Editor",
-    role: "editor",
-  };
+  const user = EDITOR_USER;
 
   const otherUser = {
     id: "user-other-1",
     email: "other@example.com",
     name: "Other",
-    role: "editor",
+    role: "editor" as const,
   };
 
   const validSuiteId = "11111111-1111-4111-a111-111111111111";
@@ -48,10 +44,11 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         session: { id: "sess-1", userId: user.id },
       });
 
-      const mockSuite = {
+      const mockSuite = createMockWebAutoSuite({
+        id: validSuiteId,
         visibility: "private",
         createdBy: user.id,
-      };
+      });
 
       const mockCases = [
         { id: 1, suiteId: validSuiteId, name: "case_a", input: { script: "await page.goto('/')", steps: "1. Goto" }, assertions: [], enabled: true },
@@ -96,10 +93,11 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         session: { id: "sess-2", userId: otherUser.id },
       });
 
-      const mockSuite = {
+      const mockSuite = createMockWebAutoSuite({
+        id: validSuiteId,
         visibility: "private",
         createdBy: user.id, // created by someone else
-      };
+      });
 
       selectMock.mockImplementation(() => ({
         from: vi.fn().mockReturnValue({
@@ -121,10 +119,11 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         session: { id: "sess-1", userId: user.id },
       });
 
-      const mockSuite = {
+      const mockSuite = createMockWebAutoSuite({
+        id: validSuiteId,
         visibility: "private",
         createdBy: user.id,
-      };
+      });
 
       selectMock.mockImplementation(() => ({
         from: vi.fn().mockReturnValue({
@@ -174,10 +173,11 @@ describe("GET & POST /api/web-auto-suites/[id]/cases", () => {
         session: { id: "sess-1", userId: user.id },
       });
 
-      const mockSuite = {
+      const mockSuite = createMockWebAutoSuite({
+        id: validSuiteId,
         visibility: "private",
         createdBy: user.id,
-      };
+      });
 
       selectMock.mockImplementation(() => ({
         from: vi.fn().mockReturnValue({

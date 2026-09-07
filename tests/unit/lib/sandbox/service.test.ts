@@ -9,11 +9,15 @@ vi.mock("@/lib/credentials/lookup", () => ({
   }),
 }));
 
-vi.mock("@/lib/config", () => ({
-  getConfig: (_key: string, defaultValue: string) => defaultValue,
-  getConfigMs: (_key: string, defaultMs: number) => defaultMs,
-  getConfigNumber: (_key: string, defaultNum: number) => defaultNum,
-}));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfig: (_key: string, defaultValue: string) => defaultValue,
+    getConfigMs: (_key: string, defaultMs: number) => defaultMs,
+    getConfigNumber: (_key: string, defaultNum: number) => defaultNum,
+  };
+});
 
 import { ServiceSandboxAdapter } from "@/lib/sandbox/adapters/service/adapter.server";
 

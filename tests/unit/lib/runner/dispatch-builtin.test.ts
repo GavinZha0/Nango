@@ -180,7 +180,9 @@ import {
   ALWAYS_APPROVAL_POLICY_BLOCK,
 } from "@/lib/constants/safety";
 import { SHARED_STATE_PROMPT_BLOCK } from "@/lib/constants/supervisor";
+import { createMockAgentSpec } from "tests/unit/fixtures";
 
+// Minimal logger stub to satisfy BuildBuiltinAgentsInput.log
 const mockLogger = {
   warn: vi.fn(),
   debug: vi.fn(),
@@ -190,23 +192,13 @@ const mockLogger = {
 
 /** Build a valid AgentSpec with sensible defaults; override per-test. */
 function makeSpec(overrides: Partial<AgentSpec> = {}): AgentSpec {
-  return {
+  return createMockAgentSpec({
     agentId: "agent-1",
     name: "Test Agent",
-    role: null,
-    modelProvider: "openai",
-    model: "gpt-4o",
-    prompt: null,
-    temperature: null,
-    maxTokens: null,
-    toolApprovalMode: "never",
-    sharedStateEnabled: false,
-    maxSteps: 5,
     apiKey: "sk-test",
-    restUrl: null,
-    tools: [],
+    prompt: null,
     ...overrides,
-  };
+  });
 }
 
 /** Capture the args passed to the BuiltInAgent constructor for the nth call. */

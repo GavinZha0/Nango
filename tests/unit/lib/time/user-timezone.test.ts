@@ -16,12 +16,10 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Drizzle's chained builder — each test reconfigures the chain via
-// `mockRow(...)` so behaviour stays explicit per-case.
-const mockDb = {
-  select: vi.fn(),
-};
-vi.mock("@/lib/db", () => ({ db: mockDb }));
+vi.mock("@/lib/db", async () => {
+  const { createDbStub } = await import("tests/unit/helpers");
+  return { db: createDbStub() };
+});
 
 // Schema mock — only the columns the helper reads.
 vi.mock("@/lib/db/schema", () => ({
@@ -39,20 +37,18 @@ vi.mock("@/lib/observability/logger", () => ({
   }),
 }));
 
+import type { MockDbStub } from "tests/unit/helpers";
+
 const { isValidTimeZone, getUserTimezone } = await import(
   "@/lib/time/user-timezone"
 );
+const { db } = await import("@/lib/db");
+const mockDb = db as unknown as MockDbStub;
 
 /** Configure the drizzle chain to resolve to `[row]` (or `[]` when
  *  `row` is undefined). The helper destructures the first element. */
 function mockRow(row: { timezone: string | null } | undefined): void {
-  mockDb.select.mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue(row ? [row] : []),
-      }),
-    }),
-  });
+  mockDb._chain.limit.mockResolvedValueOnce(row ? [row] : []);
 }
 
 describe("isValidTimeZone", () => {
@@ -75,6 +71,7 @@ describe("isValidTimeZone", () => {
 describe("getUserTimezone", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDb.select.mockReturnValue(mockDb._chain);
   });
 
   it("short-circuits to null when userId is undefined and never hits the DB", async () => {
