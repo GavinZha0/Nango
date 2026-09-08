@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.19.1](https://github.com/GavinZha0/Nango/compare/v0.19.0...v0.19.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* prompt issue and add UTs ([cd0059c](https://github.com/GavinZha0/Nango/commit/cd0059cc9bcc7d200422ba1a655c9ed0b3637404))
+* prompts issues of auto test ([9bc391a](https://github.com/GavinZha0/Nango/commit/9bc391ab1a64e7a68d3bd5d26e57ffc6d97919a4))
+* **testing:** close RBAC gaps F3-F9, unmount delete tool, sync docs ([06fe3f1](https://github.com/GavinZha0/Nango/commit/06fe3f1eb50e0beda86451f95aaf63b7675d7eca))
+* **testing:** eliminate tool schema oneOf and harmonize tester bindings ([78f6bad](https://github.com/GavinZha0/Nango/commit/78f6bad0c4696543c4b1be98895e50ef7c130d43))
+* **testing:** harden assertion sandbox, detach verification suites from MCP server ([4e7ac43](https://github.com/GavinZha0/Nango/commit/4e7ac431e8d1ee58bd4590dbd0d71c953684946a))
+
 ## [0.19.0](https://github.com/GavinZha0/Nango/compare/v0.18.0...v0.19.0) (2026-09-04)
 
 
