@@ -113,6 +113,8 @@ export interface CaseAssertionResultItem {
   description: string;
   passed: boolean;
   message?: string | null;
+  // Layered root-cause attribution for the assertion result (assertion/upstream/transport/...).
+  errorSource?: string | null;
 }
 
 export interface RunTestCaseResult {
@@ -145,6 +147,8 @@ export interface CaseResultDiagnosticItem {
   score?: number | null;
   feedback?: string | null;
   error?: string | null;
+  // Layered root-cause attribution (mcphub/upstream/transport/assertion/timeout/internal/config...).
+  errorSource?: string | null;
   assertionResults: CaseAssertionResultItem[];
 }
 

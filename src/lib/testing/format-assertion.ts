@@ -39,5 +39,6 @@ export function formatAssertionResultItem(
     description,
     passed: Boolean(result.ok),
     message: result.message ?? result.reason ?? result.feedback ?? null,
+    errorSource: result.errorSource ?? null,
   };
 }

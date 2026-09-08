@@ -178,7 +178,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                 const rawAssertions = Array.isArray(cr.result.assertionResults)
                   ? (cr.result.assertionResults as AssertionResult[])
                   : [];
-                const rawError = cr.result.error as { message?: string } | null;
+                const rawError = cr.result.error as { message?: string; source?: string } | null;
 
                 return {
                   caseId: cr.result.caseId,
@@ -186,6 +186,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   status: cr.result.status,
                   durationMs: cr.result.durationMs,
                   error: rawError?.message ?? null,
+                  errorSource: rawError?.source ?? null,
                   assertionResults: rawAssertions.map((r) => formatAssertionResultItem(r)),
                 };
               });
@@ -305,7 +306,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                 const rawAssertions = Array.isArray(cr.result.assertionResults)
                   ? (cr.result.assertionResults as AssertionResult[])
                   : [];
-                const rawError = cr.result.error as { message?: string } | null;
+                const rawError = cr.result.error as { message?: string; source?: string } | null;
 
                 return {
                   caseId: cr.result.caseId,
@@ -314,6 +315,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   score: cr.result.score,
                   feedback: cr.result.feedback,
                   error: rawError?.message ?? null,
+                  errorSource: rawError?.source ?? null,
                   assertionResults: rawAssertions.map((r) => formatAssertionResultItem(r)),
                 };
               });
@@ -432,7 +434,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                 const rawAssertions = Array.isArray(cr.result.assertionResults)
                   ? (cr.result.assertionResults as AssertionResult[])
                   : [];
-                const rawError = cr.result.error as { message?: string } | null;
+                const rawError = cr.result.error as { message?: string; source?: string } | null;
 
                 return {
                   caseId: cr.result.caseId,
@@ -442,6 +444,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   score: cr.result.score,
                   feedback: cr.result.feedback,
                   error: rawError?.message ?? null,
+                  errorSource: rawError?.source ?? null,
                   assertionResults: rawAssertions.map((r) => formatAssertionResultItem(r)),
                 };
               });

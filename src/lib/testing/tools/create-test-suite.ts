@@ -33,30 +33,12 @@ const suiteDescriptionSchema = z
   .optional()
   .describe("Optional summary of what this suite tests.");
 
-export const createTestSuiteSchema = z.discriminatedUnion("category", [
-  z.object({
-    category: z.literal("verification"),
-    name: suiteNameSchema,
-    description: suiteDescriptionSchema,
-    mcpServerId: z.string().uuid().describe("Target MCP Server ID to be tested."),
-  }).strict(),
-  z.object({
-    category: z.literal("evaluation"),
-    name: suiteNameSchema,
-    description: suiteDescriptionSchema,
-    agentId: z.string().min(1).describe("Target Agent ID to be evaluated."),
-    agentSource: z
-      .enum(["builtin", "backend"])
-      .optional()
-      .describe("Source platform of the agent. Defaults to 'builtin'."),
-    evaluatorAgentId: z
-      .string()
-      .uuid()
-      .optional()
-      .describe("Optional Evaluator Agent ID to judge conversational quality."),
-  }).strict(),
-  z.object({
-    category: z.literal("web-auto"),
+// CONTRACT: permissive object parsing strips unknown fields to tolerate LLM hallucinated extra keys.
+export const createTestSuiteSchema = z
+  .object({
+    category: z
+      .enum(["verification", "evaluation", "web-auto"])
+      .describe("Target test category ('verification', 'evaluation', or 'web-auto')."),
     name: suiteNameSchema,
     description: suiteDescriptionSchema,
     mcpServerId: z
@@ -64,10 +46,101 @@ export const createTestSuiteSchema = z.discriminatedUnion("category", [
       .uuid()
       .optional()
       .describe(
-        "Target MCP Server ID. When omitted, auto-discovers the shared public Playwright server.",
+        "Target MCP Server ID. Required for 'verification'; optional for 'web-auto' (auto-discovers shared Playwright server if omitted).",
       ),
-  }).strict(),
-]);
+    agentId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Target Agent ID to be evaluated (required for 'evaluation')."),
+    agentSource: z
+      .enum(["builtin", "backend"])
+      .optional()
+      .describe("Source platform of the agent ('builtin' or 'backend', evaluation only). Defaults to 'builtin'."),
+    evaluatorAgentId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe("Optional Evaluator Agent ID to judge conversational quality (evaluation only)."),
+  })
+  .superRefine((val, ctx) => {
+    if (val.category === "verification") {
+      if (!val.mcpServerId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'mcpServerId' (UUID) is required for 'verification' suites to target an MCP server.",
+          path: ["mcpServerId"],
+        });
+      }
+      if (val.agentId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'agentId' is not permitted in 'verification' suites. Verification suites test MCP servers; provide 'mcpServerId' instead.",
+          path: ["agentId"],
+        });
+      }
+      if (val.agentSource !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'agentSource' is not permitted in 'verification' suites. Agent source is exclusive to 'evaluation'.",
+          path: ["agentSource"],
+        });
+      }
+      if (val.evaluatorAgentId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'evaluatorAgentId' is not permitted in 'verification' suites. Evaluator agents are exclusive to 'evaluation'.",
+          path: ["evaluatorAgentId"],
+        });
+      }
+    } else if (val.category === "evaluation") {
+      if (!val.agentId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'agentId' is required for 'evaluation' suites to identify the target agent being evaluated.",
+          path: ["agentId"],
+        });
+      }
+      if (val.mcpServerId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'mcpServerId' is not permitted in 'evaluation' suites. Evaluation suites test agents; provide 'agentId' instead.",
+          path: ["mcpServerId"],
+        });
+      }
+    } else if (val.category === "web-auto") {
+      if (val.agentId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'agentId' is not permitted in 'web-auto' suites. Web-auto suites execute Playwright browser tests; bind 'mcpServerId' or leave omitted for auto-discovery.",
+          path: ["agentId"],
+        });
+      }
+      if (val.agentSource !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'agentSource' is not permitted in 'web-auto' suites. Agent source is exclusive to 'evaluation'.",
+          path: ["agentSource"],
+        });
+      }
+      if (val.evaluatorAgentId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Field 'evaluatorAgentId' is not permitted in 'web-auto' suites. Evaluator agents are exclusive to 'evaluation'.",
+          path: ["evaluatorAgentId"],
+        });
+      }
+    }
+  });
 
 export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition {
   return defineTool({
@@ -85,6 +158,9 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
       }
       if (params.category === "verification") {
         const mcpServerId = params.mcpServerId;
+        if (!mcpServerId) {
+          throw new Error("Field 'mcpServerId' is required for verification suites.");
+        }
 
         const [serverRow] = await db
           .select({
@@ -151,6 +227,9 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
 
       if (params.category === "evaluation") {
         const { agentId, agentSource, evaluatorAgentId } = params;
+        if (!agentId) {
+          throw new Error("Field 'agentId' is required for evaluation suites.");
+        }
 
         const effectiveSource = agentSource ?? "builtin";
         if (effectiveSource === "builtin") {

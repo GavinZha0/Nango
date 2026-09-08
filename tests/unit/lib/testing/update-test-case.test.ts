@@ -37,24 +37,77 @@ describe("update_test_case tool", () => {
       expect(invalidCaseId.success).toBe(false);
     });
 
-    it("rejects category-inapplicable fields", () => {
+    it("rejects category-inapplicable fields with actionable guidance", () => {
       // verification rejects turns (evaluation-only field)
-      expect(
-        updateTestCaseSchema.safeParse({
-          category: "verification",
-          caseId: 101,
-          turns: ["Hi"],
-        }).success,
-      ).toBe(false);
+      const verWithTurns = updateTestCaseSchema.safeParse({
+        category: "verification",
+        caseId: 101,
+        turns: ["Hi"],
+      });
+      expect(verWithTurns.success).toBe(false);
+      if (!verWithTurns.success) {
+        expect(verWithTurns.error.issues[0]?.message).toMatch(
+          /Field 'turns' is not permitted in 'verification' cases.*provide 'toolName' and optional 'input'/,
+        );
+      }
 
       // evaluation rejects toolName (verification-only field)
-      expect(
-        updateTestCaseSchema.safeParse({
-          category: "evaluation",
-          caseId: 101,
-          toolName: "my_tool",
-        }).success,
-      ).toBe(false);
+      const evalWithTool = updateTestCaseSchema.safeParse({
+        category: "evaluation",
+        caseId: 101,
+        toolName: "my_tool",
+      });
+      expect(evalWithTool.success).toBe(false);
+      if (!evalWithTool.success) {
+        expect(evalWithTool.error.issues[0]?.message).toMatch(
+          /Field 'toolName' is not permitted in 'evaluation' cases.*use 'turns'/,
+        );
+      }
+
+      // web-auto rejects turns and input
+      const webWithTurns = updateTestCaseSchema.safeParse({
+        category: "web-auto",
+        caseId: 101,
+        turns: ["Hi"],
+      });
+      expect(webWithTurns.success).toBe(false);
+      if (!webWithTurns.success) {
+        expect(webWithTurns.error.issues[0]?.message).toMatch(
+          /Field 'turns' is not permitted in 'web-auto' cases.*provide 'script'/,
+        );
+      }
+    });
+
+    it("accepts stringified JSON assertions, input, and turns (LLM tolerance)", () => {
+      const validWeb = updateTestCaseSchema.safeParse({
+        category: "web-auto",
+        caseId: 101,
+        assertions: JSON.stringify([{ type: "js_expression", expression: "result.ok" }]),
+      });
+      expect(validWeb.success).toBe(true);
+      if (validWeb.success) {
+        expect(validWeb.data.assertions).toEqual([{ type: "js_expression", expression: "result.ok" }]);
+      }
+
+      const validVer = updateTestCaseSchema.safeParse({
+        category: "verification",
+        caseId: 102,
+        input: JSON.stringify({ query: "deep learning" }),
+      });
+      expect(validVer.success).toBe(true);
+      if (validVer.success) {
+        expect(validVer.data.input).toEqual({ query: "deep learning" });
+      }
+
+      const validEval = updateTestCaseSchema.safeParse({
+        category: "evaluation",
+        caseId: 103,
+        turns: JSON.stringify(["turn 1", "turn 2"]),
+      });
+      expect(validEval.success).toBe(true);
+      if (validEval.success) {
+        expect(validEval.data.turns).toEqual(["turn 1", "turn 2"]);
+      }
     });
   });
 

@@ -52,36 +52,78 @@ describe("create_test_suite tool", () => {
       expect(missingCategory.success).toBe(false);
     });
 
-    it("rejects category-inapplicable fields (discriminated union)", () => {
+    it("rejects category-inapplicable fields with actionable guidance", () => {
       // verification requires mcpServerId
-      expect(
-        createTestSuiteSchema.safeParse({ category: "verification", name: "My Suite" }).success,
-      ).toBe(false);
+      const verMissingMcp = createTestSuiteSchema.safeParse({ category: "verification", name: "My Suite" });
+      expect(verMissingMcp.success).toBe(false);
+      if (!verMissingMcp.success) {
+        expect(verMissingMcp.error.issues[0]?.message).toMatch(
+          /Field 'mcpServerId' \(UUID\) is required for 'verification' suites/,
+        );
+      }
 
       // evaluation requires agentId
-      expect(
-        createTestSuiteSchema.safeParse({ category: "evaluation", name: "My Suite" }).success,
-      ).toBe(false);
+      const evalMissingAgent = createTestSuiteSchema.safeParse({ category: "evaluation", name: "My Suite" });
+      expect(evalMissingAgent.success).toBe(false);
+      if (!evalMissingAgent.success) {
+        expect(evalMissingAgent.error.issues[0]?.message).toMatch(
+          /Field 'agentId' is required for 'evaluation' suites/,
+        );
+      }
 
-      // evaluation rejects mcpServerId (verification/web-auto-only field)
-      expect(
-        createTestSuiteSchema.safeParse({
-          category: "evaluation",
-          name: "My Suite",
-          agentId: "agent-1",
-          mcpServerId: validUuid,
-        }).success,
-      ).toBe(false);
+      // evaluation rejects mcpServerId
+      const evalWithMcp = createTestSuiteSchema.safeParse({
+        category: "evaluation",
+        name: "My Suite",
+        agentId: "agent-1",
+        mcpServerId: validUuid,
+      });
+      expect(evalWithMcp.success).toBe(false);
+      if (!evalWithMcp.success) {
+        expect(evalWithMcp.error.issues[0]?.message).toMatch(
+          /Field 'mcpServerId' is not permitted in 'evaluation' suites/,
+        );
+      }
 
-      // verification rejects agentId (evaluation-only field)
-      expect(
-        createTestSuiteSchema.safeParse({
-          category: "verification",
-          name: "My Suite",
-          mcpServerId: validUuid,
-          agentId: "agent-1",
-        }).success,
-      ).toBe(false);
+      // verification rejects agentId
+      const verWithAgent = createTestSuiteSchema.safeParse({
+        category: "verification",
+        name: "My Suite",
+        mcpServerId: validUuid,
+        agentId: "agent-1",
+      });
+      expect(verWithAgent.success).toBe(false);
+      if (!verWithAgent.success) {
+        expect(verWithAgent.error.issues[0]?.message).toMatch(
+          /Field 'agentId' is not permitted in 'verification' suites/,
+        );
+      }
+
+      // web-auto rejects agentId
+      const webWithAgent = createTestSuiteSchema.safeParse({
+        category: "web-auto",
+        name: "My Web Suite",
+        agentId: "agent-1",
+      });
+      expect(webWithAgent.success).toBe(false);
+      if (!webWithAgent.success) {
+        expect(webWithAgent.error.issues[0]?.message).toMatch(
+          /Field 'agentId' is not permitted in 'web-auto' suites/,
+        );
+      }
+    });
+
+    it("tolerates and strips unknown hallucinated fields (LLM tolerance contract)", () => {
+      const parsed = createTestSuiteSchema.safeParse({
+        category: "verification",
+        name: "My Suite",
+        mcpServerId: validUuid,
+        bogusReasoningField: "I decided to test this MCP server because...",
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect((parsed.data as Record<string, unknown>).bogusReasoningField).toBeUndefined();
+      }
     });
   });
 

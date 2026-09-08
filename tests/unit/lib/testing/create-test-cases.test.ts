@@ -85,6 +85,67 @@ describe("create_test_cases tool", () => {
         }).success,
       ).toBe(false);
     });
+
+    it("accepts stringified JSON cases array and stringified assertions (LLM tolerance)", () => {
+      const stringifiedCases = JSON.stringify([
+        {
+          name: "Stringified Web Case",
+          script: "async (page) => { await page.goto('https://example.com'); }",
+          steps: "1. Go to example.com",
+          assertions: JSON.stringify([
+            { type: "js_expression", expression: "result.success === true" },
+          ]),
+        },
+      ]);
+
+      const parsed = createTestCasesSchema.safeParse({
+        category: "web-auto",
+        suiteId: validUuid,
+        cases: stringifiedCases,
+      });
+
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.cases).toHaveLength(1);
+        expect(parsed.data.cases[0]?.name).toBe("Stringified Web Case");
+        expect(parsed.data.cases[0]?.assertions).toEqual([
+          { type: "js_expression", expression: "result.success === true" },
+        ]);
+      }
+    });
+
+    it("successfully parses the real-world user payloads from the bug report", () => {
+      // User Attempt 1 & 2 payload
+      const attempt1and2Cases =
+        '[{"assertions": [{"expression": "result.success === true && result.count === 3", "type": "js_expression"}, {"expression": "result.topNews.every(n => typeof n.title === \'string\' && n.title.length > 0 && typeof n.url === \'string\' && n.url.indexOf(\'news.cnblogs.com/n/\') > 0)", "type": "js_expression"}, {"expected": 3, "operator": "==", "path": "$.topNews.length", "type": "jsonpath"}, {"operator": "exists", "path": "$.topNews[0].title", "type": "jsonpath"}, {"operator": "exists", "path": "$.topNews[2].url", "type": "jsonpath"}], "name": "博客园首页进入新闻板块并提取前三条新闻", "script": "async (page) => {\\n  await page.goto(\'https://www.cnblogs.com/\', { waitUntil: \'domcontentloaded\', timeout: 60000 });\\n\\n  const newsLink = page.locator(\'a[href*=\\"news.cnblogs.com\\"]\').filter({ hasText: \'新闻\' }).first();\\n  await newsLink.click();\\n  await page.waitForURL(/news\\\\.cnblogs\\\\.com/, { timeout: 30000 });\\n\\n  await page.waitForSelector(\'#news_list .news_block\', { timeout: 30000 });\\n\\n  const topNews = await page.$$eval(\'#news_list .news_block\', (blocks) =>\\n    blocks.slice(0, 3).map((block, i) => {\\n      const a = block.querySelector(\'h2 a\');\\n      return {\\n        rank: i + 1,\\n        title: a ? a.textContent.trim() : null,\\n        url: a ? a.href : null\\n      };\\n    })\\n  );\\n\\n  return {\\n    success: topNews.length === 3,\\n    newsPageUrl: page.url(),\\n    newsPageTitle: await page.title(),\\n    topNews,\\n    count: topNews.length\\n  };\\n}", "steps": "1. 打开博客园首页 https://www.cnblogs.com/；2. 点击顶部导航栏中的新闻链接，进入新闻板块 https://news.cnblogs.com/；3. 等待新闻列表（#news_list 下的 .news_block）加载完成；4. 提取前三条新闻的标题与详情链接；5. 返回结构化结果：success 标志、新闻页 URL 与标题、以及 topNews 数组（含 rank、title、url）。"}]';
+
+      const res1 = createTestCasesSchema.safeParse({
+        category: "web-auto",
+        suiteId: "855eec71-a8a3-400b-bb9a-ba1f03955036",
+        cases: attempt1and2Cases,
+      });
+
+      expect(res1.success).toBe(true);
+      if (res1.success) {
+        expect(res1.data.cases).toHaveLength(1);
+        expect(res1.data.cases[0]?.name).toBe("博客园首页进入新闻板块并提取前三条新闻");
+        expect(res1.data.cases[0]?.assertions).toHaveLength(5);
+      }
+
+      // User Attempt 3 diagnostic payload
+      const attempt3Cases = '[{"name": "诊断用例-传输层测试"}]';
+      const res3 = createTestCasesSchema.safeParse({
+        category: "web-auto",
+        suiteId: "855eec71-a8a3-400b-bb9a-ba1f03955036",
+        cases: attempt3Cases,
+      });
+
+      expect(res3.success).toBe(true);
+      if (res3.success) {
+        expect(res3.data.cases).toHaveLength(1);
+        expect(res3.data.cases[0]?.name).toBe("诊断用例-传输层测试");
+      }
+    });
   });
 
   describe("Tool Execution", () => {
@@ -263,6 +324,62 @@ describe("create_test_cases tool", () => {
             name: "Checkout UI",
             enabled: false,
             input: { script: "await page.goto('/checkout');", steps: "" },
+          }),
+        ]),
+      );
+    });
+
+    it("creates web-auto cases when cases and assertions are passed as stringified JSON payloads", async () => {
+      dbMock.$enqueue(
+        [
+          {
+            id: testSuiteId,
+            visibility: "private",
+            createdBy: "user-123",
+          },
+        ],
+        [
+          {
+            id: 302,
+            name: "Stringified Web Case",
+            assertions: [{ type: "js_expression", expression: "result.success === true" }],
+          },
+        ],
+      );
+
+      const stringifiedPayload = {
+        category: "web-auto" as const,
+        suiteId: testSuiteId,
+        cases: JSON.stringify([
+          {
+            name: "Stringified Web Case",
+            script: "async (page) => { await page.goto('/home'); }",
+            steps: "1. Visit home",
+            assertions: JSON.stringify([
+              { type: "js_expression", expression: "result.success === true" },
+            ]),
+          },
+        ]),
+      };
+
+      const parsedArgs = createTestCasesSchema.parse(stringifiedPayload);
+      const result = (await tool.execute!(parsedArgs)) as CreateTestCasesResult;
+
+      expect(result.category).toBe("web-auto");
+      expect(result.createdCount).toBe(1);
+      expect(result.cases[0]?.id).toBe(302);
+      expect(result.cases[0]?.name).toBe("Stringified Web Case");
+      expect(result.cases[0]?.assertionCount).toBe(1);
+
+      expect(dbMock._chain.values).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "Stringified Web Case",
+            enabled: false,
+            input: {
+              script: "async (page) => { await page.goto('/home'); }",
+              steps: "1. Visit home",
+            },
           }),
         ]),
       );

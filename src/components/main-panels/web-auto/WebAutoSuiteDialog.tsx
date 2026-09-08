@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import type { WebAutoSuiteRow, WebAutoTarget } from "@/store/web-auto-store";
 import { useWorkspaceStore } from "@/store/workspace";
+import { findBestPlaywrightMcpServer } from "@/lib/web-auto/matching";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -58,21 +59,11 @@ export function WebAutoSuiteDialog({
   );
 
   const { data: mcpServers = [] } = useSWR<
-    Array<{ id: string; name: string; enabled?: boolean }>
+    Array<{ id: string; name: string; enabled?: boolean; visibility?: string }>
   >("/api/mcp-servers", fetcher);
 
   const autoMatchedPlaywrightServer = useMemo(() => {
-    if (!mcpServers || mcpServers.length === 0) return null;
-    const exactMatch = mcpServers.find(
-      (s) =>
-        s.name.toLowerCase() === "playwright" ||
-        s.name.toLowerCase() === "playwright-mcp",
-    );
-    if (exactMatch) return exactMatch;
-    return (
-      mcpServers.find((s) => s.name.toLowerCase().includes("playwright")) ??
-      null
-    );
+    return findBestPlaywrightMcpServer(mcpServers);
   }, [mcpServers]);
 
   const [name, setName] = useState<string>(suite?.name ?? "");

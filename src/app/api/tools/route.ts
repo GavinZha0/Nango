@@ -33,6 +33,7 @@ export const GET = withSession("/api/tools", async ({ session }) => {
         url: McpServerTable.url,
         enabled: McpServerTable.enabled,
         tools: McpServerTable.tools,
+        visibility: McpServerTable.visibility,
       })
       .from(McpServerTable)
       .where(

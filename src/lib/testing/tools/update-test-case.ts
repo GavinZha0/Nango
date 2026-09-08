@@ -21,63 +21,71 @@ import {
   type UpdateTestCaseResult,
 } from "../types";
 import { normalizeAndValidateAssertions, WARNING_EVALUATOR_MISSING, containsJudgeDependentAssertions } from "../assertion-validation";
+import { jsonOrSelf } from "./json-or-self";
+import { refineDisallowedCaseFields } from "./category-field-rules";
 
-const updateCommonFields = {
-  caseId: z
-    .number()
-    .int()
-    .positive()
-    .describe("The integer ID of the test case to update."),
-  name: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .optional()
-    .describe("Optional new descriptive name for the test case."),
-  enabled: z
-    .boolean()
-    .optional()
-    .describe("Optional toggle to enable or disable the case (e.g. true to activate after review)."),
-  assertions: z
-    .array(z.record(z.string(), z.unknown()))
-    .optional()
-    .describe(
-      "Optional updated list of assertion specifications (replaces existing assertions). Supported types are category-scoped — inspect with get_assertion_schema.",
-    ),
-};
-
-export const updateTestCaseSchema = z.discriminatedUnion("category", [
-  z.object({
-    category: z.literal("verification"),
-    ...updateCommonFields,
-    toolName: z.string().trim().optional().describe("Optional updated tool name."),
+// CONTRACT: permissive object parsing strips unknown fields to tolerate LLM hallucinated extra keys.
+export const updateTestCaseSchema = z
+  .object({
+    category: z
+      .enum(["verification", "evaluation", "web-auto"])
+      .describe("Target test category ('verification', 'evaluation', or 'web-auto')."),
+    caseId: z
+      .number()
+      .int()
+      .positive()
+      .describe("The integer ID of the test case to update."),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .optional()
+      .describe("Optional new descriptive name for the test case."),
+    enabled: z
+      .boolean()
+      .optional()
+      .describe("Optional toggle to enable or disable the case (e.g. true to activate after review)."),
+    assertions: z
+      .preprocess(
+        jsonOrSelf,
+        z.array(z.record(z.string(), z.unknown())),
+      )
+      .optional()
+      .describe(
+        "Optional updated list of assertion specifications (replaces existing assertions). Supported types are category-scoped — inspect with get_assertion_schema.",
+      ),
+    toolName: z
+      .string()
+      .trim()
+      .optional()
+      .describe("Optional updated tool name (verification only)."),
     input: z
-      .record(z.string(), z.unknown())
+      .preprocess(
+        jsonOrSelf,
+        z.record(z.string(), z.unknown()),
+      )
       .optional()
-      .describe("Optional updated tool arguments payload."),
-  }).strict(),
-  z.object({
-    category: z.literal("evaluation"),
-    ...updateCommonFields,
+      .describe("Optional updated tool arguments payload (verification only)."),
     turns: z
-      .array(z.string().min(1))
+      .preprocess(
+        jsonOrSelf,
+        z.array(z.string().min(1)),
+      )
       .optional()
-      .describe("Optional updated multi-turn user prompt texts."),
-  }).strict(),
-  z.object({
-    category: z.literal("web-auto"),
-    ...updateCommonFields,
+      .describe("Optional updated multi-turn user prompt texts (evaluation only)."),
     script: z
       .string()
       .optional()
-      .describe("Optional updated Playwright script."),
+      .describe("Optional updated Playwright script (web-auto only)."),
     steps: z
       .string()
       .optional()
-      .describe("Optional updated natural language test steps (non-executable documentation)."),
-  }).strict(),
-]);
+      .describe("Optional updated natural language test steps (web-auto only)."),
+  })
+  .superRefine((val, ctx) => {
+    refineDisallowedCaseFields(val.category, val as Record<string, unknown>, ctx);
+  });
 
 /** Throw a friendly duplicate-name error on a unique violation during an update.
  *  Shared by all three categories so a branch can't drop conflict handling. */

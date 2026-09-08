@@ -22,6 +22,8 @@ import {
 } from "../types";
 import { normalizeAndValidateAssertions, WARNING_EVALUATOR_MISSING, containsJudgeDependentAssertions } from "../assertion-validation";
 import { CATEGORY_TYPE_MAPPING } from "@/lib/assertions/types";
+import { jsonOrSelf } from "./json-or-self";
+import { refineDisallowedCaseFields } from "./category-field-rules";
 
 // Generated from the shared contract so the tool description cannot drift
 // from get_assertion_schema's category bindings.
@@ -40,11 +42,14 @@ const caseNameSchema = z
   .max(120)
   .describe("Descriptive name of the test case.");
 const caseAssertionsSchema = z
-  .array(z.record(z.string(), z.unknown()))
+  .preprocess(
+    jsonOrSelf,
+    z.array(z.record(z.string(), z.unknown())),
+  )
   .default([])
   .describe(ASSERTIONS_FIELD_HINT);
 
-const verificationCaseItemSchema = z.object({
+const genericCaseItemSchema = z.object({
   name: caseNameSchema,
   toolName: z
     .string()
@@ -52,23 +57,13 @@ const verificationCaseItemSchema = z.object({
     .optional()
     .describe("Target tool name from the suite's MCP server (required for verification)."),
   input: z
-    .record(z.string(), z.unknown())
+    .preprocess(jsonOrSelf, z.record(z.string(), z.unknown()))
     .optional()
     .describe("Tool argument input payload (e.g. { query: 'Azure' })."),
-  assertions: caseAssertionsSchema,
-}).strict();
-
-const evaluationCaseItemSchema = z.object({
-  name: caseNameSchema,
   turns: z
-    .array(z.string().min(1))
+    .preprocess(jsonOrSelf, z.array(z.string().min(1)))
     .optional()
     .describe("List of user prompt texts representing multi-turn conversational inputs (required for evaluation)."),
-  assertions: caseAssertionsSchema,
-}).strict();
-
-const webAutoCaseItemSchema = z.object({
-  name: caseNameSchema,
   script: z
     .string()
     .optional()
@@ -78,7 +73,7 @@ const webAutoCaseItemSchema = z.object({
     .optional()
     .describe("Natural language test steps (non-executable documentation readable by the assistant)."),
   assertions: caseAssertionsSchema,
-}).strict();
+});
 
 const suiteIdSchema = z
   .string()
@@ -86,23 +81,21 @@ const suiteIdSchema = z
   .describe("The target suite ID where test cases will be created.");
 const casesArrayDescription = "Array of test cases to create in batch (1 to 20 items).";
 
-export const createTestCasesSchema = z.discriminatedUnion("category", [
-  z.object({
-    category: z.literal("verification"),
+export const createTestCasesSchema = z
+  .object({
+    category: z
+      .enum(["verification", "evaluation", "web-auto"])
+      .describe("Target test category ('verification', 'evaluation', or 'web-auto')."),
     suiteId: suiteIdSchema,
-    cases: z.array(verificationCaseItemSchema).min(1).max(20).describe(casesArrayDescription),
-  }).strict(),
-  z.object({
-    category: z.literal("evaluation"),
-    suiteId: suiteIdSchema,
-    cases: z.array(evaluationCaseItemSchema).min(1).max(20).describe(casesArrayDescription),
-  }).strict(),
-  z.object({
-    category: z.literal("web-auto"),
-    suiteId: suiteIdSchema,
-    cases: z.array(webAutoCaseItemSchema).min(1).max(20).describe(casesArrayDescription),
-  }).strict(),
-]);
+    cases: z
+      .preprocess(jsonOrSelf, z.array(genericCaseItemSchema).min(1).max(20))
+      .describe(casesArrayDescription),
+  })
+  .superRefine((val, ctx) => {
+    val.cases.forEach((c, i) => {
+      refineDisallowedCaseFields(val.category, c as Record<string, unknown>, ctx, ["cases", i]);
+    });
+  });
 
 function findConflictingCaseNames(cases: Array<{ name: string }>, existingNames: string[]): string[] {
   const existingSet = new Set(existingNames);

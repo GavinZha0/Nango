@@ -15,6 +15,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { ArrowLeft, Save, Loader2, ChevronDown, ChevronRight, Trash2, ChevronLeft, Star, Webhook, Scale, BookMarked, Bot } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,20 +35,14 @@ import {
 import { cn } from "@/lib/utils";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { getProviderLabel } from "@/lib/constants/providers";
-import {
-  SUPERVISOR_DESCRIPTION,
-  SUPERVISOR_NAME,
-  SUPERVISOR_PROMPT,
-} from "@/lib/constants/supervisor";
 import type { AgentRole } from "@/lib/db/schema";
-import { DEFAULT_EVALUATOR_SYSTEM_PROMPT } from "@/lib/evaluation/types";
-import { DEFAULT_TESTER_SYSTEM_PROMPT } from "@/lib/testing/prompt";
+import { computeRoleSwitchSideEffects } from "@/lib/builtin-agents/role-transitions";
 export type { BuiltinAgentRow, BoundToolRow } from "@/lib/types/builtin-agent";
 import { resolveSharedStateEnabled, type BuiltinAgentRow, type BoundToolRow } from "@/lib/types/builtin-agent";
 
 // Types
 
-interface MpcServer { id: string; name: string; description: string | null; serverDescription?: string | null; serverInstructions?: string | null; url: string; enabled: boolean }
+interface MpcServer { id: string; name: string; description: string | null; serverDescription?: string | null; serverInstructions?: string | null; url: string; enabled: boolean; visibility?: string | null }
 interface Skill { id: string; name: string; description: string | null; source: string }
 interface BuiltinToolDescriptor {
   name: string;
@@ -783,44 +778,24 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   onValueChange={(v: string | null) => {
                     if (roleIsFrozen || !v) return;
                     const newRole = v === "specialist" ? null : (v as AgentRole);
-                    
-                    if (newRole === "supervisor") {
-                      preSupervisorSnapshot.current = {
-                        name: form.name,
-                        description: form.description,
-                        prompt: form.prompt,
-                      };
-                      setForm((prev) => ({
+                    const result = computeRoleSwitchSideEffects(
+                      form,
+                      tools,
+                      newRole,
+                      mcpServers,
+                      preSupervisorSnapshot.current,
+                    );
+                    preSupervisorSnapshot.current = result.nextSnapshot;
+                    setForm(result.nextForm as FormState);
+                    if (result.nextTools) {
+                      setTools((prev) => ({
                         ...prev,
-                        role: newRole,
-                        sharedStateEnabled: true,
-                        name: SUPERVISOR_NAME,
-                        description: SUPERVISOR_DESCRIPTION,
-                        prompt: SUPERVISOR_PROMPT,
+                        builtinTools: result.nextTools!.builtinTools,
+                        mcp: result.nextTools!.mcp,
                       }));
-                    } else {
-                      const snap = preSupervisorSnapshot.current;
-                      setForm((prev) => {
-                        const restored = prev.role === "supervisor" && snap ? snap : {};
-                        const nextName = (prev.role === "supervisor" ? snap?.name : undefined) ?? prev.name;
-                        const nextPrompt = (prev.role === "supervisor" ? snap?.prompt : undefined) ?? prev.prompt;
-                        const nextDescription = (prev.role === "supervisor" ? snap?.description : undefined) ?? prev.description;
-                        
-                        return {
-                          ...prev,
-                          role: newRole,
-                          ...restored,
-                          ...(newRole === "tester" ? { sharedStateEnabled: true } : {}),
-                          ...(newRole === "evaluator" && nextPrompt.trim() === "" ? { prompt: DEFAULT_EVALUATOR_SYSTEM_PROMPT } : {}),
-                          ...(newRole === "evaluator" && nextName.trim() === "" ? { name: "Evaluator" } : {}),
-                          ...(newRole === "tester" && nextPrompt.trim() === "" ? { prompt: DEFAULT_TESTER_SYSTEM_PROMPT } : {}),
-                          ...(newRole === "tester" && nextName.trim() === "" ? { name: "Tester" } : {}),
-                          ...(newRole === "tester" && (!nextDescription || nextDescription.trim() === "") ? { description: "Autonomous Software Test Engineer (SDET) responsible for full test lifecycle management." } : {}),
-                        };
-                      });
-                      if (form.role === "supervisor") {
-                         preSupervisorSnapshot.current = null;
-                      }
+                    }
+                    if (result.warning) {
+                      toast.warning(result.warning);
                     }
                   }}
                 >
