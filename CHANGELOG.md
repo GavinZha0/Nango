@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/GavinZha0/Nango/compare/v0.19.2...v0.20.0) (2026-09-09)
+
+
+### Features
+
+* **admin:** add table sorting and optimize user/credential management ([a3da99e](https://github.com/GavinZha0/Nango/commit/a3da99e5b91060a3985e39d6b69af2cadff10970))
+
 ## [0.19.2](https://github.com/GavinZha0/Nango/compare/v0.19.1...v0.19.2) (2026-09-09)
 
 
