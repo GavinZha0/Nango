@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* page exception when chose external agent to chat ([34ffb00](https://github.com/GavinZha0/Nango/commit/34ffb0071adaa51dbe6ef263ec34a9117692e0f3))
+* page exception when chose external agent to chat ([34ffb00](https://github.com/GavinZha0/Nango/commit/34ffb0071adaa51dbe6ef263ec34a9117692e0f3)) by @GavinZha0
 
 ## [0.19.1](https://github.com/GavinZha0/Nango/compare/v0.19.0...v0.19.1) (2026-09-08)
 
