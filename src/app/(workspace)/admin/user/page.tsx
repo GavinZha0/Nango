@@ -3,53 +3,45 @@
 import { useState, type ReactNode } from "react";
 import { UserManagement } from "@/components/admin/UserManagement";
 import { LoginEvents } from "@/components/admin/LoginEvents";
-import { Users } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Users, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Tab = "users" | "login-events";
 
-interface TabButtonProps {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}
-
-function TabButton({ label, active, onClick }: TabButtonProps): ReactNode {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "border-b-2 px-4 py-2 text-sm font-medium transition-colors",
-        active
-          ? "border-primary text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
 export default function AdminUserPage(): ReactNode {
   const [tab, setTab] = useState<Tab>("users");
+  const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-8">
-      <div className="flex items-center gap-3">
-        <Users className="h-6 w-6 text-muted-foreground" />
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Users</h1>
-        </div>
-      </div>
+      {/* Integrated Single-row Header */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2.5">
+            <Users className="h-6 w-6 text-muted-foreground" />
+            <h1 className="text-xl font-bold tracking-tight">Users</h1>
+          </div>
 
-      <div className="flex border-b">
-        <TabButton label="User Accounts" active={tab === "users"} onClick={() => setTab("users")} />
-        <TabButton label="Login Events" active={tab === "login-events"} onClick={() => setTab("login-events")} />
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+            <TabsList className="h-8">
+              <TabsTrigger value="users" className="text-xs">User Accounts</TabsTrigger>
+              <TabsTrigger value="login-events" className="text-xs">Login Events</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        {tab === "users" && (
+          <Button onClick={() => setCreateOpen(true)} size="sm">
+            <UserPlus className="h-4 w-4" />
+            New User
+          </Button>
+        )}
       </div>
 
       <div className={cn(tab !== "users" && "hidden")}>
-        <UserManagement />
+        <UserManagement createOpen={createOpen} onOpenChange={setCreateOpen} />
       </div>
       <div className={cn(tab !== "login-events" && "hidden")}>
         <LoginEvents />
@@ -57,3 +49,4 @@ export default function AdminUserPage(): ReactNode {
     </div>
   );
 }
+

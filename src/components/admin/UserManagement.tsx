@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Table,
   TableBody,
@@ -20,127 +18,150 @@ import {
 } from "@/components/admin/UserActionMenu";
 import { formatTimestamp } from "@/components/admin/format";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
-import { UserPlus, Search } from "lucide-react";
+import { alphabeticCompare } from "@/lib/utils/sort";
+import { SortableHeader, useTableSort } from "@/components/admin/SortableHeader";
 
 interface UserRowWithDate extends UserRow {
-  createdAt: Date;
+  createdAt: string | Date;
 }
 
-const PAGE_SIZE = 20;
+type UserSortColumn = "name" | "role" | "status";
 
-interface FetchParams {
-  search: string;
-  offset: number;
-  /** Increment this to force a refresh without changing other params */
-  revision: number;
+export interface UserManagementProps {
+  createOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function UserManagement(): ReactNode {
+export function UserManagement({
+  createOpen: controlledCreateOpen,
+  onOpenChange: controlledOnOpenChange,
+}: UserManagementProps = {}): ReactNode {
   const tz = useDisplayTimezone();
   const [users, setUsers] = useState<UserRowWithDate[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [rawSearch, setRawSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [internalCreateOpen, setInternalCreateOpen] = useState(false);
+  const [revision, setRevision] = useState(0);
 
-  // Single source of truth for what is currently fetched
-  const [params, setParams] = useState<FetchParams>({ search: "", offset: 0, revision: 0 });
+  const isControlled = controlledCreateOpen !== undefined;
+  const createOpen = isControlled ? controlledCreateOpen : internalCreateOpen;
+  const setCreateOpen = isControlled ? (controlledOnOpenChange ?? (() => {})) : setInternalCreateOpen;
 
-  // Debounce: when rawSearch changes, wait 300 ms then update params (reset offset)
-  useEffect(() => {
-    const id = setTimeout(() => {
-      setParams((p) => ({ ...p, search: rawSearch, offset: 0 }));
-    }, 300);
-    return () => clearTimeout(id);
-  }, [rawSearch]);
+  const { sortColumn, sortDirection, handleSort } = useTableSort<UserSortColumn>("name");
 
-  // Fetch whenever params change
+  // Fetch whenever revision changes
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
-      // Custom GET /api/admin/users — filters out soft-deleted users
-      // (better-auth's admin.listUsers returns them too).
-      const url = new URL("/api/admin/users", window.location.origin);
-      url.searchParams.set("limit", String(PAGE_SIZE));
-      url.searchParams.set("offset", String(params.offset));
-      if (params.search) url.searchParams.set("search", params.search);
+      setError(null);
+      // Custom GET /api/admin/users — filters out soft-deleted users.
+      // Fetches all active users for in-memory display and client-side sorting.
       try {
-        const res = await fetch(url.toString(), { credentials: "include" });
+        const res = await fetch("/api/admin/users");
         if (res.ok) {
-          const body = (await res.json()) as { users: UserRowWithDate[]; total: number };
+          const body = (await res.json()) as { users: UserRowWithDate[] };
           if (!cancelled) {
             setUsers(body.users);
-            setTotal(body.total);
+          }
+        } else {
+          if (!cancelled) {
+            setError(`Failed to load users (HTTP ${res.status})`);
           }
         }
-      } catch {
-        /* swallowed; UI shows empty state */
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load users");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      if (!cancelled) setLoading(false);
     }
 
     void load();
     return () => { cancelled = true; };
-  }, [params]);
+  }, [revision]);
 
   function refresh() {
-    setParams((p) => ({ ...p, revision: p.revision + 1 }));
+    setRevision((r) => r + 1);
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-  const currentPage = Math.floor(params.offset / PAGE_SIZE) + 1;
+  const sortedUsers = useMemo(() => {
+    return [...users].sort((a, b) => {
+      let result = 0;
+      if (sortColumn === "name") {
+        result = alphabeticCompare(a.name, b.name);
+      } else if (sortColumn === "role") {
+        result = alphabeticCompare(a.role, b.role);
+      } else if (sortColumn === "status") {
+        const statusA = a.banned ? "Banned" : "Active";
+        const statusB = b.banned ? "Banned" : "Active";
+        result = alphabeticCompare(statusA, statusB);
+      }
+      if (result === 0) {
+        result = alphabeticCompare(a.name, b.name);
+      }
+      return sortDirection === "asc" ? result : -result;
+    });
+  }, [users, sortColumn, sortDirection]);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by name..."
-            value={rawSearch}
-            onChange={(e) => setRawSearch(e.target.value)}
-            className="pl-8"
-          />
-        </div>
-        <Button onClick={() => setCreateOpen(true)} size="sm">
-          <UserPlus className="h-4 w-4" />
-          New User
-        </Button>
-      </div>
-
       {/* Table */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
+              <SortableHeader
+                label="Name"
+                column="name"
+                currentColumn={sortColumn}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+              />
               <TableHead>Email</TableHead>
               <TableHead>Org</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
+              <SortableHeader
+                label="Role"
+                column="role"
+                currentColumn={sortColumn}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+              />
+              <SortableHeader
+                label="Status"
+                column="status"
+                currentColumn={sortColumn}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+              />
               <TableHead>Last Active</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {loading && users.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
-            ) : users.length === 0 ? (
+            ) : error ? (
+              <TableRow>
+                <TableCell colSpan={8} className="py-10 text-center text-sm text-destructive">
+                  {error}
+                </TableCell>
+              </TableRow>
+            ) : sortedUsers.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                   No users found.
                 </TableCell>
               </TableRow>
             ) : (
-              users.map((user) => (
+              sortedUsers.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell className="font-medium">{user.name}</TableCell>
                   <TableCell className="text-muted-foreground">{user.email}</TableCell>
@@ -166,33 +187,6 @@ export function UserManagement(): ReactNode {
           </TableBody>
         </Table>
       </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            {params.offset + 1}–{Math.min(params.offset + PAGE_SIZE, total)} of {total} users
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={params.offset === 0}
-              onClick={() => setParams((p) => ({ ...p, offset: Math.max(0, p.offset - PAGE_SIZE) }))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentPage >= totalPages}
-              onClick={() => setParams((p) => ({ ...p, offset: p.offset + PAGE_SIZE }))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
 
       <UserFormDialog
         open={createOpen}

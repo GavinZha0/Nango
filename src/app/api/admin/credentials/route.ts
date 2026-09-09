@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
@@ -50,7 +50,7 @@ export const GET = withAdmin(ROUTE, async () => {
     })
     .from(CredentialTable)
     .leftJoin(usageCount, eq(CredentialTable.id, usageCount.credentialId))
-    .orderBy(CredentialTable.createdAt);
+    .orderBy(asc(sql`lower(${CredentialTable.name})`), desc(CredentialTable.createdAt));
 
   return NextResponse.json(rows);
 });

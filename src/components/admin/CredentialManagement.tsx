@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Table,
   TableBody,
@@ -24,6 +24,8 @@ import {
 import { CredentialFormDialog, type CredentialRow } from "@/components/admin/CredentialFormDialog";
 import { formatTimestamp } from "@/components/admin/format";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import { alphabeticCompare } from "@/lib/utils/sort";
+import { SortableHeader, useTableSort } from "@/components/admin/SortableHeader";
 import { Plus, Trash2, KeyRound } from "lucide-react";
 
 // Type label map
@@ -195,35 +197,48 @@ function EnabledSwitch({ row, onRefresh }: EnabledSwitchProps): ReactNode {
   );
 }
 
-// Main table
+type CredentialSortColumn = "name" | "provider" | "service";
 
 export function CredentialManagement(): ReactNode {
   const tz = useDisplayTimezone();
   const [rows, setRows] = useState<CredentialRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<CredentialRow | undefined>(undefined);
   const [revision, setRevision] = useState(0);
+
+  const { sortColumn, sortDirection, handleSort } = useTableSort<CredentialSortColumn>("name");
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
-      const res = await fetch("/api/admin/credentials");
-      if (!cancelled && res.ok) {
-        const data = (await res.json()) as CredentialRow[];
-        // Normalise `enabled` at the boundary so every downstream
-        // render path (Switch, row opacity, edit dialog) sees a real
-        // boolean. The server-side route already returns booleans,
-        // but coerceEnabled is a defensive belt that fixes a Switch
-        // that's stuck "on" should anything ever leak a "t"/"f"
-        // string through this column.
-        setRows(
-          data.map((r) => ({ ...r, enabled: coerceEnabled(r.enabled) })),
-        );
+      setError(null);
+      try {
+        const res = await fetch("/api/admin/credentials");
+        if (!cancelled && res.ok) {
+          const data = (await res.json()) as CredentialRow[];
+          // Normalise `enabled` at the boundary so every downstream
+          // render path (Switch, row opacity, edit dialog) sees a real
+          // boolean. The server-side route already returns booleans,
+          // but coerceEnabled is a defensive belt that fixes a Switch
+          // that's stuck "on" should anything ever leak a "t"/"f"
+          // string through this column.
+          setRows(
+            data.map((r) => ({ ...r, enabled: coerceEnabled(r.enabled) })),
+          );
+        } else if (!cancelled && !res.ok) {
+          setError(`Failed to load credentials (HTTP ${res.status})`);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load credentials");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      if (!cancelled) setLoading(false);
     }
 
     void load();
@@ -231,6 +246,25 @@ export function CredentialManagement(): ReactNode {
   }, [revision]);
 
   function refresh() { setRevision((r) => r + 1); }
+
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      let result = 0;
+      if (sortColumn === "name") {
+        result = alphabeticCompare(a.name, b.name);
+      } else if (sortColumn === "provider") {
+        result = alphabeticCompare(a.provider ?? "", b.provider ?? "");
+      } else if (sortColumn === "service") {
+        const labelA = SERVICE_TYPE_LABELS[a.serviceType] ?? a.serviceType ?? "";
+        const labelB = SERVICE_TYPE_LABELS[b.serviceType] ?? b.serviceType ?? "";
+        result = alphabeticCompare(labelA, labelB);
+      }
+      if (result === 0) {
+        result = alphabeticCompare(a.name, b.name);
+      }
+      return sortDirection === "asc" ? result : -result;
+    });
+  }, [rows, sortColumn, sortDirection]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -251,9 +285,27 @@ export function CredentialManagement(): ReactNode {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Provider</TableHead>
-              <TableHead>Service</TableHead>
+              <SortableHeader
+                label="Name"
+                column="name"
+                currentColumn={sortColumn}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+              />
+              <SortableHeader
+                label="Provider"
+                column="provider"
+                currentColumn={sortColumn}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+              />
+              <SortableHeader
+                label="Service"
+                column="service"
+                currentColumn={sortColumn}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+              />
               <TableHead>Credential Type</TableHead>
               <TableHead>Secret Key</TableHead>
               <TableHead>Endpoints</TableHead>
@@ -264,20 +316,26 @@ export function CredentialManagement(): ReactNode {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {loading && rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
-            ) : rows.length === 0 ? (
+            ) : error ? (
+              <TableRow>
+                <TableCell colSpan={10} className="py-10 text-center text-sm text-destructive">
+                  {error}
+                </TableCell>
+              </TableRow>
+            ) : sortedRows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
                   No credentials yet. Click <strong>New Credential</strong> to add one.
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row) => (
+              sortedRows.map((row) => (
                 <TableRow key={row.id} className={row.enabled ? "" : "opacity-40"}>
                   {/* Name — click to edit */}
                   <TableCell>

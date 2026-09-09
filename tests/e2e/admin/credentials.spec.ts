@@ -105,4 +105,27 @@ test.describe("Credential Management", () => {
       await expect(page.getByText("E2E Test OpenAI")).not.toBeVisible({ timeout: 10000 });
     }
   });
+
+  test("should display sortable credential table headers and toggle sort direction on click", async ({ page }) => {
+    const nameHeader = page.getByRole("columnheader", { name: "Name" });
+    const providerHeader = page.getByRole("columnheader", { name: "Provider" });
+    const serviceHeader = page.getByRole("columnheader", { name: "Service" });
+
+    await expect(nameHeader).toBeVisible();
+    await expect(providerHeader).toBeVisible();
+    await expect(serviceHeader).toBeVisible();
+
+    // Default sort is Name ascending
+    await expect(nameHeader).toHaveAttribute("aria-sort", "ascending");
+
+    // Clicking Name toggles to descending
+    await nameHeader.click();
+    await expect(nameHeader).toHaveAttribute("aria-sort", "descending");
+
+    // Clicking Provider switches sort to Provider ascending
+    await providerHeader.click();
+    await expect(providerHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect(nameHeader).toHaveAttribute("aria-sort", "none");
+  });
 });
+

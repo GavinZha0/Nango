@@ -38,4 +38,27 @@ test.describe("User Management", () => {
     await expect(page.getByRole("columnheader", { name: "IP" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Client" })).toBeVisible();
   });
+
+  test("should display sortable user table headers and allow clicking to toggle sort", async ({ page }) => {
+    const nameHeader = page.getByRole("columnheader", { name: "Name" });
+    const roleHeader = page.getByRole("columnheader", { name: "Role" });
+    const statusHeader = page.getByRole("columnheader", { name: "Status" });
+
+    await expect(nameHeader).toBeVisible();
+    await expect(roleHeader).toBeVisible();
+    await expect(statusHeader).toBeVisible();
+
+    // Default sort is Name ascending
+    await expect(nameHeader).toHaveAttribute("aria-sort", "ascending");
+
+    // Clicking Name toggles to descending
+    await nameHeader.click();
+    await expect(nameHeader).toHaveAttribute("aria-sort", "descending");
+
+    // Clicking Role switches sort to Role ascending
+    await roleHeader.click();
+    await expect(roleHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect(nameHeader).toHaveAttribute("aria-sort", "none");
+  });
 });
+

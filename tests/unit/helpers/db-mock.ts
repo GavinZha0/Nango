@@ -9,6 +9,7 @@
 import { vi, type Mock } from "vitest";
 
 export interface MockDrizzleChain {
+  $dynamic: Mock;
   from: Mock;
   where: Mock;
   orderBy: Mock;
@@ -58,6 +59,7 @@ export interface MockDbStub {
  */
 export function createDbStub(): MockDbStub {
   const chain: Record<string, Mock> = {
+    $dynamic: vi.fn(),
     from: vi.fn(),
     where: vi.fn(),
     orderBy: vi.fn(),
@@ -110,6 +112,7 @@ export function createDrizzleMock(initialData: unknown = []): MockDrizzleDb {
   }
 
   const chain: MockDrizzleChain = {
+    $dynamic: vi.fn(),
     from: vi.fn(),
     where: vi.fn(),
     orderBy: vi.fn(),
@@ -133,6 +136,7 @@ export function createDrizzleMock(initialData: unknown = []): MockDrizzleDb {
 
   // Self-chaining for all intermediate builder calls
   const chainMethods: Array<keyof Omit<MockDrizzleChain, "returning" | "execute" | "then">> = [
+    "$dynamic",
     "from",
     "where",
     "orderBy",
