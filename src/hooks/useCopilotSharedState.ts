@@ -20,10 +20,19 @@ import { z } from "zod";
  */
 export function useCopilotSharedStateSync() {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
+  const activeAgentSource = useWorkspaceStore((s) => s.activeAgentSource);
+  const activeCredentialId = useWorkspaceStore((s) => s.activeCredentialId);
   const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const agents = useWorkspaceStore((s) => s.agents);
+  const teams = useWorkspaceStore((s) => s.teams);
+
   const activeAgent = builtinAgents.find((a) => a.id === activeAgentId);
-  const validAgentId = activeAgent ? activeAgentId : undefined;
-  const { agent } = useAgent({ agentId: validAgentId });
+  const isAgentKnow = 
+    activeAgentSource === "builtin" ? builtinAgents.some((a) => a.id === activeAgentId) : 
+    agents.some((a) => a.id === activeAgentId && a.credentialId === activeCredentialId) || 
+    teams.some((t) => t.id === activeCredentialId && t.credentialId === activeCredentialId);
+  
+  const { agent } = useAgent({ agentId: isAgentKnow ? activeAgentId : undefined });
   const pathname = usePathname();
 
   const isSharedStateEnabled = resolveSharedStateEnabled(activeAgent);
