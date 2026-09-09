@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.2](https://github.com/GavinZha0/Nango/compare/v0.19.1...v0.19.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* page exception when chose external agent to chat ([34ffb00](https://github.com/GavinZha0/Nango/commit/34ffb0071adaa51dbe6ef263ec34a9117692e0f3))
+
 ## [0.19.1](https://github.com/GavinZha0/Nango/compare/v0.19.0...v0.19.1) (2026-09-08)
 
 
