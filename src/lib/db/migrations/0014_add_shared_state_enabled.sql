@@ -1,1 +1,0 @@
-ALTER TABLE "builtin_agent" ADD COLUMN "shared_state_enabled" boolean DEFAULT false NOT NULL;
