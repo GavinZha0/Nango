@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* timeout issue of backend agent platform ([6361a3d](https://github.com/GavinZha0/Nango/commit/6361a3de8876996ca951ea625ea853ba4522f2d6))
+* timeout issue of backend agent platform ([6361a3d](https://github.com/GavinZha0/Nango/commit/6361a3de8876996ca951ea625ea853ba4522f2d6)) by @GavinZha0
 
 ## [0.20.0](https://github.com/GavinZha0/Nango/compare/v0.19.2...v0.20.0) (2026-09-09)
 
