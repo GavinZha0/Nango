@@ -22,6 +22,7 @@ import {
   type ToolFailureCause,
 } from "@/lib/runner/tool-failure";
 import { evaluateAssertions, resolveInput } from "@/lib/assertions";
+import { findUnresolvedTokens } from "./resolve-input";
 import { classifyMcpError } from "./error-source";
 import type {
   AssertionSpec,
@@ -192,6 +193,14 @@ export async function runMcpCase(
           details: { mcpIsError: true },
         };
       }
+    }
+
+    const unresolvedTokens = findUnresolvedTokens(resolvedInput);
+    if (topLineError && unresolvedTokens.length > 0) {
+      topLineError.details = {
+        ...topLineError.details,
+        unresolvedReferences: unresolvedTokens,
+      };
     }
 
     return {

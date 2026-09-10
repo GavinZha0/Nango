@@ -23,9 +23,11 @@ import {
 } from "@/components/ui/select";
 import {
   caseActions,
+  useCasesStore,
   type VerificationCaseRow,
 } from "@/store/verification-cases";
 import { verificationActions } from "@/store/verification";
+import { computeNextCasePrefix } from "@/lib/verification/prefix";
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -149,12 +151,31 @@ export function NewCaseDialog({
           suiteId: caseRow.suiteId,
         });
       } else {
+        const targetSuiteId = suiteId ?? "";
+        const cached = targetSuiteId
+          ? useCasesStore.getState().bySuite[targetSuiteId]
+          : undefined;
+        const prefix = computeNextCasePrefix(cached ?? []);
         setForm({
-          name: "",
+          name: prefix,
           mcpServerId: serverId ?? "",
           toolName: defaultToolName ?? "",
-          suiteId: suiteId ?? "",
+          suiteId: targetSuiteId,
         });
+
+        // Cache miss: fetch cases for selected suite asynchronously to compute accurate prefix
+        if (targetSuiteId && cached === undefined) {
+          void caseActions.refresh(targetSuiteId).then(() => {
+            const fresh = useCasesStore.getState().bySuite[targetSuiteId] ?? [];
+            const freshPrefix = computeNextCasePrefix(fresh);
+            setForm((prev) => {
+              if (/^\d+_?$/.test(prev.name.trim()) || prev.name.trim() === "") {
+                return { ...prev, name: freshPrefix };
+              }
+              return prev;
+            });
+          });
+        }
       }
       setSubmitError(null);
     }
@@ -175,9 +196,14 @@ export function NewCaseDialog({
     ? trimmedName !== caseRow.name || form.suiteId !== caseRow.suiteId
     : true;
 
+  // For new cases, prevent submitting when name contains only the prefix (e.g. "010_")
+  // In edit mode (caseRow), allow existing names without forcing change
+  const hasValidNameContent = caseRow ? true : !/^\d+_?$/.test(trimmedName);
+
   const canSubmit =
     !submitting &&
     trimmedName.length > 0 &&
+    hasValidNameContent &&
     hasValidSuite &&
     isDirty &&
     (caseRow ? true : effectiveServerId !== "" && form.toolName !== "");
@@ -270,13 +296,34 @@ export function NewCaseDialog({
                     const nextServerId = v ?? "";
                     const nextSuites = allSuites.filter((s) => s.mcpServerId === nextServerId);
                     const defaultSuiteId = nextSuites[0]?.id || "";
+                    const cached = defaultSuiteId
+                      ? useCasesStore.getState().bySuite[defaultSuiteId]
+                      : undefined;
+                    let nextName = form.name;
+                    if (!caseRow && (/^\d+_?$/.test(form.name.trim()) || form.name.trim() === "")) {
+                      nextName = computeNextCasePrefix(cached ?? []);
+                    }
                     setForm((prev) => ({
                       ...prev,
                       mcpServerId: nextServerId,
                       toolName: "",
                       suiteId: defaultSuiteId,
                       newSuiteName: "",
+                      name: nextName,
                     }));
+
+                    if (defaultSuiteId && cached === undefined) {
+                      void caseActions.refresh(defaultSuiteId).then(() => {
+                        const fresh = useCasesStore.getState().bySuite[defaultSuiteId] ?? [];
+                        const freshPrefix = computeNextCasePrefix(fresh);
+                        setForm((prev) => {
+                          if (!caseRow && (/^\d+_?$/.test(prev.name.trim()) || prev.name.trim() === "")) {
+                            return { ...prev, name: freshPrefix };
+                          }
+                          return prev;
+                        });
+                      });
+                    }
                   }}
                   disabled={loadingServers}
                 >
@@ -311,9 +358,33 @@ export function NewCaseDialog({
               </Label>
               <Select
                 value={form.suiteId}
-                onValueChange={(v) =>
-                  setForm((prev) => ({ ...prev, suiteId: v ?? "" }))
-                }
+                onValueChange={(v) => {
+                  const nextSuiteId = v ?? "";
+                  const cached = nextSuiteId
+                    ? useCasesStore.getState().bySuite[nextSuiteId]
+                    : undefined;
+
+                  setForm((prev) => {
+                    let nextName = prev.name;
+                    if (!caseRow && (/^\d+_?$/.test(prev.name.trim()) || prev.name.trim() === "")) {
+                      nextName = computeNextCasePrefix(cached ?? []);
+                    }
+                    return { ...prev, suiteId: nextSuiteId, name: nextName };
+                  });
+
+                  if (nextSuiteId && cached === undefined) {
+                    void caseActions.refresh(nextSuiteId).then(() => {
+                      const fresh = useCasesStore.getState().bySuite[nextSuiteId] ?? [];
+                      const freshPrefix = computeNextCasePrefix(fresh);
+                      setForm((prev) => {
+                        if (!caseRow && (/^\d+_?$/.test(prev.name.trim()) || prev.name.trim() === "")) {
+                          return { ...prev, name: freshPrefix };
+                        }
+                        return prev;
+                      });
+                    });
+                  }
+                }}
                 disabled={!form.mcpServerId}
               >
                 <SelectTrigger id="case-suite" className="w-full">
@@ -384,18 +455,23 @@ export function NewCaseDialog({
             </div>
 
             {/* Case Name */}
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <Label htmlFor="case-name">
+            <div className="grid grid-cols-[120px_1fr] items-start gap-2">
+              <Label htmlFor="case-name" className="pt-2.5">
                 Case Name <span className="text-destructive">*</span>
               </Label>
-              <Input
-                id="case-name"
-                value={form.name}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, name: e.target.value }))
-                }
-                required
-              />
+              <div className="space-y-1">
+                <Input
+                  id="case-name"
+                  value={form.name}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  required
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Use 3-digit prefix (e.g. <code>010_login</code>) for ordered serial execution and cross-case references (<code>&#123;&#123;cases.010.output.xxx&#125;&#125;</code>).
+                </p>
+              </div>
             </div>
 
             {(loadError || submitError) && (

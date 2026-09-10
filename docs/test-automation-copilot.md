@@ -150,6 +150,8 @@ All tools live under `src/lib/testing/tools/` and are wrapped by `defineTool`. R
 
 #### 8. `create_test_cases`
 - **Parameters**: `category`; `suiteId`; `cases` (max 20) with `name`, category-specific payload (`toolName`/`input` for verification, `turns` for evaluation, `script`/`steps` for web-auto), and `assertions` (category-scoped — inspect via `get_assertion_schema`).
+- **Naming & Ordering Convention (Verification)**: For `verification` suites, cases must be named with a 3-digit prefix and step 10 (e.g. `010_login`, `020_get_profile`) to guarantee deterministic lexicographical execution and enable `{{cases.010.output.xxx}}` alias references.
+- **Dynamic Variables & Cross-Case Data**: Inputs support dynamic generator variables (`{{$uuid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$int(min, max)}}`, `{{$randomString(len)}}`, `{{$counter}}`) and intra-suite cross-case references (`{{cases.<alias>.output.<path>}}`).
 - **Safety Contract (Write Barrier)**: all newly created cases are **hardcoded to `enabled: false`** at insertion; explicit human review precedes activation.
 
 #### 9. `update_test_case`

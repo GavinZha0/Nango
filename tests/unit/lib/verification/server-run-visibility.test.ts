@@ -20,6 +20,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  compareServerRunCases,
   listEnabledCasesForServerRun,
   listResultsByRun,
   listResultsByRunForViewer,
@@ -119,4 +120,28 @@ describe("server-run visibility scoping (F6)", () => {
       expect(rows).toEqual([{ id: "result-1" }]);
     });
   });
+
+  describe("compareServerRunCases - same-suite contiguity", () => {
+    it("7. guarantees cases of the same suite stay strictly contiguous even with identical suiteName", () => {
+      // Two suites from different creators sharing the same suiteName "smoke"
+      const suiteA1 = { suiteName: "smoke", suiteId: "suite-aaa", name: "010_create" };
+      const suiteA2 = { suiteName: "smoke", suiteId: "suite-aaa", name: "020_verify" };
+      const suiteB1 = { suiteName: "smoke", suiteId: "suite-bbb", name: "015_probe" };
+
+      // Input is randomly shuffled so suite-bbb is in between
+      const shuffled = [suiteA2, suiteB1, suiteA1];
+      const sorted = shuffled.slice().sort(compareServerRunCases);
+
+      // Extract the sequence of suiteIds
+      const suiteIdSeq = sorted.map((c) => c.suiteId);
+
+      // suite-aaa cases MUST be contiguous! suite-bbb cannot break in between!
+      expect(suiteIdSeq).toEqual(["suite-aaa", "suite-aaa", "suite-bbb"]);
+      // And within suite-aaa, ordered by case name
+      expect(sorted[0].name).toBe("010_create");
+      expect(sorted[1].name).toBe("020_verify");
+      expect(sorted[2].name).toBe("015_probe");
+    });
+  });
 });
+

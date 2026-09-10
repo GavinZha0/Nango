@@ -40,7 +40,9 @@ const caseNameSchema = z
   .trim()
   .min(1)
   .max(120)
-  .describe("Descriptive name of the test case.");
+  .describe(
+    "Descriptive name of the test case. For verification suites, prefix with 3 digits and step 10 (e.g. '010_login', '020_get_profile') for deterministic serial order and alias referencing.",
+  );
 const caseAssertionsSchema = z
   .preprocess(
     jsonOrSelf,
@@ -59,7 +61,9 @@ const genericCaseItemSchema = z.object({
   input: z
     .preprocess(jsonOrSelf, z.record(z.string(), z.unknown()))
     .optional()
-    .describe("Tool argument input payload (e.g. { query: 'Azure' })."),
+    .describe(
+      "Tool argument input payload (e.g. { query: 'Azure' }). Supports dynamic generator variables ({{$uuid}}, {{$timestamp}}) and intra-suite cross-case references ({{cases.010.output.token}}).",
+    ),
   turns: z
     .preprocess(jsonOrSelf, z.array(z.string().min(1)))
     .optional()

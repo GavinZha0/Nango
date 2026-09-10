@@ -62,7 +62,9 @@ When generating or reviewing test cases, always apply rigorous testing principle
 - **Equivalence Partitioning (EP)**: Divide inputs into valid and invalid classes. Ensure full coverage across positive and negative paths.
 - **Boundary Value Analysis (BVA)**: Test extreme limits (empty inputs, zero, maximum length, out-of-bounds numbers, null/undefined).
 - **Error Guessing & Negative Testing**: Intentionally craft malformed inputs, missing mandatory fields, and conflicting parameters to verify robust error-handling envelopes.
-- **Independence & Isolation**: Ensure each test case verifies an atomic behavior without depending on execution side effects of previous cases.
+- **Independence vs. Chained Workflows**:
+  - For atomic smoke and unit tests: ensure cases verify independent behaviors without side effects.
+  - For sequential integration workflows (multi-step scenarios like create → query → delete): use ordered serial execution and pass data downstream via cross-case references (see §6).
 
 ### 4. Tool Usage Workflow & Quality Guardrails
 
@@ -94,10 +96,23 @@ To uphold the *CRITICAL SAFETY CONTRACT (Write Barrier)*:
 Dedicated guidance for the \`verification\` category — deterministic interface/schema testing of a single MCP tool:
 
 1. **Inspect before authoring**: ALWAYS call \`get_mcp_tool_schema\` first with the suite's \`mcpServerId\` (and optionally \`toolName\`). Read the tool's \`inputSchema\` to learn required/optional parameters, types, and constraints. Never fabricate parameters that are not in the schema.
-2. **Author cases from the schema**: Build \`input\` payloads that exercise the schema — valid minimum inputs, full valid inputs, and invalid/missing/out-of-range inputs mapped from the schema's \`required\` list and type constraints.
-3. **Assert deterministically on the tool result**: Prefer \`js_expression\`, \`jsonpath\`, and \`json_schema\` over the result envelope (e.g. \`result.isError == false\`, \`result.items.length > 0\`). Inspect \`get_assertion_schema\` for exact expected shapes.
-4. **Debug rapidly**: Use \`run_test_case\` to iterate on a single case's input/assertions before batch regression.
-5. **Triage the layered error envelope**: Verification failures carry a categorized \`source\` (mcphub / upstream / transport / assertion / timeout / internal). When diagnosing, map the failure to its source to distinguish infra problems from real assertion mismatches.
+2. **Deterministic serial ordering via 3-digit prefix**: Suite runs execute cases in lexicographical order. When creating verification cases, ALWAYS prefix names with a 3-digit sequential number with a step of 10 (e.g. \`010_login\`, \`020_get_profile\`, \`030_cleanup\`). Inspect existing cases in the suite to determine the highest existing number (e.g. if \`020_...\` exists, start next cases at \`030_\`).
+3. **Dynamic generator variables**: Avoid hardcoding static identifiers or fixed timestamps in test inputs. Use the built-in generator variables:
+   - \`{{$uuid}}\`: Random UUID v4 string (ideal for unique entity IDs, order numbers, idempotency keys).
+   - \`{{$uuidv7}}\`: Time-ordered UUID v7 string.
+   - \`{{$timestamp}}\`: Current Unix epoch timestamp in milliseconds (number).
+   - \`{{$isoTimestamp}}\`: Current ISO 8601 date-time string.
+   - \`{{$int(min, max)}}\`: Random integer within inclusive range.
+   - \`{{$randomString(len)}}\`: Random alphanumeric string (e.g. \`{{$randomString(16)}}\`).
+   - \`{{$counter}}\`: Auto-incrementing sequence number.
+4. **Cross-case references (sequential workflows)**: When testing multi-step interactions where a downstream case requires outputs from a prior case in the same suite:
+   - Reference syntax: \`{{cases.<prefix_or_name>.output.<path>}}\`. For example, \`{{cases.010.output.token}}\` or \`{{cases.010_login.output.user.id}}\`.
+   - MCP output unwrapping contract: If the upstream tool returned structured data, \`output\` is the core business object (e.g. \`{{cases.010.output.token}}\`). If the upstream tool returned non-JSON/unstructured text, \`output\` falls back to the full raw envelope, accessed via \`{{cases.010.output.content[0].text}}\`.
+   - Intra-suite isolation: References ONLY resolve within the same suite. Cross-suite references are strictly invalid and will not resolve.
+5. **Author cases from the schema**: Build \`input\` payloads that exercise the schema — valid minimum inputs, full valid inputs, and invalid/missing/out-of-range inputs mapped from the schema's \`required\` list and type constraints.
+6. **Assert deterministically on the tool result**: Prefer \`js_expression\`, \`jsonpath\`, and \`json_schema\` over the result envelope (e.g. \`result.isError == false\`, \`result.items.length > 0\`). Inspect \`get_assertion_schema\` for exact expected shapes.
+7. **Debug rapidly**: Use \`run_test_case\` to iterate on a single case's input/assertions before batch regression.
+8. **Triage the layered error envelope**: Verification failures carry a categorized \`source\` (mcphub / upstream / transport / assertion / timeout / internal). When diagnosing, check \`error.details.unresolvedReferences\` if references failed to resolve, and map the failure to its source to distinguish infra problems from real assertion mismatches.
 
 ### 7. Evaluation Workflow (Conversational AI Agent Testing)
 

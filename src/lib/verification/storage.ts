@@ -112,6 +112,7 @@ export async function getCaseById(
 export interface VerificationCaseRunItem {
   id: number;
   suiteId: string;
+  suiteName?: string;
   name: string;
   input: unknown;
   assertions: unknown;
@@ -174,6 +175,7 @@ export async function listEnabledCasesForServerRun(
     .select({
       id: VerificationCaseTable.id,
       suiteId: VerificationCaseTable.suiteId,
+      suiteName: VerificationSuiteTable.name,
       name: VerificationCaseTable.name,
       input: VerificationCaseTable.input,
       assertions: VerificationCaseTable.assertions,
@@ -201,12 +203,30 @@ export async function listEnabledCasesForServerRun(
           : undefined,
       ),
     )
-    .orderBy(VerificationCaseTable.toolName, VerificationCaseTable.name);
-  return rows.sort((a, b) => {
-    const cmpTool = alphabeticCompare(a.toolName || "", b.toolName || "");
-    if (cmpTool !== 0) return cmpTool;
-    return alphabeticCompare(a.name, b.name);
-  });
+    .orderBy(
+      VerificationSuiteTable.name,
+      VerificationSuiteTable.id,
+      VerificationCaseTable.name,
+    );
+  return rows.sort(compareServerRunCases);
+}
+
+/**
+ * Pure sorting comparator for Server Run cases.
+ * Guarantees that:
+ * 1. Cases are ordered human-readably by suiteName;
+ * 2. Cases belonging to the SAME suite (same suiteId) are strictly CONTIGUOUS,
+ *    even if two suites created by different users share the same suiteName;
+ * 3. Within each suite, cases are ordered strictly by case name.
+ */
+export function compareServerRunCases(
+  a: { suiteName?: string | null; suiteId: string; name: string },
+  b: { suiteName?: string | null; suiteId: string; name: string },
+): number {
+  const cmpSuite = alphabeticCompare(a.suiteName || "", b.suiteName || "");
+  if (cmpSuite !== 0) return cmpSuite;
+  if (a.suiteId !== b.suiteId) return a.suiteId < b.suiteId ? -1 : 1;
+  return alphabeticCompare(a.name, b.name);
 }
 
 // --- Runs -------------------------------------------------------------------

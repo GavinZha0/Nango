@@ -45,17 +45,22 @@ import type {
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 
-const INPUT_PLACEHOLDER = `// Dynamic generator variables:
-// {{$uuid}}             - Standard random UUID v4 string
-// {{$uuidv7}}           - Time-ordered UUID v7 string
-// {{$timestamp}}        - Current Unix timestamp in ms (number)
-// {{$isoTimestamp}}     - Current ISO 8601 date-time string
-// {{$int(min, max)}}    - Random integer within range (number)
-// {{$randomString(len)}} - Random alphanumeric string (e.g. len=16)
-// {{$counter}}          - Auto-incrementing counter (number)
+const INPUT_PLACEHOLDER = `// Cross-case reference:
+// {{cases.010.output.token}}     - Reference output from case "010_..."
+// {{cases.login.output.userId}}  - Reference output by case name
+//
+// Dynamic generator variables:
+// {{$uuid}}                      - Standard random UUID v4 string
+// {{$uuidv7}}                    - Time-ordered UUID v7 string
+// {{$timestamp}}                 - Current Unix timestamp in ms (number)
+// {{$isoTimestamp}}              - Current ISO 8601 date-time string
+// {{$int(min, max)}}             - Random integer within range (number)
+// {{$randomString(len)}}         - Random alphanumeric string (e.g. len=16)
+// {{$counter}}                   - Auto-incrementing counter (number)
 
 {
-  "exampleKey": "{{$uuid}}"
+  "requestId": "{{$uuid}}",
+  "username": "{{cases.010.output.name}}"
 }`;
 
 // --- Props ------------------------------------------------------------------

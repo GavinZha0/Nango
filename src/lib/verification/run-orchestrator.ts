@@ -27,7 +27,10 @@ import { publishVerificationFrame } from "./event-bus-channel";
 import { runMcpCase } from "./runner-mcp";
 import * as storage from "./storage";
 import { timeoutError } from "./error-source";
-import { normalizeCaseName } from "@/lib/verification/resolve-input";
+import {
+  normalizeCaseName,
+  extractMcpStructuredData,
+} from "@/lib/verification/resolve-input";
 import type {
   AssertionSpec,
   CaseExecutionOutcome,
@@ -273,9 +276,16 @@ async function runSuiteCases(
 ): Promise<void> {
   const suiteStartedAt: number = Date.now();
   const timeoutMs: number = input.timeoutSec * 1000;
-  const suiteContext: Record<string, unknown> = {};
+  let currentSuiteId: string | null = null;
+  let suiteContext: Record<string, unknown> = {};
 
   for (const c of input.cases) {
+    // Reset context whenever crossing suite boundaries to guarantee strict suite isolation
+    if (c.suiteId !== currentSuiteId) {
+      currentSuiteId = c.suiteId;
+      suiteContext = {};
+    }
+
     // Wall-clock check before each case — keeps the "remaining
     // cases get skipped" invariant precise without per-case
     // setTimeout bookkeeping.
@@ -361,10 +371,24 @@ async function runSuiteCases(
     });
 
     const normalizedKey = normalizeCaseName(c.name);
-    suiteContext[normalizedKey] = {
+    const structured = extractMcpStructuredData(outcome.resultPayload);
+    const outputData =
+      structured !== undefined && structured !== null
+        ? structured
+        : (outcome.resultPayload ?? {});
+
+    const caseData = {
       input: outcome.resolvedInput ?? {},
-      output: outcome.resultPayload ?? {},
+      output: outputData,
     };
+
+    suiteContext[normalizedKey] = caseData;
+
+    // Register 3-digit/numeric alias pointer if case name starts with numbers (e.g. "010_login" -> "010")
+    const prefixMatch = normalizedKey.match(/^(\d+)/);
+    if (prefixMatch) {
+      suiteContext[prefixMatch[1]] = caseData;
+    }
 
     if (outcome.status === "passed") counters.passedCount += 1;
     else if (outcome.status === "failed") counters.failedCount += 1;

@@ -129,6 +129,38 @@ per-tool sidecar HTTP probe, which is V2 territory.
 - **Server-wide run** (`mcpServerId` in `POST /api/verification-runs`): executes all enabled cases under one server, **scoped to the triggerer's visible suites** — foreign private suites never execute, and run results are filtered by the same visibility on read. The boot recovery sweep reads unscoped (system context).
 - **Real-Time Updates (SSE)**: Publishes `run_started`, `case_finished`, and `run_finished` over the existing `/api/runs/stream` event bus. The client hook `useVerificationRunStream` drives the UI.
 
+## 6. Serial Execution & Cross-Case Reference Contract
+
+Verification suites execute cases serially in deterministic alphabetical order. To support multi-step workflows (e.g. `login` → `create_project` → `delete_project`), cases can reference outputs from earlier cases in the same suite using Mustache-like template variables: `{{cases.<name_or_prefix>.output.<path>}}`.
+
+### 6.1 Numeric Prefix Convention & Aliasing
+- **Alphabetical Execution Order**: Cases within a suite execute in lexicographical order by case name. Prepending a 3-digit prefix with a step of 10 (e.g. `010_login`, `020_get_profile`, `030_cleanup`) establishes predictable execution order.
+- **Dual Registration in `suiteContext`**: When a case finishes, the orchestrator registers it in the running suite context under two keys:
+  1. Full case name: `suiteContext["010_login"] = caseData`
+  2. Prefix alias: if the case name begins with digits `^(\d+)` (e.g. `010`), `suiteContext["010"] = caseData` pointing to the exact same object reference (zero memory copy).
+- **Usage**: Downstream cases can use either the concise alias `{{cases.010.output.token}}` or the full name `{{cases.010_login.output.token}}`.
+- **Precondition (Alias Uniqueness)**: Numeric prefixes must be unique within a single suite. If multiple cases share the same prefix (e.g. `010_test_a` and `010_test_b`), the later-executed case overwrites the `010` alias pointer in `suiteContext`.
+
+### 6.2 Output Unwrapping Rules (`extractMcpStructuredData`)
+The `output` object exposed to downstream cases is unwrapped according to strict MCP protocol semantics:
+1. **`structuredContent` Priority**: If the MCP result contains `structuredContent`, it is used directly as the unwrapped `output` object.
+2. **`content` JSON Parsing**: If `structuredContent` is not present, the runner inspects `content`. If `content` contains a text item whose text parses as valid JSON (object or array), it is parsed and assigned to `output`.
+3. **Fallback to Full Envelope**: If neither condition is met (e.g. plain non-JSON text output, primitive values, or unexpected envelope shapes), the entire raw MCP `CallToolResult` envelope is preserved as `output`.
+4. **No `result` Demangling**: Unlike WebAuto/AG-UI envelopes, top-level `result` fields are NOT unwrapped. This guarantees that business data containing a `result` property (e.g. `{ result: 42, data: "..." }`) is preserved verbatim and will not cause data loss.
+
+### 6.3 Assertions View vs. Context View
+There is a key semantic difference between how assertions and cross-case references view the output:
+- **Assertions View (`evaluateAssertions`)**: Operates on the full tool result payload. JSON Schema, JSONPath, and JS expressions (`node:vm`) inspect the tool output directly (or via `$` / `root` bindings).
+- **Context View (`extractMcpStructuredData`)**: Prepares the `output` object for `{{cases...}}` template resolution:
+  - For structured responses: `output` is the core business object (e.g. `{{cases.010.output.token}}` or `{{cases.010.output.user.id}}`).
+  - For non-structured/raw fallbacks: `output` is the raw MCP envelope. Downstream cases must access fields through the envelope structure: `{{cases.010.output.content[0].text}}`.
+
+### 6.4 Suite Boundary & Isolation Semantics
+- **Strict Suite Scoping**: The execution context is strictly isolated to the currently executing suite. Cross-suite references are not supported and will not resolve.
+- **Contiguity Guarantee in Server Runs**: When executing all suites under an MCP server, cases are ordered by `(suiteName, suiteId, caseName)`. Even if multiple users define suites with the same name, all cases of a given suite execute contiguously without cross-suite interleaving.
+- **Context Reset on Suite Boundary**: Crossing into a new suite immediately clears the context: `suiteContext = {}`. This prevents state leakage or accidental cross-suite variable contamination.
+- **Failure Forensics (`unresolvedReferences`)**: Unresolved template placeholders remain as literals in input payloads. If a case execution fails or throws, the runner scans inputs for residual `{{cases...}}` tokens and populates `error.details.unresolvedReferences` (e.g. `["{{cases.010.output.token}}"]`), providing immediate diagnostic visibility.
+
 ## 7. API Routes
 
 All routes are wrapped by `withEditor(routePath, handler)` from
