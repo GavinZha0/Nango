@@ -97,6 +97,9 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "verification.payload_max_kb", value: "32", valueType: "number", description: "Max KB to save for verification result payload" },
   { key: "mcp.test_snapshot_max_kb", value: "32", valueType: "number", description: "Max KB to save for MCP test snapshots" },
 
+  // ── backend ────────────────────────────────────────────────────────
+  { key: "backend.entity_fetch.timeout", value: "5", valueType: "number", description: "Backend entity discovery timeout in seconds" },
+
   // ── guardrails ───────────────────────────────────────────────────
   { key: "guardrail.input_safety.enabled", value: "true", valueType: "boolean", description: "Enable input safety policy middleware (regex rules on tool arguments)" },
   { key: "guardrail.result_sanitization.enabled", value: "true", valueType: "boolean", description: "Enable tool result sanitization middleware (neutralize framework tags in external tool outputs)" },

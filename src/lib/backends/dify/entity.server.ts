@@ -4,8 +4,9 @@
 
 import "server-only";
 
+import { getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
-import { describeFetchStatus } from "../types";
+import { describeFetchStatus, BACKEND_ENTITY_FETCH_TIMEOUT_MS } from "../types";
 import type { EntityFetchResult } from "../types";
 
 const log = childLogger({ component: "dify-entity-fetcher" });
@@ -24,9 +25,12 @@ export async function fetchDifyEntitiesServer(
   baseUrl: string,
   token: string,
 ): Promise<EntityFetchResult> {
+  const timeoutMs = getConfigMs("backend.entity_fetch.timeout", BACKEND_ENTITY_FETCH_TIMEOUT_MS / 1000);
+
   try {
     const res = await fetch(`${baseUrl}/info`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
       log.warn(
@@ -55,7 +59,14 @@ export async function fetchDifyEntitiesServer(
     errors: []
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === "TimeoutError" || err.name === "AbortError");
+    const message = isTimeout
+      ? `Connection timed out (${Math.round(timeoutMs / 1000)}s)`
+      : err instanceof Error
+        ? err.message
+        : String(err);
     log.warn(
       {
         event: "dify_info_failed",

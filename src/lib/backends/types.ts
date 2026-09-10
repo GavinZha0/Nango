@@ -190,6 +190,9 @@ export interface EntityFetchResult {
   errors: EntityFetchError[];
 }
 
+/** Default timeout in milliseconds for probing backend entities. */
+export const BACKEND_ENTITY_FETCH_TIMEOUT_MS = 5000;
+
 export function describeFetchStatus(status: number): string {
   switch (status) {
     case 401:
