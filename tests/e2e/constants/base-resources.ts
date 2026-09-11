@@ -20,6 +20,8 @@ export const BASE_NAMES = {
   sshServer: "base-mock-e2e-ssh",
   verificationSuite: "Base-Verification-Suite",
   verificationCase: "010_base_echo_case",
+  evalSuite: "Base-Eval-Suite",
+  evalCase: "010_base_eval_case",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

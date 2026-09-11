@@ -386,6 +386,7 @@ export function EvaluationSuiteEditor({
               className="h-6 w-6 shrink-0"
               onClick={onBack}
               aria-label="Back"
+              data-testid="eval-back-button"
             >
               <ArrowLeft className="h-3 w-3" />
             </Button>
@@ -395,7 +396,10 @@ export function EvaluationSuiteEditor({
             <span className="text-xs text-muted-foreground truncate">
               {agentDisplay.name} /
             </span>
-            <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
+            <h1
+              data-testid="eval-suite-heading"
+              className="min-w-0 truncate text-sm font-semibold pr-1"
+            >
               {suiteDisplayName}
             </h1>
           </div>
@@ -417,7 +421,7 @@ export function EvaluationSuiteEditor({
 
       {/* Main Grid: Left 20% Case List + Right Inspector */}
       <div className="flex-1 min-h-0">
-        <div className="grid h-full grid-cols-[20%_1fr] overflow-hidden">
+        <div className="grid h-full grid-cols-[minmax(220px,20%)_1fr] overflow-hidden">
           <EvalCaseList
             suiteName={suiteDisplayName}
             cases={cases}

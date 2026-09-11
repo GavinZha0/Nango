@@ -107,7 +107,7 @@ export function EvalCaseEditDialog({
             </Label>
             <div className="flex-1 text-xs">
               <Select value={selectedSuiteId} onValueChange={(val) => setSelectedSuiteId(val ?? "")}>
-                <SelectTrigger id="case-suite" className="w-full text-xs">
+                <SelectTrigger id="case-suite" data-testid="eval-case-suite-select" className="w-full text-xs">
                   <SelectValue placeholder="Select a suite...">
                     {selectedSuiteId ? (
                       availableSuites.find((s) => s.id === selectedSuiteId)?.name ?? "Unknown suite"
@@ -132,6 +132,7 @@ export function EvalCaseEditDialog({
             </Label>
             <Input
               id="case-name"
+              data-testid="eval-case-name-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="flex-1 text-xs"
@@ -141,10 +142,20 @@ export function EvalCaseEditDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="text-xs">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className="text-xs"
+            data-testid="cancel-eval-case-button"
+          >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!name.trim() || !selectedSuiteId} className="text-xs">
+          <Button
+            onClick={handleSave}
+            disabled={!name.trim() || !selectedSuiteId}
+            className="text-xs"
+            data-testid="save-eval-case-dialog-button"
+          >
             Save
           </Button>
         </DialogFooter>

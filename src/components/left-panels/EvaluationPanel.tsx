@@ -87,6 +87,11 @@ function SuiteRowItem({
 
   return (
     <div
+      data-testid="panel-row"
+      data-suite-id={suite.id}
+      data-name={suite.name}
+      data-visibility={suite.visibility}
+      data-enabled={suite.enabled ? "true" : "false"}
       className={cn(
         "group flex cursor-pointer items-center justify-between pl-7 pr-2 py-1.5 text-xs transition-colors rounded select-none",
         active
@@ -115,6 +120,7 @@ function SuiteRowItem({
           onClick={onRunSuite}
           disabled={running || !suite.enabled}
           title="Run"
+          data-action="run-suite"
           className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
         >
           {running ? (
@@ -129,6 +135,7 @@ function SuiteRowItem({
             type="button"
             onClick={onToggleVisibility}
             title={isPublic ? "Make private" : "Make public"}
+            data-action="toggle-visibility"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
           >
             {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
@@ -139,6 +146,7 @@ function SuiteRowItem({
           type="button"
           onClick={onEditSuite}
           title="Edit"
+          data-action="edit-suite"
           className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
         >
           <SquarePen className="h-3 w-3" />
@@ -149,6 +157,7 @@ function SuiteRowItem({
             type="button"
             onClick={onDeleteSuite}
             title="Delete"
+            data-action="delete-suite"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
           >
             <Trash2 className="h-3 w-3" />
@@ -194,11 +203,17 @@ function AgentGroupNode({
   const isAgentRunning = runningAgentKey === currentKey;
 
   return (
-    <div className="select-none border-b border-border/40 last:border-0">
+    <div
+      data-testid="agent-group"
+      data-agent-id={group.agentId}
+      data-agent-name={group.agentName}
+      className="select-none border-b border-border/40 last:border-0"
+    >
       {/* Level 1: Agent Node */}
       <div
         className="group flex items-center justify-between px-2.5 py-1.5 transition-colors hover:bg-muted/30 text-xs cursor-pointer"
         onClick={onToggleExpand}
+        data-action="toggle-expand"
       >
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {expanded ? (
@@ -228,6 +243,7 @@ function AgentGroupNode({
             onClick={onRunAgent}
             disabled={isAgentRunning}
             title="Run all evaluation suites for this agent"
+            data-action="run-agent"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
           >
             {isAgentRunning ? (
@@ -241,6 +257,7 @@ function AgentGroupNode({
             type="button"
             onClick={onDeleteAgent}
             title="Delete"
+            data-action="delete-agent"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
           >
             <Trash2 className="h-3 w-3" />
@@ -480,6 +497,7 @@ export function EvaluationPanel(): ReactNode {
         <button
           type="button"
           onClick={() => setActiveTab("builtin")}
+          data-testid="eval-tab-builtin"
           className={cn(
             "flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
             activeTab === "builtin"
@@ -504,6 +522,7 @@ export function EvaluationPanel(): ReactNode {
         <button
           type="button"
           onClick={() => setActiveTab("external")}
+          data-testid="eval-tab-external"
           className={cn(
             "flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
             activeTab === "external"
@@ -533,6 +552,7 @@ export function EvaluationPanel(): ReactNode {
             onClick={() => setCreateSuiteOpen(true)}
             aria-label="New suite"
             title="New suite"
+            data-testid="new-suite-button"
           >
             <SquarePlus className="h-3.5 w-3.5" />
           </Button>
@@ -548,6 +568,7 @@ export function EvaluationPanel(): ReactNode {
             disabled={isTreeLoading}
             aria-label="Refresh list"
             title="Refresh list"
+            data-testid="refresh-suites-button"
           >
             <RefreshCw
               className={cn("h-3 w-3", isTreeLoading && "animate-spin")}

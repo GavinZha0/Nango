@@ -561,3 +561,95 @@ export async function seedBaseVerificationSuite(adminEmail: string): Promise<voi
   }
 }
 
+/**
+ * Seed a read-only Base Evaluation Suite and Case bound to Base-General-e2e-Agent and Base-Judge-e2e-Agent.
+ * Idempotent: checks for existing public suite with BASE_NAMES.evalSuite first.
+ */
+export async function seedBaseEvalSuite(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed eval suite: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 2. Resolve general agent ID (target agent)
+    const agentRes = await client.query<{ id: string }>(
+      `SELECT id FROM builtin_agent WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.generalAgent],
+    );
+    if (agentRes.rows.length === 0) {
+      throw new Error(
+        `Cannot seed eval suite: target agent ${BASE_NAMES.generalAgent} not found`,
+      );
+    }
+    const targetAgentId = agentRes.rows[0].id;
+
+    // 3. Resolve evaluator agent ID
+    const evalRes = await client.query<{ id: string }>(
+      `SELECT id FROM builtin_agent WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.evaluatorAgent],
+    );
+    const evaluatorAgentId = evalRes.rows.length > 0 ? evalRes.rows[0].id : null;
+
+    // 4. Check or insert Base Evaluation Suite
+    let suiteId: string;
+    const suiteRes = await client.query<{ id: string }>(
+      `SELECT id FROM eval_suite WHERE name = $1 AND visibility = 'public' LIMIT 1`,
+      [BASE_NAMES.evalSuite],
+    );
+
+    if (suiteRes.rows.length > 0) {
+      suiteId = suiteRes.rows[0].id;
+    } else {
+      const insertSuiteRes = await client.query<{ id: string }>(
+        `INSERT INTO eval_suite (name, description, agent_id, agent_source, evaluator_agent_id, dimension_ids, enabled, visibility, created_by, updated_by)
+         VALUES ($1, $2, $3, 'builtin', $4, '["groundedness", "task_completion"]'::jsonb, true, 'public', $5, $5)
+         RETURNING id`,
+        [
+          BASE_NAMES.evalSuite,
+          "Base evaluation suite for E2E testing",
+          targetAgentId,
+          evaluatorAgentId,
+          adminId,
+        ],
+      );
+      suiteId = insertSuiteRes.rows[0].id;
+    }
+
+    // 5. Check or insert Base Evaluation Case under the suite
+    const caseRes = await client.query(
+      `SELECT id FROM eval_case WHERE suite_id = $1 AND name = $2 LIMIT 1`,
+      [suiteId, BASE_NAMES.evalCase],
+    );
+    if (caseRes.rows.length === 0) {
+      const inputJson = JSON.stringify({
+        turns: [
+          { userMessage: "Hello, please introduce yourself." },
+        ],
+      });
+      const assertionsJson = JSON.stringify([
+        {
+          type: "contains",
+          expected: "assistant",
+        },
+      ]);
+      await client.query(
+        `INSERT INTO eval_case (suite_id, created_by, name, input, assertions, enabled)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, true)`,
+        [suiteId, adminId, BASE_NAMES.evalCase, inputJson, assertionsJson],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+

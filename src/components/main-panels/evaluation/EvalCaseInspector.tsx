@@ -124,6 +124,7 @@ function TurnRow({
         placeholder={readOnly ? "No message content" : "User message..."}
         className={cn("h-20 text-xs resize-none field-sizing-fixed leading-relaxed", readOnly && "bg-transparent cursor-default")}
         readOnly={readOnly}
+        data-testid="eval-turn-textarea"
       />
     </div>
   );
@@ -660,9 +661,17 @@ export function EvalCaseInspector({
       <div className="flex h-full min-h-0 flex-col border-r min-w-0">
         {/* Top Header: Input */}
         <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Input
-          </span>
+          <div className="flex items-center gap-2 min-w-0 pr-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
+              Input:
+            </span>
+            <span
+              data-testid="eval-case-name-heading"
+              className="text-xs font-semibold truncate"
+            >
+              {evalCase.name}
+            </span>
+          </div>
           <div className="ml-auto flex items-center gap-1">
             <Button
               size="sm"
@@ -671,6 +680,7 @@ export function EvalCaseInspector({
               onClick={addTurn}
               title="Add turn"
               disabled={selectedRunSeq !== null}
+              data-testid="add-turn-button"
             >
               <SquarePlus className="h-3 w-3" />
             </Button>
@@ -681,6 +691,7 @@ export function EvalCaseInspector({
               onClick={handleSave}
               disabled={!canSave || saving || selectedRunSeq !== null}
               title="Save changes"
+              data-testid="save-case-button"
             >
               {saving ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -698,6 +709,7 @@ export function EvalCaseInspector({
                   : "Run case"
               }
               onClick={() => void handleRunSingleCase()}
+              data-testid="run-case-button"
             >
               {running || liveRun.phase === "running" ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />

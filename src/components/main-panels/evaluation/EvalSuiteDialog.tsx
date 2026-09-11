@@ -178,7 +178,7 @@ export function EvalSuiteDialog({
                 onValueChange={(val) => setSelectedAgentId(val ?? "")}
                 disabled={submitting || !!defaultAgentId}
               >
-                <SelectTrigger id="target-agent" className="w-full">
+                <SelectTrigger id="target-agent" data-testid="eval-suite-agent-select" className="w-full">
                   <SelectValue placeholder="Select target agent">
                     {selectedAgentId ? (
                       candidateAgents.find((a) => a.id === selectedAgentId)?.name || "Unknown agent"
@@ -201,6 +201,7 @@ export function EvalSuiteDialog({
             <Label htmlFor="eval-suite-name">Suite Name <span className="text-destructive">*</span></Label>
             <Input
               id="eval-suite-name"
+              data-testid="eval-suite-name-input"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -217,7 +218,7 @@ export function EvalSuiteDialog({
               onValueChange={(val) => setSelectedEvalId(val === "__none__" ? "" : (val ?? ""))}
               disabled={submitting}
             >
-              <SelectTrigger id="eval-agent" className="w-full">
+              <SelectTrigger id="eval-agent" data-testid="eval-suite-evaluator-select" className="w-full">
                 <SelectValue placeholder="None">
                   {selectedEvalId === "" || selectedEvalId === "__none__" ? (
                     "None (Deterministic only)"
@@ -279,10 +280,16 @@ export function EvalSuiteDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={submitting}
+            data-testid="cancel-eval-suite-button"
           >
             Cancel
           </Button>
-          <Button type="button" onClick={() => void handleSave()} disabled={submitting || !name.trim()}>
+          <Button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={submitting || !name.trim()}
+            data-testid="save-eval-suite-button"
+          >
             {submitting ? (
               <>
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Saving…

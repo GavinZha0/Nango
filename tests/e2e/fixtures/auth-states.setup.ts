@@ -21,6 +21,7 @@ import {
   seedBaseDataSource,
   seedBaseSshServer,
   seedBaseVerificationSuite,
+  seedBaseEvalSuite,
 } from "./base-seed";
 
 config();
@@ -116,6 +117,7 @@ setup("create admin user", async ({ page }) => {
   await seedBaseDataSource(TEST_USERS.admin.email);
   await seedBaseSshServer(TEST_USERS.admin.email);
   await seedBaseVerificationSuite(TEST_USERS.admin.email);
+  await seedBaseEvalSuite(TEST_USERS.admin.email);
 });
 
 setup("create editor user", async ({ page, context }) => {
