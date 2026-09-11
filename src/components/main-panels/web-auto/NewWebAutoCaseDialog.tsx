@@ -132,6 +132,7 @@ export function NewWebAutoCaseDialog({
             </Label>
             <Input
               id="caseName"
+              data-testid="web-auto-case-name-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
@@ -155,12 +156,17 @@ export function NewWebAutoCaseDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={submitting}
+            data-testid="cancel-web-auto-case-button"
           >
             Cancel
           </Button>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
+          <Button
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit}
+            data-testid="save-web-auto-case-dialog-button"
+          >
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Create
+            {caseToEdit ? "Save" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

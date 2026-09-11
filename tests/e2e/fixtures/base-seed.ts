@@ -653,3 +653,90 @@ export async function seedBaseEvalSuite(adminEmail: string): Promise<void> {
   }
 }
 
+/**
+ * Seed a read-only Base Web Auto Target, Suite, and Case.
+ * Idempotent: checks for existing target with BASE_NAMES.webAutoTarget and suite with BASE_NAMES.webAutoSuite first.
+ */
+export async function seedBaseWebAutoSuite(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed web auto suite: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 2. Resolve or check Base Web Auto Target (parent folder)
+    let targetId: string;
+    const targetRes = await client.query<{ id: string }>(
+      `SELECT id FROM web_auto_suite WHERE parent_id IS NULL AND name = $1 LIMIT 1`,
+      [BASE_NAMES.webAutoTarget],
+    );
+
+    if (targetRes.rows.length > 0) {
+      targetId = targetRes.rows[0].id;
+    } else {
+      const insertTargetRes = await client.query<{ id: string }>(
+        `INSERT INTO web_auto_suite (name, description, parent_id, enabled, visibility, created_by, updated_by)
+         VALUES ($1, 'Base web auto target group for E2E testing', NULL, true, 'public', $2, $2)
+         RETURNING id`,
+        [BASE_NAMES.webAutoTarget, adminId],
+      );
+      targetId = insertTargetRes.rows[0].id;
+    }
+
+    // 3. Resolve or check Base Web Auto Suite (child suite)
+    let suiteId: string;
+    const suiteRes = await client.query<{ id: string }>(
+      `SELECT id FROM web_auto_suite WHERE parent_id = $1 AND name = $2 LIMIT 1`,
+      [targetId, BASE_NAMES.webAutoSuite],
+    );
+
+    if (suiteRes.rows.length > 0) {
+      suiteId = suiteRes.rows[0].id;
+    } else {
+      const insertSuiteRes = await client.query<{ id: string }>(
+        `INSERT INTO web_auto_suite (name, description, parent_id, enabled, visibility, created_by, updated_by)
+         VALUES ($1, 'Base web auto suite for E2E testing', $2, true, 'public', $3, $3)
+         RETURNING id`,
+        [BASE_NAMES.webAutoSuite, targetId, adminId],
+      );
+      suiteId = insertSuiteRes.rows[0].id;
+    }
+
+    // 4. Check or insert Base Web Auto Case under the suite
+    const caseRes = await client.query(
+      `SELECT id FROM web_auto_case WHERE suite_id = $1 AND name = $2 LIMIT 1`,
+      [suiteId, BASE_NAMES.webAutoCase],
+    );
+    if (caseRes.rows.length === 0) {
+      const inputJson = JSON.stringify({
+        script: "// base e2e web auto test script\nasync (page) => {\n  await page.goto('https://example.com');\n  return { success: true };\n}",
+        steps: "1. Navigate to example.com\n2. Verify success",
+      });
+      const assertionsJson = JSON.stringify([
+        {
+          type: "jsonpath",
+          path: "$.success",
+          operator: "==",
+          expected: true,
+        },
+      ]);
+      await client.query(
+        `INSERT INTO web_auto_case (suite_id, created_by, name, input, assertions, enabled)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, true)`,
+        [suiteId, adminId, BASE_NAMES.webAutoCase, inputJson, assertionsJson],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+

@@ -203,7 +203,7 @@ export function WebAutoSuiteDialog({
                 onValueChange={(val) => setSelectedTargetId(val ?? "")}
                 disabled={isSubmitting}
               >
-                <SelectTrigger id="target-select" className="w-full">
+                <SelectTrigger id="target-select" data-testid="web-auto-target-select" className="w-full">
                   <SelectValue placeholder="Select target">
                     {selectedTargetId === "NEW_TARGET" ? (
                       <span className="text-primary font-semibold">
@@ -242,6 +242,7 @@ export function WebAutoSuiteDialog({
               <Input
                 required
                 id="new-target-name"
+                data-testid="web-auto-new-target-name-input"
                 value={newTargetName}
                 onChange={(e) => setNewTargetName(e.target.value)}
                 disabled={isSubmitting}
@@ -259,6 +260,7 @@ export function WebAutoSuiteDialog({
             <Input
               required
               id="suite-name"
+              data-testid="web-auto-name-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={isSubmitting}
@@ -275,7 +277,7 @@ export function WebAutoSuiteDialog({
                 onValueChange={(val) => setSelectedEvalId(val === "__none__" ? "" : (val ?? ""))}
                 disabled={isSubmitting}
               >
-                <SelectTrigger id="eval-agent" className="w-full">
+                <SelectTrigger id="eval-agent" data-testid="web-auto-evaluator-select" className="w-full">
                   <SelectValue placeholder="None">
                     {selectedEvalId === "" || selectedEvalId === "__none__"
                       ? "None"
@@ -305,7 +307,7 @@ export function WebAutoSuiteDialog({
                 onValueChange={(val) => setUserSelectedMcpId(val === "__none__" ? "" : (val ?? ""))}
                 disabled={isSubmitting}
               >
-                <SelectTrigger id="mcp-server" className="w-full">
+                <SelectTrigger id="mcp-server" data-testid="web-auto-mcp-select" className="w-full">
                   <SelectValue placeholder="None">
                     {effectiveMcpId === "" || effectiveMcpId === "__none__"
                       ? "None"
@@ -347,6 +349,7 @@ export function WebAutoSuiteDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isSubmitting}
+            data-testid="cancel-web-auto-suite-button"
           >
             Cancel
           </Button>
@@ -358,6 +361,7 @@ export function WebAutoSuiteDialog({
               !name.trim() ||
               (isCreatingNewTarget && !newTargetName.trim())
             }
+            data-testid="save-web-auto-suite-button"
           >
             {isSubmitting ? (
               <>

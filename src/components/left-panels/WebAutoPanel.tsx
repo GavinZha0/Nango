@@ -51,6 +51,10 @@ function SuiteRowItem({
 }: SuiteRowItemProps): ReactNode {
   return (
     <div
+      data-testid="panel-row"
+      data-suite-id={suite.id}
+      data-name={suite.name}
+      data-enabled={suite.enabled ? "true" : "false"}
       className={cn(
         "group flex cursor-pointer items-center justify-between pl-7 pr-2 py-1.5 text-xs transition-colors rounded select-none",
         active
@@ -76,6 +80,7 @@ function SuiteRowItem({
           type="button"
           disabled={!suite.mcpServerId || !suite.enabled}
           title={!suite.mcpServerId ? "Playwright not configured" : "Run"}
+          data-action="run-suite"
           className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-green-500 transition-colors shrink-0 disabled:opacity-40 disabled:hover:text-muted-foreground/70"
           onClick={onRunSuite}
         >
@@ -84,6 +89,7 @@ function SuiteRowItem({
         <button
           type="button"
           title="Edit"
+          data-action="edit-suite"
           className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-blue-500 transition-colors shrink-0"
           onClick={onEdit}
         >
@@ -92,6 +98,7 @@ function SuiteRowItem({
         <button
           type="button"
           title="Delete"
+          data-action="delete-suite"
           className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors shrink-0"
           onClick={onDelete}
         >
@@ -135,11 +142,17 @@ function TargetGroupNode({
   const isTargetRunnable = runnableSuites.length > 0;
 
   return (
-    <div className="select-none border-b border-border/40 last:border-0">
+    <div
+      data-testid="target-group"
+      data-target-id={target.id}
+      data-target-name={target.name}
+      className="select-none border-b border-border/40 last:border-0"
+    >
       {/* Level 1: Target Folder */}
       <div
         className="group flex items-center justify-between px-2.5 py-1.5 transition-colors hover:bg-muted/30 text-xs cursor-pointer"
         onClick={onToggleExpand}
+        data-action="toggle-expand"
       >
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {expanded ? (
@@ -170,6 +183,7 @@ function TargetGroupNode({
                 ? "Playwright not configured"
                 : "Run all suites for this target"
             }
+            data-action="run-target"
             className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-green-500 transition-colors shrink-0 disabled:opacity-40 disabled:hover:text-muted-foreground/70"
             onClick={onRunTarget}
           >
@@ -178,6 +192,7 @@ function TargetGroupNode({
           <button
             type="button"
             title="Add suite under target"
+            data-action="add-suite"
             className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors shrink-0"
             onClick={(e) => onAddSuite(target.id, e)}
           >
@@ -186,6 +201,7 @@ function TargetGroupNode({
           <button
             type="button"
             title="Edit target"
+            data-action="edit-target"
             className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-blue-500 transition-colors shrink-0"
             onClick={(e) => onEditTarget(target, e)}
           >
@@ -194,6 +210,7 @@ function TargetGroupNode({
           <button
             type="button"
             title="Delete target"
+            data-action="delete-target"
             className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors shrink-0"
             onClick={(e) => onDeleteTarget(target, e)}
           >
@@ -413,6 +430,7 @@ export function WebAutoPanel(): ReactNode {
             className="h-6 w-6 text-muted-foreground hover:text-foreground"
             title="New suite"
             aria-label="New suite"
+            data-testid="new-suite-button"
             onClick={() => {
               setCreateDefaultTargetId(null);
               setCreateDialogOpen(true);
@@ -431,6 +449,7 @@ export function WebAutoPanel(): ReactNode {
             disabled={isLoading}
             aria-label="Refresh list"
             title="Refresh list"
+            data-testid="refresh-suites-button"
           >
             <RefreshCw
               className={cn("h-3 w-3", isLoading && "animate-spin")}

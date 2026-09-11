@@ -22,6 +22,9 @@ export const BASE_NAMES = {
   verificationCase: "010_base_echo_case",
   evalSuite: "Base-Eval-Suite",
   evalCase: "010_base_eval_case",
+  webAutoTarget: "Base-WebAuto-Target",
+  webAutoSuite: "Base-WebAuto-Suite",
+  webAutoCase: "010_base_webauto_case",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

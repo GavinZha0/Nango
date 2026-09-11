@@ -12,6 +12,7 @@ export const SWEPT_TABLES: Array<{ table: string; nameColumn: string }> = [
   { table: "ssh_server", nameColumn: "name" },
   { table: "verification_suite", nameColumn: "name" },
   { table: "eval_suite", nameColumn: "name" },
+  { table: "web_auto_suite", nameColumn: "name" },
   { table: "mcp_server", nameColumn: "name" },
   { table: "skill", nameColumn: "name" },
   { table: "data_source", nameColumn: "name" },

@@ -465,10 +465,14 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
             className="h-6 w-6 p-0 shrink-0"
             onClick={() => router.push("/web-auto")}
             aria-label="Back to suite list"
+            data-testid="web-auto-back-button"
           >
             <ArrowLeft className="h-3 w-3" />
           </Button>
-          <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
+          <h1
+            data-testid="web-auto-suite-heading"
+            className="min-w-0 truncate text-sm font-semibold pr-1"
+          >
             {selectedSuite.name}
           </h1>
         </div>
@@ -486,7 +490,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         </div>
       </header>
 
-      <div className="flex-1 grid h-full grid-cols-[20%_1fr] min-h-0 overflow-hidden">
+      <div className="flex-1 grid h-full grid-cols-[minmax(220px,20%)_1fr] min-h-0 overflow-hidden">
         <WebAutoCaseList
           cases={cases ?? []}
           verdictByCaseId={verdictByCaseId}
@@ -518,6 +522,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 <button
                   type="button"
                   onClick={() => setInputTab("script")}
+                  data-testid="script-tab"
                   className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
                     inputTab === "script"
                       ? "border-primary text-foreground"
@@ -529,6 +534,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 <button
                   type="button"
                   onClick={() => setInputTab("steps")}
+                  data-testid="steps-tab"
                   className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
                     inputTab === "steps"
                       ? "border-primary text-foreground"
@@ -545,6 +551,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     disabled={!canSave}
                     onClick={handleSave}
                     title="Save"
+                    data-testid="save-case-button"
                   >
                     {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                   </Button>
@@ -554,6 +561,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
                     onClick={() => void handleRunCase()}
                     title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
+                    data-testid="run-case-button"
                   >
                     {running ? (
                       <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -583,6 +591,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                           value={draftScript}
                           onChange={(e) => setDraftScript(e.target.value)}
                           placeholder={`// playwright script\nasync (page) => {\n  await page.goto('https://www.example.com/');\n  return { success: true };\n}`}
+                          data-testid="web-auto-script-textarea"
                         />
                       ) : (
                         <Textarea
@@ -590,6 +599,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                           value={draftSteps}
                           onChange={(e) => setDraftSteps(e.target.value)}
                           placeholder={"1. Navigate to target page\n2. Perform interaction steps\n3. Check expected outcomes..."}
+                          data-testid="web-auto-steps-textarea"
                         />
                       )}
                     </div>
@@ -823,6 +833,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
               }}
               disabled={saving}
               className="bg-destructive hover:bg-destructive/90"
+              data-testid="confirm-delete-case-button"
             >
               {saving ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
