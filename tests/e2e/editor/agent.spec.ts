@@ -3,6 +3,7 @@ import { gotoSettled } from "../helpers/navigate";
 import { editorTest } from "../helpers/fixtures";
 import { panelRow, toggleEnabled, toggleVisibility, openNew } from "../helpers/panels";
 import { BASE_NAMES } from "../constants/base-resources";
+import { uniqueName } from "../helpers/data";
 
 editorTest.describe("Agent Page", () => {
   editorTest.beforeEach(async ({ page }) => {
@@ -21,9 +22,10 @@ editorTest.describe("Agent Page", () => {
     await expect(supervisorRow).toBeVisible();
     await expect(supervisorRow.locator('[data-role="supervisor"]')).toBeVisible();
 
-    // Base General Agent
+    // Base General Agent (role: null, so no role badge)
     const generalRow = panelRow(page, BASE_NAMES.generalAgent);
     await expect(generalRow).toBeVisible();
+    await expect(generalRow.locator('[data-role]')).not.toBeVisible();
 
     // Base Evaluator Agent (Judge)
     const judgeRow = panelRow(page, BASE_NAMES.evaluatorAgent);
@@ -57,7 +59,7 @@ editorTest.describe("Agent Page", () => {
   editorTest(
     "should create, toggle enabled and visibility, and delete an ephemeral agent",
     async ({ page }) => {
-      const agentName = "Ephemeral-Test-e2e-Agent";
+      const agentName = uniqueName("Ephemeral-Agent");
 
       // ── Create ──
       await openNew(page, "New BuiltIn agent");
@@ -79,7 +81,7 @@ editorTest.describe("Agent Page", () => {
       );
       await page.getByRole("button", { name: "Save", exact: true }).click();
       const saveResp = await saveRespPromise;
-      expect(saveResp.status(), await saveResp.text()).toBeLessThan(400);
+      expect(saveResp.status(), await saveResp.text()).toBe(201);
 
       // Saving navigates back to /agent and the row appears in the list.
       const row = panelRow(page, agentName);

@@ -12,31 +12,45 @@ import { BASE_NAMES, E2E_PLACEHOLDER_KEY } from "../constants/base-resources";
  * CONTRACT: All base agents are created with visibility: "public" so they are visible to all roles.
  */
 export async function seedBaseResources(request: APIRequestContext): Promise<void> {
-  // 1. Base LLM Credential
-  const credRes = await request.post("/api/admin/credentials", {
-    data: {
-      name: BASE_NAMES.llmCredential,
-      type: "api_key",
-      serviceType: "llm",
-      provider: "openai",
-      payload: { key: E2E_PLACEHOLDER_KEY },
-    },
-  });
-
-  let credId: string;
-  if (credRes.status() === 409) {
-    const listRes = await request.get("/api/admin/credentials");
-    const list = (await listRes.json()) as Array<{ id: string; name: string }>;
+  // 1. Base LLM Credential: check existing first to prevent duplicate rows
+  let credId: string | undefined;
+  const listCredRes = await request.get("/api/admin/credentials");
+  if (listCredRes.ok()) {
+    const list = (await listCredRes.json()) as Array<{ id: string; name: string }>;
     const found = list.find((c) => c.name === BASE_NAMES.llmCredential);
-    if (!found) throw new Error("Base LLM credential reported conflict but not found in list");
-    credId = found.id;
-  } else {
-    expect(credRes.ok(), await credRes.text()).toBeTruthy();
-    const body = (await credRes.json()) as { id: string };
-    credId = body.id;
+    if (found) credId = found.id;
   }
 
-  // Helper for agent seeding with visibility: "public" & 409 tolerance
+  if (!credId) {
+    const credRes = await request.post("/api/admin/credentials", {
+      data: {
+        name: BASE_NAMES.llmCredential,
+        type: "api_key",
+        serviceType: "llm",
+        provider: "openai",
+        payload: { key: E2E_PLACEHOLDER_KEY },
+      },
+    });
+
+    if (credRes.status() === 409) {
+      const listRes = await request.get("/api/admin/credentials");
+      const list = (await listRes.json()) as Array<{ id: string; name: string }>;
+      const found = list.find((c) => c.name === BASE_NAMES.llmCredential);
+      if (!found) throw new Error("Base LLM credential reported conflict but not found in list");
+      credId = found.id;
+    } else {
+      expect(credRes.ok(), await credRes.text()).toBeTruthy();
+      const body = (await credRes.json()) as { id: string };
+      credId = body.id;
+    }
+  }
+
+  // Pre-fetch existing agents to prevent duplicate rows (only supervisor has DB uniqueness)
+  const existingAgentsRes = await request.get("/api/builtin-agents");
+  const existingAgents: Array<{ id: string; name: string; role: string | null; visibility?: string }> =
+    existingAgentsRes.ok() ? await existingAgentsRes.json() : [];
+
+  // Helper for agent seeding with visibility: "public" & verified 409 tolerance
   async function seedAgent(data: {
     name: string;
     role: "supervisor" | "evaluator" | null;
@@ -46,9 +60,25 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
     enabled: boolean;
     visibility: "public";
   }) {
+    // If a public agent with this name already exists, safe to reuse
+    const alreadyExists = existingAgents.some(
+      (a) => a.name === data.name && a.visibility === "public",
+    );
+    if (alreadyExists) return;
+
     const res = await request.post("/api/builtin-agents", { data });
     if (res.status() === 409) {
-      // Role uniqueness conflict (e.g. supervisor already exists) — safe to proceed
+      // Role uniqueness conflict: confirm the agent exists in DB, otherwise throw
+      const verifyRes = await request.get("/api/builtin-agents");
+      const verifyList = verifyRes.ok()
+        ? ((await verifyRes.json()) as Array<{ id: string; name: string; role: string | null }>)
+        : [];
+      const confirmed = verifyList.some(
+        (a) => (data.role === "supervisor" && a.role === "supervisor") || a.name === data.name,
+      );
+      if (!confirmed) {
+        throw new Error(`Agent ${data.name} reported 409 conflict but was not found in agent list`);
+      }
       return;
     }
     expect(res.ok(), await res.text()).toBeTruthy();
@@ -124,7 +154,7 @@ export async function seedBaseSchedule(request: APIRequestContext): Promise<void
       startAt: tomorrow,
       intervalValue: 1,
       intervalUnit: "day",
-      enabled: true,
+      enabled: false,
     },
   });
   expect(createRes.ok(), await createRes.text()).toBeTruthy();

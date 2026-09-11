@@ -476,6 +476,7 @@ export function ScheduleEditor({
           className="h-7 w-7"
           onClick={onBack}
           aria-label="Back"
+          data-testid="schedule-back-button"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -488,6 +489,7 @@ export function ScheduleEditor({
             onClick={() => void submit()}
             disabled={submitting || startInPast || (!isCreating && !isDirty && !draftApplied)}
             className={cn("h-7 cursor-pointer gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
+            data-testid="schedule-save-button"
           >
             {submitting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -503,6 +505,7 @@ export function ScheduleEditor({
               onClick={() => setDeleteOpen(true)}
               disabled={submitting || deleting}
               aria-label="Delete this schedule"
+              data-testid="schedule-delete-button"
             >
               {deleting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -533,6 +536,7 @@ export function ScheduleEditor({
               }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="schedule-confirm-delete-button"
             >
               {deleting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />

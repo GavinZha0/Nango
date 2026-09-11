@@ -120,6 +120,9 @@ after every run.
      Tests may view, select, and assert against them, but must **never** edit, toggle,
      or delete them. Destructive/CRUD tests must create their own isolated resources
      using `uniqueName()`.
+   - **Notice on DB direct seeding**: Notification base resources are seeded via direct
+     PostgreSQL connection (see `seedBaseNotifications` in `base-seed.ts`) due to the absence
+     of an administrative notification management API; column contracts strictly follow `schema.ts`.
 
 ## Known constraints
 

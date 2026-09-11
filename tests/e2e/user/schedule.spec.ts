@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import { gotoSettled } from "../helpers/navigate";
 import { userTest } from "../helpers/fixtures";
 import { BASE_NAMES } from "../constants/base-resources";
+import { uniqueName } from "../helpers/data";
 
 userTest.describe("Schedule Page", () => {
   userTest.beforeEach(async ({ page }) => {
@@ -21,7 +22,7 @@ userTest.describe("Schedule Page", () => {
     await expect(toggleBtn).toBeVisible();
     await expect(toggleBtn).toHaveAttribute(
       "aria-label",
-      `Disable schedule ${BASE_NAMES.dailySchedule}`,
+      `Enable schedule ${BASE_NAMES.dailySchedule}`,
     );
   });
 
@@ -37,14 +38,14 @@ userTest.describe("Schedule Page", () => {
     await expect(page.getByLabel("Task")).toHaveValue("Summarize daily workspace activities");
     await expect(page.getByLabel("Every")).toHaveValue("1");
 
-    // Navigate back to schedule panel
-    await page.getByRole("button", { name: "Back" }).click();
+    // Navigate back to schedule panel via header back button
+    await page.getByTestId("schedule-back-button").click();
     await page.waitForURL(/\/schedule$/);
     await expect(page.getByRole("heading", { name: "Schedules" })).toBeVisible();
   });
 
   userTest("should create and delete an ephemeral test schedule without modifying base schedule", async ({ page }) => {
-    const ephemeralName = "Ephemeral-e2e-Schedule";
+    const ephemeralName = uniqueName("Ephemeral-Schedule");
 
     // 1. Navigate to create new schedule
     await page.getByRole("button", { name: "New schedule" }).click();
@@ -60,8 +61,11 @@ userTest.describe("Schedule Page", () => {
 
     await page.getByLabel("Task").fill("Run automated e2e ephemeral test task");
 
-    // 3. Save
-    await page.getByRole("button", { name: "Save" }).click();
+    // Set start time to far future so in-process scheduler does not fire during tests
+    await page.getByLabel("Start time").fill("2099-01-01T00:00");
+
+    // 3. Save via header save button
+    await page.getByTestId("schedule-save-button").click();
     await page.waitForURL(/\/schedule$/);
 
     // 4. Verify created row in schedules panel
@@ -73,10 +77,10 @@ userTest.describe("Schedule Page", () => {
     await page.waitForURL(/\/schedule\/[0-9a-f-]+/);
     await expect(page.getByRole("heading", { name: "Edit schedule" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Delete this schedule" }).click();
+    await page.getByTestId("schedule-delete-button").click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    await page.getByTestId("schedule-confirm-delete-button").click();
 
     // 6. Verify returned to /schedule and row is removed
     await page.waitForURL(/\/schedule$/);

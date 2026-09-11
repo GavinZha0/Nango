@@ -157,6 +157,7 @@ function ScheduleRow({
       data-testid="schedule-row"
       data-name={heading}
       data-schedule-id={row.id}
+      data-enabled={String(row.enabled)}
       className={cn(
         "flex flex-col gap-0.5 border-b border-border/70 last:border-0 px-3 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-muted/30",

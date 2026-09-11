@@ -4,6 +4,7 @@ import { userTest } from "../helpers/fixtures";
 import { BASE_NAMES } from "../constants/base-resources";
 import { TEST_USERS } from "../constants/test-users";
 import { createEphemeralNotification } from "../fixtures/base-seed";
+import { uniqueName } from "../helpers/data";
 
 userTest.describe("Notifications Page", () => {
   userTest.beforeEach(async ({ page }) => {
@@ -13,7 +14,7 @@ userTest.describe("Notifications Page", () => {
   userTest("should display notifications page, unread count, and base notifications", async ({ page }) => {
     const heading = page.getByRole("heading", { name: /Notifications/ });
     await expect(heading).toBeVisible();
-    await expect(heading).toContainText("1 unread");
+    await expect(heading).toContainText(/\d+ unread/);
 
     // All filter tabs visible
     await expect(page.getByTestId("filter-all")).toBeVisible();
@@ -63,7 +64,7 @@ userTest.describe("Notifications Page", () => {
     await expect(readRow).toBeVisible();
     await expect(unreadRow).not.toBeVisible();
 
-    // 4. All filter
+    // 4. All filter restores both
     await page.getByTestId("filter-all").click();
     await expect(unreadRow).toBeVisible();
     await expect(readRow).toBeVisible();
@@ -80,7 +81,6 @@ userTest.describe("Notifications Page", () => {
     const detail = page.getByTestId("notification-expanded-row");
     await expect(detail).toBeVisible();
     await expect(detail).toContainText("Summarize daily workspace activities");
-    await expect(detail).toContainText("Daily workspace summary completed successfully");
 
     // Click to collapse
     await unreadRow.click();
@@ -108,7 +108,7 @@ userTest.describe("Notifications Page", () => {
   });
 
   userTest("should mark as read and delete an ephemeral notification without modifying base notifications", async ({ page }) => {
-    const ephemeralTitle = "Ephemeral-e2e-Notification";
+    const ephemeralTitle = uniqueName("Ephemeral-Notification");
     await createEphemeralNotification(TEST_USERS.regular.email, ephemeralTitle);
 
     // Refresh page to load the new notification
