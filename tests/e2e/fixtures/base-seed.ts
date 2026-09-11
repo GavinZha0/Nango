@@ -261,3 +261,55 @@ export async function createEphemeralNotification(
   }
 }
 
+/**
+ * Seed a read-only Base MCP server with pre-populated tools snapshot.
+ * Idempotent: checks for existing public server with BASE_NAMES.mcpServer first.
+ */
+export async function seedBaseMcpServer(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Check if base MCP server already exists with visibility: "public"
+    const checkRes = await client.query(
+      `SELECT id FROM mcp_server WHERE name = $1 AND visibility = 'public' LIMIT 1`,
+      [BASE_NAMES.mcpServer],
+    );
+    if (checkRes.rows.length > 0) return;
+
+    // 2. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed MCP server: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 3. Pre-populated mock tools snapshot for deterministic UI testing
+    const mockTools = JSON.stringify([
+      {
+        name: "echo_tool",
+        description: "Echo test tool for E2E verification",
+        inputSchema: {
+          type: "object",
+          properties: {
+            message: { type: "string", description: "Message to echo" },
+          },
+          required: ["message"],
+        },
+      },
+    ]);
+
+    await client.query(
+      `INSERT INTO mcp_server (name, type, url, enabled, visibility, tools, server_name, server_version, server_description, created_by)
+       VALUES ($1, 'http', 'https://example.com/mcp', false, 'public', $2, 'mock-server', '1.0.0', 'Mock MCP Server for E2E testing', $3)`,
+      [BASE_NAMES.mcpServer, mockTools, adminId],
+    );
+  } finally {
+    await client.end();
+  }
+}
+

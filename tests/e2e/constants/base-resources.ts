@@ -13,6 +13,7 @@ export const BASE_NAMES = {
   dailySchedule: "Base-Daily-e2e-Schedule",
   unreadNotification: "Base-Task-Completed-e2e-Notification",
   readNotification: "Base-Task-Failed-e2e-Notification",
+  mcpServer: "Base-Mock-e2e-Mcp",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

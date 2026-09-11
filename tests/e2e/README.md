@@ -116,7 +116,7 @@ after every run.
      writing fragile structural selectors or relying on index matching (`.first()`).
    - **Base resources contract**: `fixtures/base-seed.ts` seeds shared, read-only
      baseline resources during setup (`Base-LLM-e2e-Credential`, `Nango` supervisor,
-     `Base-General-e2e-Agent`, `Base-Judge-e2e-Agent`) with `visibility: "public"`.
+     `Base-General-e2e-Agent`, `Base-Judge-e2e-Agent`, `Base-Mock-e2e-Mcp`) with `visibility: "public"`.
      Tests may view, select, and assert against them, but must **never** edit, toggle,
      or delete them. Destructive/CRUD tests must create their own isolated resources
      using `uniqueName()`.

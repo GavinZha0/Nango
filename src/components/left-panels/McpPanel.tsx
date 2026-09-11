@@ -242,6 +242,7 @@ function ServerFormDialog({
             <Label htmlFor="mcp-name">Name <span className="text-destructive">*</span></Label>
             <Input
               id="mcp-name"
+              data-testid="mcp-name-input"
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
               required
@@ -251,7 +252,7 @@ function ServerFormDialog({
 
           {/* Transport Type */}
           <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-            <Label>Transport <span className="text-destructive">*</span></Label>
+            <Label id="mcp-transport-label">Transport <span className="text-destructive">*</span></Label>
             <Select
               value={form.type}
               items={[
@@ -260,7 +261,11 @@ function ServerFormDialog({
               ]}
               onValueChange={(v) => { if (v) setField("type", v as "http" | "sse"); }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                className="w-full"
+                aria-labelledby="mcp-transport-label"
+                data-testid="mcp-transport-select"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -275,6 +280,7 @@ function ServerFormDialog({
             <Label htmlFor="mcp-url">URL <span className="text-destructive">*</span></Label>
             <Input
               id="mcp-url"
+              data-testid="mcp-url-input"
               type="url"
               value={form.url}
               onChange={(e) => setField("url", e.target.value)}
@@ -285,7 +291,7 @@ function ServerFormDialog({
 
           {/* Credential */}
           <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-            <Label>Credential</Label>
+            <Label id="mcp-credential-label">Credential</Label>
             <Select
               value={form.credentialId}
               items={[
@@ -297,7 +303,12 @@ function ServerFormDialog({
               ]}
               onValueChange={(v) => setField("credentialId", v ?? "")}
             >
-              <SelectTrigger className="w-full" data-placeholder={!form.credentialId}>
+              <SelectTrigger
+                className="w-full"
+                aria-labelledby="mcp-credential-label"
+                data-testid="mcp-credential-select"
+                data-placeholder={!form.credentialId}
+              >
                 <SelectValue placeholder="None (no auth)" />
               </SelectTrigger>
               <SelectContent>
@@ -362,10 +373,19 @@ function ServerFormDialog({
           {form.error && <p className="text-sm text-destructive">{form.error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              data-testid="mcp-cancel-button"
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button
+              type="submit"
+              disabled={submitting}
+              data-testid="mcp-submit-button"
+            >
               {submitting ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save" : "Create")}
             </Button>
           </DialogFooter>
@@ -438,11 +458,18 @@ function ServerHeader({
     // that lived inside it, but the tool list moved to the main panel
     // so the contrast is no longer needed. `bg-accent` on active and
     // a faint hover keep the row recognisably interactive.
-    <div className={cn(
-      "flex flex-col gap-0.5 border-t border-border/60 first:border-t-0 px-2 py-1.5 transition-colors",
-      active ? "bg-accent" : "hover:bg-muted/40",
-      !server.enabled && "opacity-50",
-    )}>
+    <div
+      data-testid="panel-row"
+      data-name={server.name}
+      data-server-id={server.id}
+      data-enabled={String(server.enabled)}
+      data-visibility={server.visibility}
+      className={cn(
+        "flex flex-col gap-0.5 border-t border-border/60 first:border-t-0 px-2 py-1.5 transition-colors",
+        active ? "bg-accent" : "hover:bg-muted/40",
+        !server.enabled && "opacity-50",
+      )}
+    >
       <div className="flex items-center gap-1">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <button
@@ -450,15 +477,20 @@ function ServerHeader({
             onClick={onSelect}
             className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
             aria-label={`Select ${server.name}`}
+            data-action="open-mcp-server"
             title={version ? `${server.name} (v${version})` : server.name}
           >
             {server.name}
           </button>
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground shrink-0">
+          <span
+            data-testid="tool-count-badge"
+            className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground shrink-0"
+          >
             {toolCount}
           </span>
           {version && (
             <span
+              data-testid="server-version-badge"
               className="text-xs font-normal text-muted-foreground/60 truncate min-w-0 shrink"
               title={`v${version}`}
             >
@@ -475,7 +507,8 @@ function ServerHeader({
             onClick={onRefresh}
             disabled={refreshing}
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground disabled:opacity-50"
-            aria-label="Refresh tools"
+            aria-label={`Refresh tools for ${server.name}`}
+            data-action="refresh-tools"
           >
             <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
           </button>
@@ -487,7 +520,8 @@ function ServerHeader({
             type="button"
             onClick={onEdit}
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground"
-            aria-label="Edit server"
+            aria-label={`Edit server ${server.name}`}
+            data-action="edit-server"
           >
             <SquarePen className="h-3 w-3" />
           </button>
@@ -499,7 +533,8 @@ function ServerHeader({
             type="button"
             onClick={onDelete}
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-destructive"
-            aria-label="Delete server"
+            aria-label={`Delete server ${server.name}`}
+            data-action="delete-server"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -511,7 +546,8 @@ function ServerHeader({
             type="button"
             onClick={() => onToggleVisibility(isPublic ? "private" : "public")}
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground"
-            aria-label={isPublic ? "Set to private" : "Set to public"}
+            aria-label={isPublic ? `Set ${server.name} to private` : `Set ${server.name} to public`}
+            data-action="toggle-visibility"
           >
             {isPublic
               ? <Globe className="h-3 w-3 text-foreground/60" />
@@ -530,7 +566,8 @@ function ServerHeader({
             type="button"
             onClick={() => onToggleEnabled(!server.enabled)}
             className="cursor-pointer rounded p-0.5 hover:text-foreground"
-            aria-label={server.enabled ? "Disable server" : "Enable server"}
+            aria-label={server.enabled ? `Disable server ${server.name}` : `Enable server ${server.name}`}
+            data-action="toggle-enabled"
           >
             {!server.enabled
               ? <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />
@@ -800,6 +837,7 @@ export function McpPanel(): ReactNode {
               className="h-6 w-6"
               onClick={handleNewServer}
               aria-label="New MCP server"
+              data-testid="new-mcp-server-button"
             >
               <Plus className="h-3.5 w-3.5" />
             </Button>
@@ -810,6 +848,7 @@ export function McpPanel(): ReactNode {
               onClick={refreshAll}
               disabled={loading}
               aria-label="Refresh all servers"
+              data-testid="refresh-mcp-servers-button"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
             </Button>
@@ -870,6 +909,7 @@ export function McpPanel(): ReactNode {
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                data-testid="mcp-confirm-delete-button"
               >
                 Delete
               </AlertDialogAction>

@@ -536,10 +536,20 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     <div className="flex h-full flex-col">
       {/* Header row. */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => router.push("/mcp")} aria-label="Back">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0"
+          onClick={() => router.push("/mcp")}
+          aria-label="Back"
+          data-testid="mcp-test-back-button"
+        >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h2 className="text-sm font-semibold shrink-0 truncate flex-1">
+        <h2
+          className="text-sm font-semibold shrink-0 truncate flex-1"
+          data-testid="mcp-test-heading"
+        >
           {tool ? `${serverName} / ${tool.name}` : (serverName || "Select a tool")}
         </h2>
           {tool && (
@@ -574,6 +584,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 onChange={(e) => setToolSearch(e.target.value)}
                 placeholder="Search tools…"
                 aria-label="Search tools"
+                data-testid="mcp-tool-search-input"
                 className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
               />
               {toolSearch.length > 0 && (
@@ -607,6 +618,8 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                         type="button"
                         onClick={() => handleSelectTool(t.name)}
                         aria-pressed={active}
+                        data-testid="mcp-tool-item"
+                        data-tool-name={t.name}
                         className={cn(
                           "block w-full border-b border-border/40 px-3 py-2 text-left transition-colors",
                           active

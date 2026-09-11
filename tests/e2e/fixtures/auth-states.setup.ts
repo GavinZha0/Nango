@@ -13,7 +13,12 @@ import { config } from "dotenv";
 import pg from "pg";
 import { getPostgresUrl } from "@/lib/db/postgres-url";
 import { TEST_USERS } from "../constants/test-users";
-import { seedBaseResources, seedBaseSchedule, seedBaseNotifications } from "./base-seed";
+import {
+  seedBaseResources,
+  seedBaseSchedule,
+  seedBaseNotifications,
+  seedBaseMcpServer,
+} from "./base-seed";
 
 config();
 
@@ -102,8 +107,9 @@ setup("create admin user", async ({ page }) => {
   await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
   await page.context().storageState({ path: ADMIN_STATE_PATH });
 
-  // ── Seed Base Resources (Layer 0 & Layer 1) ──────────────────────
+  // ── Seed Base Resources (Layer 0, Layer 1, MCP) ──────────────────
   await seedBaseResources(page.request);
+  await seedBaseMcpServer(TEST_USERS.admin.email);
 });
 
 setup("create editor user", async ({ page, context }) => {
