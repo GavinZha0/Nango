@@ -90,6 +90,11 @@ function SuiteRowItem({
 
   return (
     <div
+      data-testid="panel-row"
+      data-suite-id={suite.id}
+      data-name={suite.name}
+      data-visibility={suite.visibility}
+      data-enabled={String(suite.enabled)}
       className={cn(
         "group flex cursor-pointer items-center justify-between pl-7 pr-2 py-1.5 text-xs transition-colors rounded select-none",
         active
@@ -99,7 +104,7 @@ function SuiteRowItem({
       )}
       onClick={onSelect}
     >
-      <div className="flex items-center gap-1.5 min-w-0 pr-1">
+      <div className="flex items-center gap-1.5 min-w-0 pr-1" data-action="open-suite">
         <span className="truncate">{suite.name}</span>
         {suite.caseCount > 0 && (
           <span
@@ -118,6 +123,8 @@ function SuiteRowItem({
           onClick={onRunSuite}
           disabled={running || !suite.enabled || runDisabled}
           title={runDisabled ? "Suite is detached from its MCP server" : "Run"}
+          aria-label={`Run suite ${suite.name}`}
+          data-action="run-suite"
           className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
         >
           {running ? (
@@ -132,6 +139,8 @@ function SuiteRowItem({
             type="button"
             onClick={onToggleVisibility}
             title={isPublic ? "Make private" : "Make public"}
+            aria-label={isPublic ? `Set ${suite.name} to private` : `Set ${suite.name} to public`}
+            data-action="toggle-visibility"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
           >
             {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
@@ -142,6 +151,8 @@ function SuiteRowItem({
           type="button"
           onClick={onEditSuite}
           title="Edit"
+          aria-label={`Edit ${suite.name}`}
+          data-action="edit-suite"
           className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
         >
           <SquarePen className="h-3 w-3" />
@@ -152,6 +163,8 @@ function SuiteRowItem({
             type="button"
             onClick={onDeleteSuite}
             title="Delete"
+            aria-label={`Delete ${suite.name}`}
+            data-action="delete-suite"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
           >
             <Trash2 className="h-3 w-3" />
@@ -197,7 +210,12 @@ function ServerGroupNode({
   const isServerRunning = runningServerId === group.id;
 
   return (
-    <div className="select-none border-b border-border/40 last:border-0">
+    <div
+      data-testid="server-group"
+      data-server-id={group.id}
+      data-name={displayName}
+      className="select-none border-b border-border/40 last:border-0"
+    >
       {/* Level 1: Server Node */}
       <div
         className={cn(
@@ -205,6 +223,7 @@ function ServerGroupNode({
           !group.enabled && "opacity-50",
         )}
         onClick={onToggleExpand}
+        data-action="toggle-expand"
       >
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {expanded ? (
@@ -230,6 +249,8 @@ function ServerGroupNode({
             onClick={(e) => onRunServer(group.id, e)}
             disabled={isServerRunning || !group.enabled || group.detached}
             title={group.detached ? "Server deleted" : "Run"}
+            aria-label={`Run all suites for ${displayName}`}
+            data-action="run-server"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
           >
             {isServerRunning ? (
@@ -243,6 +264,8 @@ function ServerGroupNode({
             type="button"
             onClick={(e) => onDeleteServer(group, e)}
             title="Delete"
+            aria-label={`Delete verification data for ${displayName}`}
+            data-action="delete-server"
             className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
           >
             <Trash2 className="h-3 w-3" />
@@ -527,6 +550,7 @@ export function VerificationPanel(): ReactNode {
             onClick={() => setCreateSuiteOpen(true)}
             aria-label="New suite"
             title="New suite"
+            data-testid="new-suite-button"
           >
             <SquarePlus className="h-3.5 w-3.5" />
           </Button>
@@ -542,6 +566,7 @@ export function VerificationPanel(): ReactNode {
             disabled={isTreeLoading}
             aria-label="Refresh list"
             title="Refresh list"
+            data-testid="refresh-suites-button"
           >
             <RefreshCw
               className={cn("h-3 w-3", isTreeLoading && "animate-spin")}
@@ -646,6 +671,7 @@ export function VerificationPanel(): ReactNode {
               }}
               disabled={deleting}
               className="bg-destructive hover:bg-destructive/90"
+              data-testid="confirm-delete-suite-button"
             >
               {deleting ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
@@ -683,6 +709,7 @@ export function VerificationPanel(): ReactNode {
               }}
               disabled={deleting}
               className="bg-destructive hover:bg-destructive/90"
+              data-testid="confirm-delete-server-button"
             >
               {deleting ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />

@@ -105,6 +105,7 @@ export function BaseCaseList<
               title="New case"
               className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
               onClick={onNewCase}
+              data-testid="new-case-button"
             >
               <Plus className="h-3.5 w-3.5" />
             </Button>
@@ -118,6 +119,7 @@ export function BaseCaseList<
               className="h-6 w-6 p-0 text-emerald-600 hover:text-emerald-500 hover:bg-emerald-500/10"
               disabled={cases.length === 0 || isSuiteRunning || runDisabled}
               onClick={onRunSuite}
+              data-testid="run-suite-button"
             >
               {isSuiteRunning ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -168,6 +170,9 @@ export function BaseCaseList<
               return (
                 <div
                   key={c.id}
+                  data-testid="case-row"
+                  data-case-id={c.id}
+                  data-name={c.name}
                   className={cn(
                     "group relative flex items-center justify-between rounded px-2 py-1.5 text-xs transition-colors mb-0.5 select-none",
                     isSelected
@@ -182,6 +187,7 @@ export function BaseCaseList<
                     <button
                       type="button"
                       onClick={() => onSelectCase(c.id)}
+                      data-action="select-case"
                       className={cn(
                         "cursor-pointer text-left hover:underline underline-offset-2 flex-1 line-clamp-2 break-words leading-tight",
                         !c.enabled && "text-muted-foreground",
@@ -212,6 +218,7 @@ export function BaseCaseList<
                           className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
                           title="Edit"
                           aria-label={`Edit ${c.name}`}
+                          data-action="edit-case"
                         >
                           <SquarePen className="h-3 w-3" />
                         </button>
@@ -227,6 +234,7 @@ export function BaseCaseList<
                             className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
                             title="Delete"
                             aria-label={`Delete ${c.name}`}
+                            data-action="delete-case"
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>

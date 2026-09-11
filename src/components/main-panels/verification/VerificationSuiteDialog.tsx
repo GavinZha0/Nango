@@ -180,7 +180,7 @@ export function VerificationSuiteDialog({
                 onValueChange={(val) => setServerId(val ?? "")}
                 disabled={loadingServers || submitting || !!defaultServerId}
               >
-                <SelectTrigger id="mcp-server" className="w-full">
+                <SelectTrigger id="mcp-server" className="w-full" data-testid="suite-server-select">
                   <SelectValue placeholder="Select an MCP Server">
                     {serverId ? (
                       servers.find((s) => s.id === serverId)?.serverTitle ||
@@ -211,6 +211,7 @@ export function VerificationSuiteDialog({
               onChange={(e) => setName(e.target.value)}
               disabled={submitting}
               autoFocus
+              data-testid="suite-name-input"
             />
           </div>
 
@@ -226,6 +227,7 @@ export function VerificationSuiteDialog({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 disabled={submitting}
+                data-testid="suite-description-input"
               />
             </div>
           )}
@@ -236,10 +238,15 @@ export function VerificationSuiteDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={submitting}
+              data-testid="cancel-suite-button"
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !name.trim() || (!isEdit && !serverId)}>
+            <Button
+              type="submit"
+              disabled={submitting || !name.trim() || (!isEdit && !serverId)}
+              data-testid="save-suite-button"
+            >
               {submitting ? (
                 <>
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Saving…

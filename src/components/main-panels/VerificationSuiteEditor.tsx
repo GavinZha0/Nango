@@ -361,6 +361,7 @@ export function VerificationSuiteEditor({
               className="h-6 w-6 shrink-0"
               onClick={onBack}
               aria-label="Back"
+              data-testid="verification-back-button"
             >
               <ArrowLeft className="h-3 w-3" />
             </Button>
@@ -373,18 +374,25 @@ export function VerificationSuiteEditor({
             )}
             {selectedCase ? (
               <>
-                <span className="text-xs text-muted-foreground truncate">
+                <span
+                  className="text-xs text-muted-foreground truncate"
+                  data-testid="verification-suite-heading"
+                >
                   {suiteDisplayName} /
                 </span>
                 <h1
                   className="min-w-0 truncate text-sm font-semibold pr-1"
                   title={selectedCase.name}
+                  data-testid="verification-case-heading"
                 >
                   {selectedCase.name}
                 </h1>
               </>
             ) : (
-              <h1 className="min-w-0 truncate text-sm font-semibold pr-1">
+              <h1
+                className="min-w-0 truncate text-sm font-semibold pr-1"
+                data-testid="verification-suite-heading"
+              >
                 {suiteDisplayName}
               </h1>
             )}
@@ -411,9 +419,9 @@ export function VerificationSuiteEditor({
         </p>
       )}
 
-      {/* Main Grid: Left 20% Case List + Right Inspector */}
+      {/* Main Grid: Left Case List + Right Inspector */}
       <div className="flex-1 min-h-0">
-        <div className="grid h-full grid-cols-[20%_1fr] overflow-hidden">
+        <div className="grid h-full grid-cols-[minmax(220px,20%)_1fr] overflow-hidden">
           <VerificationCaseList
             suiteName={suiteDisplayName}
             cases={cases}
@@ -544,6 +552,7 @@ function DeleteCaseDialog({
             }}
             disabled={deleting}
             className="bg-destructive hover:bg-destructive/90"
+            data-testid="confirm-delete-case-button"
           >
             {deleting ? (
               <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />

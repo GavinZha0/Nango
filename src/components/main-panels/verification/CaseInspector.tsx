@@ -597,6 +597,7 @@ export function CaseInspector({
                 disabled={!canSave || readOnly}
                 onClick={() => void handleSave()}
                 title="Save"
+                data-testid="save-case-button"
               >
                 {inputDraft.saving || assertionsDraft.saving ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -610,6 +611,7 @@ export function CaseInspector({
                 onClick={() => void handleRunCase()}
                 disabled={running || !caseRow.enabled || runDisabled}
                 title={runDisabled ? "Suite is detached from its MCP server" : "Run case"}
+                data-testid="run-case-button"
               >
                 {running ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -815,6 +817,7 @@ function JsonPane({
               draft.parseError && overrideText === null && "border-destructive",
             )}
             aria-label={ariaLabel}
+            data-testid="case-input-textarea"
           />
           {showPlaceholder && (
             <pre

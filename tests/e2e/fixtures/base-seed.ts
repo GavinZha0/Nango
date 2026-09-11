@@ -478,3 +478,86 @@ export async function seedBaseSshServer(adminEmail: string): Promise<void> {
   }
 }
 
+/**
+ * Seed a read-only Base Verification Suite and Case bound to Base-Mock-e2e-Mcp.
+ * Idempotent: checks for existing public suite with BASE_NAMES.verificationSuite first.
+ */
+export async function seedBaseVerificationSuite(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed verification suite: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 2. Resolve base MCP server ID
+    const mcpRes = await client.query<{ id: string; name: string }>(
+      `SELECT id, name FROM mcp_server WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.mcpServer],
+    );
+    if (mcpRes.rows.length === 0) {
+      throw new Error(
+        `Cannot seed verification suite: MCP server ${BASE_NAMES.mcpServer} not found`,
+      );
+    }
+    const mcpServerId = mcpRes.rows[0].id;
+    const mcpServerName = mcpRes.rows[0].name;
+
+    // 3. Check or insert Base Verification Suite
+    let suiteId: string;
+    const suiteRes = await client.query<{ id: string }>(
+      `SELECT id FROM verification_suite WHERE name = $1 AND visibility = 'public' LIMIT 1`,
+      [BASE_NAMES.verificationSuite],
+    );
+
+    if (suiteRes.rows.length > 0) {
+      suiteId = suiteRes.rows[0].id;
+    } else {
+      const insertSuiteRes = await client.query<{ id: string }>(
+        `INSERT INTO verification_suite (name, description, category, mcp_server_id, mcp_server_name, workflow_id, enabled, visibility, timeout_sec, created_by, updated_by)
+         VALUES ($1, $2, 'mcp', $3, $4, NULL, true, 'public', 300, $5, $5)
+         RETURNING id`,
+        [
+          BASE_NAMES.verificationSuite,
+          "Base verification suite for E2E testing",
+          mcpServerId,
+          mcpServerName,
+          adminId,
+        ],
+      );
+      suiteId = insertSuiteRes.rows[0].id;
+    }
+
+    // 4. Check or insert Base Verification Case under the suite
+    const caseRes = await client.query(
+      `SELECT id FROM verification_case WHERE suite_id = $1 AND name = $2 LIMIT 1`,
+      [suiteId, BASE_NAMES.verificationCase],
+    );
+    if (caseRes.rows.length === 0) {
+      const assertionsJson = JSON.stringify([
+        {
+          type: "jsonpath",
+          path: "$.message",
+          operator: "==",
+          expected: "hello",
+        },
+      ]);
+      await client.query(
+        `INSERT INTO verification_case (suite_id, created_by, name, tool_name, input, assertions, enabled)
+         VALUES ($1, $2, $3, 'echo_tool', '{"message": "hello"}'::jsonb, $4::jsonb, true)`,
+        [suiteId, adminId, BASE_NAMES.verificationCase, assertionsJson],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+

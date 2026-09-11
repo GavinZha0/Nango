@@ -18,6 +18,8 @@ export const BASE_NAMES = {
   dataSource: "base-postgres-e2e-ds",
   sshCredential: "Base-SSH-e2e-Credential",
   sshServer: "base-mock-e2e-ssh",
+  verificationSuite: "Base-Verification-Suite",
+  verificationCase: "010_base_echo_case",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

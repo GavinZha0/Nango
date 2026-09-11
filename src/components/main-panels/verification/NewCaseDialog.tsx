@@ -115,7 +115,7 @@ export function NewCaseDialog({
     fetchMcpServers()
       .then((rows) => {
         if (cancelled) return;
-        setServers(rows.filter((r) => r.enabled));
+        setServers(rows);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -156,9 +156,14 @@ export function NewCaseDialog({
           ? useCasesStore.getState().bySuite[targetSuiteId]
           : undefined;
         const prefix = computeNextCasePrefix(cached ?? []);
+        const targetServerId =
+          serverId ||
+          (targetSuiteId
+            ? allSuites.find((s) => s.id === targetSuiteId)?.mcpServerId ?? ""
+            : "");
         setForm({
           name: prefix,
-          mcpServerId: serverId ?? "",
+          mcpServerId: targetServerId,
           toolName: defaultToolName ?? "",
           suiteId: targetSuiteId,
         });
@@ -327,7 +332,7 @@ export function NewCaseDialog({
                   }}
                   disabled={loadingServers}
                 >
-                  <SelectTrigger id="case-server" className="w-full">
+                  <SelectTrigger id="case-server" className="w-full" data-testid="case-server-select">
                     <SelectValue
                       placeholder={
                         loadingServers ? "Loading servers…" : "Select a server"
@@ -385,12 +390,12 @@ export function NewCaseDialog({
                     });
                   }
                 }}
-                disabled={!form.mcpServerId}
+                disabled={!effectiveServerId}
               >
-                <SelectTrigger id="case-suite" className="w-full">
+                <SelectTrigger id="case-suite" className="w-full" data-testid="case-suite-select">
                   <SelectValue
                     placeholder={
-                      !form.mcpServerId
+                      !effectiveServerId
                         ? "Select a server first"
                         : "Select a suite"
                     }
@@ -430,12 +435,12 @@ export function NewCaseDialog({
                   onValueChange={(v) =>
                     setForm((prev) => ({ ...prev, toolName: v ?? "" }))
                   }
-                  disabled={!form.mcpServerId}
+                  disabled={!effectiveServerId}
                 >
-                  <SelectTrigger id="case-tool" className="w-full font-mono text-xs">
+                  <SelectTrigger id="case-tool" className="w-full font-mono text-xs" data-testid="case-tool-select">
                     <SelectValue
                       placeholder={
-                        !form.mcpServerId
+                        !effectiveServerId
                           ? "Select a server first"
                           : "Select a tool"
                       }
@@ -467,6 +472,7 @@ export function NewCaseDialog({
                     setForm((prev) => ({ ...prev, name: e.target.value }))
                   }
                   required
+                  data-testid="case-name-input"
                 />
                 <p className="text-[11px] text-muted-foreground">
                   Use 3-digit prefix (e.g. <code>010_login</code>) for ordered serial execution and cross-case references (<code>&#123;&#123;cases.010.output.xxx&#125;&#125;</code>).
@@ -493,6 +499,7 @@ export function NewCaseDialog({
             <Button
               type="submit"
               disabled={!canSubmit}
+              data-testid="save-case-dialog-button"
             >
               {submitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
               Save
