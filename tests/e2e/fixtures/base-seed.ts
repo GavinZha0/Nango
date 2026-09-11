@@ -73,6 +73,33 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
     }
   }
 
+  // 1c. Base SSH Credential: check existing first to prevent duplicate rows
+  let sshCredId: string | undefined;
+  const foundSsh = credList.find((c) => c.name === BASE_NAMES.sshCredential);
+  if (foundSsh) sshCredId = foundSsh.id;
+
+  if (!sshCredId) {
+    const sshCredRes = await request.post("/api/admin/credentials", {
+      data: {
+        name: BASE_NAMES.sshCredential,
+        type: "basic_auth",
+        serviceType: "integration",
+        provider: "ssh",
+        payload: { username: "ubuntu", password: "mockpassword" },
+      },
+    });
+
+    if (sshCredRes.status() === 409) {
+      const listRes = await request.get("/api/admin/credentials");
+      const list = (await listRes.json()) as Array<{ id: string; name: string }>;
+      const found = list.find((c) => c.name === BASE_NAMES.sshCredential);
+      if (!found) throw new Error("Base SSH credential reported conflict but not found in list");
+      sshCredId = found.id;
+    } else {
+      expect(sshCredRes.ok(), await sshCredRes.text()).toBeTruthy();
+    }
+  }
+
   // Pre-fetch existing agents to prevent duplicate rows (only supervisor has DB uniqueness)
   const existingAgentsRes = await request.get("/api/builtin-agents");
   const existingAgents: Array<{ id: string; name: string; role: string | null; visibility?: string }> =
@@ -387,6 +414,61 @@ export async function seedBaseDataSource(adminEmail: string): Promise<void> {
       [
         BASE_NAMES.dataSource,
         "Base Postgres data source for E2E testing",
+        credId,
+        adminId,
+      ],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Seed a read-only Base SSH Server bound to Base-SSH-e2e-Credential.
+ * Idempotent: checks for existing public SSH server with BASE_NAMES.sshServer first.
+ */
+export async function seedBaseSshServer(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Check if base SSH server already exists with visibility: "public"
+    const checkRes = await client.query(
+      `SELECT id FROM ssh_server WHERE name = $1 AND visibility = 'public' LIMIT 1`,
+      [BASE_NAMES.sshServer],
+    );
+    if (checkRes.rows.length > 0) return;
+
+    // 2. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed SSH server: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 3. Resolve base SSH credential ID
+    const credRes = await client.query<{ id: string }>(
+      `SELECT id FROM credential WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.sshCredential],
+    );
+    if (credRes.rows.length === 0) {
+      throw new Error(
+        `Cannot seed SSH server: credential ${BASE_NAMES.sshCredential} not found`,
+      );
+    }
+    const credId = credRes.rows[0].id;
+
+    // 4. Insert base SSH server (enabled: false for zero side effects, public visibility)
+    await client.query(
+      `INSERT INTO ssh_server (name, description, credential_id, host, port, known_host_fingerprint, command_allow, command_deny, command_approve, login_shell, enabled, visibility, created_by)
+       VALUES ($1, $2, $3, 'localhost', 22, 'SHA256:dGVzdGZpbmdlcnByaW50ZXhhbXBsZTEyMzQ1Njc4OTA=', NULL, '[]'::jsonb, '[]'::jsonb, true, false, 'public', $4)`,
+      [
+        BASE_NAMES.sshServer,
+        "Base SSH server for E2E testing",
         credId,
         adminId,
       ],

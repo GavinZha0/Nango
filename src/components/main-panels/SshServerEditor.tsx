@@ -497,11 +497,12 @@ export function SshServerEditor({
           onClick={onBack}
           aria-label="Back"
           className="h-7 w-7"
+          data-testid="ssh-back-button"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <Plug className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-sm font-semibold" data-testid="ssh-editor-heading">
           {isNew ? "New SSH server" : initialDetail?.name}
         </h2>
         <div className="ml-auto flex items-center gap-2">
@@ -510,6 +511,7 @@ export function SshServerEditor({
             size="sm"
             onClick={() => void handleVerifyConnection()}
             disabled={verifying || saving}
+            data-testid="verify-connection-button"
           >
             {verifying ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -523,6 +525,7 @@ export function SshServerEditor({
             onClick={() => void handleSave()}
             disabled={saving || (!isNew && !isDirty && !draftApplied)}
             className={cn("h-8 gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
+            data-testid="save-ssh-server-button"
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -538,6 +541,7 @@ export function SshServerEditor({
               onClick={() => setDeleteOpen(true)}
               disabled={saving || deleting}
               title="Delete this SSH server (cannot be undone)"
+              data-testid="delete-ssh-server-button"
             >
               {deleting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -614,6 +618,7 @@ export function SshServerEditor({
                 disabled={!isNew}
                 placeholder="Lowercase letters, digits, _ and -. Cannot be changed later"
                 className="font-mono"
+                data-testid="ssh-name-input"
               />
             </div>
             <div className="space-y-2">
@@ -624,6 +629,7 @@ export function SshServerEditor({
                 onChange={(e) => update("description", e.target.value)}
                 placeholder=""
                 rows={2}
+                data-testid="ssh-description-input"
               />
             </div>
           </section>
@@ -643,6 +649,7 @@ export function SshServerEditor({
                 onChange={(e) => update("host", e.target.value)}
                 placeholder="prod.example.com or 10.0.1.5"
                 className="flex-1"
+                data-testid="ssh-host-input"
               />
             </div>
             <div className="flex items-center gap-3">
@@ -657,6 +664,7 @@ export function SshServerEditor({
                 value={form.port}
                 onChange={(e) => update("port", e.target.value)}
                 className="flex-1"
+                data-testid="ssh-port-input"
               />
             </div>
             <div className="flex items-center gap-3">
@@ -668,7 +676,7 @@ export function SshServerEditor({
                   value={form.credentialId}
                   onValueChange={(v) => update("credentialId", v ?? "")}
                 >
-                  <SelectTrigger id="ssh-credential" className="w-full">
+                  <SelectTrigger id="ssh-credential" className="w-full" data-testid="ssh-credential-select">
                     {/*
                      * Pass children to SelectValue so the trigger
                      * resolves the credential's NAME from our own
@@ -718,6 +726,7 @@ export function SshServerEditor({
                 }}
                 placeholder="Auto-filled by Verify connection"
                 className="flex-1 font-mono"
+                data-testid="ssh-fingerprint-input"
               />
             </div>
             {/*
@@ -752,6 +761,7 @@ export function SshServerEditor({
                   id="ssh-login-shell"
                   checked={form.loginShell}
                   onCheckedChange={(v) => update("loginShell", v)}
+                  data-testid="ssh-login-shell-switch"
                 />
                 <span className="text-xs text-muted-foreground">
                   Wrap commands in <code className="font-mono">bash -lc &apos;...&apos;</code>

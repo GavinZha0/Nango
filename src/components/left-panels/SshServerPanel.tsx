@@ -81,6 +81,11 @@ function SshServerRowItem({
 
   return (
     <div
+      data-testid="panel-row"
+      data-name={row.name}
+      data-server-id={row.id}
+      data-enabled={String(row.enabled)}
+      data-visibility={row.visibility}
       className={cn(
         "flex flex-col gap-0.5 border-b border-border/70 last:border-0 px-3 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-muted/30",
@@ -96,6 +101,7 @@ function SshServerRowItem({
               onClick={() => onEdit(row)}
               className="cursor-pointer block truncate text-left text-base font-medium hover:underline underline-offset-2"
               aria-label={hasEdit ? `Edit ${row.name}` : `View ${row.name}`}
+              data-action="open-ssh-server"
             >
               {row.name}
             </button>
@@ -112,7 +118,8 @@ function SshServerRowItem({
               type="button"
               onClick={() => onToggleVisibility(row, isPublic ? "private" : "public")}
               className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
-              aria-label={isPublic ? "Set to private" : "Set to public"}
+              aria-label={isPublic ? `Set ${row.name} to private` : `Set ${row.name} to public`}
+              data-action="toggle-visibility"
             >
               {isPublic ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
             </button>
@@ -130,7 +137,8 @@ function SshServerRowItem({
               type="button"
               onClick={() => onToggleEnabled(row, !row.enabled)}
               className="cursor-pointer rounded p-0.5 hover:text-foreground"
-              aria-label={row.enabled ? "Disable SSH server" : "Enable SSH server"}
+              aria-label={row.enabled ? `Disable SSH server ${row.name}` : `Enable SSH server ${row.name}`}
+              data-action="toggle-enabled"
             >
               {row.enabled ? (
                 <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
@@ -153,6 +161,7 @@ function SshServerRowItem({
       {/* Line 2: host:port — own line so long FQDNs don't crowd the name */}
       <p
         className="truncate font-mono text-[11px] leading-tight text-muted-foreground"
+        data-testid="target-info"
         title={hostLabel}
       >
         {hostLabel}
@@ -214,6 +223,8 @@ export function SshServerPanel(): ReactNode {
     }
   }, []);
 
+  // Fetch SSH servers on mount and whenever navigating back to /ssh-server.
+  // Inlined in the effect to avoid synchronous setState inside the effect body.
   useEffect(() => {
     let cancelled = false;
     async function init(): Promise<void> {
@@ -232,7 +243,7 @@ export function SshServerPanel(): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname]);
 
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) =>
@@ -295,6 +306,7 @@ export function SshServerPanel(): ReactNode {
             className="h-6 w-6"
             onClick={() => router.push("/ssh-server/new")}
             aria-label="New SSH server"
+            data-testid="new-ssh-server-button"
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
@@ -305,6 +317,7 @@ export function SshServerPanel(): ReactNode {
             onClick={() => void refresh()}
             disabled={refreshing}
             aria-label="Refresh SSH servers"
+            data-testid="refresh-ssh-servers-button"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           </Button>
