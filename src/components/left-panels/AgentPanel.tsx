@@ -109,6 +109,9 @@ function TabButton({ label, count, active, onClick }: TabButtonProps): ReactNode
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
+      data-testid={`tab-${label.toLowerCase()}`}
       onClick={onClick}
       className={cn(
         "flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-b-2 transition-colors",
@@ -116,7 +119,6 @@ function TabButton({ label, count, active, onClick }: TabButtonProps): ReactNode
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
       )}
-      aria-pressed={active}
     >
       {label}
       <span
@@ -841,7 +843,7 @@ export function AgentPanel(): ReactNode {
             Tabs follow the MCP test page's bottom-border style; the
             +/refresh actions are pushed to the right with `ml-auto` and
             kept centered vertically against the taller tab cells. */}
-        <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+        <div className="flex items-stretch border-b bg-muted/40 pr-1.5" role="tablist" aria-label="Agent types">
           <TabButton
             label="Builtin"
             count={sortedBuiltinAgents.length}

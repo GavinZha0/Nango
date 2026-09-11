@@ -6,13 +6,12 @@ import { config } from "dotenv";
 import pg from "pg";
 
 import { getPostgresUrl } from "@/lib/db/postgres-url";
+import { TEST_EMAIL_SUFFIX } from "../constants/test-users";
 import { sweepTestResources } from "./sweep";
 
 config();
 
 const { Client } = pg;
-
-const TEST_EMAIL_SUFFIX = "@test-e2e.local";
 
 export default async function globalSetup() {
   console.log("E2E setup: pre-cleaning test resources and users...");

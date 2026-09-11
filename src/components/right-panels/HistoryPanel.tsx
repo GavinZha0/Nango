@@ -340,10 +340,11 @@ function HistoryPanelContent(): ReactNode {
               const isOpen = openGroups.has(group);
               const showGroupDelete = group !== "pinned";
               return (
-                <div key={group}>
+                <div key={group} data-testid={`history-group-${group}`}>
                   <div className="group/header flex items-center bg-muted/40 px-2 py-1.5">
                     <button
                       type="button"
+                      data-testid={`history-group-toggle-${group}`}
                       onClick={() => toggleGroup(group)}
                       className="flex flex-1 items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                     >
@@ -357,6 +358,7 @@ function HistoryPanelContent(): ReactNode {
                       <Button
                         variant="ghost"
                         size="icon"
+                        data-testid={`delete-group-${group}`}
                         className="h-5 w-5 shrink-0 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover/header:opacity-100"
                         onClick={() => setBulkDeleteGroup(group)}
                         aria-label={`Delete ${GROUP_LABELS[group]}`}
@@ -430,8 +432,14 @@ interface SessionRowProps {
 }
 
 function SessionRow({ session, active, pinned, onSelect, onPin, onDelete }: SessionRowProps) {
+  const sessionTitle = session.session_name || session.session_id;
   return (
-    <li className="group relative">
+    <li
+      className="group relative"
+      data-testid="history-session-item"
+      data-session-id={session.session_id}
+      data-session-name={sessionTitle}
+    >
       <button
         type="button"
         className={cn(
@@ -441,7 +449,7 @@ function SessionRow({ session, active, pinned, onSelect, onPin, onDelete }: Sess
         onClick={() => onSelect(session.session_id)}
       >
         <span className="block min-w-0 flex-1 truncate text-sm">
-          {session.session_name || session.session_id}
+          {sessionTitle}
         </span>
       </button>
 
@@ -453,21 +461,25 @@ function SessionRow({ session, active, pinned, onSelect, onPin, onDelete }: Sess
         <Button
           variant="ghost"
           size="icon"
+          data-testid="session-pin-button"
+          data-action="pin"
           className={cn(
             "h-6 w-6 shrink-0",
             pinned && "text-yellow-500 hover:text-yellow-500",
           )}
           onClick={(e) => { e.stopPropagation(); onPin(); }}
-          aria-label={pinned ? "Unpin conversation" : "Pin conversation"}
+          aria-label={pinned ? `Unpin conversation ${sessionTitle}` : `Pin conversation ${sessionTitle}`}
         >
           <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
         </Button>
         <Button
           variant="ghost"
           size="icon"
+          data-testid="session-delete-button"
+          data-action="delete"
           className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          aria-label="Delete conversation"
+          aria-label={`Delete conversation ${sessionTitle}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>

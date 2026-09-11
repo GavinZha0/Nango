@@ -1,0 +1,15 @@
+/**
+ * Base resources seeded during setup for all E2E tests to consume.
+ *
+ * CONTRACT: These are read-only baselines. Tests may view, select,
+ * and assert against them, but must NEVER edit, disable, or delete them.
+ */
+
+export const BASE_NAMES = {
+  llmCredential: "Base-LLM-e2e-Credential",
+  supervisorAgent: "Nango",
+  generalAgent: "Base-General-e2e-Agent",
+  evaluatorAgent: "Base-Judge-e2e-Agent",
+} as const;
+
+export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

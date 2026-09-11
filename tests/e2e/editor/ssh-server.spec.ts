@@ -4,10 +4,10 @@ import { editorTest } from "../helpers/fixtures";
 
 editorTest.describe("SSH Server Page", () => {
   editorTest.beforeEach(async ({ page }) => {
-    await gotoSettled(page, "/ssh-server", page.getByText(/ssh/i).first());
+    await gotoSettled(page, "/ssh-server", page.getByRole("heading", { name: "SSH Hosts" }));
   });
 
   editorTest("should display the SSH server page", async ({ page }) => {
-    await expect(page.getByText(/ssh/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "SSH Hosts" })).toBeVisible();
   });
 });

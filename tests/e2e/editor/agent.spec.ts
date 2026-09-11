@@ -3,20 +3,16 @@ import { gotoSettled } from "../helpers/navigate";
 import { editorTest } from "../helpers/fixtures";
 import { uniqueName } from "../helpers/data";
 import { panelRow, toggleEnabled, toggleVisibility, openNew } from "../helpers/panels";
-
-// The default 1280x720 viewport squeezes the left panel so the resizable
-// separator's hit-area overlaps the "New BuiltIn agent" button (the panel
-// header's action buttons sit right against the divider). Wider viewport
-// matches how editors actually use the workspace.
-editorTest.use({ viewport: { width: 1600, height: 900 } });
+import { E2E_PLACEHOLDER_KEY } from "../constants/base-resources";
 
 editorTest.describe("Agent Page", () => {
   editorTest.beforeEach(async ({ page }) => {
-    await gotoSettled(page, "/agent", page.getByText(/agents/i).first());
+    await gotoSettled(page, "/agent", page.getByRole("button", { name: "New BuiltIn agent" }));
   });
 
   editorTest("should display the agents page", async ({ page }) => {
-    await expect(page.getByText(/agents/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "New BuiltIn agent" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /builtin/i })).toBeVisible();
   });
 
   // P0 reference flow: create a built-in agent end-to-end through the UI,
@@ -42,7 +38,7 @@ editorTest.describe("Agent Page", () => {
           type: "api_key",
           serviceType: "llm",
           provider: "openai",
-          payload: { key: "sk-test-e2e-placeholder-key" },
+          payload: { key: E2E_PLACEHOLDER_KEY },
         },
       });
       expect(credRes.ok()).toBeTruthy();

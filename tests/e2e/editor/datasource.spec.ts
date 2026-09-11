@@ -4,10 +4,10 @@ import { editorTest } from "../helpers/fixtures";
 
 editorTest.describe("Datasource Page", () => {
   editorTest.beforeEach(async ({ page }) => {
-    await gotoSettled(page, "/datasource", page.getByText(/data\s?source/i).first());
+    await gotoSettled(page, "/datasource", page.getByRole("heading", { name: "Data Sources" }));
   });
 
   editorTest("should display the datasource page", async ({ page }) => {
-    await expect(page.getByText(/data\s?source/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Data Sources" })).toBeVisible();
   });
 });

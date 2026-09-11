@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { E2E_NAME_MARKER } from "../helpers/registry";
+import { TEST_EMAIL_SUFFIX } from "../constants/test-users";
 
 /**
  * Domain tables swept by name marker, in FK-safe deletion order.
@@ -24,10 +25,14 @@ export async function sweepTestResources(client: pg.Client): Promise<number> {
   let total = 0;
   for (const { table, nameColumn } of SWEPT_TABLES) {
     try {
-      const result = await client.query(
-        `DELETE FROM ${table} WHERE ${nameColumn} LIKE $1`,
-        [`%${E2E_NAME_MARKER}%`],
-      );
+      const isAgent = table === "builtin_agent";
+      const query = isAgent
+        ? `DELETE FROM ${table} WHERE ${nameColumn} LIKE $1 OR created_by IN (SELECT id FROM "user" WHERE email LIKE $2)`
+        : `DELETE FROM ${table} WHERE ${nameColumn} LIKE $1`;
+      const params = isAgent
+        ? [`%${E2E_NAME_MARKER}%`, `%${TEST_EMAIL_SUFFIX}`]
+        : [`%${E2E_NAME_MARKER}%`];
+      const result = await client.query(query, params);
       if (result.rowCount && result.rowCount > 0) {
         console.log(`  Swept ${result.rowCount} row(s) from ${table}.`);
         total += result.rowCount;

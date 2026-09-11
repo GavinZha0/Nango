@@ -220,7 +220,10 @@ export function GuardrailsClientShell() {
   return (
     <div className="flex h-[calc(100vh-3.5rem)] w-full flex-col overflow-hidden bg-background p-4 gap-3">
       {/* Integrated Top Header Bar */}
-      <div className="flex items-center justify-between gap-4 border-b pb-2.5">
+      <div
+        data-testid="guardrails-header"
+        className="flex items-center justify-between gap-4 border-b pb-2.5"
+      >
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">

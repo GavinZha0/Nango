@@ -87,6 +87,9 @@ function TabButton({ label, count, active, onClick }: TabButtonProps): ReactNode
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
+      data-testid={`tab-${label.toLowerCase()}`}
       onClick={onClick}
       className={cn(
         "flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-b-2 transition-colors",
@@ -94,7 +97,6 @@ function TabButton({ label, count, active, onClick }: TabButtonProps): ReactNode
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
       )}
-      aria-pressed={active}
     >
       {label}
       <span
@@ -402,7 +404,7 @@ export function SkillsPanel(): ReactNode {
       {/* Header — tab strip + global actions on a single row. The tab
           labels (Builtin / Custom) already identify this as the
           skills panel, so we don't repeat a "Skills" title. */}
-      <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+      <div className="flex items-stretch border-b bg-muted/40 pr-1.5" role="tablist" aria-label="Skill types">
         <TabButton
           label="Builtin"
           count={builtin.length}

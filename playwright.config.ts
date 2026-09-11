@@ -23,6 +23,7 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     ...devices["Desktop Chrome"],
+    viewport: { width: 1600, height: 900 },
   },
 
   globalSetup: "./tests/e2e/lifecycle/setup.global.ts",
@@ -37,7 +38,6 @@ export default defineConfig({
     // Main tests: depend on setup for auth state
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
       testMatch: /.*\.spec\.ts/,
       testIgnore: [/.*\.setup\.ts/],

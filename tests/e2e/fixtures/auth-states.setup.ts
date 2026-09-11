@@ -13,6 +13,7 @@ import { config } from "dotenv";
 import pg from "pg";
 import { getPostgresUrl } from "@/lib/db/postgres-url";
 import { TEST_USERS } from "../constants/test-users";
+import { seedBaseResources } from "./base-seed";
 
 config();
 
@@ -100,6 +101,9 @@ setup("create admin user", async ({ page }) => {
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
   await page.context().storageState({ path: ADMIN_STATE_PATH });
+
+  // ── Seed Base Resources (Layer 0 & Layer 1) ──────────────────────
+  await seedBaseResources(page.request);
 });
 
 setup("create editor user", async ({ page, context }) => {

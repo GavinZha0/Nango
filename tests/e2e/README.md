@@ -107,17 +107,19 @@ after every run.
    Seeding an admin-managed resource via the API (e.g. an LLM credential
    for the agent editor) is data preparation, not an assertion — see
    `editor/agent.spec.ts` for the pattern.
-5. **Viewport.** The default 1280x720 viewport squeezes the left panel so
-   the resizable separator's hit-area can overlap the panel header's
-   action buttons. Specs that interact with left-panel headers or rows
-   should widen the viewport (`editorTest.use({ viewport: { width: 1600,
-   height: 900 } })` — see agent.spec.ts).
-6. **Testability.** When a UI element can't be located cleanly, add
-   `id` + `htmlFor` label bindings, an `aria-label`, or a
-   `data-testid="panel-row"`-style marker to the page code instead of
-   writing fragile structural selectors. Examples:
-   `BuiltinAgentEditor` (labelled Name/Model ID inputs, Provider
-   combobox), `AgentPanel` (panel-row markers).
+5. **Viewport.** The default viewport is configured globally to 1600x900 in
+   `playwright.config.ts` to reflect real-world editor usage and ensure left/right
+   sidebars and headers do not overlap.
+6. **Testability & Base resources.**
+   - When a UI element can't be located cleanly, add `id` + `htmlFor` label bindings,
+     an explicit `aria-label`, or a `data-testid` marker to the page code instead of
+     writing fragile structural selectors or relying on index matching (`.first()`).
+   - **Base resources contract**: `fixtures/base-seed.ts` seeds shared, read-only
+     baseline resources during setup (`Base-LLM-e2e-Credential`, `Nango` supervisor,
+     `Base-General-e2e-Agent`, `Base-Judge-e2e-Agent`) with `visibility: "public"`.
+     Tests may view, select, and assert against them, but must **never** edit, toggle,
+     or delete them. Destructive/CRUD tests must create their own isolated resources
+     using `uniqueName()`.
 
 ## Known constraints
 

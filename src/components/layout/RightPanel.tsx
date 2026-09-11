@@ -287,6 +287,7 @@ function RightPanelToolbar(): ReactNode {
             <button
               key={id}
               id={`right-tab-${id}`}
+              data-testid={`right-tab-${id}`}
               type="button"
               role="tab"
               aria-selected={active}
@@ -490,6 +491,7 @@ export function RightPanel(): ReactNode {
   if (!agentId) {
     return (
       <div
+        data-testid="right-chat-panel"
         className="flex h-full flex-col border-l"
         style={{ backgroundColor: "var(--panel-bg)" }}
       >
@@ -504,6 +506,7 @@ export function RightPanel(): ReactNode {
 
   return (
     <div
+      data-testid="right-chat-panel"
       className="flex h-full flex-col border-l"
       style={{ backgroundColor: "var(--panel-bg)" }}
     >
@@ -526,18 +529,20 @@ export function RightPanel(): ReactNode {
           <ChatProviderHooks />
           <div
             id="right-tabpanel-chat"
+            data-testid="right-tabpanel-chat"
             role="tabpanel"
             aria-labelledby="right-tab-chat"
             hidden={rightTab !== "chat"}
             className="flex h-full flex-col"
           >
             <ChatErrorBanner />
-            <div className="min-h-0 flex-1">
+            <div className="min-h-0 flex-1" data-testid="chat-panel-body">
               <ChatPanelBody />
             </div>
           </div>
           <div
             id="right-tabpanel-history"
+            data-testid="right-tabpanel-history"
             role="tabpanel"
             aria-labelledby="right-tab-history"
             hidden={rightTab !== "history"}

@@ -10,8 +10,8 @@ adminTest.describe("Admin Guardrails Control Plane", () => {
   });
 
   adminTest("should display the default Config tab with stats, pipeline visualizer, and registries", async ({ page }) => {
-    // 1. Verify Top Header and Tab Switchers (scoped to header bar to avoid sidebar navigation buttons)
-    const header = page.locator("div.border-b").filter({ hasText: "Guardrails" }).first();
+    // 1. Verify Top Header and Tab Switchers (scoped to header bar via data-testid)
+    const header = page.getByTestId("guardrails-header");
     await expect(header.getByRole("heading", { name: "Guardrails" })).toBeVisible();
     await expect(header.getByRole("button", { name: "Config", exact: true })).toBeVisible();
     await expect(header.getByRole("button", { name: "Audit", exact: true })).toBeVisible();
@@ -38,7 +38,7 @@ adminTest.describe("Admin Guardrails Control Plane", () => {
   });
 
   adminTest("should switch to Audit tab and display interception logs table with filters", async ({ page }) => {
-    const header = page.locator("div.border-b").filter({ hasText: "Guardrails" }).first();
+    const header = page.getByTestId("guardrails-header");
 
     // 1. Click the Audit tab button
     await header.getByRole("button", { name: "Audit", exact: true }).click();

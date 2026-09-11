@@ -5,6 +5,7 @@
  * databaseHooks). Subsequent users get the "user" role. The editor user
  * is promoted to "editor" by the admin during setup.
  */
+export const TEST_EMAIL_SUFFIX = "@test-e2e.local";
 
 export const TEST_USERS = {
   admin: {

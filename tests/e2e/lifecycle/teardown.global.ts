@@ -12,14 +12,12 @@ import { config } from "dotenv";
 import pg from "pg";
 
 import { getPostgresUrl } from "@/lib/db/postgres-url";
-
+import { TEST_EMAIL_SUFFIX } from "../constants/test-users";
 import { sweepTestResources } from "./sweep";
 
 config();
 
 const { Client } = pg;
-
-const TEST_EMAIL_SUFFIX = "@test-e2e.local";
 
 export default async function globalTeardown() {
   console.log("E2E teardown: cleaning up test users...");

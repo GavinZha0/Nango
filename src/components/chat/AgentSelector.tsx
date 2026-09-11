@@ -85,6 +85,7 @@ function GroupHeader({
   return (
     <button
       type="button"
+      data-testid={`agent-group-${label.toLowerCase()}`}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -236,6 +237,8 @@ export function AgentSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        data-testid="agent-selector-trigger"
+        aria-label="Select active agent"
         className={cn(
           "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs",
           "transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -289,6 +292,10 @@ export function AgentSelector({
                 return (
                   <DropdownMenuItem
                     key={key}
+                    data-testid="agent-selector-item"
+                    data-agent-id={e.id}
+                    data-agent-type={e.type}
+                    data-agent-name={e.name}
                     className={cn("gap-2 pl-5 text-xs", isActive && "bg-accent text-accent-foreground")}
                     onClick={() =>
                       onSelect(e.id, e.type, "backend", e.credentialId, e.provider)
@@ -320,6 +327,10 @@ export function AgentSelector({
               {expanded["__builtin__"] && sortedVisibleBuiltin.map((b) => (
                 <DropdownMenuItem
                   key={b.id}
+                  data-testid="agent-selector-item"
+                  data-agent-id={b.id}
+                  data-agent-type="agent"
+                  data-agent-name={b.name}
                   className={cn(
                     "gap-2 pl-5 text-xs",
                     activeAgentId === b.id &&
