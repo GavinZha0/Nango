@@ -18,14 +18,14 @@ tests/e2e/
 │   ├── fixtures.ts              # adminTest / editorTest / userTest role factories
 │   ├── navigate.ts              # gotoSettled, removeCopilotInspector
 │   ├── data.ts                  # uniqueName / uniqueSuffix
-│   ├── registry.ts              # test-resource lifecycle (marker + trackResource + deleteRowByName)
-│   ├── panels.ts                # left-panel row interactions (panelRow, toggles, openNew)
-│   └── dialog.ts                # fillAndSubmit for form dialogs
+│   ├── registry.ts              # test-resource lifecycle (E2E marker + deleteRowByName)
+│   └── panels.ts                # left-panel row interactions (panelRow, toggles, openNew)
 ├── fixtures/
 │   └── auth-states.setup.ts     # setup project: signs up users, saves auth state
 ├── lifecycle/
-│   ├── setup.global.ts          # pre-clean stale @test-e2e.local users
-│   └── teardown.global.ts       # post-clean test users
+│   ├── setup.global.ts          # pre-clean marked resources + stale users
+│   ├── teardown.global.ts       # post-clean marked resources + test users
+│   └── sweep.ts                 # shared resource sweeper with per-table isolation
 ├── .auth/                       # gitignored storage-state (admin/editor/user)
 ├── auth/  admin/  editor/  chat/  user/   # specs grouped by role / area
 ```
@@ -63,26 +63,19 @@ after every run.
 ## Shared helpers
 
 - `adminTest` / `editorTest` / `userTest` (`helpers/fixtures.ts`) — role-scoped
-  test objects with `storageState` pre-set per seeded user; prefer these over
+  test objects with `storageState` pre-set per seeded user, with persistent
+  `cpk-web-inspector` CSS shielding via `addInitScript`; prefer these over
   the bare `test` in specs.
-- `gotoSettled(page, path, anchor, { accessPath? })` — navigate, strip the
-  CopilotKit inspector overlay, wait for a visible anchor. Set `accessPath` to
-  self-skip when the session lands elsewhere (dirty first-user DB). Replaces
-  `goto` + `waitForTimeout` + overlay-removal boilerplate.
+- `gotoSettled(page, path, anchor, { accessPath? })` — navigate and wait for a
+  visible anchor. Set `accessPath` to self-skip when the session lands elsewhere
+  (dirty first-user DB). Replaces `goto` + `waitForTimeout` boilerplate.
 - `removeCopilotInspector(page)` — remove the `cpk-web-inspector` overlay
-  that otherwise swallows pointer events.
+  that otherwise swallows pointer events. Retained for non-fixture contexts.
 - `uniqueName(prefix)` / `uniqueSuffix()` — collision-free names for
-  test-created resources.
-
-- `uniqueName(prefix)` / `uniqueSuffix()` — collision-free names for
-  test-created resources.
-- `trackResource(kind, name)` + `deleteRowByName(page, name)`
-  (`helpers/registry.ts`) — lifecycle bookkeeping. Every test-created
-  resource MUST be named via `uniqueName()` (it embeds the `-e2e-`
-  marker); the global teardown sweeps all domain tables for rows whose
-  name carries the marker, so even a crashed run leaves nothing behind.
-  Inside a spec, call `deleteRowByName` after the assertions to clean up
-  eagerly; the sweep is the backstop, not the primary mechanism.
+  test-created resources (embeds the `-e2e-` marker for sweep recovery).
+- `deleteRowByName(page, name, dialogTitle?)` (`helpers/registry.ts`) —
+  self-cleanup inside specs. Locates the row by name, clicks Delete, confirms
+  via the alertdialog, and waits for row detachment.
 - `panelRow(page, name)`, `toggleEnabled(row, noun)`,
   `toggleVisibility(row)`, `openNew(page, ariaLabel)`
   (`helpers/panels.ts`) — the left-panel resource rows (agents, MCP
@@ -90,9 +83,6 @@ after every run.
   ("Enable/Disable <noun>", "Set to public/private", "New <resource>").
   Rows are marked `data-testid="panel-row"` + `data-name` (AgentPanel
   first; other panels adopt the markers as they gain tests).
-- `fillAndSubmit(dialog, fields, submitLabel)` (`helpers/dialog.ts`) —
-  fill a form dialog by visible label text and submit. Submit labels
-  match exactly ("Create", not "Creating…").
 
 ## Conventions
 
@@ -131,8 +121,9 @@ after every run.
 
 ## Known constraints
 
-- The CopilotKit dev-inspector overlay (`cpk-web-inspector`) must be removed
-  before interacting — see `removeCopilotInspector`.
+- The CopilotKit dev-inspector overlay (`cpk-web-inspector`) is persistently
+  suppressed in role-scoped fixtures via `addInitScript` CSS shielding. For
+  non-fixture contexts, `removeCopilotInspector` is available as a manual fallback.
 - better-auth rate-limits `/sign-in` + `/sign-up` (3 requests / 10s per IP by
   default) and the E2E suite runs against the production build, where the
   limiter is always enabled. The auth setup project alone exceeds this, so the

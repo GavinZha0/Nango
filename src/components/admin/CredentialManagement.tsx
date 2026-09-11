@@ -90,7 +90,7 @@ function DeleteButton({ row, onRefresh }: DeleteButtonProps): ReactNode {
       <button
         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-accent"
         onClick={() => { setError(""); setOpen(true); }}
-        aria-label="Delete"
+        aria-label={`Delete ${row.name}`}
       >
         <Trash2 className="h-4 w-4" />
       </button>
@@ -336,11 +336,17 @@ export function CredentialManagement(): ReactNode {
               </TableRow>
             ) : (
               sortedRows.map((row) => (
-                <TableRow key={row.id} className={row.enabled ? "" : "opacity-40"}>
+                <TableRow
+                  key={row.id}
+                  data-testid="credential-row"
+                  data-name={row.name}
+                  className={row.enabled ? "" : "opacity-40"}
+                >
                   {/* Name — click to edit */}
                   <TableCell>
                     <button
                       onClick={() => setEditing(row)}
+                      aria-label={`Edit ${row.name}`}
                       className="font-medium underline-offset-2 hover:underline hover:text-foreground text-left"
                     >
                       {row.name}

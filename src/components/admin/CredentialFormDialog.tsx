@@ -425,10 +425,19 @@ export function CredentialFormDialog({
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              data-testid="credential-cancel-btn"
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button
+              type="submit"
+              disabled={submitting}
+              data-testid="credential-submit-btn"
+            >
               {submitting ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save Changes" : "Create")}
             </Button>
           </DialogFooter>

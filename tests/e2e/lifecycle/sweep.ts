@@ -1,0 +1,40 @@
+import type pg from "pg";
+import { E2E_NAME_MARKER } from "../helpers/registry";
+
+/**
+ * Domain tables swept by name marker, in FK-safe deletion order.
+ * `nameColumn` is the column that carries the resource name.
+ */
+export const SWEPT_TABLES: Array<{ table: string; nameColumn: string }> = [
+  { table: "schedule", nameColumn: "name" },
+  { table: "ssh_server", nameColumn: "name" },
+  { table: "mcp_server", nameColumn: "name" },
+  { table: "skill", nameColumn: "name" },
+  { table: "data_source", nameColumn: "name" },
+  { table: "builtin_agent", nameColumn: "name" },
+  { table: "credential", nameColumn: "name" },
+];
+
+/**
+ * Sweep test-created resources whose names contain the E2E marker.
+ * Deletion errors on a single table (e.g. orphan FK restrictions) are caught
+ * and logged as warnings so subsequent tables and test-user cleanup are not blocked.
+ */
+export async function sweepTestResources(client: pg.Client): Promise<number> {
+  let total = 0;
+  for (const { table, nameColumn } of SWEPT_TABLES) {
+    try {
+      const result = await client.query(
+        `DELETE FROM ${table} WHERE ${nameColumn} LIKE $1`,
+        [`%${E2E_NAME_MARKER}%`],
+      );
+      if (result.rowCount && result.rowCount > 0) {
+        console.log(`  Swept ${result.rowCount} row(s) from ${table}.`);
+        total += result.rowCount;
+      }
+    } catch (err) {
+      console.warn(`  [WARN] Failed to sweep ${table}:`, err);
+    }
+  }
+  return total;
+}

@@ -3,7 +3,6 @@ import { gotoSettled } from "../helpers/navigate";
 import { editorTest } from "../helpers/fixtures";
 import { uniqueName } from "../helpers/data";
 import { panelRow, toggleEnabled, toggleVisibility, openNew } from "../helpers/panels";
-import { trackResource } from "../helpers/registry";
 
 // The default 1280x720 viewport squeezes the left panel so the resizable
 // separator's hit-area overlaps the "New BuiltIn agent" button (the panel
@@ -47,7 +46,6 @@ editorTest.describe("Agent Page", () => {
         },
       });
       expect(credRes.ok()).toBeTruthy();
-      trackResource("credential", credName);
       await adminApi.dispose();
 
       // ── Create ── the panel's "New" button navigates to the editor.
@@ -79,7 +77,6 @@ editorTest.describe("Agent Page", () => {
       // Saving navigates back to /agent and the row appears in the list.
       const row = panelRow(page, agentName);
       await expect(row).toBeVisible({ timeout: 10_000 });
-      trackResource("agent", agentName);
 
       // ── P0 toggles ── both live on the list row.
       await toggleEnabled(row, "agent");

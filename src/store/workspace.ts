@@ -219,7 +219,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       upsertBuiltinAgents: (rows) =>
         set((state) => {
           const byId = new Map(state.builtinAgents.map((a) => [a.id, a]));
-          for (const row of rows) byId.set(row.id, row);
+          for (const row of rows) {
+            const existing = byId.get(row.id);
+            byId.set(row.id, existing ? { ...existing, ...row } : row);
+          }
           return {
             builtinAgents: [...byId.values()],
             agentsLoaded: true,

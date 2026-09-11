@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import { gotoSettled } from "../helpers/navigate";
 import { adminTest } from "../helpers/fixtures";
 import { uniqueName } from "../helpers/data";
-import { deleteRowByName, trackResource } from "../helpers/registry";
+import { deleteRowByName } from "../helpers/registry";
 
 adminTest.describe("Credential Management", () => {
   adminTest.beforeEach(async ({ page }) => {
@@ -69,25 +69,47 @@ adminTest.describe("Credential Management", () => {
 
     // Self-clean: the "-e2e-" marker also makes the global teardown
     // sweep a backstop if this run fails midway.
-    trackResource("credential", name);
     await deleteRowByName(page, name);
   });
 
-  adminTest("should edit a credential", async ({ page }) => {
+  adminTest("should edit and save a credential", async ({ page }) => {
     const name = uniqueName("Credential");
+    const updatedName = uniqueName("CredEdit");
     await createCredential(page, name);
 
-    // Click on the credential name to edit
-    await page.getByRole("button", { name }).click();
+    // Open edit dialog using the precise accessible name
+    await page.getByRole("button", { name: `Edit ${name}` }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Edit Credential" })).toBeVisible();
 
-    // Edit dialog should appear
-    await expect(page.getByRole("heading", { name: "Edit Credential" })).toBeVisible();
+    // Modify fields: Name and Base URL
+    await dialog.getByLabel(/name/i).first().fill(updatedName);
+    await dialog.getByLabel(/base url/i).fill("https://api.example.com/v1");
 
-    // Close without saving
-    await page.getByRole("button", { name: "Cancel" }).click();
-    await expect(page.getByRole("heading", { name: "Edit Credential" })).not.toBeVisible();
+    // Capture PATCH response so server-side validation issues surface immediately
+    const patchRespPromise = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/credentials/") && r.request().method() === "PATCH",
+      { timeout: 15_000 },
+    );
+    await dialog.getByTestId("credential-submit-btn").click();
+    const patchResp = await patchRespPromise;
+    expect(patchResp.status(), await patchResp.text()).toBeLessThan(400);
 
-    await deleteRowByName(page, name);
+    // Dialog should close; updated name should appear in the table and old name should disappear
+    await expect(dialog.getByRole("heading", { name: "Edit Credential" })).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(updatedName)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(name)).not.toBeVisible({ timeout: 5000 });
+
+    // Verify persistence: re-open the dialog and assert that saved fields reflect the new values
+    await page.getByRole("button", { name: `Edit ${updatedName}` }).click();
+    await expect(dialog.getByRole("heading", { name: "Edit Credential" })).toBeVisible();
+    await expect(dialog.getByLabel(/name/i).first()).toHaveValue(updatedName);
+    await expect(dialog.getByLabel(/base url/i)).toHaveValue("https://api.example.com/v1");
+
+    // Close dialog and clean up
+    await dialog.getByTestId("credential-cancel-btn").click();
+    await expect(dialog.getByRole("heading", { name: "Edit Credential" })).not.toBeVisible();
+    await deleteRowByName(page, updatedName);
   });
 
   adminTest("should delete a credential", async ({ page }) => {
@@ -156,5 +178,4 @@ async function createCredential(page: import("@playwright/test").Page, name: str
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("heading", { name: "New Credential" })).not.toBeVisible({ timeout: 5000 });
   await expect(page.getByText(name)).toBeVisible({ timeout: 5000 });
-  trackResource("credential", name);
 }

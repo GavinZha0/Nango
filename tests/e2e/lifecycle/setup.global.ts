@@ -6,6 +6,7 @@ import { config } from "dotenv";
 import pg from "pg";
 
 import { getPostgresUrl } from "@/lib/db/postgres-url";
+import { sweepTestResources } from "./sweep";
 
 config();
 
@@ -14,11 +15,15 @@ const { Client } = pg;
 const TEST_EMAIL_SUFFIX = "@test-e2e.local";
 
 export default async function globalSetup() {
-  console.log("E2E setup: pre-cleaning test users...");
+  console.log("E2E setup: pre-cleaning test resources and users...");
   const client = new Client({ connectionString: getPostgresUrl() });
   try {
     await client.connect();
-    // Delete sessions first (FK constraint), then accounts, then users
+
+    // 1. Sweep stale test resources from prior crashed runs
+    await sweepTestResources(client);
+
+    // 2. Delete test users (sessions first, then accounts, then users)
     const { rows } = await client.query(
       `SELECT id FROM "user" WHERE email LIKE $1`,
       [`%${TEST_EMAIL_SUFFIX}`],
