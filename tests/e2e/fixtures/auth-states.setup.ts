@@ -13,7 +13,7 @@ import { config } from "dotenv";
 import pg from "pg";
 import { getPostgresUrl } from "@/lib/db/postgres-url";
 import { TEST_USERS } from "../constants/test-users";
-import { seedBaseResources } from "./base-seed";
+import { seedBaseResources, seedBaseSchedule } from "./base-seed";
 
 config();
 
@@ -123,4 +123,5 @@ setup("create editor user", async ({ page, context }) => {
 
 setup("create regular user", async ({ page }) => {
   await signUpOrSignIn(page, TEST_USERS.regular, USER_STATE_PATH);
+  await seedBaseSchedule(page.request);
 });

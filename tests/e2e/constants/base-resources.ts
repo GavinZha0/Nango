@@ -10,6 +10,7 @@ export const BASE_NAMES = {
   supervisorAgent: "Nango",
   generalAgent: "Base-General-e2e-Agent",
   evaluatorAgent: "Base-Judge-e2e-Agent",
+  dailySchedule: "Base-Daily-e2e-Schedule",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

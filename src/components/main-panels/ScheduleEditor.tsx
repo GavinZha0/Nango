@@ -482,6 +482,37 @@ export function ScheduleEditor({
         <h1 className="text-sm font-semibold">
           {isCreating ? "New schedule" : "Edit schedule"}
         </h1>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => void submit()}
+            disabled={submitting || startInPast || (!isCreating && !isDirty && !draftApplied)}
+            className={cn("h-7 cursor-pointer gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
+          >
+            {submitting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            Save
+          </Button>
+          {!isCreating && (
+            <Button
+              size="sm"
+              className="h-7 shrink-0 cursor-pointer gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
+              onClick={() => setDeleteOpen(true)}
+              disabled={submitting || deleting}
+              aria-label="Delete this schedule"
+            >
+              {deleting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              Delete
+            </Button>
+          )}
+        </div>
       </header>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -521,37 +552,6 @@ export function ScheduleEditor({
           <header className="flex h-10 items-center gap-2 border-b px-4 py-2 bg-card">
             <Settings className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">Settings</h2>
-            <div className="ml-auto flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => void submit()}
-                disabled={submitting || startInPast || (!isCreating && !isDirty && !draftApplied)}
-                className={cn("h-6 cursor-pointer gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
-              >
-                {submitting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Save className="h-3.5 w-3.5" />
-                )}
-                Save
-              </Button>
-              {!isCreating && (
-                <Button
-                  size="sm"
-                  className="h-6 shrink-0 cursor-pointer gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
-                  onClick={() => setDeleteOpen(true)}
-                  disabled={submitting || deleting}
-                  aria-label="Delete this schedule"
-                >
-                  {deleting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                  Delete
-                </Button>
-              )}
-            </div>
           </header>
           <ScrollArea className="min-h-0 flex-1">
             <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-6 py-6">
@@ -579,7 +579,7 @@ export function ScheduleEditor({
               raw value (which here is `${credentialId|"builtin"}:${entityId}`,
               not human-readable). */}
           <div className="grid grid-cols-[88px_1fr] items-center gap-3">
-            <Label>Agent</Label>
+            <Label id="schedule-agent-label">Agent</Label>
             <Select
               value={form.agentKey}
               items={options.map((o) => ({
@@ -590,7 +590,11 @@ export function ScheduleEditor({
             >
               {/* Default SelectTrigger is `w-fit`; force full width
                   so it lines up with the Input controls above and below. */}
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                className="w-full"
+                aria-labelledby="schedule-agent-label"
+                data-testid="schedule-agent-select"
+              >
                 <SelectValue placeholder="Pick an agent…" />
               </SelectTrigger>
               <SelectContent>

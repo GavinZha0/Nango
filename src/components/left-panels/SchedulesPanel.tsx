@@ -112,16 +112,18 @@ function StatusToggle({
   ) : (
     <CircleCheck className="h-3.5 w-3.5 text-emerald-500" />
   );
+  const heading = row.name ?? row.sourceLabel;
   const label = !row.enabled
-    ? "Enable schedule"
+    ? `Enable schedule ${heading}`
     : row.lastError
-      ? "Disable schedule (last fire failed)"
-      : "Disable schedule";
+      ? `Disable schedule ${heading} (last fire failed)`
+      : `Disable schedule ${heading}`;
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-label={label}
+      data-action="toggle-enabled"
       className="shrink-0 cursor-pointer rounded p-0.5 hover:text-foreground"
     >
       {icon}
@@ -152,6 +154,9 @@ function ScheduleRow({
 
   return (
     <div
+      data-testid="schedule-row"
+      data-name={heading}
+      data-schedule-id={row.id}
       className={cn(
         "flex flex-col gap-0.5 border-b border-border/70 last:border-0 px-3 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-muted/30",
@@ -165,6 +170,7 @@ function ScheduleRow({
           onClick={onSelect}
           className="min-w-0 flex-1 cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2"
           aria-label={`Open ${heading}`}
+          data-action="open-schedule"
         >
           {heading}
         </button>
@@ -231,6 +237,7 @@ export function SchedulesPanel(): ReactNode {
             className="h-6 w-6"
             onClick={() => router.push("/schedule/new")}
             aria-label="New schedule"
+            data-testid="new-schedule-button"
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
@@ -241,6 +248,7 @@ export function SchedulesPanel(): ReactNode {
             onClick={() => void scheduleActions.refresh()}
             disabled={loading}
             aria-label="Refresh schedules"
+            data-testid="refresh-schedules-button"
           >
             <RefreshCw
               className={cn("h-3.5 w-3.5", loading && "animate-spin")}

@@ -84,4 +84,46 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
     enabled: true,
     visibility: "public",
   });
+
+  // 5. Base Daily Schedule
+  await seedBaseSchedule(request);
+}
+
+/**
+ * Seed a recurring schedule bound to Base-General-e2e-Agent.
+ * Can be called with either admin or regular user request context.
+ * Idempotent: checks for existing schedule with BASE_NAMES.dailySchedule first.
+ */
+export async function seedBaseSchedule(request: APIRequestContext): Promise<void> {
+  const listRes = await request.get("/api/schedules");
+  if (listRes.ok()) {
+    const list = (await listRes.json()) as Array<{ name: string | null }>;
+    if (list.some((s) => s.name === BASE_NAMES.dailySchedule)) {
+      return;
+    }
+  }
+
+  const agentsRes = await request.get("/api/builtin-agents");
+  if (!agentsRes.ok()) return;
+  const agents = (await agentsRes.json()) as Array<{ id: string; name: string }>;
+  const generalAgent = agents.find((a) => a.name === BASE_NAMES.generalAgent);
+  if (!generalAgent) {
+    throw new Error(`Cannot seed schedule: ${BASE_NAMES.generalAgent} not found`);
+  }
+
+  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+  const createRes = await request.post("/api/schedules", {
+    data: {
+      name: BASE_NAMES.dailySchedule,
+      entityId: generalAgent.id,
+      entityKind: "agent",
+      sourceLabel: BASE_NAMES.generalAgent,
+      task: "Summarize daily workspace activities",
+      startAt: tomorrow,
+      intervalValue: 1,
+      intervalUnit: "day",
+      enabled: true,
+    },
+  });
+  expect(createRes.ok(), await createRes.text()).toBeTruthy();
 }
