@@ -30,12 +30,20 @@ export function panelRow(page: Page, name: string): Locator {
  * flipped. `noun` is the panel resource noun used in the aria-label
  * ("agent", "skill", "server", "SSH server", "data source").
  */
-export async function toggleEnabled(row: Locator, noun: string): Promise<void> {
-  // The current state's button is the one labelled with the opposite
-  // intent: an enabled row shows "Disable <noun>", a disabled one shows
-  // "Enable <noun>". Flip by clicking whichever is present.
-  const enable = row.getByRole("button", { name: `Enable ${noun}` });
-  const disable = row.getByRole("button", { name: `Disable ${noun}` });
+export async function toggleEnabled(row: Locator, noun?: string): Promise<void> {
+  const toggleBtn = row.locator('[data-action="toggle-enabled"]');
+  if (await toggleBtn.count() > 0) {
+    const prevEnabled = await row.getAttribute("data-enabled");
+    await toggleBtn.click();
+    if (prevEnabled !== null) {
+      const expected = prevEnabled === "true" ? "false" : "true";
+      await expect(row).toHaveAttribute("data-enabled", expected);
+    }
+    return;
+  }
+
+  const enable = row.getByRole("button", { name: new RegExp(`Enable ${noun ?? ""}`) });
+  const disable = row.getByRole("button", { name: new RegExp(`Disable ${noun ?? ""}`) });
   const wasEnabled = await disable.isVisible().catch(() => false);
 
   if (wasEnabled) {
@@ -52,8 +60,19 @@ export async function toggleEnabled(row: Locator, noun: string): Promise<void> {
  * The aria-label is identical across panels ("Set to public/private").
  */
 export async function toggleVisibility(row: Locator): Promise<void> {
-  const toPrivate = row.getByRole("button", { name: "Set to private" });
-  const toPublic = row.getByRole("button", { name: "Set to public" });
+  const toggleBtn = row.locator('[data-action="toggle-visibility"]');
+  if (await toggleBtn.count() > 0) {
+    const prevVis = await row.getAttribute("data-visibility");
+    await toggleBtn.click();
+    if (prevVis !== null) {
+      const expected = prevVis === "public" ? "private" : "public";
+      await expect(row).toHaveAttribute("data-visibility", expected);
+    }
+    return;
+  }
+
+  const toPrivate = row.getByRole("button", { name: /Set (.* )?to private/ });
+  const toPublic = row.getByRole("button", { name: /Set (.* )?to public/ });
   const wasPublic = await toPrivate.isVisible().catch(() => false);
 
   if (wasPublic) {

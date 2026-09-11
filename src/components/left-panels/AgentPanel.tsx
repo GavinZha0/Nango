@@ -318,6 +318,8 @@ function AgentRoleBadge({ role }: { role?: string | null }) {
     case "supervisor":
       return (
         <span
+          data-role="supervisor"
+          title="Role: supervisor"
           className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-amber-500/40 text-amber-500 shadow-xs"
         >
           <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
@@ -326,6 +328,8 @@ function AgentRoleBadge({ role }: { role?: string | null }) {
     case "tester":
       return (
         <span
+          data-role="tester"
+          title="Role: tester"
           className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-emerald-500/40 text-emerald-500 shadow-xs"
         >
           <Webhook className="h-2.5 w-2.5 fill-emerald-500/20 text-emerald-500" />
@@ -334,6 +338,8 @@ function AgentRoleBadge({ role }: { role?: string | null }) {
     case "evaluator":
       return (
         <span
+          data-role="evaluator"
+          title="Role: evaluator"
           className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-purple-500/40 text-purple-500 shadow-xs"
         >
           <Scale className="h-2.5 w-2.5 fill-purple-500/20 text-purple-500" />
@@ -342,6 +348,8 @@ function AgentRoleBadge({ role }: { role?: string | null }) {
     case "secretary":
       return (
         <span
+          data-role="secretary"
+          title="Role: secretary"
           className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-sky-500/40 text-sky-500 shadow-xs"
         >
           <BookMarked className="h-2.5 w-2.5 fill-sky-500/20 text-sky-500" />
@@ -387,6 +395,9 @@ function BuiltinRow({
     <div
       data-testid="panel-row"
       data-name={row.name}
+      data-agent-id={row.id}
+      data-enabled={String(row.enabled)}
+      data-visibility={row.visibility}
       className={cn(
         "flex flex-col gap-0.5 border-b border-border/70 px-3 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-muted/30",
@@ -422,6 +433,7 @@ function BuiltinRow({
               className="cursor-pointer truncate text-left text-base font-medium hover:underline hover:underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
               onClick={() => onEdit(row)}
               aria-label={`Edit ${row.name}`}
+              data-action="open-agent"
             >
               {row.name}
             </button>
@@ -442,7 +454,8 @@ function BuiltinRow({
               type="button"
               onClick={() => onToggleVisibility(row, isPublic ? "private" : "public")}
               className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
-              aria-label={isPublic ? "Set to private" : "Set to public"}
+              aria-label={isPublic ? `Set ${row.name} to private` : `Set ${row.name} to public`}
+              data-action="toggle-visibility"
             >
               {isPublic
                 ? <Globe className="h-3.5 w-3.5" />
@@ -467,7 +480,8 @@ function BuiltinRow({
               type="button"
               onClick={() => onToggleEnabled(row, !row.enabled)}
               className="cursor-pointer rounded p-0.5 hover:text-foreground"
-              aria-label={row.enabled ? "Disable agent" : "Enable agent"}
+              aria-label={row.enabled ? `Disable agent ${row.name}` : `Enable agent ${row.name}`}
+              data-action="toggle-enabled"
             >
               {row.enabled
                 ? <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
@@ -863,6 +877,7 @@ export function AgentPanel(): ReactNode {
               className="h-6 w-6"
               onClick={handleNewAgent}
               aria-label="New BuiltIn agent"
+              data-testid="new-agent-button"
             >
               <Plus className="h-3.5 w-3.5" />
             </Button>
@@ -873,6 +888,7 @@ export function AgentPanel(): ReactNode {
               onClick={refreshAll}
               disabled={anyRefreshing}
               aria-label="Refresh agents"
+              data-testid="refresh-agents-button"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", anyRefreshing && "animate-spin")} />
             </Button>
