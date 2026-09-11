@@ -11,6 +11,8 @@ export const BASE_NAMES = {
   generalAgent: "Base-General-e2e-Agent",
   evaluatorAgent: "Base-Judge-e2e-Agent",
   dailySchedule: "Base-Daily-e2e-Schedule",
+  unreadNotification: "Base-Task-Completed-e2e-Notification",
+  readNotification: "Base-Task-Failed-e2e-Notification",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

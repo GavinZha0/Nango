@@ -7,6 +7,7 @@ import { TEST_EMAIL_SUFFIX } from "../constants/test-users";
  * `nameColumn` is the column that carries the resource name.
  */
 export const SWEPT_TABLES: Array<{ table: string; nameColumn: string }> = [
+  { table: "notification", nameColumn: "title" },
   { table: "schedule", nameColumn: "name" },
   { table: "ssh_server", nameColumn: "name" },
   { table: "mcp_server", nameColumn: "name" },

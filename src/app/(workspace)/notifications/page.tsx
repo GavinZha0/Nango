@@ -95,6 +95,11 @@ function NotificationRow({
   return (
     <Fragment>
       <TableRow
+        data-testid="notification-row"
+        data-notification-id={item.id}
+        data-title={item.title}
+        data-unread={String(unread)}
+        data-kind={item.kind}
         className={cn(
           "cursor-pointer",
           unread && "bg-accent/30",
@@ -181,6 +186,9 @@ function NotificationRow({
                 size="sm"
                 className="h-7 w-7 p-0"
                 title="Mark as read"
+                aria-label={`Mark notification ${item.title} as read`}
+                data-action="mark-read"
+                data-testid="mark-read-button"
                 onClick={() => void notificationActions.markRead(item.id)}
               >
                 <CheckCheck className="h-3.5 w-3.5" />
@@ -191,6 +199,9 @@ function NotificationRow({
               size="sm"
               className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
               title="Delete"
+              aria-label={`Delete notification ${item.title}`}
+              data-action="delete"
+              data-testid="delete-notification-button"
               onClick={() => void notificationActions.remove(item.id)}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -199,7 +210,10 @@ function NotificationRow({
         </TableCell>
       </TableRow>
       {expanded && (
-        <TableRow className="bg-muted/30 hover:bg-muted/30">
+        <TableRow
+          data-testid="notification-expanded-row"
+          className="bg-muted/30 hover:bg-muted/30"
+        >
           <TableCell colSpan={5} className="px-6 py-3">
             <div className="flex flex-col gap-3">
               {item.task && (
@@ -296,6 +310,7 @@ export default function NotificationsPage(): ReactNode {
             variant="outline"
             size="sm"
             className="h-8 gap-1.5 text-xs"
+            data-testid="mark-all-read-button"
             onClick={() => void notificationActions.markAllRead()}
           >
             <CheckCheck className="h-3.5 w-3.5" />
@@ -309,6 +324,8 @@ export default function NotificationsPage(): ReactNode {
           <button
             key={f}
             type="button"
+            data-testid={`filter-${f}`}
+            data-filter={f}
             onClick={() => setFilter(f)}
             className={cn(
               "rounded px-3 py-1 transition-colors",

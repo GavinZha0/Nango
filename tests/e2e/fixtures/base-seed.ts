@@ -1,5 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 import { expect } from "@playwright/test";
+import pg from "pg";
+import { getPostgresUrl } from "@/lib/db/postgres-url";
 import { BASE_NAMES, E2E_PLACEHOLDER_KEY } from "../constants/base-resources";
 
 /**
@@ -127,3 +129,105 @@ export async function seedBaseSchedule(request: APIRequestContext): Promise<void
   });
   expect(createRes.ok(), await createRes.text()).toBeTruthy();
 }
+
+/**
+ * Seed read & unread base notifications for the given user directly via DB.
+ * Idempotent: checks if notifications with the base titles already exist.
+ */
+export async function seedBaseNotifications(userEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+    // 1. Resolve user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [userEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed notifications: user ${userEmail} not found`);
+    }
+    const userId = userRes.rows[0].id;
+
+    // 2. Check existing notifications
+    const existing = await client.query<{ title: string }>(
+      `SELECT title FROM notification WHERE owner_id = $1 AND title IN ($2, $3)`,
+      [userId, BASE_NAMES.unreadNotification, BASE_NAMES.readNotification],
+    );
+    const existingTitles = new Set(existing.rows.map((r) => r.title));
+
+    // 3. Insert unread completed notification if missing
+    if (!existingTitles.has(BASE_NAMES.unreadNotification)) {
+      await client.query(
+        `INSERT INTO notification (owner_id, kind, title, body, full_body, source_label, task, initiator, read_at)
+         VALUES ($1, 'run_completed', $2, $3, $4, $5, $6, 'user', NULL)`,
+        [
+          userId,
+          BASE_NAMES.unreadNotification,
+          "Daily workspace summary completed successfully.",
+          "Daily workspace summary completed successfully with 0 errors.",
+          BASE_NAMES.generalAgent,
+          "Summarize daily workspace activities",
+        ],
+      );
+    }
+
+    // 4. Insert read failed notification if missing
+    if (!existingTitles.has(BASE_NAMES.readNotification)) {
+      await client.query(
+        `INSERT INTO notification (owner_id, kind, title, body, full_body, source_label, task, initiator, read_at)
+         VALUES ($1, 'run_failed', $2, $3, $4, $5, $6, 'user', NOW())`,
+        [
+          userId,
+          BASE_NAMES.readNotification,
+          "Nightly data sync encountered a timeout.",
+          "Nightly data sync encountered a timeout after 3 retries.",
+          BASE_NAMES.generalAgent,
+          "Sync external data sources",
+        ],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Create an ephemeral notification for write/delete lifecycle tests.
+ * Returns the created notification id.
+ */
+export async function createEphemeralNotification(
+  userEmail: string,
+  title: string,
+): Promise<string> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [userEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot create notification: user ${userEmail} not found`);
+    }
+    const userId = userRes.rows[0].id;
+    const res = await client.query<{ id: string }>(
+      `INSERT INTO notification (owner_id, kind, title, body, full_body, source_label, task, initiator, read_at)
+       VALUES ($1, 'run_completed', $2, $3, $4, $5, $6, 'user', NULL)
+       RETURNING id`,
+      [
+        userId,
+        title,
+        "Ephemeral test notification body.",
+        "Ephemeral test notification full body content.",
+        BASE_NAMES.generalAgent,
+        "Run automated ephemeral task",
+      ],
+    );
+    return res.rows[0].id;
+  } finally {
+    await client.end();
+  }
+}
+

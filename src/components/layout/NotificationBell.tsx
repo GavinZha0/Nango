@@ -102,6 +102,8 @@ function NotificationRow({
     <div
       role="button"
       tabIndex={0}
+      data-testid="bell-notification-row"
+      data-notification-id={item.id}
       onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -149,6 +151,7 @@ export function NotificationBell(): ReactNode {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        data-testid="notification-bell-trigger"
         className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         aria-label={
           unreadCount > 0
@@ -181,10 +184,12 @@ export function NotificationBell(): ReactNode {
           {unreadCount > 0 && (
             <button
               type="button"
+              data-testid="bell-mark-all-read"
+              aria-label="Mark all read"
               onClick={() => void notificationActions.markAllRead()}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
             >
-              <CheckCheck className="h-3 w-3" />
+              <CheckCheck className="h-3.5 w-3.5" />
               Mark all read
             </button>
           )}
@@ -208,6 +213,7 @@ export function NotificationBell(): ReactNode {
         <div className="border-t px-3 py-1.5 text-right">
           <Link
             href="/notifications"
+            data-testid="bell-view-all-link"
             className="text-[11px] text-muted-foreground hover:text-foreground"
           >
             View all
