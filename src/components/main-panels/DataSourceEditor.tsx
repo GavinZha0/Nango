@@ -484,11 +484,12 @@ export function DataSourceEditor({
           onClick={onBack}
           aria-label="Back"
           className="h-7 w-7"
+          data-testid="datasource-back-button"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <Plug className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-sm font-semibold" data-testid="datasource-editor-heading">
           {isNew ? "New data source" : initialDetail?.name}
         </h2>
         <div className="ml-auto flex items-center gap-2">
@@ -497,6 +498,7 @@ export function DataSourceEditor({
             size="sm"
             onClick={() => void handleTestConnection()}
             disabled={testing}
+            data-testid="test-connection-button"
           >
             {testing ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -510,6 +512,7 @@ export function DataSourceEditor({
             onClick={() => void handleSave()}
             disabled={saving || (!isNew && !isDirty && !draftApplied)}
             className={cn("h-8 gap-1.5", (draftApplied || isDirty) && "bg-amber-600 hover:bg-amber-700 text-white")}
+            data-testid="save-datasource-button"
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -525,6 +528,7 @@ export function DataSourceEditor({
               onClick={() => setDeleteOpen(true)}
               disabled={saving || deleting}
               title="Delete this data source (cannot be undone)"
+              data-testid="delete-datasource-button"
             >
               {deleting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -563,6 +567,7 @@ export function DataSourceEditor({
               <Label htmlFor="ds-name">Name</Label>
               <Input
                 id="ds-name"
+                data-testid="ds-name-input"
                 value={form.name}
                 onChange={(e) => update("name", e.target.value)}
                 placeholder="Lowercase letters, digits, _ and -. Cannot be changed later"
@@ -573,6 +578,7 @@ export function DataSourceEditor({
               <Label htmlFor="ds-description">Description</Label>
               <Textarea
                 id="ds-description"
+                data-testid="ds-description-input"
                 value={form.description}
                 onChange={(e) => update("description", e.target.value)}
                 rows={3}
@@ -601,7 +607,7 @@ export function DataSourceEditor({
                   value={form.provider}
                   onValueChange={(v) => v && handleProviderChange(v)}
                 >
-                  <SelectTrigger id="ds-provider" className="w-full">
+                  <SelectTrigger id="ds-provider" data-testid="ds-provider-select" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -620,6 +626,7 @@ export function DataSourceEditor({
               </Label>
               <Input
                 id="ds-host"
+                data-testid="ds-host-input"
                 value={form.host}
                 onChange={(e) => update("host", e.target.value)}
                 placeholder="10.0.0.5"
@@ -632,6 +639,7 @@ export function DataSourceEditor({
               </Label>
               <Input
                 id="ds-port"
+                data-testid="ds-port-input"
                 type="number"
                 value={form.port}
                 onChange={(e) => update("port", e.target.value)}
@@ -645,6 +653,7 @@ export function DataSourceEditor({
               </Label>
               <Input
                 id="ds-database"
+                data-testid="ds-database-input"
                 value={form.database}
                 onChange={(e) => update("database", e.target.value)}
                 placeholder="sales"
@@ -657,7 +666,7 @@ export function DataSourceEditor({
               </Label>
               <div className="flex-1">
                 <Select value={form.credentialId} onValueChange={(v) => update("credentialId", v ?? "")}>
-                  <SelectTrigger id="ds-credential" className="w-full">
+                  <SelectTrigger id="ds-credential" data-testid="ds-credential-select" className="w-full">
                     {/*
                      * Resolve the label from our own lookup. Radix's
                      * default SelectValue relies on a matching
@@ -756,6 +765,7 @@ export function DataSourceEditor({
             <div className="flex items-start gap-2">
               <Checkbox
                 id="ds-readonly"
+                data-testid="ds-readonly-checkbox"
                 checked={form.readOnly}
                 onCheckedChange={(v) => update("readOnly", v === true)}
               />
@@ -769,6 +779,7 @@ export function DataSourceEditor({
               <Label htmlFor="ds-allowlist">Allowlist (optional)</Label>
               <Textarea
                 id="ds-allowlist"
+                data-testid="ds-allowlist-input"
                 value={form.tableAllowlistText}
                 onChange={(e) => update("tableAllowlistText", e.target.value)}
                 rows={2}
@@ -779,6 +790,7 @@ export function DataSourceEditor({
               <Label htmlFor="ds-denylist">Denylist (optional)</Label>
               <Textarea
                 id="ds-denylist"
+                data-testid="ds-denylist-input"
                 value={form.tableDenylistText}
                 onChange={(e) => update("tableDenylistText", e.target.value)}
                 rows={2}

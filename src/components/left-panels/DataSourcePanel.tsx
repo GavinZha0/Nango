@@ -90,6 +90,12 @@ function DataSourceRowItem({
 
   return (
     <div
+      data-testid="panel-row"
+      data-name={row.name}
+      data-datasource-id={row.id}
+      data-enabled={String(row.enabled)}
+      data-visibility={row.visibility}
+      data-provider={row.provider}
       className={cn(
         "flex flex-col gap-0.5 border-b border-border/70 last:border-0 px-3 py-2 transition-colors",
         active ? "bg-accent" : "hover:bg-muted/30",
@@ -105,6 +111,7 @@ function DataSourceRowItem({
               onClick={() => onEdit(row)}
               className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2"
               aria-label={hasEdit ? `Edit ${row.name}` : `View ${row.name}`}
+              data-action="open-datasource"
             >
               {row.name}
             </button>
@@ -113,7 +120,10 @@ function DataSourceRowItem({
               {row.name}
             </span>
           )}
-          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono leading-none uppercase text-foreground/70">
+          <span
+            data-testid="provider-badge"
+            className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono leading-none uppercase text-foreground/70"
+          >
             {row.provider}
           </span>
         </div>
@@ -124,7 +134,8 @@ function DataSourceRowItem({
               type="button"
               onClick={() => onToggleVisibility(row, isPublic ? "private" : "public")}
               className="cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
-              aria-label={isPublic ? "Set to private" : "Set to public"}
+              aria-label={isPublic ? `Set ${row.name} to private` : `Set ${row.name} to public`}
+              data-action="toggle-visibility"
             >
               {isPublic ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
             </button>
@@ -142,7 +153,8 @@ function DataSourceRowItem({
               type="button"
               onClick={() => onToggleEnabled(row, !row.enabled)}
               className="cursor-pointer rounded p-0.5 hover:text-foreground"
-              aria-label={row.enabled ? "Disable data source" : "Enable data source"}
+              aria-label={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
+              data-action="toggle-enabled"
             >
               {row.enabled ? (
                 <ToggleRight className="h-3.5 w-3.5 text-emerald-500" />
@@ -165,6 +177,7 @@ function DataSourceRowItem({
       {/* Line 2: host:port/database — own line so long FQDNs don't crowd the name */}
       <p
         className="truncate font-mono text-[11px] leading-tight text-muted-foreground"
+        data-testid="target-info"
         title={target}
       >
         {target}
@@ -229,10 +242,11 @@ export function DataSourcePanel(): ReactNode {
     }
   }, []);
 
-  // Initial load.
+  // Fetch data sources on mount and whenever navigating back to /datasource.
+  // Inlined in the effect to avoid synchronous setState inside the effect body.
   useEffect(() => {
     let cancelled = false;
-    async function init(): Promise<void> {
+    async function load(): Promise<void> {
       try {
         const res = await fetch("/api/data-sources");
         if (!cancelled && res.ok) {
@@ -244,11 +258,11 @@ export function DataSourcePanel(): ReactNode {
       }
       if (!cancelled) setLoading(false);
     }
-    void init();
+    void load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname]);
 
   // Flat alphabetical list. Each row already shows its provider as
   // an inline chip after the name (DataSourceRowItem), so a separate
@@ -317,6 +331,7 @@ export function DataSourcePanel(): ReactNode {
             className="h-6 w-6"
             onClick={() => router.push("/datasource/new")}
             aria-label="New data source"
+            data-testid="new-datasource-button"
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
@@ -327,6 +342,7 @@ export function DataSourcePanel(): ReactNode {
             onClick={() => void refresh()}
             disabled={refreshing}
             aria-label="Refresh data sources"
+            data-testid="refresh-datasources-button"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           </Button>

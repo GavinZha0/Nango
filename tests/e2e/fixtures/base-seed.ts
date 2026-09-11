@@ -15,11 +15,12 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
   // 1. Base LLM Credential: check existing first to prevent duplicate rows
   let credId: string | undefined;
   const listCredRes = await request.get("/api/admin/credentials");
-  if (listCredRes.ok()) {
-    const list = (await listCredRes.json()) as Array<{ id: string; name: string }>;
-    const found = list.find((c) => c.name === BASE_NAMES.llmCredential);
-    if (found) credId = found.id;
-  }
+  const credList: Array<{ id: string; name: string }> = listCredRes.ok()
+    ? await listCredRes.json()
+    : [];
+
+  const foundLlm = credList.find((c) => c.name === BASE_NAMES.llmCredential);
+  if (foundLlm) credId = foundLlm.id;
 
   if (!credId) {
     const credRes = await request.post("/api/admin/credentials", {
@@ -42,6 +43,33 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
       expect(credRes.ok(), await credRes.text()).toBeTruthy();
       const body = (await credRes.json()) as { id: string };
       credId = body.id;
+    }
+  }
+
+  // 1b. Base DataSource Credential: check existing first to prevent duplicate rows
+  let dsCredId: string | undefined;
+  const foundDs = credList.find((c) => c.name === BASE_NAMES.datasourceCredential);
+  if (foundDs) dsCredId = foundDs.id;
+
+  if (!dsCredId) {
+    const dsCredRes = await request.post("/api/admin/credentials", {
+      data: {
+        name: BASE_NAMES.datasourceCredential,
+        type: "basic_auth",
+        serviceType: "datasource",
+        provider: "postgres",
+        payload: { username: "postgres", password: "password" },
+      },
+    });
+
+    if (dsCredRes.status() === 409) {
+      const listRes = await request.get("/api/admin/credentials");
+      const list = (await listRes.json()) as Array<{ id: string; name: string }>;
+      const found = list.find((c) => c.name === BASE_NAMES.datasourceCredential);
+      if (!found) throw new Error("Base DataSource credential reported conflict but not found in list");
+      dsCredId = found.id;
+    } else {
+      expect(dsCredRes.ok(), await dsCredRes.text()).toBeTruthy();
     }
   }
 
@@ -307,6 +335,61 @@ export async function seedBaseMcpServer(adminEmail: string): Promise<void> {
       `INSERT INTO mcp_server (name, type, url, enabled, visibility, tools, server_name, server_version, server_description, created_by)
        VALUES ($1, 'http', 'https://example.com/mcp', false, 'public', $2, 'mock-server', '1.0.0', 'Mock MCP Server for E2E testing', $3)`,
       [BASE_NAMES.mcpServer, mockTools, adminId],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Seed a read-only Base Data Source bound to Base-Datasource-e2e-Credential.
+ * Idempotent: checks for existing public data source with BASE_NAMES.dataSource first.
+ */
+export async function seedBaseDataSource(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Check if base data source already exists with visibility: "public"
+    const checkRes = await client.query(
+      `SELECT id FROM data_source WHERE name = $1 AND visibility = 'public' LIMIT 1`,
+      [BASE_NAMES.dataSource],
+    );
+    if (checkRes.rows.length > 0) return;
+
+    // 2. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed data source: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 3. Resolve base datasource credential ID
+    const credRes = await client.query<{ id: string }>(
+      `SELECT id FROM credential WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.datasourceCredential],
+    );
+    if (credRes.rows.length === 0) {
+      throw new Error(
+        `Cannot seed data source: credential ${BASE_NAMES.datasourceCredential} not found`,
+      );
+    }
+    const credId = credRes.rows[0].id;
+
+    // 4. Insert base data source (enabled: false for zero side effects, public visibility, read_only: true)
+    await client.query(
+      `INSERT INTO data_source (name, description, provider, credential_id, host, port, database, params, read_only, table_allowlist, table_denylist, enabled, visibility, created_by)
+       VALUES ($1, $2, 'postgres', $3, 'localhost', 5432, 'nango_test', '{}'::jsonb, true, NULL, '[]'::jsonb, false, 'public', $4)`,
+      [
+        BASE_NAMES.dataSource,
+        "Base Postgres data source for E2E testing",
+        credId,
+        adminId,
+      ],
     );
   } finally {
     await client.end();

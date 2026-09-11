@@ -49,7 +49,7 @@ export function DeleteConfirmDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={deleting} data-testid="cancel-delete-button">Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={(e) => {
               e.preventDefault();
@@ -57,6 +57,7 @@ export function DeleteConfirmDialog({
             }}
             disabled={deleting}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            data-testid="confirm-delete-button"
           >
             {deleting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

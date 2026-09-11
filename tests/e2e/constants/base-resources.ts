@@ -14,6 +14,8 @@ export const BASE_NAMES = {
   unreadNotification: "Base-Task-Completed-e2e-Notification",
   readNotification: "Base-Task-Failed-e2e-Notification",
   mcpServer: "Base-Mock-e2e-Mcp",
+  datasourceCredential: "Base-Datasource-e2e-Credential",
+  dataSource: "base-postgres-e2e-ds",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";

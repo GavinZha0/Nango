@@ -115,8 +115,9 @@ after every run.
      an explicit `aria-label`, or a `data-testid` marker to the page code instead of
      writing fragile structural selectors or relying on index matching (`.first()`).
    - **Base resources contract**: `fixtures/base-seed.ts` seeds shared, read-only
-     baseline resources during setup (`Base-LLM-e2e-Credential`, `Nango` supervisor,
-     `Base-General-e2e-Agent`, `Base-Judge-e2e-Agent`, `Base-Mock-e2e-Mcp`) with `visibility: "public"`.
+     baseline resources during setup (`Base-LLM-e2e-Credential`, `Base-Datasource-e2e-Credential`,
+     `Nango` supervisor, `Base-General-e2e-Agent`, `Base-Judge-e2e-Agent`, `Base-Mock-e2e-Mcp`,
+     `base-postgres-e2e-ds`) with `visibility: "public"`.
      Tests may view, select, and assert against them, but must **never** edit, toggle,
      or delete them. Destructive/CRUD tests must create their own isolated resources
      using `uniqueName()`.

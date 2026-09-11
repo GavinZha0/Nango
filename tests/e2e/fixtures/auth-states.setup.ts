@@ -18,6 +18,7 @@ import {
   seedBaseSchedule,
   seedBaseNotifications,
   seedBaseMcpServer,
+  seedBaseDataSource,
 } from "./base-seed";
 
 config();
@@ -107,9 +108,10 @@ setup("create admin user", async ({ page }) => {
   await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
   await page.context().storageState({ path: ADMIN_STATE_PATH });
 
-  // ── Seed Base Resources (Layer 0, Layer 1, MCP) ──────────────────
+  // ── Seed Base Resources (Layer 0, Layer 1, MCP, Data Source) ─────
   await seedBaseResources(page.request);
   await seedBaseMcpServer(TEST_USERS.admin.email);
+  await seedBaseDataSource(TEST_USERS.admin.email);
 });
 
 setup("create editor user", async ({ page, context }) => {
