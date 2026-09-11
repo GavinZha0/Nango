@@ -1,26 +1,15 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { gotoSettled } from "../helpers/navigate";
+import { adminTest } from "../helpers/fixtures";
 
-// Use saved admin auth state so we skip sign-in
-test.use({ storageState: "tests/e2e/.auth/admin.json" });
-
-test.describe("Admin Guardrails Control Plane", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/admin/guardrails");
-    // Wait for navigation to settle (avoid networkidle due to CopilotKit SSE/polling)
-    await page.waitForTimeout(2000);
-    // Remove CopilotKit dev inspector overlay that intercepts pointer events
-    await page.evaluate(() => {
-      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
+adminTest.describe("Admin Guardrails Control Plane", () => {
+  adminTest.beforeEach(async ({ page }) => {
+    await gotoSettled(page, "/admin/guardrails", page.getByRole("heading", { name: "Guardrails" }), {
+      accessPath: "/admin/guardrails",
     });
-    // If not on admin page (user lacks admin role), skip all tests
-    if (!page.url().includes("/admin/guardrails")) {
-      test.skip(true, "Test user does not have admin access — first DB user was not our test user");
-    }
-    // Wait for the page content to load
-    await expect(page.getByRole("heading", { name: "Guardrails" })).toBeVisible({ timeout: 10000 });
   });
 
-  test("should display the default Config tab with stats, pipeline visualizer, and registries", async ({ page }) => {
+  adminTest("should display the default Config tab with stats, pipeline visualizer, and registries", async ({ page }) => {
     // 1. Verify Top Header and Tab Switchers (scoped to header bar to avoid sidebar navigation buttons)
     const header = page.locator("div.border-b").filter({ hasText: "Guardrails" }).first();
     await expect(header.getByRole("heading", { name: "Guardrails" })).toBeVisible();
@@ -48,7 +37,7 @@ test.describe("Admin Guardrails Control Plane", () => {
     await expect(page.getByRole("columnheader", { name: "Category" })).toBeVisible();
   });
 
-  test("should switch to Audit tab and display interception logs table with filters", async ({ page }) => {
+  adminTest("should switch to Audit tab and display interception logs table with filters", async ({ page }) => {
     const header = page.locator("div.border-b").filter({ hasText: "Guardrails" }).first();
 
     // 1. Click the Audit tab button

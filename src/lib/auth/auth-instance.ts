@@ -52,9 +52,27 @@ function recordLoginEvent(
     .catch((err: unknown) => console.warn("[auth] login event write failed:", err));
 }
 
+// E2E runs against the production build, so better-auth's default special
+// rule for /sign-in + /sign-up (3 requests / 10s per IP) is active and all
+// Playwright traffic shares the single localhost IP. The auth setup project
+// plus the sign-in spec alone exceed 3 requests in quick succession.
+// E2E_TEST loosens the cap instead of disabling the limiter, so an
+// over-the-limit regression would still surface as a "Too many requests"
+// failure in the suite. Set by playwright.config.ts webServer / CI workflow.
+const E2E_TEST = process.env.E2E_TEST === "1";
+
 const options = {
   secret: process.env.BETTER_AUTH_SECRET!,
   baseURL: process.env.BETTER_AUTH_URL,
+
+  rateLimit: {
+    // Production default is 3 per 10s for auth-sensitive paths; E2E needs
+    // room for setup sign-ups, role-promotion re-logins and the sign-in spec.
+    customRules: {
+      "/sign-in/email": { window: E2E_TEST ? 60 : 10, max: E2E_TEST ? 30 : 3 },
+      "/sign-up/email": { window: E2E_TEST ? 60 : 10, max: E2E_TEST ? 30 : 3 },
+    },
+  },
 
   hooks: {
     after: createAuthMiddleware(async (ctx) => {

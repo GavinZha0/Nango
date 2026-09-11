@@ -1,12 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { gotoSettled } from "../helpers/navigate";
+import { adminTest } from "../helpers/fixtures";
 
-test.use({
-  storageState: "tests/e2e/.auth/admin.json",
-  viewport: { width: 1920, height: 1080 },
-});
+adminTest.use({ viewport: { width: 1920, height: 1080 } });
 
-test.describe("Chat Panel", () => {
-  test.beforeEach(async ({ page }) => {
+adminTest.describe("Chat Panel", () => {
+  adminTest.beforeEach(async ({ page }) => {
     // Ensure the right panel is open before navigating.
     await page.addInitScript(() => {
       localStorage.setItem(
@@ -16,17 +14,11 @@ test.describe("Chat Panel", () => {
     });
   });
 
-  test("should display the right panel", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForTimeout(3000);
-    await page.evaluate(() => {
-      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
-    });
-    // The right panel should be visible with its border-l class
-    await expect(page.locator(".border-l").first()).toBeVisible({ timeout: 10000 });
+  adminTest("should display the right panel", async ({ page }) => {
+    await gotoSettled(page, "/", page.locator(".border-l").first());
   });
 
-  test("should show agent selection prompt when no agent is configured", async ({ page }) => {
+  adminTest("should show agent selection prompt when no agent is configured", async ({ page }) => {
     // Mock APIs to return empty lists, simulating no configured agents
     await page.route("**/api/builtin-agents*", async (route) => {
       await route.fulfill({ status: 200, json: [] });
@@ -35,15 +27,6 @@ test.describe("Chat Panel", () => {
       await route.fulfill({ status: 200, json: [] });
     });
 
-    await page.goto("/");
-    await page.waitForTimeout(3000);
-    await page.evaluate(() => {
-      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
-    });
-
-    // Without any agents configured, the panel shows the selection prompt
-    await expect(
-      page.getByText("Select an agent to start chatting."),
-    ).toBeVisible({ timeout: 10000 });
+    await gotoSettled(page, "/", page.getByText("Select an agent to start chatting."));
   });
 });

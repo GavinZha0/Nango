@@ -5,7 +5,7 @@
 import { config } from "dotenv";
 import pg from "pg";
 
-import { getPostgresUrl } from "../../../src/lib/db/postgres-url";
+import { getPostgresUrl } from "@/lib/db/postgres-url";
 
 config();
 

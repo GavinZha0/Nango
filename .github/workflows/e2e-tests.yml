@@ -94,18 +94,20 @@ jobs:
         run: pnpm build
 
       # Start the app bypassing the `prestart` hook so we don't trigger
-      # the local Python-sandbox image build (not needed for the core
-      # auth + credential specs we run in CI).
+      # the local Python-sandbox image build. E2E_TEST relaxes the
+      # better-auth sign-in/sign-up rate limit (the auth setup project
+      # exceeds the default 3-per-10s-per-IP rule); see
+      # src/lib/auth/auth-instance.ts.
       - name: Start application
         run: |
-          pnpm exec next start -p 9300 > server.log 2>&1 &
+          E2E_TEST=1 pnpm exec next start -p 9300 > server.log 2>&1 &
           echo $! > server.pid
 
       - name: Wait for application to be ready
         run: |
           timeout 90 bash -c 'until curl -sf http://localhost:9300 > /dev/null; do sleep 2; done'
 
-      - name: Run E2E tests (core)
+      - name: Run E2E tests
         run: pnpm test:e2e
 
       - name: Stop application

@@ -1,19 +1,14 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { gotoSettled } from "../helpers/navigate";
+import { editorTest } from "../helpers/fixtures";
 
-test.use({ storageState: "tests/e2e/.auth/editor.json" });
-
-test.describe("MCP Page", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/mcp");
-    await page.waitForTimeout(2000);
-    await page.evaluate(() => {
-      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
-    });
+editorTest.describe("MCP Page", () => {
+  editorTest.beforeEach(async ({ page }) => {
     // /mcp is a panel-redirect page — center shows WelcomePage
-    await expect(page.getByRole("heading", { name: "Welcome to Nango" })).toBeVisible({ timeout: 10000 });
+    await gotoSettled(page, "/mcp", page.getByRole("heading", { name: "Welcome to Nango" }));
   });
 
-  test("should display the MCP page", async ({ page }) => {
+  editorTest("should display the MCP page", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Welcome to Nango" })).toBeVisible();
   });
 });

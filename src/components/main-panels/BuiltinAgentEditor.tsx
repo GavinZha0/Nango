@@ -753,8 +753,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
             {/* ── Basic info — single-line per field ── */}
             <Section title="Basic" headerClassName="bg-muted/30">
               <div className="flex items-center gap-2">
-                <Label className="w-20 shrink-0 text-xs">Name</Label>
+                <Label htmlFor="agent-name-input" className="w-20 shrink-0 text-xs">Name</Label>
                 <Input
+                  id="agent-name-input"
                   value={form.name}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => update("name", e.target.value)}
                   readOnly={form.role === "supervisor"}
@@ -799,7 +800,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     }
                   }}
                 >
-                  <SelectTrigger className="h-8 flex-1 text-xs">
+                  <SelectTrigger className="h-8 flex-1 text-xs" aria-label="Role">
                     <div className="flex items-center gap-1.5 text-xs truncate">
                       {form.role === "supervisor" && (
                         <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400 shrink-0" />
@@ -890,7 +891,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     if (cred?.provider) update("modelProvider", cred.provider);
                   }}
                 >
-                  <SelectTrigger className="h-8 flex-1 text-xs">
+                  <SelectTrigger className="h-8 flex-1 text-xs" aria-label="Provider">
                     <SelectValue placeholder="Select credential" />
                   </SelectTrigger>
                   <SelectContent>
@@ -909,8 +910,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <Label className="w-20 shrink-0 text-xs">Model ID</Label>
+                <Label htmlFor="agent-model-input" className="w-20 shrink-0 text-xs">Model ID</Label>
                 <Input
+                  id="agent-model-input"
                   value={form.model}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => update("model", e.target.value)}
                   className="h-8 flex-1 font-mono text-xs"

@@ -1,18 +1,13 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { gotoSettled } from "../helpers/navigate";
+import { editorTest } from "../helpers/fixtures";
 
-test.use({ storageState: "tests/e2e/.auth/editor.json" });
-
-test.describe("Datasource Page", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/datasource");
-    await page.waitForTimeout(2000);
-    await page.evaluate(() => {
-      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
-    });
-    await expect(page.getByText(/data\s?source/i).first()).toBeVisible({ timeout: 10000 });
+editorTest.describe("Datasource Page", () => {
+  editorTest.beforeEach(async ({ page }) => {
+    await gotoSettled(page, "/datasource", page.getByText(/data\s?source/i).first());
   });
 
-  test("should display the datasource page", async ({ page }) => {
+  editorTest("should display the datasource page", async ({ page }) => {
     await expect(page.getByText(/data\s?source/i).first()).toBeVisible();
   });
 });

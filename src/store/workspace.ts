@@ -29,6 +29,11 @@ interface WorkspaceState {
     kinds?: readonly EntityKind[],
   ) => void;
   mergeBuiltinAgents: (builtinAgents: BuiltinAgentRow[]) => void;
+  /** Upsert rows by id — append new agents, replace edited ones. Used by
+   *  the agent editor after create/save so the panel list reflects the
+   *  change without a full reload (mergeBuiltinAgents replaces the whole
+   *  list and would drop every other row). */
+  upsertBuiltinAgents: (rows: BuiltinAgentRow[]) => void;
 
   // Agent selection (drives CopilotKit runtimeUrl header)
   activeAgentId: string;
@@ -211,6 +216,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           };
         }),
       mergeBuiltinAgents: (builtinAgents) => set({ builtinAgents, agentsLoaded: true }),
+      upsertBuiltinAgents: (rows) =>
+        set((state) => {
+          const byId = new Map(state.builtinAgents.map((a) => [a.id, a]));
+          for (const row of rows) byId.set(row.id, row);
+          return {
+            builtinAgents: [...byId.values()],
+            agentsLoaded: true,
+          };
+        }),
 
       // Agent selection
       activeAgentId: "",

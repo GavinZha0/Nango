@@ -1,18 +1,13 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { gotoSettled } from "../helpers/navigate";
+import { editorTest } from "../helpers/fixtures";
 
-test.use({ storageState: "tests/e2e/.auth/editor.json" });
-
-test.describe("Verification Page", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/verification");
-    await page.waitForTimeout(2000);
-    await page.evaluate(() => {
-      document.querySelectorAll("cpk-web-inspector").forEach((el) => el.remove());
-    });
-    await expect(page.getByRole("button", { name: "Verification" }).first()).toBeVisible({ timeout: 10000 });
+editorTest.describe("Verification Page", () => {
+  editorTest.beforeEach(async ({ page }) => {
+    await gotoSettled(page, "/verification", page.getByRole("button", { name: "Verification" }).first());
   });
 
-  test("should display the verification page", async ({ page }) => {
+  editorTest("should display the verification page", async ({ page }) => {
     await expect(page.getByRole("button", { name: "Verification" }).first()).toBeVisible();
   });
 });

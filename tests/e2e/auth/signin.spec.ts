@@ -26,9 +26,11 @@ test.describe("Sign In", () => {
     await page.getByLabel("Password").fill("WrongPassword123!");
     await page.getByRole("button", { name: /sign in/i }).click();
 
-    // Should still be on sign-in page
-    await page.waitForTimeout(2000);
-    await expect(page.getByLabel("Email")).toBeVisible();
+    // Assert the specific error so a rate-limit rejection ("Too many
+    // requests...") cannot silently pass as a "still on the page" green.
+    await expect(page.getByText("Invalid email or password")).toBeVisible({
+      timeout: 10000,
+    });
   });
 
   test("should show validation on empty form", async ({ page }) => {

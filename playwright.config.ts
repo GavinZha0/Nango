@@ -56,5 +56,14 @@ export default defineConfig({
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",
+    // Marks a playwright-spawned server as serving an E2E run so
+    // better-auth relaxes its sign-in/sign-up rate limit (see
+    // src/lib/auth/auth-instance.ts) — the auth setup project alone
+    // exceeds better-auth's default 3-per-10s-per-IP special rule.
+    // NOTE: with reuseExistingServer this env only applies when
+    // playwright itself spawns the server; an already-running dev
+    // server keeps its own env, so the relaxed limit is additionally
+    // gated by test-time checks (see auth specs' error assertion).
+    env: { ...process.env, E2E_TEST: "1" },
   },
 });
