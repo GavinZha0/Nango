@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/GavinZha0/Nango/compare/v0.20.1...v0.21.0) (2026-09-12)
+
+
+### Features
+
+* **verification:** add 3-digit prefix aliasing, output unwrapping and suite isolation ([afdbb68](https://github.com/GavinZha0/Nango/commit/afdbb684f18d942f9389117521e71c54eca1b51d))
+
+
+### Bug Fixes
+
+* e2e test issues ([f22f7bb](https://github.com/GavinZha0/Nango/commit/f22f7bbbc849acc5076b67c30ee3688b23546d86))
+
 ## [0.20.1](https://github.com/GavinZha0/Nango/compare/v0.20.0...v0.20.1) (2026-09-10)
 
 
