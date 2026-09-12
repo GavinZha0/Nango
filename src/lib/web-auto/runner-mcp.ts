@@ -28,8 +28,6 @@ export interface RunWebAutoMcpInput {
   mcpServerId: string;
   /** Playwright script content to execute */
   scriptContent: string;
-  /** Suite-level variables for template substitution */
-  variables?: Record<string, unknown>;
 }
 
 /**
@@ -57,8 +55,6 @@ export async function runWebAutoMcp(
   // Build tool input for browser_run_code_unsafe
   const toolInput = {
     code: input.scriptContent,
-    // Add variables as context for the script
-    ...(input.variables ? { context: input.variables } : {}),
   };
 
   // Borrow → tools → execute. All wrapped in try/finally so the

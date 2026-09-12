@@ -1672,6 +1672,7 @@ export const VerificationSuiteTable = pgTable(
     id: uuid("id").primaryKey().notNull().defaultRandom(),
     name: text("name").notNull(),
     description: text("description"),
+    variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     /** Left-panel tab + case target shape. */
     category: text("category").notNull(), // "mcp" | "workflow"
     // --- target (moved from case to suite in Server->Suite(Tool)->Case refactor) ---
@@ -1954,6 +1955,7 @@ export type VerificationErrorSource =
   | "transport"
   | "assertion"
   | "timeout"
+  | "config"
   | "internal";
 
 // ---------------------------------------------------------------------------
@@ -1976,6 +1978,7 @@ export const EvalSuiteTable = pgTable(
     ),
     name: text("name").notNull(),
     description: text("description"),
+    variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     dimensionIds: jsonb("dimension_ids")
       .notNull()
       .default(sql`'[]'::jsonb`)

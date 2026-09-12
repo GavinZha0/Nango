@@ -72,6 +72,8 @@ export interface RunEvalCaseInput {
   assertions: readonly AssertionSpec[];
   /** Session user ID — used as ownerId for runner dispatch. */
   ownerId: string;
+  /** Suite-level literal variables for assertion evaluation */
+  variables?: Record<string, unknown>;
 }
 
 export interface RunEvalCaseResult {
@@ -418,6 +420,7 @@ export async function runEvalCase(
     agentText: finalTargetSummary,
     actualToolCalls,
     metrics: { durationMs, outputTokens, toolCallCount },
+    variables: input.variables,
   };
   const checks = runDeterministicChecks(
     assertions,

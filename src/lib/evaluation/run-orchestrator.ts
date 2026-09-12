@@ -17,6 +17,7 @@ import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { runEvalCase, type RunEvalCaseResult } from "./eval-runner";
 import { recordRunNotification } from "@/lib/runner/notifications";
+import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import * as storage from "./storage";
 import type { AssertionSpec } from "@/lib/assertions";
 import type { EvalTurn } from "./types";
@@ -36,7 +37,7 @@ function publishEvalFrame(ownerId: string, frame: EvalFrame): void {
   publish(ownerId, { kind: "evaluation", ownerId, frame });
 }
 
-// ─── Public entry ───────────────────────────────────────────────────
+// ─── Public API ─────────────────────────────────────────────────────
 
 export interface StartEvalSuiteRunInput {
   suiteId: string;
@@ -51,14 +52,15 @@ export interface StartEvalSuiteRunResult {
 }
 
 /**
- * Kick off an eval suite run. Returns synchronously with the new
- * `eval_run` id; the actual case loop runs in the background.
+ * Kick off an evaluation suite run. Returns synchronously with the new
+ * `eval_run` id; the actual case loop runs in the background and
+ * publishes SSE frames.
  */
 export async function startEvalSuiteRun(
   input: StartEvalSuiteRunInput,
 ): Promise<StartEvalSuiteRunResult> {
   const suite = await storage.getSuiteById(input.suiteId);
-  if (!suite) throw new Error(`eval suite not found: ${input.suiteId}`);
+  if (!suite) throw new Error(`evaluation suite not found: ${input.suiteId}`);
 
   const cases =
     input.caseIds && input.caseIds.length > 0
@@ -113,6 +115,7 @@ export async function startEvalSuiteRun(
     targetAgentId: suite.agentId,
     targetCredentialId: suite.credentialId ?? undefined,
     targetAgentSource: suite.agentSource,
+    suiteVariables: suite.variables,
     cases,
   });
 
@@ -131,6 +134,7 @@ interface SuiteLoopInput {
   targetAgentId: string;
   targetCredentialId?: string;
   targetAgentSource: string;
+  suiteVariables?: unknown;
   cases: Awaited<ReturnType<typeof storage.listEnabledCasesForRun>>;
 }
 
@@ -159,6 +163,40 @@ async function runAllCases(
   input: SuiteLoopInput,
   counters: LoopCounters,
 ): Promise<void> {
+  const { literalVariables, error: resolveError } = await resolveSuiteVariables(
+    input.suiteVariables,
+    { allowCredentials: false },
+  );
+
+  if (resolveError) {
+    for (const c of input.cases) {
+      await storage.writeCaseResult({
+        runId: input.runId,
+        caseId: c.id,
+        status: "errored",
+        score: null,
+        dimensionScores: {},
+        assertionScore: null,
+        assertionResults: [],
+        feedback: resolveError.message,
+        error: resolveError.message,
+        durationMs: 0,
+      });
+      counters.erroredCount++;
+      publishEvalFrame(input.ownerId, {
+        topic: "evaluation_run",
+        kind: "case_completed",
+        runId: input.runId,
+        caseId: c.id,
+        caseName: c.name,
+        status: "errored",
+        score: null,
+        durationMs: 0,
+      });
+    }
+    return;
+  }
+
   for (const c of input.cases) {
     const caseInput = (c.input ?? {}) as Record<string, unknown>;
     const caseTurns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
@@ -177,6 +215,7 @@ async function runAllCases(
         turns: caseTurns,
         assertions: caseAssertions,
         ownerId: input.ownerId,
+        variables: literalVariables,
       });
     } catch (err) {
       // runEvalCase should never throw, but defend in depth.

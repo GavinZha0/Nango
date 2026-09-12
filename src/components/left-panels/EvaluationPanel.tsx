@@ -445,7 +445,13 @@ export function EvaluationPanel(): ReactNode {
     }
   };
 
-  const handleSuiteSave = async (updated: { name: string; evaluatorAgentId?: string | null; dimensionIds: string[] }): Promise<void> => {
+  const handleSuiteSave = async (updated: {
+    name: string;
+    description?: string | null;
+    evaluatorAgentId?: string | null;
+    dimensionIds: string[];
+    variables?: Record<string, unknown>;
+  }): Promise<void> => {
     if (!editingSuite) return;
     try {
       await evalActions.patch(editingSuite.id, updated);

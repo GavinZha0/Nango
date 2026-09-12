@@ -24,6 +24,7 @@ import { formatAssertionResultItem } from "../format-assertion";
 import { runMcpCase } from "@/lib/verification/runner-mcp";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
 import { runWebAutoCase } from "@/lib/web-auto/orchestrator";
+import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import type { AssertionSpec } from "@/lib/assertions";
 
 export const runTestCaseSchema = z.object({
@@ -76,13 +77,33 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           throw new Error(`Verification case #${caseId} is missing mcpServerId or toolName.`);
         }
 
+        const { literalVariables, error: resolveError } = await resolveSuiteVariables(
+          suite.variables,
+          { allowCredentials: false },
+        );
+
+        if (resolveError) {
+          return {
+            category,
+            caseId,
+            caseName: caseRow.name,
+            status: "errored",
+            durationMs: 0,
+            assertionResults: [],
+            error: resolveError.message,
+          };
+        }
+
         const specs = (caseRow.assertions ?? []) as readonly AssertionSpec[];
-        const outcome = await runMcpCase({
-          mcpServerId: suite.mcpServerId,
-          toolName: caseRow.toolName,
-          input: (caseRow.input ?? {}) as Record<string, unknown>,
-          assertions: specs,
-        });
+        const outcome = await runMcpCase(
+          {
+            mcpServerId: suite.mcpServerId,
+            toolName: caseRow.toolName,
+            input: (caseRow.input ?? {}) as Record<string, unknown>,
+            assertions: specs,
+          },
+          { variables: literalVariables },
+        );
 
         const assertionResults: CaseAssertionResultItem[] = (
           outcome.assertionResults ?? []
@@ -140,6 +161,23 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           return { userMessage: String(t) };
         });
 
+        const { literalVariables, error: resolveError } = await resolveSuiteVariables(
+          suite.variables,
+          { allowCredentials: false },
+        );
+
+        if (resolveError) {
+          return {
+            category,
+            caseId,
+            caseName: caseRow.name,
+            status: "errored",
+            durationMs: 0,
+            assertionResults: [],
+            error: resolveError.message,
+          };
+        }
+
         const specs = (caseRow.assertions ?? []) as readonly AssertionSpec[];
         const outcome = await runEvalCase({
           caseId: caseRow.id,
@@ -151,6 +189,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           turns,
           assertions: specs,
           ownerId: ctx.userId,
+          variables: literalVariables,
         });
 
         const assertionResults: CaseAssertionResultItem[] = (

@@ -29,6 +29,7 @@ export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   dimensionIds?: string[];
+  variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
   createdBy: string;
@@ -47,6 +48,7 @@ export async function createSuite(
       name: input.name,
       description: input.description ?? null,
       dimensionIds: input.dimensionIds ?? [],
+      variables: input.variables ?? {},
       enabled: input.enabled ?? true,
       visibility: input.visibility ?? "private",
       createdBy: input.createdBy,
@@ -102,6 +104,7 @@ export interface UpdateSuiteInput {
   description?: string | null;
   evaluatorAgentId?: string | null;
   dimensionIds?: string[];
+  variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
 }
@@ -117,6 +120,7 @@ export async function updateSuite(
   if (input.evaluatorAgentId !== undefined)
     updates.evaluatorAgentId = input.evaluatorAgentId;
   if (input.dimensionIds !== undefined) updates.dimensionIds = input.dimensionIds;
+  if (input.variables !== undefined) updates.variables = input.variables;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.visibility !== undefined) updates.visibility = input.visibility;
   updates.updatedAt = sql`CURRENT_TIMESTAMP`;
@@ -281,6 +285,7 @@ export async function listSuitesByAgentWithCaseCount(
       evaluatorAgentId: EvalSuiteTable.evaluatorAgentId,
       name: EvalSuiteTable.name,
       description: EvalSuiteTable.description,
+      variables: EvalSuiteTable.variables,
       dimensionIds: EvalSuiteTable.dimensionIds,
       enabled: EvalSuiteTable.enabled,
       visibility: EvalSuiteTable.visibility,

@@ -121,6 +121,7 @@ export interface VerificationCaseRunItem {
   updatedAt: Date;
   mcpServerId: string | null;
   toolName: string | null;
+  suiteVariables?: unknown;
 }
 
 /** Enabled cases of a suite, sorted in natural numeric-aware name order. */
@@ -139,6 +140,7 @@ export async function listEnabledCasesForRun(
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
       toolName: VerificationCaseTable.toolName,
+      suiteVariables: VerificationSuiteTable.variables,
     })
     .from(VerificationCaseTable)
     .innerJoin(
@@ -184,6 +186,7 @@ export async function listEnabledCasesForServerRun(
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
       toolName: VerificationCaseTable.toolName,
+      suiteVariables: VerificationSuiteTable.variables,
     })
     .from(VerificationCaseTable)
     .innerJoin(

@@ -231,3 +231,29 @@ export interface GetAssertionSchemaResult {
   types: AssertionTypeEnum[];
   schemas: AssertionSchemaItem[];
 }
+
+/**
+ * Suite-level variable definition supporting literals and encrypted credentials.
+ */
+export type SuiteVariableDefinition =
+  | {
+      type: "literal";
+      value: string | number | boolean;
+      description?: string;
+    }
+  | {
+      type: "credential";
+      credentialId: string;
+      field: string;
+      description?: string;
+    };
+
+/**
+ * Suite variables map as stored in database JSONB.
+ * Accommodates legacy flat records for backward compatibility.
+ */
+export type SuiteVariablesMap = Record<
+  string,
+  SuiteVariableDefinition | Record<string, unknown> | string | number | boolean | null
+>;
+

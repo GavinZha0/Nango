@@ -268,4 +268,39 @@ describe("extractMcpStructuredData - strict MCP specification", () => {
     expect(resolved.str).toBe("custom-token-str");
     expect(resolved.num).toBe(999);
   });
+
+  it("resolves suite variables {{variables.KEY}} in case input", () => {
+    const input = {
+      endpoint: "{{variables.BASE_URL}}/v1/users",
+      port: "{{variables.PORT}}",
+      debug: "{{variables.IS_DEBUG}}",
+    };
+    const context = {
+      variables: {
+        BASE_URL: "https://api.internal",
+        PORT: 8080,
+        IS_DEBUG: true,
+      },
+    };
+
+    const resolved = resolveInput(input, context);
+    expect(resolved.endpoint).toBe("https://api.internal/v1/users");
+    expect(resolved.port).toBe(8080);
+    expect(resolved.debug).toBe(true);
+  });
+
+  it("substitutes suite variables {{variables.KEY}} in assertion expected templates", () => {
+    const context = {
+      variables: {
+        EXPECTED_ENV: "production",
+      },
+    };
+
+    const result = substituteInputTemplates(
+      "env is {{variables.EXPECTED_ENV}}",
+      { id: 1 },
+      context,
+    );
+    expect(result).toBe("env is production");
+  });
 });

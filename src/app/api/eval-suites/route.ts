@@ -36,6 +36,7 @@ const createSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
+    variables: z.record(z.string(), z.unknown()).optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
   })

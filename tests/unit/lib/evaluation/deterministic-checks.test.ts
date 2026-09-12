@@ -114,6 +114,26 @@ describe("runDeterministicChecks", () => {
     expect(result.passRate).toBe(1.0);
     expect(result.totalCount).toBe(0);
   });
+
+  it("injects variables into assertion evaluation (js_expression)", () => {
+    const assertions = [
+      {
+        type: "js_expression",
+        expression: "result.text.includes(variables.TARGET_PHRASE)",
+      },
+    ];
+    const result = runDeterministicChecks(assertions, {
+      agentText: "The quick brown fox jumps over the lazy dog.",
+      actualToolCalls: [],
+      metrics: BASE_METRICS,
+      variables: {
+        TARGET_PHRASE: "brown fox",
+      },
+    });
+    expect(result.passRate).toBe(1.0);
+    expect(result.passedCount).toBe(1);
+    expect(result.assertionResults[0]?.ok).toBe(true);
+  });
 });
 
 describe("formatChecksForPrompt", () => {

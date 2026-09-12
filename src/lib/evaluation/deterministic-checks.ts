@@ -38,6 +38,8 @@ export interface DeterministicCheckInput {
     outputTokens: number;
     toolCallCount: number;
   };
+  /** Suite-level literal variables for assertion evaluation */
+  variables?: Record<string, unknown>;
 }
 
 // ─── Output ─────────────────────────────────────────────────────────
@@ -106,6 +108,7 @@ export function runDeterministicChecks(
       actualToolCallNames: input.actualToolCalls,
       toolCalls: input.toolCalls,
       metrics: input.metrics,
+      variables: input.variables,
     });
 
     const assertionResults = outcome.deterministicResults;

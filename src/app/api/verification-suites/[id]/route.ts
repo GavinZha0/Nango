@@ -43,6 +43,7 @@ const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     description: z.string().max(1000).optional().nullable(),
+    variables: z.record(z.string(), z.unknown()).optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),
@@ -60,12 +61,13 @@ export const PATCH = withEditor<{ id: string }>(
       createdBy: suite.createdBy,
     };
 
-    // Content edits (name / description / timeout) vs flag edits
+    // Content edits (name / description / timeout / variables) vs flag edits
     // (enabled / visibility) use the two distinct permission gates,
     // matching the convention from skills / mcp / agent routes.
     const contentEdit =
       body.name !== undefined
       || body.description !== undefined
+      || body.variables !== undefined
       || body.timeoutSec !== undefined;
     const flagEdit =
       body.enabled !== undefined || body.visibility !== undefined;
@@ -88,6 +90,7 @@ export const PATCH = withEditor<{ id: string }>(
     const updates: Record<string, unknown> = { updatedBy: session.user.id };
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
+    if (body.variables !== undefined) updates.variables = body.variables;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
     if (body.timeoutSec !== undefined) updates.timeoutSec = body.timeoutSec;

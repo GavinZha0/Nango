@@ -52,6 +52,13 @@ Validated by Zod (`.strict()`). LLM-evaluated fields are sent to
 the evaluator; deterministic fields are verified by code;
 execution metrics are measured by the runner.
 
+**Suite Variables (Literal Variables)** — defined on `eval_suite.variables`.
+Literal variables (e.g. `TARGET_PHRASE`, `THRESHOLD`, `ENVIRONMENT`) are resolved
+at suite start and injected into `runDeterministicChecks` → `evaluateAssertions`:
+- In JS expression assertions: accessible via `variables.KEY` and bare `KEY`.
+- In JSONPath / template substitutions: accessible via `{{variables.KEY}}`.
+- Strict security boundary: `allowCredentials: false`. Credential variables are prohibited in Evaluation suites and fail closed with `status: "errored"` without calling any agent models.
+
 ---
 
 ## 3. Execution Flow

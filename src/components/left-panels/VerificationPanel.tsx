@@ -391,7 +391,13 @@ export function VerificationPanel(): ReactNode {
   const [runningSuiteId, setRunningSuiteId] = useState<string | null>(null);
 
   const [createSuiteOpen, setCreateSuiteOpen] = useState<boolean>(false);
-  const [editingSuite, setEditingSuite] = useState<{ id: string; name: string; serverName?: string } | null>(null);
+  const [editingSuite, setEditingSuite] = useState<{
+    id: string;
+    name: string;
+    description?: string | null;
+    variables?: Record<string, unknown>;
+    serverName?: string;
+  } | null>(null);
   const [deletingSuite, setDeletingSuite] = useState<VerificationSuiteRow | null>(null);
   const [deletingServer, setDeletingServer] = useState<ServerTreeGroup | null>(null);
   const [deleting, setDeleting] = useState<boolean>(false);
@@ -450,12 +456,17 @@ export function VerificationPanel(): ReactNode {
     }
   };
 
-  const handleSuiteSave = async (name: string): Promise<void> => {
+  const handleSuiteSave = async (updated: {
+    name: string;
+    description?: string | null;
+    variables?: Record<string, unknown>;
+  }): Promise<void> => {
     if (!editingSuite) return;
     try {
-      await verificationActions.patch(editingSuite.id, { name });
+      await verificationActions.patch(editingSuite.id, updated);
       void mutateSuites();
       toast.success("Suite updated");
+      setEditingSuite(null);
     } catch {
       toast.error("Failed to update suite");
     }
@@ -613,6 +624,8 @@ export function VerificationPanel(): ReactNode {
                   setEditingSuite({
                     id: suite.id,
                     name: suite.name,
+                    description: suite.description,
+                    variables: suite.variables,
                     serverName: group.serverTitle || group.name,
                   })
                 }

@@ -31,6 +31,7 @@ import {
   normalizeCaseName,
   extractMcpStructuredData,
 } from "@/lib/verification/resolve-input";
+import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import type {
   AssertionSpec,
   CaseExecutionOutcome,
@@ -278,12 +279,41 @@ async function runSuiteCases(
   const timeoutMs: number = input.timeoutSec * 1000;
   let currentSuiteId: string | null = null;
   let suiteContext: Record<string, unknown> = {};
+  let suiteLiteralVariables: Record<string, unknown> = {};
+  let suiteResolveError: { source: "config"; message: string } | null = null;
 
   for (const c of input.cases) {
     // Reset context whenever crossing suite boundaries to guarantee strict suite isolation
     if (c.suiteId !== currentSuiteId) {
       currentSuiteId = c.suiteId;
       suiteContext = {};
+      const { literalVariables, error } = await resolveSuiteVariables(
+        c.suiteVariables,
+        { allowCredentials: false },
+      );
+      suiteLiteralVariables = literalVariables;
+      suiteResolveError = error;
+    }
+
+    if (suiteResolveError) {
+      const outcome: CaseExecutionOutcome = {
+        status: "errored",
+        resolvedInput: (c.input ?? {}) as Record<string, unknown>,
+        resultPayload: null,
+        resultTruncated: false,
+        assertionResults: [],
+        error: suiteResolveError,
+        startedAt: Date.now(),
+        durationMs: 0,
+      };
+      await persistAndPublish({
+        ownerId: input.ownerId,
+        runId: input.runId,
+        caseId: c.id,
+        outcome,
+      });
+      counters.erroredCount += 1;
+      continue;
     }
 
     // Wall-clock check before each case — keeps the "remaining
@@ -355,12 +385,15 @@ async function runSuiteCases(
       perCaseCapMs,
       rawInput: (c.input ?? {}) as Record<string, unknown>,
       runner: () =>
-        runMcpCase({
-          mcpServerId: c.mcpServerId!,
-          toolName: c.toolName!,
-          input: (c.input ?? {}) as Record<string, unknown>,
-          assertions: (c.assertions ?? []) as readonly AssertionSpec[],
-        }, { cases: suiteContext }),
+        runMcpCase(
+          {
+            mcpServerId: c.mcpServerId!,
+            toolName: c.toolName!,
+            input: (c.input ?? {}) as Record<string, unknown>,
+            assertions: (c.assertions ?? []) as readonly AssertionSpec[],
+          },
+          { cases: suiteContext, variables: suiteLiteralVariables },
+        ),
     });
 
     await persistAndPublish({

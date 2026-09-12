@@ -39,6 +39,7 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
       mcpServerName: VerificationSuiteTable.mcpServerName,
       workflowId: VerificationSuiteTable.workflowId,
       visibility: VerificationSuiteTable.visibility,
+      variables: VerificationSuiteTable.variables,
       enabled: VerificationSuiteTable.enabled,
       timeoutSec: VerificationSuiteTable.timeoutSec,
       createdBy: VerificationSuiteTable.createdBy,
@@ -80,6 +81,7 @@ const createSchema = z
     description: z.string().max(1000).optional().nullable(),
     category: z.literal("mcp").optional().default("mcp"),
     mcpServerId: z.string().uuid().optional().nullable(),
+    variables: z.record(z.string(), z.unknown()).optional(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),
   })
@@ -115,6 +117,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         mcpServerId: body.mcpServerId ?? null,
         mcpServerName,
         workflowId: null,
+        variables: body.variables ?? {},
         visibility: body.visibility ?? "private",
         timeoutSec: body.timeoutSec ?? 300,
         createdBy: session.user.id,

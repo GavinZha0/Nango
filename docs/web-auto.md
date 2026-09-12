@@ -126,6 +126,21 @@ subsystem (shared with Verification and Evaluation) — see `docs/verification.m
 * **Boot Scan (`recoverStrandedWebAutoRuns`)**: Executed on server startup via `src/instrumentation.ts`.
 * **Zombie Sweep**: Queries all `web_auto_run` records with `status = 'running'` started prior to the server boot timestamp, transitions them to `errored`, logs diagnostics, and emits recovery notifications.
 
+### 3.6 Suite Variables & Credential Security Pipeline
+Web Auto is the only test subsystem permitted to reference credentials for real-world automated authentication (e.g. login automation):
+* **Integration Credentials Only**: Limited strictly to `serviceType === "integration"`. LLM provider keys and agent backend secrets are physically blocked.
+* **IIFE Closure Injection**: Variables are injected directly into the script scope using an IIFE:
+  ```javascript
+  (() => {
+    const variables = Object.freeze(${JSON.stringify(resolvedVariables)});
+    return (${scriptContent});
+  })()
+  ```
+  No context variables are passed into external MCP server payloads, eliminating server-side context leakage.
+* **Earliest Sanitization**: Immediately after MCP execution completes, `executionOutput` and `error` are redacted against all discovered secrets (`sensitiveValues`). This occurs *prior* to assertion evaluation and LLM evaluator dispatch.
+* **Assertion Division of Rights (`literalVariables`)**: `evaluateAssertions` receives strictly `literalVariables`. Credential secrets never reach assertion diffs or sandbox scopes.
+* **Evaluator Feedback Redaction**: Feedback and expectation reasons returned by the Evaluator Agent are sanitized before persisting to `web_auto_case_result` and returning to the frontend.
+
 ---
 
 ## 4. End-to-End Workflows

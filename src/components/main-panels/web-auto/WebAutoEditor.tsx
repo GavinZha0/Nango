@@ -555,6 +555,28 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   >
                     {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                   </Button>
+                  <Button
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
+                    onClick={() => void handleRunCase()}
+                    title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
+                    data-testid="run-case-button"
+                  >
+                    {running ? (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Play
+                        className={cn(
+                          "mr-1.5 h-3 w-3",
+                          selectedSuite?.mcpServerId
+                            ? "fill-green-500 text-green-500"
+                            : "fill-muted-foreground text-muted-foreground"
+                        )}
+                      />
+                    )}
+                    Run
+                  </Button>
                 </div>
               </div>
 
@@ -568,7 +590,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                           spellCheck={false}
                           value={draftScript}
                           onChange={(e) => setDraftScript(e.target.value)}
-                          placeholder={`// playwright script\nasync (page) => {\n  await page.goto('https://www.example.com/');\n  return { success: true };\n}`}
+                          placeholder={`// Playwright script (access suite variables via variables.<key>)\nasync (page) => {\n  const url = variables?.baseUrl ?? 'https://example.com/login';\n  await page.goto(url);\n\n  // Use suite variables (e.g. literal username or credential password)\n  if (variables?.username && variables?.password) {\n    await page.fill('input[name="username"]', variables.username);\n    await page.fill('input[name="password"]', variables.password);\n    await page.click('button[type="submit"]');\n  }\n\n  return { success: true, url: page.url() };\n}`}
                           data-testid="web-auto-script-textarea"
                         />
                       ) : (
@@ -629,57 +651,33 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     )}
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  {displayOutcome && (
-                    <>
-                      {inHistoryView && selectedRunSeq !== null && (
-                        <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
-                          (#{selectedRunSeq} - {runSnapshot?.run?.startedAt ? formatHistoricalTimestamp(runSnapshot.run.startedAt) : ""})
-                        </span>
-                      )}
-                      {typeof displayOutcome.durationMs === "number" && !isNaN(displayOutcome.durationMs) && displayOutcome.durationMs > 0 && (
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {displayOutcome.durationMs >= 1000
-                            ? `${(displayOutcome.durationMs / 1000).toFixed(1)}s`
-                            : `${displayOutcome.durationMs}ms`}
-                        </span>
-                      )}
-                      <span
-                        className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                          displayOutcome.status === "passed"
-                            ? "bg-green-500/10 text-green-500 border border-green-500/20"
-                            : displayOutcome.status === "failed"
-                            ? "bg-destructive/10 text-destructive border border-destructive/20"
-                            : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                        }`}
-                      >
-                        {displayOutcome.status.toUpperCase()}
+                {displayOutcome && (
+                  <div className="flex items-center gap-2">
+                    {inHistoryView && selectedRunSeq !== null && (
+                      <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
+                        (#{selectedRunSeq} - {runSnapshot?.run?.startedAt ? formatHistoricalTimestamp(runSnapshot.run.startedAt) : ""})
                       </span>
-                    </>
-                  )}
-                  <Button
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
-                    onClick={() => void handleRunCase()}
-                    title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
-                    data-testid="run-case-button"
-                  >
-                    {running ? (
-                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                    ) : (
-                      <Play
-                        className={cn(
-                          "mr-1.5 h-3 w-3",
-                          selectedSuite?.mcpServerId
-                            ? "fill-green-500 text-green-500"
-                            : "fill-muted-foreground text-muted-foreground"
-                        )}
-                      />
                     )}
-                    Run
-                  </Button>
-                </div>
+                    {typeof displayOutcome.durationMs === "number" && !isNaN(displayOutcome.durationMs) && displayOutcome.durationMs > 0 && (
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        {displayOutcome.durationMs >= 1000
+                          ? `${(displayOutcome.durationMs / 1000).toFixed(1)}s`
+                          : `${displayOutcome.durationMs}ms`}
+                      </span>
+                    )}
+                    <span
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                        displayOutcome.status === "passed"
+                          ? "bg-green-500/10 text-green-500 border border-green-500/20"
+                          : displayOutcome.status === "failed"
+                          ? "bg-destructive/10 text-destructive border border-destructive/20"
+                          : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                      }`}
+                    >
+                      {displayOutcome.status.toUpperCase()}
+                    </span>
+                  </div>
+                )}
               </div>
               
               <div className="grid h-full grid-rows-[calc(50%-1rem)_calc(50%+1rem)] min-w-0 flex-1 overflow-hidden">

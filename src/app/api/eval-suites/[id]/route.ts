@@ -33,6 +33,7 @@ const updateSchema = z
     description: z.string().max(1000).optional().nullable(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
+    variables: z.record(z.string(), z.unknown()).optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
   })
@@ -53,7 +54,8 @@ export const PATCH = withEditor<{ id: string }>(
       body.name !== undefined ||
       body.description !== undefined ||
       body.evaluatorAgentId !== undefined ||
-      body.dimensionIds !== undefined;
+      body.dimensionIds !== undefined ||
+      body.variables !== undefined;
 
     if (contentEdit && !canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this eval suite.");

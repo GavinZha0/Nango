@@ -7,6 +7,7 @@ import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { canEditResource } from "@/lib/auth/permissions";
 import { loadVisibleCase } from "@/lib/verification/access";
 import { runMcpCase } from "@/lib/verification/runner-mcp";
+import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import type { AssertionSpec } from "@/lib/verification/types";
 
 const ROUTE = "/api/verification-cases/[id]/run";
@@ -50,12 +51,33 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    const outcome = await runMcpCase({
-      mcpServerId: suite.mcpServerId,
-      toolName: caseRow.toolName,
-      input: (caseRow.input ?? {}) as Record<string, unknown>,
-      assertions: (caseRow.assertions ?? []) as readonly AssertionSpec[],
-    });
+    const { literalVariables, error: resolveError } = await resolveSuiteVariables(
+      suite.variables,
+      { allowCredentials: false },
+    );
+
+    if (resolveError) {
+      return NextResponse.json({
+        status: "errored",
+        resolvedInput: (caseRow.input ?? {}) as Record<string, unknown>,
+        resultPayload: null,
+        resultTruncated: false,
+        assertionResults: [],
+        error: resolveError,
+        startedAt: Date.now(),
+        durationMs: 0,
+      });
+    }
+
+    const outcome = await runMcpCase(
+      {
+        mcpServerId: suite.mcpServerId,
+        toolName: caseRow.toolName,
+        input: (caseRow.input ?? {}) as Record<string, unknown>,
+        assertions: (caseRow.assertions ?? []) as readonly AssertionSpec[],
+      },
+      { variables: literalVariables },
+    );
 
     return NextResponse.json(outcome);
   },

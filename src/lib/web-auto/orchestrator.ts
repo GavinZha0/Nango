@@ -16,6 +16,8 @@ import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { recordRunNotification } from "@/lib/runner/notifications";
 import { evaluateAssertions, REASON_EVALUATOR_NOT_CONFIGURED } from "@/lib/assertions";
+import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
+import { redactSensitiveData, redactErrorEnvelope } from "@/lib/testing/redact";
 import { runWebAutoMcp } from "./runner-mcp";
 import { runWebAutoEvaluation } from "./evaluator";
 import * as storage from "./storage";
@@ -99,34 +101,81 @@ export async function runWebAutoCase(
     };
   }
 
-  const suiteVariables = (input.suite.variables ?? undefined) as
-    | Record<string, unknown>
-    | undefined;
+  // Step 1: Resolve suite variables with credential support
+  const {
+    resolved: resolvedVariables,
+    literalVariables,
+    sensitiveValues,
+    error: resolveError,
+  } = await resolveSuiteVariables(input.suite.variables ?? {}, {
+    allowCredentials: true,
+  });
 
+  if (resolveError) {
+    const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
+      index: 0,
+      type: "error",
+      ok: false,
+      errorSource: resolveError.source ?? "config",
+      message: resolveError.message,
+    };
+    return {
+      status: "errored",
+      executionOutput: null,
+      outputTruncated: false,
+      assertionResults: [errorAssertionResult],
+      verdict: {
+        deterministic: { passed: false, results: [] },
+        overall: { passed: false, reason: resolveError.message },
+      },
+      error: resolveError,
+      startedAt,
+      durationMs: 0,
+    };
+  }
+
+  // Step 2: Wrap script with IIFE and inject resolved variables
+  const scriptWithVariables = `(() => {
+  const variables = Object.freeze(${JSON.stringify(resolvedVariables)});
+  return (${scriptContent.trim()});
+})()`;
+
+  // Step 3: MCP execution (Playwright script)
   const mcpResult = await runWebAutoMcp({
     mcpServerId: input.suite.mcpServerId,
-    scriptContent,
-    variables: suiteVariables,
+    scriptContent: scriptWithVariables,
   });
+
+  // ★ Earliest Sanitization ★
+  // Immediately mask secrets in output and error envelope BEFORE assertion evaluation
+  // and LLM prompt construction to eliminate downstream credential leakage.
+  const sanitizedOutput = redactSensitiveData(
+    mcpResult.executionOutput,
+    sensitiveValues,
+  );
+  const sanitizedMcpError = redactErrorEnvelope(
+    mcpResult.error,
+    sensitiveValues,
+  );
 
   if (mcpResult.status === "errored") {
     const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
       index: 0,
       type: "error",
       ok: false,
-      errorSource: mcpResult.error?.source ?? "internal",
-      message: mcpResult.error?.message ?? "MCP execution failed",
+      errorSource: sanitizedMcpError?.source ?? "internal",
+      message: sanitizedMcpError?.message ?? "MCP execution failed",
     };
     return {
       status: "errored",
-      executionOutput: mcpResult.executionOutput,
+      executionOutput: sanitizedOutput,
       outputTruncated: false,
       assertionResults: [errorAssertionResult],
       verdict: {
         deterministic: { passed: false, results: [] },
         overall: { passed: false, reason: "MCP execution failed" },
       },
-      error: mcpResult.error,
+      error: sanitizedMcpError,
       startedAt,
       durationMs: mcpResult.durationMs,
     };
@@ -137,28 +186,29 @@ export async function runWebAutoCase(
       index: 0,
       type: "error",
       ok: false,
-      errorSource: mcpResult.error?.source ?? "upstream",
-      message: mcpResult.error?.message ?? "Playwright execution returned error",
+      errorSource: sanitizedMcpError?.source ?? "upstream",
+      message: sanitizedMcpError?.message ?? "Playwright execution returned error",
     };
     return {
       status: "failed",
-      executionOutput: mcpResult.executionOutput,
+      executionOutput: sanitizedOutput,
       outputTruncated: false,
       assertionResults: [errorAssertionResult],
       verdict: {
         deterministic: { passed: false, results: [] },
         overall: { passed: false, reason: "Playwright execution returned error" },
       },
-      error: mcpResult.error,
+      error: sanitizedMcpError,
       startedAt,
       durationMs: mcpResult.durationMs,
     };
   }
 
-  // Step 2: Evaluate assertions using universal engine
+  // Step 4: Evaluate assertions using universal engine
+  // Pass literalVariables ONLY so credentials never leak into assertion error diffs or LLM evaluators
   const assertions = (input.case.assertions ?? []) as readonly import("@/lib/assertions").AssertionSpec[];
-  const outcome = evaluateAssertions(mcpResult.executionOutput, assertions, {
-    variables: suiteVariables,
+  const outcome = evaluateAssertions(sanitizedOutput, assertions, {
+    variables: literalVariables,
   });
 
   const deterministicResult = {
@@ -170,7 +220,8 @@ export async function runWebAutoCase(
   const evaluatorAgentId = input.suite.evaluatorAgentId;
   const evaluatorConfigured = evaluatorAgentId !== null;
 
-  // Step 3: LLM evaluation (if configured and expectations exist)
+  // Step 5: LLM evaluation (if configured and expectations exist)
+  // Consumes sanitizedOutput to ensure secret values are never sent to external LLM providers
   let llmResult: import("./evaluator").WebAutoEvaluationResult | null = null;
 
   if (evaluatorAgentId && llmRequired) {
@@ -186,7 +237,7 @@ export async function runWebAutoCase(
       try {
         const evalResult = await runWebAutoEvaluation({
           evaluatorAgentId,
-          executionOutput: mcpResult.executionOutput,
+          executionOutput: sanitizedOutput,
           expectations,
           ownerId: input.ownerId,
         });
@@ -214,9 +265,20 @@ export async function runWebAutoCase(
     }
   }
 
-  // Step 4: Merge unified assertionResults array (1:1 with input assertions)
+  // Step 6: Merge unified assertionResults array (1:1 with input assertions)
+  // Ensure LLM feedback is also sanitized in case the LLM echoed any secrets
+  const sanitizedFeedback = llmResult?.feedback
+    ? redactSensitiveData(llmResult.feedback, sensitiveValues)
+    : undefined;
+
+  const rawAssertionResults = deterministicResult.results ?? [];
+  const sanitizedDeterministicResults = redactSensitiveData(
+    rawAssertionResults,
+    sensitiveValues,
+  );
+
   const unifiedAssertionResults: import("@/lib/assertions").AssertionResult[] = [
-    ...(deterministicResult.results ?? []),
+    ...(sanitizedDeterministicResults ?? []),
   ];
 
   if (outcome.llmAssertions.length > 0) {
@@ -248,7 +310,10 @@ export async function runWebAutoCase(
         llmResult.expectationResults?.[i];
 
       const itemScore = expRes?.score ?? llmResult.score ?? undefined;
-      const itemReason = expRes?.reason || llmResult.feedback;
+      const rawReason = expRes?.reason || llmResult.feedback;
+      const itemReason = rawReason
+        ? redactSensitiveData(rawReason, sensitiveValues)
+        : undefined;
 
       unifiedAssertionResults.push({
         ...base,
@@ -260,6 +325,11 @@ export async function runWebAutoCase(
     });
     unifiedAssertionResults.sort((a, b) => a.index - b.index);
   }
+
+  const sanitizedUnifiedAssertionResults = redactSensitiveData(
+    unifiedAssertionResults,
+    sensitiveValues,
+  );
 
   // ── Status & error classification ─────────────────────────────────────
   //
@@ -299,14 +369,20 @@ export async function runWebAutoCase(
   const verdict: WebAutoVerdict = {
     deterministic: {
       passed: deterministicResult.passed,
-      results: deterministicResult.results,
+      results: sanitizedDeterministicResults,
     },
     llm: llmResult
       ? {
           passed: llmResult.passed,
           score: llmResult.score,
-          feedback: llmResult.feedback,
-          expectationResults: llmResult.expectationResults,
+          feedback: sanitizedFeedback,
+          expectationResults: llmResult.expectationResults.map((r) => ({
+            ...r,
+            reason: redactSensitiveData(r.reason, sensitiveValues),
+            feedback: r.feedback
+              ? redactSensitiveData(r.feedback, sensitiveValues)
+              : undefined,
+          })),
         }
       : undefined,
     overall: {
@@ -328,11 +404,11 @@ export async function runWebAutoCase(
 
   return {
     status,
-    executionOutput: mcpResult.executionOutput,
+    executionOutput: sanitizedOutput,
     outputTruncated: false,
-    assertionResults: unifiedAssertionResults,
+    assertionResults: sanitizedUnifiedAssertionResults,
     score: finalScore,
-    feedback: llmResult?.feedback,
+    feedback: sanitizedFeedback,
     verdict,
     error: statusError,
     startedAt,

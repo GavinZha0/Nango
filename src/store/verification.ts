@@ -16,6 +16,7 @@ export interface VerificationSuiteRow {
    *  suites in the left panel after their server row is gone. */
   mcpServerName: string | null;
   visibility: VerificationVisibility;
+  variables?: Record<string, unknown>;
   enabled: boolean;
   timeoutSec: number;
   createdBy: string;
@@ -132,6 +133,7 @@ export interface CreateSuiteInput {
   description?: string | null;
   category?: VerificationCategory;
   mcpServerId?: string | null;
+  variables?: Record<string, unknown>;
   visibility?: VerificationVisibility;
   timeoutSec?: number;
 }
@@ -139,6 +141,7 @@ export interface CreateSuiteInput {
 export interface PatchSuiteInput {
   name?: string;
   description?: string | null;
+  variables?: Record<string, unknown>;
   visibility?: VerificationVisibility;
   enabled?: boolean;
   timeoutSec?: number;

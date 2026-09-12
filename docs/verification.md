@@ -49,7 +49,7 @@ Four new tables. Nothing in the existing schema changes.
 
 | Table | Purpose | Key Columns |
 |---|---|---|
-| `verification_suite` | Groups cases. | `id`, `name`, `category` ('mcp'), `mcp_server_id` (FK **SET NULL**), `mcp_server_name` (denormalized display snapshot), `timeout_sec` |
+| `verification_suite` | Groups cases. | `id`, `name`, `category` ('mcp'), `variables` (jsonb), `mcp_server_id` (FK **SET NULL**), `mcp_server_name` (denormalized display snapshot), `timeout_sec` |
 | `verification_case` | An individual test case. | `id`, `suite_id` (FK cascade), `tool_name`, `input`, `assertions` |
 | `verification_run` | A suite execution. | `id`, `suite_id` (FK cascade), `mcp_server_id` (FK **SET NULL**), `status`, counts (`passed`, `failed`, etc.) |
 | `verification_case_result`| Outcome of a case. | `id`, `verification_run_id`, `verification_case_id`, `status`, `input_snapshot`, `result_payload`, `assertion_results`, `error` |
@@ -160,6 +160,13 @@ There is a key semantic difference between how assertions and cross-case referen
 - **Contiguity Guarantee in Server Runs**: When executing all suites under an MCP server, cases are ordered by `(suiteName, suiteId, caseName)`. Even if multiple users define suites with the same name, all cases of a given suite execute contiguously without cross-suite interleaving.
 - **Context Reset on Suite Boundary**: Crossing into a new suite immediately clears the context: `suiteContext = {}`. This prevents state leakage or accidental cross-suite variable contamination.
 - **Failure Forensics (`unresolvedReferences`)**: Unresolved template placeholders remain as literals in input payloads. If a case execution fails or throws, the runner scans inputs for residual `{{cases...}}` tokens and populates `error.details.unresolvedReferences` (e.g. `["{{cases.010.output.token}}"]`), providing immediate diagnostic visibility.
+
+### 6.5 Suite Variables (Literal Variables)
+Verification suites support defining suite-level literal variables (e.g. `BASE_URL`, `PORT`, `API_VERSION`) via `verification_suite.variables`:
+- **Template Substitution in Case Input**: Case tool inputs can reference variables using `{{variables.KEY}}` (handled via `resolveInput`).
+- **Template Substitution in Assertions**: Assertion expected values can reference variables using `{{variables.KEY}}` (handled via `substituteInputTemplates`).
+- **JS Expression Assertion Support**: Variables are exposed directly to the `node:vm` execution context (`variables.KEY` and top-level `KEY`).
+- **Strict Security Boundary (allowCredentials: false)**: Credential variables are prohibited in Verification suites. If a credential variable definition is detected (via DB or API bypass), variable resolution fails closed immediately, reporting `status: "errored"` with `error.source: "config"` without calling any MCP tools.
 
 ## 7. API Routes
 

@@ -13,6 +13,7 @@ import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { loadCase } from "@/lib/evaluation/access";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
+import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import type { AssertionSpec } from "@/lib/assertions";
 import type { EvalTurn } from "@/lib/evaluation/types";
 
@@ -45,6 +46,20 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
+    const { literalVariables, error: resolveError } = await resolveSuiteVariables(
+      suite.variables,
+      { allowCredentials: false },
+    );
+
+    if (resolveError) {
+      return NextResponse.json({
+        status: "errored",
+        score: null,
+        error: resolveError.message,
+        feedback: resolveError.message,
+      });
+    }
+
     const caseInput = (caseRow.input ?? {}) as Record<string, unknown>;
     const turns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
     const assertions = (Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as AssertionSpec[];
@@ -59,6 +74,7 @@ export const POST = withEditor<{ id: string }>(
       turns,
       assertions,
       ownerId: session.user.id,
+      variables: literalVariables,
     });
 
     return NextResponse.json(outcome);

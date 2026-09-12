@@ -25,6 +25,7 @@ export interface EvalSuiteRow {
   name: string;
   description: string | null;
   dimensionIds: string[];
+  variables?: Record<string, unknown>;
   enabled: boolean;
   visibility: "private" | "public";
   createdBy: string;
@@ -110,21 +111,23 @@ export const useEvaluationStore = create<EvaluationState>()((set) => ({
       if (idx === -1) bucket.unshift(item);
       else bucket[idx] = item;
       bucket.sort((a, b) => a.name.localeCompare(b.name));
-      return { suitesByAgent: { ...s.suitesByAgent, [key]: bucket } };
+      return {
+        suitesByAgent: { ...s.suitesByAgent, [key]: bucket },
+      };
     }),
   removeSuite: (id) =>
     set((s) => {
       const next: Record<string, EvalSuiteRow[]> = {};
-      for (const [key, list] of Object.entries(s.suitesByAgent)) {
-        next[key] = list.filter((it) => it.id !== id);
+      for (const [k, v] of Object.entries(s.suitesByAgent)) {
+        next[k] = v.filter((it) => it.id !== id);
       }
       return { suitesByAgent: next };
     }),
   bumpCaseCount: (suiteId, delta) =>
     set((s) => {
       const next: Record<string, EvalSuiteRow[]> = {};
-      for (const [key, list] of Object.entries(s.suitesByAgent)) {
-        next[key] = list.map((it) =>
+      for (const [k, v] of Object.entries(s.suitesByAgent)) {
+        next[k] = v.map((it) =>
           it.id === suiteId
             ? { ...it, caseCount: Math.max(0, it.caseCount + delta) }
             : it,
@@ -144,6 +147,7 @@ export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   dimensionIds?: string[];
+  variables?: Record<string, unknown>;
 }
 
 export interface PatchSuiteInput {
@@ -151,6 +155,7 @@ export interface PatchSuiteInput {
   description?: string | null;
   evaluatorAgentId?: string | null;
   dimensionIds?: string[];
+  variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "private" | "public";
 }

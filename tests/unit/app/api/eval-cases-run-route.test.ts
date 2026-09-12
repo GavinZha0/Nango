@@ -178,4 +178,60 @@ describe("POST /api/eval-cases/[id]/run", () => {
       }),
     );
   });
+
+  it("6. passes literal variables from suite to runEvalCase", async () => {
+    getSessionMock.mockResolvedValue({
+      user: editorUser,
+      session: { id: "sess-1", userId: editorUser.id },
+    });
+
+    loadCaseMock.mockResolvedValue({
+      caseRow: sampleCase,
+      suite: {
+        ...sampleSuite,
+        variables: {
+          API_BASE: { type: "literal", value: "https://api.test.internal" },
+        },
+      },
+    });
+
+    runEvalCaseMock.mockResolvedValue({
+      status: "passed",
+      score: 100,
+      assertionScore: 100,
+      feedback: "All passed",
+    });
+
+    const res = await POST(makeRequest("42"), { params: Promise.resolve({ id: "42" }) });
+    expect(res.status).toBe(200);
+    expect(runEvalCaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: { API_BASE: "https://api.test.internal" },
+      }),
+    );
+  });
+
+  it("7. fails closed with errored status if suite contains credential variable", async () => {
+    getSessionMock.mockResolvedValue({
+      user: editorUser,
+      session: { id: "sess-1", userId: editorUser.id },
+    });
+
+    loadCaseMock.mockResolvedValue({
+      caseRow: sampleCase,
+      suite: {
+        ...sampleSuite,
+        variables: {
+          ILLEGAL_CRED: { type: "credential", credentialId: "c-1", field: "key" },
+        },
+      },
+    });
+
+    const res = await POST(makeRequest("42"), { params: Promise.resolve({ id: "42" }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("errored");
+    expect(data.error).toContain("Credential variables are not permitted in this suite type");
+    expect(runEvalCaseMock).not.toHaveBeenCalled();
+  });
 });

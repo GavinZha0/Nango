@@ -12,7 +12,7 @@ import { decrypt } from "./crypto";
 import { logger } from "@/lib/observability/logger";
 import { isSupportedBackend } from "@/lib/backends/types";
 import type { BackendId } from "@/lib/backends/types";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 
 // Types
 
@@ -57,6 +57,7 @@ export interface CredentialFieldsConfig {
    *  flow). DB rows with an unrecognized type fall back to `"api_key"` so
    *  consumers never see an out-of-range value. */
   type: CredentialType;
+  serviceType?: string;
   provider: string | null;
   restUrl: string | null;
   /** Empty record if decryption failed. */
@@ -427,6 +428,7 @@ export async function getCredentialFieldsById(
     .select({
       id: CredentialTable.id,
       type: CredentialTable.type,
+      serviceType: CredentialTable.serviceType,
       encryptedPayload: CredentialTable.encryptedPayload,
       restUrl: CredentialTable.restUrl,
       provider: CredentialTable.provider,
@@ -455,6 +457,7 @@ export async function getCredentialFieldsById(
   const config: CredentialFieldsConfig = {
     id: row.id,
     type: narrowedType,
+    serviceType: row.serviceType,
     provider: row.provider ?? null,
     restUrl: row.restUrl ?? null,
     fields: decryptPayloadSafely(row.encryptedPayload) ?? {},
@@ -611,4 +614,47 @@ export async function getEnabledInfrastructureCredentialByProvider(
     host: host ?? null,
     apiKey: apiKey ?? null,
   };
+}
+
+export interface CredentialSelectorItem {
+  id: string;
+  name: string;
+  provider: string;
+  type: string;
+  fields: string[];
+}
+
+/**
+ * List enabled credentials with serviceType="integration" for suite variable picker.
+ * Returns only decrypted field keys (no secret values).
+ */
+export async function listIntegrationCredentialsForSelector(): Promise<CredentialSelectorItem[]> {
+  const rows = await db
+    .select({
+      id: CredentialTable.id,
+      name: CredentialTable.name,
+      provider: CredentialTable.provider,
+      type: CredentialTable.type,
+      encryptedPayload: CredentialTable.encryptedPayload,
+    })
+    .from(CredentialTable)
+    .where(
+      and(
+        eq(CredentialTable.enabled, true),
+        eq(CredentialTable.serviceType, "integration"),
+        eq(CredentialTable.provider, "testing"),
+      ),
+    )
+    .orderBy(asc(CredentialTable.name));
+
+  return rows.map((r) => {
+    const fieldsObj = decryptPayloadSafely(r.encryptedPayload) ?? {};
+    return {
+      id: r.id,
+      name: r.name,
+      provider: r.provider ?? "testing",
+      type: r.type,
+      fields: Object.keys(fieldsObj),
+    };
+  });
 }

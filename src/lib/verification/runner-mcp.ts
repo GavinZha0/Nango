@@ -155,8 +155,11 @@ export async function runMcpCase(
     }
 
     const mcpIsError = isMcpIsError(raw);
+    const variables =
+      (runContext?.variables as Record<string, unknown> | undefined) ?? {};
     const outcome = evaluateAssertions(raw, input.assertions, {
       input: resolvedInput,
+      variables,
       runContext,
     });
     const assertionResults = outcome.deterministicResults;
