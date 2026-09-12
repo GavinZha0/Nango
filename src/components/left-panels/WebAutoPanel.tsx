@@ -144,6 +144,7 @@ function TargetGroupNode({
   return (
     <div
       data-testid="target-group"
+      data-group-node="true"
       data-target-id={target.id}
       data-target-name={target.name}
       className="select-none border-b border-border/40 last:border-0"

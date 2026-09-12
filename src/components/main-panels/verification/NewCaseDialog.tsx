@@ -346,11 +346,13 @@ export function NewCaseDialog({
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {servers.map((s) => (
-                      <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
-                        {s.serverTitle || s.name}
-                      </SelectItem>
-                    ))}
+                    {servers
+                      .filter((s) => s.enabled)
+                      .map((s) => (
+                        <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
+                          {s.serverTitle || s.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               )}

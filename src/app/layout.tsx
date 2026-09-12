@@ -44,11 +44,11 @@ export default function RootLayout({
           <Toaster
             richColors
             closeButton
-            position="top-center"
-            duration={10000}
+            position="bottom-right"
+            duration={5000}
             toastOptions={{
               style: {
-                width: "560px",
+                width: "380px",
               },
             }}
           />

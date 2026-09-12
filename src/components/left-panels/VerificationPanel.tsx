@@ -212,6 +212,7 @@ function ServerGroupNode({
   return (
     <div
       data-testid="server-group"
+      data-group-node="true"
       data-server-id={group.id}
       data-name={displayName}
       className="select-none border-b border-border/40 last:border-0"

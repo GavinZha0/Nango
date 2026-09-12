@@ -27,7 +27,7 @@ editorTest.describe("Web Auto Page", () => {
       await expect(page.getByTestId("new-suite-button")).toBeVisible();
       await expect(page.getByTestId("refresh-suites-button")).toBeVisible();
 
-      // Target group node for Base-WebAuto-Target
+      // Target group node for Base-WebAuto-e2e-Target
       await ensureTargetExpanded(page, BASE_NAMES.webAutoTarget);
 
       // Seeded Base Web Auto Suite row
@@ -148,17 +148,10 @@ editorTest.describe("Web Auto Page", () => {
       await scriptTextarea.fill("async (page) => { return { ephemeral: true }; }");
       await expect(page.getByTestId("save-case-button")).toBeEnabled();
 
-      // Dismiss any toasts that might overlay buttons
-      const toastCloseButtons = page.locator('[data-sonner-toast] [data-close-button]');
-      const toastCount = await toastCloseButtons.count();
-      for (let i = 0; i < toastCount; i++) {
-        await toastCloseButtons.nth(i).click().catch(() => {});
-      }
-
       const patchPromise = page.waitForResponse(
         (res) => res.url().includes("/api/web-auto-cases/") && res.request().method() === "PATCH",
       );
-      await page.getByTestId("save-case-button").dispatchEvent("click");
+      await page.getByTestId("save-case-button").click();
       const patchResp = await patchPromise;
       expect(patchResp.ok()).toBeTruthy();
       await expect(page.getByTestId("save-case-button")).toBeDisabled();

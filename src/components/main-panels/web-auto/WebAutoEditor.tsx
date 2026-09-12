@@ -517,13 +517,13 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         />
 
         <div className="grid h-full grid-cols-2 min-w-0 overflow-hidden">
-            <div className="flex min-h-0 flex-col min-w-0 border-r border-border/60">
+            <div className="relative z-10 flex min-h-0 flex-col min-w-0 border-r border-border/60">
               <div className="flex items-stretch border-b bg-muted/40 pr-1.5 h-8 shrink-0">
                 <button
                   type="button"
                   onClick={() => setInputTab("script")}
                   data-testid="script-tab"
-                  className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                  className={`px-2 py-1 text-xs font-medium border-b-2 transition-colors ${
                     inputTab === "script"
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -535,7 +535,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   type="button"
                   onClick={() => setInputTab("steps")}
                   data-testid="steps-tab"
-                  className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                  className={`px-2 py-1 text-xs font-medium border-b-2 transition-colors ${
                     inputTab === "steps"
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -554,28 +554,6 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     data-testid="save-case-button"
                   >
                     {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
-                    onClick={() => void handleRunCase()}
-                    title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
-                    data-testid="run-case-button"
-                  >
-                    {running ? (
-                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                    ) : (
-                      <Play
-                        className={cn(
-                          "mr-1.5 h-3 w-3",
-                          selectedSuite?.mcpServerId
-                            ? "fill-green-500 text-green-500"
-                            : "fill-muted-foreground text-muted-foreground"
-                        )}
-                      />
-                    )}
-                    Run
                   </Button>
                 </div>
               </div>
@@ -651,33 +629,57 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     )}
                   </button>
                 </div>
-                {displayOutcome && (
-                  <div className="flex items-center gap-2">
-                    {inHistoryView && selectedRunSeq !== null && (
-                      <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
-                        (#{selectedRunSeq} - {runSnapshot?.run?.startedAt ? formatHistoricalTimestamp(runSnapshot.run.startedAt) : ""})
+                <div className="flex items-center gap-2">
+                  {displayOutcome && (
+                    <>
+                      {inHistoryView && selectedRunSeq !== null && (
+                        <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
+                          (#{selectedRunSeq} - {runSnapshot?.run?.startedAt ? formatHistoricalTimestamp(runSnapshot.run.startedAt) : ""})
+                        </span>
+                      )}
+                      {typeof displayOutcome.durationMs === "number" && !isNaN(displayOutcome.durationMs) && displayOutcome.durationMs > 0 && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {displayOutcome.durationMs >= 1000
+                            ? `${(displayOutcome.durationMs / 1000).toFixed(1)}s`
+                            : `${displayOutcome.durationMs}ms`}
+                        </span>
+                      )}
+                      <span
+                        className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                          displayOutcome.status === "passed"
+                            ? "bg-green-500/10 text-green-500 border border-green-500/20"
+                            : displayOutcome.status === "failed"
+                            ? "bg-destructive/10 text-destructive border border-destructive/20"
+                            : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                        }`}
+                      >
+                        {displayOutcome.status.toUpperCase()}
                       </span>
+                    </>
+                  )}
+                  <Button
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
+                    onClick={() => void handleRunCase()}
+                    title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
+                    data-testid="run-case-button"
+                  >
+                    {running ? (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Play
+                        className={cn(
+                          "mr-1.5 h-3 w-3",
+                          selectedSuite?.mcpServerId
+                            ? "fill-green-500 text-green-500"
+                            : "fill-muted-foreground text-muted-foreground"
+                        )}
+                      />
                     )}
-                    {typeof displayOutcome.durationMs === "number" && !isNaN(displayOutcome.durationMs) && displayOutcome.durationMs > 0 && (
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {displayOutcome.durationMs >= 1000
-                          ? `${(displayOutcome.durationMs / 1000).toFixed(1)}s`
-                          : `${displayOutcome.durationMs}ms`}
-                      </span>
-                    )}
-                    <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                        displayOutcome.status === "passed"
-                          ? "bg-green-500/10 text-green-500 border border-green-500/20"
-                          : displayOutcome.status === "failed"
-                          ? "bg-destructive/10 text-destructive border border-destructive/20"
-                          : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                      }`}
-                    >
-                      {displayOutcome.status.toUpperCase()}
-                    </span>
-                  </div>
-                )}
+                    Run
+                  </Button>
+                </div>
               </div>
               
               <div className="grid h-full grid-rows-[calc(50%-1rem)_calc(50%+1rem)] min-w-0 flex-1 overflow-hidden">

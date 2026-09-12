@@ -18,12 +18,12 @@ export const BASE_NAMES = {
   dataSource: "base-postgres-e2e-ds",
   sshCredential: "Base-SSH-e2e-Credential",
   sshServer: "base-mock-e2e-ssh",
-  verificationSuite: "Base-Verification-Suite",
+  verificationSuite: "Base-Verification-e2e-Suite",
   verificationCase: "010_base_echo_case",
-  evalSuite: "Base-Eval-Suite",
+  evalSuite: "Base-Eval-e2e-Suite",
   evalCase: "010_base_eval_case",
-  webAutoTarget: "Base-WebAuto-Target",
-  webAutoSuite: "Base-WebAuto-Suite",
+  webAutoTarget: "Base-WebAuto-e2e-Target",
+  webAutoSuite: "Base-WebAuto-e2e-Suite",
   webAutoCase: "010_base_webauto_case",
 } as const;
 

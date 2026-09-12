@@ -110,21 +110,38 @@ after every run.
 5. **Viewport.** The default viewport is configured globally to 1600x900 in
    `playwright.config.ts` to reflect real-world editor usage and ensure left/right
    sidebars and headers do not overlap.
-6. **Testability & Base resources.**
-   - When a UI element can't be located cleanly, add `id` + `htmlFor` label bindings,
-     an explicit `aria-label`, or a `data-testid` marker to the page code instead of
-     writing fragile structural selectors or relying on index matching (`.first()`).
-   - **Base resources contract**: `fixtures/base-seed.ts` seeds shared, read-only
-     baseline resources during setup (`Base-LLM-e2e-Credential`, `Base-Datasource-e2e-Credential`,
-     `Base-SSH-e2e-Credential`, `Nango` supervisor, `Base-General-e2e-Agent`, `Base-Judge-e2e-Agent`,
-     `Base-Mock-e2e-Mcp`, `base-postgres-e2e-ds`, `base-mock-e2e-ssh`, `Base-Verification-Suite`,
-     `010_base_echo_case`) with `visibility: "public"`.
-     Tests may view, select, and assert against them, but must **never** edit, toggle,
-     or delete them. Destructive/CRUD tests must create their own isolated resources
-     using `uniqueName()`.
-   - **Notice on DB direct seeding**: Notification base resources are seeded via direct
-     PostgreSQL connection (see `seedBaseNotifications` in `base-seed.ts`) due to the absence
-     of an administrative notification management API; column contracts strictly follow `schema.ts`.
+6. **Testability & Base Resources Contract.**
+    - **Semantic Markers over Fragile Selectors**:
+      - Locate elements using accessible roles and user-facing semantics (`getByRole`, `aria-label`, accessible names) wherever possible.
+      - When a UI element cannot be located cleanly or ambiguously (e.g. icon buttons, custom list rows, code inputs, multi-stage dialog actions), add semantic `data-testid` and `data-action` attributes to the component rather than relying on brittle CSS class paths, tag structures, or positional indexes (`.first()`, `.nth(i)`).
+      - Standard testid attributes:
+        - Resource lists / left panels: `data-testid="panel-row"`, `data-name="<name>"`, `data-enabled="<true|false>"`
+        - Tree / Group container nodes: `data-group-node="true"` alongside domain-specific markers (`data-testid="server-group"`, `data-testid="agent-group"`, `data-testid="target-group"`)
+        - Case lists: `data-testid="case-row"`, `data-name="<name>"` with action buttons `data-action="select-case"`, `data-action="edit-case"`, `data-action="delete-case"`
+        - Dialogs: `data-testid="<domain>-name-input"`, `data-testid="save-<domain>-button"`, `data-testid="cancel-<domain>-button"`
+        - Confirmations: `data-testid="confirm-delete-<domain>-button"`
+    - **No Semantic Degradation for Test Convenience ("严禁为测试破坏产品业务语义")**:
+      - UI components must preserve their product business rules and validation constraints in test environments.
+      - Never relax product filtering logic (e.g. disabling server filtering in `NewCaseDialog` to let tests pick disabled servers) simply to make test authoring easier. Test suites must seed or use enabled resources conforming to product invariants.
+    - **Base Resources vs. Ephemeral Write Flow ("只读基底 + 写操作自建自销毁")**:
+      - `fixtures/base-seed.ts` seeds shared, read-only baseline resources during setup with `visibility: "public"`.
+      - Tests may view, select, switch to, and assert against Base resources, but must **NEVER** modify, disable, or delete them.
+      - Any test exercising write / mutation / deletion flows MUST create its own isolated ephemeral resources using `uniqueName()` and clean them up within the test lifecycle (with global sweep as a backstop).
+    - **Layered Seed Dependencies Contract ("分层种子依赖契约")**:
+      - Base resource seeding follows a strict two-layer topological order:
+        - **Layer 1 (Independent Foundations)**: Users, Credentials, Base Builtin Agents (`seedBaseAgents`), Base MCP Servers (`seedBaseMcpServer`), Base Skills.
+        - **Layer 2 (Dependent Suites & Cases)**: Base Verification Suite (`seedBaseVerificationSuite`, depends on `seedBaseMcpServer`), Base Eval Suite (`seedBaseEvalSuite`, depends on `seedBaseAgents`), Base Web Auto Target & Suite (`seedBaseWebAutoSuite`).
+      - All Layer 2 seed functions must document their dependency via `// CONTRACT:` comments and must execute after Layer 1 in `auth-states.setup.ts`.
+    - **"Name is Sweep Contract" Invariant ("名字即清扫契约")**:
+      - The global teardown sweeper (`lifecycle/sweep.ts`) deletes test-created rows across domain tables using `WHERE <nameColumn> LIKE '%-e2e-%'`.
+      - **MANDATORY**: Every resource created by tests or seeded as a base resource in `BASE_NAMES` (with the sole exception of the server-enforced supervisor agent `"Nango"`) **MUST** embed the `-e2e-` marker (e.g. `Base-Verification-e2e-Suite`, `Base-Eval-e2e-Suite`, `Base-WebAuto-e2e-Target`, `Base-WebAuto-e2e-Suite`). Hard-coded names without the marker break the sweep contract and lead to database leakage across runs.
+    - **Web-First Auto-Retrying Assertions**:
+      - Avoid synchronous DOM property inspections like `expect(await locator.inputValue()).toContain(...)` on elements whose state is populated asynchronously by React effects or network fetches. Prefer Playwright's web-first assertions such as `await expect(locator).toHaveValue(/.../)` which automatically retry until state settles.
+    - **Actionability & Overlay Defensive Practices**:
+      - Real physical pointer interaction (`locator.click()`) must be preserved; never bypass Playwright's actionability checks using synthetic `dispatchEvent("click")` or hacky DOM dismissal loops.
+      - If transient UI feedback (such as Sonner toasts or modal backdrops) shares screen coordinates with toolbar buttons, await modal dismissal (`toBeHidden()`) or wait for the transient feedback cycle to settle before clicking.
+    - **Notice on DB direct seeding**:
+      - Notification base resources are seeded via direct PostgreSQL connection (see `seedBaseNotifications` in `base-seed.ts`) due to the absence of an administrative notification management API; column contracts strictly follow `schema.ts`.
 
 ## Known constraints
 

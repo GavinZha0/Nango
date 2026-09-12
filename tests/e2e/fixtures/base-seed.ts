@@ -478,6 +478,7 @@ export async function seedBaseSshServer(adminEmail: string): Promise<void> {
   }
 }
 
+// CONTRACT: Layer 2 Dependency — seedBaseMcpServer must run before seedBaseVerificationSuite (mcp_server foreign key required).
 /**
  * Seed a read-only Base Verification Suite and Case bound to Base-Mock-e2e-Mcp.
  * Idempotent: checks for existing public suite with BASE_NAMES.verificationSuite first.
@@ -561,6 +562,7 @@ export async function seedBaseVerificationSuite(adminEmail: string): Promise<voi
   }
 }
 
+// CONTRACT: Layer 2 Dependency — seedBaseAgents must run before seedBaseEvalSuite (builtin_agent foreign key required).
 /**
  * Seed a read-only Base Evaluation Suite and Case bound to Base-General-e2e-Agent and Base-Judge-e2e-Agent.
  * Idempotent: checks for existing public suite with BASE_NAMES.evalSuite first.

@@ -205,6 +205,7 @@ function AgentGroupNode({
   return (
     <div
       data-testid="agent-group"
+      data-group-node="true"
       data-agent-id={group.agentId}
       data-agent-name={group.agentName}
       className="select-none border-b border-border/40 last:border-0"
