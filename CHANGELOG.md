@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/GavinZha0/Nango/compare/v0.20.1...v0.21.0) (2026-09-12)
+
+
+### Features
+
+* **testing:** add suite variables and credentials integration ([9360688](https://github.com/GavinZha0/Nango/commit/936068866c6139527f933d4aa0a4784582ff6fbd))
+* **verification:** add 3-digit prefix aliasing, output unwrapping and suite isolation ([afdbb68](https://github.com/GavinZha0/Nango/commit/afdbb684f18d942f9389117521e71c54eca1b51d))
+
+
+### Bug Fixes
+
+* e2e test issues ([f22f7bb](https://github.com/GavinZha0/Nango/commit/f22f7bbbc849acc5076b67c30ee3688b23546d86))
+* **testing:** harden suite variables, align validation and expand copilot awareness ([6cc9d5c](https://github.com/GavinZha0/Nango/commit/6cc9d5c15c45da353b79b348db2d3676f64796da))
+
 ## [0.20.1](https://github.com/GavinZha0/Nango/compare/v0.20.0...v0.20.1) (2026-09-10)
 
 
