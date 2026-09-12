@@ -66,10 +66,11 @@ export type SuiteVariableDefinition =
 /**
  * Suite 变量存储字典
  * key: 变量名，必须满足正则 /^[a-zA-Z_][a-zA-Z0-9_]*$/
+ * 兼容历史存量的扁平标量值 (string | number | boolean | null)，不支持普通嵌套对象
  */
 export type SuiteVariablesMap = Record<
   string,
-  SuiteVariableDefinition | Record<string, unknown> | string | number | boolean | null
+  SuiteVariableDefinition | string | number | boolean | null
 >;
 ```
 
@@ -199,21 +200,11 @@ Web-Auto 是唯一打通凭证变量的执行引擎，其执行管线遵循严�
 
 ### 4.3 Verification 执行链路 (`src/lib/verification/run-orchestrator.ts`)
 
-- **解析选项**：`allowCredentials: false`。
-- **模板解析**：Universal Assertions 的 `resolveInput(case.input, context)` 通过 `{{variables.KEY}}` 模板完成文本宏替换。
-- **接线注入**：
-  ```typescript
-  const resolvedInput = resolveInput(caseItem.input, {
-    variables: suiteContext.variables,
-    ...(runContext ?? {}),
-  });
-
-  const outcome = evaluateAssertions(raw, caseItem.assertions, {
-    input: resolvedInput,
-    variables: suiteContext.variables,
-    runContext,
-  });
-  ```
+- **解析选项**：`allowCredentials: false`，仅提取纯字面量变量 `suiteLiteralVariables`。
+- **执行上下文构造**：编排器向 `runMcpCase` 传入合并上下文 `{ cases: suiteContext, variables: suiteLiteralVariables }`，其中 `cases` 承载跨用例历史输出，`variables` 承载套件级字面量。
+- **模板与断言注入 (`runner-mcp.ts`)**：
+  - **用例入参宏替换**：调用 Universal Assertions 的 `resolveInput(input, runContext)`，自动完成 `{{variables.KEY}}` 与 `{{cases.KEY}}` 模板占位符展开。
+  - **断言引擎求值**：调用 `evaluateAssertions(raw, assertions, { input, variables, runContext })`，将纯字面量变量注入 JS 表达式沙箱并用于预期值模板比对。
 
 ---
 

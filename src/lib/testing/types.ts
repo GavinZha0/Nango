@@ -26,6 +26,8 @@ export interface SuiteSummaryItem {
   evaluatorAgentId?: string | null;
   // Web Auto specific
   timeoutSec?: number | null;
+  // Suite variables
+  variables?: unknown;
 }
 
 export interface ListTestSuitesResult {
@@ -250,10 +252,10 @@ export type SuiteVariableDefinition =
 
 /**
  * Suite variables map as stored in database JSONB.
- * Accommodates legacy flat records for backward compatibility.
+ * Accommodates legacy flat scalar values for backward compatibility.
  */
 export type SuiteVariablesMap = Record<
   string,
-  SuiteVariableDefinition | Record<string, unknown> | string | number | boolean | null
+  SuiteVariableDefinition | string | number | boolean | null
 >;
 

@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { McpServerTable, VerificationSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 const ROUTE = "/api/verification-suites";
@@ -81,7 +82,7 @@ const createSchema = z
     description: z.string().max(1000).optional().nullable(),
     category: z.literal("mcp").optional().default("mcp"),
     mcpServerId: z.string().uuid().optional().nullable(),
-    variables: z.record(z.string(), z.unknown()).optional(),
+    variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),
   })

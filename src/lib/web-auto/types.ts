@@ -168,6 +168,12 @@ export interface RunWebAutoCaseInput {
   case: WebAutoCaseEntity | import("./storage").WebAutoCaseRunItem;
   /** Session user ID for permissions and runner dispatch */
   ownerId: string;
+  /**
+   * Pre-resolved suite variables from the suite-loop caller.
+   * When provided, runWebAutoCase skips its internal resolveSuiteVariables call.
+   * Omit for standalone single-case runs (API / tester tool) — they self-resolve.
+   */
+  preResolved?: import("@/lib/testing/variable-resolver.server").ResolvedSuiteVariablesResult;
 }
 
 export interface RunWebAutoSuiteInput {

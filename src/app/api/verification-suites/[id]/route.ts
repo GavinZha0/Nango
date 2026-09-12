@@ -16,6 +16,7 @@ import {
 } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import { loadVisibleSuite } from "@/lib/verification/access";
 
 const ROUTE = "/api/verification-suites/[id]";
@@ -43,7 +44,7 @@ const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     description: z.string().max(1000).optional().nullable(),
-    variables: z.record(z.string(), z.unknown()).optional(),
+    variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),

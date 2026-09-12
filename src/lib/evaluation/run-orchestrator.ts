@@ -426,6 +426,7 @@ export async function startEvalAgentAllRuns(
           targetAgentId: suite.agentId,
           targetCredentialId: suite.credentialId ?? undefined,
           targetAgentSource: suite.agentSource,
+          suiteVariables: suite.variables,
           cases,
         });
 

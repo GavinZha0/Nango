@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import { loadSuite } from "@/lib/evaluation/access";
 import * as storage from "@/lib/evaluation/storage";
 
@@ -33,7 +34,7 @@ const updateSchema = z
     description: z.string().max(1000).optional().nullable(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
-    variables: z.record(z.string(), z.unknown()).optional(),
+    variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
   })

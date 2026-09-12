@@ -110,6 +110,7 @@ describe("get_test_suite_details tool", () => {
         id: testSuiteId,
         name: "MCP Search Tools",
         description: "Search tools verification suite",
+        variables: {},
         mcpServerId: "mcp-server-1",
         serverName: "docs-mcp",
         caseCount: 2,

@@ -342,7 +342,9 @@ export const SuiteVariablesEditor = forwardRef<
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="literal">Literal</SelectItem>
-                          <SelectItem value="credential">Credential</SelectItem>
+                          <SelectItem value="credential" disabled={credentials.length === 0}>
+                            Credential
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

@@ -204,6 +204,7 @@ export function EvaluationSuiteEditor({
             evaluatorAgentId: suiteData.evaluatorAgentId,
             dimensionIds: suiteData.dimensionIds,
             caseCount: cases.length,
+            variables: suiteData.variables ?? {},
           }
         : null,
       cases: casesSitemap,

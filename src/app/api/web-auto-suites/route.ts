@@ -9,6 +9,7 @@ import { WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { discoverPublicPlaywrightMcpServer } from "@/lib/web-auto/discovery.server";
+import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import { asc, eq, sql } from "drizzle-orm";
 
 const ROUTE = "/api/web-auto-suites";
@@ -59,7 +60,7 @@ const createSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
     parentId: z.string().uuid().optional().nullable(),
-    variables: z.record(z.string(), z.unknown()).optional(),
+    variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
     enabled: z.boolean().optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import * as storage from "@/lib/evaluation/storage";
 
 const ROUTE = "/api/eval-suites";
@@ -36,7 +37,7 @@ const createSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
-    variables: z.record(z.string(), z.unknown()).optional(),
+    variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
   })

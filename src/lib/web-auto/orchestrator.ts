@@ -101,13 +101,15 @@ export async function runWebAutoCase(
     };
   }
 
-  // Step 1: Resolve suite variables with credential support
+  // Step 1: Resolve suite variables with credential support.
+  // Suite runs pass preResolved to avoid per-case re-resolution (aligns with
+  // Verification/Evaluation one-shot pattern). Single-case runs self-resolve.
   const {
     resolved: resolvedVariables,
     literalVariables,
     sensitiveValues,
     error: resolveError,
-  } = await resolveSuiteVariables(input.suite.variables ?? {}, {
+  } = input.preResolved ?? await resolveSuiteVariables(input.suite.variables ?? {}, {
     allowCredentials: true,
   });
 
@@ -135,8 +137,13 @@ export async function runWebAutoCase(
   }
 
   // Step 2: Wrap script with IIFE and inject resolved variables
+  // QUIRK: JSON.stringify does not escape U+2028/U+2029 which are line
+  // terminators in ES5 string literals — raw embedding would SyntaxError.
+  const safeJson = JSON.stringify(resolvedVariables)
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
   const scriptWithVariables = `(() => {
-  const variables = Object.freeze(${JSON.stringify(resolvedVariables)});
+  const variables = Object.freeze(${safeJson});
   return (${scriptContent.trim()});
 })()`;
 
@@ -326,11 +333,6 @@ export async function runWebAutoCase(
     unifiedAssertionResults.sort((a, b) => a.index - b.index);
   }
 
-  const sanitizedUnifiedAssertionResults = redactSensitiveData(
-    unifiedAssertionResults,
-    sensitiveValues,
-  );
-
   // ── Status & error classification ─────────────────────────────────────
   //
   // When a case requires an evaluator that is not configured, the LLM judge
@@ -406,7 +408,7 @@ export async function runWebAutoCase(
     status,
     executionOutput: sanitizedOutput,
     outputTruncated: false,
-    assertionResults: sanitizedUnifiedAssertionResults,
+    assertionResults: unifiedAssertionResults,
     score: finalScore,
     feedback: sanitizedFeedback,
     verdict,
@@ -531,6 +533,27 @@ async function runWebAutoSuiteCases(
   const suiteStartedAt: number = Date.now();
   const timeoutMs: number = input.suite.timeoutSec * 1000;
 
+  // Resolve suite variables once for the entire suite run (aligns with
+  // Verification/Evaluation one-shot pattern). All cases in this run see
+  // the same credential snapshot, eliminating N redundant resolutions.
+  const preResolved = await resolveSuiteVariables(input.suite.variables ?? {}, {
+    allowCredentials: true,
+  });
+
+  if (preResolved.error) {
+    // All cases fail with the same config error — no MCP calls attempted.
+    for (const c of input.cases) {
+      await persistAndPublishError({
+        ownerId: input.ownerId,
+        runId: input.runId,
+        caseId: c.id,
+        error: preResolved.error,
+      });
+      counters.erroredCount += 1;
+    }
+    return;
+  }
+
   for (const c of input.cases) {
     // Wall-clock timeout check
     const elapsed: number = Date.now() - suiteStartedAt;
@@ -550,13 +573,14 @@ async function runWebAutoSuiteCases(
       continue;
     }
 
-    // Execute case
+    // Execute case with pre-resolved variables
     const outcome = await runWebAutoCase({
       caseId: c.id,
       suiteId: input.suiteId,
       suite: input.suite,
       case: c,
       ownerId: input.ownerId,
+      preResolved,
     });
 
     // Persist result
