@@ -921,8 +921,8 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   /** Maximum number of tokens the model may generate. null = provider default. */
   maxTokens: integer("max_tokens"),
 
-  /** Maximum number of tool-call steps per run (default 5). */
-  maxSteps: integer("max_steps").notNull().default(5),
+  /** Maximum number of tool-call steps per run (default 10). */
+  maxSteps: integer("max_steps").notNull().default(10),
 
   /** Tool execution approval mode: "always" | "auto" | "never". Default "never". */
   toolApprovalMode: text("tool_approval_mode").notNull().default("never"),

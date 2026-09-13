@@ -41,7 +41,7 @@ export interface AgentSpec {
   toolApprovalMode: AgentToolApprovalMode;
   /** Whether this agent has read/write access to the editor's shared state (Copilot Mode). */
   sharedStateEnabled: boolean;
-  /** Always >= 1; defaults to 5 in schema. */
+  /** Always >= 1; defaults to 10 in schema. */
   maxSteps: number;
   /** SECURITY: decrypted LLM API key. Memory-only, never persisted /
    *  logged; invalidated whenever the credential row changes. */

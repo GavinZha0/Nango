@@ -176,7 +176,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
           prompt: finalPrompt,
           temperature: body.temperature != null ? String(body.temperature) : null,
           maxTokens: body.maxTokens ?? null,
-          maxSteps: body.maxSteps ?? 5,
+          maxSteps: body.maxSteps ?? 10,
           toolApprovalMode: body.toolApprovalMode ?? "never",
           sharedStateEnabled: resolveSharedStateEnabled({ sharedStateEnabled: body.sharedStateEnabled, role }),
           memoryEnabled: body.memoryEnabled ?? false,

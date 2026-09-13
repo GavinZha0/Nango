@@ -59,22 +59,23 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
     suiteId = suite.id;
   } else {
-    // 1. Find if a suite already exists for this mcpServerId
-    const [existingSuite] = await db
+    // 1. Find if a "Drafts" suite already exists for this mcpServerId
+    const [existingDraftSuite] = await db
       .select()
       .from(VerificationSuiteTable)
       .where(
         and(
           eq(VerificationSuiteTable.mcpServerId, mcpServerId),
           eq(VerificationSuiteTable.createdBy, session.user.id),
-        )
+          eq(VerificationSuiteTable.name, "Drafts"),
+        ),
       )
       .limit(1);
 
-    if (existingSuite) {
-      suiteId = existingSuite.id;
+    if (existingDraftSuite) {
+      suiteId = existingDraftSuite.id;
     } else {
-      // Try to fetch server title/name for suite name
+      // Try to fetch server title/name for suite metadata
       const [server] = await db
         .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
         .from(McpServerTable)
@@ -82,14 +83,13 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         .limit(1);
 
       const serverName = server?.serverTitle || server?.name || "MCP Server";
-      const suiteName = `${serverName} Suite`;
 
-      // 2. If not, auto-create a suite on-the-fly
+      // 2. Auto-create the "Drafts" suite on-the-fly
       const [newSuite] = await db
         .insert(VerificationSuiteTable)
         .values({
-          name: suiteName,
-          description: `Automatically created verification suite for ${serverName}`,
+          name: "Drafts",
+          description: `Staging area for captured ${serverName} tool calls pending review and assertions`,
           category: "mcp",
           mcpServerId,
           mcpServerName: serverName,

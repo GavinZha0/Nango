@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,7 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { caseActions } from "@/store/verification-cases";
+import {
+  caseActions,
+  useCasesStore,
+  type VerificationCaseRow,
+} from "@/store/verification-cases";
+import { computeNextCasePrefix } from "@/lib/verification/prefix";
 
 export interface SaveAsCaseDialogProps {
   open: boolean;
@@ -40,6 +45,7 @@ export function SaveAsCaseDialog({
 }: SaveAsCaseDialogProps): ReactNode {
   // Form state — reset on each open.
   const [caseName, setCaseName] = useState<string>("");
+  const [draftSuiteId, setDraftSuiteId] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -48,14 +54,65 @@ export function SaveAsCaseDialog({
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const ss = String(now.getSeconds()).padStart(2, "0");
-      setCaseName(`${toolName}_${hh}${mm}${ss}`);
+      setCaseName(`010_${toolName}`);
+      setDraftSuiteId(undefined);
       setSubmitError(null);
     }
   }
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+
+    async function resolveDraftsPrefix(): Promise<void> {
+      try {
+        const res = await fetch("/api/verification-suites");
+        if (!res.ok || cancelled) return;
+        const suites = (await res.json()) as Array<{
+          id: string;
+          name: string;
+          mcpServerId?: string | null;
+        }>;
+        const draft = suites.find(
+          (s) => s.mcpServerId === mcpServerId && s.name === "Drafts",
+        );
+        if (!draft || cancelled) return;
+
+        setDraftSuiteId(draft.id);
+
+        // Check cache first for instant feedback
+        const cached = useCasesStore.getState().bySuite[draft.id];
+        if (cached && !cancelled) {
+          const prefix = computeNextCasePrefix(cached);
+          setCaseName(`${prefix}${toolName}`);
+        }
+
+        // Fetch fresh cases for this Drafts suite to guarantee accurate step ordering
+        const casesRes = await fetch(`/api/verification-suites/${draft.id}/cases`);
+        if (!casesRes.ok || cancelled) return;
+        const cases = (await casesRes.json()) as VerificationCaseRow[];
+        if (cancelled) return;
+
+        useCasesStore.getState().setItemsFor(draft.id, cases);
+        const freshPrefix = computeNextCasePrefix(cases);
+        setCaseName((prev) => {
+          // If user hasn't typed a completely custom name, update with fresh prefix
+          if (/^\d{3}_/.test(prev) || prev === "") {
+            return `${freshPrefix}${toolName}`;
+          }
+          return prev;
+        });
+      } catch (err) {
+        console.error("Failed to resolve Drafts suite prefix", err);
+      }
+    }
+
+    void resolveDraftsPrefix();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mcpServerId, toolName]);
 
   const trimmedCaseName: string = caseName.trim();
   const canSubmit: boolean = !submitting && trimmedCaseName.length > 0;
@@ -69,6 +126,7 @@ export function SaveAsCaseDialog({
         name: trimmedCaseName,
         mcpServerId,
         toolName,
+        suiteId: draftSuiteId,
         input,
         assertions: [],
       });
@@ -77,9 +135,7 @@ export function SaveAsCaseDialog({
         throw new Error("Failed to create case");
       }
 
-      toast.success("Saved verification case", {
-        description: `Added "${caseRow.name}" to the server regression test suite.`,
-      });
+      toast.success("Saved to Drafts");
       onOpenChange(false);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
@@ -129,8 +185,8 @@ export function SaveAsCaseDialog({
           </div>
 
           <p className="text-[11px] text-muted-foreground">
-            Captures the input you just ran. Edit assertions later in the
-            verification panel.
+            Saves to Drafts. You can review and add assertions in the
+            Verification panel before moving to a suite.
           </p>
 
           {submitError && (
