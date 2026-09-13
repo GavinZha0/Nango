@@ -335,9 +335,9 @@ function RightPanelToolbar(): ReactNode {
  * threadId eager-capture. Renders nothing.
  */
 
-function ChatProviderHooks(): ReactNode {
+function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): ReactNode {
   useOutcomeTools();
-  useCopilotSharedStateSync();
+  useCopilotSharedStateSync(activeAgentId);
   // Specific renderers — CopilotKit's matcher prefers exact name
   // match before falling back to the wildcard.
   useRenderTool({
@@ -370,24 +370,11 @@ function ChatProviderHooks(): ReactNode {
   // `agent.threadId` by then). See docs/threadid-lifecycle.md and
   // docs/chat-flow-audit.md.
   const storedThreadId = useWorkspaceStore((s) => s.runtimeThreadId);
-  const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
-  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
-  const agents = useWorkspaceStore((s) => s.agents);
-  const teams = useWorkspaceStore((s) => s.teams);
   const setChatError = useWorkspaceStore((s) => s.setChatError);
   const clearChatError = useWorkspaceStore((s) => s.clearChatError);
   const { copilotkit } = useCopilotKit();
 
-  const isAgentKnown = useMemo(() => {
-    if (!activeAgentId) return false;
-    return (
-      builtinAgents.some((b) => b.id === activeAgentId) ||
-      agents.some((a) => a.id === activeAgentId) ||
-      teams.some((t) => t.id === activeAgentId)
-    );
-  }, [activeAgentId, builtinAgents, agents, teams]);
-
-  const { agent } = useAgent({ agentId: isAgentKnown ? activeAgentId : undefined });
+  const { agent } = useAgent({ agentId: activeAgentId });
   useTestMutationSubscriber(agent);
 
   // threadId eager-capture
@@ -460,8 +447,21 @@ export function RightPanel(): ReactNode {
   const rightTab = useSidebarStore((s) => s.rightTab);
 
   const agentId = useWorkspaceStore((s) => s.activeAgentId);
+  const agentType = useWorkspaceStore((s) => s.activeAgentType);
   const agentSource = useWorkspaceStore((s) => s.activeAgentSource);
   const credentialId = useWorkspaceStore((s) => s.activeCredentialId);
+  const builtinAgents = useWorkspaceStore((s) => s.builtinAgents);
+  const agents = useWorkspaceStore((s) => s.agents);
+  const teams = useWorkspaceStore((s) => s.teams);
+
+  const isAgentKnown = useMemo(() => {
+    if (!agentId) return false;
+    return agentSource === "builtin"
+      ? builtinAgents.some((agent) => agent.id === agentId)
+      : (agentType === "agent" ? agents : agentType === "team" ? teams : []).some(
+          (agent) => agent.id === agentId && agent.credentialId === credentialId,
+        );
+  }, [agentId, agentSource, builtinAgents, agentType, agents, teams, credentialId]);
 
   // Build CopilotKitProvider props. Stable references prevent infinite rerenders.
   const runtimeUrl = agentSource === "builtin"
@@ -526,7 +526,7 @@ export function RightPanel(): ReactNode {
           showDevConsole={false}
           enableInspector={false}
         >
-          <ChatProviderHooks />
+          {isAgentKnown && <KnownAgentProviderHooks activeAgentId={agentId} />}
           <div
             id="right-tabpanel-chat"
             data-testid="right-tabpanel-chat"
@@ -537,7 +537,15 @@ export function RightPanel(): ReactNode {
           >
             <ChatErrorBanner />
             <div className="min-h-0 flex-1" data-testid="chat-panel-body">
-              <ChatPanelBody />
+              {isAgentKnown ? (
+                <ChatPanelBody />
+              ) : (
+                <div className="flex h-full items-center justify-center p-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Select an agent to start chatting.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
           <div

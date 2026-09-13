@@ -142,7 +142,8 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
         [{ credentialId: entity.credentialId}],
         { force: true },
       );
-      if (result.data) {
+      const refreshed = result.credentials.find((credential) => credential.credentialId === entity.credentialId);
+      if (result.data && refreshed?.ok) {
         replaceEntitiesForCredentials(
           new Set([entity.credentialId]),
           result.data,

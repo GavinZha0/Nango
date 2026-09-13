@@ -208,11 +208,35 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             ...state.workflows.filter((e) => !shouldReplace(e)),
             ...fresh,
           ];
-          return {
+          const entities = {
             agents: merged.filter((e) => e.kind === "agent"),
             teams: merged.filter((e) => e.kind === "team"),
             workflows: merged.filter((e) => e.kind === "workflow"),
             agentsLoaded: true,
+          };
+          const activeWasReplaced = 
+            state.activeAgentSource === "backend" && 
+            state.activeCredentialId != undefined && 
+            credentialIds.has(state.activeCredentialId) && 
+            targetKinds.includes(state.activeAgentType);
+          const activeStillExists = merged.some(
+            (e) => e.id === state.activeAgentId && e.kind === state.activeAgentType && e.credentialId === state.activeCredentialId
+          );
+          if (!activeWasReplaced || activeStillExists) {
+            return entities;
+          }
+          return { 
+            ...entities, 
+            activeAgentId: "", 
+            activeAgentType: "agent" as const, 
+            activeAgentSource: "backend" as const, 
+            activeCredentialId: undefined, 
+            activeProvider: undefined, 
+            previousAgent: null, 
+            pendingHandoffContext: null, 
+            runtimeThreadId: null, 
+            explicitThreadId: null, 
+            lastChatError: null 
           };
         }),
       mergeBuiltinAgents: (builtinAgents) => set({ builtinAgents, agentsLoaded: true }),

@@ -637,9 +637,11 @@ export function AgentPanel(): ReactNode {
       // User-initiated refresh: bypass server cache.
       const result = await getEntities(creds, { force: true });
       const loaded = result.data ?? [];
+      const successfulCredIds = new Set(result.credentials.filter((credential) => credential.ok).map((credential) => credential.credentialId));
       // Replace across all kinds.
-      replaceEntitiesForCredentials(credIdSet, loaded);
-
+      if (successfulCredIds.size > 0) {
+        replaceEntitiesForCredentials(successfulCredIds, loaded.filter((entity) => entity.credentialId && successfulCredIds.has(entity.credentialId)));
+      }
       if (result.credentials.length > 0) {
         replaceBackendCredentialsFor(credIdSet, result.credentials);
       }
