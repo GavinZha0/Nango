@@ -7,10 +7,12 @@ import { toast } from "sonner";
 import {
   CopilotChat,
   CopilotChatAssistantMessage,
+  CopilotChatReasoningMessage,
   CopilotChatUserMessage,
   CopilotChatView,
   type CopilotAgent,
   type CopilotChatAssistantMessageProps,
+  type CopilotChatReasoningMessageProps,
   type CopilotChatUserMessageProps,
   type CopilotChatViewProps,
   useAgent,
@@ -21,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 import { useWorkspaceStore } from "@/store/workspace";
 import { NangoSlotButton } from "@/components/right-panels/NangoSlotButton";
+import { useElapsedSeconds } from "@/components/copilotkit/use-elapsed-seconds";
 import { useInjectHandoffContext } from "@/hooks/useHandoff";
 import { authClient } from "@/lib/auth/client";
 import { classifyError } from "@/lib/copilot/classify-error";
@@ -290,11 +293,70 @@ function ConnectedAssistantMessage(
   );
 }
 
+// ── Custom Collapsible Reasoning Message with Live Elapsed Seconds ──
+
+/**
+ * Custom reasoning message renderer that stays collapsed by default
+ * even while streaming thoughts, preventing layout jumps and keeping
+ * the response body front-and-center. Displays live elapsed duration
+ * during output and total elapsed time on completion.
+ */
+function CollapsibleReasoningMessage({
+  message,
+  messages,
+  isRunning,
+  className,
+  ...props
+}: CopilotChatReasoningMessageProps): ReactNode {
+  const isLatest = messages?.[messages.length - 1]?.id === message.id;
+  const isStreaming = !!(isRunning && isLatest);
+  const hasContent = !!(message.content && message.content.length > 0);
+
+  // Default collapsed (never force-opened during streaming). User can expand on click.
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Track elapsed seconds in real time using the shared timing hook
+  const elapsed = useElapsedSeconds(message.id, isStreaming);
+
+  const label = isStreaming
+    ? `Thinking · ${elapsed}`
+    : elapsed && elapsed !== "0s"
+      ? `Thought for ${elapsed}`
+      : "Thought";
+
+  const handleToggle = hasContent ? () => setIsOpen((prev) => !prev) : undefined;
+
+  return (
+    <div
+      className={cn("cpk:my-1", className)}
+      data-message-id={message.id}
+      {...props}
+    >
+      <CopilotChatReasoningMessage.Header
+        isOpen={isOpen}
+        label={label}
+        hasContent={hasContent}
+        isStreaming={isStreaming}
+        onClick={handleToggle}
+      />
+      <CopilotChatReasoningMessage.Toggle isOpen={isOpen}>
+        <CopilotChatReasoningMessage.Content
+          isStreaming={isStreaming}
+          hasContent={hasContent}
+        >
+          {message.content}
+        </CopilotChatReasoningMessage.Content>
+      </CopilotChatReasoningMessage.Toggle>
+    </div>
+  );
+}
+
 /** Top-level static messageView object — zero references changes across turns,
  *  preventing CopilotChatView from unmounting/remounting the entire list and resetting scroll. */
 const STATIC_MESSAGE_VIEW = {
   userMessage: CollapsibleUserMessage as unknown as typeof CopilotChatUserMessage,
   assistantMessage: ConnectedAssistantMessage as unknown as typeof CopilotChatAssistantMessage,
+  reasoningMessage: CollapsibleReasoningMessage as unknown as typeof CopilotChatReasoningMessage,
 };
 
 // ChatViewShell — chatView slot wrapper
