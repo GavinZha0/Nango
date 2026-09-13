@@ -146,7 +146,7 @@ docker compose pull && docker compose up -d
 | 工具 | 版本 |
 |---|---|
 | Node.js | **≥ 24** (LTS) |
-| pnpm    | **10.32.1**（通过 `packageManager` 固定；`corepack enable` 足够） |
+| pnpm    | **≥ 11**（通过 `packageManager` 固定；`corepack enable` 足够） |
 | Docker  | 需要用于捆绑的 Postgres **以及**代码执行工具使用的 Python 沙盒镜像 |
 | PostgreSQL | 18（或使用捆绑的 `pnpm docker:db`） |
 

@@ -163,7 +163,7 @@ Open **http://localhost:9300**. The first user to sign up becomes the admin auto
 | Tool | Version |
 |---|---|
 | Node.js | **≥ 24** (LTS) |
-| pnpm    | **10.32.1** (pinned via `packageManager`) |
+| pnpm    | **≥ 11** (pinned via `packageManager`) |
 | Docker  | Needed for bundled Postgres + Python sandbox |
 | PostgreSQL | 18 (or `pnpm docker:db`) |
 
