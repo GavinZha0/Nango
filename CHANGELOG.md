@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.22.0](https://github.com/GavinZha0/Nango/compare/v0.21.0...v0.22.0) (2026-09-13)
+
+
+### Features
+
+* **chat:** keep reasoning card collapsed by default with live elapsed seconds ([5cbf3e8](https://github.com/GavinZha0/Nango/commit/5cbf3e8f88593e30391f25464c24997a93b53bdf))
+* **chat:** replace sticky chat error banner with in-stream activity error cards ([9566038](https://github.com/GavinZha0/Nango/commit/956603850ff2938223cb4fa915f3606514c8e503))
+* **chat:** replace sticky chat error banner with in-stream activity error cards ([fd791f8](https://github.com/GavinZha0/Nango/commit/fd791f8d7de0bc9f9fcd4d026c6a444ff3388d2f))
+* **verification:** save test cases to Drafts suite with 3-digit prefix auto-increment ([29b2f74](https://github.com/GavinZha0/Nango/commit/29b2f7427344800bff456885c2918ab6ff602318))
+
+
+### Bug Fixes
+
+* backend agent exception due to credential ([0cbd498](https://github.com/GavinZha0/Nango/commit/0cbd4985b0030506684dbb12f3158af13f9ea154))
+* Toast possition ([5ff7828](https://github.com/GavinZha0/Nango/commit/5ff78286e40d71ad5ab8fbdce107e9b1fe041263))
+
 ## [0.21.0](https://github.com/GavinZha0/Nango/compare/v0.20.1...v0.21.0) (2026-09-12)
 
 
