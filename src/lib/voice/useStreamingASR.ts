@@ -16,10 +16,12 @@ function notifySubscribers() {
 
 // Global DOM updater
 function appendResultToInput(text: string) {
-  if (!text) return;
-  const textarea = (document.querySelector(".copilotKitInput textarea") ||
-    document.querySelector(".copilotKitChat textarea") ||
-    document.querySelector("textarea")) as HTMLTextAreaElement | null;
+  const chatRoot =
+    document.querySelector('[data-slot="chat-panel-body"]') ||
+    document.querySelector('[data-testid="right-chat-panel"]');
+  const textarea = (chatRoot?.querySelector(".copilotKitInput textarea") ||
+    chatRoot?.querySelector(".copilotKitChat textarea") ||
+    chatRoot?.querySelector("textarea")) as HTMLTextAreaElement | null;
   if (!textarea) return;
 
   const currentVal = textarea.value.trim();

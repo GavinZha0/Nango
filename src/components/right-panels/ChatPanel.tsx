@@ -397,8 +397,14 @@ function ChatViewShellBody({
     if (agent.messages.length > 0 && !hasFocusedFirstMsgRef.current) {
       hasFocusedFirstMsgRef.current = true;
       const timer = setTimeout(() => {
-        const textarea = document.querySelector(
-          ".copilotKitChat textarea, .copilotKitChat input, textarea"
+        // SECURITY / CONTRACT: Restrict query strictly to the right chat panel
+        // so global textarea elements in main workspace panels (editor, verification, eval)
+        // are never focused accidentally.
+        const chatRoot =
+          document.querySelector('[data-slot="chat-panel-body"]') ||
+          document.querySelector('[data-testid="right-chat-panel"]');
+        const textarea = chatRoot?.querySelector(
+          ".copilotKitInput textarea, .copilotKitChat textarea, textarea, input"
         ) as HTMLTextAreaElement | HTMLInputElement | null;
         if (textarea) {
           textarea.focus();
@@ -536,7 +542,7 @@ export function ChatPanelBody(): ReactNode {
   if (!activeAgentId) return null;
 
   return (
-    <div className="h-full">
+    <div className="h-full" data-slot="chat-panel-body">
       <ChatPanelInner
         agentId={activeAgentId}
         threadId={explicitThreadId ?? undefined}
