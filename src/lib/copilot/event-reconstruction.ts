@@ -19,7 +19,7 @@ import "server-only";
  *  |                       |   real tool_call_result row exists for the same call)   |
  *  | tool_call_result      | TOOL_CALL_RESULT                                        |
  *  | reasoning             | REASONING_START + MESSAGE_START + CONTENT + END + END   |
- *  | error                 | RUN_ERROR                                               |
+ *  | error                 | ACTIVITY_SNAPSHOT (activityType: "error_card")          |
  *  | started / final       | suppressed (we wrap each run with our own RUN_STARTED / |
  *  |                       |   RUN_FINISHED that omits `input` — see migration doc)  |
  *  | degraded   | suppressed (admin-only, not user-visible)               |
@@ -52,7 +52,7 @@ import { from, type Observable } from "rxjs";
 import {
   EventType,
   type BaseEvent,
-  type RunErrorEvent,
+  type ActivitySnapshotEvent,
   type RunFinishedEvent,
   type RunStartedEvent,
   type TextMessageContentEvent,
@@ -317,7 +317,14 @@ function* eventRowToAgUi(
       return;
     }
     case "error": {
-      yield buildRunError(readString(p.message) ?? "Run errored");
+      const messageId = `${runId}.error.${ev.seq}`;
+      const errMsg = readString(p.message) ?? "Agent execution failed";
+      yield buildActivitySnapshot(
+        messageId,
+        "error_card",
+        { message: errMsg, error: p },
+        ev.ts.getTime(),
+      );
       return;
     }
     // started / finished / degraded: suppressed. Each run
@@ -550,11 +557,22 @@ function buildReasoningMessageEnd(
   return { type: EventType.REASONING_MESSAGE_END, messageId };
 }
 
-function buildRunError(message: string): RunErrorEvent {
-  // `code` is optional in the AG-UI schema; we tag with a constant so
-  // downstream consumers can distinguish DB-replay errors from
-  // live-run errors if they ever care.
-  return { type: EventType.RUN_ERROR, message, code: "DB_REPLAY" };
+function buildActivitySnapshot(
+  messageId: string,
+  activityType: string,
+  content: Record<string, unknown>,
+  timestamp?: number,
+): ActivitySnapshotEvent {
+  return withTs(
+    {
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId,
+      activityType,
+      content,
+      replace: true,
+    },
+    timestamp,
+  );
 }
 
 // endregion

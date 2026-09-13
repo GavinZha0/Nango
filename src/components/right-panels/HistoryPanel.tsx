@@ -151,6 +151,7 @@ function HistoryPanelContent(): ReactNode {
   const setExplicitThreadId = useWorkspaceStore((s) => s.setExplicitThreadId);
   const bumpChatEpoch = useWorkspaceStore((s) => s.bumpChatEpoch);
   const startFreshChat = useWorkspaceStore((s) => s.startFreshChat);
+  const clearChatError = useWorkspaceStore((s) => s.clearChatError);
   const pinnedSessions = useWorkspaceStore((s) => s.pinnedSessions);
   const togglePin = useWorkspaceStore((s) => s.togglePin);
   const historyRevision = useSidebarStore((s) => s.historyRevision);
@@ -203,6 +204,7 @@ function HistoryPanelContent(): ReactNode {
     // version if the reconstruction pipeline ever adds branches that
     // the in-memory path doesn't.
     if (sid === threadId && sid === explicitThreadId) {
+      clearChatError();
       setRightTab("chat");
       return;
     }
@@ -211,6 +213,7 @@ function HistoryPanelContent(): ReactNode {
     //    and DB replay.
     //  - runtime keeps "what thread am I in?" coherent for outcomes,
     //    save flows, URL sync.
+    clearChatError();
     setExplicitThreadId(sid);
     setRuntimeThreadId(sid);
     setRightTab("chat");

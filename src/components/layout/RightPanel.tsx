@@ -25,11 +25,10 @@ import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/store/sidebar";
 import { useStoredValue } from "@/hooks/useStoredValue";
 import type { RightTab } from "@/store/sidebar";
-import { useWorkspaceStore, type ChatError } from "@/store/workspace";
+import { useWorkspaceStore } from "@/store/workspace";
 import type { EntityKind } from "@/lib/backends/types";
 import { useOutcomeTools } from "@/hooks/useOutcomeTools";
 import { ChatPanelBody } from "@/components/right-panels/ChatPanel";
-import { ChatErrorBanner } from "@/components/right-panels/ChatErrorBanner";
 import { HistoryPanelBody } from "@/components/right-panels/HistoryPanel";
 import { AgentSelector } from "@/components/chat/AgentSelector";
 import { CREDENTIAL_ID_HEADER, ORCHESTRATION_MODE_HEADER } from "@/lib/http/chat-headers";
@@ -39,6 +38,12 @@ import {
 } from "@/components/right-panels/DelegateToAgentCard";
 import { WebSearchInlinePreview } from "@/components/right-panels/WebSearchInlinePreview";
 import { WildcardToolRenderer } from "@/components/copilotkit/WildcardToolRenderer";
+import {
+  ErrorActivityCard,
+  errorActivityContentSchema,
+  type ErrorActivityContent,
+} from "@/components/chat/ErrorActivityCard";
+import type { ReactActivityMessageRenderer } from "@/lib/copilot/client";
 import { webSearchArgsSchema } from "@/lib/web-search/schema";
 import { useHandoffTools } from "@/hooks/useHandoff";
 import { useInteractiveTools } from "@/hooks/useInteractiveTools";
@@ -46,62 +51,6 @@ import { useCopilotSharedStateSync } from "@/hooks/useCopilotSharedState";
 import { useRole } from "@/hooks/useRole";
 import { SaveToEvalDialog } from "@/components/chat/SaveToEvalDialog";
 import { useTestMutationSubscriber } from "@/hooks/useTestMutationSubscriber";
-
-// Chat-error classification
-
-/**
- * Map runtime failure (Error or AG-UI RunErrorEvent) to {@link ChatError}.
- * Extracts HTTP status from CopilotKit's fetch-wrapper message format;
- * falls back to generic "failed to send" on unknown shapes. Never throws.
- */
-function buildChatError(
-  source: { message?: string; code?: string } | Error,
-  agentId: string,
-): ChatError {
-  const rawMessage =
-    source instanceof Error
-      ? source.message
-      : (source.message ?? source.code ?? "");
-
-  // Match e.g. "HTTP 404: ..." (CopilotKit's fetch-wrapper format).
-  const httpMatch = /HTTP\s+(\d{3})\b/.exec(rawMessage);
-  const status = httpMatch ? Number(httpMatch[1]) : null;
-
-  let message: string;
-  switch (status) {
-    case 401:
-      message = "Your session has expired. Please sign in again.";
-      break;
-    case 403:
-    case 404:
-      // 404: agent deleted / never existed for this user.
-      // 403: visibility check failed (treated as 404 server-side, but
-      //      kept distinct here in case the route ever differentiates).
-      message =
-        "This agent is no longer available. It may have been deleted. " +
-        "Refresh your agent list or pick another agent.";
-      break;
-    case 503:
-      message =
-        "No built-in agents are available right now. " +
-        "Please try again in a moment.";
-      break;
-    case null:
-      message = rawMessage
-        ? `Failed to send message: ${rawMessage}`
-        : "Failed to send message. Please try again.";
-      break;
-    default:
-      message = `Failed to send message (HTTP ${status}). Please try again.`;
-  }
-
-  return {
-    status,
-    message,
-    agentId,
-    timestamp: Date.now(),
-  };
-}
 
 // Tab segment metadata
 
@@ -120,6 +69,13 @@ const TAB_SEGMENTS: {
 // HITL render cache. See docs/chat-flow-audit.md.
 const STABLE_EMPTY_AGENTS = Object.freeze({}) as Record<string, never>;
 const STABLE_EMPTY_PROPS = Object.freeze({}) as Record<string, unknown>;
+const STABLE_ACTIVITY_RENDERERS: ReactActivityMessageRenderer<ErrorActivityContent>[] = Object.freeze([
+  {
+    activityType: "error_card",
+    content: errorActivityContentSchema,
+    render: ErrorActivityCard,
+  },
+]) as unknown as ReactActivityMessageRenderer<ErrorActivityContent>[];
 
 // localStorage helpers for AgentSelector's disabled-agents set.
 // Reads through `useStoredValue` (a `useSyncExternalStore` wrapper)
@@ -370,8 +326,6 @@ function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): 
   // `agent.threadId` by then). See docs/threadid-lifecycle.md and
   // docs/chat-flow-audit.md.
   const storedThreadId = useWorkspaceStore((s) => s.runtimeThreadId);
-  const setChatError = useWorkspaceStore((s) => s.setChatError);
-  const clearChatError = useWorkspaceStore((s) => s.clearChatError);
   const { copilotkit } = useCopilotKit();
 
   const { agent } = useAgent({ agentId: activeAgentId });
@@ -399,28 +353,6 @@ function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): 
     );
     return () => sub.unsubscribe();
   }, [storedThreadId, copilotkit, activeAgentId, agent]);
-
-  // Chat error capture — onRunInitialized clears stale banners,
-  // onRunFailed / onRunErrorEvent populate them.
-  useEffect(() => {
-    if (!activeAgentId || !agent) return;
-    const sub = copilotkit.subscribeToAgentWithOptions(
-      agent,
-      {
-        // Starting a new run clears the slate so a previous run's
-        // error banner doesn't sit on top of fresh output.
-        onRunInitialized: () => clearChatError(),
-        onRunFailed: ({ error }) => {
-          setChatError(buildChatError(error, activeAgentId));
-        },
-        onRunErrorEvent: ({ event: errEvent }) => {
-          setChatError(buildChatError(errEvent, activeAgentId));
-        },
-      },
-      {},
-    );
-    return () => sub.unsubscribe();
-  }, [copilotkit, activeAgentId, agent, setChatError, clearChatError]);
 
   // New-chat reset. CopilotKit v2 holds messages on the per-agent
   // instance (not on `<CopilotChat>`) and its `connect-on-thread`
@@ -525,6 +457,7 @@ export function RightPanel(): ReactNode {
           selfManagedAgents={STABLE_EMPTY_AGENTS}
           showDevConsole={false}
           enableInspector={false}
+          renderActivityMessages={STABLE_ACTIVITY_RENDERERS}
         >
           {isAgentKnown && <KnownAgentProviderHooks activeAgentId={agentId} />}
           <div
@@ -535,7 +468,6 @@ export function RightPanel(): ReactNode {
             hidden={rightTab !== "chat"}
             className="flex h-full flex-col"
           >
-            <ChatErrorBanner />
             <div className="min-h-0 flex-1" data-testid="chat-panel-body">
               {isAgentKnown ? (
                 <ChatPanelBody />

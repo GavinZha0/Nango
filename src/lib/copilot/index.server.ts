@@ -80,6 +80,7 @@ export type {
   ReasoningMessageChunkEvent,
   StepStartedEvent,
   StepFinishedEvent,
+  ActivitySnapshotEvent,
   CustomEvent,
   RawEvent,
 } from "@ag-ui/client";
@@ -105,6 +106,7 @@ import type {
   ReasoningMessageChunkEvent,
   StepStartedEvent,
   StepFinishedEvent,
+  ActivitySnapshotEvent,
   CustomEvent,
   RawEvent,
 } from "@ag-ui/client";
@@ -118,7 +120,7 @@ import type {
  *
  * SCOPE NOTE: deliberately omits niche events Nango does not handle
  * yet (`STATE_SNAPSHOT`, `STATE_DELTA`, `MESSAGES_SNAPSHOT`,
- * `ACTIVITY_*`, deprecated `THINKING_*`). Adding one is a one-line
+ * deprecated `THINKING_*`). Adding one is a one-line
  * append below + the matching re-export above. Don't widen
  * preemptively — every member of the union has to be either ignored
  * or persisted by the runner / persisting-agent switch, so widening
@@ -147,5 +149,6 @@ export type AgUiEvent =
   | ReasoningMessageChunkEvent
   | StepStartedEvent
   | StepFinishedEvent
+  | ActivitySnapshotEvent
   | CustomEvent
   | RawEvent;

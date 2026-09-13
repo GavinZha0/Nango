@@ -387,6 +387,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           runtimeThreadId: null,
           explicitThreadId: null,
           chatEpoch: s.chatEpoch + 1,
+          lastChatError: null,
         })),
 
       // Pinned sessions

@@ -61,6 +61,8 @@ function describeEvent(event: AgUiEvent): string {
       return `custom name=${event.name}`;
     case EventType.RAW:
       return `raw event=${JSON.stringify(event.event)}`;
+    case EventType.ACTIVITY_SNAPSHOT:
+      return `activity-snapshot ${event.messageId} ${event.activityType}`;
     default: {
       // Exhaustiveness check: if a new variant is added to AgUiEvent
       // without a matching case here, tsc fails on this assignment.

@@ -22,6 +22,7 @@ export type {
   CopilotChatAssistantMessageProps,
   CopilotChatViewProps,
   CopilotChatUserMessageProps,
+  ReactActivityMessageRenderer,
 } from "@copilotkit/react-core/v2";
 
 import { useAgent } from "@copilotkit/react-core/v2";

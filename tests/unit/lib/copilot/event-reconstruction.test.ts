@@ -600,7 +600,7 @@ describe("reconstructFromDb — skipped row types", () => {
 });
 
 describe("reconstructFromDb — error row", () => {
-  it("emits a RUN_ERROR with DB_REPLAY code", async () => {
+  it("emits an ACTIVITY_SNAPSHOT with error_card activityType", async () => {
     const run = makeRun({ status: "failed" });
     const evs = [
       makeEvent(run.id, 0, "error", {
@@ -610,12 +610,18 @@ describe("reconstructFromDb — error row", () => {
     stageQueries([run], evs);
 
     const out = await collect("thread-1", "user-1");
-    const err = out.find((e) => e.type === EventType.RUN_ERROR) as unknown as
-      | { message: string; code?: string }
+    const snapshot = out.find((e) => e.type === EventType.ACTIVITY_SNAPSHOT) as unknown as
+      | {
+          type: string;
+          messageId: string;
+          activityType: string;
+          content: { message: string };
+        }
       | undefined;
-    expect(err).toBeDefined();
-    expect(err!.message).toBe("Something blew up");
-    expect(err!.code).toBe("DB_REPLAY");
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.activityType).toBe("error_card");
+    expect(snapshot!.content.message).toBe("Something blew up");
+    expect(snapshot!.messageId).toBe(`${run.id}.error.0`);
   });
 });
 

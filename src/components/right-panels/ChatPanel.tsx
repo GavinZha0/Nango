@@ -23,6 +23,7 @@ import { useWorkspaceStore } from "@/store/workspace";
 import { NangoSlotButton } from "@/components/right-panels/NangoSlotButton";
 import { useInjectHandoffContext } from "@/hooks/useHandoff";
 import { authClient } from "@/lib/auth/client";
+import { classifyError } from "@/lib/copilot/classify-error";
 
 /**
  * ChatPanel — v2 CopilotKit chat surface (body only).
@@ -344,6 +345,59 @@ function ChatViewShellBody({
       return () => clearTimeout(timer);
     }
   }, [agent.messages.length]);
+
+  // Subscribe to agent run errors: toast for system infrastructure errors,
+  // in-chat role: "activity" error_card for session/model errors.
+  const { copilotkit } = useCopilotKit();
+  useEffect(() => {
+    if (!agent) return;
+
+    const handleError = (rawErr: unknown) => {
+      const classified = classifyError(rawErr);
+      if (classified.scope === "system") {
+        toast.error(classified.message);
+        return;
+      }
+
+      // Session / model error -> inject activity message into chat stream.
+      // Deduplicate if the last message is already an error_card.
+      const msgs = agent.messages;
+      const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : undefined;
+      if (
+        lastMsg &&
+        lastMsg.role === "activity" &&
+        (lastMsg as { activityType?: string }).activityType === "error_card"
+      ) {
+        return;
+      }
+
+      const errorPayload: Record<string, unknown> =
+        typeof rawErr === "object" && rawErr !== null
+          ? (rawErr as Record<string, unknown>)
+          : { message: classified.rawMessage };
+
+      agent.addMessage({
+        id: `err-${Date.now()}`,
+        role: "activity",
+        activityType: "error_card",
+        content: {
+          message: classified.message,
+          error: errorPayload,
+        },
+      } as unknown as Parameters<typeof agent.addMessage>[0]);
+    };
+
+    const sub = copilotkit.subscribeToAgentWithOptions(
+      agent,
+      {
+        onRunFailed: ({ error }) => handleError(error),
+        onRunErrorEvent: ({ event: errEvent }) => handleError(errEvent),
+      },
+      {},
+    );
+
+    return () => sub.unsubscribe();
+  }, [agent, copilotkit]);
 
   // NOTE: only augment messageView using the static top-level reference.
   // Do NOT override slotProps.messages / onSubmitMessage / isRunning —
