@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.23.0](https://github.com/GavinZha0/Nango/compare/v0.22.0...v0.23.0) (2026-09-15)
+
+
+### Features
+
+* **mcp:** add server grouping and collapsible sidebar ([5562e4d](https://github.com/GavinZha0/Nango/commit/5562e4d62a9da08d30654293e4d70a529863182d))
+
+
+### Bug Fixes
+
+* parameter issue of tool get_mcp_tool_schema ([87eb25b](https://github.com/GavinZha0/Nango/commit/87eb25bc026c7fdae711f9390698368b57c688f6))
+
 ## [0.22.0](https://github.com/GavinZha0/Nango/compare/v0.21.0...v0.22.0) (2026-09-13)
 
 
