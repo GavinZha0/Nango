@@ -124,7 +124,7 @@ All tools live under `src/lib/testing/tools/` and are wrapped by `defineTool`. R
 
 #### 3. `get_mcp_tool_schema`
 - **Parameters**: `mcpServerId` (UUID, required); `toolName?` (optional filter).
-- **Behavior**: Visibility-checked MCP server contract inspection. Without `toolName`, returns schemas/descriptions for all registered tools; with it, only that tool's input schema.
+- **Behavior**: Visibility-checked MCP server contract inspection. Without `toolName`, returns a lightweight summary list (`[{ name, description, enabled }]`) of all registered tools to save tokens; with `toolName`, returns that specific tool's complete `inputSchema` for case authoring.
 
 #### 4. `get_agent_spec`
 - **Parameters**: `agentId` (UUID, required).

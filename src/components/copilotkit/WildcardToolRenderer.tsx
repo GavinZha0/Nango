@@ -180,6 +180,18 @@ function formatDisplayResult(rawResult: string | undefined): string {
   }
 }
 
+/** Format result length cleanly:
+ *  - under 1k: raw count (e.g. 746)
+ *  - 1k and above: in k unit with 1 decimal place (e.g. 1.2k)
+ */
+export function formatResultLength(rawResult: string): string {
+  const len = rawResult.length;
+  if (len < 1000) {
+    return `${len}`;
+  }
+  return `${(len / 1000).toFixed(1)}k`;
+}
+
 export function WildcardToolRenderer({
   name,
   toolCallId,
@@ -313,8 +325,11 @@ export function WildcardToolRenderer({
           </div>
           {result !== undefined && (
             <div className="border-t border-border px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Result
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span>Result</span>
+                <span className="font-mono lowercase tracking-normal text-muted-foreground/80">
+                  {formatResultLength(result)}
+                </span>
               </div>
               <pre className="mt-1.5 max-h-64 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-relaxed text-foreground">
                 {formatDisplayResult(result)}

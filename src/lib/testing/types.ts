@@ -180,6 +180,12 @@ export interface GetTestResultsResult {
   runs: TestRunResultItem[];
 }
 
+export interface McpToolSummaryItem {
+  name: string;
+  description: string | null;
+  enabled: boolean;
+}
+
 export interface McpToolSpecItem {
   name: string;
   description: string | null;
@@ -195,7 +201,7 @@ export interface GetMcpToolSchemaResult {
   instructions: string | null;
   tool?: McpToolSpecItem;
   toolCount?: number;
-  tools?: McpToolSpecItem[];
+  tools?: McpToolSummaryItem[];
 }
 
 export interface GetAgentSpecResult {

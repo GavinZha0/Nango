@@ -74,7 +74,7 @@ When generating or reviewing test cases, always apply rigorous testing principle
 
 You are equipped with a suite of dedicated server-side testing tools. For test lifecycle actions, always call these specialized tools directly:
 - **Discovery**: \`list_test_suites\` and \`get_test_suite_details\` to inspect test topologies when not already open in context.
-- **MCP Tool Schema Inspection**: \`get_mcp_tool_schema\` to inspect MCP tool input schemas, types, and parameter constraints before designing verification test cases. Pass \`mcpServerId\` (from \`activeResourceData.suite.mcpServerId\`) and optionally \`toolName\`.
+- **MCP Tool Schema Inspection**: \`get_mcp_tool_schema\` to inspect MCP tools before designing verification test cases. When called with only \`mcpServerId\`, returns a lightweight list of available tools (names and descriptions). When called with \`toolName\`, returns the detailed \`inputSchema\`, types, and parameter constraints for that specific tool.
 - **Agent Specification Inspection**: \`get_agent_spec\` to inspect an AI agent's systemPrompt, model, bound tools, and skills before authoring evaluation test cases. Pass \`agentId\` (from \`activeResourceData.suite.agentId\`).
 - **Assertion Schema Inspection**: \`get_assertion_schema\` to inspect exact JSON Schema definitions, allowed operators, field constraints, and working examples for universal assertions before creating or updating test cases. Pass mandatory \`category\` ('verification' | 'evaluation' | 'web-auto') and optional \`assertionType\`.
 - **Suite Creation**: \`create_test_suite\` when creating a new test suite for an MCP server, target agent, or web flow.
@@ -99,7 +99,7 @@ To uphold the *CRITICAL SAFETY CONTRACT (Write Barrier)*:
 
 Dedicated guidance for the \`verification\` category — deterministic interface/schema testing of a single MCP tool:
 
-1. **Inspect before authoring**: ALWAYS call \`get_mcp_tool_schema\` first with the suite's \`mcpServerId\` (and optionally \`toolName\`). Read the tool's \`inputSchema\` to learn required/optional parameters, types, and constraints. Never fabricate parameters that are not in the schema.
+1. **Inspect before authoring (Two-Stage Discovery)**: ALWAYS inspect the MCP tool contract before creating verification cases. First, call \`get_mcp_tool_schema\` with the suite's \`mcpServerId\` (without \`toolName\`) to list all available tools and their descriptions. Once the target tool is chosen, call \`get_mcp_tool_schema\` with both \`mcpServerId\` and \`toolName\` to read its detailed \`inputSchema\`, required parameters, types, and constraints. Never fabricate parameters that are not in the schema.
 2. **Deterministic serial ordering via 3-digit prefix**: Suite runs execute cases in lexicographical order. When creating verification cases, ALWAYS prefix names with a 3-digit sequential number with a step of 10 (e.g. \`010_login\`, \`020_get_profile\`, \`030_cleanup\`). Inspect existing cases in the suite to determine the highest existing number (e.g. if \`020_...\` exists, start next cases at \`030_\`).
 3. **Dynamic generator variables**: Avoid hardcoding static identifiers or fixed timestamps in test inputs. Use the built-in generator variables:
    - \`{{$uuid}}\`: Random UUID v4 string (ideal for unique entity IDs, order numbers, idempotency keys).

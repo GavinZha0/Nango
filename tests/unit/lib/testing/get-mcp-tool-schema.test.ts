@@ -39,6 +39,35 @@ describe("get_mcp_tool_schema tool", () => {
       expect(parsed.success).toBe(true);
     });
 
+    it("accepts valid mcpServerId with empty string, whitespace, or null toolName by normalizing to undefined", () => {
+      const emptyParsed = getMcpToolSchemaSchema.safeParse({
+        mcpServerId: validMcpServerId,
+        toolName: "",
+      });
+      expect(emptyParsed.success).toBe(true);
+      if (emptyParsed.success) {
+        expect(emptyParsed.data.toolName).toBeUndefined();
+      }
+
+      const whitespaceParsed = getMcpToolSchemaSchema.safeParse({
+        mcpServerId: validMcpServerId,
+        toolName: "   ",
+      });
+      expect(whitespaceParsed.success).toBe(true);
+      if (whitespaceParsed.success) {
+        expect(whitespaceParsed.data.toolName).toBeUndefined();
+      }
+
+      const nullParsed = getMcpToolSchemaSchema.safeParse({
+        mcpServerId: validMcpServerId,
+        toolName: null,
+      });
+      expect(nullParsed.success).toBe(true);
+      if (nullParsed.success) {
+        expect(nullParsed.data.toolName).toBeUndefined();
+      }
+    });
+
     it("rejects missing mcpServerId", () => {
       const parsed = getMcpToolSchemaSchema.safeParse({});
       expect(parsed.success).toBe(false);
@@ -84,7 +113,7 @@ describe("get_mcp_tool_schema tool", () => {
       ).rejects.toThrow(/not found or access denied/i);
     });
 
-    it("returns all tools when toolName is omitted", async () => {
+    it("returns lightweight tool list when toolName is omitted", async () => {
       dbMock.$enqueue([
         {
           id: validMcpServerId,
@@ -106,12 +135,45 @@ describe("get_mcp_tool_schema tool", () => {
       expect(result.serverTitle).toBe("PostgreSQL Server");
       expect(result.toolCount).toBe(2);
       expect(result.tools).toHaveLength(2);
-      expect(result.tools?.[0].name).toBe("list_records");
-      expect(result.tools?.[1].inputSchema).toEqual({
-        type: "object",
-        properties: { id: { type: "string" } },
-        required: ["id"],
+      expect(result.tools?.[0]).toEqual({
+        name: "list_records",
+        description: "List database records",
+        enabled: true,
       });
+      expect(result.tools?.[1]).toEqual({
+        name: "delete_record",
+        description: "Delete a record",
+        enabled: true,
+      });
+      // inputSchema must not be leaked in list mode to save tokens
+      expect("inputSchema" in (result.tools?.[0] ?? {})).toBe(false);
+      expect(result.tool).toBeUndefined();
+    });
+
+    it("returns lightweight tool list when toolName is empty string", async () => {
+      dbMock.$enqueue([
+        {
+          id: validMcpServerId,
+          name: "postgres-mcp",
+          serverTitle: "PostgreSQL Server",
+          serverDescription: "Direct DB interface",
+          instructions: "Use parameterized queries",
+          tools: mockMcpTools,
+        },
+      ]);
+
+      const tool = buildGetMcpToolSchemaTool({ userId: "user-1" });
+      const parsedArgs = getMcpToolSchemaSchema.parse({
+        mcpServerId: validMcpServerId,
+        toolName: "",
+      });
+      const result = (await tool.execute!(parsedArgs)) as GetMcpToolSchemaResult;
+
+      expect(result.mcpServerId).toBe(validMcpServerId);
+      expect(result.serverName).toBe("postgres-mcp");
+      expect(result.toolCount).toBe(2);
+      expect(result.tools).toHaveLength(2);
+      expect("inputSchema" in (result.tools?.[0] ?? {})).toBe(false);
       expect(result.tool).toBeUndefined();
     });
 

@@ -14,12 +14,13 @@ export const getMcpToolSchemaSchema = z.object({
     .uuid()
     .describe("The unique UUID of the MCP server."),
   toolName: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
+    .preprocess(
+      (val) =>
+        typeof val === "string" && val.trim() === "" ? undefined : (val ?? undefined),
+      z.string().trim().min(1).optional(),
+    )
     .describe(
-      "Optional: specific tool name to inspect within the MCP server. When provided, returns detailed inputSchema for this single tool. When omitted, returns all tools in the server.",
+      "Optional: specific tool name to inspect within the MCP server. When provided, returns detailed inputSchema for this single tool. When omitted, empty, or null, returns a lightweight list of all tools (names and descriptions) without heavy inputSchema.",
     ),
 });
 
@@ -27,9 +28,10 @@ export function buildGetMcpToolSchemaTool(ctx: TesterToolContext): ToolDefinitio
   return defineTool({
     name: "get_mcp_tool_schema",
     description: [
-      "Retrieve the input schema (parameters, types, required fields) and description of tools within an MCP server.",
+      "Inspect MCP tool contracts within an MCP server.",
       "Specify 'mcpServerId' (obtained from suite.mcpServerId or server list).",
-      "Optionally specify 'toolName' to inspect only a single tool's schema, which saves tokens.",
+      "When 'toolName' is omitted, returns a lightweight list of available tools (names and descriptions) to explore capabilities.",
+      "When 'toolName' is provided, returns the complete inputSchema for that specific tool to design verification cases.",
     ].join(" "),
     parameters: getMcpToolSchemaSchema,
     execute: async ({ mcpServerId, toolName }): Promise<GetMcpToolSchemaResult> => {
@@ -99,7 +101,6 @@ export function buildGetMcpToolSchemaTool(ctx: TesterToolContext): ToolDefinitio
         tools: rawTools.map((t) => ({
           name: t.name,
           description: t.description ?? null,
-          inputSchema: (t.input_schema ?? {}) as Record<string, unknown>,
           enabled: Boolean(t.enabled),
         })),
       };
