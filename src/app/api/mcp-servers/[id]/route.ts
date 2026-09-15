@@ -13,6 +13,7 @@ import {
   canEditResource,
 } from "@/lib/auth/permissions";
 import {
+  mcpGroupSchema,
   nonEmptyString,
   optionalTrimmedString,
   parseBody,
@@ -42,6 +43,7 @@ const updateSchema = z
     credentialHeader: optionalTrimmedString.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
+    group: mcpGroupSchema.optional(),
     /** Full tools snapshot replacement (used when refreshing or toggling individual tools). */
     tools: z.array(mcpToolSnapshotSchema).optional(),
   })
@@ -83,6 +85,7 @@ export const PATCH = withEditor<{ id: string }>(
       || body.headers !== undefined
       || body.credentialId !== undefined
       || body.credentialHeader !== undefined
+      || body.group !== undefined
       || body.tools !== undefined;
     if (editsContent && !canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this server.");
@@ -110,6 +113,7 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.headers !== undefined) updates.headers = body.headers;
     if (body.credentialId !== undefined) updates.credentialId = body.credentialId;
     if (body.credentialHeader !== undefined) updates.credentialHeader = body.credentialHeader;
+    if (body.group !== undefined) updates.group = body.group;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
     if (body.tools !== undefined) updates.tools = body.tools;

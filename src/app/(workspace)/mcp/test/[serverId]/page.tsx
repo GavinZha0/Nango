@@ -535,24 +535,26 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   return (
     <div className="flex h-full flex-col">
       {/* Header row. */}
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
-          onClick={() => router.push("/mcp")}
-          aria-label="Back"
-          data-testid="mcp-test-back-button"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <h2
-          className="text-sm font-semibold shrink-0 truncate flex-1"
-          data-testid="mcp-test-heading"
-        >
-          {tool ? `${serverName} / ${tool.name}` : (serverName || "Select a tool")}
-        </h2>
-          {tool && (
+      <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 py-1.5">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={() => router.push("/mcp")}
+            aria-label="Back"
+            data-testid="mcp-test-back-button"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Button>
+          <h2
+            className="text-xs font-semibold tracking-tight text-foreground truncate"
+            data-testid="mcp-test-heading"
+          >
+            {tool ? `${serverName} / ${tool.name}` : (serverName || "Select a tool")}
+          </h2>
+        </div>
+        {tool && (
           <div className="shrink-0 flex items-center">
             <HistoryDropdown
               key={`${activeToolName}:${snapshotTrigger}`}

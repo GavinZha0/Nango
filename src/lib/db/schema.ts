@@ -748,6 +748,9 @@ export const McpServerTable = pgTable("mcp_server", {
    *  LLMs how to use the server. Shown on the server detail view. */
   serverInstructions: text("server_instructions"),
 
+  /** Optional user-defined group name for categorization in the left panel. */
+  group: text("group"),
+
   visibility: text("visibility").notNull().default("private"),
   createdBy: uuid("created_by").references(() => UserTable.id, {
     onDelete: "cascade",
@@ -758,7 +761,9 @@ export const McpServerTable = pgTable("mcp_server", {
   }),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index("mcp_server_group_idx").on(t.group),
+]);
 
 /**
  * Skill — a reusable prompt / scripted capability stored as a file-system resource.

@@ -62,6 +62,12 @@ export const optionalTrimmedString = z
 
 export const uuidString = z.string().uuid();
 
+/** MCP Server Group name: optional, trimmed, null if empty, max 100 characters. */
+export const mcpGroupSchema = optionalTrimmedString.refine(
+  (s) => s === null || s.length <= 100,
+  "Group name must not exceed 100 characters",
+);
+
 // DB error helpers
 
 /**

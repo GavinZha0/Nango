@@ -9,6 +9,7 @@ import { McpServerTable } from "@/lib/db/schema";
 import { withEditor } from "@/lib/http/route-handlers";
 import { visibilitySql } from "@/lib/auth/permissions";
 import {
+  mcpGroupSchema,
   nonEmptyString,
   optionalTrimmedString,
   parseBody,
@@ -47,6 +48,7 @@ const createSchema = z.object({
   credentialId: uuidString.nullable().optional(),
   credentialHeader: optionalTrimmedString.optional(),
   visibility: z.enum(["private", "public"]).optional(),
+  group: mcpGroupSchema.optional(),
 });
 
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
@@ -64,6 +66,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       credentialHeader: body.credentialHeader ?? null,
       enabled: true,
       visibility: body.visibility ?? "private",
+      group: body.group ?? null,
       createdBy: session.user.id,
     })
     .returning();

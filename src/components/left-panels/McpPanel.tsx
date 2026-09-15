@@ -4,7 +4,6 @@
  * McpPanel — MCP server management in the left sidebar.
  */
 
-import { MCPIcon } from "@/components/icons/mcp-icon";
 import {
   RefreshCw,
   Plus,
@@ -16,12 +15,17 @@ import {
   ToggleLeft,
   ToggleRight,
   CircleAlert,
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderOpen,
 } from "lucide-react";
 import {
   type ReactNode,
   useState,
   useEffect,
   useCallback,
+  useMemo,
   type FormEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -57,12 +61,14 @@ import { useRouter, usePathname } from "next/navigation";
 import { getProviderLabel } from "@/lib/constants/providers";
 import type { McpToolSnapshot } from "@/lib/db/schema";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+import { useStoredValue } from "@/hooks/useStoredValue";
 
 // Types
 
 interface McpServerRow {
   id: string;
   name: string;
+  group: string | null;
   description: string | null;
   type: string;
   url: string;
@@ -101,6 +107,8 @@ interface HeaderEntry {
 
 interface ServerFormState {
   name: string;
+  group: string;
+  newGroupName: string;
   type: "sse" | "http";
   url: string;
   credentialId: string;
@@ -122,8 +130,11 @@ function entriesToHeaders(entries: HeaderEntry[]): Record<string, string> | null
 }
 
 function initialFormState(editing?: McpServerRow): ServerFormState {
+  const currentGroup = editing?.group?.trim();
   return {
     name: editing?.name ?? "",
+    group: currentGroup ? currentGroup : "__NONE__",
+    newGroupName: "",
     type: (editing?.type as "sse" | "http") ?? "http",
     url: editing?.url ?? "",
     credentialId: editing?.credentialId ?? "",
@@ -138,6 +149,7 @@ interface ServerFormDialogProps {
   onSuccess: (server: McpServerRow) => void;
   editing?: McpServerRow;
   credentials: CredentialOption[];
+  existingGroups: string[];
 }
 
 function ServerFormDialog({
@@ -146,6 +158,7 @@ function ServerFormDialog({
   onSuccess,
   editing,
   credentials,
+  existingGroups,
 }: ServerFormDialogProps): ReactNode {
   const isEdit = Boolean(editing);
   const [form, setForm] = useState<ServerFormState>(initialFormState(editing));
@@ -180,6 +193,11 @@ function ServerFormDialog({
     setForm((f) => ({ ...f, headers: [...f.headers, { key: "", value: "" }] }));
   }
 
+  const existingGroupMatch = useMemo(() => {
+    if (form.group !== "__NEW_GROUP__") return null;
+    return findExistingGroupMatch(form.newGroupName, existingGroups);
+  }, [form.group, form.newGroupName, existingGroups]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setField("error", "");
@@ -187,6 +205,25 @@ function ServerFormDialog({
     if (!form.name.trim() || !form.url.trim()) {
       setField("error", "Name and URL are required.");
       return;
+    }
+
+    if (form.group === "__NEW_GROUP__") {
+      const trimmed = form.newGroupName.trim();
+      if (!trimmed) {
+        setField("error", "Group name is required when creating a new group.");
+        return;
+      }
+      if (trimmed.length > 100) {
+        setField("error", "Group name must not exceed 100 characters.");
+        return;
+      }
+    }
+
+    let finalGroup: string | null = null;
+    if (form.group === "__NEW_GROUP__") {
+      finalGroup = existingGroupMatch ?? form.newGroupName.trim();
+    } else if (form.group && form.group !== "__NONE__") {
+      finalGroup = form.group.trim();
     }
 
     setSubmitting(true);
@@ -197,6 +234,7 @@ function ServerFormDialog({
         url: form.url.trim(),
         credentialId: form.credentialId || null,
         headers: entriesToHeaders(form.headers),
+        group: finalGroup,
       };
 
       const url = isEdit
@@ -249,6 +287,82 @@ function ServerFormDialog({
               placeholder="e.g. My Search Server"
             />
           </div>
+
+          {/* Group */}
+          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+            <Label id="mcp-group-label" htmlFor="mcp-group-select">Group</Label>
+            <Select
+              value={form.group}
+              items={[
+                { value: "__NONE__", label: "(No group)" },
+                ...existingGroups.map((g) => ({ value: g, label: g })),
+                { value: "__NEW_GROUP__", label: "+ Create new group..." },
+              ]}
+              onValueChange={(v) => { if (v != null) setField("group", v); }}
+            >
+              <SelectTrigger
+                id="mcp-group-select"
+                className="w-full"
+                aria-labelledby="mcp-group-label"
+                data-testid="mcp-group-select"
+              >
+                <SelectValue placeholder="Select group">
+                  {form.group === "__NEW_GROUP__" ? (
+                    <span className="text-primary font-semibold">
+                      + Create new group...
+                    </span>
+                  ) : form.group === "__NONE__" ? (
+                    "(No group)"
+                  ) : (
+                    form.group || "(No group)"
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__NONE__" label="(No group)">
+                  (No group)
+                </SelectItem>
+                {existingGroups.map((g) => (
+                  <SelectItem key={g} value={g} label={g}>
+                    {g}
+                  </SelectItem>
+                ))}
+                <SelectItem
+                  value="__NEW_GROUP__"
+                  label="+ Create new group..."
+                  className="text-primary font-semibold"
+                >
+                  + Create new group...
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* New Group Name Input if __NEW_GROUP__ */}
+          {form.group === "__NEW_GROUP__" && (
+            <div className="space-y-1">
+              <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+                <Label htmlFor="mcp-new-group">
+                  Group Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-new-group"
+                  data-testid="mcp-new-group-input"
+                  value={form.newGroupName}
+                  onChange={(e) => setField("newGroupName", e.target.value)}
+                  required
+                  maxLength={100}
+                  placeholder="e.g. Database, Testing, Search"
+                  autoFocus
+                />
+              </div>
+              {existingGroupMatch && (
+                <p className="text-[11px] text-muted-foreground pl-[88px]">
+                  Note: Group &quot;{existingGroupMatch}&quot; already exists. Server will be added to it.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Transport Type */}
           <div className="grid grid-cols-[80px_1fr] items-center gap-2">
@@ -417,6 +531,119 @@ interface ServerHeaderProps {
   onDelete: () => void;
 }
 
+// Group header & localStorage helper
+
+export const LS_KEY_COLLAPSED_GROUPS = "mcp-panel-collapsed-groups";
+export const SSR_EMPTY_SET: Set<string> = Object.freeze(new Set<string>()) as Set<string>;
+
+export function parseCollapsedGroups(raw: string | null): Set<string> {
+  if (!raw) return SSR_EMPTY_SET;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return new Set(parsed as string[]);
+    }
+    if (typeof parsed === "object" && parsed !== null) {
+      return new Set(Object.keys(parsed).filter((k) => Boolean(parsed[k])));
+    }
+    return SSR_EMPTY_SET;
+  } catch {
+    return SSR_EMPTY_SET;
+  }
+}
+
+export function serializeCollapsedGroups(set: Set<string>): string {
+  return JSON.stringify(Array.from(set));
+}
+
+export function groupMcpServers<T extends { name: string; group?: string | null }>(servers: T[]) {
+  const set = new Set<string>();
+  for (const s of servers) {
+    const g = s.group?.trim();
+    if (g) set.add(g);
+  }
+  const existingGroups = Array.from(set).sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
+  );
+
+  if (existingGroups.length === 0) {
+    return { existingGroups: [], grouped: null };
+  }
+
+  const groupMap = new Map<string, T[]>();
+  for (const g of existingGroups) {
+    groupMap.set(g, []);
+  }
+  const ungrouped: T[] = [];
+
+  for (const server of servers) {
+    const g = server.group?.trim();
+    if (g && groupMap.has(g)) {
+      groupMap.get(g)!.push(server);
+    } else {
+      ungrouped.push(server);
+    }
+  }
+
+  const sortFn = (a: T, b: T) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+
+  const groups: { name: string; servers: T[] }[] = [];
+  for (const g of existingGroups) {
+    const list = groupMap.get(g)!;
+    list.sort(sortFn);
+    groups.push({ name: g, servers: list });
+  }
+
+  if (ungrouped.length > 0) {
+    ungrouped.sort(sortFn);
+    groups.push({ name: "Ungrouped", servers: ungrouped });
+  }
+
+  return { existingGroups, grouped: groups };
+}
+
+export function findExistingGroupMatch(newGroupName: string, existingGroups: string[]): string | null {
+  const trimmed = newGroupName.trim().toLowerCase();
+  if (!trimmed) return null;
+  return existingGroups.find((g) => g.toLowerCase() === trimmed) ?? null;
+}
+
+interface McpGroupHeaderProps {
+  name: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+function McpGroupHeader({ name, count, collapsed, onToggle }: McpGroupHeaderProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      data-testid="mcp-group-header"
+      data-group-name={name}
+      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors cursor-pointer select-none border-b border-border/40"
+      aria-expanded={!collapsed}
+    >
+      {collapsed ? (
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+      ) : (
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+      )}
+      {collapsed ? (
+        <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+      ) : (
+        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+      )}
+      <span className="truncate flex-1 text-left font-medium text-xs text-foreground/85">{name}</span>
+      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal leading-none text-muted-foreground">
+        {count}
+      </span>
+    </button>
+  );
+}
+
 function ServerHeader({
   active,
   server,
@@ -475,7 +702,7 @@ function ServerHeader({
           <button
             type="button"
             onClick={onSelect}
-            className="cursor-pointer truncate text-left text-base font-medium hover:underline underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
+            className="cursor-pointer truncate text-left text-xs font-medium hover:underline underline-offset-2 shrink-0 max-w-[calc(100%-2.25rem)]"
             aria-label={`Select ${server.name}`}
             data-action="open-mcp-server"
             title={version ? `${server.name} (v${version})` : server.name}
@@ -635,6 +862,28 @@ export function McpPanel(): ReactNode {
   const [editingServer, setEditingServer] = useState<McpServerRow | undefined>(undefined);
   // Per-server refreshing state
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
+
+  // Collapsed groups (persisted via useStoredValue for SSR safety)
+  const { value: collapsedGroups, write: writeCollapsedGroups } =
+    useStoredValue<Set<string>>({
+      key: LS_KEY_COLLAPSED_GROUPS,
+      parse: parseCollapsedGroups,
+      serialize: serializeCollapsedGroups,
+      serverDefault: SSR_EMPTY_SET,
+    });
+
+  const toggleGroup = useCallback(
+    (groupName: string) => {
+      const next = new Set(collapsedGroups);
+      if (next.has(groupName)) {
+        next.delete(groupName);
+      } else {
+        next.add(groupName);
+      }
+      writeCollapsedGroups(next);
+    },
+    [collapsedGroups, writeCollapsedGroups],
+  );
 
   // Fetch current user ID
   useEffect(() => {
@@ -810,11 +1059,30 @@ export function McpPanel(): ReactNode {
     setDeleteTarget(null);
   }
 
-  // Sorted servers
+  // Groups & Sorting
 
-  const sortedServers = [...servers].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
-  );
+  const { existingGroups, grouped: groupedServers } = useMemo(() => {
+    return groupMcpServers(servers);
+  }, [servers]);
+
+  // Auto-expand group containing active server if it is currently collapsed
+  useEffect(() => {
+    if (!activeServerId) return;
+    const activeServer = servers.find((s) => s.id === activeServerId);
+    if (!activeServer) return;
+    const groupName = activeServer.group?.trim() || (existingGroups.length > 0 ? "Ungrouped" : "");
+    if (groupName && collapsedGroups.has(groupName)) {
+      const next = new Set(collapsedGroups);
+      next.delete(groupName);
+      writeCollapsedGroups(next);
+    }
+  }, [activeServerId, servers, existingGroups, collapsedGroups, writeCollapsedGroups]);
+
+  const sortedServers = useMemo(() => {
+    return [...servers].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
+    );
+  }, [servers]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -824,36 +1092,40 @@ export function McpPanel(): ReactNode {
         onSuccess={handleDialogSuccess}
         editing={editingServer}
         credentials={credentials}
+        existingGroups={existingGroups}
       />
 
       {/* Header */}
-      <div className="flex h-12 items-center gap-2 border-b px-4">
-          <MCPIcon className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">MCP Servers</h2>
-          <div className="ml-auto flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={handleNewServer}
-              aria-label="New MCP server"
-              data-testid="new-mcp-server-button"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={refreshAll}
-              disabled={loading}
-              aria-label="Refresh all servers"
-              data-testid="refresh-mcp-servers-button"
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-            </Button>
-          </div>
+      <div className="flex h-9 items-center justify-between border-b bg-muted/40 px-3 py-1.5">
+        <h2 className="text-xs font-semibold tracking-tight text-foreground truncate">
+          MCP Servers
+        </h2>
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={handleNewServer}
+            aria-label="New MCP server"
+            title="New MCP server"
+            data-testid="new-mcp-server-button"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={refreshAll}
+            disabled={loading}
+            aria-label="Refresh all servers"
+            title="Refresh all servers"
+            data-testid="refresh-mcp-servers-button"
+          >
+            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+          </Button>
         </div>
+      </div>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="py-1">
@@ -870,26 +1142,58 @@ export function McpPanel(): ReactNode {
                   Add one
                 </button>
               </div>
-            ) : (
+            ) : groupedServers ? (
               <div>
-                {sortedServers.map((server) => {
-                  const isOwner = server.createdBy === currentUserId;
+                {groupedServers.map((group) => {
+                  const isCollapsed = collapsedGroups.has(group.name);
                   return (
-                    <ServerHeader
-                      key={server.id}
-                      active={server.id === activeServerId}
-                      server={server}
-                      isOwner={isOwner}
-                      refreshing={refreshingIds.has(server.id)}
-                      onSelect={() => handleSelectServer(server)}
-                      onEdit={() => handleEditServer(server)}
-                      onRefresh={() => discoverTools(server.id)}
-                      onToggleEnabled={(enabled) => handleToggleEnabled(server, enabled)}
-                      onToggleVisibility={(vis) => handleToggleVisibility(server, vis)}
-                      onDelete={() => setDeleteTarget(server)}
-                    />
+                    <div key={group.name} className="border-b border-border/40 last:border-b-0">
+                      <McpGroupHeader
+                        name={group.name}
+                        count={group.servers.length}
+                        collapsed={isCollapsed}
+                        onToggle={() => toggleGroup(group.name)}
+                      />
+                      {!isCollapsed && (
+                        <div>
+                          {group.servers.map((server) => (
+                            <ServerHeader
+                              key={server.id}
+                              active={server.id === activeServerId}
+                              server={server}
+                              isOwner={server.createdBy === currentUserId}
+                              refreshing={refreshingIds.has(server.id)}
+                              onSelect={() => handleSelectServer(server)}
+                              onEdit={() => handleEditServer(server)}
+                              onRefresh={() => discoverTools(server.id)}
+                              onToggleEnabled={(enabled) => handleToggleEnabled(server, enabled)}
+                              onToggleVisibility={(vis) => handleToggleVisibility(server, vis)}
+                              onDelete={() => setDeleteTarget(server)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
+              </div>
+            ) : (
+              <div>
+                {sortedServers.map((server) => (
+                  <ServerHeader
+                    key={server.id}
+                    active={server.id === activeServerId}
+                    server={server}
+                    isOwner={server.createdBy === currentUserId}
+                    refreshing={refreshingIds.has(server.id)}
+                    onSelect={() => handleSelectServer(server)}
+                    onEdit={() => handleEditServer(server)}
+                    onRefresh={() => discoverTools(server.id)}
+                    onToggleEnabled={(enabled) => handleToggleEnabled(server, enabled)}
+                    onToggleVisibility={(vis) => handleToggleVisibility(server, vis)}
+                    onDelete={() => setDeleteTarget(server)}
+                  />
+                ))}
               </div>
             )}
           </div>
