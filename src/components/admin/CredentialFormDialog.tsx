@@ -23,7 +23,6 @@ import type { CredentialType } from "@/lib/db/schema";
 import {
   PROVIDERS,
   PROVIDER_MAP,
-  getProviderService,
   SERVICE_LABELS,
   type ProviderEntry,
 } from "@/lib/constants/providers";
@@ -54,6 +53,8 @@ interface CredentialFormDialogProps {
   onSuccess: () => void;
   /** When provided, the dialog is in edit mode. */
   editing?: CredentialRow;
+  /** Service type passed from the active filter in management page. */
+  serviceType?: CredentialServiceType;
 }
 
 // Payload field definitions per type
@@ -140,8 +141,11 @@ export function CredentialFormDialog({
   onOpenChange,
   onSuccess,
   editing,
+  serviceType,
 }: CredentialFormDialogProps): ReactNode {
   const isEdit = Boolean(editing);
+  const currentServiceType: CredentialServiceType =
+    (editing?.serviceType as CredentialServiceType) || serviceType || "llm";
 
   const [form, setForm] = useState<FormState>(() => initialFormState(editing));
   const [submitting, setSubmitting] = useState(false);
@@ -180,19 +184,16 @@ export function CredentialFormDialog({
       return;
     }
 
-    // Derive serviceType from provider; fall back to "other" for unknown providers
-    const serviceType = getProviderService(form.provider) ?? "other";
-
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
         name: form.name,
-        serviceType,
+        serviceType: currentServiceType,
         provider: form.provider,
         restUrl: form.restUrl.trim() || null,
         // Only persist AG-UI URL for agent-platform providers.
         aguiUrl:
-          serviceType === "agent" ? form.aguiUrl.trim() || null : null,
+          currentServiceType === "agent" ? form.aguiUrl.trim() || null : null,
       };
       if (!isEdit) body.type = form.type;
       if (hasPayloadInput) {
@@ -233,7 +234,7 @@ export function CredentialFormDialog({
   // SSH servers hide URL inputs.
   const isSsh = form.provider === "ssh";
   // AG-UI URL is only meaningful for `agent` providers.
-  const isAgent = getProviderService(form.provider) === "agent";
+  const isAgent = currentServiceType === "agent";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -261,16 +262,15 @@ export function CredentialFormDialog({
               <Label>Provider <span className="text-destructive">*</span></Label>
               {form.provider && (
                 <span className="text-xs text-muted-foreground">
-                  {PROVIDERS.find((p) => p.value === form.provider)?.label}
+                  {PROVIDERS.find((p) => p.value === form.provider && p.service === currentServiceType)?.label ?? form.provider}
                   <span className="mx-1">·</span>
-                  {SERVICE_LABELS[
-                    (getProviderService(form.provider) ?? "other") as CredentialServiceType
-                  ]}
+                  {SERVICE_LABELS[currentServiceType]}
                 </span>
               )}
             </div>
             <ProviderPicker
               value={form.provider}
+              serviceType={currentServiceType}
               onChange={(v) => setField("provider", v)}
             />
           </div>
@@ -452,6 +452,7 @@ export function CredentialFormDialog({
 interface ProviderPickerProps {
   value: string;
   onChange: (value: string) => void;
+  serviceType: CredentialServiceType;
 }
 
 /** Deterministic Tailwind color class set for the letter avatar. */
@@ -487,136 +488,50 @@ function providerInitials(p: ProviderEntry): string {
   return head.slice(0, 2).toUpperCase();
 }
 
-/**
- * Tab order + short labels. Driven from this array (not from
- * SERVICE_LABELS) so:
- *   - the order is stable regardless of provider-list churn, and
- *   - label shortening ("Agent Platform" → "Agent", "Data Source" →
- *     "Datasource") is local to the picker and does not leak into
- *     the credential management list / table headers, which keep
- *     the longer canonical labels via SERVICE_LABELS.
- *
- * `service: "other"` is intentionally absent — no provider is
- * registered against it today; if one is added later, append the
- * tab here.
- */
-const PROVIDER_TABS: ReadonlyArray<{
-  service: CredentialServiceType;
-  label: string;
-}> = [
-  { service: "llm", label: "LLM" },
-  { service: "agent", label: "Agent" },
-  { service: "search", label: "Search" },
-  { service: "observability", label: "Observability" },
-  { service: "integration", label: "Integration" },
-  { service: "datasource", label: "Datasource" },
-  { service: "calendar", label: "Calendar" },
-  { service: "voice", label: "Voice" },
-];
-
-function ProviderPicker({ value, onChange }: ProviderPickerProps): ReactNode {
-  // Default the open tab to the SERVICE of the currently-selected
-  // provider (so editing an existing OpenAI credential opens "LLM",
-  // not "LLM" by accident-of-being-first). Falls back to the first
-  // tab when nothing is selected.
-  const initialTab: CredentialServiceType = useMemo(() => {
-    const svc = value ? getProviderService(value) : null;
-    if (svc && PROVIDER_TABS.some((t) => t.service === svc)) return svc;
-    return PROVIDER_TABS[0].service;
-  }, [value]);
-  const [activeTab, setActiveTab] = useState<CredentialServiceType>(initialTab);
-
-  // Group providers by service ONCE. Constant input → constant output;
-  // memoised mostly to keep the render path tidy.
-  const byService = useMemo(() => {
-    const map = new Map<CredentialServiceType, ProviderEntry[]>();
-    for (const p of PROVIDERS) {
-      const list = map.get(p.service);
-      if (list) list.push(p);
-      else map.set(p.service, [p]);
-    }
-    return map;
-  }, []);
-
-  const items: ProviderEntry[] = byService.get(activeTab) ?? [];
+function ProviderPicker({ value, onChange, serviceType }: ProviderPickerProps): ReactNode {
+  const items: ProviderEntry[] = useMemo(() => {
+    return PROVIDERS.filter((p) => p.service === serviceType);
+  }, [serviceType]);
 
   return (
-    <div className="rounded-md border">
-      {/* Tab strip — horizontal, one tab per CredentialServiceType.
-          Active tab gets the primary underline + foreground color; no
-          shadcn Tabs primitive in the codebase, so this is a thin
-          inline implementation. */}
-      <div
-        role="tablist"
-        aria-label="Provider category"
-        className="flex flex-wrap items-stretch gap-1 border-b px-1"
-      >
-        {PROVIDER_TABS.map((tab) => {
-          const selected = activeTab === tab.service;
-          return (
-            <button
-              key={tab.service}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => setActiveTab(tab.service)}
-              className={cn(
-                "relative whitespace-nowrap px-3 py-2 text-sm transition",
-                "hover:text-foreground",
-                selected
-                  ? "font-medium text-foreground"
-                  : "text-muted-foreground",
-                // Underline indicator for the active tab — bottom-aligned
-                // 2px bar, hugs the inner content edge so it visually
-                // sits on the border-b of the strip itself.
-                selected
-                  && "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:bg-primary after:content-['']",
-              )}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-      <div role="tabpanel" className="h-64 overflow-y-auto p-2">
-        {items.length === 0 ? (
-          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            No providers in this category.
-          </p>
-        ) : (
-          <div className="grid grid-cols-3 gap-1.5">
-            {items.map((p) => {
-              const selected: boolean = value === p.value;
-              return (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => onChange(p.value)}
-                  aria-pressed={selected}
+    <div className="rounded-md border p-2">
+      {items.length === 0 ? (
+        <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+          No providers in this category.
+        </p>
+      ) : (
+        <div className="grid grid-cols-3 gap-1.5 max-h-56 overflow-y-auto">
+          {items.map((p) => {
+            const selected: boolean = value === p.value;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => onChange(p.value)}
+                aria-pressed={selected}
+                className={cn(
+                  "flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm transition cursor-pointer",
+                  "hover:bg-accent hover:text-accent-foreground",
+                  selected
+                    ? "border-primary bg-accent ring-1 ring-primary"
+                    : "border-border",
+                )}
+              >
+                <span
                   className={cn(
-                    "flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm transition",
-                    "hover:bg-accent hover:text-accent-foreground",
-                    selected
-                      ? "border-primary bg-accent ring-1 ring-primary"
-                      : "border-border",
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
+                    avatarColorClass(p.value),
                   )}
+                  aria-hidden
                 >
-                  <span
-                    className={cn(
-                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
-                      avatarColorClass(p.value),
-                    )}
-                    aria-hidden
-                  >
-                    {providerInitials(p)}
-                  </span>
-                  <span className="truncate">{p.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                  {providerInitials(p)}
+                </span>
+                <span className="truncate">{p.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

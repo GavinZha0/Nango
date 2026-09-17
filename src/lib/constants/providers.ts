@@ -101,8 +101,13 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "sensevoice",            label: "SenseVoice",     service: "voice", capability: ["stt"] },
 ];
 
-/** Lookup map: provider slug → ProviderEntry. */
-export const PROVIDER_MAP = new Map(PROVIDERS.map((p) => [p.value, p]));
+/** Lookup map: provider slug → ProviderEntry. First entry wins to preserve primary service mapping. */
+export const PROVIDER_MAP = new Map<string, ProviderEntry>();
+for (const p of PROVIDERS) {
+  if (!PROVIDER_MAP.has(p.value)) {
+    PROVIDER_MAP.set(p.value, p);
+  }
+}
 
 /** CONTRACT: returns the slug itself when unknown. */
 export function getProviderLabel(slug: string | null | undefined): string {

@@ -43,15 +43,9 @@ adminTest.describe("Credential Management", () => {
     // Fill in the form (first input labelled "Name").
     await dialog.getByLabel(/name/i).first().fill(name);
 
-    // Provider — picked via the custom ProviderPicker (tabs + button
-    // grid), NOT a shadcn Select. See CredentialFormDialog.tsx →
-    // ProviderPicker. LLM tab is the default but make it explicit so
-    // the test survives a reordering of PROVIDER_TABS.
-    await dialog.getByRole("tab", { name: "LLM" }).click();
-    await dialog
-      .getByRole("tabpanel")
-      .getByRole("button", { name: "OpenAI", exact: true })
-      .click();
+    // Provider — picked via the custom ProviderPicker (button grid).
+    // The dialog inherits the active filter category (LLM by default).
+    await dialog.getByRole("button", { name: "OpenAI", exact: true }).click();
 
     // Fill API key.
     await dialog.getByLabel("API Key").fill("sk-test-e2e-placeholder-key");
@@ -140,11 +134,9 @@ adminTest.describe("Credential Management", () => {
   adminTest("should display sortable credential table headers and toggle sort direction on click", async ({ page }) => {
     const nameHeader = page.getByRole("columnheader", { name: "Name" });
     const providerHeader = page.getByRole("columnheader", { name: "Provider" });
-    const serviceHeader = page.getByRole("columnheader", { name: "Service" });
 
     await expect(nameHeader).toBeVisible();
     await expect(providerHeader).toBeVisible();
-    await expect(serviceHeader).toBeVisible();
 
     // Default sort is Name ascending
     await expect(nameHeader).toHaveAttribute("aria-sort", "ascending");
@@ -169,11 +161,7 @@ async function createCredential(page: import("@playwright/test").Page, name: str
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "New Credential" })).toBeVisible();
   await dialog.getByLabel(/name/i).first().fill(name);
-  await dialog.getByRole("tab", { name: "LLM" }).click();
-  await dialog
-    .getByRole("tabpanel")
-    .getByRole("button", { name: "OpenAI", exact: true })
-    .click();
+  await dialog.getByRole("button", { name: "OpenAI", exact: true }).click();
   await dialog.getByLabel("API Key").fill("sk-test-e2e-placeholder-key");
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("heading", { name: "New Credential" })).not.toBeVisible({ timeout: 5000 });

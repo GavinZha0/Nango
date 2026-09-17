@@ -28,6 +28,9 @@ import { alphabeticCompare } from "@/lib/utils/sort";
 import { SortableHeader, useTableSort } from "@/components/admin/SortableHeader";
 import { Plus, Trash2, KeyRound } from "lucide-react";
 
+import { cn } from "@/lib/utils";
+import type { CredentialServiceType } from "@/lib/db/schema";
+
 // Type label map
 
 const TYPE_LABELS: Record<string, string> = {
@@ -39,14 +42,21 @@ const TYPE_LABELS: Record<string, string> = {
   keypair: "Key Pair",
 };
 
-const SERVICE_TYPE_LABELS: Record<string, string> = {
-  llm: "LLM",
-  search: "Search",
-  agent: "Agent",
-  observability: "Observability",
-  api: "API",
-  other: "Other",
-};
+interface ServiceCategory {
+  service: CredentialServiceType;
+  label: string;
+}
+
+const SERVICE_CATEGORIES: ReadonlyArray<ServiceCategory> = [
+  { service: "llm", label: "LLM" },
+  { service: "agent", label: "Agent" },
+  { service: "search", label: "Search" },
+  { service: "observability", label: "Observability" },
+  { service: "integration", label: "Integration" },
+  { service: "datasource", label: "Datasource" },
+  { service: "calendar", label: "Calendar" },
+  { service: "voice", label: "Voice" },
+];
 
 // Delete button with confirmation
 
@@ -197,7 +207,7 @@ function EnabledSwitch({ row, onRefresh }: EnabledSwitchProps): ReactNode {
   );
 }
 
-type CredentialSortColumn = "name" | "provider" | "service";
+type CredentialSortColumn = "name" | "provider";
 
 export function CredentialManagement(): ReactNode {
   const tz = useDisplayTimezone();
@@ -207,6 +217,7 @@ export function CredentialManagement(): ReactNode {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<CredentialRow | undefined>(undefined);
   const [revision, setRevision] = useState(0);
+  const [activeServiceType, setActiveServiceType] = useState<CredentialServiceType>("llm");
 
   const { sortColumn, sortDirection, handleSort } = useTableSort<CredentialSortColumn>("name");
 
@@ -247,24 +258,33 @@ export function CredentialManagement(): ReactNode {
 
   function refresh() { setRevision((r) => r + 1); }
 
+  const countByService = useMemo(() => {
+    const counts: Partial<Record<CredentialServiceType, number>> = {};
+    for (const r of rows) {
+      const st = r.serviceType as CredentialServiceType;
+      counts[st] = (counts[st] ?? 0) + 1;
+    }
+    return counts;
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => r.serviceType === activeServiceType);
+  }, [rows, activeServiceType]);
+
   const sortedRows = useMemo(() => {
-    return [...rows].sort((a, b) => {
+    return [...filteredRows].sort((a, b) => {
       let result = 0;
       if (sortColumn === "name") {
         result = alphabeticCompare(a.name, b.name);
       } else if (sortColumn === "provider") {
         result = alphabeticCompare(a.provider ?? "", b.provider ?? "");
-      } else if (sortColumn === "service") {
-        const labelA = SERVICE_TYPE_LABELS[a.serviceType] ?? a.serviceType ?? "";
-        const labelB = SERVICE_TYPE_LABELS[b.serviceType] ?? b.serviceType ?? "";
-        result = alphabeticCompare(labelA, labelB);
       }
       if (result === 0) {
         result = alphabeticCompare(a.name, b.name);
       }
       return sortDirection === "asc" ? result : -result;
     });
-  }, [rows, sortColumn, sortDirection]);
+  }, [filteredRows, sortColumn, sortDirection]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -278,6 +298,39 @@ export function CredentialManagement(): ReactNode {
           <Plus className="h-4 w-4" />
           New Credential
         </Button>
+      </div>
+
+      {/* Service Type Filter Bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        {SERVICE_CATEGORIES.map((cat) => {
+          const isSelected = activeServiceType === cat.service;
+          const count = countByService[cat.service] ?? 0;
+          return (
+            <button
+              key={cat.service}
+              type="button"
+              onClick={() => setActiveServiceType(cat.service)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer",
+                isSelected
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50",
+              )}
+            >
+              <span>{cat.label}</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
+                  isSelected
+                    ? "bg-primary-foreground/20 text-primary-foreground font-semibold"
+                    : "bg-background/80 text-muted-foreground border border-border/40",
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Table */}
@@ -299,13 +352,6 @@ export function CredentialManagement(): ReactNode {
                 currentDirection={sortDirection}
                 onSort={handleSort}
               />
-              <SortableHeader
-                label="Service"
-                column="service"
-                currentColumn={sortColumn}
-                currentDirection={sortDirection}
-                onSort={handleSort}
-              />
               <TableHead>Credential Type</TableHead>
               <TableHead>Secret Key</TableHead>
               <TableHead>Endpoints</TableHead>
@@ -318,20 +364,20 @@ export function CredentialManagement(): ReactNode {
           <TableBody>
             {loading && rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={10} className="py-10 text-center text-sm text-destructive">
+                <TableCell colSpan={9} className="py-10 text-center text-sm text-destructive">
                   {error}
                 </TableCell>
               </TableRow>
             ) : sortedRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
-                  No credentials yet. Click <strong>New Credential</strong> to add one.
+                <TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">
+                  No credentials yet.
                 </TableCell>
               </TableRow>
             ) : (
@@ -355,10 +401,6 @@ export function CredentialManagement(): ReactNode {
 
                   <TableCell className="text-muted-foreground">
                     {row.provider ?? "—"}
-                  </TableCell>
-
-                  <TableCell className="text-muted-foreground">
-                    {SERVICE_TYPE_LABELS[row.serviceType] ?? row.serviceType ?? "—"}
                   </TableCell>
 
                   <TableCell className="text-muted-foreground">
@@ -417,6 +459,7 @@ export function CredentialManagement(): ReactNode {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onSuccess={refresh}
+        serviceType={activeServiceType}
       />
 
       {/* Edit dialog */}
