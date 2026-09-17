@@ -9,7 +9,7 @@ import {
   UserTable,
   SessionTable,
   AccountTable,
-  VerificationTable,
+  AuthTokenTable,
   LoginEventTable,
 } from "@/lib/db/schema";
 import { count, eq, isNull } from "drizzle-orm";
@@ -106,7 +106,7 @@ const options = {
       user: UserTable,
       session: SessionTable,
       account: AccountTable,
-      verification: VerificationTable,
+      verification: AuthTokenTable,
     },
   }),
 

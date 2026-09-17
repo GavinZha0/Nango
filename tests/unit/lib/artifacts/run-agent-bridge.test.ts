@@ -32,7 +32,7 @@ vi.mock("@/lib/db/schema", () => ({
   UserTable: {},
   SessionTable: {},
   AccountTable: {},
-  VerificationTable: {},
+  AuthTokenTable: {},
   LoginEventTable: {},
 }));
 

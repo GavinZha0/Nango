@@ -125,7 +125,7 @@ export const AccountTable = pgTable("account", {
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const VerificationTable = pgTable("verification", {
+export const AuthTokenTable = pgTable("auth_token", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
@@ -133,6 +133,8 @@ export const VerificationTable = pgTable("verification", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+export type AuthTokenEntity = typeof AuthTokenTable.$inferSelect;
 
 /**
  * LoginEvent — append-only audit log for authentication events.
@@ -1658,7 +1660,7 @@ export type ConfigEntity = typeof ConfigTable.$inferSelect;
 
 // Verification subsystem — deterministic assert-on-output harness for
 // MCP tools (V1) and Nango internal workflows (V2). See docs/verification.md
-// for the full design. Distinct from the `verification` table above which
+// for the full design. Distinct from the `auth_token` table above which
 // is the better-auth email-verification token store.
 
 /**

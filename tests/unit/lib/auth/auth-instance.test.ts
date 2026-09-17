@@ -71,7 +71,7 @@ vi.mock("@/lib/db/schema", () => ({
   UserTable: { id: "user.id", deletedAt: "user.deletedAt" },
   SessionTable: { id: "session.id" },
   AccountTable: { id: "account.id" },
-  VerificationTable: { id: "verification.id" },
+  AuthTokenTable: { id: "auth_token.id" },
   LoginEventTable: { id: "login-event.id" },
 }));
 
@@ -204,7 +204,7 @@ describe("AuthInstanceTest", () => {
       expect(schema.user).toEqual({ id: "user.id", deletedAt: "user.deletedAt" });
       expect(schema.session).toEqual({ id: "session.id" });
       expect(schema.account).toEqual({ id: "account.id" });
-      expect(schema.verification).toEqual({ id: "verification.id" });
+      expect(schema.verification).toEqual({ id: "auth_token.id" });
     });
 
     it("exposes additional user fields with correct input flags", () => {

@@ -22,6 +22,13 @@
       "when": 1789434876225,
       "tag": "0002_add_mcp_server_group",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789681643578,
+      "tag": "0003_rename_verification_to_auth_token",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "verification" RENAME TO "auth_token";
