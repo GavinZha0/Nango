@@ -5,14 +5,14 @@
 
 ### Features
 
-* **credential:** add service type filter bar and streamline credential form dialog ([6e25f23](https://github.com/GavinZha0/Nango/commit/6e25f237e66f4fec1c84733cf1162429bf0c83ec))
-* **mcp:** add server grouping and collapsible sidebar ([5562e4d](https://github.com/GavinZha0/Nango/commit/5562e4d62a9da08d30654293e4d70a529863182d))
-* **mcp:** support compact group prefix and alphabetical sort across UI ([f33003b](https://github.com/GavinZha0/Nango/commit/f33003bea2762319fe9aeba18c5c10067ff6d917))
+* **credential:** add service type filter bar and streamline credential form dialog ([6e25f23](https://github.com/GavinZha0/Nango/commit/6e25f237e66f4fec1c84733cf1162429bf0c83ec)) by @GavinZha0
+* **mcp:** add server grouping and collapsible sidebar ([5562e4d](https://github.com/GavinZha0/Nango/commit/5562e4d62a9da08d30654293e4d70a529863182d)) by @GavinZha0
+* **mcp:** support compact group prefix and alphabetical sort across UI ([f33003b](https://github.com/GavinZha0/Nango/commit/f33003bea2762319fe9aeba18c5c10067ff6d917)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* parameter issue of tool get_mcp_tool_schema ([87eb25b](https://github.com/GavinZha0/Nango/commit/87eb25bc026c7fdae711f9390698368b57c688f6))
+* parameter issue of tool get_mcp_tool_schema ([87eb25b](https://github.com/GavinZha0/Nango/commit/87eb25bc026c7fdae711f9390698368b57c688f6)) by @GavinZha0
 
 ## [0.22.0](https://github.com/GavinZha0/Nango/compare/v0.21.0...v0.22.0) (2026-09-13)
 
