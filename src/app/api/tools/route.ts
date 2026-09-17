@@ -27,6 +27,7 @@ export const GET = withSession("/api/tools", async ({ session }) => {
       .select({
         id: McpServerTable.id,
         name: McpServerTable.name,
+        group: McpServerTable.group,
         description: McpServerTable.description,
         serverDescription: McpServerTable.serverDescription,
         serverInstructions: McpServerTable.serverInstructions,

@@ -16,6 +16,7 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
     .select({
       id: McpServerTable.id,
       name: McpServerTable.name,
+      group: McpServerTable.group,
       serverTitle: McpServerTable.serverTitle,
       serverDescription: McpServerTable.serverDescription,
       enabled: McpServerTable.enabled,

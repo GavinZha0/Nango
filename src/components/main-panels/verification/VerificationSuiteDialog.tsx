@@ -38,7 +38,14 @@ import { verificationActions, type VerificationSuiteRow } from "@/store/verifica
 interface McpServerItem {
   id: string;
   name: string;
+  group?: string | null;
   serverTitle?: string | null;
+}
+
+function getServerDisplayName(s?: McpServerItem | null): string {
+  if (!s) return "";
+  const base = s.serverTitle || s.name;
+  return s.group?.trim() ? `${s.group.trim()}/${base}` : base;
 }
 
 export interface VerificationSuiteDialogProps {
@@ -174,7 +181,7 @@ export function VerificationSuiteDialog({
   const displayServerName =
     serverName ||
     ("serverName" in (suite ?? {}) ? (suite as { serverName?: string }).serverName : undefined) ||
-    (serverId ? servers.find((s) => s.id === serverId)?.serverTitle || servers.find((s) => s.id === serverId)?.name : "MCP Server");
+    (serverId ? getServerDisplayName(servers.find((s) => s.id === serverId)) || "MCP Server" : "MCP Server");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -256,18 +263,19 @@ export function VerificationSuiteDialog({
                       <SelectTrigger id="mcp-server" className="w-full" data-testid="suite-server-select">
                         <SelectValue placeholder="Select an MCP Server">
                           {serverId ? (
-                            servers.find((s) => s.id === serverId)?.serverTitle ||
-                            servers.find((s) => s.id === serverId)?.name ||
-                            "Unknown server"
+                            getServerDisplayName(servers.find((s) => s.id === serverId)) || "Unknown server"
                           ) : null}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {servers.map((s) => (
-                          <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
-                            {s.serverTitle || s.name}
-                          </SelectItem>
-                        ))}
+                        {servers.map((s) => {
+                          const label = getServerDisplayName(s);
+                          return (
+                            <SelectItem key={s.id} value={s.id} label={label}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   )}

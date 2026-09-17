@@ -29,6 +29,7 @@ export interface VerificationSuiteRow {
 export interface VerificationServerRow {
   id: string;
   name: string;
+  group?: string | null;
   serverTitle: string | null;
   serverDescription: string | null;
   enabled: boolean;

@@ -49,6 +49,7 @@ const fetcher = async (url: string) => {
 interface ServerTreeGroup {
   id: string; // mcpServerId — or a `detached:<name>` synthetic key when the server row is gone
   name: string;
+  group?: string | null;
   serverTitle: string | null;
   serverDescription: string | null;
   enabled: boolean;
@@ -207,6 +208,7 @@ function ServerGroupNode({
   runningSuiteId,
 }: ServerGroupNodeProps): ReactNode {
   const displayName = group.serverTitle || group.name;
+  const groupName = group.group?.trim();
   const isServerRunning = runningServerId === group.id;
 
   return (
@@ -234,7 +236,14 @@ function ServerGroupNode({
           )}
           <MCPIcon className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate font-medium hover:underline underline-offset-2">
-            {displayName}
+            {groupName ? (
+              <>
+                <span className="text-muted-foreground/75 font-normal">{groupName}/</span>
+                <span>{displayName}</span>
+              </>
+            ) : (
+              displayName
+            )}
           </span>
           {group.suites.length > 0 && (
             <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.2 text-[9px] text-muted-foreground">
@@ -362,6 +371,7 @@ export function VerificationPanel(): ReactNode {
       .map((s) => ({
         id: s.id,
         name: s.name,
+        group: s.group,
         serverTitle: s.serverTitle,
         serverDescription: s.serverDescription,
         enabled: s.enabled,
@@ -375,6 +385,7 @@ export function VerificationPanel(): ReactNode {
     const detachedGroups = [...detachedByName.entries()].map(([serverName, suites]) => ({
       id: `detached:${serverName}`,
       name: serverName,
+      group: null,
       serverTitle: serverName,
       serverDescription: null,
       enabled: true,
@@ -382,8 +393,14 @@ export function VerificationPanel(): ReactNode {
       suites: suites.sort((a, b) => alphabeticCompare(a.name, b.name)),
     }));
 
+    const getSortKey = (g: { group?: string | null; serverTitle: string | null; name: string }) => {
+      const base = g.serverTitle || g.name;
+      const groupName = g.group?.trim();
+      return groupName ? `${groupName}/${base}` : base;
+    };
+
     return [...liveGroups, ...detachedGroups].sort((a, b) =>
-      alphabeticCompare(a.serverTitle || a.name, b.serverTitle || b.name),
+      alphabeticCompare(getSortKey(a), getSortKey(b)),
     );
   }, [serverRows, suiteRows]);
 
@@ -620,15 +637,17 @@ export function VerificationPanel(): ReactNode {
                 onRunServer={handleStartServerRun}
                 onRunSuite={handleStartSuiteRun}
                 onToggleSuiteVisibility={handleToggleSuiteVisibility}
-                onEditSuite={(suite) =>
+                onEditSuite={(suite) => {
+                  const base = group.serverTitle || group.name;
+                  const fullServerName = group.group?.trim() ? `${group.group.trim()}/${base}` : base;
                   setEditingSuite({
                     id: suite.id,
                     name: suite.name,
                     description: suite.description,
                     variables: suite.variables,
-                    serverName: group.serverTitle || group.name,
-                  })
-                }
+                    serverName: fullServerName,
+                  });
+                }}
                 onDeleteSuite={setDeletingSuite}
                 onDeleteServer={setDeletingServer}
                 runningServerId={runningServerId}

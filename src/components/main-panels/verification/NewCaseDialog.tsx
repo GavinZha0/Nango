@@ -39,9 +39,16 @@ interface ErrorEnvelope {
 interface McpServerListItem {
   id: string;
   name: string;
+  group?: string | null;
   serverTitle?: string | null;
   enabled: boolean;
   tools?: Array<{ name: string }>;
+}
+
+function getServerDisplayName(s?: McpServerListItem | null): string {
+  if (!s) return "";
+  const base = s.serverTitle || s.name;
+  return s.group?.trim() ? `${s.group.trim()}/${base}` : base;
 }
 
 async function readApiError(res: Response): Promise<string> {
@@ -290,8 +297,7 @@ export function NewCaseDialog({
               </Label>
               {serverId || caseRow ? (
                 <div className="text-xs font-mono bg-muted/40 border rounded-md px-3 py-2 truncate text-foreground">
-                  {servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))?.serverTitle ||
-                    servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))?.name ||
+                  {getServerDisplayName(servers.find((s) => s.id === (caseRow?.mcpServerId || serverId))) ||
                     (caseRow?.mcpServerId || serverId)}
                 </div>
               ) : (
@@ -339,8 +345,7 @@ export function NewCaseDialog({
                       }
                     >
                       {form.mcpServerId ? (
-                        servers.find((s) => s.id === form.mcpServerId)?.serverTitle ||
-                        servers.find((s) => s.id === form.mcpServerId)?.name ||
+                        getServerDisplayName(servers.find((s) => s.id === form.mcpServerId)) ||
                         "Unknown server"
                       ) : null}
                     </SelectValue>
@@ -348,11 +353,14 @@ export function NewCaseDialog({
                   <SelectContent>
                     {servers
                       .filter((s) => s.enabled)
-                      .map((s) => (
-                        <SelectItem key={s.id} value={s.id} label={s.serverTitle || s.name}>
-                          {s.serverTitle || s.name}
-                        </SelectItem>
-                      ))}
+                      .map((s) => {
+                        const label = getServerDisplayName(s);
+                        return (
+                          <SelectItem key={s.id} value={s.id} label={label}>
+                            {label}
+                          </SelectItem>
+                        );
+                      })}
                   </SelectContent>
                 </Select>
               )}

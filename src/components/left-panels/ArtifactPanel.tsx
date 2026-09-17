@@ -32,7 +32,6 @@ import {
   Search,
   Sparkles,
   Trash2,
-  Sparkles as ArtifactIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -385,15 +384,13 @@ function NodeRow({
           <span className="inline-block h-4 w-4 shrink-0" />
         )}
 
-        {/* Icon */}
-        {isFolder ? (
+        {/* Icon — folders only; leaf items omit icon for clean hierarchy */}
+        {isFolder && (
           isExpanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-emerald-500/80 dark:text-emerald-400/80 transition-colors" />
           ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <Folder className="h-3.5 w-3.5 shrink-0 text-emerald-500/80 dark:text-emerald-400/80 transition-colors" />
           )
-        ) : (
-          <ArtifactIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
 
         {/* Label — folders just toggle, leaves navigate */}

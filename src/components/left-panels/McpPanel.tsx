@@ -617,13 +617,15 @@ interface McpGroupHeaderProps {
 }
 
 function McpGroupHeader({ name, count, collapsed, onToggle }: McpGroupHeaderProps) {
+  const isUngrouped = name === "Ungrouped";
+
   return (
     <button
       type="button"
       onClick={onToggle}
       data-testid="mcp-group-header"
       data-group-name={name}
-      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors cursor-pointer select-none border-b border-border/40"
+      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-foreground/90 bg-muted/20 hover:bg-muted/50 transition-colors cursor-pointer select-none border-b border-border/40"
       aria-expanded={!collapsed}
     >
       {collapsed ? (
@@ -632,12 +634,35 @@ function McpGroupHeader({ name, count, collapsed, onToggle }: McpGroupHeaderProp
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
       )}
       {collapsed ? (
-        <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+        <Folder
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-colors",
+            isUngrouped
+              ? "text-muted-foreground/70"
+              : "text-amber-500/80 dark:text-amber-400/80",
+          )}
+        />
       ) : (
-        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+        <FolderOpen
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-colors",
+            isUngrouped
+              ? "text-muted-foreground/70"
+              : "text-amber-500/80 dark:text-amber-400/80",
+          )}
+        />
       )}
-      <span className="truncate flex-1 text-left font-medium text-xs text-foreground/85">{name}</span>
-      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal leading-none text-muted-foreground">
+      <span
+        className={cn(
+          "truncate flex-1 text-left text-xs tracking-tight",
+          isUngrouped
+            ? "font-normal text-muted-foreground italic"
+            : "font-semibold text-foreground",
+        )}
+      >
+        {name}
+      </span>
+      <span className="rounded-full bg-muted/80 px-1.5 py-0.5 text-[10px] font-normal leading-none text-muted-foreground">
         {count}
       </span>
     </button>
@@ -1155,7 +1180,7 @@ export function McpPanel(): ReactNode {
                         onToggle={() => toggleGroup(group.name)}
                       />
                       {!isCollapsed && (
-                        <div>
+                        <div className="ml-3 border-l border-border/40 pl-1">
                           {group.servers.map((server) => (
                             <ServerHeader
                               key={server.id}

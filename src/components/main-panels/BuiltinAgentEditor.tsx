@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { alphabeticCompare } from "@/lib/utils/sort";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import { getProviderLabel } from "@/lib/constants/providers";
 import type { AgentRole } from "@/lib/db/schema";
@@ -42,7 +43,7 @@ import { resolveSharedStateEnabled, type BuiltinAgentRow, type BoundToolRow } fr
 
 // Types
 
-interface MpcServer { id: string; name: string; description: string | null; serverDescription?: string | null; serverInstructions?: string | null; url: string; enabled: boolean; visibility?: string | null }
+interface MpcServer { id: string; name: string; group?: string | null; description: string | null; serverDescription?: string | null; serverInstructions?: string | null; url: string; enabled: boolean; visibility?: string | null }
 interface Skill { id: string; name: string; description: string | null; source: string }
 interface BuiltinToolDescriptor {
   name: string;
@@ -62,6 +63,7 @@ function Section({
   title,
   children,
   defaultOpen = true,
+  collapsible = true,
   count,
   actions,
   headerClassName,
@@ -69,6 +71,7 @@ function Section({
   title: string;
   children: ReactNode;
   defaultOpen?: boolean;
+  collapsible?: boolean;
   /** Optional "(selected/total)" badge after the title. Omitted for
    *  non-selection sections (Basic / System Prompt / Knowledge Base
    *  placeholder). Reactive — re-renders as the parent's Sets change. */
@@ -80,38 +83,53 @@ function Section({
   headerClassName?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const isOpen = collapsible ? open : true;
+
   return (
     <div className="border-b border-border/40">
       <div className={cn("flex items-center gap-1.5 px-4 py-2.5", headerClassName)}>
-        <button
-          type="button"
-          className="flex flex-1 items-center gap-1.5 text-left"
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {title}
-          </span>
-          {count && (
-            <span className="text-xs font-normal tabular-nums text-muted-foreground/70">
-              ({count.selected}/{count.total})
+        {collapsible ? (
+          <button
+            type="button"
+            className="flex flex-1 items-center gap-1.5 text-left cursor-pointer"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {title}
             </span>
-          )}
-        </button>
+            {count && (
+              <span className="text-xs font-normal tabular-nums text-muted-foreground/70">
+                ({count.selected}/{count.total})
+              </span>
+            )}
+          </button>
+        ) : (
+          <div className="flex flex-1 items-center gap-1.5 text-left">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {title}
+            </span>
+            {count && (
+              <span className="text-xs font-normal tabular-nums text-muted-foreground/70">
+                ({count.selected}/{count.total})
+              </span>
+            )}
+          </div>
+        )}
         {actions}
       </div>
-      {open && <div className="space-y-3 px-4 pb-3">{children}</div>}
+      {isOpen && <div className="space-y-3 px-4 pb-3">{children}</div>}
     </div>
   );
 }
 
 // Multi-select checkbox list
 
-function CheckList<T extends { id: string; name: string; description?: string | null }>({
+function CheckList<T extends { id: string; name: string; group?: string | null; description?: string | null }>({
   items,
   selected,
   onToggle,
@@ -127,26 +145,38 @@ function CheckList<T extends { id: string; name: string; description?: string | 
   }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-      {items.map((item) => (
-        <label
-          key={item.id}
-          className="flex cursor-pointer items-start gap-2.5 rounded-md px-1 py-1 hover:bg-muted/40"
-        >
-          <Checkbox
-            checked={selected.has(item.id)}
-            onCheckedChange={() => onToggle(item.id)}
-            className="mt-0.5 shrink-0"
-          />
-          <div className="min-w-0">
-            <p className="text-xs font-medium leading-tight">{item.name}</p>
-            {item.description && (
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {item.description}
+      {items.map((item) => {
+        const group = item.group?.trim();
+        return (
+          <label
+            key={item.id}
+            className="flex cursor-pointer items-start gap-2.5 rounded-md px-1 py-1 hover:bg-muted/40"
+          >
+            <Checkbox
+              checked={selected.has(item.id)}
+              onCheckedChange={() => onToggle(item.id)}
+              className="mt-0.5 shrink-0"
+            />
+            <div className="min-w-0">
+              <p className="text-xs leading-tight">
+                {group ? (
+                  <>
+                    <span className="text-muted-foreground/75 font-normal">{group}/</span>
+                    <span className="font-medium text-foreground">{item.name}</span>
+                  </>
+                ) : (
+                  <span className="font-medium text-foreground">{item.name}</span>
+                )}
               </p>
-            )}
-          </div>
-        </label>
-      ))}
+              {item.description && (
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {item.description}
+                </p>
+              )}
+            </div>
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -417,6 +447,14 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     }
   }, []);
 
+  const sortedMcpServers = useMemo(() => {
+    const getSortKey = (s: (typeof mcpServers)[number]) => {
+      const group = s.group?.trim();
+      return group ? `${group}/${s.name}` : s.name;
+    };
+    return [...mcpServers].sort((a, b) => alphabeticCompare(getSortKey(a), getSortKey(b)));
+  }, [mcpServers]);
+
   const handleTabScroll = useCallback((direction: "left" | "right") => {
     const el = tabListRef.current;
     if (el) {
@@ -650,7 +688,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   if (!isNew && !agent) {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex items-center gap-2 border-b px-4 py-3">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 py-1.5">
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -668,7 +706,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b px-3 py-2.5">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 py-1.5">
         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={onBack} aria-label="Back to agent list">
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -1084,7 +1122,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     )}
                     {activeTab === "mcp" && (
                       <CheckList
-                        items={mcpServers.map((s) => ({
+                        items={sortedMcpServers.map((s) => ({
                           ...s,
                           description: s.description || s.serverDescription || s.serverInstructions || s.url,
                         }))}
@@ -1154,8 +1192,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
 
           {/* RIGHT COLUMN: System Prompt. `lg:sticky` so it stays
               visible while the left column scrolls. */}
-          <div className="lg:sticky lg:top-0 lg:self-start lg:border-l lg:border-border/40 lg:pl-3">
-            <Section title="System Prompt">
+          <div className="lg:sticky lg:top-0 lg:self-start lg:border-l lg:border-border/40">
+            <Section title="System Prompt" collapsible={false}>
               <Textarea
                 value={form.prompt}
                 onChange={(e: ChangeEvent<HTMLTextAreaElement>) => update("prompt", e.target.value)}
@@ -1168,10 +1206,10 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 // whole right pane — resize is removed (`resize-none`)
                 // since dragging the handle would only push the box
                 // beyond the column and trigger a page-level scroll.
-                // `h-[calc(100vh-12rem)]` reserves room for the page
-                // header + Section title strip on typical viewports.
+                // `h-[calc(100vh-9.75rem)]` reserves room for the page
+                // header + Section title strip without triggering outer vertical scrollbar.
                 className={cn(
-                  "!field-sizing-fixed h-[calc(100vh-12rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed",
+                  "!field-sizing-fixed h-[calc(100vh-9.75rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed",
                   form.role === "supervisor" && "bg-muted text-muted-foreground",
                 )}
                 title={form.role === "supervisor" ? "Supervisor system prompt is locked." : undefined}
