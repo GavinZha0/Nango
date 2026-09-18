@@ -167,6 +167,8 @@ export function VerificationSuiteEditor({
     if (!r) return undefined;
     return {
       status: r.status as VerificationCaseResultStatus,
+      originalToolName: r.originalToolName,
+      effectiveToolName: r.effectiveToolName,
       resolvedInput: (r.inputSnapshot ?? {}) as Record<string, unknown>,
       resultPayload: r.resultPayload,
       resultTruncated: r.resultTruncated,
@@ -244,14 +246,26 @@ export function VerificationSuiteEditor({
       : null;
 
   const suiteDisplayName = suiteData?.name || legacyRow?.name || "Verification Suite";
-  const serverDisplayName =
-    suiteData?.serverTitle ||
+  const serverGroup = suiteData?.serverGroup?.trim() || null;
+  const rawServerName =
     suiteData?.serverName ||
+    suiteData?.serverTitle ||
     // Detached suites (server row deleted) fall back to the denormalized
     // name captured at creation.
     suiteData?.mcpServerName ||
     legacyRow?.serverTitle ||
     null;
+  const serverDisplayName = useMemo(() => {
+    if (!rawServerName) return null;
+    return serverGroup ? `${serverGroup}/${rawServerName}` : rawServerName;
+  }, [serverGroup, rawServerName]);
+
+  const shouldShowServerTag = useMemo(() => {
+    if (!serverDisplayName) return false;
+    if (suiteDisplayName.includes(`(${serverDisplayName})`)) return false;
+    if (rawServerName && suiteDisplayName.includes(`(${rawServerName})`)) return false;
+    return true;
+  }, [serverDisplayName, rawServerName, suiteDisplayName]);
   // True once the suite detail has loaded without an MCP server binding —
   // the server row was deleted and the suite is now detached (0020).
   const suiteDetached = Boolean(suiteData) && !suiteData?.mcpServerId;
@@ -369,33 +383,60 @@ export function VerificationSuiteEditor({
             </Button>
           )}
           <div className="flex items-center gap-1.5 min-w-0 truncate">
-            {serverDisplayName && (
-              <span className="text-xs text-muted-foreground truncate">
-                {serverDisplayName} /
-              </span>
-            )}
             {selectedCase ? (
               <>
-                <span
-                  className="text-xs text-muted-foreground truncate"
-                  data-testid="verification-suite-heading"
-                >
-                  {suiteDisplayName} /
-                </span>
-                <h1
-                  className="min-w-0 truncate text-sm font-semibold pr-1"
-                  title={selectedCase.name}
-                  data-testid="verification-case-heading"
-                >
-                  {selectedCase.name}
-                </h1>
+                <div className="flex items-center gap-1.5 min-w-0 truncate">
+                  <span
+                    className="text-sm font-semibold text-foreground truncate"
+                    title={suiteDisplayName}
+                    data-testid="verification-suite-heading"
+                  >
+                    {suiteDisplayName}
+                  </span>
+                  {shouldShowServerTag && serverDisplayName && (
+                    <span className="text-xs text-muted-foreground font-normal shrink-0">
+                      ({serverDisplayName})
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground shrink-0 select-none">
+                    /
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 min-w-0 pr-1">
+                  <h1
+                    className="min-w-0 truncate text-sm font-semibold text-foreground"
+                    title={
+                      selectedCase.toolName
+                        ? `${selectedCase.name} (${selectedCase.toolName})`
+                        : selectedCase.name
+                    }
+                    data-testid="verification-case-heading"
+                  >
+                    {selectedCase.name}
+                  </h1>
+                  {selectedCase.toolName && (
+                    <span
+                      className="text-xs text-muted-foreground font-normal font-mono shrink-0"
+                      data-testid="verification-case-tool-tag"
+                    >
+                      ({selectedCase.toolName})
+                    </span>
+                  )}
+                </div>
               </>
             ) : (
-              <h1
-                className="min-w-0 truncate text-sm font-semibold pr-1"
-                data-testid="verification-suite-heading"
-              >
-                {suiteDisplayName}
+              <h1 className="min-w-0 truncate text-sm font-semibold pr-1 flex items-center gap-1.5">
+                <span
+                  className="text-foreground"
+                  data-testid="verification-suite-heading"
+                >
+                  {suiteDisplayName}
+                </span>
+                {shouldShowServerTag && serverDisplayName && (
+                  <span className="text-xs text-muted-foreground font-normal">
+                    ({serverDisplayName})
+                  </span>
+                )}
               </h1>
             )}
           </div>

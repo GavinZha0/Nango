@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,13 @@ import {
   type SuiteVariablesEditorRef,
 } from "@/components/common/SuiteVariablesEditor";
 import type { SuiteVariablesMap } from "@/lib/testing/types";
-import { verificationActions, type VerificationSuiteRow } from "@/store/verification";
+import {
+  verificationActions,
+  type VerificationSuiteRow,
+  type VerificationGroupRow,
+  type ToolPrefixRule,
+  type PatchSuiteInput,
+} from "@/store/verification";
 
 interface McpServerItem {
   id: string;
@@ -51,11 +57,12 @@ function getServerDisplayName(s?: McpServerItem | null): string {
 export interface VerificationSuiteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  suite?: (VerificationSuiteRow | { id: string; name: string; description?: string | null; mcpServerId?: string; serverName?: string; variables?: Record<string, unknown> }) | null;
+  suite?: VerificationSuiteRow | null;
   serverName?: string;
   defaultServerId?: string;
+  defaultGroupId?: string;
   onCreated?: (created: VerificationSuiteRow) => void;
-  onUpdated?: (updated: { name: string; description?: string | null; variables?: Record<string, unknown> }) => Promise<void>;
+  onUpdated?: (updated: PatchSuiteInput) => Promise<void>;
 }
 
 export function VerificationSuiteDialog({
@@ -64,6 +71,7 @@ export function VerificationSuiteDialog({
   suite,
   serverName,
   defaultServerId,
+  defaultGroupId,
   onCreated,
   onUpdated,
 }: VerificationSuiteDialogProps): ReactNode {
@@ -76,7 +84,15 @@ export function VerificationSuiteDialog({
     (suite?.variables as SuiteVariablesMap) ?? {},
   );
   const [serverId, setServerId] = useState<string>(suite?.mcpServerId ?? defaultServerId ?? "");
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(suite?.groupId ?? defaultGroupId ?? "none");
+  const [customGroupName, setCustomGroupName] = useState<string>("");
+  const [prefixMode, setPrefixMode] = useState<"none" | "add" | "remove">(
+    suite?.toolPrefixRule?.mode ?? "none",
+  );
+  const [prefixText, setPrefixText] = useState<string>(suite?.toolPrefixRule?.prefix ?? "");
+
   const [servers, setServers] = useState<McpServerItem[]>([]);
+  const [groups, setGroups] = useState<VerificationGroupRow[]>([]);
   const [loadingServers, setLoadingServers] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,23 +110,30 @@ export function VerificationSuiteDialog({
       setDescription(suite?.description ?? "");
       setVariables((suite?.variables as SuiteVariablesMap) ?? {});
       setServerId(suite?.mcpServerId ?? defaultServerId ?? "");
+      setSelectedGroupId(suite?.groupId ?? defaultGroupId ?? "none");
+      setCustomGroupName("");
+      setPrefixMode(suite?.toolPrefixRule?.mode ?? "none");
+      setPrefixText(suite?.toolPrefixRule?.prefix ?? "");
       setError(null);
     }
   }
 
   useEffect(() => {
-    if (!open || isEdit) return;
+    if (!open) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingServers(true);
 
-    fetch("/api/mcp-servers")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((rows: McpServerItem[]) => {
+    Promise.all([
+      fetch("/api/mcp-servers").then((res) => (res.ok ? res.json() : [])),
+      fetch("/api/verification-groups").then((res) => (res.ok ? res.json() : [])),
+    ])
+      .then(([serverRows, groupRows]: [McpServerItem[], VerificationGroupRow[]]) => {
         if (cancelled) return;
-        setServers(rows);
-        if (!defaultServerId && rows.length > 0) {
-          setServerId((prev) => prev || rows[0].id);
+        setServers(serverRows);
+        setGroups(groupRows);
+        if (!isEdit && !defaultServerId && serverRows.length > 0) {
+          setServerId((prev) => prev || serverRows[0].id);
         }
       })
       .catch(() => {})
@@ -131,6 +154,30 @@ export function VerificationSuiteDialog({
       return;
     }
 
+    if (prefixMode !== "none" && !prefixText.trim()) {
+      setError("Please provide a tool prefix string or set mode to None.");
+      return;
+    }
+
+    if (selectedGroupId === "__new__" && !customGroupName.trim()) {
+      setError("Please provide a name for the new group.");
+      return;
+    }
+
+    const toolPrefixRule: ToolPrefixRule | null =
+      prefixMode === "none"
+        ? null
+        : { mode: prefixMode, prefix: prefixText.trim() };
+
+    const resolvedGroupId =
+      selectedGroupId === "__new__"
+        ? undefined
+        : selectedGroupId === "none" || !selectedGroupId
+        ? null
+        : selectedGroupId;
+    const resolvedGroupName =
+      selectedGroupId === "__new__" ? customGroupName.trim() : undefined;
+
     if (isEdit) {
       setSubmitting(true);
       setError(null);
@@ -138,6 +185,10 @@ export function VerificationSuiteDialog({
         await onUpdated?.({
           name: trimmedName,
           description: description.trim() || null,
+          groupId: resolvedGroupId,
+          groupName: resolvedGroupName,
+          mcpServerId: serverId || null,
+          toolPrefixRule,
           variables,
         });
         onOpenChange(false);
@@ -158,8 +209,10 @@ export function VerificationSuiteDialog({
     setError(null);
     try {
       const created = await verificationActions.create({
-        category: "mcp",
         mcpServerId: serverId,
+        groupId: resolvedGroupId,
+        groupName: resolvedGroupName,
+        toolPrefixRule,
         name: trimmedName,
         description: description.trim() || null,
         variables,
@@ -178,14 +231,15 @@ export function VerificationSuiteDialog({
     }
   };
 
+  const isDetached = isEdit && !suite?.mcpServerId && !!(suite?.mcpServerName || serverName);
   const displayServerName =
     serverName ||
-    ("serverName" in (suite ?? {}) ? (suite as { serverName?: string }).serverName : undefined) ||
+    suite?.mcpServerName ||
     (serverId ? getServerDisplayName(servers.find((s) => s.id === serverId)) || "MCP Server" : "MCP Server");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl h-[600px] max-h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-xl h-[720px] max-h-[92vh] flex flex-col">
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
             <DialogHeader className="flex flex-row items-center justify-between border-b pb-3 pr-8 shrink-0">
@@ -241,43 +295,44 @@ export function VerificationSuiteDialog({
 
             <div className="flex-1 overflow-y-auto pr-1 mt-3">
               <TabsContent value="general" className="mt-0 space-y-4 py-1">
-                {/* MCP Server Selection or Readonly */}
+                {/* Group Selection */}
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="mcp-server">
-                    MCP Server {!isEdit && <span className="text-destructive">*</span>}
-                  </Label>
-                  {isEdit ? (
+                  <Label htmlFor="suite-group">Group</Label>
+                  <Select
+                    value={selectedGroupId}
+                    onValueChange={(val) => setSelectedGroupId(val ?? "none")}
+                    disabled={submitting}
+                  >
+                    <SelectTrigger id="suite-group" className="w-full" data-testid="suite-group-select">
+                      <SelectValue placeholder="Select Group">
+                        {selectedGroupId === "none" || !selectedGroupId
+                          ? "Ungrouped"
+                          : selectedGroupId === "__new__"
+                          ? "+ Create New Group..."
+                          : groups.find((g) => g.id === selectedGroupId)?.name || "Group"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Ungrouped</SelectItem>
+                      {groups.map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__new__">+ Create New Group...</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {selectedGroupId === "__new__" && (
                     <Input
-                      id="mcp-server"
-                      value={displayServerName}
-                      disabled
-                      className="bg-muted cursor-not-allowed opacity-80"
+                      placeholder="Enter new group name..."
+                      maxLength={64}
+                      value={customGroupName}
+                      onChange={(e) => setCustomGroupName(e.target.value)}
+                      disabled={submitting}
+                      className="mt-1"
+                      autoFocus
+                      data-testid="new-group-name-input"
                     />
-                  ) : (
-                    <Select
-                      required
-                      value={serverId}
-                      onValueChange={(val) => setServerId(val ?? "")}
-                      disabled={loadingServers || submitting || !!defaultServerId}
-                    >
-                      <SelectTrigger id="mcp-server" className="w-full" data-testid="suite-server-select">
-                        <SelectValue placeholder="Select an MCP Server">
-                          {serverId ? (
-                            getServerDisplayName(servers.find((s) => s.id === serverId)) || "Unknown server"
-                          ) : null}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {servers.map((s) => {
-                          const label = getServerDisplayName(s);
-                          return (
-                            <SelectItem key={s.id} value={s.id} label={label}>
-                              {label}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
                   )}
                 </div>
 
@@ -293,9 +348,84 @@ export function VerificationSuiteDialog({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     disabled={submitting}
-                    autoFocus
                     data-testid="suite-name-input"
                   />
+                </div>
+
+                {/* Detached banner */}
+                {isDetached && (
+                  <div className="flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Bound MCP Server Deleted</p>
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        The original server <code>{displayServerName}</code> no longer exists. You can re-bind this suite by selecting an available server below.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* MCP Server Selection */}
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="mcp-server">
+                    MCP Server {!isEdit && <span className="text-destructive">*</span>}
+                  </Label>
+                  <Select
+                    value={serverId}
+                    onValueChange={(val) => setServerId(val ?? "")}
+                    disabled={loadingServers || submitting || (!isDetached && isEdit && !!defaultServerId)}
+                  >
+                    <SelectTrigger id="mcp-server" className="w-full" data-testid="suite-server-select">
+                      <SelectValue placeholder="Select an MCP Server">
+                        {serverId ? (
+                          getServerDisplayName(servers.find((s) => s.id === serverId)) || (isDetached ? `${displayServerName} (Deleted)` : "Unknown server")
+                        ) : isDetached ? (
+                          "Select a server to re-bind..."
+                        ) : null}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {servers.map((s) => {
+                        const label = getServerDisplayName(s);
+                        return (
+                          <SelectItem key={s.id} value={s.id} label={label}>
+                            {label}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* MCP Tool Prefix */}
+                <div className="flex flex-col gap-1.5">
+                  <Label>MCP Tool Prefix</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Select
+                      value={prefixMode}
+                      onValueChange={(val) => setPrefixMode((val ?? "none") as "none" | "add" | "remove")}
+                      disabled={submitting}
+                    >
+                      <SelectTrigger className="w-full" data-testid="tool-prefix-mode-select">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="add">Add Prefix</SelectItem>
+                        <SelectItem value="remove">Remove Prefix</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="col-span-2">
+                      <Input
+                        placeholder={prefixMode === "none" ? "No prefix transformation" : "e.g. weather_"}
+                        value={prefixText}
+                        onChange={(e) => setPrefixText(e.target.value)}
+                        disabled={submitting || prefixMode === "none"}
+                        maxLength={64}
+                        data-testid="tool-prefix-input"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Description */}

@@ -146,28 +146,6 @@ export const caseActions = {
     }
   },
 
-  async refreshForServer(serverId: string): Promise<void> {
-    try {
-      const res = await fetch(`/api/verification-servers/${serverId}/cases`);
-      if (!res.ok) throw new Error(await readError(res));
-      const items = (await res.json()) as VerificationCaseRow[];
-
-      // Group by suiteId
-      const groups: Record<string, VerificationCaseRow[]> = {};
-      for (const it of items) {
-        if (!groups[it.suiteId]) groups[it.suiteId] = [];
-        groups[it.suiteId].push(it);
-      }
-
-      // Update store buckets
-      for (const [suiteId, cs] of Object.entries(groups)) {
-        useCasesStore.getState().setItemsFor(suiteId, cs);
-      }
-    } catch (err) {
-      console.error("Failed to refresh cases for server", serverId, err);
-    }
-  },
-
   async create(
     input: CreateMcpCaseInput,
   ): Promise<VerificationCaseRow | null> {
@@ -183,8 +161,7 @@ export const caseActions = {
       if (!res.ok) throw new Error(await readError(res));
       const row = (await res.json()) as VerificationCaseRow;
       useCasesStore.getState().upsert(row);
-      // Refresh left panel to ensure any newly populated server shows up
-      void verificationActions.refresh("mcp");
+      void verificationActions.refresh();
       return row;
     } catch (err) {
       console.error("Failed to create case", err);
@@ -231,8 +208,7 @@ export const caseActions = {
         throw new Error(await readError(res));
       }
       useCasesStore.getState().remove(caseRow.suiteId, caseRow.id);
-      // Refresh left panel to ensure the count badge is in sync or server is removed if empty
-      void verificationActions.refresh("mcp");
+      void verificationActions.refresh();
     } catch (err) {
       useCasesStore
         .getState()

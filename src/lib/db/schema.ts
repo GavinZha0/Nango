@@ -1659,16 +1659,34 @@ export const ConfigTable = pgTable("config", {
 export type ConfigEntity = typeof ConfigTable.$inferSelect;
 
 // Verification subsystem — deterministic assert-on-output harness for
-// MCP tools (V1) and Nango internal workflows (V2). See docs/verification.md
+// MCP tools. See docs/verification.md and docs/verification-group-and-prefix-plan.md
 // for the full design. Distinct from the `auth_token` table above which
 // is the better-auth email-verification token store.
 
 /**
+ * VerificationGroup — a logical folder/container for verification suites.
+ * Case-insensitive unique name enforced by unique index.
+ */
+export const VerificationGroupTable = pgTable(
+  "verification_group",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`)
+      .$onUpdate(() => sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    uniqueIndex("verification_group_lower_name_idx").on(sql`lower(${t.name})`),
+  ],
+);
+
+export type VerificationGroupEntity = typeof VerificationGroupTable.$inferSelect;
+
+/**
  * VerificationSuite — a management group of verification cases.
- * A suite is a pure container; it does NOT bind a specific tool or
- * workflow — the target lives on each case. `category` decides which
- * left-panel tab the suite belongs to and which target columns its
- * cases must populate (enforced by CHECK on `verification_case`).
  *
  * visibility: "private" — visible to the creator only;
  *             "public"  — available to all users.
@@ -1677,72 +1695,52 @@ export const VerificationSuiteTable = pgTable(
   "verification_suite",
   {
     id: uuid("id").primaryKey().notNull().defaultRandom(),
-    name: text("name").notNull(),
-    description: text("description"),
-    variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
-    /** Left-panel tab + case target shape. */
-    category: text("category").notNull(), // "mcp" | "workflow"
-    // --- target (moved from case to suite in Server->Suite(Tool)->Case refactor) ---
-    // SECURITY: ON DELETE SET NULL — deleting an MCP server must never
-    // cascade-delete verification suites/cases/history. Detached suites
-    // (mcpServerId NULL, workflowId NULL) stay browsable/editable; only
-    // running is refused. See the widened target XOR check below.
+    groupId: uuid("group_id").references(() => VerificationGroupTable.id, {
+      onDelete: "set null",
+    }),
     mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
       onDelete: "set null",
     }),
-    /** Denormalized "last known" display name of the bound MCP server,
-     *  captured at suite creation. Kept so detached suites (server row
-     *  deleted) still group and display under their server's name in the
-     *  left panel. Live server rows always win for display when present. */
     mcpServerName: text("mcp_server_name"),
-    workflowId: uuid("workflow_id"),
-
+    toolPrefixRule: jsonb("tool_prefix_rule").$type<{
+      mode: "none" | "add" | "remove";
+      prefix: string;
+    }>(),
+    name: text("name").notNull(),
+    description: text("description"),
+    variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     enabled: boolean("enabled").notNull().default(true),
     visibility: text("visibility").notNull().default("private"),
-    /** Suite-level wall-clock cap (seconds) for one `Run suite` invocation.
-     *  On expiry the orchestrator marks remaining cases `skipped` and the
-     *  run as `timeout`. Stored as seconds to keep the value human-readable
-     *  in DB inspectors (300 = 5 min); the runner multiplies by 1000 for
-     *  `setTimeout`. */
     timeoutSec: integer("timeout_sec").notNull().default(300),
-    createdBy: uuid("created_by").references(() => UserTable.id, {
-      onDelete: "cascade",
-    }),
-    updatedBy: uuid("updated_by").references(() => UserTable.id, {
-      onDelete: "cascade",
-    }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => UserTable.id, {
+        onDelete: "cascade",
+      }),
+    updatedBy: uuid("updated_by")
+      .notNull()
+      .references(() => UserTable.id, {
+        onDelete: "cascade",
+      }),
     createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`)
+      .$onUpdate(() => sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    // Unique suite per MCP Server per name per user
-    uniqueIndex("verification_suite_mcp_user_name_idx").on(t.mcpServerId, t.name, t.createdBy),
-    // Unique suite per Workflow per user
-    uniqueIndex("verification_suite_workflow_user_idx").on(t.workflowId, t.createdBy),
-    // XOR target: MCP shape OR workflow shape, never both. Both NULL is
-    // legal post server-deletion (detached suite — see FK SECURITY note).
-    check(
-      "verification_suite_target_xor",
-      sql`NOT (
-        ${t.mcpServerId} IS NOT NULL AND ${t.workflowId} IS NOT NULL
-      )`,
-    ),
+    // Unique suite per user
+    uniqueIndex("verification_suite_user_name_idx").on(t.name, t.createdBy),
   ],
 );
 
 export type VerificationSuiteEntity =
   typeof VerificationSuiteTable.$inferSelect;
-export type VerificationSuiteCategory = "mcp" | "workflow";
 
 /**
- * VerificationCase — one assert-on-output case bound to either an MCP
- * tool or a Nango workflow (XOR enforced by CHECK). PK is bigint
- * identity because cases are parent-owned children, never URL-exposed
+ * VerificationCase — one assert-on-output case bound to an MCP tool.
+ * PK is bigint identity because cases are parent-owned children, never URL-exposed
  * (the suite is). See `AGENTS.md` PK tier 1.
- *
- * Target columns:
- *   - mcp suites:      (mcpServerId, toolName) populated; workflowId NULL
- *   - workflow suites: workflowId populated;       (mcpServerId, toolName) NULL
  *
  * `assertions` is a JSON array of `json_schema` | `jsonpath` |
  * `js_expression` entries. Empty array = smoke test. See
@@ -1757,14 +1755,14 @@ export const VerificationCaseTable = pgTable(
     suiteId: uuid("suite_id")
       .notNull()
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
-    createdBy: uuid("created_by").references(() => UserTable.id, {
-      onDelete: "cascade",
-    }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => UserTable.id, {
+        onDelete: "cascade",
+      }),
     name: text("name").notNull(),
     toolName: text("tool_name"),
-    // --- payload ---
     input: jsonb("input").notNull().default(sql`'{}'::jsonb`),
-    /** Array of assertion specs. See docs/verification.md. */
     assertions: jsonb("assertions").notNull().default(sql`'[]'::jsonb`),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at")
@@ -1772,12 +1770,11 @@ export const VerificationCaseTable = pgTable(
       .default(sql`CURRENT_TIMESTAMP`),
     updatedAt: timestamp("updated_at")
       .notNull()
-      .default(sql`CURRENT_TIMESTAMP`),
+      .default(sql`CURRENT_TIMESTAMP`)
+      .$onUpdate(() => sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    // Per-suite name uniqueness (mirrors UI assumption).
     uniqueIndex("verification_case_suite_name_idx").on(t.suiteId, t.name),
-    // Suite list view ("show all cases in this suite").
     index("verification_case_suite_idx").on(t.suiteId),
   ],
 );
@@ -1788,11 +1785,7 @@ export type VerificationCaseEntity = typeof VerificationCaseTable.$inferSelect;
  * VerificationRun — one execution of a verification suite.
  *
  * UUIDv4 PK because the id is URL-exposed via the history-view
- * `?run=<id>` query param (PK tier 3 in AGENTS.md). UUIDv7 was
- * considered for "time-ordered for free" banner pagination, but the
- * banner is always suite_id-scoped (so it needs a composite index
- * either way), and SSE replay flows through `notification.id`, not
- * through this PK.
+ * `?run=<id>` query param (PK tier 3 in AGENTS.md).
  *
  * No case-level payload here — that lives in VerificationCaseResult.
  */
@@ -1801,22 +1794,14 @@ export const VerificationRunTable = pgTable(
   {
     id: uuid("id").primaryKey().notNull().defaultRandom(),
     suiteId: uuid("suite_id")
+      .notNull()
       .references(() => VerificationSuiteTable.id, { onDelete: "cascade" }),
-    // SECURITY: SET NULL — run history must survive MCP server deletion
-    // (cascade here would silently destroy runs/results even after the
-    // suite FK itself was made SET NULL).
-    mcpServerId: uuid("mcp_server_id").references(() => McpServerTable.id, {
-      onDelete: "set null",
-    }),
-    /** Lifecycle: running | passed | failed | errored | timeout.
-     *  Precedence on close: timeout > errored > failed > passed. */
     status: text("status").notNull(),
     totalCount: integer("total_count").notNull(),
     passedCount: integer("passed_count").notNull().default(0),
     failedCount: integer("failed_count").notNull().default(0),
     erroredCount: integer("errored_count").notNull().default(0),
     skippedCount: integer("skipped_count").notNull().default(0),
-    /** Trigger origin: 'manual' | 'schedule'. */
     triggeredBy: text("triggered_by").notNull(),
     startedAt: timestamp("started_at")
       .notNull()
@@ -1824,39 +1809,13 @@ export const VerificationRunTable = pgTable(
     finishedAt: timestamp("finished_at"),
   },
   (t) => [
-    // Banner pagination — "5 newest / 5 older" runs of a given suite.
     index("verification_run_suite_started_idx").on(
       t.suiteId,
       t.startedAt.desc(),
     ),
-    // Banner pagination — "5 newest / 5 older" runs of a given server.
-    index("verification_run_server_started_idx").on(
-      t.mcpServerId,
-      t.startedAt.desc(),
-    ),
-    // Boot-epoch zombie sweep — find still-`running` rows from a prior
-    // Node process. Partial index because `status` only has 5 enum
-    // values (B-tree selectivity is poor — the planner would usually
-    // ignore a plain `status` index). Filtering by `status='running'`
-    // shrinks the index to ~ 0 rows in steady state (running rows are
-    // ephemeral) and lets recovery's `started_at < bootStartedAt`
-    // predicate drive an index range scan.
-    //
-    // The matching SQL predicate MUST be `status = 'running'`
-    // literal-equal for the planner to pick this partial index — see
-    // `selectStrandedRuns` / `markStrandedAsErrored` in storage.ts.
     index("verification_run_recovery_idx")
       .on(t.startedAt)
       .where(sql`${t.status} = 'running'`),
-    // XOR target: Suite (Tool) run OR Server run, never both / neither.
-    check(
-      "verification_run_target_xor",
-      sql`(
-        (${t.suiteId} IS NOT NULL AND ${t.mcpServerId} IS NULL)
-        OR
-        (${t.suiteId} IS NULL AND ${t.mcpServerId} IS NOT NULL)
-      )`,
-    ),
   ],
 );
 
@@ -1876,11 +1835,6 @@ export type VerificationRunStatus =
  * underlying case freely afterwards without rewriting history. The
  * history view displays the snapshot, not today's case definition.
  *
- * `entityRunId` is non-null ONLY for workflow cases (V2) — those flow
- * through `runner.start({mode:"async", initiator:"verification"})` so
- * admin run forensics works. MCP cases call `mcp/provider-pool`
- * directly (a tool call is not an entity dispatch) and leave it NULL.
- *
  * `error` JSON shape: { source, message, details? } where source ∈
  * { mcphub | upstream | transport | assertion | timeout | internal }.
  * See docs/verification.md.
@@ -1897,25 +1851,15 @@ export const VerificationCaseResultTable = pgTable(
     caseId: bigint("case_id", { mode: "number" })
       .notNull()
       .references(() => VerificationCaseTable.id, { onDelete: "cascade" }),
-    /** passed | failed | errored | skipped | timeout. */
+    originalToolName: text("original_tool_name"),
+    effectiveToolName: text("effective_tool_name"),
     status: text("status").notNull(),
-    /** Workflow cases only. SET NULL keeps the result viewable even
-     *  if an admin later prunes the entity_run forest. */
-    entityRunId: uuid("entity_run_id").references(() => EntityRunTable.id, {
-      onDelete: "cascade",
-    }),
-    /** Frozen input as it was at run time. */
     inputSnapshot: jsonb("input_snapshot").notNull(),
-    /** Tool/workflow output; >8 KB JSON is truncated and the
-     *  resultTruncated flag is set. Assertions are always evaluated
-     *  against the full payload before truncation. */
     resultPayload: jsonb("result_payload"),
     resultTruncated: boolean("result_truncated").notNull().default(false),
-    /** Per-assertion verdicts. See docs/verification.md. */
     assertionResults: jsonb("assertion_results")
       .notNull()
       .default(sql`'[]'::jsonb`),
-    /** Structured failure envelope. NULL for passed cases. See docs/verification.md. */
     error: jsonb("error"),
     durationMs: integer("duration_ms"),
     startedAt: timestamp("started_at")
@@ -1924,22 +1868,11 @@ export const VerificationCaseResultTable = pgTable(
     finishedAt: timestamp("finished_at"),
   },
   (t) => [
-    // Drill-down: "all case results in this run" — used by the history-
-    // view modal and the run-detail page.
     index("verification_case_result_run_idx").on(t.runId),
-    // "Latest status per case" — drives the case-tree status badges.
-    // DESC matches the "newest first" lookup. Pairs with the
-    // run_idx above; combined the two cover all current queries.
     index("verification_case_result_case_started_idx").on(
       t.caseId,
       t.startedAt.desc(),
     ),
-    // Idempotency guard for the boot-epoch recovery sweep. Orchestrator's
-    // serial loop never writes the same (run, case) twice on the happy
-    // path, but `recoverStrandedVerificationRuns` may re-run if the node
-    // crashes mid-recovery — without this constraint a second pass would
-    // duplicate the `skipped` filler rows it wrote on the first pass.
-    // Pairs with `.onConflictDoNothing()` in `writeSkippedCaseResults`.
     uniqueIndex("verification_case_result_run_case_idx").on(t.runId, t.caseId),
   ],
 );

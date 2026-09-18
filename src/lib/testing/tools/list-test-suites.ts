@@ -68,7 +68,6 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
           )
           .where(
             and(
-              eq(VerificationSuiteTable.category, "mcp"),
               suiteId ? eq(VerificationSuiteTable.id, suiteId) : undefined,
               enabledOnly ? eq(VerificationSuiteTable.enabled, true) : undefined,
               visibilitySql(ctx, VerificationSuiteTable.visibility, VerificationSuiteTable.createdBy),

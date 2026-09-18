@@ -190,7 +190,6 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
             .values({
               name,
               description: description ?? null,
-              category: "mcp",
               mcpServerId: mcpServerId,
               mcpServerName: serverRow.serverTitle || serverRow.name,
               enabled: true,

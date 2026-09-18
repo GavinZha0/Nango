@@ -2,19 +2,26 @@
 
 import { create } from "zustand";
 
-export type VerificationCategory = "mcp";
 export type VerificationVisibility = "private" | "public";
+
+export interface ToolPrefixRule {
+  mode: "none" | "add" | "remove";
+  prefix: string;
+}
 
 export interface VerificationSuiteRow {
   id: string;
   name: string;
   description: string | null;
-  category: VerificationCategory;
+  groupId: string | null;
+  groupName?: string | null;
   /** NULL when the bound MCP server row was deleted (detached suite). */
   mcpServerId: string | null;
-  /** Denormalized display name captured at creation — groups detached
-   *  suites in the left panel after their server row is gone. */
+  /** Denormalized display name captured at creation. */
   mcpServerName: string | null;
+  serverGroup?: string | null;
+  serverName?: string | null;
+  toolPrefixRule: ToolPrefixRule | null;
   visibility: VerificationVisibility;
   variables?: Record<string, unknown>;
   enabled: boolean;
@@ -26,18 +33,12 @@ export interface VerificationSuiteRow {
   caseCount: number;
 }
 
-export interface VerificationServerRow {
+export interface VerificationGroupRow {
   id: string;
   name: string;
-  group?: string | null;
-  serverTitle: string | null;
-  serverDescription: string | null;
-  enabled: boolean;
-  visibility: VerificationVisibility;
-  verificationVisibility: VerificationVisibility;
-  hasOwnSuites: boolean;
-  createdBy: string;
-  caseCount: number;
+  suiteCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface VerificationCaseRow {
@@ -54,86 +55,75 @@ export interface VerificationCaseRow {
 }
 
 interface VerificationState {
-  category: VerificationCategory;
-  items: { mcp: VerificationSuiteRow[] };
-  loaded: { mcp: boolean };
+  items: VerificationSuiteRow[];
+  groups: VerificationGroupRow[];
+  loaded: boolean;
   loading: boolean;
   error: string | null;
 
-  setCategory: (c: VerificationCategory) => void;
-  setItemsFor: (c: VerificationCategory, items: VerificationSuiteRow[]) => void;
+  setItems: (items: VerificationSuiteRow[]) => void;
+  setGroups: (groups: VerificationGroupRow[]) => void;
   setLoading: (loading: boolean) => void;
   setError: (err: string | null) => void;
   upsert: (item: VerificationSuiteRow) => void;
   remove: (id: string) => void;
   bumpCaseCount: (suiteId: string, delta: number) => void;
+  renameGroupInStore: (groupId: string, name: string) => void;
 }
 
-const EMPTY_PER_CATEGORY = {
-  mcp: [] as VerificationSuiteRow[],
-};
-const NEVER_LOADED = { mcp: false };
-
 export const useVerificationStore = create<VerificationState>()((set) => ({
-  category: "mcp",
-  items: EMPTY_PER_CATEGORY,
-  loaded: NEVER_LOADED,
+  items: [],
+  groups: [],
+  loaded: false,
   loading: false,
   error: null,
 
-  setCategory: (c) => set({ category: c }),
-  setItemsFor: (c, items) =>
-    set((s) => ({
-      items: { ...s.items, [c]: items },
-      loaded: { ...s.loaded, [c]: true },
-      error: null,
-    })),
+  setItems: (items) => set({ items, loaded: true, error: null }),
+  setGroups: (groups) => set({ groups }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   upsert: (item) =>
     set((s) => {
-      const bucket = s.items[item.category].slice();
-      const idx = bucket.findIndex((it) => it.id === item.id);
-      if (idx === -1) bucket.unshift(item);
-      else bucket[idx] = item;
-      bucket.sort((a, b) => a.name.localeCompare(b.name));
-      return { items: { ...s.items, [item.category]: bucket } };
+      const next = s.items.slice();
+      const idx = next.findIndex((it) => it.id === item.id);
+      if (idx === -1) next.unshift(item);
+      else next[idx] = item;
+      next.sort((a, b) => a.name.localeCompare(b.name));
+      return { items: next };
     }),
   remove: (id) =>
     set((s) => ({
-      items: {
-        mcp: s.items.mcp.filter((it) => it.id !== id),
-      },
+      items: s.items.filter((it) => it.id !== id),
     })),
   bumpCaseCount: (suiteId, delta) =>
     set((s) => {
-      const bumpIn = (
-        list: VerificationSuiteRow[],
-      ): VerificationSuiteRow[] => {
-        const idx = list.findIndex((it) => it.id === suiteId);
-        if (idx === -1) return list;
-        const next = list.slice();
-        const cur = next[idx];
-        if (!cur) return list;
-        next[idx] = {
-          ...cur,
-          caseCount: Math.max(0, cur.caseCount + delta),
-        };
-        return next;
+      const idx = s.items.findIndex((it) => it.id === suiteId);
+      if (idx === -1) return s;
+      const next = s.items.slice();
+      const cur = next[idx];
+      if (!cur) return s;
+      next[idx] = {
+        ...cur,
+        caseCount: Math.max(0, cur.caseCount + delta),
       };
-      return {
-        items: {
-          mcp: bumpIn(s.items.mcp),
-        },
-      };
+      return { items: next };
     }),
+  renameGroupInStore: (groupId, name) =>
+    set((s) => ({
+      groups: s.groups.map((g) => (g.id === groupId ? { ...g, name } : g)),
+      items: s.items.map((suite) =>
+        suite.groupId === groupId ? { ...suite, groupName: name } : suite,
+      ),
+    })),
 }));
 
 export interface CreateSuiteInput {
   name: string;
   description?: string | null;
-  category?: VerificationCategory;
+  groupId?: string | null;
+  groupName?: string | null;
   mcpServerId?: string | null;
+  toolPrefixRule?: ToolPrefixRule | null;
   variables?: Record<string, unknown>;
   visibility?: VerificationVisibility;
   timeoutSec?: number;
@@ -142,6 +132,10 @@ export interface CreateSuiteInput {
 export interface PatchSuiteInput {
   name?: string;
   description?: string | null;
+  groupId?: string | null;
+  groupName?: string | null;
+  mcpServerId?: string | null;
+  toolPrefixRule?: ToolPrefixRule | null;
   variables?: Record<string, unknown>;
   visibility?: VerificationVisibility;
   enabled?: boolean;
@@ -156,13 +150,23 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 export const verificationActions = {
-  async refresh(_category?: VerificationCategory): Promise<void> {
+  async refresh(_unused?: unknown): Promise<void> {
     useVerificationStore.getState().setLoading(true);
     try {
-      const res = await fetch(`/api/verification-servers`);
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const items = (await res.json()) as VerificationServerRow[];
-      useVerificationStore.getState().setItemsFor("mcp", items as unknown as VerificationSuiteRow[]);
+      const [groupsRes, suitesRes] = await Promise.all([
+        fetch("/api/verification-groups"),
+        fetch("/api/verification-suites"),
+      ]);
+      if (!groupsRes.ok) throw new Error(await readErrorMessage(groupsRes));
+      if (!suitesRes.ok) throw new Error(await readErrorMessage(suitesRes));
+      const groups = (await groupsRes.json()) as VerificationGroupRow[];
+      const suites = (await suitesRes.json()) as VerificationSuiteRow[];
+      useVerificationStore.setState({
+        groups,
+        items: suites,
+        loaded: true,
+        error: null,
+      });
     } catch (err) {
       useVerificationStore
         .getState()
@@ -182,6 +186,7 @@ export const verificationActions = {
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const row = (await res.json()) as VerificationSuiteRow;
       useVerificationStore.getState().upsert(row);
+      void this.refresh();
       return row;
     } catch (err) {
       useVerificationStore
@@ -222,10 +227,29 @@ export const verificationActions = {
         throw new Error(await readErrorMessage(res));
       }
       useVerificationStore.getState().remove(id);
+      void this.refresh();
     } catch (err) {
       useVerificationStore
         .getState()
         .setError(err instanceof Error ? err.message : String(err));
+    }
+  },
+
+  async renameGroup(groupId: string, name: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/verification-groups/${groupId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      useVerificationStore.getState().renameGroupInStore(groupId, name);
+      return true;
+    } catch (err) {
+      useVerificationStore
+        .getState()
+        .setError(err instanceof Error ? err.message : String(err));
+      return false;
     }
   },
 };

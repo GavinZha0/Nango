@@ -30,12 +30,16 @@ import type {
   CaseExecutionOutcome,
   ErrorEnvelope,
 } from "./types";
+import type { ToolPrefixRule } from "./tool-name";
 
 export interface RunMcpCaseInput {
   mcpServerId: string;
   toolName: string;
   input: Record<string, unknown>;
   assertions: readonly AssertionSpec[];
+  originalToolName?: string;
+  serverName?: string;
+  rule?: ToolPrefixRule | null;
 }
 
 /**
@@ -93,13 +97,22 @@ export async function runMcpCase(
       | undefined;
 
     if (!tool || typeof tool.execute !== "function") {
+      const serverLabel = input.serverName ? ` on server "${input.serverName}"` : "";
+      const originalInfo = input.originalToolName
+        ? ` (Original toolName: "${input.originalToolName}", Mode: "${input.rule?.mode ?? "none"}")`
+        : "";
       return failedOutcome({
         startedAt,
         durationMs: Date.now() - startedAt,
         error: {
-          source: "internal",
-          message: `tool not found on server: ${input.toolName}`,
-          details: { mcpServerId: input.mcpServerId, toolName: input.toolName },
+          source: "upstream",
+          message: `MCP tool "${input.toolName}" not found${serverLabel}.${originalInfo}`,
+          details: {
+            mcpServerId: input.mcpServerId,
+            toolName: input.toolName,
+            originalToolName: input.originalToolName,
+            mode: input.rule?.mode ?? "none",
+          },
         },
         resolvedInput,
       });

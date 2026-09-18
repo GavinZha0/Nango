@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import {
+  McpServerTable,
   VerificationCaseTable,
   VerificationSuiteTable,
 } from "@/lib/db/schema";
@@ -18,13 +19,11 @@ import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import { loadVisibleSuite } from "@/lib/verification/access";
+import * as storage from "@/lib/verification/storage";
 
 const ROUTE = "/api/verification-suites/[id]";
 
 // GET /api/verification-suites/[id]
-// Suite metadata + case count. The full case list is fetched
-// separately via `/cases` so this endpoint stays cheap.
-
 export const GET = withEditor<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
@@ -33,17 +32,51 @@ export const GET = withEditor<{ id: string }>(
       .select({ count: sql<number>`count(*)::int` })
       .from(VerificationCaseTable)
       .where(eq(VerificationCaseTable.suiteId, suite.id));
-    return NextResponse.json({ ...suite, caseCount: count });
+
+    let serverGroup: string | null = null;
+    let serverName: string | null = suite.mcpServerName;
+
+    if (suite.mcpServerId) {
+      const serverRow = await db
+        .select({
+          name: McpServerTable.name,
+          group: McpServerTable.group,
+          serverTitle: McpServerTable.serverTitle,
+        })
+        .from(McpServerTable)
+        .where(eq(McpServerTable.id, suite.mcpServerId))
+        .limit(1);
+
+      if (serverRow[0]) {
+        serverGroup = serverRow[0].group ? serverRow[0].group.trim() : null;
+        serverName = serverRow[0].serverTitle || serverRow[0].name;
+      }
+    }
+
+    return NextResponse.json({
+      ...suite,
+      caseCount: count,
+      serverGroup,
+      serverName,
+    });
   },
 );
 
 // PATCH /api/verification-suites/[id]
-// Editor+ — update metadata. Renames respect global uniqueness.
-
 const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     description: z.string().max(1000).optional().nullable(),
+    groupId: z.string().uuid().optional().nullable(),
+    groupName: z.string().trim().min(1).max(100).optional().nullable(),
+    mcpServerId: z.string().uuid().optional().nullable(),
+    toolPrefixRule: z
+      .object({
+        mode: z.enum(["none", "add", "remove"]),
+        prefix: z.string(),
+      })
+      .optional()
+      .nullable(),
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
@@ -62,12 +95,13 @@ export const PATCH = withEditor<{ id: string }>(
       createdBy: suite.createdBy,
     };
 
-    // Content edits (name / description / timeout / variables) vs flag edits
-    // (enabled / visibility) use the two distinct permission gates,
-    // matching the convention from skills / mcp / agent routes.
     const contentEdit =
       body.name !== undefined
       || body.description !== undefined
+      || body.groupId !== undefined
+      || body.groupName !== undefined
+      || body.mcpServerId !== undefined
+      || body.toolPrefixRule !== undefined
       || body.variables !== undefined
       || body.timeoutSec !== undefined;
     const flagEdit =
@@ -95,6 +129,37 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
     if (body.timeoutSec !== undefined) updates.timeoutSec = body.timeoutSec;
+    if (body.toolPrefixRule !== undefined) {
+      updates.toolPrefixRule = body.toolPrefixRule;
+    }
+
+    if (body.mcpServerId !== undefined) {
+      updates.mcpServerId = body.mcpServerId;
+      if (body.mcpServerId) {
+        const [server] = await db
+          .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
+          .from(McpServerTable)
+          .where(eq(McpServerTable.id, body.mcpServerId))
+          .limit(1);
+        if (server) {
+          updates.mcpServerName = server.serverTitle || server.name;
+        }
+      } else {
+        updates.mcpServerName = null;
+      }
+    }
+
+    if (body.groupId !== undefined) {
+      updates.groupId = body.groupId;
+    } else if (body.groupName !== undefined) {
+      if (body.groupName) {
+        const group = await storage.getOrCreateGroupByName(body.groupName);
+        updates.groupId = group.id;
+      } else {
+        updates.groupId = null;
+      }
+    }
+
     updates.updatedAt = sql`CURRENT_TIMESTAMP`;
 
     try {
@@ -103,8 +168,7 @@ export const PATCH = withEditor<{ id: string }>(
         .set(updates)
         .where(eq(VerificationSuiteTable.id, suite.id))
         .returning();
-      // Keep response shape aligned with GET-by-id / GET-list so the
-      // client store doesn't drop `caseCount` on optimistic upsert.
+
       const [{ count }] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(VerificationCaseTable)
@@ -115,7 +179,7 @@ export const PATCH = withEditor<{ id: string }>(
         throw new ApiError(
           "CONFLICT",
           409,
-          `A verification suite named "${body.name}" already exists.`,
+          `A verification suite named "${body.name}" already exists for your account.`,
         );
       }
       throw err;
@@ -124,8 +188,6 @@ export const PATCH = withEditor<{ id: string }>(
 );
 
 // DELETE /api/verification-suites/[id]
-// Cascade: cases + runs + case_results all drop via ON DELETE CASCADE.
-
 export const DELETE = withEditor<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {

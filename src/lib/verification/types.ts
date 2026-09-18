@@ -9,14 +9,12 @@
  */
 
 import type {
-  VerificationSuiteCategory,
   VerificationRunStatus,
   VerificationCaseResultStatus,
   VerificationErrorSource,
 } from "@/lib/db/schema";
 
 export type {
-  VerificationSuiteCategory,
   VerificationRunStatus,
   VerificationCaseResultStatus,
   VerificationErrorSource,
@@ -97,6 +95,8 @@ export type VerificationFrame =
  *  orchestrator persists this verbatim into `verification_case_result`. */
 export interface CaseExecutionOutcome {
   status: VerificationCaseResultStatus;
+  originalToolName?: string | null;
+  effectiveToolName?: string | null;
   /** Tool / workflow output. NULL for cases that never produced one
    *  (transport throw, skipped). */
   resolvedInput?: Record<string, unknown>;

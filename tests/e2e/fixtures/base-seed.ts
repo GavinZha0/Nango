@@ -523,8 +523,8 @@ export async function seedBaseVerificationSuite(adminEmail: string): Promise<voi
       suiteId = suiteRes.rows[0].id;
     } else {
       const insertSuiteRes = await client.query<{ id: string }>(
-        `INSERT INTO verification_suite (name, description, category, mcp_server_id, mcp_server_name, workflow_id, enabled, visibility, timeout_sec, created_by, updated_by)
-         VALUES ($1, $2, 'mcp', $3, $4, NULL, true, 'public', 300, $5, $5)
+        `INSERT INTO verification_suite (name, description, mcp_server_id, mcp_server_name, enabled, visibility, timeout_sec, created_by, updated_by)
+         VALUES ($1, $2, $3, $4, true, 'public', 300, $5, $5)
          RETURNING id`,
         [
           BASE_NAMES.verificationSuite,

@@ -20,7 +20,6 @@ import { childLogger } from "@/lib/observability/logger";
 
 import {
   listEnabledCasesForRun,
-  listEnabledCasesForServerRun,
   listWrittenCaseIdsForRun,
   markStrandedAsErrored,
   selectStrandedRuns,
@@ -78,9 +77,7 @@ export async function recoverStrandedVerificationRuns(
     // written ones, and fill the first `missingCount`.
     const candidates = run.suiteId
       ? await listEnabledCasesForRun(run.suiteId)
-      : run.mcpServerId
-        ? await listEnabledCasesForServerRun(run.mcpServerId)
-        : [];
+      : [];
     const writtenSet = new Set(writtenIds);
     const missingIds = candidates
       .filter((c) => !writtenSet.has(c.id))

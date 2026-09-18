@@ -7,6 +7,7 @@ import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { canEditResource } from "@/lib/auth/permissions";
 import { loadVisibleCase } from "@/lib/verification/access";
 import { runMcpCase } from "@/lib/verification/runner-mcp";
+import { resolveEffectiveToolName } from "@/lib/verification/tool-name";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import type { AssertionSpec } from "@/lib/verification/types";
 
@@ -69,16 +70,28 @@ export const POST = withEditor<{ id: string }>(
       });
     }
 
+    const effectiveToolName = resolveEffectiveToolName(
+      caseRow.toolName,
+      suite.toolPrefixRule,
+    );
+
     const outcome = await runMcpCase(
       {
         mcpServerId: suite.mcpServerId,
-        toolName: caseRow.toolName,
+        toolName: effectiveToolName,
+        originalToolName: caseRow.toolName,
+        serverName: suite.mcpServerName ?? undefined,
+        rule: suite.toolPrefixRule ?? undefined,
         input: (caseRow.input ?? {}) as Record<string, unknown>,
         assertions: (caseRow.assertions ?? []) as readonly AssertionSpec[],
       },
       { variables: literalVariables },
     );
 
-    return NextResponse.json(outcome);
+    return NextResponse.json({
+      ...outcome,
+      originalToolName: caseRow.toolName,
+      effectiveToolName,
+    });
   },
 );

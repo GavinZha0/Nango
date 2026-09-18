@@ -13,13 +13,21 @@ import {
   Globe,
   Lock,
   SquarePlus,
+  Folder,
+  FolderOpen,
 } from "lucide-react";
-import { MCPIcon } from "@/components/icons/mcp-icon";
 import { toast } from "sonner";
 import useSWR from "swr";
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,13 +38,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { alphabeticCompare } from "@/lib/utils/sort";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 import {
   verificationActions,
   type VerificationSuiteRow,
-  type VerificationServerRow,
+  type VerificationGroupRow,
+  type PatchSuiteInput,
 } from "@/store/verification";
 import { VerificationSuiteDialog } from "@/components/main-panels/verification/VerificationSuiteDialog";
 
@@ -46,15 +57,10 @@ const fetcher = async (url: string) => {
   return res.json();
 };
 
-interface ServerTreeGroup {
-  id: string; // mcpServerId — or a `detached:<name>` synthetic key when the server row is gone
+interface GroupTreeItem {
+  id: string; // group id or "ungrouped"
   name: string;
-  group?: string | null;
-  serverTitle: string | null;
-  serverDescription: string | null;
-  enabled: boolean;
-  /** True for groups whose MCP server row was deleted — Run server is disabled. */
-  detached: boolean;
+  isUngrouped: boolean;
   suites: VerificationSuiteRow[];
 }
 
@@ -67,7 +73,6 @@ interface SuiteRowItemProps {
   onEditSuite: (e: React.MouseEvent) => void;
   onDeleteSuite: (e: React.MouseEvent) => void;
   running: boolean;
-  /** True when the suite is detached from a deleted MCP server — Run is greyed out. */
   runDisabled?: boolean;
 }
 
@@ -105,8 +110,20 @@ function SuiteRowItem({
       )}
       onClick={onSelect}
     >
-      <div className="flex items-center gap-1.5 min-w-0 pr-1" data-action="open-suite">
+      <div className="flex items-center gap-1.5 min-w-0 pr-1 overflow-hidden" data-action="open-suite">
         <span className="truncate">{suite.name}</span>
+        {suite.mcpServerName && !suite.name.includes(`(${suite.mcpServerName})`) && (
+          <span
+            className={cn(
+              "shrink-0 rounded px-1 py-0.2 text-[9px] font-mono truncate max-w-[100px]",
+              suite.mcpServerId
+                ? "bg-muted/70 text-muted-foreground"
+                : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+            )}
+          >
+            {suite.mcpServerName}
+          </span>
+        )}
         {suite.caseCount > 0 && (
           <span
             className="shrink-0 rounded-full bg-muted px-1.5 py-0.2 text-[9px] font-mono text-muted-foreground"
@@ -126,7 +143,7 @@ function SuiteRowItem({
           title={runDisabled ? "Suite is detached from its MCP server" : "Run"}
           aria-label={`Run suite ${suite.name}`}
           data-action="run-suite"
-          className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
+          className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40 cursor-pointer"
         >
           {running ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -142,7 +159,7 @@ function SuiteRowItem({
             title={isPublic ? "Make private" : "Make public"}
             aria-label={isPublic ? `Set ${suite.name} to private` : `Set ${suite.name} to public`}
             data-action="toggle-visibility"
-            className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
+            className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
           >
             {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
           </button>
@@ -154,7 +171,7 @@ function SuiteRowItem({
           title="Edit"
           aria-label={`Edit ${suite.name}`}
           data-action="edit-suite"
-          className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
+          className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
         >
           <SquarePen className="h-3 w-3" />
         </button>
@@ -166,7 +183,7 @@ function SuiteRowItem({
             title="Delete"
             aria-label={`Delete ${suite.name}`}
             data-action="delete-suite"
-            className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
+            className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors cursor-pointer"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -176,55 +193,50 @@ function SuiteRowItem({
   );
 }
 
-interface ServerGroupNodeProps {
-  group: ServerTreeGroup;
+interface GroupNodeProps {
+  group: GroupTreeItem;
   expanded: boolean;
   onToggleExpand: () => void;
   activeSuiteId: string | null;
   onSelectSuite: (suiteId: string) => void;
-  onRunServer: (serverId: string, e: React.MouseEvent) => void;
+  onRunGroup: (groupId: string, e: React.MouseEvent) => void;
+  onRenameGroup: (group: GroupTreeItem, e: React.MouseEvent) => void;
   onRunSuite: (suiteId: string, e: React.MouseEvent) => void;
   onToggleSuiteVisibility: (suite: VerificationSuiteRow, e: React.MouseEvent) => void;
   onEditSuite: (suite: VerificationSuiteRow, e: React.MouseEvent) => void;
   onDeleteSuite: (suite: VerificationSuiteRow, e: React.MouseEvent) => void;
-  onDeleteServer: (server: ServerTreeGroup, e: React.MouseEvent) => void;
-  runningServerId: string | null;
+  runningGroupId: string | null;
   runningSuiteId: string | null;
 }
 
-function ServerGroupNode({
+function GroupNode({
   group,
   expanded,
   onToggleExpand,
   activeSuiteId,
   onSelectSuite,
-  onRunServer,
+  onRunGroup,
+  onRenameGroup,
   onRunSuite,
   onToggleSuiteVisibility,
   onEditSuite,
   onDeleteSuite,
-  onDeleteServer,
-  runningServerId,
+  runningGroupId,
   runningSuiteId,
-}: ServerGroupNodeProps): ReactNode {
-  const displayName = group.serverTitle || group.name;
-  const groupName = group.group?.trim();
-  const isServerRunning = runningServerId === group.id;
+}: GroupNodeProps): ReactNode {
+  const isGroupRunning = runningGroupId === group.id;
 
   return (
     <div
       data-testid="server-group"
       data-group-node="true"
-      data-server-id={group.id}
-      data-name={displayName}
+      data-group-id={group.id}
+      data-name={group.name}
       className="select-none border-b border-border/40 last:border-0"
     >
-      {/* Level 1: Server Node */}
+      {/* Group Node Header */}
       <div
-        className={cn(
-          "group flex items-center justify-between px-2.5 py-1.5 transition-colors hover:bg-muted/30 text-xs cursor-pointer",
-          !group.enabled && "opacity-50",
-        )}
+        className="group flex items-center justify-between px-2.5 py-1.5 transition-colors hover:bg-muted/30 text-xs cursor-pointer"
         onClick={onToggleExpand}
         data-action="toggle-expand"
       >
@@ -234,16 +246,13 @@ function ServerGroupNode({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
-          <MCPIcon className="h-3.5 w-3.5 shrink-0" />
+          {expanded ? (
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80 transition-colors" />
+          ) : (
+            <Folder className="h-3.5 w-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80 transition-colors" />
+          )}
           <span className="truncate font-medium hover:underline underline-offset-2">
-            {groupName ? (
-              <>
-                <span className="text-muted-foreground/75 font-normal">{groupName}/</span>
-                <span>{displayName}</span>
-              </>
-            ) : (
-              displayName
-            )}
+            {group.name}
           </span>
           {group.suites.length > 0 && (
             <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.2 text-[9px] text-muted-foreground">
@@ -252,43 +261,45 @@ function ServerGroupNode({
           )}
         </div>
 
-        {/* Level 1 Actions */}
-        <div className="flex shrink-0 items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-          <button
-            type="button"
-            onClick={(e) => onRunServer(group.id, e)}
-            disabled={isServerRunning || !group.enabled || group.detached}
-            title={group.detached ? "Server deleted" : "Run"}
-            aria-label={`Run all suites for ${displayName}`}
-            data-action="run-server"
-            className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40"
-          >
-            {isServerRunning ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Play className="h-3 w-3 fill-current" />
-            )}
-          </button>
+        {/* Group Actions */}
+        {!group.isUngrouped && (
+          <div className="flex shrink-0 items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+            <button
+              type="button"
+              onClick={(e) => onRunGroup(group.id, e)}
+              disabled={isGroupRunning || group.suites.length === 0}
+              title="Run all suites in group"
+              aria-label={`Run all suites for ${group.name}`}
+              data-action="run-group"
+              className="rounded p-0.5 text-muted-foreground/70 hover:text-emerald-500 transition-colors disabled:opacity-40 cursor-pointer"
+            >
+              {isGroupRunning ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Play className="h-3 w-3 fill-current" />
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={(e) => onDeleteServer(group, e)}
-            title="Delete"
-            aria-label={`Delete verification data for ${displayName}`}
-            data-action="delete-server"
-            className="rounded p-0.5 text-muted-foreground/70 hover:text-destructive transition-colors"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={(e) => onRenameGroup(group, e)}
+              title="Rename group"
+              aria-label={`Rename ${group.name}`}
+              data-action="rename-group"
+              className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
+            >
+              <SquarePen className="h-3 w-3" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Level 2: Suites List */}
+      {/* Suites List */}
       {expanded && (
         <div className="flex flex-col py-0.5">
           {group.suites.length === 0 ? (
             <div className="pl-8 py-1 text-[11px] text-muted-foreground italic">
-              No suites created yet.
+              No suites in this group.
             </div>
           ) : (
             group.suites.map((suite) => (
@@ -316,124 +327,104 @@ export function VerificationPanel(): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Derive active suite ID from /verification/[id]
   const activeSuiteMatch = pathname.match(/^\/verification\/([^/]+)/);
-  const activeSuiteId = activeSuiteMatch && activeSuiteMatch[1] !== "server" ? activeSuiteMatch[1] : null;
+  const activeSuiteId =
+    activeSuiteMatch && activeSuiteMatch[1] !== "server"
+      ? activeSuiteMatch[1]
+      : null;
 
-  // 1. Fetch servers
-  const { data: serverRows, error: serverError, isLoading: serverLoading, mutate: mutateServers } = useSWR<VerificationServerRow[]>(
-    "/api/verification-servers",
-    fetcher,
-  );
+  // 1. Fetch groups
+  const {
+    data: groupRows,
+    error: groupError,
+    isLoading: groupLoading,
+    mutate: mutateGroups,
+  } = useSWR<VerificationGroupRow[]>("/api/verification-groups", fetcher);
 
   // 2. Fetch suites
-  const { data: suiteRows, error: suiteError, isLoading: suiteLoading, mutate: mutateSuites } = useSWR<VerificationSuiteRow[]>(
-    "/api/verification-suites",
-    fetcher,
-  );
+  const {
+    data: suiteRows,
+    error: suiteError,
+    isLoading: suiteLoading,
+    mutate: mutateSuites,
+  } = useSWR<VerificationSuiteRow[]>("/api/verification-suites", fetcher);
 
-  const [expandedServerIds, setExpandedServerIds] = useState<Record<string, boolean>>({});
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
 
-  const toggleServerExpand = (serverId: string, currentlyExpanded: boolean): void => {
-    setExpandedServerIds((prev) => ({
+  const toggleGroupExpand = (groupId: string, currentlyExpanded: boolean): void => {
+    setExpandedGroupIds((prev) => ({
       ...prev,
-      [serverId]: !currentlyExpanded,
+      [groupId]: !currentlyExpanded,
     }));
   };
 
-  // Build tree grouping (alphabetical sort on servers and suites, filter out empty servers)
-  // Suites whose MCP server row was deleted (mcpServerId NULL) are grouped
-  // under their denormalized mcpServerName snapshot so the two-level
-  // server -> suite hierarchy and its display names survive server
-  // deletion; only the Run buttons on those suites are greyed out.
-  const treeGroups = useMemo<ServerTreeGroup[]>(() => {
-    if (!serverRows) return [];
+  const treeGroups = useMemo<GroupTreeItem[]>(() => {
+    if (!suiteRows) return [];
 
-    const suitesByServer = new Map<string, VerificationSuiteRow[]>();
-    const detachedByName = new Map<string, VerificationSuiteRow[]>();
-    for (const suite of suiteRows ?? []) {
-      const serverId = (suite as unknown as { mcpServerId?: string }).mcpServerId;
-      if (serverId) {
-        const list = suitesByServer.get(serverId) ?? [];
+    const suitesByGroup = new Map<string, VerificationSuiteRow[]>();
+    const ungroupedSuites: VerificationSuiteRow[] = [];
+
+    for (const suite of suiteRows) {
+      if (suite.groupId) {
+        const list = suitesByGroup.get(suite.groupId) ?? [];
         list.push(suite);
-        suitesByServer.set(serverId, list);
+        suitesByGroup.set(suite.groupId, list);
       } else {
-        const serverName =
-          (suite as unknown as { mcpServerName?: string | null }).mcpServerName ||
-          "Unknown Server";
-        const list = detachedByName.get(serverName) ?? [];
-        list.push(suite);
-        detachedByName.set(serverName, list);
+        ungroupedSuites.push(suite);
       }
     }
 
-    const liveGroups = serverRows
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        group: s.group,
-        serverTitle: s.serverTitle,
-        serverDescription: s.serverDescription,
-        enabled: s.enabled,
-        detached: false,
-        suites: (suitesByServer.get(s.id) ?? []).sort((a, b) =>
-          alphabeticCompare(a.name, b.name),
-        ),
-      }))
-      .filter((g) => g.suites.length > 0);
-
-    const detachedGroups = [...detachedByName.entries()].map(([serverName, suites]) => ({
-      id: `detached:${serverName}`,
-      name: serverName,
-      group: null,
-      serverTitle: serverName,
-      serverDescription: null,
-      enabled: true,
-      detached: true,
-      suites: suites.sort((a, b) => alphabeticCompare(a.name, b.name)),
+    const regularGroups: GroupTreeItem[] = (groupRows ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      isUngrouped: false,
+      suites: (suitesByGroup.get(g.id) ?? []).sort((a, b) =>
+        alphabeticCompare(a.name, b.name),
+      ),
     }));
 
-    const getSortKey = (g: { group?: string | null; serverTitle: string | null; name: string }) => {
-      const base = g.serverTitle || g.name;
-      const groupName = g.group?.trim();
-      return groupName ? `${groupName}/${base}` : base;
-    };
+    regularGroups.sort((a, b) => alphabeticCompare(a.name, b.name));
 
-    return [...liveGroups, ...detachedGroups].sort((a, b) =>
-      alphabeticCompare(getSortKey(a), getSortKey(b)),
-    );
-  }, [serverRows, suiteRows]);
+    if (ungroupedSuites.length > 0) {
+      regularGroups.push({
+        id: "ungrouped",
+        name: "Ungrouped",
+        isUngrouped: true,
+        suites: ungroupedSuites.sort((a, b) =>
+          alphabeticCompare(a.name, b.name),
+        ),
+      });
+    }
 
-  const [runningServerId, setRunningServerId] = useState<string | null>(null);
+    return regularGroups;
+  }, [groupRows, suiteRows]);
+
+  const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
   const [runningSuiteId, setRunningSuiteId] = useState<string | null>(null);
 
   const [createSuiteOpen, setCreateSuiteOpen] = useState<boolean>(false);
-  const [editingSuite, setEditingSuite] = useState<{
-    id: string;
-    name: string;
-    description?: string | null;
-    variables?: Record<string, unknown>;
-    serverName?: string;
-  } | null>(null);
+  const [editingSuite, setEditingSuite] = useState<VerificationSuiteRow | null>(null);
   const [deletingSuite, setDeletingSuite] = useState<VerificationSuiteRow | null>(null);
-  const [deletingServer, setDeletingServer] = useState<ServerTreeGroup | null>(null);
+  const [renamingGroup, setRenamingGroup] = useState<GroupTreeItem | null>(null);
+  const [newGroupName, setNewGroupName] = useState<string>("");
   const [deleting, setDeleting] = useState<boolean>(false);
+  const [renaming, setRenaming] = useState<boolean>(false);
 
-  const handleStartServerRun = async (serverId: string, e: React.MouseEvent): Promise<void> => {
+  const handleStartGroupRun = async (groupId: string, e: React.MouseEvent): Promise<void> => {
     e.stopPropagation();
-    setRunningServerId(serverId);
+    setRunningGroupId(groupId);
     try {
       const res = await fetch("/api/verification-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mcpServerId: serverId }),
+        body: JSON.stringify({ groupId }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Triggered server run");
+      toast.success("Triggered group run");
     } catch {
-      toast.error("Failed to start server run");
+      toast.error("Failed to start group run");
     } finally {
-      setRunningServerId(null);
+      setRunningGroupId(null);
     }
   };
 
@@ -455,7 +446,10 @@ export function VerificationPanel(): ReactNode {
     }
   };
 
-  const handleToggleSuiteVisibility = async (suite: VerificationSuiteRow, e: React.MouseEvent): Promise<void> => {
+  const handleToggleSuiteVisibility = async (
+    suite: VerificationSuiteRow,
+    e: React.MouseEvent,
+  ): Promise<void> => {
     e.stopPropagation();
     const next = suite.visibility === "public" ? "private" : "public";
     try {
@@ -473,14 +467,11 @@ export function VerificationPanel(): ReactNode {
     }
   };
 
-  const handleSuiteSave = async (updated: {
-    name: string;
-    description?: string | null;
-    variables?: Record<string, unknown>;
-  }): Promise<void> => {
+  const handleSuiteSave = async (updated: PatchSuiteInput): Promise<void> => {
     if (!editingSuite) return;
     try {
       await verificationActions.patch(editingSuite.id, updated);
+      void mutateGroups();
       void mutateSuites();
       toast.success("Suite updated");
       setEditingSuite(null);
@@ -494,6 +485,7 @@ export function VerificationPanel(): ReactNode {
     setDeleting(true);
     try {
       await verificationActions.remove(deletingSuite.id);
+      void mutateGroups();
       void mutateSuites();
       toast.success("Suite deleted");
       if (activeSuiteId === deletingSuite.id) {
@@ -507,61 +499,28 @@ export function VerificationPanel(): ReactNode {
     }
   };
 
-  const handleDeleteServerConfirm = async (): Promise<void> => {
-    if (!deletingServer) return;
-    setDeleting(true);
+  const handleRenameGroupConfirm = async (): Promise<void> => {
+    if (!renamingGroup || !newGroupName.trim()) return;
+    setRenaming(true);
     try {
-      if (deletingServer.detached) {
-        // Detached group: no MCP server row exists (the synthetic group id
-        // must never hit the server-scoped DELETE endpoint). Delete owned
-        // suites via the per-suite endpoints — per-suite RBAC applies, so
-        // suites owned by others are skipped with a 403.
-        let deleted = 0;
-        let skipped = 0;
-        for (const suite of deletingServer.suites) {
-          try {
-            await verificationActions.remove(suite.id);
-            deleted++;
-          } catch {
-            skipped++;
-          }
-        }
-        toast.success(
-          skipped > 0
-            ? `Deleted ${deleted} suite${deleted === 1 ? "" : "s"} (${skipped} skipped — owned by others)`
-            : `Deleted ${deleted} suite${deleted === 1 ? "" : "s"}`,
-        );
-        void mutateServers();
+      const ok = await verificationActions.renameGroup(renamingGroup.id, newGroupName.trim());
+      if (ok) {
+        toast.success("Group renamed");
+        void mutateGroups();
         void mutateSuites();
-        router.push("/verification");
-        return;
+        setRenamingGroup(null);
+      } else {
+        toast.error("Failed to rename group");
       }
-      const res = await fetch(`/api/verification-servers/${deletingServer.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(`${res.status}`);
-      const { deleted, skipped } = (await res.json()) as {
-        deleted: number;
-        skipped: number;
-      };
-      toast.success(
-        skipped > 0
-          ? `Deleted ${deleted} suite${deleted === 1 ? "" : "s"} (${skipped} skipped — owned by others)`
-          : `Deleted ${deleted} suite${deleted === 1 ? "" : "s"}`,
-      );
-      void mutateServers();
-      void mutateSuites();
-      router.push("/verification");
     } catch {
-      toast.error("Failed to delete server verification data");
+      toast.error("Failed to rename group");
     } finally {
-      setDeleting(false);
-      setDeletingServer(null);
+      setRenaming(false);
     }
   };
 
-  const isTreeLoading = serverLoading || suiteLoading;
-  const treeError = serverError || suiteError;
+  const isTreeLoading = groupLoading || suiteLoading;
+  const treeError = groupError || suiteError;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -575,7 +534,7 @@ export function VerificationPanel(): ReactNode {
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={() => setCreateSuiteOpen(true)}
             aria-label="New suite"
             title="New suite"
@@ -587,9 +546,9 @@ export function VerificationPanel(): ReactNode {
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={() => {
-              void mutateServers();
+              void mutateGroups();
               void mutateSuites();
             }}
             disabled={isTreeLoading}
@@ -623,47 +582,42 @@ export function VerificationPanel(): ReactNode {
             </div>
           ) : (
             treeGroups.map((group) => {
-            const isExpanded =
-              expandedServerIds[group.id] ??
-              (activeSuiteId ? group.suites.some((s) => s.id === activeSuiteId) : false);
-            return (
-              <ServerGroupNode
-                key={group.id}
-                group={group}
-                expanded={isExpanded}
-                onToggleExpand={() => toggleServerExpand(group.id, isExpanded)}
-                activeSuiteId={activeSuiteId}
-                onSelectSuite={(suiteId) => router.push(`/verification/${suiteId}`)}
-                onRunServer={handleStartServerRun}
-                onRunSuite={handleStartSuiteRun}
-                onToggleSuiteVisibility={handleToggleSuiteVisibility}
-                onEditSuite={(suite) => {
-                  const base = group.serverTitle || group.name;
-                  const fullServerName = group.group?.trim() ? `${group.group.trim()}/${base}` : base;
-                  setEditingSuite({
-                    id: suite.id,
-                    name: suite.name,
-                    description: suite.description,
-                    variables: suite.variables,
-                    serverName: fullServerName,
-                  });
-                }}
-                onDeleteSuite={setDeletingSuite}
-                onDeleteServer={setDeletingServer}
-                runningServerId={runningServerId}
-                runningSuiteId={runningSuiteId}
-              />
-            );
-          }))}
+              const isExpanded =
+                expandedGroupIds[group.id] ??
+                (activeSuiteId ? group.suites.some((s) => s.id === activeSuiteId) : true);
+              return (
+                <GroupNode
+                  key={group.id}
+                  group={group}
+                  expanded={isExpanded}
+                  onToggleExpand={() => toggleGroupExpand(group.id, isExpanded)}
+                  activeSuiteId={activeSuiteId}
+                  onSelectSuite={(suiteId) => router.push(`/verification/${suiteId}`)}
+                  onRunGroup={handleStartGroupRun}
+                  onRenameGroup={(g) => {
+                    setRenamingGroup(g);
+                    setNewGroupName(g.name);
+                  }}
+                  onRunSuite={handleStartSuiteRun}
+                  onToggleSuiteVisibility={handleToggleSuiteVisibility}
+                  onEditSuite={(suite) => setEditingSuite(suite)}
+                  onDeleteSuite={setDeletingSuite}
+                  runningGroupId={runningGroupId}
+                  runningSuiteId={runningSuiteId}
+                />
+              );
+            })
+          )}
         </div>
       </ScrollArea>
+
       {/* New Suite Dialog */}
       <VerificationSuiteDialog
         open={createSuiteOpen}
         onOpenChange={setCreateSuiteOpen}
         onCreated={(created) => {
           void mutateSuites();
-          void mutateServers();
+          void mutateGroups();
           router.push(`/verification/${created.id}`);
         }}
       />
@@ -675,11 +629,59 @@ export function VerificationPanel(): ReactNode {
           onOpenChange={(o) => {
             if (!o) setEditingSuite(null);
           }}
-          serverName={editingSuite?.serverName ?? "MCP Server"}
           suite={editingSuite}
           onUpdated={handleSuiteSave}
         />
       )}
+
+      {/* Rename Group Dialog */}
+      <Dialog
+        open={renamingGroup !== null}
+        onOpenChange={(o) => {
+          if (!o && !renaming) setRenamingGroup(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename Group</DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <Label htmlFor="rename-group-name">Group Name</Label>
+            <Input
+              id="rename-group-name"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              disabled={renaming}
+              maxLength={64}
+              autoFocus
+              className="mt-1.5"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRenamingGroup(null)}
+              disabled={renaming}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleRenameGroupConfirm()}
+              disabled={renaming || !newGroupName.trim()}
+            >
+              {renaming ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Saving…
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Suite Dialog */}
       <AlertDialog
@@ -703,46 +705,8 @@ export function VerificationPanel(): ReactNode {
                 void handleSuiteDeleteConfirm();
               }}
               disabled={deleting}
-              className="bg-destructive hover:bg-destructive/90"
+              className="bg-destructive hover:bg-destructive/90 cursor-pointer"
               data-testid="confirm-delete-suite-button"
-            >
-              {deleting ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="mr-1 h-3.5 w-3.5" />
-              )}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete Server Dialog */}
-      <AlertDialog
-        open={deletingServer !== null}
-        onOpenChange={(o) => {
-          if (!o && !deleting) setDeletingServer(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Server Verification Data</AlertDialogTitle>
-            <AlertDialogDescription>
-              Permanently delete the verification suites you own under{" "}
-              <strong>{deletingServer?.serverTitle || deletingServer?.name}</strong>? Suites owned
-              by others are kept. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDeleteServerConfirm();
-              }}
-              disabled={deleting}
-              className="bg-destructive hover:bg-destructive/90"
-              data-testid="confirm-delete-server-button"
             >
               {deleting ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
@@ -757,3 +721,4 @@ export function VerificationPanel(): ReactNode {
     </div>
   );
 }
+

@@ -259,13 +259,12 @@ export function NewCaseDialog({
         });
       }
 
-      // Refresh cases for this server to ensure the changes appear across suites
-      if (targetServerId) {
-        void caseActions.refreshForServer(targetServerId);
+      if (form.suiteId) {
+        void caseActions.refresh(form.suiteId);
       }
 
-      // Trigger store refresh for verification left panel servers list
-      void verificationActions.refresh("mcp");
+      // Trigger store refresh for verification left panel
+      void verificationActions.refresh();
 
       onCreated(resultRow);
       onOpenChange(false);
@@ -366,6 +365,48 @@ export function NewCaseDialog({
               )}
             </div>
 
+            {/* Tool Selector */}
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
+              <Label htmlFor="case-tool">
+                MCP Tool <span className="text-destructive">*</span>
+              </Label>
+              {caseRow ? (
+                <div
+                  className="text-xs font-mono bg-muted/40 border rounded-md px-3 py-2 break-all text-foreground select-text"
+                  title={caseRow.toolName ?? undefined}
+                >
+                  {caseRow.toolName}
+                </div>
+              ) : (
+                <Select
+                  value={form.toolName}
+                  onValueChange={(v) =>
+                    setForm((prev) => ({ ...prev, toolName: v ?? "" }))
+                  }
+                  disabled={!effectiveServerId}
+                >
+                  <SelectTrigger id="case-tool" className="w-full font-mono text-xs" data-testid="case-tool-select">
+                    <SelectValue
+                      placeholder={
+                        !effectiveServerId
+                          ? "Select a server first"
+                          : "Select a tool"
+                      }
+                    >
+                      {form.toolName ? form.toolName : null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px]">
+                    {tools.map((t) => (
+                      <SelectItem key={t} value={t} label={t} className="font-mono text-xs">
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
             {/* Suite Selector */}
             <div className="grid grid-cols-[120px_1fr] items-center gap-2">
               <Label htmlFor="case-suite">
@@ -425,48 +466,6 @@ export function NewCaseDialog({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            {/* Tool Selector */}
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <Label htmlFor="case-tool">
-                MCP Tool <span className="text-destructive">*</span>
-              </Label>
-              {caseRow ? (
-                <div
-                  className="text-xs font-mono bg-muted/40 border rounded-md px-3 py-2 break-all text-foreground select-text"
-                  title={caseRow.toolName ?? undefined}
-                >
-                  {caseRow.toolName}
-                </div>
-              ) : (
-                <Select
-                  value={form.toolName}
-                  onValueChange={(v) =>
-                    setForm((prev) => ({ ...prev, toolName: v ?? "" }))
-                  }
-                  disabled={!effectiveServerId}
-                >
-                  <SelectTrigger id="case-tool" className="w-full font-mono text-xs" data-testid="case-tool-select">
-                    <SelectValue
-                      placeholder={
-                        !effectiveServerId
-                          ? "Select a server first"
-                          : "Select a tool"
-                      }
-                    >
-                      {form.toolName ? form.toolName : null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[300px]">
-                    {tools.map((t) => (
-                      <SelectItem key={t} value={t} label={t} className="font-mono text-xs">
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
             </div>
 
             {/* Case Name */}

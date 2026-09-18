@@ -1,7 +1,7 @@
 /**
  * Verification — suite-level execution orchestrator.
  *
- * Public entry: {@link startSuiteRun}. Returns a `runId` immediately
+ * Public entry: {@link startSuiteRun}, {@link startGroupRun}. Returns a `runId` immediately
  * and runs the suite asynchronously in the background. The Node
  * single-threaded event loop guarantees this co-operates with HTTP
  * handlers; we never `await` the inner loop from the API caller.
@@ -21,10 +21,11 @@ import { childLogger } from "@/lib/observability/logger";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { McpServerTable } from "@/lib/db/schema";
+import { VerificationGroupTable } from "@/lib/db/schema";
 import { recordRunNotification } from "@/lib/runner/notifications";
 import { publishVerificationFrame } from "./event-bus-channel";
 import { runMcpCase } from "./runner-mcp";
+import { resolveEffectiveToolName } from "./tool-name";
 import * as storage from "./storage";
 import { timeoutError } from "./error-source";
 import {
@@ -48,27 +49,26 @@ const log = childLogger({ component: "verification-orchestrator" });
  * promise is detached (`.catch` guards against UnhandledRejection)
  * and the provider-pool's refcount / idle reaper eventually reclaims
  * the client when this case's borrow is released.
- *
- * Set generously (60 s) — most MCP tools should finish in << 1 s; a
- * minute is the threshold at which "this tool is hung" is the only
- * sensible interpretation. Callers wanting tighter bounds should
- * lower the SUITE timeout (`verification_suite.timeoutSec`).
  */
 const PER_CASE_MAX_MS = 60_000;
+
+export interface SuiteRunFinishPayload {
+  status: VerificationRunStatus;
+  passedCount: number;
+  failedCount: number;
+  erroredCount: number;
+  skippedCount: number;
+  runId: string;
+  suiteId: string;
+  groupId?: string | null;
+}
 
 export interface StartSuiteRunInput {
   suiteId: string;
   ownerId: string;
   triggeredBy: "manual" | "schedule";
-}
-
-export interface StartServerRunInput {
-  mcpServerId: string;
-  ownerId: string;
-  triggeredBy: "manual" | "schedule";
-  /** SECURITY: set for user-triggered runs so case selection stays inside
-   *  the triggerer's visible suites; omit for system contexts (recovery). */
-  viewer?: { userId: string; isAdmin: boolean; isEditor: boolean };
+  suppressNotification?: boolean;
+  onFinish?: (payload: SuiteRunFinishPayload) => Promise<void> | void;
 }
 
 export interface StartSuiteRunResult {
@@ -77,85 +77,9 @@ export interface StartSuiteRunResult {
 }
 
 /**
- * Kick off a server run (runs all cases across all tools of this server).
- */
-export async function startServerRun(
-  input: StartServerRunInput,
-): Promise<StartSuiteRunResult> {
-  const [server] = await db
-    .select()
-    .from(McpServerTable)
-    .where(eq(McpServerTable.id, input.mcpServerId))
-    .limit(1);
-
-  if (!server) {
-    throw new Error(`MCP server not found: ${input.mcpServerId}`);
-  }
-
-  const serverName = server.serverTitle || server.name;
-  const cases = await storage.listEnabledCasesForServerRun(
-    input.mcpServerId,
-    input.viewer,
-  );
-  const run = await storage.createRun({
-    mcpServerId: input.mcpServerId,
-    totalCount: cases.length,
-    triggeredBy: input.triggeredBy,
-  });
-
-  publishVerificationFrame(input.ownerId, {
-    topic: "verification_run",
-    kind: "run_started",
-    runId: run.id,
-    mcpServerId: input.mcpServerId,
-    serverName,
-    totalCount: cases.length,
-  });
-
-  if (cases.length === 0) {
-    await storage.finalizeRun({
-      runId: run.id,
-      status: "passed",
-      passedCount: 0,
-      failedCount: 0,
-      erroredCount: 0,
-      skippedCount: 0,
-    });
-    publishVerificationFrame(input.ownerId, {
-      topic: "verification_run",
-      kind: "run_finished",
-      runId: run.id,
-      status: "passed",
-      totalCount: 0,
-      passedCount: 0,
-      failedCount: 0,
-      erroredCount: 0,
-      skippedCount: 0,
-    });
-    return { runId: run.id, totalCount: 0 };
-  }
-
-  // 10 minutes global timeout for all server tools.
-  void executeSuiteLoop({
-    runId: run.id,
-    ownerId: input.ownerId,
-    timeoutSec: 600,
-    targetName: serverName,
-    category: "server",
-    cases,
-  });
-
-  return { runId: run.id, totalCount: cases.length };
-}
-
-/**
  * Kick off a suite run. Returns synchronously with the new
  * {@link verification_run} id; the actual case loop runs in the
  * background and publishes SSE frames to `ownerId`'s channel.
- *
- * CONTRACT: the suite must exist and have at least one enabled case.
- * Empty / disabled suites short-circuit to a `passed` run with
- * totalCount=0 so the API caller still gets a clean record.
  */
 export async function startSuiteRun(
   input: StartSuiteRunInput,
@@ -200,39 +124,156 @@ export async function startSuiteRun(
       erroredCount: 0,
       skippedCount: 0,
     });
+    if (input.onFinish) {
+      await input.onFinish({
+        status: "passed",
+        passedCount: 0,
+        failedCount: 0,
+        erroredCount: 0,
+        skippedCount: 0,
+        runId: run.id,
+        suiteId: input.suiteId,
+        groupId: suite.groupId,
+      });
+    }
     return { runId: run.id, totalCount: 0 };
   }
 
-  // Fire-and-forget background loop. We deliberately do NOT await —
-  // the HTTP handler returns to the client immediately. The Node
-  // event loop drives the loop to completion (or boot-epoch recovery
-  // sweeps it on next restart).
+  // Fire-and-forget background loop.
   void executeSuiteLoop({
     runId: run.id,
+    suiteId: input.suiteId,
+    groupId: suite.groupId,
     ownerId: input.ownerId,
     timeoutSec: suite.timeoutSec,
     targetName: suite.name,
-    category: "suite",
     cases,
+    suppressNotification: input.suppressNotification,
+    onFinish: input.onFinish,
   });
 
   return { runId: run.id, totalCount: cases.length };
 }
 
-interface ExecuteSuiteLoopInput {
-  runId: string;
+export interface StartGroupRunInput {
+  groupId: string;
   ownerId: string;
-  timeoutSec: number;
-  targetName: string;
-  category: "suite" | "server";
-  cases: Awaited<ReturnType<typeof storage.listEnabledCasesForRun>>;
+  viewer: storage.VerificationViewer;
+  triggeredBy?: "manual" | "schedule";
+}
+
+export interface StartGroupRunResult {
+  groupId: string;
+  triggeredCount: number;
+  skippedCount: number;
+  runIds: string[];
 }
 
 /**
- * Mutable counters shared between the main loop and the crash
- * handler. Encapsulated as one object so the catch branch can read a
- * coherent snapshot without juggling 5 closure variables.
+ * Kick off a group run across all visible enabled suites in the specified group.
+ * Gathers suites using listEnabledSuitesByGroup(groupId, viewer) to strictly prevent F6 privilege escalation.
  */
+export async function startGroupRun(
+  input: StartGroupRunInput,
+): Promise<StartGroupRunResult> {
+  const suites = await storage.listEnabledSuitesByGroup(
+    input.groupId,
+    input.viewer,
+  );
+  const runIds: string[] = [];
+
+  const [groupRow] = await db
+    .select()
+    .from(VerificationGroupTable)
+    .where(eq(VerificationGroupTable.id, input.groupId))
+    .limit(1);
+  const groupName = groupRow?.name ?? "Verification Group";
+
+  if (suites.length === 0) {
+    return {
+      groupId: input.groupId,
+      triggeredCount: 0,
+      skippedCount: 0,
+      runIds: [],
+    };
+  }
+
+  let finishedSuites = 0;
+  let totalPassed = 0;
+  let totalFailed = 0;
+  let totalErrored = 0;
+  let totalSkipped = 0;
+  let anyFailure = false;
+
+  const onSuiteFinish = async (payload: SuiteRunFinishPayload) => {
+    finishedSuites += 1;
+    totalPassed += payload.passedCount;
+    totalFailed += payload.failedCount;
+    totalErrored += payload.erroredCount;
+    totalSkipped += payload.skippedCount;
+    if (payload.status !== "passed") {
+      anyFailure = true;
+    }
+
+    if (finishedSuites === suites.length) {
+      // Single aggregated notification with runId: null
+      await recordRunNotification({
+        ownerId: input.ownerId,
+        runId: null,
+        kind: anyFailure ? "run_failed" : "run_completed",
+        title: `Verification Group: ${groupName}`,
+        body: anyFailure
+          ? `Group completed with issues: ✓ ${totalPassed} Passed, ✗ ${totalFailed} Failed, ${totalErrored} Errored, ${totalSkipped} Skipped (${suites.length} suites)`
+          : `All ${suites.length} suites passed: ✓ ${totalPassed} Passed`,
+        sourceLabel: "Verification Group",
+        task: `Run verification group '${groupName}'`,
+        initiator: "verification",
+      });
+    }
+  };
+
+  for (const suite of suites) {
+    try {
+      const res = await startSuiteRun({
+        suiteId: suite.id,
+        ownerId: input.ownerId,
+        triggeredBy: input.triggeredBy ?? "manual",
+        suppressNotification: true,
+        onFinish: onSuiteFinish,
+      });
+      runIds.push(res.runId);
+    } catch (err) {
+      log.error(
+        {
+          event: "start_group_suite_failed",
+          suiteId: suite.id,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        "failed to start suite run in group",
+      );
+    }
+  }
+
+  return {
+    groupId: input.groupId,
+    triggeredCount: runIds.length,
+    skippedCount: suites.length - runIds.length,
+    runIds,
+  };
+}
+
+interface ExecuteSuiteLoopInput {
+  runId: string;
+  suiteId: string;
+  groupId?: string | null;
+  ownerId: string;
+  timeoutSec: number;
+  targetName: string;
+  cases: Awaited<ReturnType<typeof storage.listEnabledCasesForRun>>;
+  suppressNotification?: boolean;
+  onFinish?: (payload: SuiteRunFinishPayload) => Promise<void> | void;
+}
+
 interface LoopCounters {
   passedCount: number;
   failedCount: number;
@@ -250,14 +291,6 @@ async function executeSuiteLoop(input: ExecuteSuiteLoopInput): Promise<void> {
     timedOut: false,
   };
 
-  // Outer safety net. This whole function runs detached from the HTTP
-  // handler (`void executeSuiteLoop(...)` in `startSuiteRun`), so any
-  // uncaught throw becomes an Unhandled Promise Rejection that the
-  // request lifecycle can never observe. If we don't trap it here,
-  // `finalizeRun` never runs and `verification_run.status` is stuck
-  // at `'running'` until the next boot-epoch recovery sweep. Persist
-  // an `errored` terminal state and emit a `run_finished` frame so
-  // the live UI unfreezes immediately. See docs/verification.md.
   try {
     await runSuiteCases(input, counters);
     await finaliseAndAnnounce(input, counters);
@@ -266,11 +299,6 @@ async function executeSuiteLoop(input: ExecuteSuiteLoopInput): Promise<void> {
   }
 }
 
-/**
- * Inner serial loop — one tick per case. Mutates {@link counters} in
- * place. Throws on truly unexpected failures (e.g. provider-pool
- * blowing up), which the outer `executeSuiteLoop` catches.
- */
 async function runSuiteCases(
   input: ExecuteSuiteLoopInput,
   counters: LoopCounters,
@@ -283,7 +311,6 @@ async function runSuiteCases(
   let suiteResolveError: { source: "config"; message: string } | null = null;
 
   for (const c of input.cases) {
-    // Reset context whenever crossing suite boundaries to guarantee strict suite isolation
     if (c.suiteId !== currentSuiteId) {
       currentSuiteId = c.suiteId;
       suiteContext = {};
@@ -311,14 +338,13 @@ async function runSuiteCases(
         runId: input.runId,
         caseId: c.id,
         outcome,
+        originalToolName: c.toolName ?? "",
+        effectiveToolName: c.toolName ?? "",
       });
       counters.erroredCount += 1;
       continue;
     }
 
-    // Wall-clock check before each case — keeps the "remaining
-    // cases get skipped" invariant precise without per-case
-    // setTimeout bookkeeping.
     const elapsed: number = Date.now() - suiteStartedAt;
     if (elapsed > timeoutMs) {
       counters.timedOut = true;
@@ -337,15 +363,14 @@ async function runSuiteCases(
         runId: input.runId,
         caseId: c.id,
         outcome: skippedOutcome,
+        originalToolName: c.toolName ?? "",
+        effectiveToolName: c.toolName ?? "",
       });
       counters.skippedCount += 1;
       continue;
     }
 
     if (!c.mcpServerId || !c.toolName) {
-      // V1 invariant: every enabled MCP case has both target fields
-      // (CHECK constraint enforces this at the DB level too). Defend
-      // in depth: if a row violates it, mark errored, don't crash.
       const outcome: CaseExecutionOutcome = {
         status: "errored",
         resolvedInput: (c.input ?? {}) as Record<string, unknown>,
@@ -365,18 +390,18 @@ async function runSuiteCases(
         runId: input.runId,
         caseId: c.id,
         outcome,
+        originalToolName: c.toolName ?? "",
+        effectiveToolName: c.toolName ?? "",
       });
       counters.erroredCount += 1;
       continue;
     }
 
-    // Per-case wall-clock cap. The suite-level check above only fires
-    // BETWEEN cases — if `tool.execute` hangs forever inside a single
-    // case the orchestrator would otherwise never reach that check and
-    // the whole run would stay `running` until the next boot-epoch
-    // sweep. Race the in-flight case against a setTimeout-resolved
-    // sentinel outcome whose budget is `min(remainingSuiteBudget,
-    // PER_CASE_MAX_MS)` so we never overshoot the suite cap either.
+    const effectiveToolName = resolveEffectiveToolName(
+      c.toolName ?? "",
+      c.toolPrefixRule,
+    );
+
     const remainingSuiteMs = Math.max(0, timeoutMs - elapsed);
     const perCaseCapMs = Math.max(1, Math.min(remainingSuiteMs, PER_CASE_MAX_MS));
     const outcome: CaseExecutionOutcome = await runCaseWithCap({
@@ -388,9 +413,12 @@ async function runSuiteCases(
         runMcpCase(
           {
             mcpServerId: c.mcpServerId!,
-            toolName: c.toolName!,
+            toolName: effectiveToolName,
             input: (c.input ?? {}) as Record<string, unknown>,
             assertions: (c.assertions ?? []) as readonly AssertionSpec[],
+            originalToolName: c.toolName ?? "",
+            serverName: c.mcpServerName ?? "",
+            rule: c.toolPrefixRule ?? null,
           },
           { cases: suiteContext, variables: suiteLiteralVariables },
         ),
@@ -401,6 +429,8 @@ async function runSuiteCases(
       runId: input.runId,
       caseId: c.id,
       outcome,
+      originalToolName: c.toolName ?? "",
+      effectiveToolName,
     });
 
     const normalizedKey = normalizeCaseName(c.name);
@@ -417,7 +447,6 @@ async function runSuiteCases(
 
     suiteContext[normalizedKey] = caseData;
 
-    // Register 3-digit/numeric alias pointer if case name starts with numbers (e.g. "010_login" -> "010")
     const prefixMatch = normalizedKey.match(/^(\d+)/);
     if (prefixMatch) {
       suiteContext[prefixMatch[1]] = caseData;
@@ -430,15 +459,6 @@ async function runSuiteCases(
   }
 }
 
-/**
- * Happy-path terminal step: derive the suite-level status from the
- * per-case tallies, persist it, and broadcast `run_finished` so live
- * subscribers can transition off the spinner.
- *
- * `finalizeRun` itself is wrapped in a best-effort try — a transient
- * DB failure should not also lose the SSE frame, since boot-epoch
- * recovery picks up unfinalised rows anyway.
- */
 async function finaliseAndAnnounce(
   input: ExecuteSuiteLoopInput,
   counters: LoopCounters,
@@ -450,10 +470,9 @@ async function finaliseAndAnnounce(
     erroredCount: counters.erroredCount,
   });
 
-  const isServer = input.category === "server";
-  const title = isServer ? `Verification Server: ${input.targetName}` : `Verification: ${input.targetName}`;
-  const sourceLabel = isServer ? "Verification Server" : "Verification Suite";
-  const task = isServer ? `Run verification server '${input.targetName}'` : `Run verification suite '${input.targetName}'`;
+  const title = `Verification: ${input.targetName}`;
+  const sourceLabel = "Verification Suite";
+  const task = `Run verification suite '${input.targetName}'`;
 
   try {
     await storage.finalizeRun({
@@ -465,16 +484,31 @@ async function finaliseAndAnnounce(
       skippedCount: counters.skippedCount,
     });
 
-    await recordRunNotification({
-      ownerId: input.ownerId,
-      runId: input.runId,
-      kind: finalStatus === "passed" ? "run_completed" : "run_failed",
-      title,
-      body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored, ${counters.skippedCount} Skipped`,
-      sourceLabel,
-      task,
-      initiator: "verification",
-    });
+    if (!input.suppressNotification) {
+      await recordRunNotification({
+        ownerId: input.ownerId,
+        runId: input.runId,
+        kind: finalStatus === "passed" ? "run_completed" : "run_failed",
+        title,
+        body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored, ${counters.skippedCount} Skipped`,
+        sourceLabel,
+        task,
+        initiator: "verification",
+      });
+    }
+
+    if (input.onFinish) {
+      await input.onFinish({
+        status: finalStatus,
+        passedCount: counters.passedCount,
+        failedCount: counters.failedCount,
+        erroredCount: counters.erroredCount,
+        skippedCount: counters.skippedCount,
+        runId: input.runId,
+        suiteId: input.suiteId,
+        groupId: input.groupId,
+      });
+    }
   } catch (err) {
     log.error(
       {
@@ -499,13 +533,6 @@ async function finaliseAndAnnounce(
   });
 }
 
-/**
- * Crash recovery: an unexpected throw escaped the per-case guards.
- * Force an `errored` terminal state, best-effort persist + broadcast.
- * The `erroredCount + 1` accounts for the case whose throw landed us
- * here (no `case_finished` frame was emitted for it). If `finalizeRun`
- * itself fails (DB outage), boot-epoch recovery is the last resort.
- */
 async function handleSuiteLoopCrash(
   input: ExecuteSuiteLoopInput,
   counters: LoopCounters,
@@ -521,10 +548,9 @@ async function handleSuiteLoopCrash(
     "verification suite loop crashed; forcing errored terminal state",
   );
 
-  const isServer = input.category === "server";
-  const title = isServer ? `Verification Server: ${input.targetName}` : `Verification: ${input.targetName}`;
-  const sourceLabel = isServer ? "Verification Server" : "Verification Suite";
-  const task = isServer ? `Run verification server '${input.targetName}'` : `Run verification suite '${input.targetName}'`;
+  const title = `Verification: ${input.targetName}`;
+  const sourceLabel = "Verification Suite";
+  const task = `Run verification suite '${input.targetName}'`;
 
   try {
     await storage.finalizeRun({
@@ -536,18 +562,33 @@ async function handleSuiteLoopCrash(
       skippedCount: counters.skippedCount,
     });
 
-    await recordRunNotification({
-      ownerId: input.ownerId,
-      runId: input.runId,
-      kind: "run_failed",
-      title,
-      body: `Crashed: ${err instanceof Error ? err.message : String(err)}`,
-      sourceLabel,
-      task,
-      initiator: "verification",
-    });
+    if (!input.suppressNotification) {
+      await recordRunNotification({
+        ownerId: input.ownerId,
+        runId: input.runId,
+        kind: "run_failed",
+        title,
+        body: `Crashed: ${err instanceof Error ? err.message : String(err)}`,
+        sourceLabel,
+        task,
+        initiator: "verification",
+      });
+    }
+
+    if (input.onFinish) {
+      await input.onFinish({
+        status: "errored",
+        passedCount: counters.passedCount,
+        failedCount: counters.failedCount,
+        erroredCount: counters.erroredCount + 1,
+        skippedCount: counters.skippedCount,
+        runId: input.runId,
+        suiteId: input.suiteId,
+        groupId: input.groupId,
+      });
+    }
   } catch {
-    // swallow — boot-epoch sweeper is the last resort
+    // swallow
   }
   publishVerificationFrame(input.ownerId, {
     topic: "verification_run",
@@ -562,20 +603,6 @@ async function handleSuiteLoopCrash(
   });
 }
 
-/**
- * Race a case's runner against a wall-clock cap. The losing branch
- * (real or sentinel) is the one we persist; the OTHER branch — if the
- * race was decided by the timer — keeps running in the background but
- * is detached. We attach a `.catch` to suppress
- * `UnhandledPromiseRejection` warnings; the result is discarded.
- *
- * Returned status when the sentinel wins:
- *   - `errored` with `error.source = "timeout"`. We do NOT use the
- *     case-result `"timeout"` status here — that one is currently
- *     unwired in `computeFinalStatus` and would zero-out of the
- *     totals. `errored` correctly bubbles to the suite-level
- *     `"errored"` status (or stays under a suite-level `"timeout"`).
- */
 async function runCaseWithCap(args: {
   runId: string;
   caseId: number;
@@ -588,8 +615,6 @@ async function runCaseWithCap(args: {
 
   const runnerPromise = args.runner();
 
-  // Suppress unhandled rejection if the timer wins and the in-flight
-  // promise later rejects — we no longer have a consumer for it.
   runnerPromise.catch((err) => {
     log.warn(
       {
@@ -633,7 +658,6 @@ async function runCaseWithCap(args: {
   }
 }
 
-/** Precedence: timeout > errored > failed > passed. See docs/verification.md. */
 function computeFinalStatus(args: {
   timedOut: boolean;
   passedCount: number;
@@ -651,6 +675,8 @@ interface PersistAndPublishInput {
   runId: string;
   caseId: number;
   outcome: CaseExecutionOutcome;
+  originalToolName?: string | null;
+  effectiveToolName?: string | null;
 }
 
 async function persistAndPublish(input: PersistAndPublishInput): Promise<void> {
@@ -660,11 +686,10 @@ async function persistAndPublish(input: PersistAndPublishInput): Promise<void> {
       caseId: input.caseId,
       outcome: input.outcome,
       inputSnapshot: input.outcome.resolvedInput,
+      originalToolName: input.originalToolName,
+      effectiveToolName: input.effectiveToolName,
     });
   } catch (err) {
-    // Persistence failure is ops-grade — log and continue so the
-    // suite still emits its SSE frame. The user's UI will refresh
-    // from the live state regardless.
     log.error(
       {
         event: "verification_case_persist_failed",

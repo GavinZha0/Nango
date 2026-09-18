@@ -45,11 +45,14 @@ import type {
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 
-const INPUT_PLACEHOLDER = `// Cross-case reference:
-// {{cases.010.output.token}}     - Reference output from case "010_..."
-// {{cases.login.output.userId}}  - Reference output by case name
-//
-// Dynamic generator variables:
+const INPUT_PLACEHOLDER = `// example:
+{
+  "requestId": "{{$uuid}}",
+  "username": "{{cases.010.output.name}}",
+  "action": "login"
+}
+
+// Dynamic variables:
 // {{$uuid}}                      - Standard random UUID v4 string
 // {{$uuidv7}}                    - Time-ordered UUID v7 string
 // {{$timestamp}}                 - Current Unix timestamp in ms (number)
@@ -58,10 +61,9 @@ const INPUT_PLACEHOLDER = `// Cross-case reference:
 // {{$randomString(len)}}         - Random alphanumeric string (e.g. len=16)
 // {{$counter}}                   - Auto-incrementing counter (number)
 
-{
-  "requestId": "{{$uuid}}",
-  "username": "{{cases.010.output.name}}"
-}`;
+// Cross-case reference:
+// {{cases.010.output.name}}     - Reference output from case "010_..."
+`;
 
 // --- Props ------------------------------------------------------------------
 
@@ -123,6 +125,8 @@ export interface CaseInspectorDraftHandle {
     source: "live" | "history";
     historySeq?: number;
     status: string;
+    originalToolName?: string | null;
+    effectiveToolName?: string | null;
     error: unknown;
     assertionResults: unknown[];
     output: unknown;
@@ -410,6 +414,8 @@ export function CaseInspector({
       source: (showHistoryChrome ? "history" : "live") as "live" | "history",
       ...(showHistoryChrome && historyMeta ? { historySeq: historyMeta.seq } : {}),
       status: displayedOutcome.status,
+      originalToolName: displayedOutcome.originalToolName,
+      effectiveToolName: displayedOutcome.effectiveToolName,
       error: displayedOutcome.error || null,
       assertionResults: displayedOutcome.assertionResults || [],
       output: sanitizeWebAutoOutput(displayedOutcome.resultPayload),
@@ -650,6 +656,29 @@ export function CaseInspector({
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Output
             </span>
+
+            {displayedOutcome?.effectiveToolName && (
+              <span
+                className="ml-2 inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground max-w-[200px] truncate"
+                title={
+                  displayedOutcome.originalToolName &&
+                  displayedOutcome.originalToolName !== displayedOutcome.effectiveToolName
+                    ? `Tool transformed: ${displayedOutcome.originalToolName} → ${displayedOutcome.effectiveToolName}`
+                    : `Tool: ${displayedOutcome.effectiveToolName}`
+                }
+              >
+                {displayedOutcome.originalToolName &&
+                displayedOutcome.originalToolName !== displayedOutcome.effectiveToolName ? (
+                  <>
+                    <span className="line-through opacity-70 truncate">{displayedOutcome.originalToolName}</span>
+                    <span>→</span>
+                    <span className="font-medium text-foreground truncate">{displayedOutcome.effectiveToolName}</span>
+                  </>
+                ) : (
+                  <span className="truncate">{displayedOutcome.effectiveToolName}</span>
+                )}
+              </span>
+            )}
 
             {resultSizeStr && (
               <div className="ml-3 flex items-center gap-2 border-l border-border/50 pl-3">

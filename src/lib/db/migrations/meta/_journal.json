@@ -29,6 +29,13 @@
       "when": 1789681643578,
       "tag": "0003_rename_verification_to_auth_token",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789683015620,
+      "tag": "0004_verification_group_and_prefix",
+      "breakpoints": true
     }
   ]
 }

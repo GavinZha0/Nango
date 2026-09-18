@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { VerificationCaseTable, VerificationSuiteTable, McpServerTable } from "@/lib/db/schema";
@@ -59,7 +59,17 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
     suiteId = suite.id;
   } else {
-    // 1. Find if a "Drafts" suite already exists for this mcpServerId
+    // Try to fetch server title/name for suite metadata
+    const [server] = await db
+      .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
+      .from(McpServerTable)
+      .where(eq(McpServerTable.id, mcpServerId))
+      .limit(1);
+
+    const serverName = server?.serverTitle || server?.name || "MCP Server";
+    const draftSuiteName = `Drafts (${serverName})`;
+
+    // 1. Find if a "Drafts (${serverName})" suite (or legacy "Drafts" suite) already exists for this mcpServerId
     const [existingDraftSuite] = await db
       .select()
       .from(VerificationSuiteTable)
@@ -67,7 +77,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         and(
           eq(VerificationSuiteTable.mcpServerId, mcpServerId),
           eq(VerificationSuiteTable.createdBy, session.user.id),
-          eq(VerificationSuiteTable.name, "Drafts"),
+          inArray(VerificationSuiteTable.name, [draftSuiteName, "Drafts"]),
         ),
       )
       .limit(1);
@@ -75,22 +85,13 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     if (existingDraftSuite) {
       suiteId = existingDraftSuite.id;
     } else {
-      // Try to fetch server title/name for suite metadata
-      const [server] = await db
-        .select({ name: McpServerTable.name, serverTitle: McpServerTable.serverTitle })
-        .from(McpServerTable)
-        .where(eq(McpServerTable.id, mcpServerId))
-        .limit(1);
-
-      const serverName = server?.serverTitle || server?.name || "MCP Server";
-
-      // 2. Auto-create the "Drafts" suite on-the-fly
+      // 2. Auto-create the "Drafts (${serverName})" suite on-the-fly under Ungrouped (groupId: null)
       const [newSuite] = await db
         .insert(VerificationSuiteTable)
         .values({
-          name: "Drafts",
+          groupId: null,
+          name: draftSuiteName,
           description: `Staging area for captured ${serverName} tool calls pending review and assertions`,
-          category: "mcp",
           mcpServerId,
           mcpServerName: serverName,
           visibility: "private",

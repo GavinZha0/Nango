@@ -20,10 +20,9 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
-  compareServerRunCases,
-  listEnabledCasesForServerRun,
+  listEnabledSuitesByGroup,
+  listGroupsWithActiveSuites,
   listResultsByRun,
-  listResultsByRunForViewer,
   type VerificationViewer,
 } from "@/lib/verification/storage";
 
@@ -38,29 +37,29 @@ const adminViewer: VerificationViewer = {
   isEditor: true,
 };
 
-function mockJoinChain(rows: unknown[] = []): void {
-  const orderBy = vi.fn().mockReturnValue(rows);
-  const where = vi.fn().mockReturnValue({ orderBy });
-  const innerJoin = vi.fn();
-  innerJoin.mockImplementation(() => ({ where, innerJoin }));
-  mockFrom.mockReturnValue({ innerJoin });
-}
-
-function mockPlainChain(rows: unknown[] = []): void {
-  const orderBy = vi.fn().mockReturnValue(rows);
+function mockWhereOrderByChain(rows: unknown[] = []): void {
+  const orderBy = vi.fn().mockResolvedValue(rows);
   const where = vi.fn().mockReturnValue({ orderBy });
   mockFrom.mockReturnValue({ where });
 }
 
-describe("server-run visibility scoping (F6)", () => {
+function mockJoinGroupByChain(rows: unknown[] = []): void {
+  const orderBy = vi.fn().mockResolvedValue(rows);
+  const groupBy = vi.fn().mockReturnValue({ orderBy });
+  const where = vi.fn().mockReturnValue({ groupBy });
+  const innerJoin = vi.fn().mockReturnValue({ where });
+  mockFrom.mockReturnValue({ innerJoin });
+}
+
+describe("group-run visibility scoping (F6)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe("listEnabledCasesForServerRun", () => {
-    it("1. user-triggered runs apply the viewer visibility predicate", async () => {
-      mockJoinChain([]);
-      await listEnabledCasesForServerRun("server-1", editorViewer);
+  describe("listEnabledSuitesByGroup", () => {
+    it("1. non-admin viewer applies the viewer visibility predicate", async () => {
+      mockWhereOrderByChain([]);
+      await listEnabledSuitesByGroup("group-1", editorViewer);
 
       expect(visibilitySqlSpy).toHaveBeenCalledTimes(1);
       const [, visibilityCol, createdByCol] = visibilitySqlSpy.mock.calls[0];
@@ -68,80 +67,37 @@ describe("server-run visibility scoping (F6)", () => {
       expect(createdByCol).toBeDefined();
     });
 
-    it("2. recovery context (no viewer) sees all cases — no predicate", async () => {
-      mockJoinChain([]);
-      await listEnabledCasesForServerRun("server-1");
+    it("2. admin viewer does not apply visibility predicate (sees all suites in group)", async () => {
+      mockWhereOrderByChain([]);
+      await listEnabledSuitesByGroup("group-1", adminViewer);
 
       expect(visibilitySqlSpy).not.toHaveBeenCalled();
     });
-
-    it("3. admin viewer still passes through visibilitySql (which yields true)", async () => {
-      mockJoinChain([]);
-      await listEnabledCasesForServerRun("server-1", adminViewer);
-
-      expect(visibilitySqlSpy).toHaveBeenCalledWith(
-        adminViewer,
-        expect.anything(),
-        expect.anything(),
-      );
-    });
   });
 
-  describe("listResultsByRunForViewer", () => {
-    it("4. applies the viewer visibility predicate over case→suite join", async () => {
-      mockJoinChain([{ id: "result-1" }]);
-      const rows = await listResultsByRunForViewer("run-1", editorViewer);
+  describe("listGroupsWithActiveSuites", () => {
+    it("3. non-admin viewer applies visibility predicate over joined suites", async () => {
+      mockJoinGroupByChain([]);
+      await listGroupsWithActiveSuites(editorViewer);
 
       expect(visibilitySqlSpy).toHaveBeenCalledTimes(1);
-      expect(rows).toEqual([{ id: "result-1" }]);
     });
 
-    it("5. selects only the result entity columns (flat shape despite joins)", async () => {
-      mockJoinChain([]);
-      const { db } = await import("@/lib/db");
-      await listResultsByRunForViewer("run-1", editorViewer);
+    it("4. admin viewer does not apply visibility predicate over joined suites", async () => {
+      mockJoinGroupByChain([]);
+      await listGroupsWithActiveSuites(adminViewer);
 
-      const projection = vi.mocked(db.select).mock.calls[0][0] as Record<
-        string,
-        unknown
-      >;
-      expect(Object.keys(projection)).toEqual(
-        expect.arrayContaining(["runId", "caseId", "status", "assertionResults"]),
-      );
+      expect(visibilitySqlSpy).not.toHaveBeenCalled();
     });
   });
 
   describe("listResultsByRun (unfiltered)", () => {
-    it("6. suite-scoped reads stay unfiltered — no viewer predicate", async () => {
-      mockPlainChain([{ id: "result-1" }]);
+    it("5. suite-scoped reads stay unfiltered — no viewer predicate", async () => {
+      mockWhereOrderByChain([{ id: "result-1" }]);
       const rows = await listResultsByRun("run-1");
 
       expect(visibilitySqlSpy).not.toHaveBeenCalled();
       expect(rows).toEqual([{ id: "result-1" }]);
     });
   });
-
-  describe("compareServerRunCases - same-suite contiguity", () => {
-    it("7. guarantees cases of the same suite stay strictly contiguous even with identical suiteName", () => {
-      // Two suites from different creators sharing the same suiteName "smoke"
-      const suiteA1 = { suiteName: "smoke", suiteId: "suite-aaa", name: "010_create" };
-      const suiteA2 = { suiteName: "smoke", suiteId: "suite-aaa", name: "020_verify" };
-      const suiteB1 = { suiteName: "smoke", suiteId: "suite-bbb", name: "015_probe" };
-
-      // Input is randomly shuffled so suite-bbb is in between
-      const shuffled = [suiteA2, suiteB1, suiteA1];
-      const sorted = shuffled.slice().sort(compareServerRunCases);
-
-      // Extract the sequence of suiteIds
-      const suiteIdSeq = sorted.map((c) => c.suiteId);
-
-      // suite-aaa cases MUST be contiguous! suite-bbb cannot break in between!
-      expect(suiteIdSeq).toEqual(["suite-aaa", "suite-aaa", "suite-bbb"]);
-      // And within suite-aaa, ordered by case name
-      expect(sorted[0].name).toBe("010_create");
-      expect(sorted[1].name).toBe("020_verify");
-      expect(sorted[2].name).toBe("015_probe");
-    });
-  });
 });
-

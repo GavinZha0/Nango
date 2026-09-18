@@ -51,7 +51,7 @@ function fullBody(text: string | null | undefined): string | null {
 
 interface RecordRunNotificationInput {
   ownerId: string;
-  runId: string;
+  runId?: string | null;
   kind: Extract<NotificationKind, "run_completed" | "run_failed">;
   title: string;
   /** Full specialist output / error. Preview computed for `body`,
@@ -87,7 +87,7 @@ export async function recordRunNotification(
         sourceLabel: input.sourceLabel ?? null,
         // Same sanitisation for tasks (NUL-strip + 16KB cap).
         task: fullBody(input.task),
-        runId: input.runId,
+        runId: input.runId ?? null,
         initiator: input.initiator ?? null,
       })
       .returning();

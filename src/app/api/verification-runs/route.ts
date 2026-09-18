@@ -2,30 +2,31 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
 
-import { canEditResource, visibilitySql } from "@/lib/auth/permissions";
-import { db } from "@/lib/db";
-import { McpServerTable } from "@/lib/db/schema";
+import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
 import { loadVisibleSuite } from "@/lib/verification/access";
-import { startSuiteRun, startServerRun } from "@/lib/verification/run-orchestrator";
+import {
+  startSuiteRun,
+  startGroupRun,
+} from "@/lib/verification/run-orchestrator";
 
 const ROUTE = "/api/verification-runs";
 
 // POST /api/verification-runs
-// Body: { suiteId } OR { mcpServerId }
-// Starts an ASYNC run (either single suite/tool or whole server).
+// Body: { suiteId } OR { groupId }
+// Starts an ASYNC run (either single suite or group).
 const startSchema = z
   .object({
     suiteId: z.string().uuid().optional(),
-    mcpServerId: z.string().uuid().optional(),
+    groupId: z.string().uuid().optional(),
   })
   .strict()
   .refine(
-    (data) => (data.suiteId && !data.mcpServerId) || (!data.suiteId && data.mcpServerId),
-    { message: "Either suiteId or mcpServerId must be provided, but not both." }
+    (data) =>
+      (data.suiteId && !data.groupId) || (!data.suiteId && data.groupId),
+    { message: "Either suiteId or groupId must be provided, but not both." },
   );
 
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
@@ -34,18 +35,16 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   if (body.suiteId) {
     const suite = await loadVisibleSuite(body.suiteId, session);
 
-    if (!canEditResource(
-      {
-        visibility: suite.visibility as "private" | "public",
-        createdBy: suite.createdBy,
-      },
-      session,
-    )) {
-      throw new ApiError(
-        "FORBIDDEN",
-        403,
-        "You cannot run suite.",
-      );
+    if (
+      !canEditResource(
+        {
+          visibility: suite.visibility as "private" | "public",
+          createdBy: suite.createdBy,
+        },
+        session,
+      )
+    ) {
+      throw new ApiError("FORBIDDEN", 403, "You cannot run suite.");
     }
 
     if (!suite.enabled) {
@@ -57,7 +56,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
 
     // CONTRACT: suites detached from a deleted MCP server stay browsable
-    // and editable but are never runnable (see 0020 migration).
+    // and editable but are never runnable.
     if (!suite.mcpServerId) {
       throw new ApiError(
         "BAD_REQUEST",
@@ -73,50 +72,20 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     });
     return NextResponse.json({ runId, totalCount }, { status: 202 });
   } else {
-    // Run all suites under this MCP server
-    const [server] = await db
-      .select()
-      .from(McpServerTable)
-      .where(
-        and(
-          eq(McpServerTable.id, body.mcpServerId!),
-          visibilitySql(
-            session,
-            McpServerTable.visibility,
-            McpServerTable.createdBy,
-          )
-        )
-      )
-      .limit(1);
+    // Run all visible enabled suites in this Group
+    const viewer = {
+      userId: session.user.id,
+      isAdmin: session.user.role === "admin",
+      isEditor: true,
+    };
 
-    if (!server) {
-      throw new ApiError(
-        "NOT_FOUND",
-        404,
-        `MCP server with ID "${body.mcpServerId}" not found or access denied.`
-      );
-    }
-
-    if (!server.enabled) {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        "MCP server is disabled.",
-      );
-    }
-
-    const { runId, totalCount } = await startServerRun({
-      mcpServerId: server.id,
+    const result = await startGroupRun({
+      groupId: body.groupId!,
       ownerId: session.user.id,
+      viewer,
       triggeredBy: "manual",
-      // SECURITY: scope the run to suites visible to the triggerer —
-      // a public server must not execute foreign private suites' cases.
-      viewer: {
-        userId: session.user.id,
-        isAdmin: session.user.role === "admin",
-        isEditor: true,
-      },
     });
-    return NextResponse.json({ runId, totalCount }, { status: 202 });
+
+    return NextResponse.json(result, { status: 202 });
   }
 });

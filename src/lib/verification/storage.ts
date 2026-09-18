@@ -2,15 +2,15 @@
  * Verification — DB access layer.
  *
  * Thin Drizzle wrappers used by the runner, orchestrator, recovery
- * sweep, and (Phase 3) API routes. Keeping all SQL here makes the
- * other modules trivially testable with an in-memory stub.
+ * sweep, and API routes. Keeping all SQL here makes the other modules
+ * cleanly testable with an in-memory stub.
  *
- * See docs/verification.md.
+ * See docs/verification.md and docs/verification-group-and-prefix-plan.md.
  */
 
 import "server-only";
 
-import { and, desc, eq, getTableColumns, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { visibilitySql } from "@/lib/auth/permissions";
@@ -18,10 +18,12 @@ import { alphabeticCompare } from "@/lib/utils/sort";
 import {
   VerificationCaseResultTable,
   VerificationCaseTable,
+  VerificationGroupTable,
   VerificationRunTable,
   VerificationSuiteTable,
   type VerificationCaseEntity,
   type VerificationCaseResultEntity,
+  type VerificationGroupEntity,
   type VerificationRunEntity,
   type VerificationSuiteEntity,
 } from "@/lib/db/schema";
@@ -32,16 +34,147 @@ import type {
   CaseExecutionOutcome,
   ErrorEnvelope,
   VerificationRunStatus,
-  VerificationSuiteCategory,
 } from "./types";
+import type { ToolPrefixRule } from "./tool-name";
 import { getConfigNumber } from "@/lib/config";
+
+// --- Groups -----------------------------------------------------------------
+
+export async function getOrCreateGroupByName(
+  name: string,
+): Promise<VerificationGroupEntity> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Group name cannot be empty");
+  }
+  const existing = await db
+    .select()
+    .from(VerificationGroupTable)
+    .where(sql`lower(${VerificationGroupTable.name}) = lower(${trimmed})`)
+    .limit(1);
+  if (existing[0]) return existing[0];
+
+  const [created] = await db
+    .insert(VerificationGroupTable)
+    .values({ name: trimmed })
+    .onConflictDoNothing()
+    .returning();
+  if (created) return created;
+
+  const [fallback] = await db
+    .select()
+    .from(VerificationGroupTable)
+    .where(sql`lower(${VerificationGroupTable.name}) = lower(${trimmed})`)
+    .limit(1);
+  return fallback;
+}
+
+export async function renameGroup(
+  id: string,
+  newName: string,
+): Promise<VerificationGroupEntity> {
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    throw new Error("Group name cannot be empty");
+  }
+  const [row] = await db
+    .update(VerificationGroupTable)
+    .set({ name: trimmed, updatedAt: sql`CURRENT_TIMESTAMP` })
+    .where(eq(VerificationGroupTable.id, id))
+    .returning();
+  if (!row) {
+    throw new Error(`Group not found: ${id}`);
+  }
+  return row;
+}
+
+export async function listGroupsWithActiveSuites(
+  viewer: VerificationViewer,
+): Promise<Array<VerificationGroupEntity & { suiteCount: number }>> {
+  const whereClauses = [eq(VerificationSuiteTable.enabled, true)];
+  if (!viewer.isAdmin) {
+    whereClauses.push(
+      visibilitySql(
+        viewer,
+        VerificationSuiteTable.visibility,
+        VerificationSuiteTable.createdBy,
+      ),
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: VerificationGroupTable.id,
+      name: VerificationGroupTable.name,
+      createdAt: VerificationGroupTable.createdAt,
+      updatedAt: VerificationGroupTable.updatedAt,
+      suiteCount: sql<number>`count(distinct ${VerificationSuiteTable.id})::int`,
+    })
+    .from(VerificationGroupTable)
+    .innerJoin(
+      VerificationSuiteTable,
+      eq(VerificationSuiteTable.groupId, VerificationGroupTable.id),
+    )
+    .where(and(...whereClauses))
+    .groupBy(
+      VerificationGroupTable.id,
+      VerificationGroupTable.name,
+      VerificationGroupTable.createdAt,
+      VerificationGroupTable.updatedAt,
+    )
+    .orderBy(VerificationGroupTable.name);
+  return rows;
+}
+
+export async function listEnabledSuitesByGroup(
+  groupId: string,
+  viewer: VerificationViewer,
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    mcpServerId: string | null;
+    mcpServerName: string | null;
+    toolPrefixRule: ToolPrefixRule | null;
+  }>
+> {
+  const whereClauses = [
+    eq(VerificationSuiteTable.enabled, true),
+    eq(VerificationSuiteTable.groupId, groupId),
+  ];
+
+  if (!viewer.isAdmin) {
+    whereClauses.push(
+      visibilitySql(
+        viewer,
+        VerificationSuiteTable.visibility,
+        VerificationSuiteTable.createdBy,
+      ),
+    );
+  }
+
+  return db
+    .select({
+      id: VerificationSuiteTable.id,
+      name: VerificationSuiteTable.name,
+      mcpServerId: VerificationSuiteTable.mcpServerId,
+      mcpServerName: VerificationSuiteTable.mcpServerName,
+      toolPrefixRule: VerificationSuiteTable.toolPrefixRule,
+    })
+    .from(VerificationSuiteTable)
+    .where(and(...whereClauses))
+    .orderBy(asc(VerificationSuiteTable.name));
+}
 
 // --- Suites -----------------------------------------------------------------
 
 export interface CreateSuiteInput {
   name: string;
   description?: string | null;
-  category: VerificationSuiteCategory;
+  groupId?: string | null;
+  mcpServerId?: string | null;
+  mcpServerName?: string | null;
+  toolPrefixRule?: ToolPrefixRule | null;
   visibility?: "private" | "public";
   timeoutSec?: number;
   createdBy: string;
@@ -55,7 +188,10 @@ export async function createSuite(
     .values({
       name: input.name,
       description: input.description ?? null,
-      category: input.category,
+      groupId: input.groupId ?? null,
+      mcpServerId: input.mcpServerId ?? null,
+      mcpServerName: input.mcpServerName ?? null,
+      toolPrefixRule: input.toolPrefixRule ?? null,
       visibility: input.visibility ?? "private",
       timeoutSec: input.timeoutSec ?? 300,
       createdBy: input.createdBy,
@@ -76,13 +212,10 @@ export async function getSuiteById(
   return rows[0] ?? null;
 }
 
-export async function listSuites(
-  category: VerificationSuiteCategory,
-): Promise<VerificationSuiteEntity[]> {
+export async function listSuites(): Promise<VerificationSuiteEntity[]> {
   return db
     .select()
     .from(VerificationSuiteTable)
-    .where(eq(VerificationSuiteTable.category, category))
     .orderBy(VerificationSuiteTable.name);
 }
 
@@ -120,7 +253,9 @@ export interface VerificationCaseRunItem {
   createdAt: Date;
   updatedAt: Date;
   mcpServerId: string | null;
+  mcpServerName: string | null;
   toolName: string | null;
+  toolPrefixRule: ToolPrefixRule | null;
   suiteVariables?: unknown;
 }
 
@@ -139,13 +274,15 @@ export async function listEnabledCasesForRun(
       createdAt: VerificationCaseTable.createdAt,
       updatedAt: VerificationCaseTable.updatedAt,
       mcpServerId: VerificationSuiteTable.mcpServerId,
+      mcpServerName: VerificationSuiteTable.mcpServerName,
       toolName: VerificationCaseTable.toolName,
+      toolPrefixRule: VerificationSuiteTable.toolPrefixRule,
       suiteVariables: VerificationSuiteTable.variables,
     })
     .from(VerificationCaseTable)
     .innerJoin(
       VerificationSuiteTable,
-      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id)
+      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id),
     )
     .where(
       and(
@@ -166,77 +303,10 @@ export interface VerificationViewer {
   isEditor: boolean;
 }
 
-/** Enabled cases of an entire MCP server, sorted in natural numeric-aware toolName and case name order.
- *  SECURITY: pass `viewer` for user-triggered runs so foreign private
- *  suites never execute; omit it only in system contexts (recovery sweep). */
-export async function listEnabledCasesForServerRun(
-  mcpServerId: string,
-  viewer?: VerificationViewer,
-): Promise<VerificationCaseRunItem[]> {
-  const rows = await db
-    .select({
-      id: VerificationCaseTable.id,
-      suiteId: VerificationCaseTable.suiteId,
-      suiteName: VerificationSuiteTable.name,
-      name: VerificationCaseTable.name,
-      input: VerificationCaseTable.input,
-      assertions: VerificationCaseTable.assertions,
-      enabled: VerificationCaseTable.enabled,
-      createdAt: VerificationCaseTable.createdAt,
-      updatedAt: VerificationCaseTable.updatedAt,
-      mcpServerId: VerificationSuiteTable.mcpServerId,
-      toolName: VerificationCaseTable.toolName,
-      suiteVariables: VerificationSuiteTable.variables,
-    })
-    .from(VerificationCaseTable)
-    .innerJoin(
-      VerificationSuiteTable,
-      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id)
-    )
-    .where(
-      and(
-        eq(VerificationSuiteTable.mcpServerId, mcpServerId),
-        eq(VerificationCaseTable.enabled, true),
-        viewer
-          ? visibilitySql(
-              viewer,
-              VerificationSuiteTable.visibility,
-              VerificationSuiteTable.createdBy,
-            )
-          : undefined,
-      ),
-    )
-    .orderBy(
-      VerificationSuiteTable.name,
-      VerificationSuiteTable.id,
-      VerificationCaseTable.name,
-    );
-  return rows.sort(compareServerRunCases);
-}
-
-/**
- * Pure sorting comparator for Server Run cases.
- * Guarantees that:
- * 1. Cases are ordered human-readably by suiteName;
- * 2. Cases belonging to the SAME suite (same suiteId) are strictly CONTIGUOUS,
- *    even if two suites created by different users share the same suiteName;
- * 3. Within each suite, cases are ordered strictly by case name.
- */
-export function compareServerRunCases(
-  a: { suiteName?: string | null; suiteId: string; name: string },
-  b: { suiteName?: string | null; suiteId: string; name: string },
-): number {
-  const cmpSuite = alphabeticCompare(a.suiteName || "", b.suiteName || "");
-  if (cmpSuite !== 0) return cmpSuite;
-  if (a.suiteId !== b.suiteId) return a.suiteId < b.suiteId ? -1 : 1;
-  return alphabeticCompare(a.name, b.name);
-}
-
 // --- Runs -------------------------------------------------------------------
 
 export interface CreateRunInput {
-  suiteId?: string | null;
-  mcpServerId?: string | null;
+  suiteId: string;
   totalCount: number;
   triggeredBy: "manual" | "schedule";
 }
@@ -247,8 +317,7 @@ export async function createRun(
   const [row] = await db
     .insert(VerificationRunTable)
     .values({
-      suiteId: input.suiteId ?? null,
-      mcpServerId: input.mcpServerId ?? null,
+      suiteId: input.suiteId,
       status: "running",
       totalCount: input.totalCount,
       triggeredBy: input.triggeredBy,
@@ -306,38 +375,12 @@ export async function listRecentRuns(
     .limit(limit);
 }
 
-/** Total number of runs persisted for a suite. Used by the banner
- *  to label chips with their absolute run sequence number and to
- *  drive precise "older" pagination enable/disable. */
+/** Total number of runs persisted for a suite. */
 export async function countRuns(suiteId: string): Promise<number> {
   const rows = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(VerificationRunTable)
     .where(eq(VerificationRunTable.suiteId, suiteId));
-  return rows[0]?.n ?? 0;
-}
-
-/** Paginated history for the recent-runs banner (Server level). */
-export async function listRecentServerRuns(
-  mcpServerId: string,
-  offset: number,
-  limit: number,
-): Promise<VerificationRunEntity[]> {
-  return db
-    .select()
-    .from(VerificationRunTable)
-    .where(eq(VerificationRunTable.mcpServerId, mcpServerId))
-    .orderBy(desc(VerificationRunTable.startedAt))
-    .offset(offset)
-    .limit(limit);
-}
-
-/** Total number of runs persisted for a server. */
-export async function countServerRuns(mcpServerId: string): Promise<number> {
-  const rows = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(VerificationRunTable)
-    .where(eq(VerificationRunTable.mcpServerId, mcpServerId));
   return rows[0]?.n ?? 0;
 }
 
@@ -348,12 +391,16 @@ export interface WriteCaseResultInput {
   caseId: number;
   outcome: CaseExecutionOutcome;
   inputSnapshot: unknown;
+  originalToolName?: string | null;
+  effectiveToolName?: string | null;
 }
 
 export async function writeCaseResult(
   input: WriteCaseResultInput,
 ): Promise<VerificationCaseResultEntity> {
-  const { truncatedPayload, truncated } = truncatePayload(input.outcome.resultPayload);
+  const { truncatedPayload, truncated } = truncatePayload(
+    input.outcome.resultPayload,
+  );
 
   const [row] = await db
     .insert(VerificationCaseResultTable)
@@ -361,19 +408,14 @@ export async function writeCaseResult(
       runId: input.runId,
       caseId: input.caseId,
       status: input.outcome.status,
-      // MCP cases only — entity_run_id always null.
-      entityRunId: null,
+      originalToolName: input.originalToolName ?? null,
+      effectiveToolName: input.effectiveToolName ?? null,
       inputSnapshot: input.inputSnapshot,
       resultPayload: truncatedPayload ?? null,
       resultTruncated: truncated,
       assertionResults: input.outcome.assertionResults as unknown,
       error: input.outcome.error as unknown,
       durationMs: input.outcome.durationMs,
-      // started_at + finished_at are derived from the outcome's wall-
-      // clock window rather than left to the DB default. Without this
-      // both timestamps collapsed to the INSERT moment (≈ finishedAt),
-      // making `started_at + duration_ms ≠ finished_at` and breaking
-      // any future timeline / gantt rendering of case execution order.
       startedAt: new Date(input.outcome.startedAt),
       finishedAt: new Date(input.outcome.startedAt + input.outcome.durationMs),
     })
@@ -391,40 +433,6 @@ export async function listResultsByRun(
     .orderBy(VerificationCaseResultTable.startedAt);
 }
 
-/** SECURITY: viewer-scoped variant of {@link listResultsByRun} for
- *  server-wide runs — a server row being visible must NOT expose other
- *  users' private suites' case results (input snapshots / outputs /
- *  assertion diffs). Rows whose case belongs to a suite outside the
- *  viewer's visibility are omitted. Suite-scoped runs never need this
- *  (their results all belong to one already-gated suite). */
-export async function listResultsByRunForViewer(
-  runId: string,
-  viewer: VerificationViewer,
-): Promise<VerificationCaseResultEntity[]> {
-  return db
-    .select(getTableColumns(VerificationCaseResultTable))
-    .from(VerificationCaseResultTable)
-    .innerJoin(
-      VerificationCaseTable,
-      eq(VerificationCaseResultTable.caseId, VerificationCaseTable.id),
-    )
-    .innerJoin(
-      VerificationSuiteTable,
-      eq(VerificationCaseTable.suiteId, VerificationSuiteTable.id),
-    )
-    .where(
-      and(
-        eq(VerificationCaseResultTable.runId, runId),
-        visibilitySql(
-          viewer,
-          VerificationSuiteTable.visibility,
-          VerificationSuiteTable.createdBy,
-        ),
-      ),
-    )
-    .orderBy(VerificationCaseResultTable.startedAt);
-}
-
 // --- Recovery ---------------------------------------------------------------
 
 /**
@@ -435,12 +443,11 @@ export async function listResultsByRunForViewer(
  */
 export async function selectStrandedRuns(
   bootStartedAt: Date,
-): Promise<Array<Pick<VerificationRunEntity, "id" | "suiteId" | "mcpServerId" | "totalCount">>> {
+): Promise<Array<Pick<VerificationRunEntity, "id" | "suiteId" | "totalCount">>> {
   return db
     .select({
       id: VerificationRunTable.id,
       suiteId: VerificationRunTable.suiteId,
-      mcpServerId: VerificationRunTable.mcpServerId,
       totalCount: VerificationRunTable.totalCount,
     })
     .from(VerificationRunTable)
@@ -470,12 +477,7 @@ export async function listWrittenCaseIdsForRun(
 /**
  * Bulk-insert `skipped` filler rows for cases that never executed
  * because the Node process crashed mid-run. Idempotent via the
- * `(run_id, case_id)` UNIQUE index — repeated recovery passes
- * (e.g. crash during recovery itself) silently no-op rather than
- * raising.
- *
- * `error.source = "crashed"` so the UI can distinguish this filler
- * row from a genuine runner-internal bug (`source = "internal"`).
+ * `(run_id, case_id)` UNIQUE index.
  */
 export async function writeSkippedCaseResults(
   runId: string,
@@ -489,11 +491,6 @@ export async function writeSkippedCaseResults(
         runId,
         caseId,
         status: "skipped" as const,
-        entityRunId: null,
-        // `inputSnapshot` is NOT NULL in schema; we don't have the
-        // original input here (would require an extra fetch per case)
-        // and the UI treats `skipped` rows as "did not execute"
-        // anyway, so an empty object is the minimum viable filler.
         inputSnapshot: {},
         resultPayload: null,
         resultTruncated: false,
@@ -532,6 +529,7 @@ export async function markStrandedAsErrored(
 // --- Re-exports for callers that just want types ----------------------------
 
 export type {
+  VerificationGroupEntity,
   VerificationSuiteEntity,
   VerificationCaseEntity,
   VerificationRunEntity,
@@ -541,13 +539,20 @@ export type {
   ErrorEnvelope,
 };
 
-function truncatePayload(raw: unknown): { truncatedPayload: unknown; truncated: boolean } {
-  if (raw === null || raw === undefined) return { truncatedPayload: raw, truncated: false };
+function truncatePayload(
+  raw: unknown,
+): { truncatedPayload: unknown; truncated: boolean } {
+  if (raw === null || raw === undefined) {
+    return { truncatedPayload: raw, truncated: false };
+  }
   let serialised: string;
   try {
     serialised = JSON.stringify(raw);
   } catch {
-    return { truncatedPayload: { __nonSerialisable: true, repr: String(raw) }, truncated: true };
+    return {
+      truncatedPayload: { __nonSerialisable: true, repr: String(raw) },
+      truncated: true,
+    };
   }
   const byteLength = Buffer.byteLength(serialised, "utf8");
   const maxBytes = getConfigNumber("verification.payload_max_kb", 32) * 1024;
@@ -555,7 +560,9 @@ function truncatePayload(raw: unknown): { truncatedPayload: unknown; truncated: 
     return { truncatedPayload: raw, truncated: false };
   }
   return {
-    truncatedPayload: { truncated_preview: serialised.slice(0, Math.floor(maxBytes / 2)) },
+    truncatedPayload: {
+      truncated_preview: serialised.slice(0, Math.floor(maxBytes / 2)),
+    },
     truncated: true,
   };
 }

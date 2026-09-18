@@ -2,6 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { asc, eq, sql } from "drizzle-orm";
 
 import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
@@ -9,36 +10,34 @@ import { McpServerTable, VerificationSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
-import { and, asc, eq, sql } from "drizzle-orm";
+import * as storage from "@/lib/verification/storage";
 
 const ROUTE = "/api/verification-suites";
 
 // GET /api/verification-suites
-// Returns visible MCP verification suites (alphabetical).
+// Returns visible verification suites (alphabetical).
 
-export const GET = withEditor(ROUTE, async ({ req, session }) => {
-  const categoryParam = new URL(req.url).searchParams.get("category");
-  if (categoryParam && categoryParam !== "mcp") {
-    throw new ApiError(
-      "VALIDATION_FAILED",
-      400,
-      "Verification suites are exclusively for MCP.",
-    );
-  }
-  const category = "mcp";
-
+export const GET = withEditor(ROUTE, async ({ session }) => {
   // Projection mirrors `select()` but pulls a correlated COUNT for the
   // case rows of each suite, so the left-panel can render a badge
-  // without an N+1 fetch. Same pattern used in builtin-agents/route.ts.
+  // without an N+1 fetch.
   const rows = await db
     .select({
       id: VerificationSuiteTable.id,
       name: VerificationSuiteTable.name,
       description: VerificationSuiteTable.description,
-      category: VerificationSuiteTable.category,
+      groupId: VerificationSuiteTable.groupId,
       mcpServerId: VerificationSuiteTable.mcpServerId,
       mcpServerName: VerificationSuiteTable.mcpServerName,
-      workflowId: VerificationSuiteTable.workflowId,
+      serverGroup: sql<string | null>`(
+        select "group" from "mcp_server"
+        where "mcp_server"."id" = "verification_suite"."mcp_server_id"
+      )`,
+      serverName: sql<string | null>`(
+        select coalesce("server_title", "name") from "mcp_server"
+        where "mcp_server"."id" = "verification_suite"."mcp_server_id"
+      )`,
+      toolPrefixRule: VerificationSuiteTable.toolPrefixRule,
       visibility: VerificationSuiteTable.visibility,
       variables: VerificationSuiteTable.variables,
       enabled: VerificationSuiteTable.enabled,
@@ -47,11 +46,6 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
       updatedBy: VerificationSuiteTable.updatedBy,
       createdAt: VerificationSuiteTable.createdAt,
       updatedAt: VerificationSuiteTable.updatedAt,
-      // NB: column refs must be fully qualified with the table name —
-      // inside the correlated subquery, an unqualified `"id"` resolves
-      // to `verification_case.id` (bigint), not the outer suite's `id`
-      // (uuid). drizzle does not auto-qualify here, so we spell the
-      // names out, same pattern as builtin-agents/route.ts.
       caseCount: sql<number>`(
         select count(*)::int from "verification_case"
         where "verification_case"."suite_id" = "verification_suite"."id"
@@ -59,13 +53,10 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
     })
     .from(VerificationSuiteTable)
     .where(
-      and(
-        eq(VerificationSuiteTable.category, category),
-        visibilitySql(
-          session,
-          VerificationSuiteTable.visibility,
-          VerificationSuiteTable.createdBy,
-        ),
+      visibilitySql(
+        session,
+        VerificationSuiteTable.visibility,
+        VerificationSuiteTable.createdBy,
       ),
     )
     .orderBy(asc(VerificationSuiteTable.name));
@@ -80,8 +71,16 @@ const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
-    category: z.literal("mcp").optional().default("mcp"),
+    groupId: z.string().uuid().optional().nullable(),
+    groupName: z.string().trim().min(1).max(100).optional().nullable(),
     mcpServerId: z.string().uuid().optional().nullable(),
+    toolPrefixRule: z
+      .object({
+        mode: z.enum(["none", "add", "remove"]),
+        prefix: z.string(),
+      })
+      .optional()
+      .nullable(),
     variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
     timeoutSec: z.number().int().min(10).max(7200).optional(),
@@ -91,8 +90,7 @@ const createSchema = z
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
 
-  // Snapshot the bound server's display name onto the suite (0021) so the
-  // left panel can still group by server name after the server is deleted.
+  // Snapshot the bound server's display name onto the suite
   let mcpServerName: string | null = null;
   if (body.mcpServerId) {
     const [server] = await db
@@ -106,18 +104,22 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     mcpServerName = server.serverTitle || server.name;
   }
 
-  // Global name uniqueness is enforced by the DB UNIQUE constraint
-  // — surface as 409 if it trips so the UI can show a nice message.
+  let resolvedGroupId = body.groupId ?? null;
+  if (!resolvedGroupId && body.groupName) {
+    const group = await storage.getOrCreateGroupByName(body.groupName);
+    resolvedGroupId = group.id;
+  }
+
   try {
     const [row] = await db
       .insert(VerificationSuiteTable)
       .values({
         name: body.name,
         description: body.description ?? null,
-        category: body.category,
+        groupId: resolvedGroupId,
         mcpServerId: body.mcpServerId ?? null,
         mcpServerName,
-        workflowId: null,
+        toolPrefixRule: body.toolPrefixRule ?? null,
         variables: body.variables ?? {},
         visibility: body.visibility ?? "private",
         timeoutSec: body.timeoutSec ?? 300,
@@ -125,16 +127,14 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         updatedBy: session.user.id,
       })
       .returning();
-    // Newly-created suite has no cases yet; surface the same shape as
-    // the list endpoint so the client store can upsert without losing
-    // the `caseCount` field on the row.
+
     return NextResponse.json({ ...row, caseCount: 0 }, { status: 201 });
   } catch (err) {
     if (isUniqueViolation(err)) {
       throw new ApiError(
         "CONFLICT",
         409,
-        `A verification suite named "${body.name}" already exists.`,
+        `A verification suite named "${body.name}" already exists for your account.`,
       );
     }
     throw err;

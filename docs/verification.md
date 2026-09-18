@@ -2,9 +2,10 @@
 
 > **Status**
 > - **MCP tool tests** — shipped end-to-end. Schema, runner, SSE
->   pipeline, suite/case CRUD, single-case rerun, suite run with
->   live updates, history-view via the recent-runs banner, and the
->   `(input snapshot, output, assertion verdicts, error envelope)`
+>   pipeline, group/suite/case CRUD, tool prefix engine, dual-snapshot
+>   fidelity, single-case debugging run, suite run with live updates,
+>   group batch execution with aggregate notifications, history-view via
+>   the recent-runs banner, and the `(input snapshot, output, assertion verdicts, error envelope)`
 >   inspector are all in place.
 > - The verification subsystem is dedicated exclusively to **MCP tool contract verification**.
 >
@@ -27,15 +28,22 @@ Three needs the existing surfaces don't cover:
    promises. The MCP tool layer is the one the agent actually sees;
    testing at this layer catches MCPHub conversion errors that a raw
    REST test (Postman) cannot.
-2. **Repeatable case organisation** — group cases into suites, share
-   them, schedule recurring regression runs.
-3. **Failure forensics** — surface *which layer* failed (MCPHub vs
-   upstream vs assertion) so a red light is actionable.
+2. **Business-driven repeatable case organisation** — group suites into
+   business catalogs (`Group -> Suite -> Case`), decouple test cases from
+   raw physical server topologies, share them with team members, and execute
+   one-click group regression runs.
+3. **Environment drift resilience** — adapt to direct-connect vs. gateway tool
+   naming differences via suite-level tool prefix transformation rules (`none/add/remove`),
+   retaining 100% case portability.
+4. **Failure forensics & audit fidelity** — freeze both `originalToolName` and
+   `effectiveToolName` in execution snapshots so historical replays remain
+   accurate even after subsequent case edits, surfacing *which layer* failed
+   (MCPHub vs upstream vs assertion vs configuration).
 
 What this is **not**:
 
 - Not an agent quality evaluator. Agent outputs are stochastic and
-  belong in the Eval subsystem.
+  belong in the Eval subsystem (`docs/evaluation.md`).
 - Not a replacement for unit / e2e tests. This is a runtime harness
   for live tools, not a CI gate.
 
@@ -43,43 +51,150 @@ What this is **not**:
 
 ## 2. Data Model
 
-Four new tables. Nothing in the existing schema changes.
+The subsystem consists of five core tables (`src/lib/db/schema.ts`):
 
-### 2.1 Tables
+```mermaid
+erDiagram
+    verification_group ||--o{ verification_suite : "categorizes (1:N)"
+    mcp_server ||--o{ verification_suite : "targets (1:N, ON DELETE SET NULL)"
+    verification_suite ||--|{ verification_case : "contains (1:N, CASCADE)"
+    verification_suite ||--o{ verification_run : "spawns (1:N, CASCADE)"
+    verification_run ||--|{ verification_case_result : "records (1:N, CASCADE)"
+    verification_case ||--o{ verification_case_result : "yields (1:N, CASCADE)"
 
-| Table | Purpose | Key Columns |
+    verification_group {
+        uuid id PK "defaultRandom()"
+        text name "uniqueIndex lower(name)"
+        timestamp created_at "CURRENT_TIMESTAMP"
+        timestamp updated_at "CURRENT_TIMESTAMP"
+    }
+
+    verification_suite {
+        uuid id PK "defaultRandom()"
+        uuid group_id FK "references verification_group(id) ON DELETE SET NULL"
+        uuid mcp_server_id FK "references mcp_server(id) ON DELETE SET NULL"
+        text mcp_server_name "Historical display snapshot"
+        jsonb tool_prefix_rule "mode: none|add|remove, prefix: string"
+        text name "Suite display name"
+        text description "Optional markdown description"
+        jsonb variables "Suite literal variables"
+        boolean enabled "Active/Inactive flag"
+        text visibility "private | public"
+        integer timeout_sec "Per-suite wall-clock cap"
+        uuid created_by FK "references user(id), NOT NULL"
+        uuid updated_by FK "references user(id), NOT NULL"
+        timestamp created_at "CURRENT_TIMESTAMP"
+        timestamp updated_at "CURRENT_TIMESTAMP"
+    }
+
+    verification_case {
+        bigint id PK "generatedAlwaysAsIdentity()"
+        uuid suite_id FK "references verification_suite(id) ON DELETE CASCADE"
+        text name "Unique per suite"
+        text tool_name "Relative tool name (e.g. search_leads)"
+        jsonb input "Input argument payload"
+        jsonb assertions "Array of assertion specs"
+        boolean enabled "Active/Inactive flag"
+        uuid created_by FK "references user(id), NOT NULL"
+        timestamp created_at "CURRENT_TIMESTAMP"
+        timestamp updated_at "CURRENT_TIMESTAMP"
+    }
+
+    verification_run {
+        uuid id PK "defaultRandom()"
+        uuid suite_id FK "references verification_suite(id) ON DELETE CASCADE, NOT NULL"
+        text status "running | passed | failed | errored | timeout"
+        integer total_count "Total cases planned"
+        integer passed_count "Passed cases"
+        integer failed_count "Failed cases"
+        integer errored_count "Errored cases"
+        integer skipped_count "Skipped cases"
+        text triggered_by "manual | schedule"
+        timestamp started_at "CURRENT_TIMESTAMP"
+        timestamp finished_at "Completed timestamp"
+    }
+
+    verification_case_result {
+        bigint id PK "generatedAlwaysAsIdentity()"
+        uuid run_id FK "references verification_run(id) ON DELETE CASCADE"
+        bigint case_id FK "references verification_case(id) ON DELETE CASCADE"
+        text original_tool_name "Snapshot of case.toolName at run time"
+        text effective_tool_name "Real tool dispatched (e.g. gw_search_leads)"
+        text status "passed | failed | errored | skipped | timeout"
+        jsonb input_snapshot "Frozen input as executed"
+        jsonb result_payload "Tool response (truncated if >32KB)"
+        boolean result_truncated "Truncation indicator"
+        jsonb assertion_results "Per-assertion evaluations"
+        jsonb error "Structured error envelope"
+        integer duration_ms "Execution latency in ms"
+        timestamp started_at "Case start timestamp"
+        timestamp finished_at "Case finish timestamp"
+    }
+```
+
+### 2.1 Table Specifications
+
+| Table | Purpose | Key Constraints & Rules |
 |---|---|---|
-| `verification_suite` | Groups cases. | `id`, `name`, `category` ('mcp'), `variables` (jsonb), `mcp_server_id` (FK **SET NULL**), `mcp_server_name` (denormalized display snapshot), `timeout_sec` |
-| `verification_case` | An individual test case. | `id`, `suite_id` (FK cascade), `tool_name`, `input`, `assertions` |
-| `verification_run` | A suite execution. | `id`, `suite_id` (FK cascade), `mcp_server_id` (FK **SET NULL**), `status`, counts (`passed`, `failed`, etc.) |
-| `verification_case_result`| Outcome of a case. | `id`, `verification_run_id`, `verification_case_id`, `status`, `input_snapshot`, `result_payload`, `assertion_results`, `error` |
+| `verification_group` | Shared catalog/grouping container. | `name` case-insensitive unique index (`lower(name)`). Shared team directory, auto-hidden when empty. |
+| `verification_suite` | The primary Aggregate Root. Binds MCP server, prefix rules, variables, and history. | Unique index on `(name, created_by)`. `groupId` can be `NULL` (Ungrouped). `mcp_server_id` ON DELETE SET NULL. Category and workflow legacy fields eliminated. |
+| `verification_case` | An individual test case definition. | `tool_name` stores the relative business tool name. Unique index on `(suite_id, name)`. |
+| `verification_run` | Execution instance of a suite. | `suite_id` is NOT NULL (all runs belong to a suite). No server-level run rows. |
+| `verification_case_result`| Immutable audit record of a case execution. | Contains both `original_tool_name` and `effective_tool_name` snapshots for 100% audit fidelity. |
 
-**MCP server lifecycle (detached suites)**: deleting an MCP server detaches its
-suites (`mcp_server_id` → NULL) instead of destroying them — suites, cases, run
-history and results are all kept, and the denormalized `mcp_server_name` keeps
-the left panel grouping intact. Detached suites stay editable/browsable but are
-never runnable: run requests fail with a structured "detached" error at both
-the REST and tester-tool layers.
+### 2.2 MCP Server Lifecycle (Detached Suites & Self-Healing)
 
-#### Why MCP cases do **not** write `entity_run`
+When an underlying MCP server is deleted:
+1. Foreign key `ON DELETE SET NULL` clears `verification_suite.mcp_server_id`.
+2. The denormalized string `mcp_server_name` preserves the historical server name.
+3. In the left panel, the suite shows a warning badge and the Run button is disabled (`runDisabled`).
+4. In `VerificationSuiteDialog`, an amber warning banner appears: *"Bound MCP Server Deleted. The original server no longer exists. You can re-bind this suite by selecting an available server below."*
+5. The user selects any available MCP server and saves to immediately restore full functionality.
 
-`entity_run` represents "an agent / team / workflow was dispatched"
-(`AGENTS.md` §11). An MCP tool call is not an entity dispatch — it is
-a single function invocation against `mcp/provider-pool`. Threading
-tool calls through the runner would inflate the kernel's contract,
-add zombie-sweep concerns to a synchronous code path, and provide no
-extra forensics value (the result is already in
-`verification_case_result.result_payload`).
+### 2.3 Why MCP Cases Do Not Write `entity_run`
+
+`entity_run` represents "an agent / team / workflow was dispatched" (`AGENTS.md` §11). An MCP tool call is a direct function invocation against `mcp/provider-pool`. Threading verification cases through the orchestration kernel would inflate its contract, introduce zombie-sweep concerns to a synchronous code path, and provide no additional forensics value (`verification_case_result` is already self-contained).
 
 ---
 
-## 3. Error Source Convention
+## 3. Tool Prefix Conversion Engine
 
-`verification_case_result.error` is JSON, never a free-form string. Shape:
+MCP gateways or multi-tenant proxies often prepend prefixes (e.g. `crm_`, `gateway_`) to tool names. To allow test cases to be written with pure relative tool names (`search_leads`) and run against both raw servers and gateways without duplication, suites configure a `toolPrefixRule`:
+
+```ts
+export type ToolPrefixMode = "none" | "add" | "remove";
+
+export interface ToolPrefixRule {
+  mode: ToolPrefixMode;
+  prefix: string;
+}
+```
+
+- **`resolveEffectiveToolName(toolName, rule)`** (`src/lib/verification/tool-name.ts`):
+  - `mode: "none"`: returns `toolName` unchanged.
+  - `mode: "add"`: prepends `prefix` unless already present (case-insensitive idempotency).
+  - `mode: "remove"`: strips `prefix` if present (case-insensitive).
+  - Trims whitespace and handles empty/null strings safely.
+- **Diagnostics on Missing Tools**:
+  If the server returns `-32601 Method not found`, the runner reports structured diagnostic details:
+  ```json
+  {
+    "source": "upstream",
+    "message": "MCP tool \"crm_search_leads\" not found on server \"crm-server\". (Original toolName: \"search_leads\", Mode: \"add\")"
+  }
+  ```
+- **Dual Snapshot Fidelity**:
+  `verification_case_result` stores both `original_tool_name` (as configured on the case) and `effective_tool_name` (as sent to MCP). In historical view, the UI displays `originalToolName → effectiveToolName` when transformed.
+
+---
+
+## 4. Error Source Convention
+
+`verification_case_result.error` is JSON, never a free-form string:
 
 ```json
 {
-  "source": "mcphub" | "upstream" | "transport" | "assertion" | "timeout" | "internal",
+  "source": "mcphub" | "upstream" | "transport" | "assertion" | "timeout" | "config" | "internal",
   "message": "...",
   "details": { ... }
 }
@@ -87,31 +202,19 @@ extra forensics value (the result is already in
 
 | `source` | When | `details` examples |
 |---|---|---|
-| `mcphub` | MCPHub itself returned an error (502, 504, or its own error envelope). | `{ httpStatus: 502, mcphubRouteId: "..." }` |
-| `upstream` | MCPHub reached the upstream REST API and the upstream returned a non-success. | `{ httpStatus: 401, wwwAuthenticate: "Bearer ..." }` |
-| `transport` | Network / connection / DNS — never got a response. | `{ kind: "ECONNREFUSED", target: "mcphub:3000" }` |
-| `assertion` | Tool returned successfully but at least one assertion failed. (Distinct from `status='failed'` because the `error` field is optional even when `status='failed'`; populated only when one *individual* assertion needs to surface its mismatch as the top-line error.) | `{ assertionPath: "$.data.id", expected: "abc", actual: "xyz" }` |
-| `timeout` | Per-case wall-clock or suite-level timeout. | `{ scope: "case" \| "suite", elapsedMs: 30000 }` |
-| `internal` | Unexpected throw inside the verification runner itself. **Always a bug.** | `{ stack: "..." }` |
-
-Distinguishing `mcphub` vs `upstream` requires cooperation from
-MCPHub. Today MCPHub does not always forward upstream status codes
-verbatim. Until that is fixed, the runner classifies as follows:
-
-- `5xx` from MCPHub with `x-mcphub-source: mcphub` header → `mcphub`
-- `5xx` from MCPHub with `x-mcphub-source: upstream` header → `upstream`
-- `5xx` without the header → `mcphub` (conservative default — points
-  the user at the layer Nango owns)
-- `4xx` always → `upstream` (MCPHub itself rarely returns 4xx)
-
-This is intentionally **best-effort in V1**; the alternative is a
-per-tool sidecar HTTP probe, which is V2 territory.
+| `mcphub` | MCPHub returned an error (502, 504, or own envelope). | `{ httpStatus: 502, mcphubRouteId: "..." }` |
+| `upstream` | Upstream returned a non-success or tool not found. | `{ httpStatus: 401, wwwAuthenticate: "Bearer ..." }` |
+| `transport` | Network / connection / DNS failure. | `{ kind: "ECONNREFUSED", target: "mcphub:3000" }` |
+| `assertion` | Tool returned successfully but assertions failed. | `{ assertionPath: "$.data.id", expected: "abc", actual: "xyz" }` |
+| `timeout` | Per-case wall-clock or suite-level timeout reached. | `{ scope: "case" | "suite", elapsedMs: 30000 }` |
+| `config` | Prohibited credential variable or missing configuration. | `{ variableKey: "SECRET_KEY" }` |
+| `internal` | Unexpected throw inside runner. Always a bug. | `{ stack: "..." }` |
 
 ---
 
-## 4. Assertion Types
+## 5. Assertion Types
 
-`verification_case.assertions` is a JSON array evaluated against the `structuredContent` of the tool result.
+`verification_case.assertions` is a JSON array evaluated against the `structuredContent` of the tool result:
 
 | Type | Description | Example |
 |---|---|---|
@@ -119,121 +222,126 @@ per-tool sidecar HTTP probe, which is V2 territory.
 | `jsonpath` | Evaluates a JSONPath query against target operators. | `path: "items[0].id", operator: "==", expected: "abc"` |
 | `js_expression` | Executes a pure JS expression in a restricted `node:vm`. | `result.totalCount > 42` |
 
-- Empty assertions array acts as a smoke test (passes if no upstream error).
-- Assertions can target the raw MCP output by prefixing paths with `$` or using the `root` JS binding.
-
-## 5. Execution
-
-- **Single-case run**: Synchronous. Updates UI state but does NOT write to the database.
-- **Suite run**: Asynchronous, serial. Creates `verification_run` and `verification_case_result` rows. Publishes SSE updates. Tolerant to individual case failures. Gated on suite edit permission, `enabled`, and a live MCP binding.
-- **Server-wide run** (`mcpServerId` in `POST /api/verification-runs`): executes all enabled cases under one server, **scoped to the triggerer's visible suites** — foreign private suites never execute, and run results are filtered by the same visibility on read. The boot recovery sweep reads unscoped (system context).
-- **Real-Time Updates (SSE)**: Publishes `run_started`, `case_finished`, and `run_finished` over the existing `/api/runs/stream` event bus. The client hook `useVerificationRunStream` drives the UI.
-
-## 6. Serial Execution & Cross-Case Reference Contract
-
-Verification suites execute cases serially in deterministic alphabetical order. To support multi-step workflows (e.g. `login` → `create_project` → `delete_project`), cases can reference outputs from earlier cases in the same suite using Mustache-like template variables: `{{cases.<name_or_prefix>.output.<path>}}`.
-
-### 6.1 Numeric Prefix Convention & Aliasing
-- **Alphabetical Execution Order**: Cases within a suite execute in lexicographical order by case name. Prepending a 3-digit prefix with a step of 10 (e.g. `010_login`, `020_get_profile`, `030_cleanup`) establishes predictable execution order.
-- **Dual Registration in `suiteContext`**: When a case finishes, the orchestrator registers it in the running suite context under two keys:
-  1. Full case name: `suiteContext["010_login"] = caseData`
-  2. Prefix alias: if the case name begins with digits `^(\d+)` (e.g. `010`), `suiteContext["010"] = caseData` pointing to the exact same object reference (zero memory copy).
-- **Usage**: Downstream cases can use either the concise alias `{{cases.010.output.token}}` or the full name `{{cases.010_login.output.token}}`.
-- **Precondition (Alias Uniqueness)**: Numeric prefixes must be unique within a single suite. If multiple cases share the same prefix (e.g. `010_test_a` and `010_test_b`), the later-executed case overwrites the `010` alias pointer in `suiteContext`.
-
-### 6.2 Output Unwrapping Rules (`extractMcpStructuredData`)
-The `output` object exposed to downstream cases is unwrapped according to strict MCP protocol semantics:
-1. **`structuredContent` Priority**: If the MCP result contains `structuredContent`, it is used directly as the unwrapped `output` object.
-2. **`content` JSON Parsing**: If `structuredContent` is not present, the runner inspects `content`. If `content` contains a text item whose text parses as valid JSON (object or array), it is parsed and assigned to `output`.
-3. **Fallback to Full Envelope**: If neither condition is met (e.g. plain non-JSON text output, primitive values, or unexpected envelope shapes), the entire raw MCP `CallToolResult` envelope is preserved as `output`.
-4. **No `result` Demangling**: Unlike WebAuto/AG-UI envelopes, top-level `result` fields are NOT unwrapped. This guarantees that business data containing a `result` property (e.g. `{ result: 42, data: "..." }`) is preserved verbatim and will not cause data loss.
-
-### 6.3 Assertions View vs. Context View
-There is a key semantic difference between how assertions and cross-case references view the output:
-- **Assertions View (`evaluateAssertions`)**: Operates on the full tool result payload. JSON Schema, JSONPath, and JS expressions (`node:vm`) inspect the tool output directly (or via `$` / `root` bindings).
-- **Context View (`extractMcpStructuredData`)**: Prepares the `output` object for `{{cases...}}` template resolution:
-  - For structured responses: `output` is the core business object (e.g. `{{cases.010.output.token}}` or `{{cases.010.output.user.id}}`).
-  - For non-structured/raw fallbacks: `output` is the raw MCP envelope. Downstream cases must access fields through the envelope structure: `{{cases.010.output.content[0].text}}`.
-
-### 6.4 Suite Boundary & Isolation Semantics
-- **Strict Suite Scoping**: The execution context is strictly isolated to the currently executing suite. Cross-suite references are not supported and will not resolve.
-- **Contiguity Guarantee in Server Runs**: When executing all suites under an MCP server, cases are ordered by `(suiteName, suiteId, caseName)`. Even if multiple users define suites with the same name, all cases of a given suite execute contiguously without cross-suite interleaving.
-- **Context Reset on Suite Boundary**: Crossing into a new suite immediately clears the context: `suiteContext = {}`. This prevents state leakage or accidental cross-suite variable contamination.
-- **Failure Forensics (`unresolvedReferences`)**: Unresolved template placeholders remain as literals in input payloads. If a case execution fails or throws, the runner scans inputs for residual `{{cases...}}` tokens and populates `error.details.unresolvedReferences` (e.g. `["{{cases.010.output.token}}"]`), providing immediate diagnostic visibility.
-
-### 6.5 Suite Variables (Literal Variables)
-Verification suites support defining suite-level literal variables (e.g. `BASE_URL`, `PORT`, `API_VERSION`) via `verification_suite.variables`:
-- **Template Substitution in Case Input**: Case tool inputs can reference variables using `{{variables.KEY}}` (handled via `resolveInput`).
-- **Template Substitution in Assertions**: Assertion expected values can reference variables using `{{variables.KEY}}` (handled via `substituteInputTemplates`).
-- **JS Expression Assertion Support**: Variables are exposed directly to the `node:vm` execution context (`variables.KEY` and top-level `KEY`).
-- **Strict Security Boundary (allowCredentials: false)**: Credential variables are prohibited in Verification suites. If a credential variable definition is detected (via DB or API bypass), variable resolution fails closed immediately, reporting `status: "errored"` with `error.source: "config"` without calling any MCP tools.
-
-## 7. API Routes
-
-All routes are wrapped by `withEditor(routePath, handler)` from
-`src/lib/http/route-handlers.ts`.
-
-| Method & Path                                       | Purpose |
-|-----------------------------------------------------|---------|
-| `GET    /api/verification-suites`                           | List visible MCP verification suites. |
-| `POST   /api/verification-suites`                           | Create a suite. |
-| `GET    /api/verification-suites/[id]`                      | Suite metadata + case summary. |
-| `PATCH  /api/verification-suites/[id]`                      | Update name / description / enabled / visibility / `timeout_sec`. |
-| `DELETE /api/verification-suites/[id]`                      | Cascade-delete cases + runs + results. |
-| `GET    /api/verification-suites/[id]/cases`                | List cases (alphabetical). |
-| `POST   /api/verification-suites/[id]/cases`                | Create a case. `CHECK` enforced server-side. |
-| `PATCH  /api/verification-cases/[id]`                       | Update name / input / assertions / enabled / `suiteId` (moves validate the target suite: existence + edit permission + same MCP server). |
-| `DELETE /api/verification-cases/[id]`                       | Delete a case. |
-| `POST   /api/verification-cases/[id]/run`                   | **Synchronous** single-case run; does not persist. |
-| `POST   /api/verification-runs`                             | Body `{ suiteId }` → start async suite run; returns `{ runId }`. |
-| `GET    /api/verification-suites/[id]/runs?offset=0&limit=5`| Paginated history for the banner. Returns `{ rows: VerificationRunEntity[], total: number }` — `total` drives both absolute chip numbering (`#N`) and a precise "more older runs?" guard for the pagination buttons. |
-| `GET    /api/verification-runs/[id]`                        | Run header + all `verification_case_result` rows. Returns `{ run, results, visibleCount }`. Used by `useRunSnapshot` for both the just-completed-run inspector view AND history-view chip selection. Server-wide runs scope `results` to the viewer's visible suites. |
-| `GET    /api/verification-servers`                          | List MCP servers that have verification suites (left-panel tree groups), with per-user visibility and suite counts. |
-| `DELETE /api/verification-servers/[id]`                     | Bulk cleanup: deletes only the suites the caller may delete (per-suite `canDeleteResource`; admin deletes all). Returns `{ deleted, skipped }`. Non-uuid ids → 404. |
-| `GET    /api/verification-servers/[id]/cases`, `.../runs`    | Cross-suite per-server listings for the left panel and the server-run history banner. |
+- An empty assertions array acts as a smoke test (passes if no upstream tool error).
+- Assertions can target raw MCP output by prefixing paths with `$` or using the `root` JS binding.
 
 ---
 
-## 8. UI
+## 6. Execution Modes & Orchestration
 
-The UI is built around `/verification/[id]`, consisting of three columns: a left CaseTree column, a middle column (Input, Assertions), and a right column (Output, Verdicts).
+### 6.1 Execution Modes
 
-- **CaseTree**: Displays suites and nested cases. Includes statuses driven by live SSE updates or snapshot loads.
-- **Recent Runs Banner**: A horizontal list of recent suite runs (`#N · ✓4 ✗2`), allowing pagination. Clicking a run switches the editor into read-only snapshot mode (history-view).
-- **Editor panes**: 
-  - `INPUT` and `ASSERTIONS` use a debounce/PATCH hook (`useJsonDraft`) for auto-saving.
-  - In history-view, `INPUT`, `OUTPUT`, and `VERDICTS` show the frozen snapshot, while `ASSERTIONS` are intentionally not snapshotted (showing a notice instead).
-- **Cross-page entry**: From the MCP test page, users can click "Save as case" to persist a successful tool call into a verification case.
+- **Single-case debug run** (`POST /api/verification-cases/[id]/run`):
+  Synchronous in-memory execution (<50ms). Resolves variables and tool prefixes, returns `{ status, outcome, originalToolName, effectiveToolName }`. Does NOT write database run rows, preventing history pollution.
+- **Suite run** (`POST /api/verification-runs` with `{ suiteId }`):
+  Asynchronous serial execution. Creates a `verification_run` row and per-case `verification_case_result` rows. Publishes SSE events. Sends a single Notification Bell alert on completion.
+- **Group run** (`POST /api/verification-runs` with `{ groupId }`):
+  Concurrent multi-suite regression run across all visible enabled suites in the group.
+  - **F6 Security Enforcement**: Queries enforce `viewer: VerificationViewer` and apply `visibilitySql`. Private suites of other users are never included.
+  - **Aggregate Notification**: Individual suite runs set `suppressNotification: true`. On group completion, an aggregate Notification Bell message is posted (`runId: null`, clicking navigates to `/verification`).
 
-## 9. Permissions
+### 6.2 Real-Time Updates (SSE)
 
-| Action | Required role |
+Publishes `run_started`, `case_finished`, and `run_finished` events over `/api/runs/stream`. The client hook `useVerificationRunStream` drives real-time UI state updates.
+
+---
+
+## 7. Serial Execution & Cross-Case Reference Contract
+
+Verification suites execute cases serially in deterministic alphabetical order. Downstream cases can reference outputs from earlier cases using `{{cases.<alias_or_name>.output.<path>}}`.
+
+### 7.1 Numeric Prefix Convention & Aliasing
+- **Prefix convention**: Case names should use a 3-digit step prefix (e.g. `010_login`, `020_create_order`, `030_cleanup`).
+- **Dual registration**: When a case finishes, it is registered under:
+  1. Full name: `suiteContext["010_login"] = caseData`
+  2. Prefix alias: `suiteContext["010"] = caseData`
+- **Usage**: Downstream cases can write `{{cases.010.output.orderId}}`.
+
+### 7.2 Output Unwrapping Rules (`extractMcpStructuredData`)
+1. **`structuredContent` priority**: Used directly if present.
+2. **`content` JSON parsing**: Text items parsing as valid JSON objects/arrays are unwrapped.
+3. **Fallback to full envelope**: Raw `CallToolResult` preserved if non-JSON or primitive.
+4. **No `result` demangling**: Top-level `result` fields in business payloads are never stripped.
+
+### 7.3 Suite Variables (Literal Variables)
+Defined in `verification_suite.variables`:
+- Case input: `{{variables.KEY}}`
+- Assertions: `{{variables.KEY}}`
+- JS expressions: `variables.KEY` and top-level `KEY`
+- **Security constraint (`allowCredentials: false`)**: Credential references are strictly forbidden; any detected credential causes immediate fail-closed error.
+
+---
+
+## 8. UI Architecture & Conventions
+
+### 8.1 Left Panel (`VerificationPanel.tsx`)
+- **3-Level Navigation Tree**: `Group -> Suite -> Case`.
+- **Group Folders**: Uniform Violet color styling (`text-violet-500/80 dark:text-violet-400/80 transition-colors`) with dynamic `<FolderOpen />` (expanded) and `<Folder />` (collapsed) states for all groups including `Ungrouped`.
+- **Group Actions**: One-click Run Group button (`data-action="run-group"`) and Inline Rename (`data-action="rename-group"`).
+- **Suite Item Badges**: Displays MCP server name badge (amber border when detached). Automatically suppresses badge if the suite name already contains `(${serverName})`.
+
+### 8.2 Header Breadcrumbs (`VerificationSuiteEditor.tsx`)
+- **Format**:
+  - Suite root view: `[Highlighted Suite] (Server Group/Server Name)`
+  - Selected Case view: `[Highlighted Suite] (Server Group/Server Name) / [Highlighted Case] (Tool Name)`
+- **Visual hierarchy**:
+  - `suite name` and `case name` are highlighted (`text-sm font-semibold text-foreground`).
+  - `(server group/server name)`, `/`, and `(tool_name)` are rendered in muted secondary styling (`text-xs text-muted-foreground font-normal`).
+  - Test IDs `verification-suite-heading` and `verification-case-heading` are scoped directly to the entity name elements.
+
+### 8.3 Suite Dialog (`VerificationSuiteDialog.tsx`)
+- **Natural field order**:
+  1. `Group` (with `+ Create New Group...`)
+  2. `Suite Name`
+  3. `MCP Server` (with detached re-binding banner)
+  4. `MCP Tool Prefix` (`none`, `add`, `remove`)
+  5. `Description`
+- Sized at `h-[720px] max-h-[92vh]` to prevent vertical scrollbars when expanding new group inputs.
+
+### 8.4 Case Dialog (`NewCaseDialog.tsx`)
+- **Field order**: `MCP Server` -> `MCP Tool` -> `Suite Name` -> `Case Name`.
+
+### 8.5 MCP "Save As Case" Integration (`SaveAsCaseDialog.tsx`)
+- Capturing a tool call from the MCP management/test page automatically routes to `Ungrouped` -> `Drafts (${serverName})`, computing the next prefix (e.g. `010_toolName`).
+
+---
+
+## 9. API Routes
+
+All handlers use `withEditor` / `withSession` from `src/lib/http/route-handlers.ts`:
+
+| Method & Path | Purpose |
 |---|---|
-| List / view suites, cases, runs, results | `editor`+ (resource visibility applies) |
-| Create / edit suites, cases | `editor`+ (`canEditResource` — public suites are collaboratively editable) |
-| Delete a suite | Suite author or admin (`canDeleteResource`) |
-| Delete a case | Case author OR suite author OR admin (unified rule across all three test modules) |
-| Bulk-delete suites under an MCP server | Per-suite `canDeleteResource` — editors delete only their own suites |
-| Run case (sync) or suite (async) | Suite edit permission + `enabled` + live MCP binding |
-| Server-wide run | Server visibility (view) — but case selection and results are scoped to the triggerer's visible suites |
-| Schedule a suite (V2, via `schedule` row with `entity_kind='verification_suite'`) | `editor`+ |
+| `GET    /api/verification-groups` | List all active verification groups with suite counts (empty groups hidden). |
+| `PATCH  /api/verification-groups/[id]` | Rename a group (transactional reuse if name exists). |
+| `GET    /api/verification-suites` | List visible suites with `serverGroup` and `serverName` metadata. |
+| `POST   /api/verification-suites` | Create a suite (supports `groupId` or `groupName`, `toolPrefixRule`). |
+| `GET    /api/verification-suites/[id]` | Suite metadata + cases summary. |
+| `PATCH  /api/verification-suites/[id]` | Update suite (supports re-binding `mcpServerId`, moving groups, changing prefix). |
+| `DELETE /api/verification-suites/[id]` | Cascade-delete suite, cases, runs, and results. |
+| `GET    /api/verification-suites/[id]/cases` | List cases for suite (alphabetical). |
+| `POST   /api/verification-cases` | Create a case (supports explicit `suiteId` or auto-creation into `Drafts (${serverName})`). |
+| `PATCH  /api/verification-cases/[id]` | Update case details or move to another suite. |
+| `DELETE /api/verification-cases/[id]` | Delete a single case. |
+| `POST   /api/verification-cases/[id]/run` | Synchronous single-case debug run (does not persist). |
+| `POST   /api/verification-runs` | Start async suite run (`{ suiteId }`) or group run (`{ groupId }`). |
+| `GET    /api/verification-runs/[id]` | Full run snapshot (`run`, `results`) for live inspector and history view. |
+| `GET    /api/verification-suites/[id]/runs` | Paginated recent runs for suite banner (`offset`, `limit`). |
 
-The Verification page is wired to the `editor` group on the LeftToolbar.
-`source='builtin'` is not relevant here — verification suites are always
-user-authored.
+> *Note: Legacy `/api/verification-servers/*` routes have been completely removed.*
 
 ---
 
-## 10. Operational Notes
+## 10. Permissions & Security
 
-- **Payload truncation**: `result_payload` is capped at 32 KB by default (configurable via `verification.payload_max_kb`). Assertions evaluate on the full payload before truncation.
-- **Concurrency**: MCP cases reuse clients from `mcp/provider-pool`.
-- **Schema drift**: Assertions are editable after runs; history-view strictly shows the historical `assertion_results` verdicts, not the latest definitions.
+| Action | Required Role & Guard |
+|---|---|
+| View suites, cases, runs, results | `editor`+ (`canEditResource` / visibility checks apply) |
+| Create / edit suites, cases | `editor`+ (`canEditResource`) |
+| Delete a suite | Suite author or admin (`canDeleteResource`) |
+| Delete a case | Case author OR suite author OR admin |
+| Single-case debug run | Suite edit permission + `enabled` + live MCP binding |
+| Suite run | Suite edit permission + `enabled` + live MCP binding |
+| Group run | Enforces `viewer: VerificationViewer` with `visibilitySql` — private suites of other users are sealed from execution |
 
-## 11. Future Roadmap
-
-- **Shareable history-view URLs**: Promote UI state to `?run=<id>`.
-- **Schedule-driven regression**: Hook suites into the scheduler.
-- ~~**AI-assisted case generation**~~: Shipped — see `docs/test-automation-copilot.md` (Tester agent + ambient context).
-- **Result blob storage**: Offload large payloads if needed.
-
+Verification suites are always user-authored; `source='builtin'` does not apply.

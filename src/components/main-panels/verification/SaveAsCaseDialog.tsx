@@ -73,8 +73,11 @@ export function SaveAsCaseDialog({
           name: string;
           mcpServerId?: string | null;
         }>;
+        const targetDraftName = `Drafts (${serverName})`;
         const draft = suites.find(
-          (s) => s.mcpServerId === mcpServerId && s.name === "Drafts",
+          (s) =>
+            s.mcpServerId === mcpServerId &&
+            (s.name === targetDraftName || s.name === "Drafts"),
         );
         if (!draft || cancelled) return;
 
@@ -112,7 +115,7 @@ export function SaveAsCaseDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, mcpServerId, toolName]);
+  }, [open, mcpServerId, serverName, toolName]);
 
   const trimmedCaseName: string = caseName.trim();
   const canSubmit: boolean = !submitting && trimmedCaseName.length > 0;
@@ -135,7 +138,7 @@ export function SaveAsCaseDialog({
         throw new Error("Failed to create case");
       }
 
-      toast.success("Saved to Drafts");
+      toast.success(`Saved to Drafts (${serverName})`);
       onOpenChange(false);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
@@ -185,7 +188,7 @@ export function SaveAsCaseDialog({
           </div>
 
           <p className="text-[11px] text-muted-foreground">
-            Saves to Drafts. You can review and add assertions in the
+            Saves to Drafts ({serverName}) under Ungrouped. You can review and add assertions in the
             Verification panel before moving to a suite.
           </p>
 
