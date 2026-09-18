@@ -20,6 +20,7 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
 import { buildGenerateEchartsConfigTool, buildGenerateHtmlPageTool } from "@/lib/outcomes/runtime-tools";
+import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 
 /** Coarse grouping for the UI's section headings. */
 export type BuiltinToolCategory = "sandbox" | "search" | "outcomes";
@@ -141,6 +142,59 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       required: ["query"],
     },
     build: buildWebSearchTool,
+  },
+  {
+    name: "repeat_tool",
+    displayName: "Repeat tool (Interval runner)",
+    description:
+      "Repeat the execution of an MCP or server tool at intervals (5-60s) until a condition is met, max_count is reached, or timeout occurs.",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        tool_name: {
+          type: "string",
+          description: "The name of the tool to execute repeatedly.",
+        },
+        tool_args: {
+          type: "object",
+          description: "Arguments to pass to the target tool on each execution.",
+        },
+        interval_sec: {
+          type: "number",
+          minimum: 5,
+          maximum: 30,
+          default: 5,
+          description: "Interval in seconds between executions (min: 5, max: 30, default: 5).",
+        },
+        timeout_sec: {
+          type: "number",
+          minimum: 5,
+          maximum: 60,
+          default: 30,
+          description: "Maximum total duration in seconds for this call (min: 5, max: 60, default: 30).",
+        },
+        max_count: {
+          type: "integer",
+          minimum: 1,
+          maximum: 12,
+          description: "Optional maximum number of times to execute (1-12).",
+        },
+        stop_condition: {
+          type: "object",
+          properties: {
+            field: { type: "string", description: "Dot-path in the result to inspect." },
+            equals: { description: "Stop when field strictly equals this value." },
+            not_equals: { description: "Stop when field is no longer this value." },
+            one_of: { type: "array", description: "Stop when field matches any of these values." },
+            contains: { type: "string", description: "Stop when output text contains this substring." },
+          },
+          description: "Condition that terminates execution early when satisfied.",
+        },
+      },
+      required: ["tool_name"],
+    },
+    build: () => buildRepeatTool({ getTool: () => undefined }),
   },
 ];
 

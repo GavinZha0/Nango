@@ -4,6 +4,7 @@ import { useState, useMemo, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   Folder,
+  FolderOpen,
   SquarePlus,
   ChevronRight,
   ChevronDown,
@@ -161,7 +162,11 @@ function TargetGroupNode({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
-          <Folder className="h-3.5 w-3.5 text-blue-500/70 shrink-0" />
+          {expanded ? (
+            <FolderOpen className="h-3.5 w-3.5 text-blue-500/80 dark:text-blue-400/80 transition-colors shrink-0" />
+          ) : (
+            <Folder className="h-3.5 w-3.5 text-blue-500/80 dark:text-blue-400/80 transition-colors shrink-0" />
+          )}
           <span className="truncate font-medium hover:underline underline-offset-2">
             {target.name}
           </span>

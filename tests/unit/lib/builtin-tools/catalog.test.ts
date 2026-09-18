@@ -20,6 +20,15 @@ vi.mock("@/lib/web-search/runtime-tools", () => ({
   }),
 }));
 
+vi.mock("@/lib/repeater/runtime-tools", () => ({
+  buildRepeatTool: () => ({
+    name: "repeat_tool",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+}));
+
 import {
   BUILTIN_TOOLS,
   buildBuiltinTools,
@@ -36,7 +45,13 @@ describe("BUILTIN_TOOLS catalog", () => {
     // their respective domain modules and are auto-mounted by
     // dispatch/builtin.ts when their binding is present.
     const names = BUILTIN_TOOLS.map((t) => t.name).sort();
-    expect(names).toEqual(["generate_echarts_config", "generate_html_page", "run_code_in_sandbox", "web_search"]);
+    expect(names).toEqual([
+      "generate_echarts_config",
+      "generate_html_page",
+      "repeat_tool",
+      "run_code_in_sandbox",
+      "web_search",
+    ]);
   });
 
   it("each entry has a displayName, description, and category", () => {

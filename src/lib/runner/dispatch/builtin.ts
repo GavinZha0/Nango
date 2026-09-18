@@ -25,6 +25,7 @@ import {
   buildListSshHostsTool,
   buildRunSshCommandTool,
 } from "@/lib/ssh/runtime-tools";
+import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
 import { skillPool, type SkillSpec } from "@/lib/skills";
 import { buildSkillsRuntime } from "@/lib/skills/runtime-tools";
@@ -363,7 +364,10 @@ export async function buildBuiltinAgents(
     // User-selected built-in tools. Unknown names are dropped — a
     // junction row pointing at a retired tool name must not crash.
     // Binding-implied tools are built directly above, not here.
-    const builtinTools: ToolDefinition[] = buildBuiltinTools([...builtinToolNames]);
+    // `repeat_tool` is context-dependent (binds to active toolkit) and built below.
+    const hasRepeatTool = builtinToolNames.has("repeat_tool");
+    const otherBuiltinToolNames = [...builtinToolNames].filter((n) => n !== "repeat_tool");
+    const builtinTools: ToolDefinition[] = buildBuiltinTools(otherBuiltinToolNames);
 
     // Chart prompt block — usage policy for the opt-in
     // `generate_echarts_config` server tool. Skipped for supervisor
@@ -396,6 +400,7 @@ export async function buildBuiltinAgents(
       || evaluatorTools.length > 0
       || testerTools.length > 0
       || builtinTools.length > 0
+      || hasRepeatTool
       || dataSourceTools.length > 0
       || sshTools.length > 0
       || calendarTools.length > 0
@@ -514,6 +519,8 @@ export async function buildBuiltinAgents(
       "get_skill",
       "get_skill_file",
       "run_skill_script",
+      // Repeater coordinator tool
+      "repeat_tool",
     ]);
 
     // Wrap server tools so an uncaught throw becomes
@@ -542,12 +549,45 @@ export async function buildBuiltinAgents(
       metadata: {},
     };
     const toolPipeline = composeToolPipeline(pipelineMiddlewares, pipelineCtx);
+
+    const pipelinedProviders = providers.map((p) =>
+      composePipelinedMcpProvider(p, pipelineMiddlewares, pipelineCtx),
+    );
+
+    let repeatTool: ToolDefinition | undefined;
+    if (hasRepeatTool) {
+      repeatTool = buildRepeatTool({
+        getTool: async (name: string) => {
+          for (const provider of pipelinedProviders) {
+            const tools = (await provider.tools()) as Record<
+              string,
+              { execute?: (args: unknown) => Promise<unknown> }
+            >;
+            if (tools && name in tools && typeof tools[name].execute === "function") {
+              return tools[name];
+            }
+          }
+          return serverTools.find((t) => t.name === name);
+        },
+        availableToolNames: async () => {
+          const names: string[] = [];
+          for (const provider of pipelinedProviders) {
+            const tools = (await provider.tools()) as Record<string, unknown>;
+            if (tools) names.push(...Object.keys(tools));
+          }
+          names.push(...serverTools.map((t) => t.name).filter((n) => n !== "repeat_tool"));
+          return Array.from(new Set(names));
+        },
+      });
+    }
+
     const serverTools: ToolDefinition[] = [
       ...skillsRuntime.tools,
       ...supervisorTools,
       ...evaluatorTools,
       ...testerTools,
       ...builtinTools,
+      ...(repeatTool ? [repeatTool] : []),
       ...dataSourceTools,
       ...sshTools,
       ...calendarTools,
@@ -571,11 +611,9 @@ export async function buildBuiltinAgents(
       maxSteps: hasTools ? Math.max(spec.maxSteps, 2) : 1,
       // mcpClients (user-managed lifecycle) — pool owns connections.
       // Pipeline wraps MCP tools identically to serverTools.
-      ...(providers.length > 0
+      ...(pipelinedProviders.length > 0
         ? {
-            mcpClients: providers.map((p) =>
-              composePipelinedMcpProvider(p, pipelineMiddlewares, pipelineCtx),
-            ),
+            mcpClients: pipelinedProviders,
           }
         : {}),
       ...(serverTools.length > 0 ? { tools: serverTools } : {}),
