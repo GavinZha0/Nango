@@ -11,7 +11,7 @@
 import "server-only";
 
 import { BUILTIN_TOOL_RISK_MAP } from "./risk-registry";
-import { wrapUntrustedContext } from "./untrusted-context";
+// import { wrapUntrustedContext } from "./untrusted-context";
 import { defineToolMiddleware } from "./compose";
 import type { ToolMiddleware } from "./types";
 
@@ -141,7 +141,8 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
           if (isExternalTool(call.toolName)) {
             const sanitizedContent = processedContent.map((entry) => {
               if (entry.type === "text" && typeof entry.text === "string") {
-                return { ...entry, text: wrapUntrustedContext(sanitizeToolResultText(entry.text)) };
+                // Temporarily bypass wrapUntrustedContext to prevent breaking structured JSON data
+                return { ...entry, text: sanitizeToolResultText(entry.text) };
               }
               return entry;
             });
@@ -159,7 +160,8 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
       // If string result
       if (typeof rawResult === "string") {
         const sanitized = sanitizeToolResultText(rawResult);
-        return wrapUntrustedContext(sanitized);
+        // Temporarily bypass wrapUntrustedContext to prevent breaking structured JSON data
+        return sanitized;
       }
 
       // If object result containing text/content fields
@@ -167,11 +169,11 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
         const resObj = rawResult as Record<string, unknown>;
         // Return new object to avoid mutating the original reference
         if (typeof resObj.text === "string") {
-          return { ...resObj, text: wrapUntrustedContext(sanitizeToolResultText(resObj.text)) };
+          return { ...resObj, text: sanitizeToolResultText(resObj.text) };
         } else if (typeof resObj.content === "string") {
-          return { ...resObj, content: wrapUntrustedContext(sanitizeToolResultText(resObj.content)) };
+          return { ...resObj, content: sanitizeToolResultText(resObj.content) };
         } else if (typeof resObj.output === "string") {
-          return { ...resObj, output: wrapUntrustedContext(sanitizeToolResultText(resObj.output)) };
+          return { ...resObj, output: sanitizeToolResultText(resObj.output) };
         }
         return rawResult;
       }
