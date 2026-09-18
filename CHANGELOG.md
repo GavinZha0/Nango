@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/GavinZha0/Nango/compare/v0.23.0...v0.24.0) (2026-09-18)
+
+
+### Features
+
+* **tools:** introduce universal server-side repeat_tool for interval execution and polling ([3fdcaa8](https://github.com/GavinZha0/Nango/commit/3fdcaa8f81251aab0f59ec5abd6b2298beeba1a3))
+* **verification:** refactor to group-suite-case architecture and tool prefix rules ([8250df7](https://github.com/GavinZha0/Nango/commit/8250df716460d6edbb0e697d40445303a0bd302d))
+
+
+### Bug Fixes
+
+* **guardrail:** UNTRUSTED_SOURCE_DATA issue of tool ([da7cf64](https://github.com/GavinZha0/Nango/commit/da7cf643d0656962dea3c3ce980fe38b9d44bef1))
+* **repeater:** resolve loop detection false positives and refine execution controls ([e0b48a8](https://github.com/GavinZha0/Nango/commit/e0b48a81f5ab5e1976e73cce7e8023e4855fb953))
+
 ## [0.23.0](https://github.com/GavinZha0/Nango/compare/v0.22.0...v0.23.0) (2026-09-17)
 
 
