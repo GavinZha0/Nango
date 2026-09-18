@@ -147,7 +147,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     name: "repeat_tool",
     displayName: "Repeat tool (Interval runner)",
     description:
-      "Repeat the execution of an MCP or server tool at intervals (5-60s) until a condition is met, max_count is reached, or timeout occurs.",
+      "Repeat the execution of an MCP or server tool at intervals (5-30s) until a condition is met, max_count is reached, or timeout occurs (5-60s). First execution happens immediately (or after initial_delay_sec); returns ONLY the final latest result.",
     category: "outcomes",
     input_schema: {
       type: "object",
@@ -167,12 +167,19 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
           default: 5,
           description: "Interval in seconds between executions (min: 5, max: 30, default: 5).",
         },
+        initial_delay_sec: {
+          type: "number",
+          minimum: 0,
+          maximum: 60,
+          default: 0,
+          description: "Optional initial delay in seconds before the first execution (min: 0, max: 60, default: 0).",
+        },
         timeout_sec: {
           type: "number",
           minimum: 5,
           maximum: 60,
-          default: 30,
-          description: "Maximum total duration in seconds for this call (min: 5, max: 60, default: 30).",
+          default: 60,
+          description: "Maximum total duration in seconds for this call (min: 5, max: 60, default: 60).",
         },
         max_count: {
           type: "integer",

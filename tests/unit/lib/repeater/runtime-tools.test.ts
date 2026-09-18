@@ -4,6 +4,10 @@ import {
   evaluateStopCondition,
   getByDotPath,
 } from "@/lib/repeater/runtime-tools";
+import { composePipelinedMcpProvider } from "@/lib/agent-pipeline/compose";
+import { loopDetectionMiddleware } from "@/lib/agent-pipeline/loop-detection";
+import type { MiddlewareContext } from "@/lib/agent-pipeline/types";
+import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
 
 describe("getByDotPath", () => {
   it("extracts shallow and deeply nested properties", () => {
@@ -315,5 +319,210 @@ describe("buildRepeatTool", () => {
         message: "Database down",
       },
     });
+  });
+
+  it("calls setActiveRepeatTool with toolName before execution and resets to undefined in finally", async () => {
+    const states: (string | undefined)[] = [];
+    const setActiveRepeatToolMock = vi.fn().mockImplementation((name) => {
+      states.push(name);
+    });
+
+    let probeCount = 0;
+    const executeMock = vi.fn().mockImplementation(async () => {
+      probeCount++;
+      return { count: probeCount };
+    });
+
+    const sleepMock = vi.fn().mockResolvedValue(undefined);
+
+    const repeatTool = buildRepeatTool({
+      getTool: () => ({ execute: executeMock }),
+      sleepFn: sleepMock,
+      setActiveRepeatTool: setActiveRepeatToolMock,
+    });
+
+    await (repeatTool.execute as unknown as ToolExecutor)({
+      tool_name: "query_job",
+      interval_sec: 5,
+      timeout_sec: 30,
+      max_count: 2,
+    });
+
+    expect(executeMock).toHaveBeenCalledTimes(2);
+    // Cycle for 2 iterations: set -> clear -> set -> clear
+    expect(states).toEqual(["query_job", undefined, "query_job", undefined]);
+  });
+
+  it("successfully repeats an MCP tool 3 times through loopDetectionMiddleware without triggering loop detection", async () => {
+    const pipelineCtx: MiddlewareContext = {
+      userId: "u1",
+      isHeadless: false,
+      metadata: {},
+    };
+
+    let screenshotCount = 0;
+    const fakeMcpProvider: GracefulMcpProvider = {
+      label: "browser-service",
+      health: "ready",
+      lastErrorMessage: null,
+      async tools() {
+        return {
+          browser_take_screenshot: {
+            description: "Takes screenshot",
+            execute: async () => {
+              screenshotCount++;
+              return { image: `shot-${screenshotCount}` };
+            },
+          },
+        } as never;
+      },
+      async close() {},
+    };
+
+    const pipelinedProviders = [
+      composePipelinedMcpProvider(fakeMcpProvider, [loopDetectionMiddleware(3)], pipelineCtx),
+    ];
+
+    const sleepMock = vi.fn().mockResolvedValue(undefined);
+
+    const repeatTool = buildRepeatTool({
+      setActiveRepeatTool: (toolName) => {
+        if (toolName) {
+          pipelineCtx.metadata.__activeRepeatTool = toolName;
+        } else {
+          delete pipelineCtx.metadata.__activeRepeatTool;
+        }
+      },
+      getTool: async (name: string) => {
+        for (const provider of pipelinedProviders) {
+          const tools = (await provider.tools()) as Record<
+            string,
+            { execute?: (args: unknown) => Promise<unknown> }
+          >;
+          if (tools && name in tools && typeof tools[name].execute === "function") {
+            return tools[name];
+          }
+        }
+        return undefined;
+      },
+      sleepFn: sleepMock,
+    });
+
+    const result = await (repeatTool.execute as unknown as ToolExecutor)({
+      tool_name: "browser_take_screenshot",
+      tool_args: { scale: "css", fullPage: true },
+      interval_sec: 10,
+      max_count: 3,
+      timeout_sec: 60,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      status: "completed",
+      result: { image: "shot-3" },
+    });
+    expect(screenshotCount).toBe(3);
+    expect(sleepMock).toHaveBeenCalledTimes(2);
+    expect(pipelineCtx.metadata.__activeRepeatTool).toBeUndefined();
+    expect(pipelineCtx.metadata.__toolCallHistory).toBeUndefined();
+  });
+
+  it("defaults timeout_sec to 60s and allows 4 iterations with interval_sec=10 without timing out", async () => {
+    let count = 0;
+    const executeMock = vi.fn().mockImplementation(async () => {
+      count++;
+      return { step: count };
+    });
+
+    let currentTime = 0;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+    const sleepMock = vi.fn().mockImplementation(async (ms: number) => {
+      currentTime += ms;
+    });
+
+    const repeatTool = buildRepeatTool({
+      getTool: () => ({ execute: executeMock }),
+      sleepFn: sleepMock,
+    });
+
+    const result = await (repeatTool.execute as unknown as ToolExecutor)({
+      tool_name: "poll_action",
+      interval_sec: 10,
+      max_count: 4,
+      // timeout_sec omitted -> defaults to 60s
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      status: "completed",
+      result: { step: 4 },
+    });
+    expect(executeMock).toHaveBeenCalledTimes(4);
+    expect(sleepMock).toHaveBeenCalledTimes(3);
+
+    dateSpy.mockRestore();
+  });
+
+  it("sleeps for initial_delay_sec before the first execution when specified", async () => {
+    const executionTimestamps: number[] = [];
+    let currentTime = 0;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+
+    const executeMock = vi.fn().mockImplementation(async () => {
+      executionTimestamps.push(currentTime);
+      return { ok: true };
+    });
+
+    const sleepMock = vi.fn().mockImplementation(async (ms: number) => {
+      currentTime += ms;
+    });
+
+    const repeatTool = buildRepeatTool({
+      getTool: () => ({ execute: executeMock }),
+      sleepFn: sleepMock,
+    });
+
+    await (repeatTool.execute as unknown as ToolExecutor)({
+      tool_name: "delayed_action",
+      initial_delay_sec: 10,
+      interval_sec: 5,
+      max_count: 2,
+    });
+
+    // 1st sleep: initial_delay of 10s (10000ms)
+    // 2nd sleep: interval between count 1 and count 2 of 5s (5000ms)
+    expect(sleepMock).toHaveBeenCalledTimes(2);
+    expect(sleepMock).toHaveBeenNthCalledWith(1, 10000);
+    expect(sleepMock).toHaveBeenNthCalledWith(2, 5000);
+
+    // 1st execute happened at t=10000ms (after initial delay)
+    // 2nd execute happened at t=15000ms (after interval)
+    expect(executionTimestamps).toEqual([10000, 15000]);
+
+    dateSpy.mockRestore();
+  });
+
+  it("times out immediately if initial_delay_sec exceeds or equals timeout_sec", async () => {
+    const executeMock = vi.fn();
+    const sleepMock = vi.fn();
+
+    const repeatTool = buildRepeatTool({
+      getTool: () => ({ execute: executeMock }),
+      sleepFn: sleepMock,
+    });
+
+    const result = await (repeatTool.execute as unknown as ToolExecutor)({
+      tool_name: "impossible_action",
+      initial_delay_sec: 60,
+      timeout_sec: 30,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      status: "timeout",
+      result: null,
+    });
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(sleepMock).not.toHaveBeenCalled();
   });
 });

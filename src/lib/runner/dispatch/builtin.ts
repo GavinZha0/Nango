@@ -37,6 +37,7 @@ import {
   type SupervisorRuntime,
 } from "../supervisor-tools.server";
 import { ERROR_POLICY_BLOCK } from "../tool-failure";
+import type { MiddlewareContext } from "@/lib/agent-pipeline/types";
 import { composePipelinedMcpProvider, composeToolPipeline } from "@/lib/agent-pipeline/compose";
 import { buildServerToolMiddlewares } from "@/lib/agent-pipeline/middlewares";
 import {
@@ -541,7 +542,7 @@ export async function buildBuiltinAgents(
       ctx?.initiator === "schedule" ||
       ctx?.initiator === "evaluator";
 
-    const pipelineCtx = {
+    const pipelineCtx: MiddlewareContext = {
       runId: ctx?.runId,
       userId: ctx?.userId ?? "",
       agentId,
@@ -557,6 +558,13 @@ export async function buildBuiltinAgents(
     let repeatTool: ToolDefinition | undefined;
     if (hasRepeatTool) {
       repeatTool = buildRepeatTool({
+        setActiveRepeatTool: (toolName) => {
+          if (toolName) {
+            pipelineCtx.metadata.__activeRepeatTool = toolName;
+          } else {
+            delete pipelineCtx.metadata.__activeRepeatTool;
+          }
+        },
         getTool: async (name: string) => {
           for (const provider of pipelinedProviders) {
             const tools = (await provider.tools()) as Record<

@@ -54,12 +54,18 @@ export const RepeatToolInputSchema = z.object({
     .max(30)
     .default(5)
     .describe("Interval in seconds between executions. Min 5s, max 30s. Default is 5s."),
+  initial_delay_sec: z
+    .number()
+    .min(0)
+    .max(60)
+    .default(0)
+    .describe("Optional initial delay in seconds before the first execution (0-60s, default 0). Use this if you need to wait before starting."),
   timeout_sec: z
     .number()
     .min(5)
     .max(60)
-    .default(30)
-    .describe("Maximum total duration in seconds for this call. Min 5s, max 60s. Default is 30s."),
+    .default(60)
+    .describe("Maximum total duration in seconds for this call. Min 5s, max 60s. Default is 60s."),
   max_count: z
     .number()
     .int()
@@ -103,6 +109,8 @@ export interface BuildRepeatToolOptions {
   availableToolNames?: () => string[] | Promise<string[]>;
   /** Optional custom sleep function (used for unit testing with fake timers). */
   sleepFn?: (ms: number) => Promise<void>;
+  /** Optional hook to mark the currently polling tool name for downstream loop-detection bypass. */
+  setActiveRepeatTool?: (toolName: string | undefined) => void;
 }
 
 /**
@@ -189,7 +197,7 @@ export function buildRepeatTool(opts: BuildRepeatToolOptions): ToolDefinition {
   return defineTool({
     name: "repeat_tool",
     description:
-      "Repeat the execution of an existing tool (such as querying async status or repeating an action) at specified intervals (5-60s) until a stop condition is met, max_count is reached, or a timeout occurs.",
+      "Repeat the execution of an existing tool at specified intervals (5-30s) until a stop condition is met, max_count is reached, or timeout occurs (5-60s). Execution timeline: first execution happens immediately (or after initial_delay_sec if specified), subsequent executions wait interval_sec. NOTE: Returns ONLY the final (latest) execution result; does NOT accumulate intermediate outputs. max_count=1 returns immediately after 1 execution without waiting interval_sec.",
     parameters: RepeatToolInputSchema,
     execute: async (args: RepeatToolInput): Promise<RepeatToolResult> => {
       const toolName = args.tool_name?.trim();
@@ -206,9 +214,11 @@ export function buildRepeatTool(opts: BuildRepeatToolOptions): ToolDefinition {
 
       // Hard clamp boundaries
       const intervalSec = Math.max(5, Math.min(30, args.interval_sec ?? 5));
-      const timeoutSec = Math.max(5, Math.min(60, args.timeout_sec ?? 30));
+      const timeoutSec = Math.max(5, Math.min(60, args.timeout_sec ?? 60));
+      const initialDelaySec = Math.max(0, Math.min(60, args.initial_delay_sec ?? 0));
       const intervalMs = intervalSec * 1000;
       const timeoutMs = timeoutSec * 1000;
+      const initialDelayMs = initialDelaySec * 1000;
       const maxCount = args.max_count !== undefined ? Math.max(1, Math.min(12, args.max_count)) : undefined;
 
       const target = await opts.getTool(toolName);
@@ -229,12 +239,28 @@ export function buildRepeatTool(opts: BuildRepeatToolOptions): ToolDefinition {
       }
 
       const startTime = Date.now();
+      if (initialDelayMs > 0) {
+        if (initialDelayMs >= timeoutMs) {
+          return {
+            ok: true,
+            status: "timeout",
+            result: null,
+          };
+        }
+        await sleep(initialDelayMs);
+      }
+
+      // QUIRK: Currently only the latest result is retained and returned to conserve token budget
+      // and match polling semantics. If sampling workflows need full trajectory history in the future,
+      // consider expanding RepeatToolSuccess to optionally include `results: unknown[]`.
       let latestResult: unknown = null;
       let executionCount = 0;
 
       while (true) {
         executionCount++;
         let rawResult: unknown;
+        // Mark target tool for loop-detection middleware exemption during this probe
+        opts.setActiveRepeatTool?.(toolName);
         try {
           rawResult = await target.execute(args.tool_args ?? {});
         } catch (err) {
@@ -246,6 +272,9 @@ export function buildRepeatTool(opts: BuildRepeatToolOptions): ToolDefinition {
             error: "TOOL_EXECUTION_FAILED",
             message: `Tool '${toolName}' threw an error during execution: ${errMsg}`,
           };
+        } finally {
+          // Always reset the active tool marker immediately after execution
+          opts.setActiveRepeatTool?.(undefined);
         }
 
         // Check if downstream tool returned an error envelope (Rule 19 / ok: false)

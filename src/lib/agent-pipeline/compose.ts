@@ -20,7 +20,7 @@ import type {
 const PIPELINED_MARKER = "__nangoPipelined" as const;
 
 interface ToolLike {
-  name: string;
+  name?: string;
   execute?: (...args: unknown[]) => unknown;
   [PIPELINED_MARKER]?: true;
 }
@@ -66,16 +66,16 @@ export function defineToolMiddleware(spec: ToolMiddlewareSpec): ToolMiddleware {
 export function composeToolPipeline(
   middlewares: readonly ToolMiddleware[],
   ctx: MiddlewareContext,
-): <T extends ToolLike>(tool: T) => T {
+): <T extends ToolLike>(tool: T, fallbackName?: string) => T {
   const ordered = [...middlewares].sort((a, b) => a.order - b.order);
 
-  return function wrap<T extends ToolLike>(tool: T): T {
+  return function wrap<T extends ToolLike>(tool: T, fallbackName?: string): T {
     if (!tool || typeof tool !== "object") return tool;
     if (typeof tool.execute !== "function") return tool;
     if (tool[PIPELINED_MARKER]) return tool;
 
     const original = tool.execute.bind(tool);
-    const toolName = tool.name;
+    const toolName = tool.name ?? fallbackName ?? "unknown_tool";
 
     const wrappedExecute = async (...rawArgs: unknown[]): Promise<unknown> => {
       const call: ToolCall = {
@@ -102,6 +102,7 @@ export function composeToolPipeline(
 
     return {
       ...(tool as object),
+      name: toolName,
       [PIPELINED_MARKER]: true,
       execute: wrappedExecute,
     } as T;
@@ -124,7 +125,7 @@ export function composePipelinedMcpProvider(
       const rawTools = (await provider.tools()) as Record<string, unknown>;
       const result: Record<string, unknown> = {};
       for (const [name, tool] of Object.entries(rawTools)) {
-        result[name] = wrap(tool as ToolLike);
+        result[name] = wrap(tool as ToolLike, name);
       }
       return result as never;
     },

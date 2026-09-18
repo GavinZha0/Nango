@@ -55,6 +55,12 @@ export function loopDetectionMiddleware(threshold = 3): ToolMiddleware {
     name: "loop-detection",
     order: 60,
     beforeToolCall: async (ctx, call) => {
+      // Exemption: Bounded internal probe loop managed by `repeat_tool`.
+      // Bypasses loop detection and avoids polluting conversation tool history.
+      if (ctx.metadata.__activeRepeatTool === call.toolName) {
+        return { action: "pass" };
+      }
+
       // In-memory run-scoped history on ctx.metadata
       const historyKey = "__toolCallHistory";
       if (!Array.isArray(ctx.metadata[historyKey])) {

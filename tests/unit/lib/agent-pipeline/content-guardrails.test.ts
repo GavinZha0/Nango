@@ -31,6 +31,37 @@ describe("G11 LoopDetectionMiddleware", () => {
       message: "Loop detected: tool 'search' called 3 times with identical arguments. Please change your approach or try a different tool.",
     });
   });
+
+  it("bypasses loop detection and avoids polluting history when toolName matches __activeRepeatTool", async () => {
+    const mw = loopDetectionMiddleware(3);
+    const ctx: MiddlewareContext = {
+      isHeadless: false,
+      userId: "u1",
+      metadata: { __activeRepeatTool: "poll_status" },
+    };
+
+    // Should pass indefinitely when matching active repeat tool
+    for (let i = 0; i < 5; i++) {
+      const res = await mw.wrapToolCall(
+        ctx,
+        { toolName: "poll_status", args: { taskId: "task-1" } },
+        async () => "status_ok",
+      );
+      expect(res).toBe("status_ok");
+    }
+
+    // Call history must NOT be polluted
+    expect(ctx.metadata.__toolCallHistory).toBeUndefined();
+
+    // Other tools must still be guarded
+    await mw.wrapToolCall(ctx, { toolName: "other_tool", args: {} }, async () => "ok");
+    await mw.wrapToolCall(ctx, { toolName: "other_tool", args: {} }, async () => "ok");
+    const blockedRes = await mw.wrapToolCall(ctx, { toolName: "other_tool", args: {} }, async () => "ok");
+    expect(blockedRes).toEqual({
+      isError: true,
+      message: "Loop detected: tool 'other_tool' called 3 times with identical arguments. Please change your approach or try a different tool.",
+    });
+  });
 });
 
 describe("G9 Sanitizer & G10 Untrusted Context", () => {

@@ -64,6 +64,44 @@ describe("composePipelinedMcpProvider", () => {
     expect(log).toEqual(["in:test_mcp_tool", "out:test_mcp_tool"]);
   });
 
+  it("correctly supplies toolName to middleware even when the raw tool object lacks a name property", async () => {
+    const executed = vi.fn(async () => "screenshot-ok");
+    const rawProvider: GracefulMcpProvider = {
+      label: "browser-mcp",
+      health: "ready",
+      lastErrorMessage: null,
+      async tools() {
+        return {
+          browser_take_screenshot: {
+            // Emulate dynamicTool where name is not an own property
+            description: "Takes screenshot",
+            execute: executed,
+          },
+        } as never;
+      },
+      async close() {},
+    };
+
+    let observedToolName = "";
+    const mw: ToolMiddleware = {
+      name: "spy",
+      order: 10,
+      wrapToolCall: async (_c, call, next) => {
+        observedToolName = call.toolName;
+        return next(call);
+      },
+    };
+
+    const pipelined = composePipelinedMcpProvider(rawProvider, [mw], ctx);
+    const tools = (await pipelined.tools()) as Record<string, { name?: string; execute?: (args: unknown) => Promise<unknown> }>;
+
+    expect(tools.browser_take_screenshot.name).toBe("browser_take_screenshot");
+    const res = await tools.browser_take_screenshot.execute!({ fullPage: true });
+
+    expect(res).toBe("screenshot-ok");
+    expect(observedToolName).toBe("browser_take_screenshot");
+  });
+
   it("allows middleware to short-circuit (block) an MCP tool call", async () => {
     const executed = vi.fn(async () => "should-not-be-called");
     const provider = createFakeMcpProvider({ dangerous_mcp_tool: executed });

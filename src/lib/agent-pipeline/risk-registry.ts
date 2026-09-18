@@ -73,6 +73,10 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
   ],
   [
+    "repeat_tool",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
     "run_code_in_sandbox",
     { riskLevel: "high", sideEffects: "write", headlessAllowed: true },
   ],

@@ -284,6 +284,7 @@ function wrapTools(
         return normalizeAndDeduplicateMcpResult(result, { parseForUi: false });
       },
     });
+    Object.assign(baseTool, { name: raw.name });
     wrapped[raw.name] = baseTool;
   }
   return wrapped;
