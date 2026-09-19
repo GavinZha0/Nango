@@ -18,6 +18,7 @@
     "start": "next start -p 9300",
     "lint": "eslint",
     "test": "vitest run",
+    "test:migration": "vitest run --config vitest.integration.config.mts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",

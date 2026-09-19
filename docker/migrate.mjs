@@ -4,7 +4,7 @@
  *
  * Maintains a `__migrations` table to track which files have been applied.
  * Only runs new migrations. Each SQL file is split on '--> statement-breakpoint'
- * and executed statement by statement.
+ * and executed statement by statement inside an isolated transaction.
  *
  * Uses the `pg` package which is already bundled in the standalone build.
  * Env on host is loaded via `node --env-file-if-exists=.env` (see package.json);
@@ -20,6 +20,10 @@ import { join } from "path";
 import pg from "pg";
 
 const { Client } = pg;
+
+// SECURITY: Static 64-bit bigint identifier for session-level PostgreSQL advisory lock.
+// Prevents race conditions and corrupted schema states if multiple containers start concurrently.
+const MIGRATION_LOCK_ID = "8246019247192841";
 
 function getPostgresUrl() {
   const url = process.env.POSTGRES_URL;
@@ -50,77 +54,125 @@ async function connectWithRetry(url, maxRetries = 10, delayMs = 3000) {
   throw new Error("Unreachable");
 }
 
-async function migrate() {
-  const url = getPostgresUrl();
-  const migrationsDir = join(process.cwd(), "src/lib/db/migrations");
+/**
+ * Executes pending SQL migrations using per-file transactions protected by an advisory lock.
+ *
+ * @param {import("pg").Client} client
+ * @param {string} migrationsDir
+ */
+async function runMigrations(client, migrationsDir) {
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
   if (files.length === 0) {
     console.log("No migration files found.");
-    return;
+    return { applied: [], pending: 0 };
   }
 
-  const client = await connectWithRetry(url);
+  let lockAcquired = false;
+  try {
+    // SECURITY: Acquire session-level advisory lock to serialize migrations across concurrent containers.
+    await client.query("SELECT pg_advisory_lock($1::bigint)", [MIGRATION_LOCK_ID]);
+    lockAcquired = true;
 
-  // Create migrations tracking table if it doesn't exist
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS "__migrations" (
-      "id" serial PRIMARY KEY,
-      "name" text NOT NULL UNIQUE,
-      "applied_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
-    )
-  `);
+    // Create migrations tracking table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "__migrations" (
+        "id" serial PRIMARY KEY,
+        "name" text NOT NULL UNIQUE,
+        "applied_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )
+    `);
 
-  // Get already-applied migrations
-  const { rows: applied } = await client.query(
-    `SELECT "name" FROM "__migrations" ORDER BY "name"`
-  );
-  const appliedSet = new Set(applied.map((r) => r.name));
+    // Get already-applied migrations
+    const { rows: applied } = await client.query(
+      `SELECT "name" FROM "__migrations" ORDER BY "name"`
+    );
+    const appliedSet = new Set(applied.map((r) => r.name));
 
-  const pending = files.filter((f) => !appliedSet.has(f));
+    const pending = files.filter((f) => !appliedSet.has(f));
 
-  if (pending.length === 0) {
-    console.log(`All ${files.length} migration(s) already applied.`);
-    await client.end();
-    return;
-  }
+    if (pending.length === 0) {
+      console.log(`All ${files.length} migration(s) already applied.`);
+      return { applied: [], pending: 0 };
+    }
 
-  console.log(`Found ${pending.length} pending migration(s) (${files.length} total).`);
+    console.log(`Found ${pending.length} pending migration(s) (${files.length} total).`);
 
-  for (const file of pending) {
-    const filePath = join(migrationsDir, file);
-    const sql = readFileSync(filePath, "utf8");
-    const statements = sql
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const appliedThisRun = [];
 
-    for (const stmt of statements) {
+    for (const file of pending) {
+      const filePath = join(migrationsDir, file);
+      const sql = readFileSync(filePath, "utf8");
+      const statements = sql
+        .split("--> statement-breakpoint")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      // CONTRACT: Run each migration file in a single dedicated transaction.
+      // If any statement fails, rollback completely so no half-applied state is left.
+      await client.query("BEGIN");
       try {
-        await client.query(stmt);
+        for (const stmt of statements) {
+          await client.query(stmt);
+        }
+
+        // Record this migration as applied within the same transaction
+        await client.query(
+          `INSERT INTO "__migrations" ("name") VALUES ($1)`,
+          [file]
+        );
+
+        await client.query("COMMIT");
+        appliedThisRun.push(file);
+        console.log(`  Applied: ${file}`);
       } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`Migration error in ${file}: ${msg}`);
-        await client.end();
-        process.exit(1);
+        throw err;
       }
     }
 
-    // Record this migration as applied
-    await client.query(
-      `INSERT INTO "__migrations" ("name") VALUES ($1)`,
-      [file]
-    );
-    console.log(`  Applied: ${file}`);
+    console.log("All migrations applied.");
+    return { applied: appliedThisRun, pending: pending.length };
+  } finally {
+    if (lockAcquired) {
+      try {
+        await client.query("SELECT pg_advisory_unlock($1::bigint)", [MIGRATION_LOCK_ID]);
+      } catch {
+        // Ignored: closing connection will automatically release session advisory locks
+      }
+    }
   }
-
-  await client.end();
-  console.log("All migrations applied.");
 }
 
-migrate().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exit(1);
-});
+async function migrate() {
+  const url = getPostgresUrl();
+  const migrationsDir = join(process.cwd(), "src/lib/db/migrations");
+  const client = await connectWithRetry(url);
+
+  try {
+    await runMigrations(client, migrationsDir);
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+import { fileURLToPath } from "url";
+import { resolve } from "path";
+
+const isCli =
+  Boolean(process.argv[1]) &&
+  resolve(process.argv[1]).toLowerCase() ===
+    resolve(fileURLToPath(import.meta.url)).toLowerCase();
+
+if (isCli) {
+  migrate().catch((err) => {
+    console.error("Migration failed:", err);
+    process.exit(1);
+  });
+}
+
+export { runMigrations, getPostgresUrl, connectWithRetry, MIGRATION_LOCK_ID };
