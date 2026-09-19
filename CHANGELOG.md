@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/GavinZha0/Nango/compare/v0.24.0...v0.24.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **migration:** 0004 verification issue ([65bce1f](https://github.com/GavinZha0/Nango/commit/65bce1f343e2446bbecfb02ecb10917ef424d587))
+
 ## [0.24.0](https://github.com/GavinZha0/Nango/compare/v0.23.0...v0.24.0) (2026-09-18)
 
 
