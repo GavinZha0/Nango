@@ -545,10 +545,14 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
               viewMode={node?.viewMode ?? "snapshot"}
               disableManagement={activeView === "workflow"}
               onExport={node?.type === "slide" ? handleExportSlides : undefined}
-              onRefresh={() => {
-                if (activeView === "workflow") setActiveView("preview");
-                void handleRefresh();
-              }}
+              onRefresh={
+                node?.type === "slide"
+                  ? undefined
+                  : () => {
+                      if (activeView === "workflow") setActiveView("preview");
+                      void handleRefresh();
+                    }
+              }
               onSaveSnapshot={() => {
                 if (activeView === "workflow") setActiveView("preview");
                 void handleSaveSnapshot();
@@ -934,7 +938,7 @@ function ActionBar({
 }: {
   viewMode: "snapshot" | "live";
   disableManagement?: boolean;
-  onRefresh: () => void;
+  onRefresh?: () => void;
   onSaveSnapshot: () => void;
   onLoadSnapshot: () => void;
   onCompare: () => void;
@@ -961,16 +965,18 @@ function ActionBar({
           </Tooltip>
         )}
 
-        <Tooltip>
-          <TooltipTrigger
-            onClick={onRefresh}
-            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
-            aria-label="Refresh live data"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Refresh</TooltipContent>
-        </Tooltip>
+        {onRefresh && (
+          <Tooltip>
+            <TooltipTrigger
+              onClick={onRefresh}
+              className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+              aria-label="Refresh live data"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Refresh</TooltipContent>
+          </Tooltip>
+        )}
 
         <Tooltip>
           <TooltipTrigger

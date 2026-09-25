@@ -22,6 +22,7 @@ import type {
   CardListItem,
   Outcome,
   OutcomeBlock,
+  SlideBlock,
 } from "@/store/outcome-store";
 import type {
   WebSearchOk,
@@ -39,6 +40,7 @@ import {
   type GenerateBentoSlidesArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
 import { normalizeOutcomeId } from "./schema";
+import { mergeSlideDocs } from "./merge-slides";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
 
@@ -338,6 +340,7 @@ export function rebuildHtmlPageOutcome(
 export function rebuildBentoSlidesOutcome(
   chunk: ToolCallChunkPayload,
   ctx: RebuildContext,
+  priorOutcome?: Outcome,
 ): { id: string; outcome: Outcome } | null {
   let rawArgs: Record<string, unknown>;
   try {
@@ -367,7 +370,32 @@ export function rebuildBentoSlidesOutcome(
     );
     return null;
   }
-  const content = slideArgsToContent(args);
+
+  const priorSlideBlock = priorOutcome?.blocks.find(
+    (b): b is SlideBlock => b.kind === "slide",
+  );
+
+  // CONTRACT: Global toolCallId idempotency guard across runs
+  // If this toolCallId was already processed into priorOutcome (whether append or non-append replay),
+  // short-circuit return to prevent replayed initial chunks from resetting the outcome.
+  if (priorOutcome && priorSlideBlock?.appliedToolCallIds?.includes(chunk.toolCallId)) {
+    return { id: normalizeOutcomeId(args.outcome_id), outcome: priorOutcome };
+  }
+
+  let appliedToolCallIds = [chunk.toolCallId];
+  let finalDoc = args.doc;
+  if (args.append === true && priorOutcome && priorSlideBlock && priorSlideBlock.doc) {
+    finalDoc = mergeSlideDocs(priorSlideBlock.doc, args.doc);
+    appliedToolCallIds = [
+      ...(priorSlideBlock.appliedToolCallIds ?? []),
+      chunk.toolCallId,
+    ];
+  }
+
+  const content = slideArgsToContent({
+    ...args,
+    doc: finalDoc,
+  });
   if (content === null) {
     ctx.log.warn(
       {
@@ -379,21 +407,26 @@ export function rebuildBentoSlidesOutcome(
     );
     return null;
   }
+  const slideBlock = content.blocks[0];
+  if (slideBlock && slideBlock.kind === "slide") {
+    slideBlock.appliedToolCallIds = appliedToolCallIds;
+  }
+
   const finalOutcomeId = normalizeOutcomeId(args.outcome_id);
   return {
     id: finalOutcomeId,
     outcome: {
       outcomeId: finalOutcomeId,
       kind: "report",
-      title: args.title,
-      description: args.description,
+      title: priorOutcome?.title ?? args.title,
+      description: priorOutcome?.description ?? args.description,
       blocks: content.blocks,
       agentId: ctx.entityId,
       threadId: ctx.threadId,
       runId: ctx.runId,
-      createdAt: ctx.ts.getTime(),
-      collapsed: false,
-      savedArtifactId: null,
+      createdAt: priorOutcome?.createdAt ?? ctx.ts.getTime(),
+      collapsed: priorOutcome ? priorOutcome.collapsed : false,
+      savedArtifactId: priorOutcome?.savedArtifactId ?? null,
     },
   };
 }

@@ -106,7 +106,8 @@ export const BENTO_SLIDES_PROMPT_BLOCKS = {
     "- Morph Transitions: If elements across consecutive slides share the exact same `id` (e.g. `id: 'hero-metric'`), set the latter slide's `transition: 'morph'`; Bento will automatically glide and morph them between slides.",
     "- Charts: Bento uses an embedded charts-lite engine (not full ECharts). Supported chart types include 'bar', 'line', 'pie'. Provide simple 1D number arrays in `series[*].data` and category labels in `xAxis.data` (e.g., `series: [{ type: 'bar', data: [120, 200, 150] }]`, `xAxis: { data: ['Q1', 'Q2', 'Q3'] }`). Do NOT use complex `dataset.source` or 2D matrices.",
     "- The slides render in the user's Outcomes preview panel IMMEDIATELY on success — do NOT paste JSON document text into your chat reply.",
-    "- Re-calling with the same outcome_id OVERWRITES the previous deck.",
+    "- Multi-slide / Incremental generation (append mode): If generating a large presentation (e.g. > 6 slides), generate in batches (e.g. 3-5 slides per tool call). On the first call, use append: false (or omit) to initialize the presentation. On subsequent calls with the SAME outcome_id, set append: true to seamlessly append new slides to the existing deck without overwriting previous slides. This prevents generation timeouts and LLM token limit truncation.",
+    "- Re-calling with the same outcome_id and append: false (default) OVERWRITES the previous deck.",
     "- outcome_id MUST contain only letters, numbers, spaces, hyphens, and underscores. Try to use clean kebab-case or snake_case (e.g. 'quarterly-review' or 'sales_deck').",
   ].join("\n"),
 } as const;

@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
 
+import { normalizeOutcomeId } from "@/lib/outcomes/schema";
 import type { Outcome } from "@/store/outcome-store";
 import {
   rebuildChartOutcome,
@@ -130,13 +131,27 @@ export const GET = withSession<{ threadId: string }>(
         }
 
         if (chunk.toolName === "generate_bento_slides") {
-          const built = rebuildBentoSlidesOutcome(chunk, {
-            threadId,
-            runId: row.runId,
-            entityId: row.entityId,
-            ts: row.eventTs,
-            log,
-          });
+          let priorOutcome: Outcome | undefined;
+          try {
+            const raw = JSON.parse(chunk.args) as Record<string, unknown>;
+            if (raw && typeof raw.outcome_id === "string") {
+              const normId = normalizeOutcomeId(raw.outcome_id);
+              priorOutcome = outcomes.get(normId);
+            }
+          } catch {
+            // parse error handled inside rebuilder
+          }
+          const built = rebuildBentoSlidesOutcome(
+            chunk,
+            {
+              threadId,
+              runId: row.runId,
+              entityId: row.entityId,
+              ts: row.eventTs,
+              log,
+            },
+            priorOutcome,
+          );
           if (built) outcomes.set(built.id, built.outcome);
           continue;
         }

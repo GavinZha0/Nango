@@ -172,6 +172,137 @@ describe("rebuildBentoSlidesOutcome", () => {
     expect(built!.id).toBe("my-fancy-deck");
     expect(built!.outcome.outcomeId).toBe("my-fancy-deck");
   });
+
+  it("appends slides when append: true and priorOutcome exists", () => {
+    const chunk1: ToolCallChunkPayload = {
+      toolCallId: "call-slides-chunk-1",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "incremental-deck",
+        title: "Incremental Deck",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-1", content: "Part 1" }],
+        },
+      }),
+    };
+    const built1 = rebuildBentoSlidesOutcome(chunk1, ctxFixture());
+    expect(built1).not.toBeNull();
+
+    const chunk2: ToolCallChunkPayload = {
+      toolCallId: "call-slides-chunk-2",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "incremental-deck",
+        title: "Incremental Deck",
+        append: true,
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-2", content: "Part 2" }],
+        },
+      }),
+    };
+    const built2 = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built1!.outcome);
+    expect(built2).not.toBeNull();
+    const slideBlock = built2!.outcome.blocks[0];
+    if (slideBlock.kind === "slide") {
+      const slides = slideBlock.doc.slides as Array<Record<string, unknown>>;
+      expect(slides).toHaveLength(2);
+      expect(slides[0]?.id).toBe("slide-1");
+      expect(slides[1]?.id).toBe("slide-2");
+    }
+  });
+
+  it("replaces slides when append: false even if priorOutcome exists", () => {
+    const chunk1: ToolCallChunkPayload = {
+      toolCallId: "call-slides-chunk-1",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "replace-deck",
+        title: "Old Deck",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-old" }],
+        },
+      }),
+    };
+    const built1 = rebuildBentoSlidesOutcome(chunk1, ctxFixture());
+
+    const chunk2: ToolCallChunkPayload = {
+      toolCallId: "call-slides-chunk-2",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "replace-deck",
+        title: "New Deck",
+        append: false,
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-new" }],
+        },
+      }),
+    };
+    const built2 = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built1!.outcome);
+    expect(built2).not.toBeNull();
+    const slideBlock = built2!.outcome.blocks[0];
+    if (slideBlock.kind === "slide") {
+      const slides = slideBlock.doc.slides as Array<Record<string, unknown>>;
+      expect(slides).toHaveLength(1);
+      expect(slides[0]?.id).toBe("slide-new");
+    }
+  });
+
+  it("is idempotent when the same toolCallId is replayed twice", () => {
+    const chunk1: ToolCallChunkPayload = {
+      toolCallId: "call-slides-1",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "idempotent-deck",
+        title: "Main Presentation Title",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-1" }],
+        },
+      }),
+    };
+    const built1 = rebuildBentoSlidesOutcome(chunk1, ctxFixture());
+
+    const chunk2: ToolCallChunkPayload = {
+      toolCallId: "call-slides-2",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "idempotent-deck",
+        title: "Subsequent Batch Title",
+        append: true,
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-2" }],
+        },
+      }),
+    };
+    const built2 = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built1!.outcome);
+    expect(built2).not.toBeNull();
+    expect(built2!.outcome.title).toBe("Main Presentation Title");
+
+    // Replay chunk2 again (same toolCallId)
+    const built2Again = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built2!.outcome);
+    expect(built2Again).not.toBeNull();
+    const slideBlock = built2Again!.outcome.blocks[0];
+    if (slideBlock.kind === "slide") {
+      const slides = slideBlock.doc.slides as Array<Record<string, unknown>>;
+      expect(slides).toHaveLength(2); // Still 2, not 3
+      expect(slideBlock.appliedToolCallIds).toContain("call-slides-1");
+      expect(slideBlock.appliedToolCallIds).toContain("call-slides-2");
+    }
+
+    // Replay chunk1 again (cross-run replay of initial append: false chunk)
+    const built1Again = rebuildBentoSlidesOutcome(chunk1, ctxFixture(), built2!.outcome);
+    expect(built1Again).not.toBeNull();
+    const slideBlock1Again = built1Again!.outcome.blocks[0];
+    if (slideBlock1Again.kind === "slide") {
+      const slides = slideBlock1Again.doc.slides as Array<Record<string, unknown>>;
+      expect(slides).toHaveLength(2); // Still 2, does NOT reset to 1!
+    }
+  });
 });
 
 describe("rebuildWebSearchOutcome", () => {

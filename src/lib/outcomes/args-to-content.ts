@@ -175,6 +175,7 @@ export interface GenerateBentoSlidesArtifactArgs {
   outcome_id: string;
   title: string;
   description?: string;
+  append?: boolean;
   doc: Record<string, unknown>;
 }
 
@@ -225,6 +226,9 @@ export function readGenerateBentoSlidesArgs(
   };
   if (typeof args.description === "string") {
     out.description = args.description;
+  }
+  if (typeof args.append === "boolean") {
+    out.append = args.append;
   }
   return out;
 }

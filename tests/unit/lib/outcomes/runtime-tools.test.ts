@@ -141,6 +141,25 @@ describe("buildGenerateBentoSlidesTool", () => {
       expect(result.error).toBe("DOC_NO_SLIDES");
     }
   });
+
+  it("handles append: true in arguments and reflects in success envelope", async () => {
+    const validDoc = {
+      format: "bento/slides",
+      slides: [{ id: "slide-batch-2" }],
+    };
+
+    const result = await execute({
+      outcome_id: "multi-batch-deck",
+      title: "Batch Presentation",
+      append: true,
+      doc: validDoc,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.append).toBe(true);
+    }
+  });
 });
 
 describe("prompt blocks", () => {
@@ -151,6 +170,8 @@ describe("prompt blocks", () => {
     expect(block).toContain("1280x720");
     expect(block).toContain("charts-lite");
     expect(block).toContain("outcome_id");
+    expect(block).toContain("append: true");
+    expect(block).toContain("Incremental generation");
   });
 
   it("buildHtmlPagePromptBlock contains usage guidelines", () => {

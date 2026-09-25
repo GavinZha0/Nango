@@ -240,8 +240,9 @@ export function buildGenerateBentoSlidesTool(): ToolDefinition {
       "Generate an interactive slide deck presentation using Bento and " +
       "surface it as a preview card in the user's Outcomes panel. The deck " +
       "renders in a sandboxed iframe with morph transitions IMMEDIATELY on " +
-      "success — DO NOT paste the JSON doc into your text reply. Re-calling " +
-      "with the same outcome_id OVERWRITES the previous slide deck. " +
+      "success — DO NOT paste the JSON doc into your text reply. " +
+      "Setting append: true appends slides incrementally to an existing presentation without overwriting. " +
+      "Re-calling with the same outcome_id and append: false (default) OVERWRITES the previous slide deck. " +
       "USE THIS when the user asks for a presentation, pitch deck, slide deck, " +
       "or visual report slides. " +
       "FORMAT: doc must have format: 'bento/slides' and a non-empty slides array. " +
@@ -301,6 +302,9 @@ export function buildGenerateBentoSlidesTool(): ToolDefinition {
           description: args.description,
         }),
         doc: args.doc,
+        ...(args.append !== undefined && {
+          append: args.append,
+        }),
         ...(originalOutcomeId !== finalOutcomeId && {
           message: `The outcome_id was normalized from "${originalOutcomeId}" to "${finalOutcomeId}". Please use "${finalOutcomeId}" for subsequent updates.`,
         }),

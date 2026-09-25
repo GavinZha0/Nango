@@ -138,9 +138,17 @@ export async function buildArtifactBundle(
   // ── Snapshot path ────────────────────────────────────────────────
   // When view_mode='snapshot' and a snapshot exists, return it
   // immediately without executing the workflow.
+  // CONTRACT: Slide artifacts are snapshot-driven documents. When a snapshot
+  // exists, always return it to prevent live workflow re-execution from
+  // truncating incrementally-appended slide presentations.
+  const isSlideWithSnapshot =
+    node.type === "slide" &&
+    node.snapshot !== null &&
+    node.snapshot !== undefined;
+
   if (
-    options?.forceFresh !== true &&
-    node.viewMode === "snapshot" &&
+    (isSlideWithSnapshot || options?.forceFresh !== true) &&
+    (isSlideWithSnapshot || node.viewMode === "snapshot") &&
     node.snapshot !== null &&
     node.snapshot !== undefined
   ) {

@@ -65,31 +65,23 @@ export function SlidesPreviewCard(props: SlidesPreviewProps): ReactElement {
   );
 
   // Side-effect: when the server tool completes successfully, upsert
-  // the Bento slides into the Outcomes store.
+  // the Bento slides into the Outcomes store via specialized slide handler.
   useEffect(() => {
     if (props.status !== "complete") return;
     const parsed = parseServerResult(props.result);
     if (parsed === null || parsed.ok !== true) return;
 
     const ws = useWorkspaceStore.getState();
-    useOutcomeStore.getState().addOutcome({
+    useOutcomeStore.getState().upsertSlideOutcome({
       outcomeId: parsed.outcome_id,
-      kind: "report",
       title: parsed.title,
       description: parsed.description,
-      blocks: [
-        {
-          kind: "slide",
-          doc: parsed.doc,
-          title: parsed.title,
-        },
-      ],
-      agentId: ws.activeAgentId,
+      doc: parsed.doc,
+      append: parsed.append,
+      toolCallId: props.toolCallId,
+      agentId: ws.activeAgentId ?? "system",
       threadId: ws.runtimeThreadId ?? null,
       runId: null,
-      createdAt: Date.now(),
-      collapsed: false,
-      savedArtifactId: null,
     });
   }, [props.status, props.result, props.toolCallId]);
 
@@ -165,10 +157,15 @@ function SuccessCard({
         <button
           type="button"
           onClick={() => onView(args.outcome_id)}
-          className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-amber-600 hover:text-amber-700 hover:underline dark:text-amber-400 dark:hover:text-amber-300"
+          className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-amber-600 hover:text-amber-700 hover:underline dark:text-amber-400 dark:hover:text-amber-300"
           aria-label={`View ${args.title} in Outcomes`}
         >
           {args.title}
+          {args.append && (
+            <span className="text-xs font-normal text-muted-foreground">
+              (appended)
+            </span>
+          )}
           <ArrowUpRight className="h-3 w-3" aria-hidden />
         </button>
       </div>

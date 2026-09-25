@@ -385,6 +385,100 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(saved.snapshot).toEqual({ ...slideDoc, title: "Pitch Deck" });
   });
 
+  it("should merge slides from multi-chunk append calls when saving slide artifact", async () => {
+    const outcomeId = "multi-chunk-deck";
+    const toolCallId1 = "call-slide-chunk-1";
+    const toolCallId2 = "call-slide-chunk-2";
+
+    const slideDocPart1 = {
+      format: "bento/slides",
+      title: "Complete Deck",
+      slides: [{ id: "slide-1", content: "Part 1" }],
+    };
+    const slideDocPart2 = {
+      format: "bento/slides",
+      slides: [{ id: "slide-2", content: "Part 2" }],
+    };
+
+    mockEvents = [
+      {
+        id: 1,
+        runId: "run-6",
+        seq: 0,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: toolCallId1,
+          toolName: "generate_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            title: "Complete Deck",
+            append: false,
+            doc: slideDocPart1,
+          }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 2,
+        runId: "run-6",
+        seq: 1,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: toolCallId1,
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, title: "Complete Deck", doc: slideDocPart1 }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 3,
+        runId: "run-6",
+        seq: 2,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: toolCallId2,
+          toolName: "generate_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            title: "Complete Deck",
+            append: true,
+            doc: slideDocPart2,
+          }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 4,
+        runId: "run-6",
+        seq: 3,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: toolCallId2,
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, title: "Complete Deck", append: true, doc: slideDocPart2 }),
+        },
+        createdAt: new Date(),
+      },
+    ] as unknown as EntityRunEventEntity[];
+
+    const input: SaveArtifactInput = {
+      ownerId,
+      threadId,
+      outcomeId,
+      name: "Complete Deck",
+    };
+
+    const result = await saveArtifact(input, mockDeps);
+
+    expect(result.reused).toBe(false);
+    expect(mockInsertedArtifacts.length).toBe(1);
+
+    const saved = mockInsertedArtifacts[0];
+    expect(saved.type).toBe("slide");
+    const snapshot = saved.snapshot as { slides: Array<Record<string, unknown>> };
+    expect(snapshot.slides).toHaveLength(2);
+    expect(snapshot.slides[0]?.id).toBe("slide-1");
+    expect(snapshot.slides[1]?.id).toBe("slide-2");
+  });
+
   it("should be idempotent when saving the same outcome twice", async () => {
     mockExistingArtifact = {
       id: "existing-art-99",

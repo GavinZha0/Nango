@@ -145,6 +145,12 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
           type: "string",
           description: "Optional summary of the slide deck.",
         },
+        append: {
+          type: "boolean",
+          default: false,
+          description:
+            "If true, appends the provided slides to the existing presentation with outcome_id. If false (default), replaces or creates a new presentation.",
+        },
         doc: {
           type: "object",
           description:

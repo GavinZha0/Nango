@@ -10,6 +10,7 @@
  */
 
 import { create } from "zustand";
+import { mergeSlideDocs } from "@/lib/outcomes/merge-slides";
 
 // blocks
 
@@ -105,6 +106,8 @@ export interface SlideBlock {
   doc: Record<string, unknown>;
   /** Optional title to fall back to when doc.title is omitted */
   title?: string;
+  /** Track all toolCallIds applied to this slide deck to ensure idempotent incremental appending */
+  appliedToolCallIds?: string[];
 }
 
 // outcome
@@ -155,6 +158,18 @@ export type Outcome = ReportOutcome;
 
 export type OutcomeStatus = "idle" | "loading" | "ready" | "error";
 
+export interface UpsertSlideOutcomeInput {
+  outcomeId: string;
+  title: string;
+  description?: string;
+  doc: Record<string, unknown>;
+  append?: boolean;
+  toolCallId: string;
+  agentId: string;
+  threadId: string | null;
+  runId: string | null;
+}
+
 interface OutcomeState {
   /** Outcomes belonging to the CURRENT thread. Cleared on thread switch. */
   outcomes: Outcome[];
@@ -167,6 +182,9 @@ interface OutcomeState {
    *  user-toggled `collapsed` across upserts so a regenerate
    *  doesn't unsave the library copy or undo a collapse. */
   addOutcome: (outcome: Outcome) => void;
+  /** Specialized upsert for Bento Slides supporting idempotent appending,
+   *  deduplication, and out-of-order mount resolution without module-level state. */
+  upsertSlideOutcome: (input: UpsertSlideOutcomeInput) => void;
   removeOutcome: (outcomeId: string) => void;
   toggleCollapse: (outcomeId: string) => void;
   select: (outcomeId: string | null) => void;
@@ -211,6 +229,95 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
           collapsed: prior.collapsed,
         };
         const next: Outcome[] = state.outcomes.slice();
+        next[idx] = merged;
+        return { outcomes: next };
+      }),
+
+    upsertSlideOutcome: (input) =>
+      set((state) => {
+        const idx = state.outcomes.findIndex(
+          (o) => o.outcomeId === input.outcomeId,
+        );
+
+        if (idx === -1) {
+          // If no existing deck, initialize it (even if append: true arrived first,
+          // it immediately surfaces in store to prevent missing panel content).
+          const outcome: Outcome = {
+            outcomeId: input.outcomeId,
+            kind: "report",
+            title: input.title,
+            description: input.description,
+            blocks: [
+              {
+                kind: "slide",
+                doc: input.doc,
+                title: input.title,
+                appliedToolCallIds: [input.toolCallId],
+              },
+            ],
+            agentId: input.agentId,
+            threadId: input.threadId,
+            runId: input.runId,
+            createdAt: Date.now(),
+            collapsed: false,
+            savedArtifactId: null,
+          };
+          return { outcomes: [...state.outcomes, outcome] };
+        }
+
+        const prior = state.outcomes[idx];
+        const priorSlideBlock = prior.blocks.find(
+          (b): b is SlideBlock => b.kind === "slide",
+        );
+
+        // CONTRACT: Idempotency check — if this toolCallId was already applied to the deck,
+        // short-circuit return to prevent duplicate additions or resets during remounts or StrictMode.
+        if (priorSlideBlock?.appliedToolCallIds?.includes(input.toolCallId)) {
+          return state;
+        }
+
+        let nextDoc = input.doc;
+        let nextAppliedIds = [input.toolCallId];
+        let nextTitle = input.title;
+        let nextDescription = input.description;
+
+        if (priorSlideBlock && priorSlideBlock.doc) {
+          if (input.append === true) {
+            // Normal sequential append: prior is base, incoming slides append to existing deck
+            nextDoc = mergeSlideDocs(priorSlideBlock.doc, input.doc);
+            nextTitle = prior.title || input.title;
+            nextDescription = prior.description ?? input.description;
+            nextAppliedIds = [
+              ...(priorSlideBlock.appliedToolCallIds ?? []),
+              input.toolCallId,
+            ];
+          } else {
+            // Out-of-order mount resolution: input is base, prepend base doc ahead of prior append slides!
+            nextDoc = mergeSlideDocs(input.doc, priorSlideBlock.doc);
+            nextTitle = input.title || prior.title;
+            nextDescription = input.description ?? prior.description;
+            nextAppliedIds = [
+              input.toolCallId,
+              ...(priorSlideBlock.appliedToolCallIds ?? []),
+            ];
+          }
+        }
+
+        const merged: Outcome = {
+          ...prior,
+          title: nextTitle,
+          description: nextDescription,
+          blocks: [
+            {
+              kind: "slide",
+              doc: nextDoc,
+              title: nextTitle,
+              appliedToolCallIds: nextAppliedIds,
+            },
+          ],
+        };
+
+        const next = state.outcomes.slice();
         next[idx] = merged;
         return { outcomes: next };
       }),

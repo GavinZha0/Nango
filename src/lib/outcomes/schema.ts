@@ -272,6 +272,14 @@ export const generateBentoSlidesSchema = z.object({
     .string()
     .optional()
     .describe("One-sentence summary of what this presentation covers."),
+  append: z
+    .boolean()
+    .optional()
+    .describe(
+      "Optional: if true, appends the provided slides to the existing presentation with outcome_id. " +
+        "If false (default), replaces or creates a new presentation. " +
+        "Use append: true when generating multi-slide presentations incrementally to avoid timeouts.",
+    ),
   doc: z
     .record(z.string(), z.unknown())
     .describe(
@@ -301,6 +309,7 @@ export interface GenerateBentoSlidesSuccess {
   title: string;
   description?: string;
   doc: Record<string, unknown>;
+  append?: boolean;
   message?: string;
 }
 
