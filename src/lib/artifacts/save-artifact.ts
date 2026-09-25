@@ -120,13 +120,25 @@ function extractInitialSnapshot(
           for (let i = startIndex + 1; i < related.length; i++) {
             const item = related[i]!;
             if (item.toolName === "edit_bento_slides") {
+              // CONTRACT: Only replay edits the server tool accepted. `item.ok` is
+              // true only when the tool returned `{ ok: true, ... }` (verified by
+              // coalesceToolCalls via isFailedEnvelope). Skipping failed calls prevents
+              // applying operations that were rejected at execution time (e.g.
+              // REPLACE_COUNT_MISMATCH, DUPLICATE_SLIDE_ID). item.result carries the
+              // server-validated payload including ID-locked slides from normalizedSlides.
+              if (!item.ok || !item.result) continue;
+
+              const res = item.result;
+              const action = res.action;
+              if (action !== "delete" && action !== "replace" && action !== "insert") continue;
+
               const editRes = applySlideEdit(currentDoc, {
-                action: item.inputs.action as "delete" | "replace" | "insert",
-                target_slide_ids: Array.isArray(item.inputs.target_slide_ids)
-                  ? item.inputs.target_slide_ids.map(String)
+                action,
+                target_slide_ids: Array.isArray(res.target_slide_ids)
+                  ? res.target_slide_ids.map(String)
                   : undefined,
-                slides: Array.isArray(item.inputs.slides)
-                  ? (item.inputs.slides as Array<Record<string, unknown>>)
+                slides: Array.isArray(res.slides)
+                  ? (res.slides as Array<Record<string, unknown>>)
                   : undefined,
               });
               if (editRes.changed) {
@@ -227,12 +239,18 @@ export async function saveArtifact(
     sourceThreadId: input.threadId,
     sourceOutcomeId: input.outcomeId,
   });
+
+  // CONTRACT: Load events ONCE and reuse across both the idempotency
+  // update path (if existing !== null) and the fresh-save path.
+  // Prevents double full-thread event walk for the common
+  // "re-save" case.
+  const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
+  const invocations = coalesceToolCalls(rawEvents);
+
   if (existing !== null) {
     // CONTRACT: If the existing artifact is an incrementally-appended slide deck,
     // subsequent append calls in the thread may have arrived after the first save.
     // Update the existing artifact's snapshot so it captures the full merged presentation.
-    const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
-    const invocations = coalesceToolCalls(rawEvents);
     const normId = normalizeOutcomeId(input.outcomeId);
     const relatedSlideInvs = invocations.filter(
       (inv) =>
@@ -243,7 +261,7 @@ export async function saveArtifact(
           normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) === normId),
     );
     const hasEditsOrAppends = relatedSlideInvs.some(
-      (inv) => inv.toolName === "edit_bento_slides" || inv.inputs.append === true,
+      (inv) => inv.toolName === "edit_bento_slides",
     );
     if (hasEditsOrAppends && relatedSlideInvs.length > 0) {
       const lastInv = relatedSlideInvs[relatedSlideInvs.length - 1]!;
@@ -287,18 +305,15 @@ export async function saveArtifact(
   // `tool_call_chunk` event's args somewhere in the thread; the
   // chunk also carries the OpenAI `toolCallId` we need to identify
   // the artifact creator.
-  const resolution = await resolveOutcomeToCall({
-    threadId: input.threadId,
-    outcomeId: input.outcomeId,
-    ownerId: input.ownerId,
-  });
-
-  // Cross-run load: chat tool calls routinely span multiple runs
-  // (chunk + result in turn N, replayed result in turn N+1). The
-  // coalescer pins each toolCallId to its origin run to avoid
-  // double-concatenation.
-  const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
-  const invocations = coalesceToolCalls(rawEvents);
+  // CONTRACT: Pass preloaded rawEvents to avoid double full-thread event walk.
+  const resolution = await resolveOutcomeToCall(
+    {
+      threadId: input.threadId,
+      outcomeId: input.outcomeId,
+      ownerId: input.ownerId,
+    },
+    rawEvents,
+  );
 
   // Pure pipeline: events → LLM spec + lineage.
   const built = buildWorkflowSpecFromRunEvents({
@@ -312,9 +327,7 @@ export async function saveArtifact(
     invocations.some(
       (inv) =>
         inv.ok &&
-        (inv.toolName === "edit_bento_slides" ||
-          (inv.toolName === "generate_bento_slides" &&
-            inv.inputs.append === true)) &&
+        inv.toolName === "edit_bento_slides" &&
         (inv.inputs.outcome_id === input.outcomeId ||
           normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) ===
             normalizeOutcomeId(input.outcomeId)),
@@ -502,12 +515,22 @@ export async function saveArtifact(
  *
  * Throws `WorkflowError` (`UNKNOWN_ERROR`) when no match exists.
  */
-async function resolveOutcomeToCall(args: {
-  threadId: string;
-  outcomeId: string;
-  ownerId: string;
-}): Promise<{ runId: string; toolCallId: string }> {
-  const chunkRows = await loadThreadEvents(args.threadId, args.ownerId);
+async function resolveOutcomeToCall(
+  args: {
+    threadId: string;
+    outcomeId: string;
+    ownerId: string;
+  },
+  preloadedEvents?: Array<{
+    runId: string;
+    seq: number;
+    type: string;
+    payload: unknown;
+    ts: Date;
+  }>,
+): Promise<{ runId: string; toolCallId: string }> {
+  const chunkRows =
+    preloadedEvents ?? (await loadThreadEvents(args.threadId, args.ownerId));
 
   // Coalesce so multi-chunk args (Vercel AI SDK streams args
   // incrementally) end up as a single parseable object. Passing

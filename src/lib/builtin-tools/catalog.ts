@@ -133,7 +133,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     // CONTRACT: Single capability toggle per product UX decision. In BuiltinAgentEditor,
     // this single entry mounts both `generate_bento_slides` and `edit_bento_slides`.
     // The input_schema below covers deck generation; `edit_bento_slides` schema is
-    // registered independently under WORKFLOW_AMBIENT_TOOLS for tool discovery.
+    // registered via the `bundled` property and expanded in listWorkflowToolDescriptors().
     description:
       "Generate and incrementally edit Bento presentation slide decks (create, delete, replace, and insert/append slides).",
     category: "outcomes",

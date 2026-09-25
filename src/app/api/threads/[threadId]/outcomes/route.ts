@@ -135,55 +135,20 @@ export const GET = withSession<{ threadId: string }>(
           continue;
         }
 
-        if (chunk.toolName === "generate_bento_slides") {
-          let priorOutcome: Outcome | undefined;
-          try {
-            const raw = JSON.parse(chunk.args) as Record<string, unknown>;
-            if (raw && typeof raw.outcome_id === "string") {
-              const normId = normalizeOutcomeId(raw.outcome_id);
-              priorOutcome = outcomes.get(normId);
-            }
-          } catch {
-            // parse error handled inside rebuilder
-          }
-          const built = rebuildBentoSlidesOutcome(
+        // generate_bento_slides and edit_bento_slides are stashed in `pending`
+        // so they can be paired with their result events. The rebuilders check
+        // result.ok before applying — failed calls (DOC_TOO_LARGE, REPLACE_COUNT_MISMATCH,
+        // etc.) are skipped rather than replayed as ghost outcomes.
+        if (
+          chunk.toolName === "generate_bento_slides" ||
+          chunk.toolName === "edit_bento_slides"
+        ) {
+          pending.set(chunk.toolCallId, {
             chunk,
-            {
-              threadId,
-              runId: row.runId,
-              entityId: row.entityId,
-              ts: row.eventTs,
-              log,
-            },
-            priorOutcome,
-          );
-          if (built) outcomes.set(built.id, built.outcome);
-          continue;
-        }
-
-        if (chunk.toolName === "edit_bento_slides") {
-          let priorOutcome: Outcome | undefined;
-          try {
-            const raw = JSON.parse(chunk.args) as Record<string, unknown>;
-            if (raw && typeof raw.outcome_id === "string") {
-              const normId = normalizeOutcomeId(raw.outcome_id);
-              priorOutcome = outcomes.get(normId);
-            }
-          } catch {
-            // parse error handled inside rebuilder
-          }
-          const built = rebuildBentoSlideEditOutcome(
-            chunk,
-            {
-              threadId,
-              runId: row.runId,
-              entityId: row.entityId,
-              ts: row.eventTs,
-              log,
-            },
-            priorOutcome,
-          );
-          if (built) outcomes.set(built.id, built.outcome);
+            runId: row.runId,
+            entityId: row.entityId,
+            ts: row.eventTs,
+          });
           continue;
         }
 
@@ -198,7 +163,53 @@ export const GET = withSession<{ threadId: string }>(
         const result = row.payload as ToolCallResultPayload;
         const pair = pending.get(result.toolCallId);
 
-        // 1. Try web_search
+        // 1. Try generate_bento_slides
+        if (pair && pair.chunk.toolName === "generate_bento_slides") {
+          pending.delete(result.toolCallId);
+          let priorOutcome: Outcome | undefined;
+          try {
+            const raw = JSON.parse(pair.chunk.args) as Record<string, unknown>;
+            if (raw && typeof raw.outcome_id === "string") {
+              const normId = normalizeOutcomeId(raw.outcome_id);
+              priorOutcome = outcomes.get(normId);
+            }
+          } catch {
+            // parse error handled inside rebuilder
+          }
+          const built = rebuildBentoSlidesOutcome(
+            pair.chunk,
+            ctxFor(pair),
+            priorOutcome,
+            result,
+          );
+          if (built) outcomes.set(built.id, built.outcome);
+          continue;
+        }
+
+        // 2. Try edit_bento_slides
+        if (pair && pair.chunk.toolName === "edit_bento_slides") {
+          pending.delete(result.toolCallId);
+          let priorOutcome: Outcome | undefined;
+          try {
+            const raw = JSON.parse(pair.chunk.args) as Record<string, unknown>;
+            if (raw && typeof raw.outcome_id === "string") {
+              const normId = normalizeOutcomeId(raw.outcome_id);
+              priorOutcome = outcomes.get(normId);
+            }
+          } catch {
+            // parse error handled inside rebuilder
+          }
+          const built = rebuildBentoSlideEditOutcome(
+            pair.chunk,
+            ctxFor(pair),
+            priorOutcome,
+            result,
+          );
+          if (built) outcomes.set(built.id, built.outcome);
+          continue;
+        }
+
+        // 3. Try web_search
         if (pair && pair.chunk.toolName === "web_search") {
           const built = rebuildWebSearchOutcome(pair.chunk, result, ctxFor(pair));
           pending.delete(result.toolCallId);
@@ -206,7 +217,7 @@ export const GET = withSession<{ threadId: string }>(
           continue;
         }
 
-        // 2. Try image outcome from MCP tools (e.g. browser_take_screenshot)
+        // 4. Try image outcome from MCP tools (e.g. browser_take_screenshot)
         const ctx: RebuildContext = pair
           ? ctxFor(pair)
           : {

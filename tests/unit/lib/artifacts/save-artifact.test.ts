@@ -606,7 +606,15 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         type: "tool_call_result",
         payload: {
           toolCallId: "c-2",
-          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "insert" }),
+          // Full result matching what buildEditBentoSlidesTool.execute() returns:
+          // includes target_slide_ids and slides so save-artifact can replay from result.
+          content: JSON.stringify({
+            ok: true,
+            outcome_id: outcomeId,
+            action: "insert",
+            target_slide_ids: ["s1"],
+            slides: [{ id: "s3", title: "Slide 3 Middle" }],
+          }),
         },
         createdAt: new Date("2026-09-01T10:00:03Z"),
       },
@@ -635,7 +643,14 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         type: "tool_call_result",
         payload: {
           toolCallId: "c-3",
-          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "replace" }),
+          // Full result: slides has id locked to the target ("s2") by the server tool.
+          content: JSON.stringify({
+            ok: true,
+            outcome_id: outcomeId,
+            action: "replace",
+            target_slide_ids: ["s2"],
+            slides: [{ id: "s2", title: "Slide 2 Replaced" }],
+          }),
         },
         createdAt: new Date("2026-09-01T10:00:05Z"),
       },
@@ -663,7 +678,13 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         type: "tool_call_result",
         payload: {
           toolCallId: "c-4",
-          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "delete" }),
+          // Full result: delete includes target_slide_ids so replay knows which to remove.
+          content: JSON.stringify({
+            ok: true,
+            outcome_id: outcomeId,
+            action: "delete",
+            target_slide_ids: ["s1"],
+          }),
         },
         createdAt: new Date("2026-09-01T10:00:07Z"),
       },

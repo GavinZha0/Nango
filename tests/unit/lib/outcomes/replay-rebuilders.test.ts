@@ -233,6 +233,58 @@ describe("rebuildBentoSlidesOutcome", () => {
     expect(built1Again).not.toBeNull();
     expect(built1Again!.outcome).toBe(built1!.outcome);
   });
+
+  it("returns null when result.ok is false (DOC_TOO_LARGE, etc.)", () => {
+    const ctx = ctxFixture();
+    const chunk: ToolCallChunkPayload = {
+      toolCallId: "call-fail",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "failed-deck",
+        title: "Failed Deck",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-1" }],
+        },
+      }),
+    };
+    const errResult: ToolCallResultPayload = {
+      toolCallId: "call-fail",
+      content: JSON.stringify({
+        ok: false,
+        error: "DOC_TOO_LARGE",
+        message: "Bento doc is 600000 bytes; cap is 524288.",
+      }),
+    };
+    const built = rebuildBentoSlidesOutcome(chunk, ctx, undefined, errResult);
+    expect(built).toBeNull();
+    expect(ctx.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "outcomes_replay_tool_failed",
+        tool: "generate_bento_slides",
+        error: "DOC_TOO_LARGE",
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("falls back to chunk-only rebuild when result is missing (in-flight run)", () => {
+    const chunk: ToolCallChunkPayload = {
+      toolCallId: "call-inflight",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "inflight-deck",
+        title: "In-flight Deck",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "slide-1" }],
+        },
+      }),
+    };
+    const built = rebuildBentoSlidesOutcome(chunk, ctxFixture(), undefined, undefined);
+    expect(built).not.toBeNull();
+    expect(built!.id).toBe("inflight-deck");
+  });
 });
 
 describe("rebuildBentoSlideEditOutcome", () => {
@@ -354,8 +406,62 @@ describe("rebuildBentoSlideEditOutcome", () => {
     expect(block.appliedToolCallIds).toEqual(["call-init-nomatch"]);
     expect(block.appliedToolCallIds).not.toContain("call-nomatch");
   });
-});
 
+  it("returns priorOutcome when result.ok is false (REPLACE_COUNT_MISMATCH, etc.)", () => {
+    const ctx = ctxFixture();
+    const initChunk: ToolCallChunkPayload = {
+      toolCallId: "call-init-editfail",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "deck-editfail",
+        title: "Deck",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "s1" }, { id: "s2" }],
+        },
+      }),
+    };
+    const initBuilt = rebuildBentoSlidesOutcome(initChunk, ctx);
+    expect(initBuilt).not.toBeNull();
+
+    const errChunk: ToolCallChunkPayload = {
+      toolCallId: "call-edit-fail",
+      toolName: "edit_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "deck-editfail",
+        action: "replace",
+        target_slide_ids: ["s1"],
+        slides: [{ title: "New Slide 1" }, { title: "Extra slide - mismatch" }],
+      }),
+    };
+    const errResult: ToolCallResultPayload = {
+      toolCallId: "call-edit-fail",
+      content: JSON.stringify({
+        ok: false,
+        error: "REPLACE_COUNT_MISMATCH",
+        message: "Action 'replace' requires exactly matching counts: received 2 slide(s) for 1 target id(s).",
+      }),
+    };
+    const built = rebuildBentoSlideEditOutcome(
+      errChunk,
+      ctx,
+      initBuilt!.outcome,
+      errResult,
+    );
+    expect(built).not.toBeNull();
+    const block = built!.outcome.blocks[0] as SlideBlock;
+    expect(block.appliedToolCallIds).toEqual(["call-init-editfail"]);
+    expect(block.appliedToolCallIds).not.toContain("call-edit-fail");
+    expect(ctx.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "outcomes_replay_tool_failed",
+        tool: "edit_bento_slides",
+        error: "REPLACE_COUNT_MISMATCH",
+      }),
+      expect.any(String),
+    );
+  });
+});
 
 describe("rebuildWebSearchOutcome", () => {
   const okChunk: ToolCallChunkPayload = {

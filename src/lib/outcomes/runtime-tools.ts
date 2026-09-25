@@ -464,14 +464,10 @@ export function buildEditBentoSlidesTool(): ToolDefinition {
       // 3. Slide sanity check and ID immutability enforcement
       let normalizedSlides: Array<Record<string, unknown>> | undefined;
       if (slides && slides.length > 0) {
-        normalizedSlides = slides.map((s, idx) => {
+        normalizedSlides = slides.map((s) => {
           const slideObj = { ...s };
           if (!Array.isArray(slideObj.elements)) {
             slideObj.elements = [];
-          }
-          // CONTRACT: Replace preserves the target slide ID to guarantee immutability
-          if (action === "replace" && target_slide_ids && target_slide_ids[idx]) {
-            slideObj.id = target_slide_ids[idx];
           }
           return slideObj;
         });

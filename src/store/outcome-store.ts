@@ -13,6 +13,31 @@ import { create } from "zustand";
 import { applySlideEdit } from "@/lib/outcomes/merge-slides";
 import { normalizeOutcomeId } from "@/lib/outcomes/schema";
 
+// CONTRACT: Hard cap on buffered pending edits per outcome to prevent unbounded
+// memory growth when edits reference non-existent slide IDs (e.g. LLM hallucination,
+// stale references after a generate_bento_slides overwrite).
+const MAX_PENDING_EDITS_PER_OUTCOME = 20;
+
+/**
+ * Deduplicate and cap a pending-edit queue for one outcomeId.
+ * Returns the existing array unchanged (same reference) when the incoming
+ * edit is already present — callers use this for cheap no-op detection.
+ */
+function cappedPendingPush(
+  existing: ApplySlideEditOutcomeInput[],
+  incoming: ApplySlideEditOutcomeInput,
+): ApplySlideEditOutcomeInput[] {
+  if (existing.some((p) => p.toolCallId === incoming.toolCallId)) {
+    return existing; // already buffered — return same reference for no-op detection
+  }
+  const appended = [...existing, incoming];
+  // Keep newest entries when over cap; oldest unresolvable edits are least
+  // likely to ever apply and should be evicted first.
+  return appended.length > MAX_PENDING_EDITS_PER_OUTCOME
+    ? appended.slice(-MAX_PENDING_EDITS_PER_OUTCOME)
+    : appended;
+}
+
 // blocks
 
 /** Visual primitives a Report can be composed of. Each entry has a
@@ -107,7 +132,10 @@ export interface SlideBlock {
   doc: Record<string, unknown>;
   /** Optional title to fall back to when doc.title is omitted */
   title?: string;
-  /** Track all toolCallIds applied to this slide deck to ensure idempotent incremental appending */
+  /** Track all toolCallIds applied to this slide deck to ensure idempotent incremental appending.
+   *  CONTRACT: AG-UI protocol guarantees toolCallId global uniqueness across all tools.
+   *  Both generate_bento_slides and edit_bento_slides IDs are mixed here safely —
+   *  no collision possible, and the array serves purely as an idempotency guard. */
   appliedToolCallIds?: string[];
 }
 
@@ -316,6 +344,7 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
         }
 
         // Flush any pending edits that arrived before generate_bento_slides
+        // (handles legitimate out-of-order delivery of edits vs generation).
         const pendingForThis = state.pendingSlideEdits[normId] ?? [];
         const flushed = flushPendingEdits(
           input.doc,
@@ -323,12 +352,12 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
           pendingForThis,
         );
 
+        // QUIRK: generate_bento_slides OVERWRITES the entire deck, establishing
+        // a completely new slide ID namespace. Any remaining pending edits after
+        // the flush reference IDs from the previous deck and can never resolve —
+        // discard them unconditionally to prevent unbounded memory accumulation.
         const nextPending = { ...state.pendingSlideEdits };
-        if (flushed.remainingPending.length > 0) {
-          nextPending[normId] = flushed.remainingPending;
-        } else {
-          delete nextPending[normId];
-        }
+        delete nextPending[normId];
 
         const nextTitle = input.title || prior?.title || "Bento Presentation";
         const nextDescription = input.description ?? prior?.description;
@@ -385,13 +414,12 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
         // 1. If deck does not exist yet, buffer in pendingSlideEdits
         if (idx === -1) {
           const existingPending = state.pendingSlideEdits[normId] ?? [];
-          if (existingPending.some((p) => p.toolCallId === input.toolCallId)) {
-            return state;
-          }
+          const nextList = cappedPendingPush(existingPending, input);
+          if (nextList === existingPending) return state; // already buffered (same ref = no-op)
           return {
             pendingSlideEdits: {
               ...state.pendingSlideEdits,
-              [normId]: [...existingPending, input],
+              [normId]: nextList,
             },
           };
         }
@@ -402,13 +430,12 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
         );
         if (!priorSlideBlock || !priorSlideBlock.doc) {
           const existingPending = state.pendingSlideEdits[normId] ?? [];
-          if (existingPending.some((p) => p.toolCallId === input.toolCallId)) {
-            return state;
-          }
+          const nextList = cappedPendingPush(existingPending, input);
+          if (nextList === existingPending) return state; // already buffered (same ref = no-op)
           return {
             pendingSlideEdits: {
               ...state.pendingSlideEdits,
-              [normId]: [...existingPending, input],
+              [normId]: nextList,
             },
           };
         }
@@ -428,13 +455,12 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
         // 3. If not changed (e.g. out-of-order target not created yet), buffer into pending
         if (!editRes.changed) {
           const existingPending = state.pendingSlideEdits[normId] ?? [];
-          if (existingPending.some((p) => p.toolCallId === input.toolCallId)) {
-            return state;
-          }
+          const nextList = cappedPendingPush(existingPending, input);
+          if (nextList === existingPending) return state; // already buffered (same ref = no-op)
           return {
             pendingSlideEdits: {
               ...state.pendingSlideEdits,
-              [normId]: [...existingPending, input],
+              [normId]: nextList,
             },
           };
         }

@@ -333,17 +333,49 @@ export function rebuildHtmlPageOutcome(
 
 // generate_bento_slides
 //
-// Same rebuild-from-chunk-only pattern as generate_html_page.
+// Unlike generate_echarts_config / generate_html_page which rebuild from the
+// chunk alone, Bento slides require a paired result to confirm the server
+// tool accepted the payload (ok: true). This prevents replaying failed
+// generate calls (e.g. DOC_TOO_LARGE) as if they succeeded.
 
 /**
- * Rebuild a `generate_bento_slides` outcome from its
- * tool_call_chunk payload.
+ * Rebuild a `generate_bento_slides` outcome from its tool_call_chunk
+ * payload and the paired tool_call_result.
+ *
+ * Passing `result` is strongly preferred; when it is absent (e.g. the
+ * result event has not yet been written for an in-flight run) the
+ * rebuilder falls back to chunk-only mode as before.
  */
 export function rebuildBentoSlidesOutcome(
   chunk: ToolCallChunkPayload,
   ctx: RebuildContext,
   priorOutcome?: Outcome,
+  result?: ToolCallResultPayload,
 ): { id: string; outcome: Outcome } | null {
+  // CONTRACT: When a paired result is available, only rebuild if the
+  // server tool returned ok: true.  Skips DOC_TOO_LARGE / DOC_NO_SLIDES /
+  // SLIDE_MISSING_ID failures so replay doesn't surface ghost outcomes.
+  if (result !== undefined) {
+    try {
+      const parsed = JSON.parse(result.content) as Record<string, unknown>;
+      if (parsed.ok !== true) {
+        ctx.log.warn(
+          {
+            event: "outcomes_replay_tool_failed",
+            tool: "generate_bento_slides",
+            runId: ctx.runId,
+            error: parsed.error,
+          },
+          "skipping generate_bento_slides with ok:false result",
+        );
+        return null;
+      }
+    } catch {
+      // Unparseable result content — fall through to chunk-only rebuild
+      // rather than silently discarding potentially valid outcomes.
+    }
+  }
+
   let rawArgs: Record<string, unknown>;
   try {
     rawArgs = JSON.parse(chunk.args) as Record<string, unknown>;
@@ -425,12 +457,39 @@ export function rebuildBentoSlidesOutcome(
 
 /**
  * Rebuild a Bento slides outcome modified by an `edit_bento_slides` tool call.
+ *
+ * Passing `result` is strongly preferred; when available the rebuilder checks
+ * `ok: true` before applying the edit, matching the behaviour of save-artifact.ts.
  */
 export function rebuildBentoSlideEditOutcome(
   chunk: ToolCallChunkPayload,
   ctx: RebuildContext,
   priorOutcome?: Outcome,
+  result?: ToolCallResultPayload,
 ): { id: string; outcome: Outcome } | null {
+  // CONTRACT: When a paired result is available, only apply the edit if the
+  // server tool returned ok: true.  Skips REPLACE_COUNT_MISMATCH /
+  // DUPLICATE_SLIDE_ID / other validation failures at replay time.
+  if (result !== undefined) {
+    try {
+      const parsed = JSON.parse(result.content) as Record<string, unknown>;
+      if (parsed.ok !== true) {
+        ctx.log.warn(
+          {
+            event: "outcomes_replay_tool_failed",
+            tool: "edit_bento_slides",
+            runId: ctx.runId,
+            error: parsed.error,
+          },
+          "skipping edit_bento_slides with ok:false result",
+        );
+        return priorOutcome ? { id: normalizeOutcomeId(String((JSON.parse(chunk.args) as Record<string, unknown>).outcome_id ?? "")), outcome: priorOutcome } : null;
+      }
+    } catch {
+      // Unparseable result content — fall through to chunk-args mode.
+    }
+  }
+
   let rawArgs: Record<string, unknown>;
   try {
     rawArgs = JSON.parse(chunk.args) as Record<string, unknown>;
@@ -478,10 +537,33 @@ export function rebuildBentoSlideEditOutcome(
     return { id: normId, outcome: priorOutcome };
   }
 
+  // Prefer server-validated result fields over raw chunk.args when a result
+  // is available (mirrors the save-artifact.ts fix: result.slides has IDs
+  // already locked by the server tool's normalizedSlides step).
+  let editAction = args.action;
+  let editTargetIds = args.target_slide_ids;
+  let editSlides = args.slides;
+  if (result !== undefined) {
+    try {
+      const parsedResult = JSON.parse(result.content) as Record<string, unknown>;
+      if (typeof parsedResult.action === "string") {
+        editAction = parsedResult.action as typeof args.action;
+      }
+      if (Array.isArray(parsedResult.target_slide_ids)) {
+        editTargetIds = (parsedResult.target_slide_ids as unknown[]).map(String);
+      }
+      if (Array.isArray(parsedResult.slides)) {
+        editSlides = parsedResult.slides as Array<Record<string, unknown>>;
+      }
+    } catch {
+      // Fall through to chunk-derived values already set above.
+    }
+  }
+
   const editRes = applySlideEdit(priorSlideBlock.doc, {
-    action: args.action,
-    target_slide_ids: args.target_slide_ids,
-    slides: args.slides,
+    action: editAction,
+    target_slide_ids: editTargetIds,
+    slides: editSlides,
   });
 
   if (!editRes.changed) {

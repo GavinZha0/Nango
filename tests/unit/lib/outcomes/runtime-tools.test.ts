@@ -260,7 +260,7 @@ describe("buildEditBentoSlidesTool", () => {
   });
 
   describe("action: replace", () => {
-    it("validates successful replace call and preserves target IDs", async () => {
+    it("validates successful replace call (ID immutability enforced at Reducer layer)", async () => {
       const result = await execute({
         outcome_id: "deck-1",
         action: "replace",
@@ -270,7 +270,9 @@ describe("buildEditBentoSlidesTool", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.action).toBe("replace");
-        expect(result.slides?.[0]?.id).toBe("slide-target"); // Preserves target ID
+        // CONTRACT: ID immutability is enforced by applySlideEdit (Reducer layer),
+        // not by the tool layer. The tool layer returns the LLM's original id.
+        expect(result.slides?.[0]?.id).toBe("arbitrary-id-from-llm");
       }
     });
 
