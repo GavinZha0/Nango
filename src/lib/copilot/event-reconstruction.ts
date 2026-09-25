@@ -387,25 +387,19 @@ export function synthesizeToolCallResult(
       timestamp,
     );
   }
-  // Per-tool placeholder enrichments. Chart id propagation is the
-  // only one today: lets the LLM say "update the sales-pie chart"
+  // Per-tool placeholder enrichments. Outcome id propagation
+  // lets the LLM say "update the sales-pie chart" or "update the slides"
   // on a follow-up turn without re-deriving the id from history.
   let extra: Record<string, unknown> = {};
-  if (payload.toolName === "generate_echarts_config") {
+  if (
+    payload.toolName === "generate_echarts_config" ||
+    payload.toolName === "generate_html_page" ||
+    payload.toolName === "generate_bento_slides"
+  ) {
     try {
-      const args = JSON.parse(payload.args) as { chart_id?: unknown };
-      if (typeof args.chart_id === "string" && args.chart_id.length > 0) {
-        extra = { chart_id: args.chart_id };
-      }
-    } catch {
-      /* fall through with empty extra */
-    }
-  }
-  if (payload.toolName === "generate_html_page") {
-    try {
-      const args = JSON.parse(payload.args) as { page_id?: unknown };
-      if (typeof args.page_id === "string" && args.page_id.length > 0) {
-        extra = { page_id: args.page_id };
+      const args = JSON.parse(payload.args) as { outcome_id?: unknown };
+      if (typeof args.outcome_id === "string" && args.outcome_id.length > 0) {
+        extra = { outcome_id: args.outcome_id };
       }
     } catch {
       /* fall through with empty extra */

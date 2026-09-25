@@ -26,6 +26,7 @@ import type {
   ChartBlock,
   HtmlBlock,
   OutcomeBlock,
+  SlideBlock,
 } from "@/store/outcome-store";
 
 // ─── generate_echarts_config ───────────────────────────────────────────
@@ -39,7 +40,7 @@ import type {
  * `optionJson` string-wrapped form is gone with the frontend tool.
  */
 export interface GenerateEchartsConfigArtifactArgs {
-  chart_id: string;
+  outcome_id: string;
   title: string;
   description?: string;
   option: Record<string, unknown>;
@@ -79,9 +80,9 @@ export function chartArgsToContent(
 export function readGenerateEchartsConfigArgs(
   args: Record<string, unknown>,
 ): GenerateEchartsConfigArtifactArgs | null {
-  const chart_id = args.chart_id;
+  const outcome_id = args.outcome_id;
   const title = args.title;
-  if (typeof chart_id !== "string" || chart_id.length === 0) return null;
+  if (typeof outcome_id !== "string" || outcome_id.length === 0) return null;
   if (typeof title !== "string" || title.length === 0) return null;
   if (
     args.option === null ||
@@ -91,7 +92,7 @@ export function readGenerateEchartsConfigArgs(
     return null;
   }
   const out: GenerateEchartsConfigArtifactArgs = {
-    chart_id,
+    outcome_id,
     title,
     option: args.option as Record<string, unknown>,
   };
@@ -112,7 +113,7 @@ export function readGenerateEchartsConfigArgs(
  * `lib/outcomes/schema.ts`.
  */
 export interface GenerateHtmlPageArtifactArgs {
-  page_id: string;
+  outcome_id: string;
   title: string;
   description?: string;
   html: string;
@@ -146,15 +147,15 @@ export function htmlArgsToContent(
 export function readGenerateHtmlPageArgs(
   args: Record<string, unknown>,
 ): GenerateHtmlPageArtifactArgs | null {
-  const page_id = args.page_id;
+  const outcome_id = args.outcome_id;
   const title = args.title;
-  if (typeof page_id !== "string" || page_id.length === 0) return null;
+  if (typeof outcome_id !== "string" || outcome_id.length === 0) return null;
   if (typeof title !== "string" || title.length === 0) return null;
   if (typeof args.html !== "string" || args.html.trim().length === 0) {
     return null;
   }
   const out: GenerateHtmlPageArtifactArgs = {
-    page_id,
+    outcome_id,
     title,
     html: args.html,
   };
@@ -163,3 +164,68 @@ export function readGenerateHtmlPageArgs(
   }
   return out;
 }
+
+// ─── generate_bento_slides ────────────────────────────────────────────
+
+/**
+ * Subset of `generate_bento_slides` args we project into the content
+ * blocks. Mirrors `generateBentoSlidesSchema` in `lib/outcomes/schema.ts`.
+ */
+export interface GenerateBentoSlidesArtifactArgs {
+  outcome_id: string;
+  title: string;
+  description?: string;
+  doc: Record<string, unknown>;
+}
+
+/**
+ * Build the renderable content payload for a `generate_bento_slides`
+ * artifact. Returns `null` when args.doc is not a usable object.
+ */
+export function slideArgsToContent(
+  args: GenerateBentoSlidesArtifactArgs,
+): { blocks: OutcomeBlock[] } | null {
+  if (
+    args.doc === null ||
+    typeof args.doc !== "object" ||
+    Array.isArray(args.doc)
+  ) {
+    return null;
+  }
+  const block: SlideBlock = {
+    kind: "slide",
+    doc: args.doc,
+    title: args.title,
+  };
+  return { blocks: [block] };
+}
+
+/**
+ * Defensive read of an arbitrary args object into
+ * `GenerateBentoSlidesArtifactArgs` shape.
+ */
+export function readGenerateBentoSlidesArgs(
+  args: Record<string, unknown>,
+): GenerateBentoSlidesArtifactArgs | null {
+  const outcome_id = args.outcome_id;
+  const title = args.title;
+  if (typeof outcome_id !== "string" || outcome_id.length === 0) return null;
+  if (typeof title !== "string" || title.length === 0) return null;
+  if (
+    args.doc === null ||
+    typeof args.doc !== "object" ||
+    Array.isArray(args.doc)
+  ) {
+    return null;
+  }
+  const out: GenerateBentoSlidesArtifactArgs = {
+    outcome_id,
+    title,
+    doc: args.doc as Record<string, unknown>,
+  };
+  if (typeof args.description === "string") {
+    out.description = args.description;
+  }
+  return out;
+}
+

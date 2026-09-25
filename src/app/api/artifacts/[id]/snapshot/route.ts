@@ -21,18 +21,29 @@ export const POST = withSession<{ id: string }>(
   ROUTE,
   async ({ req, params, session, log }) => {
     let inputValues: Record<string, unknown> | undefined;
+    let directSnapshot: Record<string, unknown> | undefined;
     try {
       const body = await req.json();
-      if (body && typeof body === "object" && body.inputs && typeof body.inputs === "object") {
-        inputValues = body.inputs as Record<string, unknown>;
+      if (body && typeof body === "object") {
+        if (body.inputs && typeof body.inputs === "object") {
+          inputValues = body.inputs as Record<string, unknown>;
+        }
+        if (body.snapshot && typeof body.snapshot === "object") {
+          directSnapshot = body.snapshot as Record<string, unknown>;
+        }
       }
     } catch {
       // Body may be empty on plain POST snapshot requests
     }
 
-    const bundle = await saveSnapshot(params.id, session.user.id, inputValues);
+    const bundle = await saveSnapshot(params.id, session.user.id, inputValues, directSnapshot);
     log.info(
-      { event: "artifact_snapshot_saved", artifactId: params.id, hasInputValues: inputValues !== undefined },
+      {
+        event: "artifact_snapshot_saved",
+        artifactId: params.id,
+        hasInputValues: inputValues !== undefined,
+        hasDirectSnapshot: directSnapshot !== undefined,
+      },
       "artifact snapshot saved",
     );
     return NextResponse.json(bundle);

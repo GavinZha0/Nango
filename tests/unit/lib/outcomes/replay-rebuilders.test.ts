@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import {
   rebuildChartOutcome,
+  rebuildBentoSlidesOutcome,
   rebuildWebSearchOutcome,
   tryDomain,
   type RebuildContext,
@@ -25,7 +26,7 @@ describe("rebuildChartOutcome", () => {
       toolCallId: "call-1",
       toolName: "generate_echarts_config",
       args: JSON.stringify({
-        chart_id: "sales-pie",
+        outcome_id: "sales-pie",
         title: "Q1 Sales",
         description: "Top regions",
         option: {
@@ -56,7 +57,7 @@ describe("rebuildChartOutcome", () => {
       toolCallId: "call-2",
       toolName: "generate_echarts_config",
       args: JSON.stringify({
-        chart_id: "no-dataset-bar",
+        outcome_id: "no-dataset-bar",
         title: "No-dataset Bar",
         option: { series: [{ type: "bar" }] },
       }),
@@ -91,14 +92,14 @@ describe("rebuildChartOutcome", () => {
       {
         toolCallId: "x",
         toolName: "generate_echarts_config",
-        args: JSON.stringify({ chart_id: "c", title: "t" }),
+        args: JSON.stringify({ outcome_id: "c", title: "t" }),
       },
       ctxFixture(),
     );
     expect(built).toBeNull();
   });
 
-  it("skips silently when chart_id or title missing (defensive)", () => {
+  it("skips silently when outcome_id or title missing (defensive)", () => {
     const noChartId = rebuildChartOutcome(
       {
         toolCallId: "x",
@@ -117,13 +118,59 @@ describe("rebuildChartOutcome", () => {
         toolCallId: "x",
         toolName: "generate_echarts_config",
         args: JSON.stringify({
-          chart_id: "c",
+          outcome_id: "c",
           option: { series: [{ type: "bar" }] },
         }),
       },
       ctxFixture(),
     );
     expect(noTitle).toBeNull();
+  });
+});
+
+describe("rebuildBentoSlidesOutcome", () => {
+  it("rebuilds a Report with a single slide block from generate_bento_slides args", () => {
+    const doc = {
+      format: "bento/slides",
+      slides: [{ id: "slide-1", elements: [{ type: "text", content: "Hi" }] }],
+    };
+    const chunk: ToolCallChunkPayload = {
+      toolCallId: "call-slides-1",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "demo-deck",
+        title: "Demo Deck",
+        description: "Deck description",
+        doc,
+      }),
+    };
+    const built = rebuildBentoSlidesOutcome(chunk, ctxFixture());
+    expect(built).not.toBeNull();
+    expect(built!.id).toBe("demo-deck");
+    expect(built!.outcome.outcomeId).toBe("demo-deck");
+    expect(built!.outcome.kind).toBe("report");
+    expect(built!.outcome.title).toBe("Demo Deck");
+    expect(built!.outcome.blocks).toHaveLength(1);
+    expect(built!.outcome.blocks[0].kind).toBe("slide");
+    if (built!.outcome.blocks[0].kind === "slide") {
+      expect(built!.outcome.blocks[0].doc).toEqual(doc);
+    }
+  });
+
+  it("normalizes outcome_id during rebuild", () => {
+    const chunk: ToolCallChunkPayload = {
+      toolCallId: "call-slides-2",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "My Fancy Deck!",
+        title: "Deck Title",
+        doc: { format: "bento/slides", slides: [] },
+      }),
+    };
+    const built = rebuildBentoSlidesOutcome(chunk, ctxFixture());
+    expect(built).not.toBeNull();
+    expect(built!.id).toBe("my-fancy-deck");
+    expect(built!.outcome.outcomeId).toBe("my-fancy-deck");
   });
 });
 

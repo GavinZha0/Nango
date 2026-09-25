@@ -17,7 +17,9 @@
 import { useRenderTool } from "@/lib/copilot/client";
 import { ChartPreviewCard } from "@/components/right-panels/ChartPreviewCard";
 import { HtmlPreviewCard } from "@/components/right-panels/HtmlPreviewCard";
+import { SlidesPreviewCard } from "@/components/right-panels/SlidesPreviewCard";
 import {
+  generateBentoSlidesSchema,
   generateEchartsConfigSchema,
   generateHtmlPageSchema,
 } from "@/lib/outcomes/schema";
@@ -33,5 +35,11 @@ export function useOutcomeTools(): void {
     name: "generate_html_page",
     parameters: generateHtmlPageSchema,
     render: HtmlPreviewCard,
+  });
+
+  useRenderTool({
+    name: "generate_bento_slides",
+    parameters: generateBentoSlidesSchema,
+    render: SlidesPreviewCard,
   });
 }

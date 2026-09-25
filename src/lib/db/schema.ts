@@ -304,7 +304,7 @@ export const ArtifactTable = pgTable(
 
     /**
      * Workflow integration columns. Both NULL for artifacts not
-     * backed by a workflow — HTML, PPT, image, code, report, and
+     * backed by a workflow — HTML, slide, image, code, report, and
      * standalone charts with inline data. Both non-NULL (enforced
      * at the service layer per the doc-comment above) for chart
      * artifacts produced by `save-as-workflow`.

@@ -17,7 +17,7 @@ import { create } from "zustand";
  *  dedicated renderer under `components/workspace/blocks/`. Adding a
  *  new block: append the discriminant + a `<KindBlock>` component +
  *  wire it in `BlockList`. */
-export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock | ImageBlock;
+export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock | ImageBlock | SlideBlock;
 
 export interface TextBlock {
   kind: "text";
@@ -97,6 +97,14 @@ export interface ImageBlock {
   mimeType?: string;
   alt?: string;
   caption?: string;
+}
+
+export interface SlideBlock {
+  kind: "slide";
+  /** Complete Bento slides JSON document. Rendered via Bento HTML template in sandboxed iframe. */
+  doc: Record<string, unknown>;
+  /** Optional title to fall back to when doc.title is omitted */
+  title?: string;
 }
 
 // outcome

@@ -39,10 +39,14 @@ export async function saveSnapshot(
   artifactId: string,
   ownerId: string,
   inputValues?: Record<string, unknown>,
+  directSnapshot?: Record<string, unknown>,
 ): Promise<ArtifactBundle> {
   // Ownership check — the artifact must exist and belong to ownerId.
   const rows = await db
-    .select({ createdBy: ArtifactTable.createdBy })
+    .select({
+      createdBy: ArtifactTable.createdBy,
+      config: ArtifactTable.config,
+    })
     .from(ArtifactTable)
     .where(eq(ArtifactTable.id, artifactId))
     .limit(1);
@@ -57,6 +61,32 @@ export async function saveSnapshot(
       403,
       "Only the artifact owner can save a snapshot",
     );
+  }
+
+  // If directSnapshot is provided (e.g. edited slide doc), save directly to DB
+  if (directSnapshot !== undefined) {
+    const snapshotAt = new Date();
+    const currentConfig = (artifact.config as Record<string, unknown> | null) ?? {};
+    const updatedConfig = { ...currentConfig, doc: directSnapshot };
+    await db
+      .update(ArtifactTable)
+      .set({
+        snapshot: directSnapshot,
+        snapshotAt,
+        config: updatedConfig,
+      })
+      .where(eq(ArtifactTable.id, artifactId));
+
+    const bundle = await buildArtifactBundle(
+      artifactId,
+      ownerId,
+      productionDeps,
+      { forceFresh: false },
+    );
+    bundle.data = directSnapshot;
+    bundle.fromSnapshot = true;
+    bundle.snapshotAt = snapshotAt.toISOString();
+    return bundle;
   }
 
   // Execute the workflow live to get the current output.

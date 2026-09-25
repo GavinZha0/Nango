@@ -23,6 +23,7 @@ import {
   ArrowLeft,
   Camera,
   ChevronRight as ChevronRightCrumb,
+  Download,
   Folder,
   FolderInput,
   GitCompare,
@@ -35,6 +36,7 @@ import {
   Trash2,
   Workflow,
 } from "lucide-react";
+import { assembleBentoHtml } from "@/lib/bento/template";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -187,6 +189,55 @@ const fetcher = async (url: string): Promise<ArtifactBundleResponse> => {
   return bundle;
 };
 
+/**
+ * Safely request the latest live document from the sandboxed Bento iframe via postMessage bridge.
+ */
+async function getBentoDocFromIframe(
+  iframe: HTMLIFrameElement | null,
+  timeoutMs = 1500,
+): Promise<Record<string, unknown> | null> {
+  const contentWindow = iframe?.contentWindow;
+  if (!contentWindow) return null;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        window.removeEventListener("message", handler);
+        resolve(null);
+      }
+    }, timeoutMs);
+
+    const handler = (event: MessageEvent) => {
+      if (
+        event.data &&
+        typeof event.data === "object" &&
+        event.data.type === "nango:doc-response"
+      ) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          window.removeEventListener("message", handler);
+          resolve((event.data.doc as Record<string, unknown>) ?? null);
+        }
+      }
+    };
+
+    window.addEventListener("message", handler);
+    try {
+      contentWindow.postMessage({ type: "nango:get-doc" }, "*");
+    } catch {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener("message", handler);
+        resolve(null);
+      }
+    }
+  });
+}
+
 export interface ArtifactDetailProps {
   artifactId: string;
 }
@@ -194,6 +245,7 @@ export interface ArtifactDetailProps {
 export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElement {
   const tz = useDisplayTimezone();
   const router = useRouter();
+  const slideIframeRef = useRef<HTMLIFrameElement>(null);
   const { data, error, isLoading, mutate } = useSWR<ArtifactBundleResponse>(
     `/api/artifacts/${artifactId}`,
     fetcher,
@@ -302,12 +354,21 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
       const activeSessionInputs = sessionAppliedInputsMap.get(artifactId);
       const inputsToSave = inputs ?? activeSessionInputs;
 
+      let slideSnapshot: Record<string, unknown> | undefined;
+      if (node?.type === "slide") {
+        const liveDoc = await getBentoDocFromIframe(slideIframeRef.current);
+        if (liveDoc && isSlideDoc(liveDoc)) {
+          slideSnapshot = liveDoc;
+        }
+      }
+
       const res = await fetch(`/api/artifacts/${artifactId}/snapshot`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: inputsToSave && Object.keys(inputsToSave).length > 0
-          ? JSON.stringify({ inputs: inputsToSave })
-          : undefined,
+        body: JSON.stringify({
+          inputs: inputsToSave && Object.keys(inputsToSave).length > 0 ? inputsToSave : undefined,
+          snapshot: slideSnapshot,
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -324,7 +385,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     } catch (err) {
       toast.error(`Save snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [artifactId]);
+  }, [artifactId, node]);
 
   const handleLoadSnapshot = useCallback(async (): Promise<void> => {
     if (!node || node.viewMode === "snapshot") return;
@@ -405,6 +466,43 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     return undefined;
   }, [data, tz]);
 
+  const handleExportSlides = useCallback(async () => {
+    if (!node || node.type !== "slide") return;
+    const liveDoc = await getBentoDocFromIframe(slideIframeRef.current);
+    const rawDoc = (liveDoc && isSlideDoc(liveDoc))
+      ? liveDoc
+      : isSlideDoc(data?.data)
+      ? data.data
+      : isSlideDoc(node.snapshot)
+      ? node.snapshot
+      : isSlideDoc((node.config as { doc?: unknown })?.doc)
+      ? (node.config as { doc?: unknown }).doc
+      : null;
+    if (!rawDoc) {
+      toast.error("No presentation document found to export");
+      return;
+    }
+    try {
+      const html = assembleBentoHtml(rawDoc, {
+        fallbackTitle: node.name,
+        mode: "standalone",
+      });
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(node.name || "presentation").replace(/[/\\?%*:|"<>]/g, "-")}.bento.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Exported Bento presentation HTML");
+    } catch (err) {
+      console.error("Export Bento slides failed:", err);
+      toast.error("Failed to export presentation");
+    }
+  }, [node, data]);
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -446,6 +544,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
             <ActionBar
               viewMode={node?.viewMode ?? "snapshot"}
               disableManagement={activeView === "workflow"}
+              onExport={node?.type === "slide" ? handleExportSlides : undefined}
               onRefresh={() => {
                 if (activeView === "workflow") setActiveView("preview");
                 void handleRefresh();
@@ -484,6 +583,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           onSaveWorkflowNode={handleSaveWorkflowNode}
           onDeleteWorkflowNode={handleDeleteNode}
           isRefreshing={isRefreshing}
+          slideIframeRef={slideIframeRef}
         />
       ) : (
         <ArtifactScrollBody
@@ -491,6 +591,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
           tree={tree}
           router={router}
           data={data?.data}
+          slideIframeRef={slideIframeRef}
         />
       )}
 
@@ -545,6 +646,7 @@ interface ArtifactScrollBodyProps {
    *  prefer this over `node.content.blocks` so the body always
    *  reflects the current workflow execution. */
   data?: unknown;
+  slideIframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
 function ArtifactScrollBody({
@@ -552,6 +654,7 @@ function ArtifactScrollBody({
   tree,
   router,
   data,
+  slideIframeRef,
 }: ArtifactScrollBodyProps): ReactElement {
   if (node.kind === "folder") {
     return (
@@ -574,7 +677,7 @@ function ArtifactScrollBody({
         </p>
       )}
       <div className="min-h-0 w-full flex-1">
-        <ArtifactBody node={node} data={data} />
+        <ArtifactBody node={node} data={data} slideIframeRef={slideIframeRef} />
       </div>
     </div>
   );
@@ -592,6 +695,7 @@ interface WorkflowOrPreviewLayoutProps {
   onSaveWorkflowNode?: (updatedNode: CanonicalNode) => Promise<void>;
   onDeleteWorkflowNode?: (nodeId: number) => Promise<void>;
   isRefreshing?: boolean;
+  slideIframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
 /**
@@ -611,6 +715,7 @@ function WorkflowOrPreviewLayout({
   onSaveWorkflowNode,
   onDeleteWorkflowNode,
   isRefreshing = false,
+  slideIframeRef,
 }: WorkflowOrPreviewLayoutProps): ReactElement {
 
   const hasFilters = Boolean(
@@ -685,6 +790,7 @@ function WorkflowOrPreviewLayout({
             tree={tree}
             router={router}
             data={data}
+            slideIframeRef={slideIframeRef}
           />
         </ResizablePanel>
         <ResizableHandle withHandle />
@@ -824,6 +930,7 @@ function ActionBar({
   onRename,
   onMove,
   onDelete,
+  onExport,
 }: {
   viewMode: "snapshot" | "live";
   disableManagement?: boolean;
@@ -834,12 +941,26 @@ function ActionBar({
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
+  onExport?: () => void;
 }): ReactElement {
   return (
     <TooltipProvider delay={200}>
       <div className="flex items-center gap-1">
 
         {/* Data & View Action Group */}
+        {onExport && (
+          <Tooltip>
+            <TooltipTrigger
+              onClick={onExport}
+              className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10")}
+              aria-label="Export .bento.html"
+            >
+              <Download className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Export .bento.html</TooltipContent>
+          </Tooltip>
+        )}
+
         <Tooltip>
           <TooltipTrigger
             onClick={onRefresh}
@@ -1021,11 +1142,13 @@ interface ArtifactBodyProps {
    *  renderer yet and show a "not yet supported" placeholder until
    *  they migrate. */
   data?: unknown;
+  slideIframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
 function ArtifactBody({
   node,
   data,
+  slideIframeRef,
 }: ArtifactBodyProps): ReactElement {
   // Chart artifacts: `bundle.data` is the merged ECharts option
   // produced by the workflow's chart node. Render it directly so
@@ -1054,6 +1177,45 @@ function ArtifactBody({
         />
       </div>
     );
+  }
+
+  // Bento slide artifacts: `bundle.data` (or node.snapshot or node.config.doc) is the Bento slides doc.
+  // Render via sandboxed iframe in full edit mode with slideIframeRef attached.
+  if (node.type === "slide") {
+    const rawDoc = isSlideDoc(data)
+      ? data
+      : isSlideDoc(node.snapshot)
+      ? node.snapshot
+      : isSlideDoc((node.config as { doc?: unknown })?.doc)
+      ? (node.config as { doc?: unknown }).doc
+      : null;
+
+    if (rawDoc) {
+      let html = "";
+      try {
+        html = assembleBentoHtml(rawDoc, {
+          fallbackTitle: node.name,
+          mode: "edit",
+        });
+      } catch (err) {
+        console.error("[ArtifactDetail] Failed to assemble Bento HTML:", err);
+      }
+
+      if (html) {
+        return (
+          <div className="h-full min-h-0 w-full flex flex-col">
+            <iframe
+              ref={slideIframeRef}
+              srcDoc={html}
+              sandbox="allow-scripts"
+              referrerPolicy="no-referrer"
+              title={node.name ?? "Bento Slides"}
+              className="h-full w-full rounded border border-border bg-slate-950 flex-1"
+            />
+          </div>
+        );
+      }
+    }
   }
 
   // Image artifacts: render image directly via URL / data URL
@@ -1167,6 +1329,15 @@ function isChartOption(value: unknown): boolean {
 /** Cheap check — HTML content is a non-empty string. */
 function isHtmlContent(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Structural check for Bento slides JSON doc. */
+function isSlideDoc(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const v = value as { format?: unknown; slides?: unknown };
+  return v.format === "bento/slides" || Array.isArray(v.slides);
 }
 
 // dialogs

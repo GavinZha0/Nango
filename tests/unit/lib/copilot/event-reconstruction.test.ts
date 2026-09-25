@@ -227,13 +227,13 @@ describe("reconstructFromDb — backend tool with real result", () => {
 });
 
 describe("reconstructFromDb — frontend tool, succeeded run", () => {
-  it("synthesises { ok:true, chart_id } for generate_echarts_config with parseable args", async () => {
+  it("synthesises { ok:true, outcome_id } for generate_echarts_config with parseable args", async () => {
     const run = makeRun();
     const evs = [
       makeEvent(run.id, 0, "tool_call_chunk", {
         toolCallId: "call-r",
         toolName: "generate_echarts_config",
-        args: '{"chart_id":"sales-pie","title":"Sales"}',
+        args: '{"outcome_id":"sales-pie","title":"Sales"}',
       }),
       // No matching tool_call_result row
       makeEvent(run.id, 1, "message", {
@@ -249,14 +249,14 @@ describe("reconstructFromDb — frontend tool, succeeded run", () => {
     const results = out.filter((e) => e.type === EventType.TOOL_CALL_RESULT);
     expect(results).toHaveLength(1);
     const r = results[0]! as unknown as { content: string; messageId: string };
-    // Synthetic warning envelope: { isError, severity, message, chart_id }.
-    // Three fields are guaranteed; chart_id is the per-generate_echarts_config
+    // Synthetic warning envelope: { isError, severity, message, outcome_id }.
+    // Three fields are guaranteed; outcome_id is the per-generate_echarts_config
     // enrichment for the LLM's downstream "update the chart" turn.
     expect(JSON.parse(r.content)).toEqual({
       isError: true,
       severity: "warning",
       message: "No tool result was recorded — outcome inferred.",
-      chart_id: "sales-pie",
+      outcome_id: "sales-pie",
     });
     expect(r.messageId.startsWith("synth.")).toBe(true);
 
@@ -768,16 +768,16 @@ describe("synthesizeToolCallResult", () => {
     });
   });
 
-  it("returns a warning-severity envelope with chart_id for generate_echarts_config on succeeded runs", () => {
+  it("returns a warning-severity envelope with outcome_id for generate_echarts_config on succeeded runs", () => {
     const result = synthesizeToolCallResult(
-      { toolCallId: "id", toolName: "generate_echarts_config", args: '{"chart_id":"abc"}' },
+      { toolCallId: "id", toolName: "generate_echarts_config", args: '{"outcome_id":"abc"}' },
       "succeeded",
     );
     expect(JSON.parse(result.content)).toEqual({
       isError: true,
       severity: "warning",
       message: WARNING_MESSAGE,
-      chart_id: "abc",
+      outcome_id: "abc",
     });
   });
 

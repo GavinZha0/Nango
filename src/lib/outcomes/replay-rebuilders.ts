@@ -30,12 +30,15 @@ import type {
 import {
   chartArgsToContent,
   htmlArgsToContent,
+  slideArgsToContent,
   readGenerateEchartsConfigArgs,
   readGenerateHtmlPageArgs,
+  readGenerateBentoSlidesArgs,
   type GenerateEchartsConfigArtifactArgs,
   type GenerateHtmlPageArtifactArgs,
+  type GenerateBentoSlidesArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
-import { normalizePageId, normalizeChartId } from "./schema";
+import { normalizeOutcomeId } from "./schema";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
 
@@ -122,13 +125,13 @@ export function rebuildChartOutcome(
       {
         event: "outcomes_replay_missing_option",
         runId: ctx.runId,
-        chartId: args.chart_id,
+        outcomeId: args.outcome_id,
       },
       "skipping generate_echarts_config row with no usable option payload",
     );
     return null;
   }
-  const normalizedId = normalizeChartId(args.chart_id);
+  const normalizedId = normalizeOutcomeId(args.outcome_id);
   return {
     id: normalizedId,
     outcome: {
@@ -299,17 +302,88 @@ export function rebuildHtmlPageOutcome(
       {
         event: "outcomes_replay_missing_html",
         runId: ctx.runId,
-        pageId: args.page_id,
+        outcomeId: args.outcome_id,
       },
       "skipping generate_html_page row with no usable html payload",
     );
     return null;
   }
-  const finalPageId = normalizePageId(args.page_id);
+  const finalPageId = normalizeOutcomeId(args.outcome_id);
   return {
     id: finalPageId,
     outcome: {
       outcomeId: finalPageId,
+      kind: "report",
+      title: args.title,
+      description: args.description,
+      blocks: content.blocks,
+      agentId: ctx.entityId,
+      threadId: ctx.threadId,
+      runId: ctx.runId,
+      createdAt: ctx.ts.getTime(),
+      collapsed: false,
+      savedArtifactId: null,
+    },
+  };
+}
+
+// generate_bento_slides
+//
+// Same rebuild-from-chunk-only pattern as generate_html_page.
+
+/**
+ * Rebuild a `generate_bento_slides` outcome from its
+ * tool_call_chunk payload.
+ */
+export function rebuildBentoSlidesOutcome(
+  chunk: ToolCallChunkPayload,
+  ctx: RebuildContext,
+): { id: string; outcome: Outcome } | null {
+  let rawArgs: Record<string, unknown>;
+  try {
+    rawArgs = JSON.parse(chunk.args) as Record<string, unknown>;
+  } catch (err) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_parse_failed",
+        tool: "generate_bento_slides",
+        runId: ctx.runId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "skipping unparseable generate_bento_slides payload",
+    );
+    return null;
+  }
+  const args: GenerateBentoSlidesArtifactArgs | null =
+    readGenerateBentoSlidesArgs(rawArgs);
+  if (args === null) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_invalid_args",
+        tool: "generate_bento_slides",
+        runId: ctx.runId,
+      },
+      "skipping generate_bento_slides row with invalid args shape",
+    );
+    return null;
+  }
+  const content = slideArgsToContent(args);
+  if (content === null) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_missing_doc",
+        runId: ctx.runId,
+        outcomeId: args.outcome_id,
+      },
+      "skipping generate_bento_slides row with no usable doc payload",
+    );
+    return null;
+  }
+  const finalOutcomeId = normalizeOutcomeId(args.outcome_id);
+  return {
+    id: finalOutcomeId,
+    outcome: {
+      outcomeId: finalOutcomeId,
       kind: "report",
       title: args.title,
       description: args.description,

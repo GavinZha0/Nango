@@ -27,6 +27,7 @@ import { CardListBlockRenderer } from "./CardListBlock";
 import { ChartBlockRenderer } from "./ChartBlock";
 import { HtmlBlockRenderer } from "./HtmlBlock";
 import { ImageBlockRenderer } from "./ImageBlock";
+import { SlideBlockRenderer } from "./SlideBlock";
 import { TextBlockRenderer } from "./TextBlock";
 
 export type BlockSize = "compact" | "large";
@@ -71,6 +72,8 @@ function BlockSwitch({
       return <HtmlBlockRenderer block={block} size={size} />;
     case "image":
       return <ImageBlockRenderer block={block} size={size} />;
+    case "slide":
+      return <SlideBlockRenderer block={block} size={size} />;
     default: {
       // exhaustiveness check — TS will error here if a new block
       // kind is added to the union without a branch above.

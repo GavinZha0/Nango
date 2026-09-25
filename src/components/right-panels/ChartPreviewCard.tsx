@@ -105,7 +105,7 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
 
     const ws = useWorkspaceStore.getState();
     useOutcomeStore.getState().addOutcome({
-      outcomeId: parsed.chart_id,
+      outcomeId: parsed.outcome_id,
       kind: "report",
       title: parsed.title,
       description: parsed.description,
@@ -146,7 +146,7 @@ export function ChartPreviewCard(props: ChartPreviewProps): ReactElement {
             aria-hidden
           />
           <span className="text-sm font-medium text-muted-foreground">
-            {partial.title ?? partial.chart_id ?? "Generating chart…"}
+            {partial.title ?? partial.outcome_id ?? "Generating chart…"}
           </span>
         </div>
       </CardShell>
@@ -204,7 +204,7 @@ function SuccessCard({
         <BarChart3 className="h-4 w-4 text-blue-500" aria-hidden />
         <button
           type="button"
-          onClick={() => onView(args.chart_id)}
+          onClick={() => onView(args.outcome_id)}
           className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
           aria-label={`View ${args.title} in Outcomes`}
         >
@@ -260,7 +260,7 @@ function parseServerResult(
   try {
     const obj = JSON.parse(result) as Record<string, unknown>;
     if (obj === null || typeof obj !== "object") return null;
-    if (obj.ok === true && typeof obj.chart_id === "string") {
+    if (obj.ok === true && typeof obj.outcome_id === "string") {
       return obj as unknown as GenerateEchartsConfigResult;
     }
     if (obj.ok === false) {

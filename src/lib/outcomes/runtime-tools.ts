@@ -24,8 +24,11 @@ import {
   generateHtmlPageSchema,
   type GenerateHtmlPageArgs,
   type GenerateHtmlPageResult,
-  normalizePageId,
-  normalizeChartId,
+  BENTO_DOC_HARD_CAP_BYTES,
+  generateBentoSlidesSchema,
+  type GenerateBentoSlidesArgs,
+  type GenerateBentoSlidesResult,
+  normalizeOutcomeId,
 } from "./schema";
 
 /**
@@ -68,8 +71,8 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
     execute: async (
       args: GenerateEchartsConfigArgs,
     ): Promise<GenerateEchartsConfigResult> => {
-      const normalized = normalizeChartId(args.chart_id);
-      const isModified = normalized !== args.chart_id;
+      const normalized = normalizeOutcomeId(args.outcome_id);
+      const isModified = normalized !== args.outcome_id;
       const finalId = normalized;
 
       // size cap — measured on the serialized option
@@ -121,7 +124,7 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
 
       return {
         ok: true,
-        chart_id: finalId,
+        outcome_id: finalId,
         title: args.title,
         ...(args.description !== undefined && {
           description: args.description,
@@ -130,7 +133,7 @@ export function buildGenerateEchartsConfigTool(): ToolDefinition {
         ...(args.dataset_id !== undefined && { dataset_id: args.dataset_id }),
         ...(isModified && {
           message:
-            `Note: The chart_id was normalized to '${finalId}' (converted to ` +
+            `Note: The outcome_id was normalized to '${finalId}' (converted to ` +
             `lowercase, replaced spaces with hyphens, and stripped disallowed chars) ` +
             `to ensure it complies with storage regulations. Use '${finalId}' to update this chart in future turns.`,
         }),
@@ -196,19 +199,110 @@ export function buildGenerateHtmlPageTool(): ToolDefinition {
         };
       }
 
-      const originalPageId = args.page_id;
-      const finalPageId = normalizePageId(originalPageId);
+      const originalPageId = args.outcome_id;
+      const finalPageId = normalizeOutcomeId(originalPageId);
 
       return {
         ok: true,
-        page_id: finalPageId,
+        outcome_id: finalPageId,
         title: args.title,
         ...(args.description !== undefined && {
           description: args.description,
         }),
         html: args.html,
         ...(originalPageId !== finalPageId && {
-          message: `The page_id was normalized from "${originalPageId}" to "${finalPageId}". Please use "${finalPageId}" for subsequent updates.`,
+          message: `The outcome_id was normalized from "${originalPageId}" to "${finalPageId}". Please use "${finalPageId}" for subsequent updates.`,
+        }),
+      };
+    },
+  });
+}
+
+/**
+ * Build the `generate_bento_slides` tool definition.
+ *
+ * Mounted as an opt-in built-in tool via the agent editor's "Built-in
+ * Tools" section. The tool validates the Bento slides JSON doc payload
+ * size and schema format, echoing it back verbatim so the frontend
+ * side-effect hook can update the Outcomes store.
+ *
+ * Validation contract:
+ *   - `doc` serialized length <= BENTO_DOC_HARD_CAP_BYTES (512KB)
+ *   - `doc.format === "bento/slides"`
+ *   - `doc.slides` is a non-empty array
+ * On failure returns `{ ok: false, error, message }` so the LLM
+ * can self-correct on the next turn.
+ */
+export function buildGenerateBentoSlidesTool(): ToolDefinition {
+  return defineTool({
+    name: "generate_bento_slides",
+    description:
+      "Generate an interactive slide deck presentation using Bento and " +
+      "surface it as a preview card in the user's Outcomes panel. The deck " +
+      "renders in a sandboxed iframe with morph transitions IMMEDIATELY on " +
+      "success — DO NOT paste the JSON doc into your text reply. Re-calling " +
+      "with the same outcome_id OVERWRITES the previous slide deck. " +
+      "USE THIS when the user asks for a presentation, pitch deck, slide deck, " +
+      "or visual report slides. " +
+      "FORMAT: doc must have format: 'bento/slides' and a non-empty slides array. " +
+      "Each slide is 1280x720. For morph transitions across slides, use the same id. " +
+      "Charts in Bento use charts-lite — provide simple numbers in series[*].data.",
+    parameters: generateBentoSlidesSchema,
+    execute: async (
+      args: GenerateBentoSlidesArgs,
+    ): Promise<GenerateBentoSlidesResult> => {
+      // size cap on serialized doc
+      const serialized = JSON.stringify(args.doc);
+      const byteLength = new TextEncoder().encode(serialized).length;
+      if (byteLength > BENTO_DOC_HARD_CAP_BYTES) {
+        return {
+          ok: false,
+          error: "DOC_TOO_LARGE",
+          message:
+            `Bento doc is ${byteLength} bytes; cap is ${BENTO_DOC_HARD_CAP_BYTES}. ` +
+            `Reduce slide count, shorten prose, or simplify embedded data.`,
+        };
+      }
+
+      // slides check
+      if (!Array.isArray(args.doc.slides) || args.doc.slides.length === 0) {
+        return {
+          ok: false,
+          error: "DOC_NO_SLIDES",
+          message: "doc.slides must be a non-empty array of slide objects.",
+        };
+      }
+
+      // CONTRACT: Auto-polyfill defensive metadata (format, version, title, size).
+      // LLMs calling generate_bento_slides may occasionally omit or shorthand doc.format
+      // (e.g. 'slides'). Rather than failing and triggering a costly re-generation turn,
+      // normalize it to 'bento/slides'.
+      if (args.doc.format !== "bento/slides") {
+        args.doc.format = "bento/slides";
+      }
+      if (!args.doc.version) {
+        args.doc.version = 1;
+      }
+      if (!args.doc.title && args.title) {
+        args.doc.title = args.title;
+      }
+      if (!args.doc.size) {
+        args.doc.size = { width: 1280, height: 720 };
+      }
+
+      const originalOutcomeId = args.outcome_id;
+      const finalOutcomeId = normalizeOutcomeId(originalOutcomeId);
+
+      return {
+        ok: true,
+        outcome_id: finalOutcomeId,
+        title: args.title,
+        ...(args.description !== undefined && {
+          description: args.description,
+        }),
+        doc: args.doc,
+        ...(originalOutcomeId !== finalOutcomeId && {
+          message: `The outcome_id was normalized from "${originalOutcomeId}" to "${finalOutcomeId}". Please use "${finalOutcomeId}" for subsequent updates.`,
         }),
       };
     },

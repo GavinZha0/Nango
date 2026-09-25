@@ -179,6 +179,11 @@ function isHtmlPageInvocation(inv: ToolInvocation): boolean {
   return inv.toolName === HTML_PAGE_TOOL_NAME;
 }
 
+const BENTO_SLIDES_TOOL_NAME = "generate_bento_slides";
+function isBentoSlidesInvocation(inv: ToolInvocation): boolean {
+  return inv.toolName === BENTO_SLIDES_TOOL_NAME;
+}
+
 function isImageInvocation(inv: ToolInvocation): boolean {
   const name = inv.toolName.toLowerCase();
   if (
@@ -274,9 +279,10 @@ export function buildWorkflowSpecFromRunEvents(
   // workflow nodes — their invocations stay in `dataInvocations`.
   const artifactCreatorIsChart = isChartInvocation(artifactCreator);
   const artifactCreatorIsHtmlPage = isHtmlPageInvocation(artifactCreator);
+  const artifactCreatorIsBentoSlides = isBentoSlidesInvocation(artifactCreator);
   const artifactCreatorIsImage = isImageInvocation(artifactCreator);
   const artifactCreatorIsFirstClass =
-    artifactCreatorIsChart || artifactCreatorIsHtmlPage || artifactCreatorIsImage;
+    artifactCreatorIsChart || artifactCreatorIsHtmlPage || artifactCreatorIsBentoSlides || artifactCreatorIsImage;
   const dataInvocations = artifactCreatorIsFirstClass
     ? successful
     : successful.filter((i) => i.callId !== artifactCreatingCallId);
@@ -298,6 +304,8 @@ export function buildWorkflowSpecFromRunEvents(
     ? buildChartOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : artifactCreatorIsHtmlPage
     ? buildHtmlOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
+    : artifactCreatorIsBentoSlides
+    ? buildBentoSlidesOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : artifactCreatorIsImage
     ? buildImageOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : buildOutputsMap(
@@ -1332,6 +1340,31 @@ function buildHtmlOutputsMap(
     );
   }
   return { html: `@nodes.${htmlNode.id}.html` };
+}
+
+function buildBentoSlidesOutputsMap(
+  dataInvocations: ReadonlyArray<ToolInvocation>,
+  nodes: ReadonlyArray<LLMNode>,
+  artifactCreatingCallId: string,
+): Record<string, string> {
+  const idx = dataInvocations.findIndex((inv) => inv.callId === artifactCreatingCallId);
+  if (idx < 0) {
+    throw new Error(
+      `buildBentoSlidesOutputsMap: slides callId '${artifactCreatingCallId}' ` +
+      `is not present in dataInvocations (was it a failed tool call?). ` +
+      `Cannot build spec.outputs without a slides node.`,
+    );
+  }
+  const slidesNode = nodes[idx];
+  if (slidesNode === undefined || slidesNode.type !== "tool") {
+    throw new Error(
+      `buildBentoSlidesOutputsMap: expected a slides tool node at index ${idx} ` +
+      `(callId '${artifactCreatingCallId}') but got ` +
+      `${slidesNode === undefined ? "undefined" : `type="${slidesNode.type}"`}. ` +
+      `This indicates a bug in the assembleNode dispatch table.`,
+    );
+  }
+  return { doc: `@nodes.${slidesNode.id}.doc` };
 }
 
 function buildImageOutputsMap(

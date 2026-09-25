@@ -46,6 +46,7 @@ describe("BUILTIN_TOOLS catalog", () => {
     // dispatch/builtin.ts when their binding is present.
     const names = BUILTIN_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual([
+      "generate_bento_slides",
       "generate_echarts_config",
       "generate_html_page",
       "repeat_tool",

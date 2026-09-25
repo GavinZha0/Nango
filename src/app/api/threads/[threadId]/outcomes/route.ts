@@ -15,6 +15,7 @@ import type { Outcome } from "@/store/outcome-store";
 import {
   rebuildChartOutcome,
   rebuildHtmlPageOutcome,
+  rebuildBentoSlidesOutcome,
   rebuildImageOutcome,
   rebuildWebSearchOutcome,
   type RebuildContext,
@@ -118,6 +119,18 @@ export const GET = withSession<{ threadId: string }>(
 
         if (chunk.toolName === "generate_html_page") {
           const built = rebuildHtmlPageOutcome(chunk, {
+            threadId,
+            runId: row.runId,
+            entityId: row.entityId,
+            ts: row.eventTs,
+            log,
+          });
+          if (built) outcomes.set(built.id, built.outcome);
+          continue;
+        }
+
+        if (chunk.toolName === "generate_bento_slides") {
+          const built = rebuildBentoSlidesOutcome(chunk, {
             threadId,
             runId: row.runId,
             entityId: row.entityId,

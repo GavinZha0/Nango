@@ -4,7 +4,7 @@
  * ArtifactPanel — left-sidebar tree view of the current user's
  * artifact library.
  *
- *  - Seed categories (Charts / Reports / Code / Images / HTML / PPT)
+ *  - Seed categories (Charts / Reports / Code / Images / HTML / Slides)
  *    are rendered as top-level rows. They cannot be renamed or
  *    deleted; their hover menu only offers `New sub-folder`.
  *  - User-created sub-folders + leaf artifacts expose

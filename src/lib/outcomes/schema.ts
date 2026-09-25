@@ -20,9 +20,22 @@ import { z } from "zod";
  */
 export const ECHARTS_OPTION_HARD_CAP_BYTES = 64_000;
 
-// ─── generate_echarts_config ────────────────────────────────────────
+export function normalizeOutcomeId(val: string): string {
+  return val
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]+/g, "")
+    .replace(/-+/g, "-")
+    .replace(/_+/g, "_")
+    .replace(/^[-_]+|[-_]+$/g, "");
+}
 
-export const normalizeChartId = normalizePageId;
+export const normalizeChartId = normalizeOutcomeId;
+export const normalizePageId = normalizeOutcomeId;
+export const normalizeSlideId = normalizeOutcomeId;
+
+// ─── generate_echarts_config ────────────────────────────────────────
 
 /**
  * Parameter schema for the `generate_echarts_config` server tool.
@@ -32,14 +45,14 @@ export const normalizeChartId = normalizePageId;
  * validation (CopilotKit `useRenderTool`).
  */
 export const generateEchartsConfigSchema = z.object({
-  chart_id: z
+  outcome_id: z
     .string()
     .regex(
       /^[a-zA-Z0-9-_\s]+$/,
-      "chart_id must contain only letters, numbers, spaces, hyphens, and underscores",
+      "outcome_id must contain only letters, numbers, spaces, hyphens, and underscores",
     )
-    .min(1, "chart_id cannot be empty")
-    .max(64, "chart_id max 64 characters")
+    .min(1, "outcome_id cannot be empty")
+    .max(64, "outcome_id max 64 characters")
     .describe(
       "Stable per-thread identifier; re-calling with the same id " +
         "overwrites the previous chart. Pick a short kebab-case or snake_case slug " +
@@ -104,7 +117,7 @@ export type GenerateEchartsConfigArgs = z.infer<
  */
 export interface GenerateEchartsConfigSuccess {
   ok: true;
-  chart_id: string;
+  outcome_id: string;
   title: string;
   description?: string;
   option: Record<string, unknown>;
@@ -138,17 +151,6 @@ export type GenerateEchartsConfigResult =
  */
 export const HTML_PAGE_HARD_CAP_BYTES = 524_288; // 512 KB
 
-export function normalizePageId(val: string): string {
-  return val
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-_]+/g, "")
-    .replace(/-+/g, "-")
-    .replace(/_+/g, "_")
-    .replace(/^[-_]+|[-_]+$/g, "");
-}
-
 /**
  * Parameter schema for the `generate_html_page` server tool.
  *
@@ -157,14 +159,14 @@ export function normalizePageId(val: string): string {
  * validation (CopilotKit `useRenderTool`).
  */
 export const generateHtmlPageSchema = z.object({
-  page_id: z
+  outcome_id: z
     .string()
     .regex(
       /^[a-zA-Z0-9-_\s]+$/,
-      "page_id must contain only letters, numbers, spaces, hyphens, and underscores",
+      "outcome_id must contain only letters, numbers, spaces, hyphens, and underscores",
     )
-    .min(1, "page_id cannot be empty")
-    .max(64, "page_id max 64 characters")
+    .min(1, "outcome_id cannot be empty")
+    .max(64, "outcome_id max 64 characters")
     .describe(
       "Stable per-thread identifier; re-calling with the same id " +
         "overwrites the previous page. Pick a short kebab-case or snake_case slug " +
@@ -211,7 +213,7 @@ export type GenerateHtmlPageArgs = z.infer<typeof generateHtmlPageSchema>;
  */
 export interface GenerateHtmlPageSuccess {
   ok: true;
-  page_id: string;
+  outcome_id: string;
   title: string;
   description?: string;
   html: string;
@@ -232,3 +234,83 @@ export interface GenerateHtmlPageFailure {
 export type GenerateHtmlPageResult =
   | GenerateHtmlPageSuccess
   | GenerateHtmlPageFailure;
+
+// ─── generate_bento_slides ──────────────────────────────────────────
+
+/**
+ * Hard upper bound on the serialized Bento doc JSON a single
+ * `generate_bento_slides` call can carry (512 KB).
+ */
+export const BENTO_DOC_HARD_CAP_BYTES = 524_288;
+
+/**
+ * Parameter schema for the `generate_bento_slides` server tool.
+ *
+ * Drives both LLM parameter catalog and client-side tool parameter
+ * validation (CopilotKit `useRenderTool`).
+ */
+export const generateBentoSlidesSchema = z.object({
+  outcome_id: z
+    .string()
+    .regex(
+      /^[a-zA-Z0-9-_\s]+$/,
+      "outcome_id must contain only letters, numbers, spaces, hyphens, and underscores",
+    )
+    .min(1, "outcome_id cannot be empty")
+    .max(64, "outcome_id max 64 characters")
+    .describe(
+      "Stable per-thread identifier; re-calling with the same id " +
+        "overwrites the previous slides deck. Pick a short kebab-case or snake_case slug " +
+        "like 'q3-growth', 'product-launch', or 'tech-architecture'. " +
+        "Letters, numbers, spaces, hyphens, and underscores only.",
+    ),
+  title: z
+    .string()
+    .min(1, "title cannot be empty")
+    .describe("Human-readable presentation title (shown on preview cards)."),
+  description: z
+    .string()
+    .optional()
+    .describe("One-sentence summary of what this presentation covers."),
+  doc: z
+    .record(z.string(), z.unknown())
+    .describe(
+      [
+        "Complete Bento Slides document as a JSON OBJECT (NOT a string).",
+        "Must specify 'format': 'bento/slides', 'version': 1, 'title': '...', 'size': { 'width': 1280, 'height': 720 }, and a non-empty 'slides' array.",
+        "REQUIRED: 'title' (same as presentation title), 'theme': { 'background': '#0D1117', 'color': '#E6EDF3', 'accent': '#388BFD', 'fontFamily': 'Inter, system-ui, sans-serif' }.",
+        "Each slide entry requires: id, elements array, and optional transition ('none' | 'morph' | 'fade').",
+        "Elements format:",
+        "  - Text: { id, type: 'text', x, y, w, h, html: '...', fontSize, fontWeight, color, align: 'left'|'center'|'right' } (NOTE: use 'html', not 'text').",
+        "  - Shape: { id, type: 'shape', shape: 'rect'|'ellipse'|'line'|'arrow', x, y, w, h, fill: '#...', stroke: 'transparent', strokeWidth: 0, radius?: 8 }.",
+        "  - Chart: { id, type: 'chart', x, y, w, h, preset: 'bar'|'line'|'pie'|'scatter', option: { xAxis: { data: [...] }, series: [{ type: 'bar', data: [10, 20] }] } }.",
+        "Bento Best Practices:",
+        "  - Consecutive slides showing evolution: use the SAME element id + transition: 'morph'.",
+        "  - Spacing: respect 96px side margins (x: 96, max w: 1088) for a clean presentation look.",
+      ].join("\n"),
+    ),
+});
+
+export type GenerateBentoSlidesArgs = z.infer<
+  typeof generateBentoSlidesSchema
+>;
+
+export interface GenerateBentoSlidesSuccess {
+  ok: true;
+  outcome_id: string;
+  title: string;
+  description?: string;
+  doc: Record<string, unknown>;
+  message?: string;
+}
+
+export interface GenerateBentoSlidesFailure {
+  ok: false;
+  error: "DOC_TOO_LARGE" | "DOC_INVALID_FORMAT" | "DOC_NO_SLIDES";
+  message: string;
+}
+
+export type GenerateBentoSlidesResult =
+  | GenerateBentoSlidesSuccess
+  | GenerateBentoSlidesFailure;
+

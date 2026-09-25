@@ -260,7 +260,7 @@ describe("seedArtifactCategoriesForUser", () => {
     expect(db.insert).toHaveBeenCalledOnce();
     const inserted = insertedValues[0] as Array<{ name: string; kind: string }>;
     expect(inserted.map((r) => r.name).sort()).toEqual(
-      ["Charts", "Code", "HTML", "Images", "PPT", "Reports"].sort(),
+      ["Charts", "Code", "HTML", "Images", "Slides", "Reports"].sort(),
     );
     expect(inserted.every((r) => r.kind === "folder")).toBe(true);
   });
@@ -270,7 +270,7 @@ describe("seedArtifactCategoriesForUser", () => {
     await seedArtifactCategoriesForUser(OWNER);
     const inserted = insertedValues[0] as Array<{ name: string }>;
     expect(inserted.map((r) => r.name).sort()).toEqual(
-      ["Code", "HTML", "Images", "PPT"].sort(),
+      ["Code", "HTML", "Images", "Slides"].sort(),
     );
   });
 
@@ -281,7 +281,7 @@ describe("seedArtifactCategoriesForUser", () => {
       { name: "Code" },
       { name: "Images" },
       { name: "HTML" },
-      { name: "PPT" },
+      { name: "Slides" },
     ]);
     await seedArtifactCategoriesForUser(OWNER);
     expect(db.insert).not.toHaveBeenCalled();

@@ -88,6 +88,16 @@ function extractInitialSnapshot(
     }
   }
 
+  if (artifactType === "slide") {
+    if (config.doc && typeof config.doc === "object") {
+      const doc = { ...(config.doc as Record<string, unknown>) };
+      if (!doc.title && typeof config.title === "string" && config.title.trim()) {
+        doc.title = config.title.trim();
+      }
+      return doc;
+    }
+  }
+
   return null;
 }
 
@@ -597,6 +607,8 @@ function deriveArtifactType(toolName: string): ArtifactType {
     case "generate_html_page":
     case "render_html":
       return "html";
+    case "generate_bento_slides":
+      return "slide";
     case "render_markdown":
     case "web_search":
       return "report";

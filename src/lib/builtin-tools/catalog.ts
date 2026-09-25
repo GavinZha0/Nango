@@ -19,7 +19,11 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 
 import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
-import { buildGenerateEchartsConfigTool, buildGenerateHtmlPageTool } from "@/lib/outcomes/runtime-tools";
+import {
+  buildGenerateEchartsConfigTool,
+  buildGenerateHtmlPageTool,
+  buildGenerateBentoSlidesTool,
+} from "@/lib/outcomes/runtime-tools";
 import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 
 /** Coarse grouping for the UI's section headings. */
@@ -119,6 +123,49 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       required: ["html"],
     },
     build: buildGenerateHtmlPageTool,
+  },
+  {
+    name: "generate_bento_slides",
+    displayName: "Generate Bento Slides",
+    description:
+      "Generate an interactive slide deck presentation using Bento.",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        outcome_id: {
+          type: "string",
+          description: "Unique identifier for this slide deck outcome.",
+        },
+        title: {
+          type: "string",
+          description: "Presentation title.",
+        },
+        description: {
+          type: "string",
+          description: "Optional summary of the slide deck.",
+        },
+        doc: {
+          type: "object",
+          description:
+            "Bento slides JSON document with format 'bento/slides' and slides array.",
+          properties: {
+            format: {
+              type: "string",
+              description: "Format identifier, defaults to 'bento/slides'",
+            },
+            slides: {
+              type: "array",
+              items: { type: "object" },
+              description: "Array of slide objects.",
+            },
+          },
+          required: ["slides"],
+        },
+      },
+      required: ["outcome_id", "title", "doc"],
+    },
+    build: buildGenerateBentoSlidesTool,
   },
   {
     name: "web_search",

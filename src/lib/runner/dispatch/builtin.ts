@@ -18,7 +18,11 @@ import { buildExtractDatasetTool } from "@/lib/data-sources/runtime-tools";
 import { buildGetCurrentDatetimeTool } from "@/lib/time/runtime-tools";
 import { buildCalendarPromptBlock } from "@/lib/calendar/prompt-block.server";
 import { buildFetchCalendarEventsTool } from "@/lib/calendar/runtime-tools";
-import { buildChartPromptBlock, buildHtmlPagePromptBlock } from "@/lib/outcomes/prompt-block.server";
+import {
+  buildChartPromptBlock,
+  buildHtmlPagePromptBlock,
+  buildBentoSlidesPromptBlock,
+} from "@/lib/outcomes/prompt-block.server";
 import { mcpProviderPool } from "@/lib/mcp";
 import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
 import {
@@ -390,6 +394,12 @@ export async function buildBuiltinAgents(
       ? ""
       : buildHtmlPagePromptBlock();
 
+    // Bento slides prompt block — usage policy for `generate_bento_slides`.
+    const hasBentoSlides = builtinToolNames.has("generate_bento_slides");
+    const bentoSlidesPromptBlock: string = !hasBentoSlides
+      ? ""
+      : buildBentoSlidesPromptBlock();
+
     // Always true in practice — `ambientTools` is never empty. Kept as
     // a disjunction so the invariant still holds if ambient tools ever
     // become conditional. `maxSteps` below depends on this: a tool-only
@@ -440,6 +450,7 @@ export async function buildBuiltinAgents(
       }
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
       if (htmlPagePromptBlock.length > 0) parts.push(htmlPagePromptBlock);
+      if (bentoSlidesPromptBlock.length > 0) parts.push(bentoSlidesPromptBlock);
 
       if (resolveSharedStateEnabled({ sharedStateEnabled: spec.sharedStateEnabled, role: spec.role })) {
         parts.push(SHARED_STATE_PROMPT_BLOCK);

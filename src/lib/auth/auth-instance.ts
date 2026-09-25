@@ -206,7 +206,7 @@ const options = {
         },
         after: async (user: Record<string, unknown>) => {
           // Seed the per-user artifact tree (Charts / Reports / Code /
-          // Images / HTML / PPT root folders). Idempotent — safe to
+          // Images / HTML / Slides root folders). Idempotent — safe to
           // call even if the migration backfill already provisioned
           // this user. Failure here must not block sign-up: log and
           // continue. If the seed fails, the user will see an empty

@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * HtmlPreviewCard — inline chat preview for `generate_html_page`
+ * SlidesPreviewCard — inline chat preview for `generate_bento_slides`
  * server-tool calls.
  *
- * Two responsibilities (mirrors ChartPreviewCard):
+ * Two responsibilities (mirrors HtmlPreviewCard / ChartPreviewCard):
  *
  * 1. **Streaming render.** CopilotKit's `useRenderTool` invokes this
  *    component as the tool's args arrive over AG-UI and again on
@@ -15,14 +15,14 @@
  *      - `complete`: server tool returned success or failure.
  *
  * 2. **Outcomes-store update.** When `status` transitions to
- *    `complete` with `ok === true`, a `useEffect` upserts the HTML
- *    page into `useOutcomeStore` so the Outcomes panel renders it.
+ *    `complete` with `ok === true`, a `useEffect` upserts the Bento
+ *    slides deck into `useOutcomeStore` so the Outcomes panel renders it.
  */
 
 import {
   ArrowUpRight,
-  Code2,
   Loader2,
+  Presentation,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, type ReactElement } from "react";
@@ -33,27 +33,27 @@ import { useWorkspaceStore } from "@/store/workspace";
 import { useToolApproval, ToolApprovalButtons, ToolApprovalBadge } from "@/hooks/useToolApproval";
 
 import type {
-  GenerateHtmlPageArgs,
-  GenerateHtmlPageResult,
+  GenerateBentoSlidesArgs,
+  GenerateBentoSlidesResult,
 } from "@/lib/outcomes/schema";
 import { detectToolResultStatus } from "@/lib/copilot/detect-tool-result-status";
 import { WildcardToolRenderer } from "@/components/copilotkit/WildcardToolRenderer";
 
 // props
 
-export interface HtmlPreviewProps {
+export interface SlidesPreviewProps {
   name: string;
   toolCallId: string;
   parameters:
-    | Partial<GenerateHtmlPageArgs>
-    | GenerateHtmlPageArgs;
+    | Partial<GenerateBentoSlidesArgs>
+    | GenerateBentoSlidesArgs;
   status: "inProgress" | "executing" | "complete";
   result: string | undefined;
 }
 
 // component
 
-export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
+export function SlidesPreviewCard(props: SlidesPreviewProps): ReactElement {
   const router = useRouter();
   const select = useOutcomeStore((s) => s.select);
   
@@ -65,7 +65,7 @@ export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
   );
 
   // Side-effect: when the server tool completes successfully, upsert
-  // the HTML page into the Outcomes store.
+  // the Bento slides into the Outcomes store.
   useEffect(() => {
     if (props.status !== "complete") return;
     const parsed = parseServerResult(props.result);
@@ -79,8 +79,9 @@ export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
       description: parsed.description,
       blocks: [
         {
-          kind: "html",
-          html: parsed.html,
+          kind: "slide",
+          doc: parsed.doc,
+          title: parsed.title,
         },
       ],
       agentId: ws.activeAgentId,
@@ -92,14 +93,14 @@ export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
     });
   }, [props.status, props.result, props.toolCallId]);
 
-  const onView = (pageId: string): void => {
+  const onView = (outcomeId: string): void => {
     router.push("/outcomes");
-    select(pageId);
+    select(outcomeId);
   };
 
   // inProgress: args stream in incrementally — render a skeleton.
   if (props.status === "inProgress") {
-    const partial = props.parameters as Partial<GenerateHtmlPageArgs>;
+    const partial = props.parameters as Partial<GenerateBentoSlidesArgs>;
     return (
       <CardShell actions={actions}>
         <div className="flex items-center gap-2">
@@ -108,7 +109,7 @@ export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
             aria-hidden
           />
           <span className="text-sm font-medium text-muted-foreground">
-            {partial.title ?? partial.outcome_id ?? "Generating HTML page…"}
+            {partial.title ?? partial.outcome_id ?? "Generating Bento slides…"}
           </span>
         </div>
       </CardShell>
@@ -116,13 +117,13 @@ export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
   }
 
   // executing or complete: parameters are fully validated.
-  const args = props.parameters as GenerateHtmlPageArgs;
+  const args = props.parameters as GenerateBentoSlidesArgs;
 
   if (props.status === "executing") {
     return (
       <CardShell actions={actions}>
         <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-blue-500" aria-hidden />
+          <Loader2 className="h-4 w-4 animate-spin text-amber-500" aria-hidden />
           <span className="text-sm font-medium">{args.title}</span>
         </div>
       </CardShell>
@@ -153,18 +154,18 @@ function SuccessCard({
   onView,
   actions,
 }: {
-  args: GenerateHtmlPageArgs;
-  onView: (pageId: string) => void;
+  args: GenerateBentoSlidesArgs;
+  onView: (outcomeId: string) => void;
   actions?: React.ReactNode;
 }): ReactElement {
   return (
     <CardShell actions={actions}>
       <div className="flex items-center gap-2">
-        <Code2 className="h-4 w-4 text-blue-500" aria-hidden />
+        <Presentation className="h-4 w-4 text-amber-500" aria-hidden />
         <button
           type="button"
           onClick={() => onView(args.outcome_id)}
-          className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+          className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-amber-600 hover:text-amber-700 hover:underline dark:text-amber-400 dark:hover:text-amber-300"
           aria-label={`View ${args.title} in Outcomes`}
         >
           {args.title}
@@ -205,21 +206,21 @@ function CardShell({
 }
 
 /**
- * Parse the JSON envelope returned by the `generate_html_page`
+ * Parse the JSON envelope returned by the `generate_bento_slides`
  * server tool's `execute()`.
  */
 function parseServerResult(
   result: string | undefined,
-): GenerateHtmlPageResult | null {
+): GenerateBentoSlidesResult | null {
   if (typeof result !== "string" || result.length === 0) return null;
   try {
     const obj = JSON.parse(result) as Record<string, unknown>;
     if (obj === null || typeof obj !== "object") return null;
     if (obj.ok === true && typeof obj.outcome_id === "string") {
-      return obj as unknown as GenerateHtmlPageResult;
+      return obj as unknown as GenerateBentoSlidesResult;
     }
     if (obj.ok === false) {
-      return obj as unknown as GenerateHtmlPageResult;
+      return obj as unknown as GenerateBentoSlidesResult;
     }
     return null;
   } catch {

@@ -328,6 +328,63 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(saved.snapshot).toBe(htmlContent);
   });
 
+  it("should successfully save a generate_bento_slides outcome as slide type with snapshot", async () => {
+    const outcomeId = "demo-slides";
+    const toolCallId = "call-slides-1";
+    const slideDoc = {
+      format: "bento/slides",
+      slides: [{ id: "s1", elements: [{ type: "text", content: "Slide 1" }] }],
+    };
+
+    mockEvents = [
+      {
+        id: 1,
+        runId: "run-5",
+        seq: 0,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId,
+          toolName: "generate_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            title: "Pitch Deck",
+            doc: slideDoc,
+          }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 2,
+        runId: "run-5",
+        seq: 1,
+        type: "tool_call_result",
+        payload: {
+          toolCallId,
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, title: "Pitch Deck", doc: slideDoc }),
+        },
+        createdAt: new Date(),
+      },
+    ] as unknown as EntityRunEventEntity[];
+
+    const input: SaveArtifactInput = {
+      ownerId,
+      threadId,
+      outcomeId,
+      name: "Pitch Deck",
+    };
+
+    const result = await saveArtifact(input, mockDeps);
+
+    expect(result.reused).toBe(false);
+    expect(mockInsertedArtifacts.length).toBe(1);
+
+    const saved = mockInsertedArtifacts[0];
+    expect(saved.type).toBe("slide");
+    expect(saved.viewMode).toBe("snapshot");
+    expect(saved.snapshotAt).toBeDefined();
+    expect(saved.snapshot).toEqual({ ...slideDoc, title: "Pitch Deck" });
+  });
+
   it("should be idempotent when saving the same outcome twice", async () => {
     mockExistingArtifact = {
       id: "existing-art-99",
