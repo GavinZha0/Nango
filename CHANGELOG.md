@@ -5,15 +5,15 @@
 
 ### Features
 
-* **agent:** Bento slides generation/displaying/ssaving ([48c4f00](https://github.com/GavinZha0/Nango/commit/48c4f00bfd26b7cc450b01017d3dd22300d14792))
-* **agent:** support to append slides ([041ad5c](https://github.com/GavinZha0/Nango/commit/041ad5c6d5e169ddeec44b464e1043c53bcfae95))
-* **outcomes:** harden bento slides replay and pending edits buffering ([a51b262](https://github.com/GavinZha0/Nango/commit/a51b2625f0c1a3865629a72f12b01627a85fe32a))
-* **outcomes:** implement partial bento slide editing and state machine ([1bfc742](https://github.com/GavinZha0/Nango/commit/1bfc74244aadf1cc5cc88c25663e07c1e01df822))
+* **agent:** Bento slides generation/displaying/ssaving ([48c4f00](https://github.com/GavinZha0/Nango/commit/48c4f00bfd26b7cc450b01017d3dd22300d14792)) by @GavinZha0
+* **agent:** support to append slides ([041ad5c](https://github.com/GavinZha0/Nango/commit/041ad5c6d5e169ddeec44b464e1043c53bcfae95)) by @GavinZha0
+* **outcomes:** harden bento slides replay and pending edits buffering ([a51b262](https://github.com/GavinZha0/Nango/commit/a51b2625f0c1a3865629a72f12b01627a85fe32a)) by @GavinZha0
+* **outcomes:** implement partial bento slide editing and state machine ([1bfc742](https://github.com/GavinZha0/Nango/commit/1bfc74244aadf1cc5cc88c25663e07c1e01df822)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **migration:** 0004 verification issue ([65bce1f](https://github.com/GavinZha0/Nango/commit/65bce1f343e2446bbecfb02ecb10917ef424d587))
+* **migration:** 0004 verification issue ([65bce1f](https://github.com/GavinZha0/Nango/commit/65bce1f343e2446bbecfb02ecb10917ef424d587)) by @GavinZha0
 
 ## [0.24.0](https://github.com/GavinZha0/Nango/compare/v0.23.0...v0.24.0) (2026-09-18)
 
