@@ -283,9 +283,13 @@ export function buildWorkflowSpecFromRunEvents(
   const artifactCreatorIsImage = isImageInvocation(artifactCreator);
   const artifactCreatorIsFirstClass =
     artifactCreatorIsChart || artifactCreatorIsHtmlPage || artifactCreatorIsBentoSlides || artifactCreatorIsImage;
-  const dataInvocations = artifactCreatorIsFirstClass
-    ? successful
-    : successful.filter((i) => i.callId !== artifactCreatingCallId);
+  // CONTRACT: Incremental partial edit tools (edit_bento_slides) materialize directly
+  // into the artifact's static snapshot in saveArtifact, not standalone workflow nodes.
+  const dataInvocations = (
+    artifactCreatorIsFirstClass
+      ? successful
+      : successful.filter((i) => i.callId !== artifactCreatingCallId)
+  ).filter((i) => i.toolName !== "edit_bento_slides");
 
   let nextId = 0;
   const literalNodes: LLMNode[] = dataInvocations.map((inv) => {

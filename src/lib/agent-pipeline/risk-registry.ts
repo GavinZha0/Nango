@@ -53,6 +53,14 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     { riskLevel: "low", sideEffects: "none", readOnlyHint: true, headlessAllowed: true },
   ],
   [
+    "generate_bento_slides",
+    { riskLevel: "low", sideEffects: "none", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
+    "edit_bento_slides",
+    { riskLevel: "low", sideEffects: "write", headlessAllowed: true },
+  ],
+  [
     "web_search",
     { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
   ],
@@ -189,6 +197,25 @@ export function evaluateToolRisk(
       riskLevel = "high";
       sideEffects = "write";
       reason = "SQL query contains write operation";
+    }
+  } else if (toolName === "edit_bento_slides") {
+    let action: unknown;
+    if (args && typeof args === "object") {
+      action = (args as { action?: unknown }).action;
+    } else if (typeof args === "string") {
+      try {
+        const parsed = JSON.parse(args);
+        if (parsed && typeof parsed === "object") {
+          action = (parsed as { action?: unknown }).action;
+        }
+      } catch {
+        // Ignore unparseable JSON args
+      }
+    }
+    if (action === "delete") {
+      riskLevel = "high";
+      sideEffects = "destructive";
+      reason = "Deleting slides from presentation";
     }
   }
 

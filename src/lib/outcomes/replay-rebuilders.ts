@@ -35,12 +35,14 @@ import {
   readGenerateEchartsConfigArgs,
   readGenerateHtmlPageArgs,
   readGenerateBentoSlidesArgs,
+  readEditBentoSlidesArgs,
   type GenerateEchartsConfigArtifactArgs,
   type GenerateHtmlPageArtifactArgs,
   type GenerateBentoSlidesArtifactArgs,
+  type EditBentoSlidesArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
 import { normalizeOutcomeId } from "./schema";
-import { mergeSlideDocs } from "./merge-slides";
+import { applySlideEdit } from "./merge-slides";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
 
@@ -376,25 +378,15 @@ export function rebuildBentoSlidesOutcome(
   );
 
   // CONTRACT: Global toolCallId idempotency guard across runs
-  // If this toolCallId was already processed into priorOutcome (whether append or non-append replay),
+  // If this toolCallId was already processed into priorOutcome,
   // short-circuit return to prevent replayed initial chunks from resetting the outcome.
   if (priorOutcome && priorSlideBlock?.appliedToolCallIds?.includes(chunk.toolCallId)) {
     return { id: normalizeOutcomeId(args.outcome_id), outcome: priorOutcome };
   }
 
-  let appliedToolCallIds = [chunk.toolCallId];
-  let finalDoc = args.doc;
-  if (args.append === true && priorOutcome && priorSlideBlock && priorSlideBlock.doc) {
-    finalDoc = mergeSlideDocs(priorSlideBlock.doc, args.doc);
-    appliedToolCallIds = [
-      ...(priorSlideBlock.appliedToolCallIds ?? []),
-      chunk.toolCallId,
-    ];
-  }
-
   const content = slideArgsToContent({
     ...args,
-    doc: finalDoc,
+    doc: args.doc,
   });
   if (content === null) {
     ctx.log.warn(
@@ -409,7 +401,7 @@ export function rebuildBentoSlidesOutcome(
   }
   const slideBlock = content.blocks[0];
   if (slideBlock && slideBlock.kind === "slide") {
-    slideBlock.appliedToolCallIds = appliedToolCallIds;
+    slideBlock.appliedToolCallIds = [chunk.toolCallId];
   }
 
   const finalOutcomeId = normalizeOutcomeId(args.outcome_id);
@@ -427,6 +419,95 @@ export function rebuildBentoSlidesOutcome(
       createdAt: priorOutcome?.createdAt ?? ctx.ts.getTime(),
       collapsed: priorOutcome ? priorOutcome.collapsed : false,
       savedArtifactId: priorOutcome?.savedArtifactId ?? null,
+    },
+  };
+}
+
+/**
+ * Rebuild a Bento slides outcome modified by an `edit_bento_slides` tool call.
+ */
+export function rebuildBentoSlideEditOutcome(
+  chunk: ToolCallChunkPayload,
+  ctx: RebuildContext,
+  priorOutcome?: Outcome,
+): { id: string; outcome: Outcome } | null {
+  let rawArgs: Record<string, unknown>;
+  try {
+    rawArgs = JSON.parse(chunk.args) as Record<string, unknown>;
+  } catch (err) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_parse_failed",
+        tool: "edit_bento_slides",
+        runId: ctx.runId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "skipping unparseable edit_bento_slides payload",
+    );
+    return null;
+  }
+
+  const args: EditBentoSlidesArtifactArgs | null =
+    readEditBentoSlidesArgs(rawArgs);
+  if (args === null) {
+    ctx.log.warn(
+      {
+        event: "outcomes_replay_invalid_args",
+        tool: "edit_bento_slides",
+        runId: ctx.runId,
+      },
+      "skipping edit_bento_slides row with invalid args shape",
+    );
+    return null;
+  }
+
+  const normId = normalizeOutcomeId(args.outcome_id);
+  if (!priorOutcome) {
+    return null;
+  }
+
+  const priorSlideBlock = priorOutcome.blocks.find(
+    (b): b is SlideBlock => b.kind === "slide",
+  );
+  if (!priorSlideBlock || !priorSlideBlock.doc) {
+    return null;
+  }
+
+  // CONTRACT: ToolCallId idempotency guard
+  if (priorSlideBlock.appliedToolCallIds?.includes(chunk.toolCallId)) {
+    return { id: normId, outcome: priorOutcome };
+  }
+
+  const editRes = applySlideEdit(priorSlideBlock.doc, {
+    action: args.action,
+    target_slide_ids: args.target_slide_ids,
+    slides: args.slides,
+  });
+
+  if (!editRes.changed) {
+    return { id: normId, outcome: priorOutcome };
+  }
+
+  const nextAppliedIds = [
+    ...(priorSlideBlock.appliedToolCallIds ?? []),
+    chunk.toolCallId,
+  ];
+
+  const updatedBlocks = priorOutcome.blocks.map((b) =>
+    b.kind === "slide"
+      ? {
+          ...b,
+          doc: editRes.doc,
+          appliedToolCallIds: nextAppliedIds,
+        }
+      : b,
+  );
+
+  return {
+    id: normId,
+    outcome: {
+      ...priorOutcome,
+      blocks: updatedBlocks,
     },
   };
 }

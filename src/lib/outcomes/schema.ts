@@ -272,14 +272,6 @@ export const generateBentoSlidesSchema = z.object({
     .string()
     .optional()
     .describe("One-sentence summary of what this presentation covers."),
-  append: z
-    .boolean()
-    .optional()
-    .describe(
-      "Optional: if true, appends the provided slides to the existing presentation with outcome_id. " +
-        "If false (default), replaces or creates a new presentation. " +
-        "Use append: true when generating multi-slide presentations incrementally to avoid timeouts.",
-    ),
   doc: z
     .record(z.string(), z.unknown())
     .describe(
@@ -309,17 +301,110 @@ export interface GenerateBentoSlidesSuccess {
   title: string;
   description?: string;
   doc: Record<string, unknown>;
-  append?: boolean;
   message?: string;
 }
 
 export interface GenerateBentoSlidesFailure {
   ok: false;
-  error: "DOC_TOO_LARGE" | "DOC_INVALID_FORMAT" | "DOC_NO_SLIDES";
+  error:
+    | "DOC_TOO_LARGE"
+    | "DOC_INVALID_FORMAT"
+    | "DOC_NO_SLIDES"
+    | "SLIDE_MISSING_ID"
+    | "DUPLICATE_SLIDE_ID";
   message: string;
 }
 
 export type GenerateBentoSlidesResult =
   | GenerateBentoSlidesSuccess
   | GenerateBentoSlidesFailure;
+
+// ─── edit_bento_slides ────────────────────────────────────────────
+
+function parsePossibleJsonArray(val: unknown): unknown {
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return val;
+      }
+    }
+  }
+  return val;
+}
+
+export const editBentoSlidesSchema = z.object({
+  outcome_id: z
+    .string()
+    .regex(
+      /^[a-zA-Z0-9-_\s]+$/,
+      "outcome_id must contain only letters, numbers, spaces, hyphens, and underscores",
+    )
+    .min(1, "outcome_id cannot be empty")
+    .max(64, "outcome_id max 64 characters")
+    .describe(
+      "The outcome_id of the existing Bento slides presentation to edit.",
+    ),
+  action: z
+    .enum(["delete", "replace", "insert"])
+    .describe(
+      "The type of edit to perform: " +
+        "'delete' removes existing slides by target_slide_ids; " +
+        "'replace' substitutes targeted slides with new slide definitions; " +
+        "'insert' adds new slides (appends to end if target_slide_ids is omitted, inserts at start if '0', or after target_slide_ids[0]).",
+    ),
+  target_slide_ids: z
+    .preprocess(
+      parsePossibleJsonArray,
+      z.array(z.string().min(1, "slide id cannot be empty")),
+    )
+    .optional()
+    .describe(
+      "Authoritative list of slide IDs. Required for 'delete' and 'replace'. " +
+        "For 'insert': omit to append to end; specify ['0'] to insert at start; or specify ['<slide_id>'] to insert after that slide.",
+    ),
+  slides: z
+    .preprocess(
+      parsePossibleJsonArray,
+      z.array(z.record(z.string(), z.unknown())),
+    )
+    .optional()
+    .describe(
+      "Array of Bento slide objects. Required for 'replace' (must match count of target_slide_ids 1-to-1) " +
+        "and 'insert' (1 or more slides). DO NOT provide for 'delete'.",
+    ),
+});
+
+export type EditBentoSlidesArgs = z.infer<typeof editBentoSlidesSchema>;
+
+export interface EditBentoSlidesSuccess {
+  ok: true;
+  outcome_id: string;
+  action: "delete" | "replace" | "insert";
+  target_slide_ids?: string[];
+  slides?: Array<Record<string, unknown>>;
+  message?: string;
+}
+
+export interface EditBentoSlidesFailure {
+  ok: false;
+  error:
+    | "SLIDES_TOO_LARGE"
+    | "UNEXPECTED_SLIDES"
+    | "SLIDES_REQUIRED"
+    | "TARGET_SLIDE_IDS_REQUIRED"
+    | "REPLACE_COUNT_MISMATCH"
+    | "DUPLICATE_TARGET_SLIDE_ID"
+    | "SLIDE_MISSING_ID"
+    | "DUPLICATE_SLIDE_ID"
+    | "SLIDE_INVALID";
+  message: string;
+}
+
+export type EditBentoSlidesResult =
+  | EditBentoSlidesSuccess
+  | EditBentoSlidesFailure;
+
 

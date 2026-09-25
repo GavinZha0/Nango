@@ -3,12 +3,14 @@ import { describe, it, expect, vi } from "vitest";
 import {
   rebuildChartOutcome,
   rebuildBentoSlidesOutcome,
+  rebuildBentoSlideEditOutcome,
   rebuildWebSearchOutcome,
   tryDomain,
   type RebuildContext,
   type ToolCallChunkPayload,
   type ToolCallResultPayload,
 } from "@/lib/outcomes/replay-rebuilders";
+import type { SlideBlock } from "@/store/outcome-store";
 
 function ctxFixture(): RebuildContext {
   return {
@@ -173,47 +175,7 @@ describe("rebuildBentoSlidesOutcome", () => {
     expect(built!.outcome.outcomeId).toBe("my-fancy-deck");
   });
 
-  it("appends slides when append: true and priorOutcome exists", () => {
-    const chunk1: ToolCallChunkPayload = {
-      toolCallId: "call-slides-chunk-1",
-      toolName: "generate_bento_slides",
-      args: JSON.stringify({
-        outcome_id: "incremental-deck",
-        title: "Incremental Deck",
-        doc: {
-          format: "bento/slides",
-          slides: [{ id: "slide-1", content: "Part 1" }],
-        },
-      }),
-    };
-    const built1 = rebuildBentoSlidesOutcome(chunk1, ctxFixture());
-    expect(built1).not.toBeNull();
-
-    const chunk2: ToolCallChunkPayload = {
-      toolCallId: "call-slides-chunk-2",
-      toolName: "generate_bento_slides",
-      args: JSON.stringify({
-        outcome_id: "incremental-deck",
-        title: "Incremental Deck",
-        append: true,
-        doc: {
-          format: "bento/slides",
-          slides: [{ id: "slide-2", content: "Part 2" }],
-        },
-      }),
-    };
-    const built2 = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built1!.outcome);
-    expect(built2).not.toBeNull();
-    const slideBlock = built2!.outcome.blocks[0];
-    if (slideBlock.kind === "slide") {
-      const slides = slideBlock.doc.slides as Array<Record<string, unknown>>;
-      expect(slides).toHaveLength(2);
-      expect(slides[0]?.id).toBe("slide-1");
-      expect(slides[1]?.id).toBe("slide-2");
-    }
-  });
-
-  it("replaces slides when append: false even if priorOutcome exists", () => {
+  it("replaces slides when called again even if priorOutcome exists", () => {
     const chunk1: ToolCallChunkPayload = {
       toolCallId: "call-slides-chunk-1",
       toolName: "generate_bento_slides",
@@ -234,7 +196,6 @@ describe("rebuildBentoSlidesOutcome", () => {
       args: JSON.stringify({
         outcome_id: "replace-deck",
         title: "New Deck",
-        append: false,
         doc: {
           format: "bento/slides",
           slides: [{ id: "slide-new" }],
@@ -265,45 +226,136 @@ describe("rebuildBentoSlidesOutcome", () => {
       }),
     };
     const built1 = rebuildBentoSlidesOutcome(chunk1, ctxFixture());
+    expect(built1).not.toBeNull();
 
-    const chunk2: ToolCallChunkPayload = {
-      toolCallId: "call-slides-2",
+    // Replay chunk1 again (same toolCallId)
+    const built1Again = rebuildBentoSlidesOutcome(chunk1, ctxFixture(), built1!.outcome);
+    expect(built1Again).not.toBeNull();
+    expect(built1Again!.outcome).toBe(built1!.outcome);
+  });
+});
+
+describe("rebuildBentoSlideEditOutcome", () => {
+  it("rebuilds deck after applying edit operations", () => {
+    // 1. Initial deck
+    const initChunk: ToolCallChunkPayload = {
+      toolCallId: "call-init",
       toolName: "generate_bento_slides",
       args: JSON.stringify({
-        outcome_id: "idempotent-deck",
-        title: "Subsequent Batch Title",
-        append: true,
+        outcome_id: "deck-replay-edit",
+        title: "Presentation Title",
         doc: {
           format: "bento/slides",
-          slides: [{ id: "slide-2" }],
+          slides: [
+            { id: "s1", title: "Slide 1" },
+            { id: "s2", title: "Slide 2" },
+            { id: "s3", title: "Slide 3" },
+          ],
         },
       }),
     };
-    const built2 = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built1!.outcome);
-    expect(built2).not.toBeNull();
-    expect(built2!.outcome.title).toBe("Main Presentation Title");
+    const initBuilt = rebuildBentoSlidesOutcome(initChunk, ctxFixture());
+    expect(initBuilt).not.toBeNull();
 
-    // Replay chunk2 again (same toolCallId)
-    const built2Again = rebuildBentoSlidesOutcome(chunk2, ctxFixture(), built2!.outcome);
-    expect(built2Again).not.toBeNull();
-    const slideBlock = built2Again!.outcome.blocks[0];
-    if (slideBlock.kind === "slide") {
-      const slides = slideBlock.doc.slides as Array<Record<string, unknown>>;
-      expect(slides).toHaveLength(2); // Still 2, not 3
-      expect(slideBlock.appliedToolCallIds).toContain("call-slides-1");
-      expect(slideBlock.appliedToolCallIds).toContain("call-slides-2");
-    }
+    // 2. Edit call: delete s2
+    const delChunk: ToolCallChunkPayload = {
+      toolCallId: "call-del",
+      toolName: "edit_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "deck-replay-edit",
+        action: "delete",
+        target_slide_ids: ["s2"],
+      }),
+    };
+    const delBuilt = rebuildBentoSlideEditOutcome(
+      delChunk,
+      ctxFixture(),
+      initBuilt!.outcome,
+    );
+    const delBlock = delBuilt!.outcome.blocks[0] as SlideBlock;
+    const delSlides = delBlock.doc.slides as Array<{ id: string }>;
+    expect(delSlides.map((s) => s.id)).toEqual(["s1", "s3"]);
+    expect(delBlock.appliedToolCallIds).toEqual(["call-init", "call-del"]);
 
-    // Replay chunk1 again (cross-run replay of initial append: false chunk)
-    const built1Again = rebuildBentoSlidesOutcome(chunk1, ctxFixture(), built2!.outcome);
-    expect(built1Again).not.toBeNull();
-    const slideBlock1Again = built1Again!.outcome.blocks[0];
-    if (slideBlock1Again.kind === "slide") {
-      const slides = slideBlock1Again.doc.slides as Array<Record<string, unknown>>;
-      expect(slides).toHaveLength(2); // Still 2, does NOT reset to 1!
-    }
+    // 3. Duplicate del call (idempotent replay)
+    const delDup = rebuildBentoSlideEditOutcome(
+      delChunk,
+      ctxFixture(),
+      delBuilt!.outcome,
+    );
+    expect(delDup).not.toBeNull();
+    const delDupBlock = delDup!.outcome.blocks[0] as SlideBlock;
+    const delDupSlides = delDupBlock.doc.slides as Array<{ id: string }>;
+    expect(delDupSlides.map((s) => s.id)).toEqual(["s1", "s3"]);
+
+    // 4. Edit call: insert slide after s1
+    const insChunk: ToolCallChunkPayload = {
+      toolCallId: "call-ins",
+      toolName: "edit_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "deck-replay-edit",
+        action: "insert",
+        target_slide_ids: ["s1"],
+        slides: [{ id: "s1-inserted", title: "Inserted Slide" }],
+      }),
+    };
+    const insBuilt = rebuildBentoSlideEditOutcome(
+      insChunk,
+      ctxFixture(),
+      delBuilt!.outcome,
+    );
+    expect(insBuilt).not.toBeNull();
+    const insBlock = insBuilt!.outcome.blocks[0] as SlideBlock;
+    const insSlides = insBlock.doc.slides as Array<{ id: string }>;
+    expect(insSlides.map((s) => s.id)).toEqual([
+      "s1",
+      "s1-inserted",
+      "s3",
+    ]);
+    expect(insBlock.appliedToolCallIds).toEqual([
+      "call-init",
+      "call-del",
+      "call-ins",
+    ]);
+  });
+
+  it("preserves outcome and does not record toolCallId when edit does not match", () => {
+    const initChunk: ToolCallChunkPayload = {
+      toolCallId: "call-init-nomatch",
+      toolName: "generate_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "deck-nomatch",
+        title: "Presentation",
+        doc: {
+          format: "bento/slides",
+          slides: [{ id: "s1" }],
+        },
+      }),
+    };
+    const initBuilt = rebuildBentoSlidesOutcome(initChunk, ctxFixture());
+    expect(initBuilt).not.toBeNull();
+
+    const nomatchChunk: ToolCallChunkPayload = {
+      toolCallId: "call-nomatch",
+      toolName: "edit_bento_slides",
+      args: JSON.stringify({
+        outcome_id: "deck-nomatch",
+        action: "delete",
+        target_slide_ids: ["non-existent-id"],
+      }),
+    };
+    const result = rebuildBentoSlideEditOutcome(
+      nomatchChunk,
+      ctxFixture(),
+      initBuilt!.outcome,
+    );
+    expect(result).not.toBeNull();
+    const block = result!.outcome.blocks[0] as SlideBlock;
+    expect(block.appliedToolCallIds).toEqual(["call-init-nomatch"]);
+    expect(block.appliedToolCallIds).not.toContain("call-nomatch");
   });
 });
+
 
 describe("rebuildWebSearchOutcome", () => {
   const okChunk: ToolCallChunkPayload = {

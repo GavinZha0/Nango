@@ -20,6 +20,7 @@ import { HtmlPreviewCard } from "@/components/right-panels/HtmlPreviewCard";
 import { SlidesPreviewCard } from "@/components/right-panels/SlidesPreviewCard";
 import {
   generateBentoSlidesSchema,
+  editBentoSlidesSchema,
   generateEchartsConfigSchema,
   generateHtmlPageSchema,
 } from "@/lib/outcomes/schema";
@@ -40,6 +41,12 @@ export function useOutcomeTools(): void {
   useRenderTool({
     name: "generate_bento_slides",
     parameters: generateBentoSlidesSchema,
+    render: SlidesPreviewCard,
+  });
+
+  useRenderTool({
+    name: "edit_bento_slides",
+    parameters: editBentoSlidesSchema,
     render: SlidesPreviewCard,
   });
 }

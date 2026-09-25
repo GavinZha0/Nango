@@ -24,7 +24,14 @@ export async function buildUserToolCatalog(
 ): Promise<Map<string, ToolDefinition>> {
   const map = new Map<string, ToolDefinition>();
   for (const entry of BUILTIN_TOOLS) {
-    map.set(entry.name, entry.build());
+    const built = entry.build();
+    if (Array.isArray(built)) {
+      for (const t of built) {
+        map.set(t.name, t);
+      }
+    } else {
+      map.set(entry.name, built);
+    }
   }
 
   // Register ambient tools (e.g. get_current_datetime) so they resolve during workflow save canonicalize

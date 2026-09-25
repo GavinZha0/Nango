@@ -35,7 +35,7 @@ import { coalesceToolCalls } from "./coalesce-tool-calls";
 import { executeWorkflow } from "./execute-workflow";
 import { extractFilenameFromScreenshotText } from "@/lib/playwright/storage.server";
 import { normalizeOutcomeId } from "@/lib/outcomes/schema";
-import { mergeSlideDocChain } from "@/lib/outcomes/merge-slides";
+import { applySlideEdit } from "@/lib/outcomes/merge-slides";
 
 function extractInitialSnapshot(
   artifactType: ArtifactType,
@@ -93,47 +93,61 @@ function extractInitialSnapshot(
   }
 
   if (artifactType === "slide") {
-    if (config.doc && typeof config.doc === "object") {
-      let doc = { ...(config.doc as Record<string, unknown>) };
-      if (!doc.title && typeof config.title === "string" && config.title.trim()) {
-        doc.title = config.title.trim();
-      }
-
-      // If multiple tool invocations appended slides to this outcome, merge them.
-      if (allInvocations && outcomeId) {
-        const normId = normalizeOutcomeId(outcomeId);
-        const related = allInvocations.filter(
-          (inv) =>
-            inv.ok &&
-            inv.toolName === "generate_bento_slides" &&
-            (inv.inputs.outcome_id === outcomeId ||
-              normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) === normId),
-        );
-        if (related.length > 1) {
-          // Find the last invocation that initialized a deck (append !== true)
-          let startIndex = 0;
-          for (let i = related.length - 1; i >= 0; i--) {
-            if (related[i].inputs.append !== true) {
-              startIndex = i;
-              break;
-            }
-          }
-          const chain = related
-            .slice(startIndex)
-            .map((item) => item.inputs.doc as Record<string, unknown>)
-            .filter((d): d is Record<string, unknown> => Boolean(d && typeof d === "object"));
-          const merged = mergeSlideDocChain(chain);
-          if (merged) {
-            doc = merged;
+    // 1. If we have full invocations history for this thread/outcome, reconstruct the latest merged deck.
+    if (allInvocations && outcomeId) {
+      const normId = normalizeOutcomeId(outcomeId);
+      const related = allInvocations.filter(
+        (inv) =>
+          inv.ok &&
+          (inv.toolName === "generate_bento_slides" ||
+            inv.toolName === "edit_bento_slides") &&
+          (inv.inputs.outcome_id === outcomeId ||
+            normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) === normId),
+      );
+      if (related.length > 0) {
+        // Find the last invocation that generated a deck (generate_bento_slides)
+        let startIndex = 0;
+        for (let i = related.length - 1; i >= 0; i--) {
+          if (related[i]!.toolName === "generate_bento_slides") {
+            startIndex = i;
+            break;
           }
         }
+        let currentDoc =
+          (related[startIndex]?.inputs.doc as Record<string, unknown>) ?? null;
+        if (currentDoc) {
+          currentDoc = { ...currentDoc };
+          for (let i = startIndex + 1; i < related.length; i++) {
+            const item = related[i]!;
+            if (item.toolName === "edit_bento_slides") {
+              const editRes = applySlideEdit(currentDoc, {
+                action: item.inputs.action as "delete" | "replace" | "insert",
+                target_slide_ids: Array.isArray(item.inputs.target_slide_ids)
+                  ? item.inputs.target_slide_ids.map(String)
+                  : undefined,
+                slides: Array.isArray(item.inputs.slides)
+                  ? (item.inputs.slides as Array<Record<string, unknown>>)
+                  : undefined,
+              });
+              if (editRes.changed) {
+                currentDoc = editRes.doc;
+              }
+            }
+          }
+          if (!currentDoc.title && typeof config.title === "string" && config.title.trim()) {
+            currentDoc.title = config.title.trim();
+          }
+          return currentDoc;
+        }
       }
+    }
 
-      // CONTRACT: Ensure title fallback is reapplied if chain merge didn't carry one
+    // 2. Direct fallback from single config.doc if invocations list is not provided
+    if (config.doc && typeof config.doc === "object") {
+      const doc = { ...(config.doc as Record<string, unknown>) };
       if (!doc.title && typeof config.title === "string" && config.title.trim()) {
         doc.title = config.title.trim();
       }
-
       return doc;
     }
   }
@@ -223,12 +237,15 @@ export async function saveArtifact(
     const relatedSlideInvs = invocations.filter(
       (inv) =>
         inv.ok &&
-        inv.toolName === "generate_bento_slides" &&
+        (inv.toolName === "generate_bento_slides" ||
+          inv.toolName === "edit_bento_slides") &&
         (inv.inputs.outcome_id === input.outcomeId ||
           normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) === normId),
     );
-    const hasAppends = relatedSlideInvs.some((inv) => inv.inputs.append === true);
-    if (hasAppends && relatedSlideInvs.length > 0) {
+    const hasEditsOrAppends = relatedSlideInvs.some(
+      (inv) => inv.toolName === "edit_bento_slides" || inv.inputs.append === true,
+    );
+    if (hasEditsOrAppends && relatedSlideInvs.length > 0) {
       const lastInv = relatedSlideInvs[relatedSlideInvs.length - 1]!;
       const combinedConfig = {
         ...lastInv.inputs,
@@ -290,13 +307,14 @@ export async function saveArtifact(
   });
 
   const artifactType = deriveArtifactType(built.artifactCreatorToolName);
-  const hasAppendedSlides =
+  const hasAppendedOrEditedSlides =
     artifactType === "slide" &&
     invocations.some(
       (inv) =>
         inv.ok &&
-        inv.toolName === "generate_bento_slides" &&
-        inv.inputs.append === true &&
+        (inv.toolName === "edit_bento_slides" ||
+          (inv.toolName === "generate_bento_slides" &&
+            inv.inputs.append === true)) &&
         (inv.inputs.outcome_id === input.outcomeId ||
           normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) ===
             normalizeOutcomeId(input.outcomeId)),
@@ -440,10 +458,10 @@ export async function saveArtifact(
       forceFresh: false,
     });
     if (resolution !== null && resolution.data !== undefined) {
-      // For slide artifacts with appended slides, initialSnapshot already contains
+      // For slide artifacts with appended or edited slides, initialSnapshot already contains
       // the complete merged slides deck; executeWorkflow on the last invocation alone
       // only resolves the last chunk. Preserve initialSnapshot in this case.
-      if (!hasAppendedSlides) {
+      if (!hasAppendedOrEditedSlides) {
         await db
           .update(ArtifactTable)
           .set({
@@ -577,7 +595,11 @@ async function loadThreadEvents(
         sql`${EntityRunEventTable.type} IN ('tool_call_chunk', 'tool_call_result')`,
       ),
     )
-    .orderBy(asc(EntityRunEventTable.ts), asc(EntityRunEventTable.seq));
+    .orderBy(
+      asc(EntityRunTable.createdAt),
+      asc(EntityRunEventTable.seq),
+      asc(EntityRunEventTable.ts),
+    );
 }
 
 interface ExistingArtifactRef {
@@ -710,6 +732,7 @@ function deriveArtifactType(toolName: string): ArtifactType {
     case "render_html":
       return "html";
     case "generate_bento_slides":
+    case "edit_bento_slides":
       return "slide";
     case "render_markdown":
     case "web_search":

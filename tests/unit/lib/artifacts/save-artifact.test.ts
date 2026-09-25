@@ -412,7 +412,6 @@ describe("saveArtifact — Outcomes save unit tests", () => {
           args: JSON.stringify({
             outcome_id: outcomeId,
             title: "Complete Deck",
-            append: false,
             doc: slideDocPart1,
           }),
         },
@@ -436,12 +435,11 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         type: "tool_call_chunk",
         payload: {
           toolCallId: toolCallId2,
-          toolName: "generate_bento_slides",
+          toolName: "edit_bento_slides",
           args: JSON.stringify({
             outcome_id: outcomeId,
-            title: "Complete Deck",
-            append: true,
-            doc: slideDocPart2,
+            action: "insert",
+            slides: slideDocPart2.slides,
           }),
         },
         createdAt: new Date(),
@@ -453,7 +451,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         type: "tool_call_result",
         payload: {
           toolCallId: toolCallId2,
-          content: JSON.stringify({ ok: true, outcome_id: outcomeId, title: "Complete Deck", append: true, doc: slideDocPart2 }),
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "insert", slides: slideDocPart2.slides }),
         },
         createdAt: new Date(),
       },
@@ -477,6 +475,211 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(snapshot.slides).toHaveLength(2);
     expect(snapshot.slides[0]?.id).toBe("slide-1");
     expect(snapshot.slides[1]?.id).toBe("slide-2");
+  });
+
+  it("should preserve slide snapshot when an edit has changed: false (unmatched targets)", async () => {
+    const outcomeId = "unchanged-edit-deck";
+    const slideDoc = {
+      format: "bento/slides",
+      title: "Stable Deck",
+      slides: [{ id: "s1", content: "Original 1" }, { id: "s2", content: "Original 2" }],
+    };
+
+    mockEvents = [
+      {
+        id: 1,
+        runId: "run-unchanged",
+        seq: 0,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: "call-init",
+          toolName: "generate_bento_slides",
+          args: JSON.stringify({ outcome_id: outcomeId, title: "Stable Deck", doc: slideDoc }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 2,
+        runId: "run-unchanged",
+        seq: 1,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: "call-init",
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, title: "Stable Deck", doc: slideDoc }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 3,
+        runId: "run-unchanged",
+        seq: 2,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: "call-del-ghost",
+          toolName: "edit_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            action: "delete",
+            target_slide_ids: ["non-existent-id"],
+          }),
+        },
+        createdAt: new Date(),
+      },
+      {
+        id: 4,
+        runId: "run-unchanged",
+        seq: 3,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: "call-del-ghost",
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "delete", target_slide_ids: ["non-existent-id"] }),
+        },
+        createdAt: new Date(),
+      },
+    ] as unknown as EntityRunEventEntity[];
+
+    const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+    expect(result.reused).toBe(false);
+    expect(mockInsertedArtifacts.length).toBe(1);
+
+    const saved = mockInsertedArtifacts[0];
+    const snapshot = saved.snapshot as { slides: Array<Record<string, unknown>> };
+    expect(snapshot.slides).toHaveLength(2);
+    expect(snapshot.slides[0]?.id).toBe("s1");
+    expect(snapshot.slides[1]?.id).toBe("s2");
+  });
+
+  it("should reconstruct full sequence in total order across insert, replace, and delete", async () => {
+    const outcomeId = "complex-chain-deck";
+    const initDoc = {
+      format: "bento/slides",
+      title: "Chain Deck",
+      slides: [{ id: "s1", title: "Slide 1" }, { id: "s2", title: "Slide 2" }],
+    };
+
+    mockEvents = [
+      {
+        id: 1,
+        runId: "run-chain",
+        seq: 0,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: "c-1",
+          toolName: "generate_bento_slides",
+          args: JSON.stringify({ outcome_id: outcomeId, title: "Chain Deck", doc: initDoc }),
+        },
+        createdAt: new Date("2026-09-01T10:00:00Z"),
+      },
+      {
+        id: 2,
+        runId: "run-chain",
+        seq: 1,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: "c-1",
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, title: "Chain Deck", doc: initDoc }),
+        },
+        createdAt: new Date("2026-09-01T10:00:01Z"),
+      },
+      // Insert s3 after s1 -> [s1, s3, s2]
+      {
+        id: 3,
+        runId: "run-chain",
+        seq: 2,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: "c-2",
+          toolName: "edit_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            action: "insert",
+            target_slide_ids: ["s1"],
+            slides: [{ id: "s3", title: "Slide 3 Middle" }],
+          }),
+        },
+        createdAt: new Date("2026-09-01T10:00:02Z"),
+      },
+      {
+        id: 4,
+        runId: "run-chain",
+        seq: 3,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: "c-2",
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "insert" }),
+        },
+        createdAt: new Date("2026-09-01T10:00:03Z"),
+      },
+      // Replace s2 with updated title -> [s1, s3, s2_updated]
+      {
+        id: 5,
+        runId: "run-chain",
+        seq: 4,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: "c-3",
+          toolName: "edit_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            action: "replace",
+            target_slide_ids: ["s2"],
+            slides: [{ title: "Slide 2 Replaced" }],
+          }),
+        },
+        createdAt: new Date("2026-09-01T10:00:04Z"),
+      },
+      {
+        id: 6,
+        runId: "run-chain",
+        seq: 5,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: "c-3",
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "replace" }),
+        },
+        createdAt: new Date("2026-09-01T10:00:05Z"),
+      },
+      // Delete s1 -> [s3, s2_updated]
+      {
+        id: 7,
+        runId: "run-chain",
+        seq: 6,
+        type: "tool_call_chunk",
+        payload: {
+          toolCallId: "c-4",
+          toolName: "edit_bento_slides",
+          args: JSON.stringify({
+            outcome_id: outcomeId,
+            action: "delete",
+            target_slide_ids: ["s1"],
+          }),
+        },
+        createdAt: new Date("2026-09-01T10:00:06Z"),
+      },
+      {
+        id: 8,
+        runId: "run-chain",
+        seq: 7,
+        type: "tool_call_result",
+        payload: {
+          toolCallId: "c-4",
+          content: JSON.stringify({ ok: true, outcome_id: outcomeId, action: "delete" }),
+        },
+        createdAt: new Date("2026-09-01T10:00:07Z"),
+      },
+    ] as unknown as EntityRunEventEntity[];
+
+    const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+    expect(result.reused).toBe(false);
+    expect(mockInsertedArtifacts.length).toBe(1);
+
+    const saved = mockInsertedArtifacts[0];
+    const snapshot = saved.snapshot as { slides: Array<{ id: string; title?: string }> };
+    expect(snapshot.slides).toHaveLength(2);
+    expect(snapshot.slides[0]?.id).toBe("s3");
+    expect(snapshot.slides[0]?.title).toBe("Slide 3 Middle");
+    expect(snapshot.slides[1]?.id).toBe("s2");
+    expect(snapshot.slides[1]?.title).toBe("Slide 2 Replaced");
   });
 
   it("should be idempotent when saving the same outcome twice", async () => {

@@ -35,7 +35,9 @@ import {
   findBuiltinTool,
   isKnownBuiltinTool,
   listBuiltinToolDescriptors,
+  listWorkflowToolDescriptors,
 } from "@/lib/builtin-tools";
+import { WORKFLOW_AMBIENT_TOOLS } from "@/lib/builtin-tools/catalog";
 
 describe("BUILTIN_TOOLS catalog", () => {
   it("exposes the V1 entries with stable slugs", () => {
@@ -94,6 +96,37 @@ describe("BUILTIN_TOOLS catalog", () => {
       expect(d).toHaveProperty("category");
     }
   });
+
+  it("listWorkflowToolDescriptors includes edit_bento_slides with full input_schema via bundled expansion", () => {
+    const descriptors = listWorkflowToolDescriptors();
+    const editEntry = descriptors.find((d) => d.name === "edit_bento_slides");
+    expect(editEntry).toBeDefined();
+    expect(editEntry?.displayName).toBe("edit_bento_slides");
+    expect(editEntry?.category).toBe("outcomes");
+    expect(editEntry?.input_schema).toBeDefined();
+
+    const schema = editEntry?.input_schema as {
+      type: string;
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(schema.type).toBe("object");
+    expect(schema.properties).toHaveProperty("outcome_id");
+    expect(schema.properties).toHaveProperty("action");
+    expect(schema.properties).toHaveProperty("target_slide_ids");
+    expect(schema.properties).toHaveProperty("slides");
+    expect(schema.required).toEqual(["outcome_id", "action"]);
+
+    // CONTRACT: edit_bento_slides must NOT be in WORKFLOW_AMBIENT_TOOLS
+    // to prevent accidental global auto-mounting without user opt-in.
+    const ambientEdit = WORKFLOW_AMBIENT_TOOLS.find((t) => t.name === "edit_bento_slides");
+    expect(ambientEdit).toBeUndefined();
+
+    // CONTRACT: edit_bento_slides is declared on generate_bento_slides.bundled
+    const bentoEntry = BUILTIN_TOOLS.find((t) => t.name === "generate_bento_slides");
+    expect(bentoEntry?.bundled).toHaveLength(1);
+    expect(bentoEntry?.bundled?.[0]?.name).toBe("edit_bento_slides");
+  });
 });
 
 describe("buildBuiltinTools", () => {
@@ -124,5 +157,13 @@ describe("buildBuiltinTools", () => {
       "run_code_in_sandbox",
     ]);
     expect(tools.map((t) => t.name)).toEqual(["run_code_in_sandbox"]);
+  });
+
+  it("expands generate_bento_slides slug into both generate and edit tools", () => {
+    const tools = buildBuiltinTools(["generate_bento_slides"]);
+    expect(tools.map((t) => t.name)).toEqual([
+      "generate_bento_slides",
+      "edit_bento_slides",
+    ]);
   });
 });

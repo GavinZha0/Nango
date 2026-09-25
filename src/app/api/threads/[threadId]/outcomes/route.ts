@@ -17,6 +17,7 @@ import {
   rebuildChartOutcome,
   rebuildHtmlPageOutcome,
   rebuildBentoSlidesOutcome,
+  rebuildBentoSlideEditOutcome,
   rebuildImageOutcome,
   rebuildWebSearchOutcome,
   type RebuildContext,
@@ -77,7 +78,11 @@ export const GET = withSession<{ threadId: string }>(
           ),
         ),
       )
-      .orderBy(asc(EntityRunEventTable.ts), asc(EntityRunEventTable.seq));
+      .orderBy(
+        asc(EntityRunTable.createdAt),
+        asc(EntityRunEventTable.seq),
+        asc(EntityRunEventTable.ts),
+      );
 
     // 2. Walk events in order; bucket chunks needing pairing, rebuild
     //    eagerly when no pairing is needed (generate_echarts_config).
@@ -142,6 +147,32 @@ export const GET = withSession<{ threadId: string }>(
             // parse error handled inside rebuilder
           }
           const built = rebuildBentoSlidesOutcome(
+            chunk,
+            {
+              threadId,
+              runId: row.runId,
+              entityId: row.entityId,
+              ts: row.eventTs,
+              log,
+            },
+            priorOutcome,
+          );
+          if (built) outcomes.set(built.id, built.outcome);
+          continue;
+        }
+
+        if (chunk.toolName === "edit_bento_slides") {
+          let priorOutcome: Outcome | undefined;
+          try {
+            const raw = JSON.parse(chunk.args) as Record<string, unknown>;
+            if (raw && typeof raw.outcome_id === "string") {
+              const normId = normalizeOutcomeId(raw.outcome_id);
+              priorOutcome = outcomes.get(normId);
+            }
+          } catch {
+            // parse error handled inside rebuilder
+          }
+          const built = rebuildBentoSlideEditOutcome(
             chunk,
             {
               threadId,

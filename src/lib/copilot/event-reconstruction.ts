@@ -394,7 +394,8 @@ export function synthesizeToolCallResult(
   if (
     payload.toolName === "generate_echarts_config" ||
     payload.toolName === "generate_html_page" ||
-    payload.toolName === "generate_bento_slides"
+    payload.toolName === "generate_bento_slides" ||
+    payload.toolName === "edit_bento_slides"
   ) {
     try {
       const args = JSON.parse(payload.args) as { outcome_id?: unknown };

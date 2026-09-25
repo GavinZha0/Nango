@@ -23,6 +23,7 @@ import {
   buildGenerateEchartsConfigTool,
   buildGenerateHtmlPageTool,
   buildGenerateBentoSlidesTool,
+  buildEditBentoSlidesTool,
 } from "@/lib/outcomes/runtime-tools";
 import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 
@@ -39,8 +40,10 @@ export interface BuiltinToolEntry {
   readonly description: string;
   readonly category: BuiltinToolCategory;
   readonly input_schema?: Record<string, unknown>;
-  /** Factory called once per agent run when this tool is bound. */
-  readonly build: () => ToolDefinition;
+  /** Companion tools bundled under this capability toggle (e.g. edit_bento_slides with generate_bento_slides). */
+  readonly bundled?: readonly BuiltinToolDescriptor[];
+  /** Factory called once per agent run when this tool is bound. May return multiple tools. */
+  readonly build: () => ToolDefinition | ToolDefinition[];
 }
 
 export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
@@ -126,9 +129,13 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
   },
   {
     name: "generate_bento_slides",
-    displayName: "Generate Bento Slides",
+    displayName: "Bento presentation slides",
+    // CONTRACT: Single capability toggle per product UX decision. In BuiltinAgentEditor,
+    // this single entry mounts both `generate_bento_slides` and `edit_bento_slides`.
+    // The input_schema below covers deck generation; `edit_bento_slides` schema is
+    // registered independently under WORKFLOW_AMBIENT_TOOLS for tool discovery.
     description:
-      "Generate an interactive slide deck presentation using Bento.",
+      "Generate and incrementally edit Bento presentation slide decks (create, delete, replace, and insert/append slides).",
     category: "outcomes",
     input_schema: {
       type: "object",
@@ -144,12 +151,6 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
         description: {
           type: "string",
           description: "Optional summary of the slide deck.",
-        },
-        append: {
-          type: "boolean",
-          default: false,
-          description:
-            "If true, appends the provided slides to the existing presentation with outcome_id. If false (default), replaces or creates a new presentation.",
         },
         doc: {
           type: "object",
@@ -171,7 +172,43 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       },
       required: ["outcome_id", "title", "doc"],
     },
-    build: buildGenerateBentoSlidesTool,
+    bundled: [
+      {
+        name: "edit_bento_slides",
+        displayName: "edit_bento_slides",
+        description:
+          "Incrementally edit Bento presentation slide decks (delete, replace, or insert slides).",
+        category: "outcomes",
+        input_schema: {
+          type: "object",
+          properties: {
+            outcome_id: {
+              type: "string",
+              description: "Target slide deck outcome identifier.",
+            },
+            action: {
+              type: "string",
+              enum: ["delete", "replace", "insert"],
+              description: "Edit action to perform: delete, replace, or insert.",
+            },
+            target_slide_ids: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Slide IDs to target: for delete/replace, existing slide IDs; for insert, anchor slide ID (or '0' for start).",
+            },
+            slides: {
+              type: "array",
+              items: { type: "object" },
+              description:
+                "New slide definitions required for replace and insert actions.",
+            },
+          },
+          required: ["outcome_id", "action"],
+        },
+      },
+    ],
+    build: () => [buildGenerateBentoSlidesTool(), buildEditBentoSlidesTool()],
   },
   {
     name: "web_search",
@@ -401,5 +438,19 @@ export function listBuiltinToolDescriptors(): BuiltinToolDescriptor[] {
 }
 
 export function listWorkflowToolDescriptors(): BuiltinToolDescriptor[] {
-  return [...listBuiltinToolDescriptors(), ...WORKFLOW_AMBIENT_TOOLS];
+  const result: BuiltinToolDescriptor[] = [];
+  for (const t of BUILTIN_TOOLS) {
+    result.push({
+      name: t.name,
+      displayName: t.displayName,
+      description: t.description,
+      category: t.category,
+      input_schema: t.input_schema,
+    });
+    if (t.bundled && t.bundled.length > 0) {
+      result.push(...t.bundled);
+    }
+  }
+  result.push(...WORKFLOW_AMBIENT_TOOLS);
+  return result;
 }

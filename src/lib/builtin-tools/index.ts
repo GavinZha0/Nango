@@ -35,7 +35,12 @@ export function buildBuiltinTools(names: readonly string[]): ToolDefinition[] {
     seen.add(name);
     const entry = findBuiltinTool(name);
     if (!entry) continue;
-    out.push(entry.build());
+    const built = entry.build();
+    if (Array.isArray(built)) {
+      out.push(...built);
+    } else {
+      out.push(built);
+    }
   }
   return out;
 }

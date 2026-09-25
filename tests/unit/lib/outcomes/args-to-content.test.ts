@@ -5,6 +5,7 @@ import {
   readGenerateEchartsConfigArgs,
   slideArgsToContent,
   readGenerateBentoSlidesArgs,
+  readEditBentoSlidesArgs,
 } from "@/lib/outcomes/args-to-content";
 
 describe("chartArgsToContent", () => {
@@ -194,4 +195,40 @@ describe("readGenerateBentoSlidesArgs", () => {
     expect(readGenerateBentoSlidesArgs({ outcome_id: "", title: "t", doc: {} })).toBeNull();
   });
 });
+
+describe("readEditBentoSlidesArgs", () => {
+  it("returns typed args on valid input", () => {
+    const raw = {
+      outcome_id: "q3-review",
+      action: "replace",
+      target_slide_ids: ["slide-1"],
+      slides: [{ title: "New Slide" }],
+    };
+    expect(readEditBentoSlidesArgs(raw)).toEqual(raw);
+  });
+
+  it("rejects invalid input", () => {
+    expect(readEditBentoSlidesArgs({ action: "delete" })).toBeNull();
+    expect(readEditBentoSlidesArgs({ outcome_id: "deck", action: "invalid_action" })).toBeNull();
+    expect(readEditBentoSlidesArgs({ outcome_id: "", action: "delete" })).toBeNull();
+  });
+
+  it("defensively unpacks string-encoded JSON arrays for target_slide_ids and slides", () => {
+    const raw = {
+      outcome_id: "q3-review",
+      action: "replace",
+      target_slide_ids: JSON.stringify(["slide-1", "slide-2"]),
+      slides: JSON.stringify([
+        { id: "s1", title: "Slide 1" },
+        { id: "s2", title: "Slide 2" },
+      ]),
+    };
+    const parsed = readEditBentoSlidesArgs(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.target_slide_ids).toEqual(["slide-1", "slide-2"]);
+    expect(parsed!.slides).toHaveLength(2);
+    expect(parsed!.slides?.[0]).toEqual({ id: "s1", title: "Slide 1" });
+  });
+});
+
 

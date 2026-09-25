@@ -28,6 +28,9 @@ import {
   generateBentoSlidesSchema,
   type GenerateBentoSlidesArgs,
   type GenerateBentoSlidesResult,
+  editBentoSlidesSchema,
+  type EditBentoSlidesArgs,
+  type EditBentoSlidesResult,
   normalizeOutcomeId,
 } from "./schema";
 
@@ -241,12 +244,12 @@ export function buildGenerateBentoSlidesTool(): ToolDefinition {
       "surface it as a preview card in the user's Outcomes panel. The deck " +
       "renders in a sandboxed iframe with morph transitions IMMEDIATELY on " +
       "success — DO NOT paste the JSON doc into your text reply. " +
-      "Setting append: true appends slides incrementally to an existing presentation without overwriting. " +
-      "Re-calling with the same outcome_id and append: false (default) OVERWRITES the previous slide deck. " +
+      "Re-calling with the same outcome_id OVERWRITES the previous slide deck. " +
+      "For incremental updates or adding new slides, use edit_bento_slides. " +
       "USE THIS when the user asks for a presentation, pitch deck, slide deck, " +
       "or visual report slides. " +
       "FORMAT: doc must have format: 'bento/slides' and a non-empty slides array. " +
-      "Each slide is 1280x720. For morph transitions across slides, use the same id. " +
+      "Each slide is 1280x720 and must have a unique, explicit 'id'. For morph transitions across slides, use the same id. " +
       "Charts in Bento use charts-lite — provide simple numbers in series[*].data.",
     parameters: generateBentoSlidesSchema,
     execute: async (
@@ -272,6 +275,33 @@ export function buildGenerateBentoSlidesTool(): ToolDefinition {
           error: "DOC_NO_SLIDES",
           message: "doc.slides must be a non-empty array of slide objects.",
         };
+      }
+
+      // CONTRACT: Validate slide ID presence and uniqueness (P0-1 / P0-2)
+      const seenSlideIds = new Set<string>();
+      for (let i = 0; i < args.doc.slides.length; i++) {
+        const slide = args.doc.slides[i];
+        if (
+          !slide ||
+          typeof slide !== "object" ||
+          typeof (slide as Record<string, unknown>).id !== "string" ||
+          !(slide as Record<string, unknown>).id
+        ) {
+          return {
+            ok: false,
+            error: "SLIDE_MISSING_ID",
+            message: `Slide at index ${i} is missing a non-empty string "id". Every slide must have an explicit immutable id.`,
+          };
+        }
+        const slideId = String((slide as Record<string, unknown>).id);
+        if (seenSlideIds.has(slideId)) {
+          return {
+            ok: false,
+            error: "DUPLICATE_SLIDE_ID",
+            message: `Duplicate slide id "${slideId}" found in doc.slides at index ${i}. Slide IDs must be unique within the deck.`,
+          };
+        }
+        seenSlideIds.add(slideId);
       }
 
       // CONTRACT: Auto-polyfill defensive metadata (format, version, title, size).
@@ -302,9 +332,6 @@ export function buildGenerateBentoSlidesTool(): ToolDefinition {
           description: args.description,
         }),
         doc: args.doc,
-        ...(args.append !== undefined && {
-          append: args.append,
-        }),
         ...(originalOutcomeId !== finalOutcomeId && {
           message: `The outcome_id was normalized from "${originalOutcomeId}" to "${finalOutcomeId}". Please use "${finalOutcomeId}" for subsequent updates.`,
         }),
@@ -312,3 +339,160 @@ export function buildGenerateBentoSlidesTool(): ToolDefinition {
     },
   });
 }
+
+/**
+ * Build the `edit_bento_slides` tool definition.
+ *
+ * PURE VALIDATOR — stateless. Does NOT read or write database rows.
+ * Validates semantic constraints on the edit delta and returns the operation
+ * payload verbatim so the shared reducer `applySlideEdit` can apply it
+ * deterministically across the frontend store and backend replay.
+ */
+export function buildEditBentoSlidesTool(): ToolDefinition {
+  return defineTool({
+    name: "edit_bento_slides",
+    description:
+      "Edit an existing Bento slides deck incrementally (delete, replace, or insert/append slides). " +
+      "Use this tool when updating, fixing, or incrementally adding slides instead of re-generating the entire deck. " +
+      "Supported actions: " +
+      "1) 'delete': removes slides specified in target_slide_ids. " +
+      "2) 'replace': substitutes targeted slides with new slides (1-to-1 match; preserves target slide ID). " +
+      "3) 'insert': adds new slides (omitting target_slide_ids appends to end; ['0'] inserts at start; ['<id>'] inserts after).",
+    parameters: editBentoSlidesSchema,
+    execute: async (
+      args: EditBentoSlidesArgs,
+    ): Promise<EditBentoSlidesResult> => {
+      // 1. Size cap validation on serialized payload (if slides are provided)
+      if (args.slides && args.slides.length > 0) {
+        const serialized = JSON.stringify(args.slides);
+        const byteLength = new TextEncoder().encode(serialized).length;
+        if (byteLength > BENTO_DOC_HARD_CAP_BYTES) {
+          return {
+            ok: false,
+            error: "SLIDES_TOO_LARGE",
+            message:
+              `Slides payload is ${byteLength} bytes; cap is ${BENTO_DOC_HARD_CAP_BYTES}. ` +
+              `Reduce slide count or simplify embedded data.`,
+          };
+        }
+      }
+
+      // 2. Semantic validations by action
+      const { action, target_slide_ids, slides } = args;
+
+      if (action === "delete") {
+        if (slides && slides.length > 0) {
+          return {
+            ok: false,
+            error: "UNEXPECTED_SLIDES",
+            message: "Action 'delete' does not accept 'slides'. Only provide 'target_slide_ids'.",
+          };
+        }
+        if (!target_slide_ids || target_slide_ids.length === 0) {
+          return {
+            ok: false,
+            error: "TARGET_SLIDE_IDS_REQUIRED",
+            message: "Action 'delete' requires 'target_slide_ids'.",
+          };
+        }
+      } else if (action === "replace") {
+        if (!target_slide_ids || target_slide_ids.length === 0) {
+          return {
+            ok: false,
+            error: "TARGET_SLIDE_IDS_REQUIRED",
+            message: "Action 'replace' requires 'target_slide_ids'.",
+          };
+        }
+        if (!slides || slides.length === 0) {
+          return {
+            ok: false,
+            error: "SLIDES_REQUIRED",
+            message: "Action 'replace' requires a non-empty 'slides' array.",
+          };
+        }
+        if (slides.length !== target_slide_ids.length) {
+          return {
+            ok: false,
+            error: "REPLACE_COUNT_MISMATCH",
+            message:
+              `Action 'replace' requires exactly matching counts: ` +
+              `received ${slides.length} slide(s) for ${target_slide_ids.length} target id(s).`,
+          };
+        }
+        const targetSet = new Set(target_slide_ids);
+        if (targetSet.size !== target_slide_ids.length) {
+          return {
+            ok: false,
+            error: "DUPLICATE_TARGET_SLIDE_ID",
+            message: "Action 'replace' received duplicate IDs in 'target_slide_ids'.",
+          };
+        }
+      } else if (action === "insert") {
+        if (!slides || slides.length === 0) {
+          return {
+            ok: false,
+            error: "SLIDES_REQUIRED",
+            message: "Action 'insert' requires at least one slide in 'slides'.",
+          };
+        }
+        const seenInsertIds = new Set<string>();
+        for (let i = 0; i < slides.length; i++) {
+          const s = slides[i];
+          if (
+            !s ||
+            typeof s !== "object" ||
+            typeof s.id !== "string" ||
+            !s.id
+          ) {
+            return {
+              ok: false,
+              error: "SLIDE_MISSING_ID",
+              message: `Slide at index ${i} in 'slides' is missing a non-empty string "id". Every inserted slide must have an explicit immutable id.`,
+            };
+          }
+          if (seenInsertIds.has(s.id)) {
+            return {
+              ok: false,
+              error: "DUPLICATE_SLIDE_ID",
+              message: `Duplicate slide id "${s.id}" found in 'slides' at index ${i}.`,
+            };
+          }
+          seenInsertIds.add(s.id);
+        }
+      }
+
+      // 3. Slide sanity check and ID immutability enforcement
+      let normalizedSlides: Array<Record<string, unknown>> | undefined;
+      if (slides && slides.length > 0) {
+        normalizedSlides = slides.map((s, idx) => {
+          const slideObj = { ...s };
+          if (!Array.isArray(slideObj.elements)) {
+            slideObj.elements = [];
+          }
+          // CONTRACT: Replace preserves the target slide ID to guarantee immutability
+          if (action === "replace" && target_slide_ids && target_slide_ids[idx]) {
+            slideObj.id = target_slide_ids[idx];
+          }
+          return slideObj;
+        });
+      }
+
+      const originalOutcomeId = args.outcome_id;
+      const finalOutcomeId = normalizeOutcomeId(originalOutcomeId);
+
+      return {
+        ok: true,
+        outcome_id: finalOutcomeId,
+        action: args.action,
+        ...(args.target_slide_ids !== undefined && {
+          target_slide_ids: args.target_slide_ids,
+        }),
+        ...(normalizedSlides !== undefined && { slides: normalizedSlides }),
+        ...(originalOutcomeId !== finalOutcomeId && {
+          message: `The outcome_id was normalized from "${originalOutcomeId}" to "${finalOutcomeId}". Please use "${finalOutcomeId}" for subsequent updates.`,
+        }),
+      };
+    },
+  });
+}
+

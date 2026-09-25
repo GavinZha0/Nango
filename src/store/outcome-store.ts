@@ -10,7 +10,8 @@
  */
 
 import { create } from "zustand";
-import { mergeSlideDocs } from "@/lib/outcomes/merge-slides";
+import { applySlideEdit } from "@/lib/outcomes/merge-slides";
+import { normalizeOutcomeId } from "@/lib/outcomes/schema";
 
 // blocks
 
@@ -163,11 +164,18 @@ export interface UpsertSlideOutcomeInput {
   title: string;
   description?: string;
   doc: Record<string, unknown>;
-  append?: boolean;
   toolCallId: string;
   agentId: string;
   threadId: string | null;
   runId: string | null;
+}
+
+export interface ApplySlideEditOutcomeInput {
+  outcomeId: string;
+  action: "delete" | "replace" | "insert";
+  target_slide_ids?: string[];
+  slides?: Array<Record<string, unknown>>;
+  toolCallId: string;
 }
 
 interface OutcomeState {
@@ -177,14 +185,18 @@ interface OutcomeState {
   selectedId: string | null;
   /** "loading" while replay is in flight; UI shows skeleton. */
   status: OutcomeStatus;
+  /** Thread-scoped buffer of slide edits waiting for the deck to initialize or dependent slides to appear */
+  pendingSlideEdits: Record<string, ApplySlideEditOutcomeInput[]>;
 
   /** Upsert by `outcomeId`. Preserves `savedArtifactId` and
    *  user-toggled `collapsed` across upserts so a regenerate
    *  doesn't unsave the library copy or undo a collapse. */
   addOutcome: (outcome: Outcome) => void;
-  /** Specialized upsert for Bento Slides supporting idempotent appending,
-   *  deduplication, and out-of-order mount resolution without module-level state. */
+  /** Specialized upsert for Bento Slides supporting idempotent generation/overwriting
+   *  without module-level state. */
   upsertSlideOutcome: (input: UpsertSlideOutcomeInput) => void;
+  /** Incremental edit (delete, replace, insert) applied to existing Bento Slides. */
+  applySlideEditOutcome: (input: ApplySlideEditOutcomeInput) => void;
   removeOutcome: (outcomeId: string) => void;
   toggleCollapse: (outcomeId: string) => void;
   select: (outcomeId: string | null) => void;
@@ -200,6 +212,57 @@ interface OutcomeState {
   bindPendingThreadId: (threadId: string) => void;
 }
 
+/**
+ * Pure helper to flush pending slide edits against a slide deck doc.
+ * Uses a multi-pass approach so that an earlier edit can unblock a dependent later edit.
+ */
+function flushPendingEdits(
+  baseDoc: Record<string, unknown>,
+  appliedIds: string[],
+  pending: ApplySlideEditOutcomeInput[],
+): {
+  doc: Record<string, unknown>;
+  appliedIds: string[];
+  remainingPending: ApplySlideEditOutcomeInput[];
+} {
+  let doc = baseDoc;
+  const nextApplied = [...appliedIds];
+  let unapplied = [...pending];
+  let madeProgress = true;
+
+  while (madeProgress && unapplied.length > 0) {
+    madeProgress = false;
+    const nextUnapplied: ApplySlideEditOutcomeInput[] = [];
+
+    for (const edit of unapplied) {
+      if (nextApplied.includes(edit.toolCallId)) {
+        continue;
+      }
+      const res = applySlideEdit(doc, {
+        action: edit.action,
+        target_slide_ids: edit.target_slide_ids,
+        slides: edit.slides,
+      });
+
+      if (res.changed) {
+        doc = res.doc;
+        nextApplied.push(edit.toolCallId);
+        madeProgress = true;
+      } else {
+        nextUnapplied.push(edit);
+      }
+    }
+
+    unapplied = nextUnapplied;
+  }
+
+  return {
+    doc,
+    appliedIds: nextApplied,
+    remainingPending: unapplied,
+  };
+}
+
 // store
 
 export const useOutcomeStore = create<OutcomeState>((set, get) => {
@@ -213,6 +276,7 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
     outcomes: [],
     selectedId: null,
     status: "idle",
+    pendingSlideEdits: {},
 
     addOutcome: (outcome) =>
       set((state) => {
@@ -235,26 +299,54 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
 
     upsertSlideOutcome: (input) =>
       set((state) => {
+        const normId = normalizeOutcomeId(input.outcomeId);
         const idx = state.outcomes.findIndex(
-          (o) => o.outcomeId === input.outcomeId,
+          (o) => normalizeOutcomeId(o.outcomeId) === normId,
         );
 
-        if (idx === -1) {
-          // If no existing deck, initialize it (even if append: true arrived first,
-          // it immediately surfaces in store to prevent missing panel content).
+        const prior = idx !== -1 ? state.outcomes[idx] : undefined;
+        const priorSlideBlock = prior?.blocks.find(
+          (b): b is SlideBlock => b.kind === "slide",
+        );
+
+        // CONTRACT: Idempotency check — if this toolCallId was already applied to the deck,
+        // short-circuit return to prevent duplicate resets during remounts or StrictMode.
+        if (priorSlideBlock?.appliedToolCallIds?.includes(input.toolCallId)) {
+          return state;
+        }
+
+        // Flush any pending edits that arrived before generate_bento_slides
+        const pendingForThis = state.pendingSlideEdits[normId] ?? [];
+        const flushed = flushPendingEdits(
+          input.doc,
+          [input.toolCallId],
+          pendingForThis,
+        );
+
+        const nextPending = { ...state.pendingSlideEdits };
+        if (flushed.remainingPending.length > 0) {
+          nextPending[normId] = flushed.remainingPending;
+        } else {
+          delete nextPending[normId];
+        }
+
+        const nextTitle = input.title || prior?.title || "Bento Presentation";
+        const nextDescription = input.description ?? prior?.description;
+
+        const updatedSlideBlock: SlideBlock = {
+          kind: "slide",
+          doc: flushed.doc,
+          title: nextTitle,
+          appliedToolCallIds: flushed.appliedIds,
+        };
+
+        if (!prior) {
           const outcome: Outcome = {
             outcomeId: input.outcomeId,
             kind: "report",
-            title: input.title,
-            description: input.description,
-            blocks: [
-              {
-                kind: "slide",
-                doc: input.doc,
-                title: input.title,
-                appliedToolCallIds: [input.toolCallId],
-              },
-            ],
+            title: nextTitle,
+            description: nextDescription,
+            blocks: [updatedSlideBlock],
             agentId: input.agentId,
             threadId: input.threadId,
             runId: input.runId,
@@ -262,64 +354,129 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
             collapsed: false,
             savedArtifactId: null,
           };
-          return { outcomes: [...state.outcomes, outcome] };
-        }
-
-        const prior = state.outcomes[idx];
-        const priorSlideBlock = prior.blocks.find(
-          (b): b is SlideBlock => b.kind === "slide",
-        );
-
-        // CONTRACT: Idempotency check — if this toolCallId was already applied to the deck,
-        // short-circuit return to prevent duplicate additions or resets during remounts or StrictMode.
-        if (priorSlideBlock?.appliedToolCallIds?.includes(input.toolCallId)) {
-          return state;
-        }
-
-        let nextDoc = input.doc;
-        let nextAppliedIds = [input.toolCallId];
-        let nextTitle = input.title;
-        let nextDescription = input.description;
-
-        if (priorSlideBlock && priorSlideBlock.doc) {
-          if (input.append === true) {
-            // Normal sequential append: prior is base, incoming slides append to existing deck
-            nextDoc = mergeSlideDocs(priorSlideBlock.doc, input.doc);
-            nextTitle = prior.title || input.title;
-            nextDescription = prior.description ?? input.description;
-            nextAppliedIds = [
-              ...(priorSlideBlock.appliedToolCallIds ?? []),
-              input.toolCallId,
-            ];
-          } else {
-            // Out-of-order mount resolution: input is base, prepend base doc ahead of prior append slides!
-            nextDoc = mergeSlideDocs(input.doc, priorSlideBlock.doc);
-            nextTitle = input.title || prior.title;
-            nextDescription = input.description ?? prior.description;
-            nextAppliedIds = [
-              input.toolCallId,
-              ...(priorSlideBlock.appliedToolCallIds ?? []),
-            ];
-          }
+          return {
+            outcomes: [...state.outcomes, outcome],
+            pendingSlideEdits: nextPending,
+          };
         }
 
         const merged: Outcome = {
           ...prior,
           title: nextTitle,
           description: nextDescription,
-          blocks: [
-            {
-              kind: "slide",
-              doc: nextDoc,
-              title: nextTitle,
-              appliedToolCallIds: nextAppliedIds,
-            },
-          ],
+          blocks: [updatedSlideBlock],
         };
 
-        const next = state.outcomes.slice();
-        next[idx] = merged;
-        return { outcomes: next };
+        const nextOutcomes = state.outcomes.slice();
+        nextOutcomes[idx] = merged;
+        return {
+          outcomes: nextOutcomes,
+          pendingSlideEdits: nextPending,
+        };
+      }),
+
+    applySlideEditOutcome: (input) =>
+      set((state) => {
+        const normId = normalizeOutcomeId(input.outcomeId);
+        const idx = state.outcomes.findIndex(
+          (o) => normalizeOutcomeId(o.outcomeId) === normId,
+        );
+
+        // 1. If deck does not exist yet, buffer in pendingSlideEdits
+        if (idx === -1) {
+          const existingPending = state.pendingSlideEdits[normId] ?? [];
+          if (existingPending.some((p) => p.toolCallId === input.toolCallId)) {
+            return state;
+          }
+          return {
+            pendingSlideEdits: {
+              ...state.pendingSlideEdits,
+              [normId]: [...existingPending, input],
+            },
+          };
+        }
+
+        const prior = state.outcomes[idx]!;
+        const priorSlideBlock = prior.blocks.find(
+          (b): b is SlideBlock => b.kind === "slide",
+        );
+        if (!priorSlideBlock || !priorSlideBlock.doc) {
+          const existingPending = state.pendingSlideEdits[normId] ?? [];
+          if (existingPending.some((p) => p.toolCallId === input.toolCallId)) {
+            return state;
+          }
+          return {
+            pendingSlideEdits: {
+              ...state.pendingSlideEdits,
+              [normId]: [...existingPending, input],
+            },
+          };
+        }
+
+        // CONTRACT: Idempotency check with appliedToolCallIds
+        if (priorSlideBlock.appliedToolCallIds?.includes(input.toolCallId)) {
+          return state;
+        }
+
+        // 2. Try applying directly
+        const editRes = applySlideEdit(priorSlideBlock.doc, {
+          action: input.action,
+          target_slide_ids: input.target_slide_ids,
+          slides: input.slides,
+        });
+
+        // 3. If not changed (e.g. out-of-order target not created yet), buffer into pending
+        if (!editRes.changed) {
+          const existingPending = state.pendingSlideEdits[normId] ?? [];
+          if (existingPending.some((p) => p.toolCallId === input.toolCallId)) {
+            return state;
+          }
+          return {
+            pendingSlideEdits: {
+              ...state.pendingSlideEdits,
+              [normId]: [...existingPending, input],
+            },
+          };
+        }
+
+        // 4. Edit succeeded! Now flush any other pending edits waiting for this state
+        const initialApplied = [
+          ...(priorSlideBlock.appliedToolCallIds ?? []),
+          input.toolCallId,
+        ];
+        const pendingForThis = state.pendingSlideEdits[normId] ?? [];
+        const flushed = flushPendingEdits(
+          editRes.doc,
+          initialApplied,
+          pendingForThis,
+        );
+
+        const nextPending = { ...state.pendingSlideEdits };
+        if (flushed.remainingPending.length > 0) {
+          nextPending[normId] = flushed.remainingPending;
+        } else {
+          delete nextPending[normId];
+        }
+
+        const merged: Outcome = {
+          ...prior,
+          blocks: prior.blocks.map((b) =>
+            b.kind === "slide"
+              ? {
+                  ...b,
+                  doc: flushed.doc,
+                  appliedToolCallIds: flushed.appliedIds,
+                }
+              : b,
+          ),
+        };
+
+        const nextOutcomes = state.outcomes.slice();
+        nextOutcomes[idx] = merged;
+        return {
+          outcomes: nextOutcomes,
+          pendingSlideEdits: nextPending,
+        };
       }),
 
     removeOutcome: (outcomeId) =>
@@ -345,7 +502,7 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
       })),
 
     clearForThreadSwitch: () =>
-      set({ outcomes: [], selectedId: null, status: "idle" }),
+      set({ outcomes: [], selectedId: null, status: "idle", pendingSlideEdits: {} }),
 
     bindPendingThreadId: (threadId) =>
       set((state) => ({

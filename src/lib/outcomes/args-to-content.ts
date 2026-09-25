@@ -175,7 +175,6 @@ export interface GenerateBentoSlidesArtifactArgs {
   outcome_id: string;
   title: string;
   description?: string;
-  append?: boolean;
   doc: Record<string, unknown>;
 }
 
@@ -227,9 +226,63 @@ export function readGenerateBentoSlidesArgs(
   if (typeof args.description === "string") {
     out.description = args.description;
   }
-  if (typeof args.append === "boolean") {
-    out.append = args.append;
-  }
   return out;
 }
+
+// ─── edit_bento_slides ──────────────────────────────────────────────
+
+export interface EditBentoSlidesArtifactArgs {
+  outcome_id: string;
+  action: "delete" | "replace" | "insert";
+  target_slide_ids?: string[];
+  slides?: Array<Record<string, unknown>>;
+}
+
+function normalizeArrayArg<T = unknown>(val: unknown): T[] | undefined {
+  if (Array.isArray(val)) return val as T[];
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed as T[];
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Defensive read of an arbitrary args object into `EditBentoSlidesArtifactArgs`.
+ */
+export function readEditBentoSlidesArgs(
+  args: Record<string, unknown>,
+): EditBentoSlidesArtifactArgs | null {
+  const outcome_id = args.outcome_id;
+  const action = args.action;
+  if (typeof outcome_id !== "string" || outcome_id.length === 0) return null;
+  if (action !== "delete" && action !== "replace" && action !== "insert") {
+    return null;
+  }
+
+  const out: EditBentoSlidesArtifactArgs = {
+    outcome_id,
+    action,
+  };
+
+  const rawTargetIds = normalizeArrayArg(args.target_slide_ids);
+  if (rawTargetIds) {
+    out.target_slide_ids = rawTargetIds.map((id) => String(id));
+  }
+
+  const rawSlides = normalizeArrayArg<Record<string, unknown>>(args.slides);
+  if (rawSlides) {
+    out.slides = rawSlides;
+  }
+
+  return out;
+}
+
 
