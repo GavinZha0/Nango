@@ -143,6 +143,161 @@ describe("bento template & normalization", () => {
       expect(el.rotation).toBe(0);
       expect(el.opacity).toBe(1);
     });
+
+    it("normalizes flattened chart elements by wrapping series and xAxis into option", () => {
+      const doc = {
+        slides: [
+          {
+            elements: [
+              {
+                id: "c1",
+                type: "chart",
+                xAxis: { data: ["Q1", "Q2", "Q3"] },
+                series: [{ type: "bar", data: [100, 200, 150] }],
+              },
+            ],
+          },
+        ],
+      };
+
+      const normalized = normalizeBentoDoc(doc) as {
+        slides: Array<{
+          elements: Array<{
+            id: string;
+            type: string;
+            preset: string;
+            option: {
+              xAxis: { data: string[] };
+              yAxis: { type: string };
+              series: Array<{ type: string; data: number[] }>;
+            };
+            series?: unknown;
+            xAxis?: unknown;
+          }>;
+        }>;
+      };
+      const el = normalized.slides[0]!.elements[0]!;
+
+      expect(el.type).toBe("chart");
+      expect(el.preset).toBe("bar");
+      expect(el.option).toBeDefined();
+      expect(el.option.xAxis).toEqual({ data: ["Q1", "Q2", "Q3"] });
+      expect(el.option.yAxis).toEqual({ type: "value" });
+      expect(el.option.series).toEqual([{ type: "bar", data: [100, 200, 150] }]);
+      // Top-level flattened properties must be removed
+      expect(el.series).toBeUndefined();
+      expect(el.xAxis).toBeUndefined();
+    });
+
+    it("normalizes chart elements with options/chart_option aliases and missing yAxis", () => {
+      const doc = {
+        slides: [
+          {
+            elements: [
+              {
+                id: "c2",
+                type: "chart",
+                options: {
+                  series: [{ type: "line", data: [5, 10, 15] }],
+                },
+              },
+            ],
+          },
+        ],
+      };
+
+      const normalized = normalizeBentoDoc(doc) as {
+        slides: Array<{
+          elements: Array<{
+            preset: string;
+            option: {
+              series: Array<{ type: string; data: number[] }>;
+              yAxis: { type: string };
+            };
+            options?: unknown;
+          }>;
+        }>;
+      };
+      const el = normalized.slides[0]!.elements[0]!;
+
+      expect(el.preset).toBe("line");
+      expect(el.option).toBeDefined();
+      expect(el.option.series).toEqual([{ type: "line", data: [5, 10, 15] }]);
+      expect(el.option.yAxis).toEqual({ type: "value" });
+      expect(el.options).toBeUndefined();
+    });
+
+    it("normalizes shorthand chart types like type: 'pie' to type: 'chart'", () => {
+      const doc = {
+        slides: [
+          {
+            elements: [
+              {
+                id: "c3",
+                type: "pie",
+                series: [{ data: [{ name: "A", value: 30 }] }],
+              },
+            ],
+          },
+        ],
+      };
+
+      const normalized = normalizeBentoDoc(doc) as {
+        slides: Array<{
+          elements: Array<{
+            type: string;
+            preset: string;
+            option: {
+              series: Array<{ type: string; data: Array<{ name: string; value: number }> }>;
+              yAxis?: unknown;
+            };
+          }>;
+        }>;
+      };
+      const el = normalized.slides[0]!.elements[0]!;
+
+      expect(el.type).toBe("chart");
+      expect(el.preset).toBe("pie");
+      expect(el.option).toBeDefined();
+      expect(el.option.series[0]?.type).toBe("pie");
+      // Pie charts do not get a default Cartesian yAxis
+      expect(el.option.yAxis).toBeUndefined();
+    });
+
+    it("safely generates a default option for empty chart elements to prevent runtime crash", () => {
+      const doc = {
+        slides: [
+          {
+            elements: [
+              {
+                id: "c4",
+                type: "chart",
+              },
+            ],
+          },
+        ],
+      };
+
+      const normalized = normalizeBentoDoc(doc) as {
+        slides: Array<{
+          elements: Array<{
+            type: string;
+            preset: string;
+            option: {
+              series: Array<{ type: string; data: unknown[] }>;
+            };
+          }>;
+        }>;
+      };
+      const el = normalized.slides[0]!.elements[0]!;
+
+      expect(el.type).toBe("chart");
+      expect(el.preset).toBe("bar");
+      expect(el.option).toBeDefined();
+      expect(Array.isArray(el.option.series)).toBe(true);
+      expect(el.option.series.length).toBe(1);
+      expect(el.option.series[0]?.type).toBe("bar");
+    });
   });
 
   describe("assembleBentoHtml", () => {

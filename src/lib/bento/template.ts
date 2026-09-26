@@ -112,6 +112,104 @@ export function normalizeBentoDoc(
             if (el.valign === undefined) el.valign = "top";
           }
 
+          // Normalize shorthand chart types to 'chart'
+          if (
+            el.type === "bar" ||
+            el.type === "line" ||
+            el.type === "pie" ||
+            el.type === "scatter" ||
+            el.type === "echarts"
+          ) {
+            const chartPreset = el.type === "echarts" ? "bar" : el.type;
+            el.type = "chart";
+            if (!el.preset) el.preset = chartPreset;
+          }
+
+          if (el.type === "chart") {
+            // 1. Resolve raw option container (support options, chart_option, chartOption)
+            const rawOption = (
+              el.option && typeof el.option === "object"
+                ? el.option
+                : el.options && typeof el.options === "object"
+                  ? el.options
+                  : el.chart_option && typeof el.chart_option === "object"
+                    ? el.chart_option
+                    : el.chartOption && typeof el.chartOption === "object"
+                      ? el.chartOption
+                      : {}
+            ) as Record<string, unknown>;
+
+            const option: Record<string, unknown> = { ...rawOption };
+
+            // 2. Fold top-level properties if LLM flattened them on the element
+            if (!option.series && el.series) option.series = el.series;
+            if (!option.xAxis && el.xAxis) option.xAxis = el.xAxis;
+            if (!option.yAxis && el.yAxis) option.yAxis = el.yAxis;
+            if (!option.grid && el.grid) option.grid = el.grid;
+            if (!option.legend && el.legend) option.legend = el.legend;
+            if (!option.tooltip && el.tooltip) option.tooltip = el.tooltip;
+
+            // 3. Ensure option.series is an array
+            if (Array.isArray(option.series)) {
+              option.series = [...option.series];
+            } else if (option.series && typeof option.series === "object") {
+              option.series = [option.series];
+            } else {
+              option.series = [];
+            }
+
+            // 4. Determine or infer preset
+            let preset = typeof el.preset === "string" ? el.preset : undefined;
+            if (!preset) {
+              const firstSeries = (option.series as Array<Record<string, unknown>>)[0];
+              const seriesType = typeof firstSeries?.type === "string" ? firstSeries.type : undefined;
+              if (seriesType && ["bar", "line", "pie", "scatter"].includes(seriesType)) {
+                preset = seriesType;
+              } else {
+                preset = "bar";
+              }
+            }
+            el.preset = preset;
+
+            // 5. Ensure series items have the correct type and data
+            const seriesList = option.series as Array<Record<string, unknown>>;
+            if (seriesList.length === 0) {
+              if (preset === "pie") {
+                seriesList.push({ type: "pie", data: [] });
+              } else if (preset === "scatter") {
+                seriesList.push({ type: "scatter", data: [] });
+              } else {
+                seriesList.push({ type: preset, data: [] });
+              }
+            } else {
+              for (let i = 0; i < seriesList.length; i++) {
+                const s = seriesList[i];
+                if (s && typeof s === "object") {
+                  if (!s.type) s.type = preset;
+                  if (!Array.isArray(s.data)) s.data = [];
+                }
+              }
+            }
+
+            // 6. Ensure Cartesian charts have yAxis defined
+            if (preset !== "pie" && !option.yAxis) {
+              option.yAxis = { type: "value" };
+            }
+
+            // 7. Cleanup flattened chart properties on the element
+            delete el.options;
+            delete el.chart_option;
+            delete el.chartOption;
+            delete el.series;
+            delete el.xAxis;
+            delete el.yAxis;
+            delete el.grid;
+            delete el.legend;
+            delete el.tooltip;
+
+            el.option = option;
+          }
+
           return el;
         });
       }

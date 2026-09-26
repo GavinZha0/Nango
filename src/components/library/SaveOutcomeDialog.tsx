@@ -34,7 +34,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -77,9 +76,14 @@ export function SaveOutcomeDialog({
   // the `artifactType` decision in `useSaveOutcome.toCreateArtifactBody`
   // so the picker default and the saved row's folder agree.
   const defaultCategoryName: string | undefined = useMemo(() => {
+    const isSlide: boolean = outcome.blocks.some((b) => b.kind === "slide");
     const isSingleChart: boolean =
       outcome.blocks.length === 1 && outcome.blocks[0].kind === "chart";
-    const artifactType: ArtifactType = isSingleChart ? "chart" : "report";
+    const artifactType: ArtifactType = isSlide
+      ? "slide"
+      : isSingleChart
+        ? "chart"
+        : "report";
     return lookupCategoryForType(artifactType)?.name;
   }, [outcome.blocks]);
 
@@ -145,10 +149,6 @@ export function SaveOutcomeDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Save to Artifact library</DialogTitle>
-          <DialogDescription>
-            Pick a destination folder and confirm the name. The chart
-            stays in this chat as well.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3 py-2">
@@ -181,6 +181,7 @@ export function SaveOutcomeDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
+              className="resize-none"
               placeholder="Add a note for future-you…"
             />
           </div>

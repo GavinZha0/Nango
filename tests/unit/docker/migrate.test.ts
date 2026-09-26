@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "path";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 
 // CONTRACT: runMigrations must be imported dynamically or statically from docker/migrate.mjs
@@ -207,15 +207,11 @@ describe("0004_verification_group_and_prefix.sql — Re-entrancy & State Converg
       query: vi.fn(async (queryText: string) => {
         executedQueries.push(queryText.trim());
         if (queryText.includes("SELECT \"name\" FROM \"__migrations\"")) {
-          // Simulate 0000-0003 already applied, only 0004 pending
-          return {
-            rows: [
-              { name: "0000_initial.sql" },
-              { name: "0001_add_suite_variables.sql" },
-              { name: "0002_add_mcp_server_group.sql" },
-              { name: "0003_rename_verification_to_auth_token.sql" },
-            ],
-          };
+          // Simulate all migrations except 0004 already applied, only 0004 pending
+          const otherApplied = readdirSync(realMigrationsDir)
+            .filter((f) => f.endsWith(".sql") && f !== "0004_verification_group_and_prefix.sql")
+            .map((f) => ({ name: f }));
+          return { rows: otherApplied };
         }
         return { rows: [] };
       }),

@@ -36,6 +36,13 @@
       "when": 1789683015620,
       "tag": "0004_verification_group_and_prefix",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790387839575,
+      "tag": "0005_rename_ppt_to_slides",
+      "breakpoints": true
     }
   ]
 }
