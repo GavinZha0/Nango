@@ -25,7 +25,9 @@ Key system capabilities:
 |---|---|---|
 | **Multi-backend agent integration** | Connect heterogeneous agent platforms (agno / Mastra / Dify); browser sees a uniform **AG-UI protocol** | `src/lib/backends/` |
 | **Built-in Agent + MCP** | Build agents in-app via the CopilotKit runtime; extend tools through the Model Context Protocol (MCP) | `src/lib/builtin-agents/agent-pool.ts`, `src/lib/mcp/provider-pool.ts` |
-| **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs; permanent Artifact library via Save | `src/lib/artifacts/` |
+| **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs; permanent Artifact library via Save | `src/lib/artifacts/`, `src/lib/outcomes/` ([docs/outcomes.md](file:///d:/AI/nango/docs/outcomes.md), [docs/artifact.md](file:///d:/AI/nango/docs/artifact.md)) |
+| **Bento Presentation Slides** | Structured 16:9 visual slide decks; two-tool state machine (`generate`/`edit`) with pure reducer (`applySlideEdit`) | `src/lib/outcomes/`, `src/lib/bento/` ([docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)) |
+| **Safety Guardrails & Pipeline** | Interceptor pipeline for tool execution, Tool Risk Registry, fail-closed isolation, and admin control plane | `src/lib/agent-pipeline/` ([docs/guardrails.md](file:///d:/AI/nango/docs/guardrails.md)) |
 | **Verification Subsystem** | Deterministic quality gate for testing MCP tool integrations using assertions | `src/lib/verification/` ([docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | **Evaluation Subsystem** | Stochastic quality assessment for agent conversations using LLM-as-Judge | `src/lib/evaluation/` ([docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 | **Web Auto Subsystem** | Deterministic Playwright-based browser automation & regression testing with dual-tier evaluation | `src/lib/web-auto/` ([docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
@@ -76,17 +78,19 @@ Key system capabilities:
 │  /api/{verification, eval, web-auto}-*   Test suites, cases & run loops     │
 │  /api/{schedules, notifications}  Triggers & live user notifications │
 │  /api/runs/stream                 SSE: notifications + finalized     │
-│  /api/admin/{credentials, runs}   Admin credentials & forensics      │
+│  /api/admin/{credentials, runs, guardrails} Admin & security controls│
+│  /api/threads/[threadId]/outcomes Transient thread outcomes          │
 │  /api/auth/[...all]               better-auth handler                │
 │                                                                     │
 │  ┌──────────────────┐  ┌──────────────────────────────────────────┐ │
-│  │ Runner kernel    │  │ Process-wide caches (6)                  │ │
+│  │ Runner kernel    │  │ Process-wide caches (7)                  │ │
 │  │ entity_run +     │  │  agentPool          (LRU + 10-min TTL)    │ │
 │  │ entity_run_event │  │  mcpProviderPool    (refcounted + reaper) │ │
 │  │ EventBus + SSE   │  │  skillPool          (LRU + 10-min TTL)    │ │
 │  │ Scheduler        │  │  credential cache   (10-min TTL)          │ │
 │  └──────────────────┘  │  EntityCatalog      (control plane, TTL)  │ │
 │                        │  thread-state       (LRU, backend chat)   │ │
+│                        │  guardrail-state    (policies & overrides)│ │
 │                        └──────────────────────────────────────────┘ │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
@@ -110,7 +114,7 @@ Key system capabilities:
 2. **Secret isolation**: All API keys are AES-256-GCM encrypted and never reach the browser.
 3. **Parallel multi-source loading.** `WorkspaceProvider` loads three agent sources in parallel on mount (Backend Agents / Backend Teams / Built-in Agents). The first source with available agents auto-selects the default; the UI is never blocked by the slowest source.
 4. **Adapter pattern.** Each backend platform plugs in by implementing `IBackendAdapter` (metadata) and `IBackendChatHandler` (chat). The registry uses `satisfies Record<BackendId, …>` so forgetting to register an adapter is a compile error.
-5. **Cache with precise, reverse-indexed invalidation.** Six process-wide caches live in the Node process (e.g., credentials, agents, MCP connections). Writes invalidate only dependent entries. All caches are pinned to `globalThis` to survive dev-server HMR reloads.
+5. **Cache with precise, reverse-indexed invalidation.** Seven process-wide caches live in the Node process (credentials, agents, MCP connections, skills, entity catalog, thread-state, guardrail state). Writes invalidate only dependent entries. All caches are pinned to `globalThis` to survive dev-server HMR reloads.
 6. **Run-as-first-class.** Every execution (chat, scheduled, workflow refresh) produces a unified `entity_run` row and an append-only timeline.
 7. **Supervisor catalog inlined.** The supervisor agent sees available specialists directly in its system prompt—avoiding extra round-trips to list agents.
 8. **Vendor lock-in mitigation.** Third-party SDKs (e.g., CopilotKit, AG-UI) are wrapped in centralized barrel files (`lib/copilot/`). Upgrades require editing a single file rather than touching scattered call sites.
@@ -188,7 +192,7 @@ For detailed design and implementation phases, see:
 | Group | Paths | Guards | Purpose |
 |---|---|---|---|
 | `(auth)` | `/sign-in`, `/sign-up` | none | accessible while signed out |
-| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/schedule[/[id]]`, `/notifications`, `/web-auto[/[id]]` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
+| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/schedule[/[id]]`, `/notifications`, `/web-auto[/[id]]`, `/admin/guardrails` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
 | API | `/api/*` | `getSession()` per-route | unified 401 handling |
 
 ### 4.2 Frontend Layout (Three-Pane)
@@ -219,8 +223,10 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `/api/notifications`, `/api/notifications/[id]` | GET/POST/PATCH/DELETE | Inbox list / mark-all-read / mark-read / delete | session |
 | `/api/runs/stream` | GET (SSE) | Live notification + `run_finalized` stream keyed by ownerId. Notification frames carry `id: <uuidv7>`; on EventSource auto-reconnect we replay missed `notification` rows via `Last-Event-ID` (header or `?lastEventId=`), capped at 200 rows per resume. | session |
 | `/api/threads`, `/api/threads/[id]`, `/api/threads/[id]/messages` | GET / DELETE / GET | Unified chat history surface. Lists threads (filtered by optional `?entityId=`), reconstructs AG-UI `Message[]` from `entity_run.input_task` + post-coalesce `entity_run_event` rows, deletes a thread + its delegation sub-tree via recursive CTE. owner-scoped end to end (`owner_id = session.user.id`); sub-runs excluded by `parent_run_id IS NULL`. Replaces the previous reverse-proxy of upstream agent platform `/sessions` APIs. | session |
+| `/api/threads/[threadId]/outcomes` | GET | Retrieve transient outcomes generated within a conversation thread | session |
 | `/api/schedules`, `/api/schedules/[id]`, `/api/schedules/[id]/trigger` | CRUD/RPC | Schedule CRUD + manual trigger | session |
 | `/api/admin/credentials` | CRUD | Credential management | requireAdmin |
+| `/api/admin/guardrails` | GET/POST/PUT/DELETE | Safety policies, tool risk overrides, and interception logs control plane | requireAdmin |
 | `/api/admin/threads`, `/api/admin/threads/[id]` | GET | Thread forensics list + detail (runs + per-run metrics) | requireAdmin |
 | `/api/admin/runs/[id]` | GET | Single-run events (children + last 1000 events) — fetched lazily by the thread detail right column | requireAdmin |
 | `/api/auth/[...all]` | better-auth | Sign-in / sign-up etc. | — |
@@ -265,6 +271,9 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `orchestration/modes.ts` | Mode registry: `auto | tool-call | handoff | async`. Each mode contributes a `promptDirective` merged into the supervisor prompt at dispatch time. |
 | `orchestration/display-name.ts` | Stable `${sourceLabel} / ${name}` rendering shared between server (catalog block) and client (panels, editors). |
 | `observability/logger.ts` | pino structured logging with automatic secret redaction |
+| `agent-pipeline/` | Safety guardrail interceptor pipeline (`composeToolPipeline`), Tool Risk Registry, tag sanitization, loop detection, input/output inspection (see [docs/guardrails.md](file:///d:/AI/nango/docs/guardrails.md)) |
+| `outcomes/` | Transient outcomes management, pure reducer `applySlideEdit`, and thread replay rebuilders (see [docs/outcomes.md](file:///d:/AI/nango/docs/outcomes.md), [docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)) |
+| `bento/` | Bento Presentation Slides templates, HTML compiler, and export assets (see [docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)) |
 | `domain/artifact.ts` | Artifact type enum: `code` / `chart` / `dashboard` / `image` / `html` / `ppt` / `report` |
 
 ### 4.5 Client State (Zustand)
@@ -272,7 +281,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | Store | Key fields |
 |---|---|
 | `workspace.ts` | agent list cache (agents/teams/builtinAgents), `activeAgentId`/`activeAgentSource`/`activeCredentialId`/`activeProvider`, `threadId` (CopilotKit v2), `pinnedSessions` (persisted), `orchestrationMode` |
-| `outcome-store.ts` | Thread-scoped polymorphic Outcome list (chart V1; html/image Phase 2), `addOutcome` upsert, `markSaved`, `toggleCollapse`, `loadForThread` (replay from `entity_run_event`) |
+| `outcome-store.ts` | Thread-scoped polymorphic Outcome list (charts, Bento Slides delta edits via `applySlideEdit`, dashboards), `addOutcome` upsert, `markSaved`, `toggleCollapse`, `loadForThread` (replay from `entity_run_event`) |
 | `sidebar.ts` | left-panel switcher, right-panel open flag |
 | `notifications.ts` | inbox items, `isStreamConnected` flag (SSE), updated by `useStartNotifications` + BroadcastChannel for cross-tab sync |
 | `schedules.ts` | schedule list cache + `scheduleActions` (refresh / create / patch / remove / triggerNow) |
@@ -379,9 +388,36 @@ Runtime (inside Built-in Agent):
    release every provider in the route's `finally`
 ```
 
-### 5.4 Outcomes Panel & Artifact Library
+### 5.4 Outcomes Panel & Artifact Pipeline
 
-Transient Outcomes Panel (/outcomes) for per-thread charts; Permanent Artifact Library (/artifact) for saved outcomes.
+The system establishes a two-tier visual output lifecycle:
+
+1. **Transient Outcomes (`/outcomes`)**: Per-thread ephemeral outputs emitted during conversations. Captured from `entity_run_event` streams and rendered across polymorphic cards (Charts, Bento Slides, Dashboards).
+2. **Permanent Artifacts (`/artifact`)**: Persisted assets saved from transient outcomes. Retains full metadata, layout configuration, and optional underlying workflow linkages.
+
+```
+       Chat Tool Invocations
+   (generate_chart, generate_bento_slides, edit_bento_slides)
+                 │
+                 ▼
+         entity_run_event (PostgreSQL timeline)
+                 │
+    ┌────────────┴────────────┬────────────────────────┐
+    ▼                         ▼                        ▼
+Client Store           Thread Replay             Artifact Saver
+(outcome-store.ts)   (replay-rebuilders.ts)     (save-artifact.ts)
+    │                         │                        │
+    └────────────┬────────────┴────────────────────────┘
+                 ▼
+     applySlideEdit(baseDoc, edit)
+     Pure Reducer (Single Source of Truth)
+                 ▼
+     Deterministic Visual Outcomes
+```
+
+- **Bento Presentation Slides Subsystem**: 16:9 visual presentation decks built on modern Bento Grid design. Uses a two-tool state machine (`generate_bento_slides` for initialization + `edit_bento_slides` for fine-grained partial delta edits) and the shared `applySlideEdit` pure reducer to eliminate LLM generation fatigue and ensure multi-environment deterministic rendering (see [docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)).
+- **Outcomes Architecture & Replay**: Detailed in [docs/outcomes.md](file:///d:/AI/nango/docs/outcomes.md).
+- **Artifact Model & Operations**: Detailed in [docs/artifact.md](file:///d:/AI/nango/docs/artifact.md).
 
 ### 5.5 Credential Lifecycle
 
@@ -417,7 +453,7 @@ Lookup paths (server-side only):
 | Credentials | `credential` | All secrets encrypted; `serviceType` ∈ `llm/search/agent/observability/integration/datasource/other` |
 | Built-in Agents | `builtin_agent`, `builtin_agent_tool` | Agent definition + tool bindings (discriminated union) |
 | Tool sources | `mcp_server`, `skill`, `skill_file` | MCP server / DB-resident Skill (helper bytes in `skill_file.content::bytea`) |
-| Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards |
+| Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards / slides |
 | Verification | `verification_suite`, `verification_case`, `verification_run`, `verification_case_result` | Deterministic assert-on-output testing for MCP tools. Deleting an MCP server detaches suites (`mcp_server_id` → SET NULL; `mcp_server_name` snapshot kept) instead of cascading (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | Evaluation | `eval_suite`, `eval_case`, `eval_run`, `eval_case_result` | Stochastic quality evaluations using LLM-as-Judge (see [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
 | Web Auto | `web_auto_suite`, `web_auto_case`, `web_auto_run`, `web_auto_case_result` | Deterministic Playwright browser automation suites, cases, runs & results (see [docs/web-auto.md](file:///d:/AI/nango/docs/web-auto.md)) |
@@ -443,15 +479,15 @@ Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the u
 `artifact` is a first-class resource for AI outputs, related to:
 - `menuItemId` → `menu_item` — placement in the dynamic menu tree
 - `visibility` — `private` | `shared`
-- `content` is JSONB (ECharts option / HTML string / image URL / …)
+- `content` is JSONB (ECharts option / Bento slide deck / HTML string / image URL / …)
 
 ---
 
 ## 7. Time & Timezone
-- **UTC Everywhere**: All DB 	imestamp columns and server-side computations use absolute UTC.
-- **Display**: Timezone is purely a edge/presentation concern, resolved via useDisplayTimezone() + ormatTimestamp(iso, tz, style).
-- **User Profile**: 	imezone field in user table is the source of truth, optionally synced to browser via 	imezone_follow_browser.
-- **Schedules**: schedule.timezone captures a snapshot of the user's timezone at creation time, used for DST-safe interval arithmetic.
+- **UTC Everywhere**: All DB timestamp columns and server-side computations use absolute UTC.
+- **Display**: Timezone is purely an edge/presentation concern, resolved via `useDisplayTimezone()` + `formatTimestamp(iso, tz, style)`.
+- **User Profile**: `timezone` field in `user` table is the source of truth, optionally synced to browser via `timezone_follow_browser`.
+- **Schedules**: `schedule.timezone` captures a snapshot of the user's timezone at creation time, used for DST-safe interval arithmetic.
 
 ## 8. Security
 
@@ -464,6 +500,7 @@ Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the u
 | Injection | Incoming IDs (`X-Credential-Id`, `agentId`) are matched against strict regex patterns; `entityKind` is server-derived from EntityCatalog so cannot be tampered |
 | Log leakage | pino redacts `headers.authorization` / `headers.cookie` / `headers['x-credential-id']` etc. automatically |
 | MCP failures | `GracefulMcpProvider` wraps tool calls: 5s timeout, errors degrade to readable text — never abort the LLM run |
+| Execution safety & prompt injection | Safety Guardrails & Agent Middleware Pipeline: Tool Risk Registry with fail-closed defaults, HITL tool approval, tag sanitization, loop detection, and regex content inspection (see [docs/guardrails.md](file:///d:/AI/nango/docs/guardrails.md)) |
 
 ---
 
@@ -479,7 +516,6 @@ See `docs/observability.md` for details.
 ---
 
 ## 10. Extensibility
-- **New Agent Backend**: See docs/backend-integration.md. Create adapter/chat handlers under src/lib/backends/<slug>/ and register in 
-egistry.ts.
-- **New MCP Server**: Handled fully via UI at /mcp (saves to mcp_server table).
-- **New Frontend Tool**: Define schema in src/hooks/useOutcomeTools.tsx, add render logic in OutcomesPanel.tsx.
+- **New Agent Backend**: See `docs/backend-integration.md`. Create adapter/chat handlers under `src/lib/backends/<slug>/` and register in `src/lib/backends/registry.server.ts`.
+- **New MCP Server**: Handled fully via UI at `/mcp` (saves to `mcp_server` table).
+- **New Frontend Tool**: Define schema in `src/hooks/useOutcomeTools.tsx`, add render logic in `src/components/main-panels/OutcomesPanel.tsx`.

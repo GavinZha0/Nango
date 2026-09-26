@@ -11,9 +11,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
-  ShieldCheck,
   ShieldAlert,
-  Clock,
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -235,32 +233,29 @@ export function GuardrailsClientShell() {
           </div>
 
           {/* Embedded Header Buttons Switcher */}
-          <div className="flex items-center gap-2">
-            <Button
-              variant={currentTab === "config" ? "secondary" : "outline"}
-              size="sm"
-              className={cn(
-                "h-7.5 text-xs gap-1.5 font-semibold",
-                currentTab === "config" && "bg-muted font-bold text-foreground shadow-xs",
-              )}
+          <div className="flex items-center rounded-full border border-border bg-muted p-0.5 shadow-sm">
+            <button
               onClick={() => handleTabChange("config")}
-            >
-              <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-              <span>Config</span>
-            </Button>
-
-            <Button
-              variant={currentTab === "logs" ? "secondary" : "outline"}
-              size="sm"
               className={cn(
-                "h-7.5 text-xs gap-1.5 font-semibold",
-                currentTab === "logs" && "bg-muted font-bold text-foreground shadow-xs",
+                "rounded-full px-4 py-1 text-sm font-medium transition-colors",
+                currentTab === "config"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
-              onClick={() => handleTabChange("logs")}
             >
-              <Clock className="h-3.5 w-3.5 text-primary" />
-              <span>Audit</span>
-            </Button>
+              Config
+            </button>
+            <button
+              onClick={() => handleTabChange("logs")}
+              className={cn(
+                "rounded-full px-4 py-1 text-sm font-medium transition-colors",
+                currentTab === "logs"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Audit
+            </button>
           </div>
         </div>
 

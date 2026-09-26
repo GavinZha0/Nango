@@ -25,8 +25,23 @@ export interface RawRunEvent {
 export function coalesceToolCalls(
   events: ReadonlyArray<RawRunEvent>,
 ): ToolInvocation[] {
-  // Sort by seq just in case the caller didn't. Stable.
-  const sorted = [...events].sort((a, b) => a.seq - b.seq);
+  // QUIRK: `seq` is a per-run local counter that resets to 0 on each new run.
+  // Sorting by bare `seq` across multiple runs scrambles the chronological
+  // order that the caller (loadThreadEvents) has already established via
+  // `ORDER BY run.created_at ASC, event.seq ASC`.
+  // Fix: assign each runId a stable encounter-order index, then sort by
+  // (runOrder, seq) so cross-run ordering is preserved.
+  const runOrder = new Map<string | undefined, number>();
+  for (const ev of events) {
+    if (!runOrder.has(ev.runId)) {
+      runOrder.set(ev.runId, runOrder.size);
+    }
+  }
+  const sorted = [...events].sort((a, b) => {
+    const ra = runOrder.get(a.runId) ?? 0;
+    const rb = runOrder.get(b.runId) ?? 0;
+    return ra !== rb ? ra - rb : a.seq - b.seq;
+  });
 
   // Accumulate chunks per toolCallId in encounter order.
   const buckets = new Map<string, ChunkBucket>();

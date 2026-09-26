@@ -3,7 +3,6 @@
 import { useState, type ReactNode } from "react";
 import { UserManagement } from "@/components/admin/UserManagement";
 import { LoginEvents } from "@/components/admin/LoginEvents";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Users, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,12 +23,30 @@ export default function AdminUserPage(): ReactNode {
             <h1 className="text-xl font-bold tracking-tight">Users</h1>
           </div>
 
-          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-            <TabsList className="h-8">
-              <TabsTrigger value="users" className="text-xs">User Accounts</TabsTrigger>
-              <TabsTrigger value="login-events" className="text-xs">Login Events</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center rounded-full border border-border bg-muted p-0.5 shadow-sm">
+            <button
+              onClick={() => setTab("users")}
+              className={cn(
+                "rounded-full px-4 py-1 text-sm font-medium transition-colors",
+                tab === "users"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              User Accounts
+            </button>
+            <button
+              onClick={() => setTab("login-events")}
+              className={cn(
+                "rounded-full px-4 py-1 text-sm font-medium transition-colors",
+                tab === "login-events"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Login Events
+            </button>
+          </div>
         </div>
 
         {tab === "users" && (
@@ -49,4 +66,3 @@ export default function AdminUserPage(): ReactNode {
     </div>
   );
 }
-

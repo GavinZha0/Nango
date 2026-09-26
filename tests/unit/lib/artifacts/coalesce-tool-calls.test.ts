@@ -327,4 +327,53 @@ describe("coalesceToolCalls — edge cases", () => {
     expect(callB?.inputs).toEqual({ y: "b-args" });
     expect(callB?.result).toEqual({ ok: "b" });
   });
+
+  it("preserves cross-run chronological order when seq resets per run", () => {
+    // Regression test for the Bento Slides save bug:
+    // Multiple runs each start seq from a small number (e.g. seq=4).
+    // A naive `sort((a,b) => a.seq - b.seq)` would interleave them,
+    // causing edit_bento_slides calls to be replayed in the wrong order.
+    //
+    // Scenario mirrors the Nokia slides case:
+    //   run-1: generate (seq=4) + insert-bar (seq=8)
+    //   run-2: replace-line (seq=4)  — must come AFTER run-1
+    //   run-3: insert-telecom (seq=4) — must come AFTER run-2
+    function chunkR(
+      seq: number,
+      runId: string,
+      toolCallId: string,
+      toolName: string,
+      args: string,
+    ): RawRunEvent {
+      return { seq, runId, type: "tool_call_chunk", payload: { toolCallId, toolName, args } };
+    }
+    function resultR(seq: number, runId: string, toolCallId: string, content: string): RawRunEvent {
+      return { seq, runId, type: "tool_call_result", payload: { toolCallId, content } };
+    }
+
+    // Events delivered in correct chronological order by the DB query
+    // (ORDER BY run.created_at ASC, event.seq ASC).
+    const events: RawRunEvent[] = [
+      chunkR(4, "run-1", "gen-call",    "generate_bento_slides", '{"outcome_id":"deck","doc":{"slides":[{"id":"s1"}]}}'),
+      resultR(5, "run-1", "gen-call",    '{"ok":true,"action":null}'),
+      chunkR(8, "run-1", "insert-bar",  "edit_bento_slides",     '{"outcome_id":"deck","action":"insert"}'),
+      resultR(9, "run-1", "insert-bar",  '{"ok":true,"action":"insert","slides":[{"id":"bar"}]}'),
+      chunkR(4, "run-2", "replace-line","edit_bento_slides",     '{"outcome_id":"deck","action":"replace"}'),
+      resultR(5, "run-2", "replace-line",'{"ok":true,"action":"replace","target_slide_ids":["bar"],"slides":[{"id":"line"}]}'),
+      chunkR(4, "run-3", "ins-telecom", "edit_bento_slides",     '{"outcome_id":"deck","action":"insert"}'),
+      resultR(6, "run-3", "ins-telecom", '{"ok":true,"action":"insert","slides":[{"id":"telecom"}]}'),
+    ];
+
+    const inv = coalesceToolCalls(events);
+    expect(inv.map((i) => i.callId)).toEqual([
+      "gen-call",
+      "insert-bar",
+      "replace-line",
+      "ins-telecom",
+    ]);
+    // The replace-line call must come BEFORE ins-telecom in the output.
+    const replaceIdx = inv.findIndex((i) => i.callId === "replace-line");
+    const insertTelecomIdx = inv.findIndex((i) => i.callId === "ins-telecom");
+    expect(replaceIdx).toBeLessThan(insertTelecomIdx);
+  });
 });

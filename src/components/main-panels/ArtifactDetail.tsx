@@ -27,14 +27,12 @@ import {
   Folder,
   FolderInput,
   GitCompare,
-  LineChart,
   Loader2,
   Pencil,
   RefreshCw,
   Save,
   Sparkles,
   Trash2,
-  Workflow,
 } from "lucide-react";
 import { assembleBentoHtml } from "@/lib/bento/template";
 import { useRouter } from "next/navigation";
@@ -466,43 +464,6 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     return undefined;
   }, [data, tz]);
 
-  const handleExportSlides = useCallback(async () => {
-    if (!node || node.type !== "slide") return;
-    const liveDoc = await getBentoDocFromIframe(slideIframeRef.current);
-    const rawDoc = (liveDoc && isSlideDoc(liveDoc))
-      ? liveDoc
-      : isSlideDoc(data?.data)
-      ? data.data
-      : isSlideDoc(node.snapshot)
-      ? node.snapshot
-      : isSlideDoc((node.config as { doc?: unknown })?.doc)
-      ? (node.config as { doc?: unknown }).doc
-      : null;
-    if (!rawDoc) {
-      toast.error("No presentation document found to export");
-      return;
-    }
-    try {
-      const html = assembleBentoHtml(rawDoc, {
-        fallbackTitle: node.name,
-        mode: "standalone",
-      });
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${(node.name || "presentation").replace(/[/\\?%*:|"<>]/g, "-")}.bento.html`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success("Exported Bento presentation HTML");
-    } catch (err) {
-      console.error("Export Bento slides failed:", err);
-      toast.error("Failed to export presentation");
-    }
-  }, [node, data]);
-
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -544,7 +505,6 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
             <ActionBar
               viewMode={node?.viewMode ?? "snapshot"}
               disableManagement={activeView === "workflow"}
-              onExport={node?.type === "slide" ? handleExportSlides : undefined}
               onRefresh={
                 node?.type === "slide"
                   ? undefined
@@ -764,59 +724,61 @@ function WorkflowOrPreviewLayout({
     }
   }, [hasFilters]);
 
-  if (activeView === "workflow") {
-    return (
-      <div className="flex min-h-0 flex-1 border-t bg-muted/20">
+  // Keep both views always mounted so the iframe and scroll state are
+  // preserved across tab switches. CSS `hidden` hides without unmounting.
+  return (
+    <>
+      {/* Workflow view — always mounted, hidden when not active */}
+      <div className={activeView === "workflow" ? "flex min-h-0 flex-1 border-t bg-muted/20" : "hidden"}>
         <WorkflowGraph
           spec={spec}
           onSaveNode={onSaveWorkflowNode}
           onDeleteNode={onDeleteWorkflowNode}
         />
       </div>
-    );
-  }
 
-  return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <ResizablePanelGroup
-        key={`horizontal-${node.id}-${hasFilters}`}
-        orientation="horizontal"
-        className="h-full w-full flex-1"
-      >
-        <ResizablePanel
-          id="artifact-chart-pane"
-          defaultSize={hasFilters ? "80%" : "100%"}
-          minSize="50%"
-          className="flex h-full w-full min-h-0 min-w-0 flex-col"
+      {/* Preview view — always mounted, hidden when not active */}
+      <div className={activeView === "preview" ? "relative flex min-h-0 flex-1 flex-col" : "hidden"}>
+        <ResizablePanelGroup
+          key={`horizontal-${node.id}-${hasFilters}`}
+          orientation="horizontal"
+          className="h-full w-full flex-1"
         >
-          <ArtifactScrollBody
-            node={node}
-            tree={tree}
-            router={router}
-            data={data}
-            slideIframeRef={slideIframeRef}
-          />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel
-          panelRef={filterPanelRef}
-          id="artifact-filter-pane"
-          defaultSize={hasFilters ? "20%" : "0%"}
-          minSize="15%"
-          maxSize="20%"
-          collapsible
-          collapsedSize="0%"
-          className="flex h-full w-full min-h-0 min-w-0 flex-col"
-        >
-          <ArtifactFilterPanel
-            schema={spec.input_schema}
-            initialValues={initialFilterValues}
-            onApply={(values) => void onRefreshWithInputs?.(values)}
-            loading={isRefreshing}
-          />
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </div>
+          <ResizablePanel
+            id="artifact-chart-pane"
+            defaultSize={hasFilters ? "80%" : "100%"}
+            minSize="50%"
+            className="flex h-full w-full min-h-0 min-w-0 flex-col"
+          >
+            <ArtifactScrollBody
+              node={node}
+              tree={tree}
+              router={router}
+              data={data}
+              slideIframeRef={slideIframeRef}
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel
+            panelRef={filterPanelRef}
+            id="artifact-filter-pane"
+            defaultSize={hasFilters ? "20%" : "0%"}
+            minSize="15%"
+            maxSize="20%"
+            collapsible
+            collapsedSize="0%"
+            className="flex h-full w-full min-h-0 min-w-0 flex-col"
+          >
+            <ArtifactFilterPanel
+              schema={spec.input_schema}
+              initialValues={initialFilterValues}
+              onApply={(values) => void onRefreshWithInputs?.(values)}
+              loading={isRefreshing}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    </>
   );
 }
 
@@ -898,24 +860,30 @@ function DetailHeader({
       {/* View Toggle (Absolute Centered) */}
       {hasWorkflow && activeView && setActiveView && (
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setActiveView(activeView === "preview" ? "workflow" : "preview")}
-            className="h-8 gap-1.5 px-3 text-muted-foreground hover:text-foreground shadow-sm"
-          >
-            {activeView === "preview" ? (
-              <>
-                <Workflow className="h-4 w-4 text-blue-500" />
-                Edit Workflow
-              </>
-            ) : (
-              <>
-                <LineChart className="h-4 w-4 text-emerald-500" />
-                View Artifact
-              </>
-            )}
-          </Button>
+          <div className="flex items-center rounded-full border border-border bg-muted p-0.5 shadow-sm">
+            <button
+              onClick={() => setActiveView("preview")}
+              className={cn(
+                "rounded-full px-4 py-1 text-sm font-medium transition-colors",
+                activeView === "preview"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              View
+            </button>
+            <button
+              onClick={() => setActiveView("workflow")}
+              className={cn(
+                "rounded-full px-4 py-1 text-sm font-medium transition-colors",
+                activeView === "workflow"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Workflow
+            </button>
+          </div>
         </div>
       )}
 
