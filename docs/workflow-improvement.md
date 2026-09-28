@@ -1,120 +1,29 @@
-# Workflow Dataflow, Parameterization & Filtering Architecture
+# Workflow Dataflow, Parameters, and Filters (Spec v2)
 
-> **Status**: Architectural Blueprint & Implementation Specification.
-> **Audience**: Full-stack engineers, Workflow engine developers, AI Agent architects.
-> **Related Documents**: [`workflow.md`](./workflow.md), [`artifact-filters.md`](./artifact-filters.md), [`data-sources.md`](./data-sources.md), [`sandbox.md`](./sandbox.md).
+> **Status:** Approved design, not yet implemented. See `workflow.md`, `artifact-filters.md`, `data-sources.md`, and `sandbox.md` for existing behavior. Existing workflow rows are deleted rather than migrated (S10, D9); the execution plan is S9.
 
----
+## 0. Design principles
 
-## 0. Executive Summary & Design Principles
+These principles are the premises for every later section. When a later rule seems arbitrary, the reason is here.
 
-In data analytics and interactive dashboard scenarios, a workflow is not merely a static replay script—it is a **high-throughput, memory-conscious data computation pipeline** that must respond seamlessly to user filtering, slicing, and drill-down operations.
+### 0.1 Mandates
 
-### 0.1 Architectural Mandate & Guiding Principles
+1. **Re-architecture, not patchwork.** The goal is a foundation that can carry multi-source, multi-step analysis, not a patch on the v1 engine. Phase 1 is an engine rewrite (§9).
+2. **Zero legacy baggage.** The product is pre-launch. The design ignores compatibility with v1 specs and data. Existing workflow rows are deleted (S10, D9).
+3. **AI-native JSON orchestration (the core focus).** The workflow's fundamental contract is a strictly validated JSON document, not internal UI state.
+   - *Why JSON.* JSON is the structured output dialect LLMs produce most reliably. An agent can generate, read, and repair a workflow as a co-pilot, a human can inspect it, and the server can validate it completely before anything runs. UI layout (graph positions, panel state) stays out of the spec.
+   - *Why this shape.* LLMs generate tokens sequentially. A node therefore refers **backward** to nodes it consumes (`@nodes.<id>.<field>`), never forward in the style of Node-RED `wires`, so the model never has to anticipate nodes it has not written yet. Compile orders nodes from those refs and rejects cycles. A strict tagged union (`type: "sql" | "code" | ...`) with a fixed `inputs` shape per type, parsed without passthrough, prevents parameter drift. Refs are two segments and whole-field only, so there is no expression language to hallucinate.
+   - *Three pillars.* 1) Strongly typed Zod schemas as the single source of truth for the spec (§2). 2) Dual-track data passing: dataset pointers for large data, complete bounded rows for charts (§0.2, §3). 3) Safe SQL parameterization through a dedicated compiler, never string splicing (§5.3).
+4. **Two authoring contexts, one execution path (Tool vs Node).** See §0.3.
+5. **Uncompromising credential boundary.** Database extraction, credential handling, and SQL policy enforcement stay in the Node.js main process. Database credentials or connection strings are **never** passed into the sandbox, not even to bypass a Node.js I/O bottleneck. The sandbox receives only Parquet files on its read-only mount and JSON parameters.
 
-This document serves as the blueprint for a fundamental upgrade of the workflow engine. The design is governed by the following strict mandates established during architectural review:
+### 0.2 Ground truths: The Three-Tier Pipeline & Dual-Track Data
 
-1. **Re-architecture, Not Patchwork**: The goal is to build a robust, forward-looking foundation capable of supporting complex workflows. We are not patching the existing implementation.
-2. **Zero Legacy Baggage**: As the product is pre-launch, this design explicitly ignores backward compatibility with any older workflow schemas or existing legacy data.
-3. **AI-Native JSON Orchestration (The Core Focus)**: The engine's fundamental contract is a strictly JSON-based configuration rather than an internal UI state.
-   - *Why JSON?* JSON is the native, structured output dialect of LLMs. To allow an Agent to generate, parse, and repair workflows seamlessly as an active co-pilot, the orchestration format must be programmatic.
-   - *Why this specific JSON shape?* LLMs generate tokens sequentially (autoregressive). Therefore, we strictly enforce backward-linking (`depends_on: [prev_id]`) instead of forward-linking (like Node-RED's `wires`) to prevent look-ahead hallucinations. We use strict Tagged Unions (`type: "sql"`) to prevent parameter drift.
-   - *The Triangle*: The JSON architecture is governed by three pillars: ① Strongly-typed Zod Schemas as the Single Source of Truth, ② Dual-Track Inter-node Data Passing, and ③ Safe SQL Parameterization.
-4. **Separation of Authoring Scenarios (Tool vs Node)**: The architecture respects the fundamental divide between two modes of AI interaction. We strictly decouple **Scenario 1 (Ad-hoc Exploration)** where an Agent uses conversational *Tools* imperatively, from **Scenario 2 (Workflow Orchestration)** where a specialized Copilot Agent modifies a declarative *JSON Workflow Node Spec*. Tools and Nodes are unified in execution but strictly layered in their schema contracts (Detailed in §0.3).
-5. **Uncompromising Credential Security**: The isolation between Node.js and the Sandbox is a hard security boundary. Database extraction, credential management, and SQL policy enforcement **must** remain in the Node.js main process. Passing raw DB credentials into the user-programmable Sandbox (to bypass Node.js I/O bottlenecks) is strictly forbidden to prevent security leakage.
+To understand the execution contract, one must visualize the macro data flow. The engine is a **high-throughput, memory-conscious data computation pipeline** built on three tiers and two data tracks.
 
-### 0.2 Core Ground Truths & Decisions
+#### 0.2.1 Unified Three-Tier Filtering Pipeline
 
-1. **Preserve Concise Numeric Node IDs**: Node IDs remain immutable non-negative integers assigned at birth (`#0`, `#1`, `#2`). They directly correlate with visual graph cards in `<WorkflowGraph />`, keep reference strings short (`@nodes.0.dataset_name`), and eliminate naming ceremonies for compact DAGs (typically 2–8 nodes).
-
-2. **Dual-Track Data Contract (Parquet File-Sharing Anchor)**:
-   - Analytical datasets are frequently large (tens of thousands to millions of rows). Returning raw full datasets to the LLM or storing them in the Node.js main process heap is strictly forbidden.
-   - Upstream SQL nodes materialize the full result into disk-resident Parquet files (`./tmp/data/<name>/**/*.parquet`). The workflow state and LLM context carry **only a preview (`rows`, up to `row_limit`) and metadata (`row_schema`, `total_rows`)**.
-   - Downstream heavy processing mounts the Parquet dataset inside the sandbox without round-tripping through the LLM context.
-
-3. **Sandbox Capabilities**: The Dify Sandbox environment is **persistent (daemonized / warm, zero container startup delay)**, natively equipped with `duckdb>=1.5.5`, `pandas>=3.0.5`, `numpy`, and `pyarrow` (defined in `docker/dify-sandbox/requirements.txt`). No polars.
-
-4. **No In-Process Node.js Transform**: An in-process Node.js transform node is explicitly rejected:
-   - Node.js in the main app process lacks native, zero-copy Parquet readers.
-   - Performing in-memory transformations in Node.js would require loading entire datasets into the server's JavaScript heap, degrading API throughput and defeating the Parquet architecture.
-   - Transformations are instead routed to either **Source SQL Pushdown**, **Sandbox-Native DuckDB/Pandas Pipeline**, or **ECharts Client-Side Transform**.
-
-### 0.3 Node–Tool Relationship: Contract Layering & Elevation Policy
-
-Nango's workflow engine reconciles two authoring contexts that **share execution logic but differ in input contract**. This section codifies the architecture that emerged from the node-vs-tool design review, eliminating wrapper-maintenance cost without sacrificing the workflow engine's reference-resolution and canonicalization semantics.
-
-#### 0.3.1 Two Authoring Contexts
-
-| Context | Actor | Input form | Workflow awareness |
-|---|---|---|---|
-| **Exploration (chat)** | Chat Agent | `tool_name` + literal `arguments` (`sql_text: "SELECT ..."`) | None |
-| **Orchestration (artifact / workflow)** | Copilot Agent | `type: "sql"` + reference-capable `inputs` (`sql_text: "... @inputs.date"`) | Full: node definitions + current spec |
-
-These two contexts never see each other's terminology: the chat layer speaks only in *tools*, the orchestration layer only in *declarative nodes*. A **non-agent translation layer** (`build-from-events.ts` → `assembleNode`) mechanically converts tool calls into nodes at "Save as workflow" time — no LLM participates in extraction.
-
-#### 0.3.2 Execution Unification, Contract Layering
-
-**Execution layer — unified (already true today):** a single generic reference-resolution pass (`execution-context.ts` `resolveRefs` / `resolveRefsInString`) feeds resolved values into each executor, which reuses the underlying tool's core logic (`sql-node.ts` calling `extract_dataset_by_sql`). Tools are never aware of whether a chat Agent or the workflow scheduler invoked them.
-
-**Contract layer — layered (must NOT be unified):** `type:"sql"` / `"code"` / `"agent"` / `"chart"` nodes are not mere wrappers of tool schemas. They are a *semantic enhancement* carrying metadata that a chat tool schema cannot derive:
-
-1. **Canonical-only fields** — `data_source_id` (`x-canonical-only`, resolved from `data_source_name` by canonicalize) exists on node schemas but never on tool schemas. A generic `makeNodeSchema(ToolSchema)` cannot conjure it.
-2. **Default-value divergence** — chat `row_limit` defaults to `5` (token economy); workflow `row_limit` defaults to `200` (chart fidelity). A single shared schema object makes these fight.
-3. **Two reference morphologies** — `sql_text` carries *embedded* refs (`"... >= '@inputs.date'"`, resolved by `resolveRefsInString`); `datasets` carries *whole-field* refs (`["@nodes.0.dataset_name"]`). A generic "any field may start with `@`" widening cannot distinguish them.
-
-#### 0.3.3 Single Source of Truth (Field Pieces)
-
-Do not copy-paste field definitions between tool and node schemas. Extract reusable Zod field pieces, and let node schemas `.extend()` to add canonical-only fields, strengthen descriptions with reference semantics, and override defaults:
-
-```ts
-// Field library (single source of truth)
-const sqlTextField        = z.string().min(1).describe("...");
-const dataSourceNameField = z.string().min(1).describe("...");
-
-// Tool schema (assembled)
-const ExtractDatasetArgs = z.object({
-  sql_text: sqlTextField,
-  data_source_name: dataSourceNameField,
-  row_limit: z.number().int().default(5),   // chat default
-});
-
-// Node schema (extends + enhances)
-const CanonicalSqlInputsSchema = z.object({
-  sql_text: sqlTextField.describe("... @inputs.* / @nodes.* refs resolved before execution."),
-  data_source_name: dataSourceNameField,
-  data_source_id: z.string().uuid().meta({ "x-canonical-only": true }), // node-only
-  row_limit: z.number().int().default(200), // workflow default
-});
-```
-
-#### 0.3.4 TOOL_TO_NODE_MAPPING Router
-
-Replace scattered `if (toolName === "extract_dataset_by_sql")` branches with a single routing table consulted by `assembleNode`:
-
-```ts
-const TOOL_TO_NODE_MAPPING = {
-  "extract_dataset_by_sql": { targetNode: "sql",   version: "1" },
-  "run_code_in_sandbox":    { targetNode: "code",  version: "1" },
-  // ... agent-delegation tool → "agent", chart-generation tools → "chart"
-} as const;
-```
-
-`assembleNode` looks up this table: a hit converts the tool call into the declared declarative node; a miss falls back to a generic `type:"tool"` node (`source` + `name` + `arguments`, per-instance schema snapshot).
-
-#### 0.3.5 Node Elevation Policy
-
-A tool is elevated to a first-class declarative node **only if** it participates in data-lineage passing (produces a Parquet dataset or `rows` that downstream nodes reference via `@nodes.X.<field>`) **or** receives filter pushdown (`@inputs.*`). Everything else stays a generic `type:"tool"` fallback node.
-
-- **Elevated (declarative):** `extract_dataset_by_sql` (→ `sql`), `run_code_in_sandbox` (→ `code`), chart-generation tools (→ `chart`), agent-delegation tool (→ `agent`).
-- **Fallback (`type:"tool"`):** `web_search`, `get_current_datetime`, `repeat_tool`, `run_skill_script`, arbitrary MCP tools — no data lineage, no per-type schema needed.
-
-This policy keeps the declarative node set small (bounded by the data-lineage surface) while guaranteeing lossless extraction of any tool call.
-
----
-
-## 1. Unified Three-Tier Filtering Pipeline
-
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ UI Layer: Artifact Filter Panel (RJSF Form / Dynamic Options from options_source)      │
 └───────────────────────────────────────────┬────────────────────────────────────────────┘
@@ -149,370 +58,561 @@ This policy keeps the declarative node set small (bounded by the data-lineage su
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+Each tier is optional when its contract allows:
+| Tier | Data path | Responsible for | Not responsible for |
+|---|---|---|---|
+| Source SQL | Source → full Parquet + bounded `rows` | Filtering and grouping close to the source; filter pushdown; materializing results | Rendering; running Python; handling credentials outside the data-source layer |
+| Python sandbox | Read-only shared Parquet → bounded aggregated `rows` | Multi-source joins, time series, statistics, anything impractical in source SQL | Owning credentials or DB connections; keeping state between runs |
+| ECharts (browser) | Small complete `rows` → rendered chart | Rendering, legend interaction, presentation-only transforms such as sorting | Re-applying SQL filters; processing raw or full datasets |
 
-## 2. Dual-Track Data Passing: Pointers vs. Previews
+#### 0.2.2 Dual-Track Data Contract (Pointers vs Previews)
 
-The SQL node's output contract is already implemented as 5 fixed fields (`sql-node.ts` → `extract_dataset_by_sql` result, registered in `nodes/registry.ts` outputs schema with `additionalProperties: false`). This section documents the semantic split between them.
+Analytical results are often tens of thousands to millions of rows. They never enter agent context, the Node.js heap as a whole, events, snapshots, or the browser.
 
+```text
+SQL node
+├─ Disk: shared cache directory/**/*.parquet ← full result (e.g. 500,000)
+└─ Output bag:
+   ├─ dataset_name ← [pointer] heavy path → code nodes (sandbox reads Parquet)
+   ├─ total_rows ← [metadata]
+   ├─ returned_rows ← [metadata] equals total_rows only when rows are complete
+   ├─ row_schema ← [metadata] what an agent needs to write analysis code
+   └─ rows ← [inline] ≤ workflow inline budget; chart input only when complete
 ```
-Upstream SQL Node (#0)
- ├── Disk: ./tmp/data/wf_run_n0/**/*.parquet  (Full Dataset: 500,000 rows)
- └── In-Memory Node Outputs (5 fixed fields):
-      ├── dataset_name: "wf_run_n0"            ← [Pointer]  Heavy data path → Code nodes
-      ├── total_rows: 500000                   ← [Metadata] Row count for display / short-circuit
-      ├── returned_rows: 200                   ← [Metadata] Actual inline rows count
-      ├── row_schema: { columns: [...] }       ← [Metadata] Schema for LLM code generation
-      └── rows: [ { ... }, { ... } ] (top N)   ← [Preview]  Lightweight path → Chart nodes only
-```
 
-### 2.1 Volume-Aware Consumption Paths (Small vs. Large Data)
+The engine adapts dynamically based on data volume:
+1. **Small Data Scenario (Total Rows ≤ inline budget)**: The `rows` array contains the **complete dataset**. Downstream Chart nodes and UI renderers bind directly to `@nodes.X.rows` (the **Lightweight Path**). While the Parquet file is still written for consistency, the inline `rows` serves as the complete, lightweight payload.
+2. **Large Data Scenario (Total Rows > inline budget)**: `rows` acts strictly as a **truncated preview** to prevent Node.js heap exhaustion and LLM context window blowouts. Downstream analytical nodes must use the Parquet pointer via `@nodes.X.dataset_name` (the **Heavy Data Path**). Code inside the Python sandbox queries the full dataset at C++/Rust speed over the disk-resident Parquet files, which emits small aggregated rows for the final chart.
 
-The engine's Dual-Track system adapts dynamically based on the volume of data extracted relative to the node's `row_limit` (typically configured to 100-200 rows):
+3. **No in-process Node.js transform.** The Node.js process has no zero-copy Parquet engine, and loading full datasets into its heap would hurt every API request. Transformations happen only in source SQL, the sandbox, or presentation-only ECharts transforms. The only Parquet reads in Node.js are bounded inline reads (at most the inline budget) that produce `rows`.
 
-1. **Small Data Scenario (Total Rows ≤ `row_limit`)**:
-   - When a query returns a small dataset (e.g., daily aggregated metrics or a short list of 50 records), the `rows` array contains the **complete, full dataset**.
-   - **Lightweight Path**: Downstream Chart nodes, UI renderers, and even LLM evaluators can bind directly to `@nodes.X.rows` to consume the data instantly in-memory. While the Parquet file is still written for consistency, the inline `rows` serves as the complete, lightweight payload.
+4. **Sandbox capabilities.** The Dify sandbox is a persistent, warm service started with the system (no per-run container start). It mounts the shared dataset cache read-only, and that mount does not change per run. Libraries are pre-installed from `docker/dify-sandbox/requirements.txt` (generated by `pnpm sandbox:build`): `duckdb`, `pandas`, `numpy`, `pyarrow`, `pytz`, `matplotlib`, `seaborn`. There is no `polars`, no runtime installation, and no network. The service is persistent, but each code execution is independent: no variables or state carry over between calls.
 
-2. **Large Data Scenario (Total Rows > `row_limit`)**:
-   - When extracting massive tables (e.g., 500,000 rows of raw logs), `rows` acts strictly as a **truncated preview**. This hard ceiling prevents Node.js heap exhaustion and LLM context window blowouts.
-   - **Heavy Data Path**: Downstream analytical nodes must *not* attempt to use `rows`. Instead, they reference the Parquet pointer via `@nodes.X.dataset_name`.
-   - The engine translates this pointer into a read-only sandbox mount (`./tmp/data/<dataset_name>/`). Code inside the Python sandbox queries the full dataset at C++/Rust speed using DuckDB or Pandas directly over the disk-resident Parquet files.
+### 0.3 Tool vs Node: contract layering
 
+Two authoring contexts.
+| Context | Actor | Input form | Workflow awareness |
+|---|---|---|---|
+| Exploration (chat) | Chat agent | `tool_name` + literal, immediately executable `arguments` | None |
+| Orchestration (artifact) | Human in the Inspector; future copilot agent | Declarative node (`type` + `inputs`) that may carry refs (`@nodes.*`, `@inputs.*`) | Full: node definitions and the current spec |
 
+The chat layer speaks only in tools; the orchestration layer only in nodes. A non-LLM translation layer (`build-from-events.ts`) converts captured tool calls into nodes mechanically at Save (§4). No LLM participates in extraction.
 
----
+**Execution is unified; contracts are layered.** A node executor and its chat tool call the same underlying service: the extraction service for `sql` / `extract_dataset_by_sql`, and the sandbox invocation and result assembly for `code` / `run_code_in_sandbox`. They return the same result shape. Their input schemas are deliberately not one object:
 
-## 3. Tier 1: Source Pushdown & SQL Parameter Handling
+- Node inputs may carry refs; tool arguments are always literal.
+- Defaults differ by boundary: the chat SQL tool previews 5 rows by default (at most 200) for token economy, while the workflow uses the inline budget (§3.1).
 
-Filtering at the source database is the most efficient operation because it prevents unnecessary rows from being written to Parquet in the first place.
+**Field pieces are the single source of truth.** Identical fields are defined once as Zod pieces and assembled into both schemas; neither copies the other's definitions:
 
-### 3.1 Two-Phase SQL Parameterization
-
-**Current V1 state** (code evidence in `src/lib/data-sources/`):
-- `runtime-tools.ts:66`: tool description says "Bake parameter values into the SQL — bound parameters are not supported in V1."
-- DuckDB-extension adapters (postgres/mysql/mariadb) and Vertica adapter throw if `ExtractInput.params` is non-empty.
-- `ExtractInput.params` typed as `Record<string, string | number | boolean | null>` — no array type.
-
-The upgrade is delivered in phases:
-
----
-
-#### Phase 1 — Type-Aware Safe Escaping (Eliminates SQL Injection)
-
-Implemented entirely in `sql-node.ts` before passing the final SQL to `extract_dataset_by_sql`. No adapter changes required.
-
-**Step 1 — Policy check & Identifier Guard (`SPEC_REF_AS_IDENTIFIER`)**:
-These are two distinct mechanisms:
-1. **Identifier AST Guard**: Parse the *original* template SQL using `node-sql-parser`. Walk the AST. If any `@inputs.<key>` appears in an identifier node (e.g., TableRef, ColumnRef in GROUP BY, or as a format argument to `date_trunc`), reject at save time with `SPEC_REF_AS_IDENTIFIER`. Identifier injection is strictly unsupported.
-2. **Read-Only / TableList Policy Guard**: For `validateSqlAgainstPolicy` (which checks table access and read-only constraints), perform a global regex replacement (`/@inputs\.[a-zA-Z0-9_]+/g` → `'__param__'`). This dummy replacement ensures `node-sql-parser` doesn't choke on custom `@inputs` syntax, allowing it to correctly extract table names and verify `SELECT` operations.
-
-**Step 2 — Type-aware value substitution**:
-Each `@inputs.<key>` ref is resolved to a concrete value via `ExecutionState`, then escaped according to `input_schema.properties.<key>.type` (including `items.type` for arrays):
-
-| Declared type | Substitution | Example |
-|---|---|---|
-| `string` | `'value'` with internal `'` → `''` escaping | `'2024-01-01'` |
-| `number` | bare numeric literal (validated as finite) | `42` |
-| `boolean` | `TRUE` / `FALSE` | `TRUE` |
-| `array` | Escapes elements based on `items.type`, formats as `('a', 'b')` or `ARRAY['a', 'b']` | `('user', 'evaluator')` |
-| absent / null | `NULL` | `NULL` |
-
-`ExtractInput.params` type extended to accept arrays:
 ```ts
-params?: Record<string, string | number | boolean | null | string[] | number[]>;
+const sqlTextField = z.string().min(1).describe("...");
+const dataSourceNameField = z.string().min(1).describe("...");
+
+// Chat tool: literal arguments, LLM-preview defaults
+const ExtractDatasetArgs = z.object({
+  sql_text: sqlTextField,
+  data_source_name: dataSourceNameField,
+  dataset_name: z.string().min(1),
+  row_limit: z.number().int().min(0).max(200).default(5),
+  force_refresh: z.boolean().default(false),
+});
+
+// Workflow node inputs: ref-capable, engine-owned inline budget (no row_limit)
+const SqlNodeInputs = z.object({
+  sql_text: sqlTextField.describe("... @inputs.* value parameters (§5.3)"),
+  data_source_name: dataSourceNameField,
+  dataset_label: z.string().min(1).optional(),
+}).strict();
 ```
 
-**Optional filter pattern** — unset parameter → identity branch:
-```sql
--- @inputs.status resolves to NULL when not provided
-WHERE (@inputs.status IS NULL OR status = @inputs.status)
+**Node elevation policy.** A tool becomes a first-class declarative node type only if it takes part in data lineage (produces a dataset or `rows` that downstream nodes reference) or receives filter pushdown. Today those are `extract_dataset_by_sql` -> `sql`, `run_code_in_sandbox` -> `code`, chart tools -> `chart`, and `delegate_to_agent` -> `agent`. Every other tool becomes a generic `type: "tool"` node, and only when registered replayable; otherwise it is omitted (§4.1). This keeps the node vocabulary small and bounded by the data-lineage surface.
+
+## 1. Scope, principles, and trust model
+
+Nango is a single long-running Node process for personal use or a small, internally trusted team. Workflows are JSON DAGs behind artifacts, not a distributed execution platform. This proposal targets one reliable family of paths:
+
+```text
+------------- validated artifact filter inputs -------------
+↓                                                          ↓
+chat tools -> Save -> SQL --(Parquet dataset)-> optional Python --(small rows)->
+----------------------(complete small rows)------------------↑
 ```
 
----
+### 1.1 Data principles (normative)
 
-#### Phase 2 — Native Prepared-Statement Binding (Vertica Only)
+1. **Large data never enters agent context.** The chat SQL tool returns a bounded preview (≤ 200 rows / 50 KB) plus `total_rows` and `row_schema`. The agent writes Python from the preview and schema; the Python runs against the full dataset.
+2. **Large data never goes directly into a chart.** A chart receives a complete row array within the workflow inline budget (§3.1). A truncated preview is never presented as a complete refreshed chart.
+3. **Large data flows between nodes by reference.** SQL materializes a full Parquet dataset in the team-shared cache; downstream code nodes read it by dataset reference. Full datasets do not travel through the workflow output bag, events, snapshots, or the browser.
+4. **Save produces a replayable DAG; it does not invent filters.** Filter inputs are added afterwards by editing the spec (§4.5, §8).
 
-Replace type-aware escaping with true parameterized queries for low-hanging fruit.
+### 1.2 Trust model and security layers
 
-| Provider | V1 Path | Phase 2 Path |
-|---|---|---|
-| **Vertica** | `vertica-nodejs` → NDJSON → Parquet | `client.query({ text, values: [...] })` — driver already supports `$1` binding. |
+- **Datasets and the Parquet cache are shared across team users.** No owner IDs in cache keys, no per-user dataset handles. The sandbox is started with the system and mounts the shared cache read-only; mounts cannot change per run, and this proposal does not change that.
+- The security boundary has three layers, and only these three:
+  1. **Role/API gates** (`withSession` / `withEditor` / `withAdmin`, resource permissions) decide who can view, edit, and refresh artifacts.
+  2. **Source query authorization:** every new extraction resolves the data source through the server-side data-source layer (credentials never leave it), checks it is in the caller's allowed set, and applies its read-only/table policy to the SQL that will actually run.
+  3. **Sandbox capability reduction:** code guard checks, dedicated analysis agents with constrained prompts, pre-installed libraries only, no runtime installs, no network.
+- **This proposal does not promise file-level confidentiality between trusted team users.**
 
-*(Note: Postgres/MySQL/MariaDB native binding requires replacing DuckDB-extension COPY with a full node native-client-to-NDJSON pipeline. This is a heavy refactor and is deferred to Phase 3/Standalone effort).*
+## 2. Spec v2 (normative)
 
-**Spec-layer placeholder convention** — `@inputs.<key>` is the only form ever written in specs. `sql-node.ts` translates at execution time to provider-native positional placeholders (e.g., `$1`).
+This section is the single source of truth for the JSON shape. Later sections refer to it and do not redefine fields.
 
----
+### 2.1 Top-level shape
 
-### 3.2 Dynamic Filter Options (`options_source`) & Security Barrier
-
-`input_schema` properties may declare an `options_source` to populate filter dropdowns dynamically:
-
-```jsonc
+```json
 {
-  "type": "object",
-  "properties": {
-    "initiator": {
-      "type": "string",
-      "title": "Initiator",
-      "widget": "select",
-      "options_source": {
-        "type": "sql",
-        "data_source_name": "nango-db",
-        "sql_text": "SELECT DISTINCT initiator AS label, initiator AS value FROM entity_run WHERE initiator IS NOT NULL ORDER BY label ASC"
-      }
-    }
-  }
+  "version": 2, // spec format version (replaces per-node schema_version)
+  "name": "Daily sales", // required
+  "description": "", // optional
+  "input_schema": { ... }, // optional; JSON Schema subset (§5.1). Definitions
+  "nodes": [ ... ], // required, ≥ 1
+  "outputs": { "option": "@nodes.chart_1.option" }, // required, ≥ 1; key ->
+  "execution": { "max_parallelism": 3, "timeout_seconds": 120, "on_failure": "" }
 }
 ```
+`artifact.workflow_output_field` selects one key of `outputs` to render. Nothing else is stored in the spec: no resolved ids, no compile output (§2.5).
 
-// SECURITY: `GET /api/artifacts/[id]/filters` executes `options_source` queries and MUST enforce:
-1. Session authentication via `withSession`.
-2. Artifact read permission check (`canReadResource`).
-3. Data source access verification: reusing `buildUserCatalog` policy.
-4. SQL policy enforcement via `validateSqlAgainstPolicy`. No user-controlled parameters are accepted in `options_source` queries.
+### 2.2 Common node fields
 
----
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string `^[a-z][a-z0-9_]{0,31}$` | yes | Unique, stable. Editing or deleting one node never renames others. Save derives ids from the tool and position (`sql_1`, `code_1`, `chart_1`); nobody (human or LLM) is required to invent names, but a human may rename a node in the Inspector (refs are rewritten in the same write). |
+| `type` | `"sql"` \| `"code"` \| `"chart"` \| `"tool"` \| `"agent"` | yes | Tagged union discriminator |
+| `description` | string | no | Human/agent-facing purpose |
+| `inputs` | object | yes | Type-specific fields (§2.3). Kept from v1 to limit churn; unrelated to the workflow-level `input_schema` / `@inputs` refs despite the similar word. |
+| `after` | string[] | no | Order-only dependencies. Rarely needed: data dependencies are inferred from refs (§2.5). |
+| `retries` | { attempts, delay_seconds, backoff? } | no | |
+| `timeout_seconds` | integer | no | Capped by config |
 
-### 3.3 Strongly-Typed `input_schema` (`InputPropertySchema`)
+### 2.3 Node types ( `inputs` fields)
 
-`input_schema` is the shared contract. It must be strongly typed at the Zod level.
+| Type | `inputs` | Runtime outputs |
+|---|---|---|
+| `sql` | `data_source_name` (string, literal), `sql_text` (string; `@inputs.*` value parameters from Phase 3, §5.3), `dataset_label` (string, literal, optional display label) | `dataset_name`: DatasetName (physical name), `total_rows`: int, `returned_rows`: int, `rows`: Rows, `row_schema`: RowSchema |
+| `code` | `language` (`"python"` ; `"javascript"` without datasets), `code_text` (string, literal), `datasets` (array of whole-field refs to DatasetName), `params` (object; values are literals or whole-field refs) | CodeOutputEnvelope : `ok`, `rows`: Rows \| null, `row_count`, `row_schema`, `message`, `files`, `error`, `duration_ms` |
+| `chart` | `renderer` (`"echarts"`), `config` (ECharts option template, literal, no data, ≤ 64 KB), `dataset` (whole-field ref to Rows, or array of ≥ 2 such refs for multi-dataset charts) | `option`: object |
+| `tool` | `source` (`"builtin"` \| `"mcp:<server_id>"`), `name` (string), `arguments` (object; values literal or whole-field refs) | Per tool output schema. **Only tools registered as replayable (§4.1).** |
+| `agent` | `name` (agent display name), `task` (string or whole-field ref), `context` (optional, same rules) | `result`: string. Executes only on explicit refresh or Save's first run, never on GET. Not required by SQL->Python->chart. |
 
-```ts
-const InputPropertySchema = z.object({
-  type: z.enum(["string", "number", "boolean", "array"]),
-  items: z.object({ type: z.enum(["string", "number"]) }).optional(), // Required if type="array"
-  title: z.string().optional(),
-  description: z.string().optional(),
-  default: z.unknown().optional(),
-  widget: z.enum(["text", "select", "multiselect", "date", "daterange"]).optional(),
-  options_source: z.object({
-    type: z.literal("sql"),
-    data_source_name: z.string(),
-    sql_text: z.string(),
-  }).optional(),
-}).passthrough();
+### 2.4 References and the ref-carrier table
+
+Reference grammar:
+| Form | Meaning |
+|---|---|
+| `@nodes.<id>.<field>` | One top-level output field of an upstream node. No deep paths. |
+| `@inputs.<key>` | One key of the resolved, validated input bag (§5.2) |
+| `@context.<name>` | A fixed allow-list: `@context.now`, `@context.user_id` |
+
+A ref is recognized **only when the whole string value is exactly one ref**; the resolved value keeps its JSON type. There is no embedded interpolation anywhere except `sql_text`, which has its own compiler (§5.3). A string that merely contains `@nodes.` (e.g. in code or chart text) is a literal.
+
+**Ref-carrier table** (field paths are under the node's `inputs`). A ref anywhere not listed here is a lint error (`SPEC_REF_NOT_ALLOWED`).
+
+| Node.field | Allowed |
+|---|---|
+| `sql.sql_text` | `@inputs.<key>` value parameters only, compiled by §5.3. **Until Phase 3 ships, any `@inputs` token here is a lint error (`SQL_PARAMS_NOT_ENABLED`).** `@nodes.*` / `@context.*` are always rejected: so it is never sent to a database as text. |
+| `sql.data_source_name`, `sql.dataset_label` | **Literals only.** Switching sources means editing the spec (and passing source authorization), never submitting a filter. |
+| `code.datasets[i]` | `@nodes.<sql_id>.dataset_name` |
+| `code.params.<k>` | Literal, or whole-field `@inputs.*` / `@nodes.*` / `@context.*` |
+| `code.code_text`, `chart.config`, `chart.renderer` | Literals only; never scanned |
+| `chart.dataset` (or each element) | `@nodes.<id>.rows` (type `Rows`) |
+| `tool.arguments.<k>`, `agent.task`, `agent.context` | Literal, or whole-field ref |
+| `outputs.<k>` | `@nodes.<id>.<field>` |
+
+### 2.5 Stored form, compile, and lint
+
+- `workflow.spec` persists the authoring form above, and only it. Humans (Inspector), agents (future), and `build-from-events` all read and write this same shape. Compile output is never persisted; there is no separate LLM-emit vs canonical schema and no stored lock map.
+- `compile(spec, deps)` runs at **every write and every execution** and produces an in-memory CompiledWorkflow:
+  1. Zod shape parse (strict, no passthrough).
+  2. Resolve names against current catalogs: `data_source_name` within the caller's allowed data sources, agent by display name, tool by source + name. Data-source names cannot be changed after creation (the `data-source` PATCH API rejects `name`), so the name is a stable key. A deleted source fails with `DATA_SOURCE_NOT_FOUND`; a source recreated under the same name is used, per the admin's intent. A renamed or deleted agent fails with `AGENT_NOT_FOUND`, fixed by picking the agent again in the Inspector.
+  3. Infer data edges from the ref carriers (§2.4). Effective deps = inferred ∪ `after`, sorted.
+  4. Validate unknown nodes/fields, output-field types (registry: `rows`: `Rows`, `dataset_name`: `DatasetName`, `option`: `object`, ...), reachability, cycles, ref-carrier rules, SQL template rules (§5.3), size caps, replayability.
+- `lint(spec)` **returns all issues rather than throwing on the first**: `{ severity, code, path, node_id, message, hint }`, where `path` is a JSON Pointer (e.g. `/nodes/1/inputs/sql_text`). Three severities:
+
+| Severity | Effect | Examples |
+|---|---|---|
+| `error` | Blocks the write | `Unknown ref`, `cycle`, `SPEC_REF_NOT_ALLOWED`, `SQL_PARAMS_NOT_ENABLED`, `DATA_SOURCE_NOT_FOUND` |
+| `not_refreshable` | Write succeeds; `artifact.refreshable = false`; message shown in the UI | Chart with baked data (§4.3), data from an omitted non-replayable invocation, `HARDCODED_DATASET_PATH` |
+| `warning` | Informational only | Unused node, ambiguous Strategy Z+ match kept literal |
+
+The Inspector and a future agent editor fix every issue in one pass.
+
+### 2.6 Examples
+
+Ids below are hand-picked for readability; a chat Save produces `sql_1`, `chart_1`, and so on.
+
+**A. Small SQL result charted directly (24 daily totals; SQL does the aggregation):**
+```json
+{
+  "version": 2,
+  "name": "Daily sales (last 30 days)",
+  "nodes": [
+    {
+      "id": "sales", "type": "sql",
+      "inputs": { "data_source_name": "sales_pg",
+                  "sql_text": "SELECT day, SUM(amount) AS total FROM orders WHERE day >= current_date - 30 GROUP BY 1" }
+    },
+    {
+      "id": "chart", "type": "chart",
+      "inputs": { "renderer": "echarts",
+                  "config": { "xAxis": { "type": "category" }, "yAxis": { "type": "value" },
+                              "series": [{ "type": "line", "encode": { "x": "day", "y": "total" } }] },
+                  "dataset": "@nodes.sales.rows" }
+    }
+  ],
+  "outputs": { "option": "@nodes.chart.option" }
+}
 ```
+Compiled: chart deps `[sales]`. At run, chart requires `sales.returned_rows === sales.total_rows`, which holds because 24 ≤ the inline budget.
 
-`InputPropertySchema.type` is the **single source of truth** for runtime type coercion and bind enforcement. Type mismatch → `WorkflowError(SPEC_SCHEMA_MISMATCH)`.
-*(Note: Because this schema is LLM-authored, the system prompt must explicitly document these 4 allowed types and the strict matching requirement to prevent high-frequency hard failures).*
-
----
-
-## 4. Tier 2: Resident Sandbox In-Place Pipeline (DuckDB / Pandas)
-
-All intermediate and heavy data transformations run inside the **warm, persistent Sandbox**.
-
-### 4.1 Zero-Cold-Start In-Place SQL via DuckDB in Python
-
-```python
-import os, json, duckdb
-
-params = json.loads(os.environ.get('NANGO_PARAMS', '{}'))
-min_amount = float(params.get('min_amount', 0))
-dataset = params.get('dataset', 'wf_run_n0')
-
-con = duckdb.connect()
-df_res = con.execute("""
-    SELECT date_trunc('day', created_at) AS day, COUNT(*) AS total
-    FROM read_parquet('./tmp/data/' || ? || '/**/*.parquet')
-    WHERE amount >= ?
-    GROUP BY 1
-""", [dataset, min_amount]).df()
-
-print(json.dumps({"rows": df_res.to_dict(orient="records")}))
+**B. Large SQL result -> Python aggregation -> chart (500,000 raw rows):**
+```json
+{
+  "version": 2,
+  "name": "Order count by weekday",
+  "nodes": [
+    {
+      "id": "orders", "type": "sql",
+      "inputs": { "data_source_name": "sales_pg",
+                  "sql_text": "SELECT created_at, amount FROM orders WHERE created_at >= DATE '2025-01-01'" }
+    },
+    {
+      "id": "agg", "type": "code",
+      "inputs": { "language": "python",
+                  "datasets": ["@nodes.orders.dataset_name"],
+                  "params": { "min_amount": 10 },
+                  "code_text": "import duckdb, json\npath = f'./tmp/data/{datasets[0]}/**/*.parquet'\nres = duckdb.query(f\"SELECT dayofweek(created_at) AS weekday, count(*) AS n FROM read_parquet('{path}') WHERE amount >= {params['min_amount']} GROUP BY 1\").df()\nprint(json.dumps({'rows': res.to_dict('records')}))" }
+    },
+    {
+      "id": "chart", "type": "chart",
+      "inputs": { "renderer": "echarts",
+                  "config": { "xAxis": { "type": "category" }, "yAxis": { "type": "value" },
+                              "series": [{ "type": "bar", "encode": { "x": "weekday", "y": "n" } }] },
+                  "dataset": "@nodes.agg.rows" }
+    }
+  ],
+  "outputs": { "option": "@nodes.chart.option" }
+}
 ```
+`orders.rows` is only a preview here and nothing references it. Python reads the full Parquet via `datasets[0]`, never a hard-coded path.
 
----
+**C. Multiple sources, multi-step analysis, several charts:**
+```json
+{
+  "version": 2,
+  "name": "Revenue vs. support load",
+  "nodes": [
+    { "id": "revenue", "type": "sql",
+      "inputs": { "data_source_name": "sales_pg",
+                  "sql_text": "SELECT region, day, amount FROM orders WHERE day >= DATE '2025-01-01'" } },
+    { "id": "tickets", "type": "sql",
+      "inputs": { "data_source_name": "support_vertica",
+                  "sql_text": "SELECT region, day, count(*) AS tickets FROM tickets WHERE day >= '2025-01-01' GROUP BY 1, 2" } },
+    { "id": "joined", "type": "code",
+      "inputs": { "language": "python",
+                  "datasets": ["@nodes.revenue.dataset_name", "@nodes.tickets.dataset_name"],
+                  "code_text": "# join both datasets by region/day, emit per-region weekly trend and a global pie chart..." } },
+    { "id": "by_region", "type": "code",
+      "inputs": { "language": "python",
+                  "datasets": ["@nodes.revenue.dataset_name"],
+                  "code_text": "# total revenue per region\n..." } },
+    { "id": "trend_chart", "type": "chart",
+      "inputs": { "renderer": "echarts",
+                  "config": { "xAxis": { "type": "category" }, "yAxis": [{ "type": "value" }, { "type": "value" }],
+                              "series": [{ "type": "line", "encode": { "x": "week", "y": "revenue" }, "yAxisIndex": 0 },
+                                         { "type": "bar", "yAxisIndex": 1, "encode": { "x": "week", "y": "tickets" } }] },
+                  "dataset": "@nodes.joined.rows" } },
+    { "id": "region_chart", "type": "chart",
+      "inputs": { "renderer": "echarts",
+                  "config": { "series": [{ "type": "pie", "encode": { "itemName": "region", "value": "revenue" } }] },
+                  "dataset": "@nodes.by_region.rows" } }
+  ],
+  "outputs": { "trend": "@nodes.trend_chart.option", "regions": "@nodes.region_chart.option" }
+}
+```
+`revenue` and `tickets` run in parallel, and both `code` nodes read the same shared Parquet dataset. An artifact renders one `workflow_output_field` (§10, D1), and an artifact execution runs only that output's ancestor closure (§6). An artifact bound to `trend` runs `revenue`, `tickets`, `joined`, `trend_chart`, and never touches `by_region` / `region_chart`.
 
-## 5. Tier 3: ECharts Client-Side Transform
+**D. Example A with a filter added after Save (Phase 3; via the Inspector or a future agent):**
+```json
+{
+  "version": 2,
+  "name": "Daily sales",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "start_date": { "type": "string", "format": "date", "title": "Start date" },
+      "region": { "type": "string", "null": true, "default": null, "enum": ["east", "west"] }
+    },
+    "required": ["start_date"]
+  },
+  "nodes": [
+    {
+      "id": "sales", "type": "sql",
+      "inputs": { "data_source_name": "sales_pg",
+                  "sql_text": "SELECT day, SUM(amount) AS total FROM orders WHERE day >= @inputs.start_date AND (@inputs.region IS NULL OR region = @inputs.region) GROUP BY 1" }
+    },
+    {
+      "id": "chart", "type": "chart",
+      "inputs": { "renderer": "echarts",
+                  "config": { "xAxis": { "type": "category" }, "yAxis": { "type": "value" },
+                              "series": [{ "type": "line", "encode": { "x": "day", "y": "total" } }] },
+                  "dataset": "@nodes.sales.rows" }
+    }
+  ],
+  "outputs": { "option": "@nodes.chart.option" }
+}
+```
+Compiled `sales.sql_text` for a binding provider: `... WHERE day >= $1 AND ($2 IS NULL OR region = $2) ...` with typed values `["2026-03-01", "east"]`. A repeated key reuses its binding (§5.3).
 
-The chart node's ECharts `config` can embed ECharts' native `dataset.transform` for client-side sorting and filtering without server round-trips.
+## 3. Data paths and budgets
 
----
+### 3.1 Two separate budgets
 
-## 6. Reference Syntax Specification (Pure & Stable)
+| Budget | Consumer | Default (config key) | Where enforced |
+|---|---|---|---|
+| LLM preview | Agent context in chat | 5 rows default, ≤ 200 rows / 50 KB (`datasource.preview.max_rows`, `datasource.preview.max_bytes`) | Chat `extract_dataset_by_sql` only |
+| Workflow inline | Chart rendering, snapshot, API response | ≤ 1000 rows / 1 MB serialized (`workflow.inline_max_rows`, `workflow.inline_max_bytes`; replaces `sql.inline_max_rows` / unenforced `sql.inline_max_bytes_mb`) | Workflow SQL node `rows`, code node `rows` consumed by a chart, chart `option` |
 
-1. **No Deep `@nodes` Paths**: `@nodes.<id>.<field>` remains strictly 2 segments.
-2. **No `??` Null-Coalescing in `@path`**: Default values belong in `input_schema.properties.<key>.default`.
-3. **No Identifier Injection via `@inputs`**: Rejected at save time via AST inspection (`SPEC_REF_AS_IDENTIFIER`).
+The budgets are independent. Raising the workflow inline budget must not raise what the LLM sees. The workflow SQL node therefore calls the shared extraction service with its own inline limit instead of invoking the chat tool, which clamps to the LLM preview cap. Both paths share source resolution, authorization, policy, the cache, and result assembly.
 
----
+### 3.2 SQL output and chart completeness
 
-## 7. `depends_on`: Execution Edges vs Data Edges
+- `dataset_name` names the full Parquet result in the shared cache. `rows` is at most the workflow inline budget. `returned_rows === total_rows` is the only proof that `rows` is complete. `total_rows ≤ limit` alone is not enough, because the byte cap can truncate.
+- A chart whose `dataset` IS `@nodes.<sql_id>.rows` checks the referenced SQL node's own output bag at run time: incomplete -> `CHART_DATA_INCOMPLETE` with the hint "aggregate in SQL or add a Python node". For a multi-dataset chart, **every** element is checked, and any incomplete or oversized element fails the chart. Code `rows` count as complete but must fit the inline budget (`CHART_DATA_TOO_LARGE` otherwise). Referencing `dataset_name` from `chart.dataset` is a type error at compile.
+- The check repeats on every refresh, because filter values change cardinality. There is no "sample-only chart" mode: incomplete data fails.
 
-To eliminate LLM hallucination in DAG construction, Nango strictly separates dependencies into two semantic categories (modeled after dbt's `ref` and Dagster's `deps`):
+### 3.3 Python input bridge
 
-1. **Data Edges (Auto-Inferred)**: The universal default. Any `@nodes.X.field` reference automatically creates a topological edge.
-2. **Execution Edges (Explicit `depends_on`)**: The explicit `depends_on` array is redefined as **"pure dependency, non-data edges"**. It is used *exclusively* for side-effects (e.g., "create a resource, then query it").
+A `code` node receives three bindings through the single existing `_PARAMS_` JSON transport, so they never merge or collide:
 
-### 7.1 Current State
+| Binding | Content |
+|---|---|
+| `inputs` | The run's validated input bag (§5.2), injected automatically |
+| `params` | The node's resolved `params` |
+| `datasets` | Resolved physical dataset names, in `datasets` order |
 
-In V1, `depends_on` inference is strictly isolated to **one layer**: `build-from-events.ts` (Strategy Z+). During `rewriteInputViaIndex`, it accumulates referenced `nodeId`s and stamps them onto the node.
-`canonicalize.ts` does not infer dependencies. `validate.ts` only consumes the closed graph to verify reachability.
+Python reads `./tmp/data/{datasets[i]}/**/*.parquet` under the fixed shared mount. A hard-coded dataset path or name in `code_text` is a `not_refreshable` lint issue (`HARDCODED_DATASET_PATH`), because the physical directory a node reads can differ between runs (§7). Align the chat `run_code_in_sandbox` tool to the same bridge: it currently declares `params` but does not forward them. Code output must fit the inline budget when a chart consumes it; aggregate further otherwise.
 
-### 7.2 Target Architecture (Phase 3 Deferred)
+### 3.4 Events and snapshots stay small
 
-Eventually, workflows will be modified directly by agents (`modify_workflow`) bypassing `build-from-events.ts`. At that point (Phase 3), `inferDependsOn` will be moved down into `canonicalize.ts` to act as a universal safety net.
+- `workflow_node_completed` events persist a summary, not the full output bag: `row_counts`, `dataset_name`, `row_schema`, the first ≤ 20 `rows`, `duration_ms`, `cached`. Today the recorder writes the whole engine event including full `outputs`, which becomes unbounded as soon as rows grow.
+- Artifact snapshots store the rendered output (e.g. the merged ECharts `option`, bounded by §3.1) in `snapshot`, the inputs used in `snapshot_inputs`, and the run time in `snapshot_at` (§6).
+- SQL node events record the compiled SQL and bound parameter values for debugging ("why did this filter return nothing"). These values are as sensitive as the existing run forensics timeline: visible to admins in run detail, never copied into snapshots.
 
-**Field Migration Strategy**: Currently (V1), `build-from-events.ts` stamps Data Edges into the `depends_on` array. In Phase 3, we will formalize the split: Data Edges will be dynamically inferred at runtime from `@nodes.X` references and **not persisted**. The persisted `depends_on` field will be strictly reserved for Execution Edges. Strategy Z+ will be updated to only write execution-only side-effect edges into this array.
+## 4. Chat -> workflow (Save)
 
----
+### 4.1 Tool-to-node mapping
 
-## 8. Parquet Lifecycle & Cache Invalidation Policy
+| Captured tool | Saved as | Replayable |
+|---|---|---|
+| `extract_dataset_by_sql` | `sql` | yes |
+| `run_code_in_sandbox` | `code` | yes |
+| `generate_echarts_config` | `chart` (never re-called on refresh) | yes |
+| `delegate_to_agent` | `agent` | yes (refresh only) |
+| `generate_html_page`, `generate_bento_slides` (+ `edit_bento_slides` merge) | Current save/snapshot path; the creator becomes a `tool` node | yes: their `execute` only validates and echoes its arguments, so a refresh replays the saved args and runs no browser or data query. HTML that should depend on SQL data would need a real data node; it is not silently re-echoed as if refreshed. |
+| Screenshot / image tools | Snapshot only; no node | no (browser side effects) |
+| Other tools / MCP tools | `tool` **only if the tool registry marks it** `replayable: true` (read-only, idempotent). Default `false`. | per flag |
 
-1. **TTL-Based Automatic Eviction**: `.meta.json` with `ttlHours` (default 24h).
-2. **Process Boot Purge**: `purgeAllDatasets()` sweeps on startup.
-3. **Data Source Deletion Purge**: `purgeDatasetsForDataSource(dataSourceId)`.
-4. **Run-Scoped Slots & Content-Addressed Cache (`code_version`)**: Initially, slots use deterministic names (`wf_<runId>_n<nodeId>`). In Phase 3, caching will evolve to be content-addressed via `hash(query_text + resolved_params)`. If a downstream chart filter changes but the upstream extraction node does not, the upstream node hits its materialized Parquet cache instantly rather than re-executing.
-5. **Read-Only Sandbox Mounts**: Mounted `:ro`.
+Non-replayable invocations are **omitted from the DAG**, and their outputs stay literal in downstream nodes. If an artifact's data depends on an omitted invocation, the artifact is saved with a `not_refreshable` issue (§4.3) rather than failing or re-running side effects.
 
----
+### 4.2 Binding rules
 
-## 9. Future: `condition` Node (Schema Reserved, Executor Deferred)
+1. **Do not copy the chat** `row_limit` **into the SQL node.** The chat value (often 5) is an LLM-preview setting. The workflow uses the inline budget. The current `build-from-events` copies it, and that must be removed.
+2. Chart data binding: if the chart call carries `dataset_id` (the tool and prompt already ask for it), bind `chart.inputs.dataset` to `@nodes.<sql_node_whose_captured_dataset_name_matches>.rows`. This is deterministic. Only when it is absent, fall back to the existing Strategy Z+ deep-equal match of `option.dataset.source` against upstream `rows`. On a match, strip `dataset.source` from `config`.
+3. Code `datasets` elements that uniquely match an upstream captured `dataset_name` become `@nodes.<id>.dataset_name` (Strategy Z+, unchanged). Ambiguous values stay literal and are reported in the lineage report.
+4. The captured chat `dataset_name` becomes the SQL node's optional `dataset_label`.
+5. Node ids are derived from the tool and position (`sql_1`, `code_1`, `chart_1`) and are never renumbered later.
 
-For branching (e.g., anomaly detection alerts), a `condition` node type is anticipated. Any spec using an unknown node type fails at save time via `SCHEMA_VERSION_UNKNOWN`. The `NodeTypeSchema` enum may pre-register `"condition"`, but no executor will be implemented until real use cases establish the minimum required shape.
+### 4.3 Direct SQL -> chart cases at Save
 
----
+The agent may return up to 200 rows in chat. It reports `total_rows`, and it should say so (reply or chart title) when the chat chart is partial.
 
-## 10. Developer Implementation Guide & Execution Steps
+| Captured chat result | Save outcome |
+|---|---|
+| `returned_rows === total_rows` (≤ 200) | Bind chart to SQL `rows`. Refreshable. |
+| Truncated in chat, `total_rows` ≤ workflow inline budget (e.g. 350 total, 200 shown) | Bind chart to SQL `rows`. Refreshable. The first run (§4.4) produces the *complete* chart, better than the chat preview. The Save response notes that the saved chart shows all rows. |
+| `total_rows` > workflow inline budget | Keep the chat option's baked data (existing not-refreshable fallback). Save succeeds with a `not_refreshable` issue: "result exceeds chart budget; aggregate in SQL or add a Python step". |
+| Chart data from Python `rows` | Bind to `@nodes.<code_id>.rows`. Refreshable if the code uses `datasets[i]` (no hard-coded path) and output fits the budget. |
 
-This section translates the architectural blueprints into concrete coding instructions, target files, and step-by-step execution phases for developers.
+### 4.4 Save = compile + first run
 
-### Phase 1: Security, Types, and Filter Foundations
+Save runs `compile` + `lint`, persists the authoring spec, then executes the workflow once with `force_refresh = false` (as `saveArtifact` already does today). Because cache lookup is by query identity (§7), the SQL nodes hit the Parquet the chat just wrote. The first run does not query the source unless the chat dataset expired or was replaced. That first run's output becomes the initial snapshot (with `snapshot_inputs` and `snapshot_at`), so the saved artifact shows workflow-produced data rather than LLM-copied data.
 
-**1.1 Strong Typing & Zod Contracts (`input_schema`)**
-- **Target File**: `src/lib/workflows/spec/schema.ts`
-- **Action**: Replace `z.unknown()` in `LLMWorkflowSpecSchema.input_schema` with the strictly defined `InputPropertySchema`.
-- **Implementation Detail**: Ensure `type` is limited to an enum (`"string" | "number" | "boolean" | "array"`). For `array`, require `items: { type: z.enum(["string", "number"]) }`. 
-- **Execution Step**: Run `pnpm check-types` after the schema change. Fix any downstream TypeErrors where `input_schema` was assumed to be `any`. Update LLM System Prompts to explicitly list these 4 types to prevent generation drift.
+If the first run fails, the artifact is **still saved** with the chat-captured snapshot, and the failure is persisted in `artifact.last_run_error` ( `{ code, message, node_id, at }` ). The UI shows it until a later refresh succeeds, so the user can fix the spec in the Inspector (S10, D3). Today `saveArtifact` already runs a non-fatal first execution, but `executeWorkflow` turns a `WorkflowError` into `null` and the failure only reaches a server log. Making it visible is the change.
 
-**1.2 Dynamic Filters API (`options_source`)**
-- **Target File**: `src/app/api/artifacts/[id]/filters/route.ts` (New Route)
-- **Action**: Build the endpoint that hydrates dropdowns for the RJSF form.
-- **Implementation Detail**: 
-  - Wrap with `withSession` and verify artifact access via `canReadResource(id)`.
-  - Extract the `options_source` object from the requested parameter schema.
-  - Assert policy safety: `validateSqlAgainstPolicy(sql_text, provider, policy)`. Ensure no user inputs can be injected into this specific SQL.
-  - Return `Array<{label: string, value: string | number}>`.
-- **Execution Step**: Write RBAC/Policy unit tests in `filters.test.ts`. Wire up the UI frontend to call this endpoint on `<WorkflowFilterPanel />` mount.
+`artifact.refreshable` is recomputed on every write: `false` exactly when `lint` reports any `not_refreshable` issue (§2.5). Those messages are returned with the save response and shown on the artifact.
 
-**1.3 AST Identifier Guard & Dummy Substitution**
-- **Target Files**: `src/lib/workflows/nodes/sql-node.ts`, `src/lib/data-sources/policy.ts`
-- **Action**: Split the policy check from the identifier check.
-- **Implementation Detail**:
-  1. **AST Guard**: Use `node-sql-parser` to parse the *original* SQL template. Walk the AST; if any `@inputs.<key>` string is found within an Identifier node (e.g., `type: 'column_ref'`, `type: 'table'`), throw `WorkflowError(SPEC_REF_AS_IDENTIFIER)`.
-  2. **Dummy Replace**: Run `sqlText.replace(/@inputs\.[a-zA-Z0-9_]+/g, "'__param__'")`. Pass this sanitized string to `validateSqlAgainstPolicy` to check read-only constraints and table allowlists.
-- **Execution Step**: Add edge-case unit tests (e.g., `@inputs` in `GROUP BY`, in `date_trunc` format string, in `FROM` clause) to ensure they all hard-fail.
+### 4.5 Save does not create filters
 
-**1.4 Type-Aware Safe Escaping**
-- **Target File**: `src/lib/workflows/nodes/sql-node.ts` (inside `resolveRefsInString`)
-- **Action**: Implement the Phase 1 escaping mechanism.
-- **Implementation Detail**: Iterate over regex matches of `@inputs.<key>`. Lookup the type in `ExecutionState.input_schema`.
-  - `string`: Wrap in single quotes, replace internal `'` with `''`.
-  - `number`: Append as bare literal. Ensure `Number.isFinite()`.
-  - `array`: Extract `items.type`. Expand to `('a', 'b')` or `ARRAY['a']` depending on the provider dialect.
-  - `null` / Absent: Output `NULL`.
-- **Execution Step**: Ensure `ExtractInput.params` type in `types.ts` is updated to include `string[] | number[]`.
+A chat-derived spec has baked-in SQL and an empty `input_schema`, and the Filter panel stays collapsed. Filters come later (Phase 3), from the Inspector (or a future agent) adding `input_schema` properties and rewriting `sql_text` with `@inputs.*` parameters. A "promote literal to input" action in the Inspector is the intended shortcut. Acceptance tests for filters use such edited specs, not raw chat saves.
 
-**1.5 Field-Level Single Source of Truth & TOOL_TO_NODE_MAPPING**
-- **Target Files**: `src/lib/workflows/spec/schema.ts`, `src/lib/data-sources/runtime-tools.ts`, `src/lib/workflows/build-from-events.ts`
-- **Action**: Eliminate duplicated field definitions and scattered if-else dispatch (see §0.3).
-- **Implementation Detail**:
-  1. Extract reusable Zod field pieces (`sqlTextField`, `dataSourceNameField`, `datasetNameField`, `rowLimitField`) and reassemble both `ExtractDatasetArgs` (tool) and `CanonicalSqlInputsSchema` (node) from them. The node schema `.extend()`s `data_source_id` and overrides the `row_limit` default.
-  2. Add `TOOL_TO_NODE_MAPPING` and refactor `assembleNode` to consult it instead of hardcoded if-branches.
-- **Execution Step**: Run `pnpm check-types` and `pnpm test`; confirm no field-name or type drift remains between the tool and node schemas.
+## 5. Inputs and filters
 
----
+### 5.1 `input_schema` subset
 
-### Phase 2: Native Binding & Engine Advancements
+- **Top level type:** `"object"`, named `properties`, optional top-level `required`.
+- **Property type:** `string`, `number`, `boolean`, or array of strings/numbers (with `items.type`, `maxItems` required, optional `uniqueItems`). `format: "date"` is a string format; a date range is two date properties.
+- **Nullable uses `type: ["<base>", "null"]`** with explicit `default: null`. Optional `metadata`: `enum`, `title`, `description`, supported UI hints (presentation only, never value types).
+- **Defaults must match their type.** Reject unknown keys, mismatched types, invalid dates, non-finite numbers, and oversized strings/arrays. No `passthrough()`. The schema itself is validated at compile.
 
-**2.1 Native Parameter Binding (Vertica First)**
-- **Target File**: `src/lib/data-sources/vertica/extract.server.ts`
-- **Action**: Upgrade to proper prepared statements.
-- **Implementation Detail**: `sql-node.ts` translates `@inputs.X` to `$1`, `$2` and passes the ordered values via `ExtractInput.params`. The Vertica driver consumes `client.query({ text, values: params })` natively.
-- **Execution Step**: Verify the change drops execution latency and fully prevents injection at the driver level. 
+### 5.2 Value resolution (one input bag per run)
 
-**2.2 `x-data-track` Annotations**
-- **Target File**: `src/lib/workflows/nodes/registry.ts`
-- **Action**: Explicitly declare which outputs are heavy vs lightweight.
-- **Implementation Detail**: Add `x-data-track: "heavy"` to `dataset_name`, and `"preview"` to `rows`. Update `validate.ts` to ensure Chart nodes cannot bind to `"heavy"` paths directly.
+- `input_schema` holds definitions only. `value` is not a spec field.
+- **Refresh request:** `{ "inputs": { ... } }`. Resolution: request value > schema default > missing-required error, validated server-side on every request. The frontend form is not a validation boundary.
+- The inputs used by a run are stored with its snapshot (`artifact.snapshot_inputs`). The Filter panel pre-fills from the current snapshot's inputs and Reset restores schema defaults. Saved values therefore never bypass validation: They are just a previous validated request replayed from the UI.
 
----
+### 5.3 SQL value-parameter compiler (Phase 3)
 
-### Phase 3: Copilot Editing, DAG Automation, and Content Cache
+`sql_text` never passes through generic ref resolution. Detecting "unquoted" tokens requires lexing, so the compiler substitutes first and lets the parser decide, failing closed:
 
-**3.1 Content-Addressed Caching**
-- **Target Files**: `src/lib/data-sources/runtime-tools.ts`, `src/lib/cache/parquet-manager.ts`
-- **Action**: Evolve from Run-Scoped slots to Hash-Scoped slots.
-- **Implementation Detail**: Compute `const cacheKey = crypto.createHash('sha256').update(resolved_sql_text).digest('hex')`. The Parquet slot becomes `./tmp/data/ds_<cacheKey>/`. Before extracting, if `getCacheStatus(cacheKey).isFresh`, skip extraction entirely.
-- **Execution Step**: Ensure `purgeAllDatasets` is updated to sweep these new `ds_` prefixes.
+1. **Substitute.** Replace every `@inputs.<key>` occurrence (including ones mistakenly inside quotes or comments) with a unique sentinel placeholder in a form the provider's parser (`node-sql-parser`, already used by `policy.ts`) recognizes as a parameter node. Every key must exist in `input_schema`. Record the number of substitutions.
+2. **Parse** the substituted SQL with the provider dialect. A parse failure rejects the template.
+3. **Count check.** Collect parameter nodes from the AST. Their count must equal the substitution count. A token that was inside a string literal (`'@inputs.x'`) or a comment does not appear as a parameter node, so a mismatch rejects the template.
+4. **Position check.** Every parameter node must be in a value-expression position. Reject identifiers, table/function names, LIMIT / ORDER BY targets, or any other non-value slot.
+5. **Bind.** Emit the provider's real placeholders (`$n` / `?`) or adapter-rendered literals, with typed values: strings (including ISO dates), finite numbers, booleans, explicit null. A repeated key reuses one binding. Nullable optional filters use `(@inputs.k IS NULL OR col = @inputs.k)`, never `= NULL`.
+6. **Arrays.** Only `col IN (@inputs.arr)` is supported. Expand to one placeholder per element. An empty array compiles to a constant-false predicate (`1=0`), never `IN ()`. `NOT IN` and other array uses are rejected in v1.
+7. **Policy.** Run the source's read-only/table policy on the SQL that will execute, at extraction time.
 
-**3.2 `depends_on` Inference Migration (`inferDependsOn`)**
-- **Target Files**: `src/lib/workflows/spec/canonicalize.ts`, `src/lib/workflows/build-from-events.ts`
-- **Action**: Move DAG building out of the event builder and into the strict compilation step.
-- **Implementation Detail**: 
-  - `build-from-events` outputs `depends_on: []` for all data nodes.
-  - `canonicalize` runs a global regex `/@nodes\.(\d+)/g` over each node's `inputs`. It pushes discovered IDs into `node.depends_on` (performing a union with any explicitly declared execution edges).
-- **Execution Step**: Refactor `validate.ts` cycle detection to run *after* `canonicalize` finishes inference.
+If a dialect cannot be parsed reliably, that provider does not support filter parameters yet; its unparameterized extraction keeps working. Providers that cannot bind (the DuckDB-extension `COPY` path and current Vertica adapter reject `ExtractInput.params`) need an adapter-owned, value-position-only literal renderer, tested for quoting/arrays/null, before filters are enabled for them. Changing a TypeScript type is not an implementation. Until this compiler ships, `@inputs` in `sql_text` is a lint error (§2.4).
 
-**3.3 Copilot Agent Integration (`modify_workflow`)**
-- **Target Files**: `src/lib/copilot/resource-registry.ts`, `src/app/api/copilotkit/tools/workflow.ts`
-- **Action**: Expose the workflow state to the LLM agent.
-- **Implementation Detail**: Use `@copilotkit/react-core`'s `useCopilotDraft` to mount the active JSON spec and current filter values in the React Context. Implement a `modify_workflow` tool that accepts JSON Patches or complete schema overrides from the LLM to add/modify filters and nodes via chat.
+### 5.4 Dynamic dropdown options (follow-up)
 
-## 11. Appendix: Open-Source Architectural Inspirations
+Static `enum` ships first. The follow-up `options_source` design is preserved:
 
-> **Purpose**: Documents the architectural evaluation of leading open-source workflow and data engines, explicitly mapping their strengths to the Nango Workflow Engine's underlying design principles.
+```json
+{
+  "type": ["string", "null"], "title": "Initiator", "default": null,
+  "options_source": { "type": "sql", "data_source_name": "nango-db",
+                    "sql_text": "SELECT DISTINCT initiator AS label, initiator AS value FROM entity_run" }
+}
+```
+A future `GET /api/artifacts/[id]/filters` uses `withSession` plus the artifact's read check, runs the declared SQL with the same source authorization/policy, enforces row/byte/time bounds, returns `{ label, value }[]`, and never accepts client SQL. A submitted value must still pass the declared type/enum validation.
 
-### 11.1 Windmill (windmill-labs/windmill)
+### 5.5 Filter UI
 
-**Overview**: Windmill is a highly scalable, developer-first open-source platform for turning scripts (Python, TypeScript, Go) into workflows and internal UIs.
+Keep the existing View/Workflow switch, the chart preview, the graph, and the horizontally resizable chart/Filter layout (Filter collapsed when there are no properties). RJSF with the shadcn theme renders `input_schema`. Apply sends `POST /api/artifacts/[id]/refresh { inputs }`. SQL is the pushdown point, Python receives the same `inputs`, and ECharts must not silently re-filter the same field (presentation-only transforms such as sorting remain fine).
 
-**What Nango Absorbed:**
-1. **Strongly-Typed input_schema (The Zod Contract)**: We adopted Windmill's strict JSON schema philosophy. InputPropertySchema acts as the single source of truth for UI generation, LLM prompting, and runtime type coercion, preventing silent failures.
-2. **Dual-Track Data Contract (Parquet Pointers)**: Inspired by Windmill's storage pointers (S3/GCS), Nango rejects passing large data arrays via the engine's memory state. Instead, we pass lightweight pointers (dataset_name) to Parquet files mounted securely in the sandbox.
-3. **Uncompromising Credential Security**: Nango strictly keeps all database extraction and credential handling in the Node.js main process, passing only the *results* to the Python/JS Sandbox, heavily mirroring Windmill's secure resource isolation.
+## 6. Run semantics
 
-### 11.2 Zen Engine (gorules/zen)
+| Action | Executes workflow | Persists |
+|---|---|---|
+| `GET /api/artifacts/[id]` | **No.** Returns `snapshot`, `snapshot_inputs`, `snapshot_at`, `last_run_error`, `refreshable`, and the spec. | Nothing |
+| `POST /[id]/refresh { inputs }` | **Yes**, `force_refresh = false` (normally a cache hit right after a refresh). The server never trusts client-supplied chart output. | `snapshot`, `snapshot_inputs`, `snapshot_at`. It no longer writes `value` into the spec (today `save-snapshot.ts` does). The slide `directSnapshot` path is unchanged. |
+| Save (§4.4) | **Yes**, once, `force_refresh = false` | Initial snapshot, or `last_run_error` |
 
-**Overview**: Zen Engine is an extremely fast, Rust-based Business Rules Engine (BRE) that executes deterministic JSON Decision Models.
+An artifact execution evaluates only the ancestor closure of the node referenced by the artifact's `workflow_output_field`. Unrelated branches (another chart, its code nodes) are neither executed nor able to fail the run. Engine-level tests may still run a full DAG.
 
-**What Nango Absorbed:**
-1. **Pre-flight Type Checking & Validation**: Our decision to enforce SPEC_SCHEMA_MISMATCH and SPEC_REF_AS_IDENTIFIER at the canonicalization/validation layer (before execution) is directly inspired by Zen Engine's deterministic evaluation model.
-2. **Stateless canonicalize and validate Pipeline**: The Nango engine treats the workflow spec purely as a data structure. Dependency inference (inferDependsOn) and cycle detection treat the DAG as a mathematical graph, independent of runtime side effects.
+A failed refresh returns an actionable error (node id, error code, hint), writes `last_run_error`, and keeps the last snapshot. Missing data is never treated as success. A successful refresh clears `last_run_error`.
 
-### 11.3 Node-RED & FlowCraft (gorango/flowcraft)
+Today GET executes the workflow when `view_mode = 'live'`, or when the snapshot is NULL. Both paths are removed (S10, D2). `artifact.view_mode` is dropped. The UI's "Snapshot / Live" toggle becomes client state: it shows the stored snapshot, or the latest refresh result of this session (unsaved until the user saves it as the snapshot). An artifact without a snapshot shows an empty state with a Refresh button.
 
-**Overview**: Visual dataflow pipelines (Node-RED) and lightweight Go/Rust-based DAG orchestrators (FlowCraft) focused on explicit dataflow passing.
+Artifact columns after this change: `snapshot` (rendered output, unchanged shape), `snapshot_inputs` jsonb (new), `snapshot_at`, `last_run_error` jsonb (new), `refreshable` boolean NOT NULL DEFAULT true (new). `view_mode` is dropped.
 
-**What Nango Absorbed & Evolved:**
-1. **Immutable Numeric Node IDs**: We adopted concise, immutable IDs (#0, #1) to seamlessly sync the visual layer (<WorkflowGraph />) with execution state.
-2. **Rejection of the msg.payload Anti-Pattern**: While we absorbed explicit dataflow, we specifically *rejected* Node-RED's tendency to load massive datasets into the in-memory payload (which crushes the Node.js heap). Nango split this into the Dual-Track system.
+## 7. Shared Parquet cache
 
-### 11.4 dbt (Data Build Tool)
+Keep the local cache, TTL (24 h default), boot purge, source-deletion purge, and the fixed read-only sandbox mount. Correctness fixes only:
 
-**Overview**: The industry standard for data transformation in the warehouse. dbt compiles parameterized SQL, enforces strict materialization strategies, and infers execution order automatically.
+1. **Identity-based lookup (Phase 1).** A dataset's identity is `(data_source_id, SQL text exactly as executed, bound parameter values)`. The directory name is only a storage key, `ds_<hash(identity)>`.
+   - An in-process index `Map<identity, directory>` is updated on every commit, slot reassignment, and purge. It starts empty at boot, which is correct because boot purges the cache.
+   - The chat tool keeps its contract: it writes to the agent-named slot directory and still answers "same name + same SQL" as a hit (now also requiring the same `data_source_id`). Each chat write also registers its identity in the index.
+   - Workflow SQL nodes look up by identity. A hit returns whichever directory holds it, often the chat slot just written, so Save's first run does not re-query the source. A miss writes a new directory named `ds_<hash(identity)>`; workflows never write into agent-named chat slots.
+   - The same label and SQL on another source can never hit the wrong Parquet, and different filter values never share or overwrite a directory.
+2. **Hits.** A hit requires identity match, fresh TTL, and `no force_refresh`. A hit is not a source query, so it does not re-run the table policy; the Parquet is a snapshot artifact, and the next miss applies the current policy. This matches current behavior and is now stated explicitly. New extractions always go through source authorization and policy (§1.2). The sidecar stores `row_schema` so hits return the same columns as fresh runs (Phase 2; today hits return `columns: []`).
+3. **Replacement without breaking readers (Phase 2).** Two events replace a directory's content: a forced refresh of an identity whose directory already exists, and a chat slot reassignment (same name, different SQL). Both write to a temp directory, swap, and delete the old directory only when no in-flight run in this process holds it (in-process refcount, taken when a code node is dispatched with that dataset). This replaces today's `rm -rf <final> && rename(tmp, final)` in `commitWriteSlot`. No `asset/version` object model and no GC service.
+4. The engine's optional JSON node cache (`engine/cache.ts`) stays unwired.
 
-**What Nango Absorbed (Synthesized Insights):**
-1. **`ref()` & Explicit Fallback → `inferDependsOn`**: In dbt, analysts write `ref('model_a')` and the compiler infers the DAG. Explicit `-- depends_on:` is only used as a fallback for hidden dependencies. Nango adopted this exact dual-model for Phase 3: `inferDependsOn` parsing `@nodes.*` is the universal default, reducing LLM hallucination risks. The explicit `depends_on` array is relegated to a strict fallback.
-2. **`var()` Priority Chain → Filter Resolution**: dbt's variable resolution chain (runtime override > project defaults > compilation error) is directly mirrored in Nango's Parameter Resolution Hierarchy (`inputValues` > `schema.default` > `REF_UNRESOLVED`). We explicitly rejected runtime type coercion. While dbt offers coercion helpers (e.g., `as_number`), Nango deliberately diverges here, hard-failing on type mismatch (`SPEC_SCHEMA_MISMATCH`) because LLM-authored schemas require strict failure to prevent logic drift.
-3. **Materialization Strategies (`ephemeral` vs `table`)**: We broke the implicit rule that "SQL nodes always write to Parquet". This provides a future blueprint for explicit materialization enumeration. While Nango currently writes all heavy SQL results to Parquet, we plan to evaluate an `ephemeral` strategy (inlined CTEs) in future phases once the complex execution boundary between runtime node orchestration and SQL text compilation is resolved.
-4. **Exposures → `spec.outputs` Maturity**: dbt's `exposures` declare downstream consumers (dashboards) as first-class citizens. This inspired the future addition of `maturity` and `type` labels to Nango's chart/artifact output nodes, allowing the engine to perform partial DAG refreshes targeted only at specific visual consumers.
+## 8. Editing paths
 
-### 11.5 Dagster
+Every write goes through `compile + lint` (§2.5): `build-from-events`, `PATCH /api/artifacts/[id]/nodes/[nodeId]`, and any future agent editor. Clients send the authoring form only. Today `updateArtifact` / `updateWorkflowNode` only run `validate` and write the client-supplied canonical node directly; they must switch to authoring-form input plus compile. Deleting a node that is still referenced is an error issue pointing at the referring fields. Concurrent node edits keep the existing row lock.
 
-**Overview**: A data orchestrator built for machine learning, analytics, and ETL, famous for pioneering Software-Defined Assets (SDAs) and decoupling execution logic from I/O.
+**Future agent editing (design kept, implementation deferred).** A copilot in the artifact view receives the authoring spec, the available data sources and their schema, and the `input_schema`. It proposes a full authoring spec or changed nodes, then iterates on `lint` issues. It never writes resolved ids or compile output. The preview reuses the existing draft pattern (`useCopilotDraft`) with an explicit user confirm before saving.
 
-**What Nango Absorbed (Synthesized Insights):**
-1. **Semantic Split: Data Edges vs `deps` (Execution Edges)**: Dagster strictly separates data flow (handled via function inputs / I/O managers) from pure execution order (declared via `deps=[...]`). Nango absorbed this completely: `@nodes.X` references auto-generate Data Edges, while the `depends_on` array is explicitly redefined as purely "Execution Edges" (no data passed, side-effects only).
-2. **Software-Defined Assets & I/O Managers → Dual-Track Dataset**: Dagster shifts focus from "tasks running" to "assets materialized", using pluggable I/O managers to handle storage. Nango's SQL node output (`dataset_name`) is our materialized asset. In Nango's Dual-Track model, the heavy data path (Parquet pointers) maps to Dagster's custom I/O bypass (handling its own large-scale storage), while only the lightweight preview rows utilize the engine's in-memory data passing (true I/O management).
-3. **Content-Addressed Caching (`code_version`)**: Dagster invalidates assets based on code changes rather than just time. This informs Nango's caching roadmap: moving from simple TTLs to `hash(query + parameters)` so that unchanged upstream data extractions hit the Parquet cache instantly when only a downstream chart config changes.
-4. **Partitions (Future Blueprint)**: Dagster handles large data updates via multi-dimensional partitions (e.g., time + region) rather than full recalculations. While Nango relies on full recalculation via filters in Phase 1/2, Dagster's `MultiPartitionsDefinition` provides the theoretical blueprint for future incremental dataset refreshes.
+## 9. Execution plan
 
-### 11.6 Synthesis: Nango's Unique Architecture
+Priorities: **P0** must land together to replace v1 (the v1 engine and specs are deleted, so there is no mixed state); **P1** data correctness that must precede filters; **P2** filters; **P3** deferred.
 
-While absorbing the best practices of these engines, Nango's workflow architecture is uniquely tailored for **AI-Native Data Analytics**:
-1. **LLM-First Authoring**: Unlike Windmill or dbt where humans write the code, Nango's JSON structure is designed for an LLM to emit reliably (strict 2-segment references @nodes.X.rows, no complex deep paths).
-2. **DuckDB / Parquet Native**: Nango combines Windmill's sandboxing, dbt's parameter pushdown, and Dagster's asset materialization into an integrated DuckDB analytics pipeline, creating an engine optimized specifically for high-throughput dashboarding.
+Phase 1 is an engine rewrite (compile/lint, string ids, whole-field refs, compiled graph), not a small prerequisite of filters. It keeps the v1 `inputs` wrapper and field names wherever semantics are unchanged to limit churn. Work on a branch. Each step ships with unit tests and keeps `pnpm check-types` green, but Phase 1 merges as one unit.
+
+### Phase 1 (P0): Spec v2 end to end
+
+Goal: the SQL -> chart and SQL -> Python -> chart chat paths save as v2 workflows without re-querying the source, show workflow-produced snapshots, refresh correctly within the inline budget, and are editable through compile.
+
+| Step | Tasks | Depends on | Done when |
+|---|---|---|---|
+| 1.1 Spec v2 schema | Zod schemas for §2.1-2.3 (strict). Registry output types (`Rows`, `DatasetName`, `RowSchema`, `option`, `CodeOutputEnvelope`). Delete the LLM-emit/canonical split, canonical-only fields, and v1 schemas. | - | Examples A-D in §2.6 parse. v1-only shapes (numeric ids, `schema_version`, `data_source_id`, `@workflow.*`, `row_limit`) are rejected. |
+| 1.2 compile + lint | Pure functions with injected catalogs: name resolution within allowed data sources, agents, tools; ref-carrier rules (§2.4) including `SQL_PARAMS_NOT_ENABLED`; inferred deps ∪ `after`; cycle/reachability/type checks; size caps; replayability. Issue list with JSON pointers and the three severities. | 1.1 | Unit tests cover every §2.4 row, multiple issues returned at once, `@inputs` in `data_source_name` / `sql_text` rejected, deleted source -> `DATA_SOURCE_NOT_FOUND`, `not_refreshable` issues do not block. |
+| 1.3 Engine on compiled graph | Scheduler over string ids and compiled deps, restricted to the selected output's ancestor closure (§6). Whole-field ref resolution only (remove embedded interpolation from `execution-context.ts`). Node executors read v2 `inputs`. Chart enforces completeness/size per dataset element (§3.2). | 1.2 | Engine tests for A-C with stubbed deps. `CHART_DATA_INCOMPLETE` / `CHART_DATA_TOO_LARGE` raised, including one bad element of a multi-dataset chart. Selecting `trend` in C never runs `by_region`. |
+| 1.4 Extraction service, budget, identity lookup | Extract the shared extraction service from `extract_dataset_by_sql` (source resolution, authorization, policy, cache, extract, result assembly). The chat tool keeps its LLM caps and slot contract. The SQL node calls the service with workflow inline max rows = 1000, workflow inline max bytes = 1 MB (bytes enforced). Identity index and identity lookup (§7.1), hits also compare `data_source_id`. Replace the `sql.inline_max_*` config keys. | 1.3 | A 350-row result gives the workflow SQL node `returned_rows = total_rows = 350` while chat still caps at 200. A workflow node with the chat's source + SQL hits the chat slot. The same label/SQL on another source misses. |
+| 1.5 Save mapping | `build-from-events` v2 | Emit v2 authoring form: derived string ids, v2 `inputs`, replayable flag in the tool registry (SQL, code, chart, `delegate_to_agent`, and the echo-only creators `generate_html_page` / `generate_bento_slides` are replayable; screenshot tools are not, so image artifacts become snapshot-only). Omit non-replayable invocations. Do not copy chat `row_limit`. Chat `dataset_name` -> `dataset_label`. `dataset_id` -> first chart binding, Strategy Z+ fallback. §4.3 outcome rules. | 1.2 | Tests for each §4.3 row. A chat `row_limit: 5` never reaches the node. HTML and slide saves still work. |
+| 1.6 Save orchestration | Compile + lint on save. Persist the authoring spec. First run with `force_refresh = false` -> snapshot / `snapshot_inputs` / `snapshot_at`. A failure keeps the chat snapshot and writes `last_run_error`. Compute `refreshable` from `not_refreshable` issues and return the messages. | 1.4, 1.5, 1.7 (columns) | Save right after a chat extraction issues no source query. A truncated-preview chart (≤ 1000 total) yields a complete snapshot. An oversized chart saves with `refreshable = false` and its message. A forced first-run failure is visible in GET. |
+| 1.7 Data migration + run semantics | **Irreversible; take a `pg_dump` of the `workflow` table first.** `pnpm db:generate --name=workflow_v2_artifact_columns`: add `snapshot_inputs`, `last_run_error`, `refreshable`; drop `view_mode`. A custom Drizzle migration deletes all workflow rows: the FK sets `artifact.workflow_id` to NULL, those artifacts are set `refreshable = false`, and only their snapshots remain viewable. `entity_run` history is kept. GET returns snapshot only. Refresh writes/clears `last_run_error`. The snapshot endpoint re-executes with validated inputs and stops writing value into the spec. | 1.1 | Old artifacts open from their snapshot without executing anything. Artifacts with a NULL snapshot and no workflow show an empty state. No GET path calls `executeWorkflow`. |
+| 1.8 Edit paths + Inspector | `PATCH /api/artifacts/[id]` (spec) and `PATCH .../nodes/[nodeId]` accept authoring-form input, run compile + lint, and return issues (HTTP 400 with the issue list on error; 200 with `not_refreshable` / `warning` issues otherwise). Inspector forms read/write v2 `inputs`, display issues inline at their JSON pointers, and support node rename with ref rewrite. The graph uses string ids. Deletion is blocked while a node is still referenced. `artifactDetail` loses the server-side view-mode toggle (§6). | 1.2, 1.7 | An invalid edit shows every issue next to its field. Changing `data_source_name` to a source outside the allowed set is rejected. |
+| 1.9 Events | The recorder persists node summaries (§3.4) instead of full outputs. | 1.3 | Event payload size is bounded regardless of row counts. |
+| 1.10 Docs | Replace `workflow.md` with the v2 as-built reference. Update `artifact-filters.md` examples. Update `AGENTS.md` rule references where needed. | 1.1-1.9 | Docs match code. |
+
+### Phase 2 (P1): Data correctness in the shared cache
+
+| Step | Tasks | Done when |
+|---|---|---|
+| 2.1 | Row schema on hits | The sidecar stores `row_schema`; hits return it. | Hits return the same columns as a fresh extraction. |
+| 2.2 | Safe replacement | Forced refresh of an existing identity and chat slot reassignment both use `temp` + `swap` + refcounted deletion (§7.3), replacing `rm -rf` + `rename` in `commitWriteSlot`. | A forced refresh or slot reassignment while Python reads the old directory does not break the reader. |
+| 2.3 | Python bridge | `inputs` / `params` / `datasets` via one `_PARAMS_` JSON in workflow code nodes and the chat `run_code_in_sandbox` (fix unforwarded `params`). `HARDCODED_DATASET_PATH` lint (`not_refreshable`). | The same code runs in chat and as a node. A hard-coded path marks the workflow `not_refreshable`. |
+| 2.4 | SQL observability | Record compiled SQL and bound values in SQL node events (§3.4). | Visible in admin run detail. |
+
+### Phase 3 (P2): Filters
+
+| Step | Tasks | Done when |
+|---|---|---|
+| 3.1 | Inputs | Validate the §5.1 subset at compile. Resolve the input bag per run (request > default). Persist `snapshot_inputs`. | Unknown/mistyped/missing inputs rejected server-side before any IO. |
+| 3.2 | SQL parameter compiler | §5.3 algorithm (substitute -> parse -> count check -> position check -> bind). Enable per provider only after its tests pass: native binding where available, adapter-owned literal renderer for the DuckDB `COPY` path / Vertica. Policy on executed SQL. Lift `SQL_PARAMS_NOT_ENABLED` per enabled provider. | Per provider: quoted token and commented token rejected by the count check, identifier misuse, null, empty/non-empty `IN (1=0)`, repeated refs, wrong types. |
+| 3.3 | Filter UI | RJSF panel wired to `POST /refresh { inputs }`, pre-filled from `snapshot_inputs`. Reset to defaults. Save-as-snapshot with inputs. Inspector "promote literal to input" (adds a property and rewrites the literal to `@inputs.<key>`). | Example D works end to end from a chat-saved example A. |
+
+### Phase 4 (P3): Deferred
+
+Multi-chart artifacts, dynamic `options_source` (§5.4), agent editing in the artifact view (§8), native binding for more providers, `condition`/branching, subflows, partitioned refresh, live-vs-snapshot compare.
+
+## 9.1 Touchpoints
+
+| Contract | Primary files |
+|---|---|
+| Spec v2, compile, lint | `src/lib/workflows/spec/schema.ts`, `canonicalize.ts` -> `compile`, `validate.ts` -> `lint`, `nodes/registry.ts` |
+| Save mapping | `src/lib/workflows/build-from-events.ts` |
+| Engine refs, selective execution | `src/lib/workflows/engine/execution-context.ts` (drop embedded interpolation), `scheduler.ts` (string ids, ancestor closure), `in-process.ts` |
+| SQL node + extraction service + identity index | `src/lib/workflows/nodes/sql-node.ts`, `src/lib/data-sources/runtime-tools.ts`, `cache.ts`, `policy.ts`, provider adapters |
+| Chart node | `src/lib/workflows/nodes/chart-node.ts` |
+| Python bridge | `src/lib/workflows/nodes/code-node.ts`, `src/lib/artifacts/execute-workflow.ts`, `src/lib/sandbox/runtime-tools.ts` |
+| Events | `src/lib/artifacts/workflow-run-recorder.ts` |
+| Run semantics, snapshots | `src/lib/artifacts/bundle.ts`, `get-artifact.ts`, `save-snapshot.ts`, `refresh-artifact.ts`, `execute-workflow.ts` |
+| Schema + migrations | `src/lib/db/schema.ts` (`ArtifactTable` columns), `src/lib/db/migrations/` (generated column migration + custom `DELETE FROM workflow` migration) |
+| Replayable flag | `src/lib/builtin-tools/catalog.ts` and MCP tool metadata |
+| Edit paths | `src/app/api/artifacts/[id]/route.ts`, `[id]/nodes/[nodeId]/route.ts`, `src/components/workflow-graph/*` (graph, inspector), `src/components/main-panels/ArtifactDetail.tsx` |
+| Filter UI | `src/components/main-panels/ArtifactFilterPanel.tsx`, `src/app/api/artifacts/[id]/refresh/route.ts` |
+
+## 10. Decisions
+
+| # | Topic | Decision |
+|---|---|---|
+| D1 | Multiple charts per artifact | Deferred. A spec may contain several chart outputs; an artifact renders one `workflow_output_field`, and executes only its ancestor closure. |
+| D2 | GET behavior | GET returns the stored snapshot only; only an explicit refresh executes. `view_mode` is dropped. |
+| D3 | First-run failure at Save | Save anyway with the chat-captured snapshot and a persisted, visible `last_run_error`. |
+| D4 | Workflow inline budget | 1000 rows / 1 MB for now (config keys, §3.1). |
+| D5 | Stored form | Persist the authoring form only. Compile on every write and run. No stored lock map or resolved ids. |
+| D6 | Oversized chat charts | Save succeeds with a `not_refreshable` issue; `refreshable = false`. |
+| D7 | SQL parameter syntax | Keep `@inputs.key`. |
+| D8 | Agent and generic tool nodes | Keep both: agent executes on refresh / Save's first run only; tool nodes only when `replayable`. |
+| D9 | Existing workflows | Delete all `workflow` rows (irreversible; `pg_dump` first). Artifacts keep their snapshots and become not refreshable. |
+| D10 | Node shape | Keep the v1 `inputs` wrapper and field names where semantics are unchanged; string ids, auto-derived at Save. |
+| D11 | Resolved-id locks | None. Data-source names are immutable after creation; resolve by name within the allowed set on every compile. Revisit (with a separate `workflow` column, outside the authoring JSON) only if names become mutable. |
+| D12 | Cache lookup | Identity-based lookup (`data_source_id` + executed SQL + bound values) lands in Phase 1 so Save hits the chat cache; the chat slot contract is unchanged. |
+
+### Appendix: external ideas (borrow the contract, not the platform)
+
+| Project | Borrowed here | Not imported |
+|---|---|---|
+| Windmill | JSON-Schema flow inputs driving the form; per-argument bindings (static value vs reference) -> whole-field refs and the ref-carrier table; large data exchanged by dataset reference | Worker fleet, loop DSL, S3/GCS storage |
+| Zen Engine | Validate the whole graph before execution; input and output schemas at both ends | Decision tables, a rules engine, forward edges as grammar |
+| Flowcraft (TypeScript) | Serializable blueprint + executor registry; LintBlueprint - style issue lists; keep UI layout out of the executable spec | A second runtime, distributed adapters |
+| Node-RED | Approachable graph editing | Mutable message bus as a carrier for analytical data |
+| dbt | Dependencies derived from references (`ref()` -> `@nodes`); viewable compiled SQL | `var()` -style literal Jinja rendering as a parameter mechanism (that is exactly the injection path §5.3 avoids); incremental/ephemeral models |
+| Dagster | Data vs order-only dependencies (`@nodes` refs vs `after`); keep large data out of orchestration memory; row count/schema metadata on outputs | IO managers, partitions, asset versioning |
