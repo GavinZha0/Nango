@@ -35,12 +35,7 @@ export const updateTestCaseSchema = z
       .int()
       .positive()
       .describe("The integer ID of the test case to update."),
-    name: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .optional()
+    name: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.string().trim().min(1).max(120).optional())
       .describe("Optional new descriptive name for the test case."),
     enabled: z
       .boolean()
@@ -55,10 +50,7 @@ export const updateTestCaseSchema = z
       .describe(
         "Optional updated list of assertion specifications (replaces existing assertions). Supported types are category-scoped — inspect with get_assertion_schema.",
       ),
-    toolName: z
-      .string()
-      .trim()
-      .optional()
+    toolName: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.string().trim().min(1).optional())
       .describe("Optional updated tool name (verification only)."),
     input: z
       .preprocess(
@@ -74,13 +66,9 @@ export const updateTestCaseSchema = z
       )
       .optional()
       .describe("Optional updated multi-turn user prompt texts (evaluation only)."),
-    script: z
-      .string()
-      .optional()
+    script: z.string().min(1).optional()
       .describe("Optional updated Playwright script (web-auto only)."),
-    steps: z
-      .string()
-      .optional()
+    steps: z.string().optional()
       .describe("Optional updated natural language test steps (web-auto only)."),
   })
   .superRefine((val, ctx) => {

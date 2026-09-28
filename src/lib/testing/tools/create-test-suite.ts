@@ -41,26 +41,17 @@ export const createTestSuiteSchema = z
       .describe("Target test category ('verification', 'evaluation', or 'web-auto')."),
     name: suiteNameSchema,
     description: suiteDescriptionSchema,
-    mcpServerId: z
-      .string()
-      .uuid()
-      .optional()
+    mcpServerId: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.string().uuid().optional())
       .describe(
         "Target MCP Server ID. Required for 'verification'; optional for 'web-auto' (auto-discovers shared Playwright server if omitted).",
       ),
-    agentId: z
-      .string()
-      .min(1)
-      .optional()
+    agentId: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.string().min(1).optional())
       .describe("Target Agent ID to be evaluated (required for 'evaluation')."),
     agentSource: z
       .enum(["builtin", "backend"])
       .optional()
       .describe("Source platform of the agent ('builtin' or 'backend', evaluation only). Defaults to 'builtin'."),
-    evaluatorAgentId: z
-      .string()
-      .uuid()
-      .optional()
+    evaluatorAgentId: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.string().uuid().optional())
       .describe("Optional Evaluator Agent ID to judge conversational quality (evaluation only)."),
   })
   .superRefine((val, ctx) => {

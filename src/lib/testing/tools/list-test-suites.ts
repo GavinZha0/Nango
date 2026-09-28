@@ -24,9 +24,9 @@ export const listTestSuitesSchema = z.object({
     "Required test category: 'verification' (MCP), 'evaluation' (Agent benchmark), or 'web-auto' (Playwright UI).",
   ),
   suiteId: z
-    .string()
-    .uuid()
+    .union([z.string().uuid(), z.literal("")])
     .optional()
+    .transform((val) => (val === "" ? undefined : val))
     .describe("Optional suite ID to filter for a specific test suite."),
   enabledOnly: z
     .boolean()

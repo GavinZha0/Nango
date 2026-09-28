@@ -120,9 +120,7 @@ export const getAssertionSchemaInputSchema = z.object({
   category: z
     .enum(["verification", "evaluation", "web-auto"])
     .describe("Target test category ('verification' | 'evaluation' | 'web-auto')"),
-  assertionType: z
-    .enum(ASSERTION_TYPES)
-    .nullish()
+  assertionType: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.enum(ASSERTION_TYPES).nullish())
     .describe(
       "Optional assertion type filter ('jsonpath' | 'json_schema' | 'js_expression' | 'tool_call' | 'metric' | 'llm_judge'). Returns all supported schemas if null or omitted.",
     ),

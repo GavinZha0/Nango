@@ -41,9 +41,9 @@ export const getTestResultsSchema = z.object({
     .optional()
     .describe("Specific run ID to retrieve. If provided, returns exact run and detailed case results."),
   suiteId: z
-    .string()
-    .uuid()
+    .union([z.string().uuid(), z.literal("")])
     .optional()
+    .transform((val) => (val === "" ? undefined : val))
     .describe("The test suite ID. Required if runId is not specified."),
   last: z
     .number()

@@ -53,10 +53,7 @@ const caseAssertionsSchema = z
 
 const genericCaseItemSchema = z.object({
   name: caseNameSchema,
-  toolName: z
-    .string()
-    .trim()
-    .optional()
+  toolName: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.string().trim().min(1).optional())
     .describe("Target tool name from the suite's MCP server (required for verification)."),
   input: z
     .preprocess(jsonOrSelf, z.record(z.string(), z.unknown()))
@@ -68,13 +65,9 @@ const genericCaseItemSchema = z.object({
     .preprocess(jsonOrSelf, z.array(z.string().min(1)))
     .optional()
     .describe("List of user prompt texts representing multi-turn conversational inputs (required for evaluation)."),
-  script: z
-    .string()
-    .optional()
+  script: z.string().min(1).optional()
     .describe("Playwright automation script (Node.js/JS)."),
-  steps: z
-    .string()
-    .optional()
+  steps: z.string().optional()
     .describe("Natural language test steps (non-executable documentation readable by the assistant)."),
   assertions: caseAssertionsSchema,
 });
@@ -98,6 +91,13 @@ export const createTestCasesSchema = z
   .superRefine((val, ctx) => {
     val.cases.forEach((c, i) => {
       refineDisallowedCaseFields(val.category, c as Record<string, unknown>, ctx, ["cases", i]);
+        if (val.category === "verification" && !c.toolName) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Field 'toolName' is required for verification test cases.",
+            path: ["cases", i, "toolName"],
+          });
+        }
     });
   });
 
