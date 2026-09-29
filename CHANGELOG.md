@@ -5,9 +5,9 @@
 
 ### Bug Fixes
 
-* **artifacts:** preserve multi-run event order and optimize header toggles ([5ade198](https://github.com/GavinZha0/Nango/commit/5ade198f12d8a08df1c352c813916d6a3beef03d))
-* **bento:** harden chart normalization and migrate PPT to Slides ([8ac3a5e](https://github.com/GavinZha0/Nango/commit/8ac3a5eb50d61348996afa05151f4438ca6e9cf4))
-* **testing:** harden zod schemas against empty string validation crashes ([3a2d629](https://github.com/GavinZha0/Nango/commit/3a2d6292272ac649b9905de00b37616bd7e12d7a))
+* **artifacts:** preserve multi-run event order and optimize header toggles ([5ade198](https://github.com/GavinZha0/Nango/commit/5ade198f12d8a08df1c352c813916d6a3beef03d)) by @GavinZha0
+* **bento:** harden chart normalization and migrate PPT to Slides ([8ac3a5e](https://github.com/GavinZha0/Nango/commit/8ac3a5eb50d61348996afa05151f4438ca6e9cf4)) by @GavinZha0
+* **testing:** harden zod schemas against empty string validation crashes ([3a2d629](https://github.com/GavinZha0/Nango/commit/3a2d6292272ac649b9905de00b37616bd7e12d7a)) by @GavinZha0
 
 ## [0.25.0](https://github.com/GavinZha0/Nango/compare/v0.24.0...v0.25.0) (2026-09-25)
 
