@@ -17,14 +17,14 @@ overrides:
 # decision to let third-party code execute on install.
 allowBuilds:
   # Required — these install/build steps are essential.
-  esbuild: true              # platform binary for Next.js / vitest bundling
-  msw: true                  # Mock Service Worker test harness CLI init
+  esbuild: true # platform binary for Next.js / vitest bundling
+  msw: true # Mock Service Worker test harness CLI init
 
   # Optional native bindings — pure-JS fallback is sufficient.
-  sharp: false               # advanced image transforms (unused)
-  unrs-resolver: false       # ESLint experimental native resolver
-  ssh2: false                # node-ssh falls back to Node's crypto
-  cpu-features: false        # paired with ssh2; CPU feature detection
+  sharp: false # advanced image transforms (unused)
+  unrs-resolver: false # ESLint experimental native resolver
+  ssh2: false # node-ssh falls back to Node's crypto
+  cpu-features: false # paired with ssh2; CPU feature detection
 
   # Telemetry — explicitly refused.
   "@scarf/scarf": false
