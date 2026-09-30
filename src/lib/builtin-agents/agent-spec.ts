@@ -46,6 +46,10 @@ export interface AgentSpec {
   /** SECURITY: decrypted LLM API key. Memory-only, never persisted /
    *  logged; invalidated whenever the credential row changes. */
   apiKey: string;
+  /** Credential type (e.g. "api_key", "bearer_token") to drive auth header formatting. */
+  credentialType?: string;
+  /** Custom header name for api_key credentials. Defaults to X-API-Key if omitted. */
+  headerName?: string | null;
   /** Optional REST base URL for self-hosted providers (Ollama,
    *  OpenAI-compatible gateways); ignored by cloud providers. */
   restUrl: string | null;

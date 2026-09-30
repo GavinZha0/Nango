@@ -7,7 +7,8 @@ import "server-only";
 import { getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 import { describeFetchStatus, BACKEND_ENTITY_FETCH_TIMEOUT_MS } from "../types";
-import type { EntityFetchResult } from "../types";
+import type { EntityFetchResult, EntityFetchOptions } from "../types";
+import { buildAuthHeaders } from "../bridge-runtime-kit.server";
 
 const log = childLogger({ component: "dify-entity-fetcher" });
 
@@ -24,12 +25,13 @@ export async function fetchDifyEntitiesServer(
   credentialId: string,
   baseUrl: string,
   token: string,
+  options?: EntityFetchOptions,
 ): Promise<EntityFetchResult> {
   const timeoutMs = getConfigMs("backend.entity_fetch.timeout", BACKEND_ENTITY_FETCH_TIMEOUT_MS / 1000);
 
   try {
     const res = await fetch(`${baseUrl}/info`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: buildAuthHeaders(token, options?.type, options?.headerName),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {

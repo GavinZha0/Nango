@@ -7,7 +7,14 @@ import "server-only";
 import { getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 import { describeFetchStatus, BACKEND_ENTITY_FETCH_TIMEOUT_MS } from "../types";
-import type { EntityDescriptor, EntityKind, EntityFetchError, EntityFetchResult } from "../types";
+import type {
+  EntityDescriptor,
+  EntityKind,
+  EntityFetchError,
+  EntityFetchResult,
+  EntityFetchOptions,
+} from "../types";
+import { buildAuthHeaders } from "../bridge-runtime-kit.server";
 
 const log = childLogger({ component: "agno-entity-fetcher" });
 
@@ -136,8 +143,11 @@ export async function fetchAgnoEntitiesServer(
   credentialId: string,
   baseUrl: string,
   token: string,
+  options?: EntityFetchOptions,
 ): Promise<EntityFetchResult> {
-  const headers: HeadersInit = { Authorization: `Bearer ${token}` };
+  const headers: HeadersInit = {
+    ...buildAuthHeaders(token, options?.type, options?.headerName),
+  };
   const errors: EntityFetchError[] = [];
 
   const timeoutMs = getConfigMs("backend.entity_fetch.timeout", BACKEND_ENTITY_FETCH_TIMEOUT_MS / 1000);

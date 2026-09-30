@@ -47,6 +47,10 @@ adminTest.describe("Credential Management", () => {
     // The dialog inherits the active filter category (LLM by default).
     await dialog.getByRole("button", { name: "OpenAI", exact: true }).click();
 
+    // Select API Key type (Bearer Token is the default type).
+    await dialog.getByRole("combobox").click();
+    await page.getByRole("option", { name: "API Key", exact: true }).click();
+
     // Fill API key.
     await dialog.getByLabel("API Key").fill("sk-test-e2e-placeholder-key");
 
@@ -162,6 +166,8 @@ async function createCredential(page: import("@playwright/test").Page, name: str
   await expect(dialog.getByRole("heading", { name: "New Credential" })).toBeVisible();
   await dialog.getByLabel(/name/i).first().fill(name);
   await dialog.getByRole("button", { name: "OpenAI", exact: true }).click();
+  await dialog.getByRole("combobox").click();
+  await page.getByRole("option", { name: "API Key", exact: true }).click();
   await dialog.getByLabel("API Key").fill("sk-test-e2e-placeholder-key");
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("heading", { name: "New Credential" })).not.toBeVisible({ timeout: 5000 });

@@ -12,7 +12,7 @@ import {
   CredentialTable,
 } from "@/lib/db/schema";
 import { encrypt, extractKeyPreview } from "@/lib/credentials/crypto";
-import { withAdmin } from "@/lib/http/route-handlers";
+import { ApiError, withAdmin } from "@/lib/http/route-handlers";
 import {
   nonEmptyString,
   optionalTrimmedString,
@@ -75,8 +75,24 @@ const createSchema = z.object({
 export const POST = withAdmin(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
 
+  // SECURITY: Require at least one non-empty secret field in the payload (excluding config fields like headerName)
+  const hasSecret = Object.entries(body.payload).some(
+    ([k, v]) => k !== "headerName" && typeof v === "string" && v.trim() !== "",
+  );
+  if (!hasSecret) {
+    throw new ApiError(
+      "VALIDATION_FAILED",
+      400,
+      "Credential payload must contain at least one non-empty secret value.",
+    );
+  }
+
   const encryptedPayload = encrypt(body.payload);
   const keyPreview = extractKeyPreview(body.payload);
+  const headerName =
+    typeof body.payload.headerName === "string" && body.payload.headerName.trim()
+      ? body.payload.headerName.trim()
+      : undefined;
 
   const [row] = await db
     .insert(CredentialTable)
@@ -88,7 +104,10 @@ export const POST = withAdmin(ROUTE, async ({ req, session }) => {
       restUrl: body.restUrl ?? null,
       aguiUrl: body.aguiUrl ?? null,
       encryptedPayload,
-      metadata: { keyPreview },
+      metadata: {
+        keyPreview,
+        ...(headerName ? { headerName } : {}),
+      },
       enabled: true,
       createdBy: session.user.id,
     })

@@ -18,6 +18,10 @@ import type { LanguageModel } from "ai";
 import { createOllama } from "ollama-ai-provider-v2";
 
 import type { AgentSpec } from "./agent-spec";
+import {
+  buildAuthHeaders,
+  isAnonymousPlaceholder,
+} from "@/lib/backends/bridge-runtime-kit.server";
 
 export interface ResolvedModel {
   /** `"<provider>:<model>"` (CopilotKit native) or constructed
@@ -31,7 +35,6 @@ export interface ResolvedModel {
 /** CONTRACT: keep in sync with the switch in
  *  `node_modules/@copilotkit/runtime/dist/agent/index.mjs`. */
 const NATIVE_PROVIDERS: ReadonlySet<string> = new Set([
-  "openai",
   "anthropic",
   "google",
   "gemini",
@@ -47,13 +50,38 @@ const DEFAULT_OLLAMA_HOST: string = "http://127.0.0.1:11434";
 export function resolveLanguageModel(spec: AgentSpec): ResolvedModel {
   const provider: string = spec.modelProvider.toLowerCase();
 
+  if (provider === "openai" || provider === "openai-compatible") {
+    // If a custom restUrl is provided,
+    // construct an OpenAI-compatible instance bound to that specific baseURL and dynamic headers.
+    if (spec.restUrl) {
+      const compat = createOpenAICompatible({
+        name: `openai:${spec.model}`,
+        baseURL: spec.restUrl.replace(/\/+$/, ""),
+        headers: buildAuthHeaders(spec.apiKey, spec.credentialType, spec.headerName),
+      });
+      return { model: compat(spec.model) };
+    }
+
+    // Default official OpenAI endpoint (no custom restUrl configured).
+    // Safely omit apiKey if it's an anonymous placeholder.
+    const apiKey = isAnonymousPlaceholder(spec.apiKey) ? undefined : spec.apiKey;
+    return {
+      model: `openai:${spec.model}`,
+      ...(apiKey ? { apiKey } : {}),
+    };
+  }
+
   if (NATIVE_PROVIDERS.has(provider)) {
     return { model: `${provider}:${spec.model}`, apiKey: spec.apiKey };
   }
 
   if (provider === "ollama") {
     const baseURL: string = resolveOllamaBaseUrl(spec.restUrl);
-    const ollama = createOllama({ baseURL });
+    const headers = buildAuthHeaders(spec.apiKey, spec.credentialType, spec.headerName);
+    const ollama = createOllama({
+      baseURL,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    });
     return { model: ollama(spec.model) };
   }
 
@@ -91,29 +119,10 @@ export function resolveLanguageModel(spec: AgentSpec): ResolvedModel {
     return { model: openrouter(spec.model) };
   }
 
-  if (provider === "openai-compatible") {
-    // SECURITY: restUrl is REQUIRED — falling back to api.openai.com
-    // would silently send the workload to OpenAI under whatever key
-    // the credential carries.
-    if (!spec.restUrl) {
-      throw new Error(
-        `openai-compatible provider requires a REST API URL on the credential. `
-          + `Set the credential's "REST API URL" to the endpoint's chat completions base, `
-          + `e.g. "https://api.together.xyz/v1" or "http://vllm-host:8000/v1".`,
-      );
-    }
-    const compat = createOpenAICompatible({
-      name: `openai-compatible:${spec.model}`,
-      apiKey: spec.apiKey,
-      baseURL: spec.restUrl,
-    });
-    return { model: compat(spec.model) };
-  }
-
   throw new Error(
     `Unsupported model provider "${spec.modelProvider}". `
-      + `Supported: ${[...NATIVE_PROVIDERS].join(", ")}, `
-      + `groq, xai, deepseek, openrouter, openai-compatible, ollama.`,
+      + `Supported: openai, ${[...NATIVE_PROVIDERS].join(", ")}, `
+      + `groq, xai, deepseek, openrouter, ollama.`,
   );
 }
 

@@ -17,7 +17,8 @@ vi.mock("@/lib/backends/registry.server", () => ({
           credId: string,
           baseUrl: string,
           token: string,
-        ) => fetchEntitiesMock(credId, baseUrl, token),
+          options?: import("@/lib/backends/types").EntityFetchOptions,
+        ) => fetchEntitiesMock(credId, baseUrl, token, options),
       },
     },
   },
@@ -198,5 +199,31 @@ describe("EntityCatalog.list — singleflight", () => {
     expect(EntityCatalog._cacheSize()).toBe(1);
     EntityCatalog.invalidate(CRED_ID);
     expect(EntityCatalog._cacheSize()).toBe(0);
+  });
+
+  it("forwards credential type and headerName to fetchEntities", async () => {
+    const customCred = {
+      ...CRED,
+      id: "22222222-2222-2222-2222-222222222222",
+      type: "api_key" as const,
+      headerName: "X-Custom-Auth",
+    };
+    getCredentialConfigById.mockResolvedValue(customCred);
+    fetchEntitiesMock.mockResolvedValueOnce({
+      entities: [makeEntity("custom", customCred.id)],
+      errors: [],
+    });
+
+    await EntityCatalog.list(customCred.id);
+
+    expect(fetchEntitiesMock).toHaveBeenCalledWith(
+      customCred.id,
+      "https://agno.example",
+      "tok",
+      {
+        type: "api_key",
+        headerName: "X-Custom-Auth",
+      },
+    );
   });
 });

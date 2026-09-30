@@ -16,6 +16,7 @@ import type { ChatContext, IBackendChatHandler } from "../types";
 import {
   assertValidSseResponse,
   attachBridgeConfig,
+  buildAuthHeaders,
   buildPassthroughAgentIfConfigured,
   createBridgeRunObservable,
   lastUserText,
@@ -48,13 +49,15 @@ async function postChat(
   apiKey: string,
   body: DifyChatBody,
   signal: AbortSignal,
+  type?: string,
+  headerName?: string | null,
 ): Promise<Response> {
   return fetch(`${baseUrl}/chat-messages`, {
     method: "POST",
     signal,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      ...buildAuthHeaders(apiKey, type, headerName),
       Accept: "text/event-stream",
     },
     body: JSON.stringify(body),
@@ -84,6 +87,8 @@ interface BridgeConfig {
   /** Trimmed, e.g. "https://api.dify.ai/v1". */
   baseUrl: string;
   apiKey: string;
+  type?: string;
+  headerName?: string | null;
   credentialId: string;
 }
 
@@ -130,6 +135,8 @@ export class DifyBridgeAgent extends AbstractAgent {
           ...(mapped ? { conversation_id: mapped } : {}),
         },
         abortSignal,
+        this.cfg.type,
+        this.cfg.headerName,
       );
 
       if (mapped && (response.status === 404 || response.status === 400)) {
@@ -145,6 +152,8 @@ export class DifyBridgeAgent extends AbstractAgent {
             user: userId,
           },
           abortSignal,
+          this.cfg.type,
+          this.cfg.headerName,
         );
       }
 
@@ -293,6 +302,8 @@ export const difyChatHandler: IBackendChatHandler = {
     return new DifyBridgeAgent({
       baseUrl: credential.value.baseUrl,
       apiKey: credential.value.apiKey,
+      type: credential.value.credential.type,
+      headerName: credential.value.credential.headerName,
       credentialId: ctx.credentialId,
     });
   },

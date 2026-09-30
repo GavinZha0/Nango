@@ -190,6 +190,29 @@ export function inspectCiphertextKeyId(ciphertext: string): string {
   return parts[1];
 }
 
+export const ANONYMOUS_PLACEHOLDERS: ReadonlySet<string> = new Set([
+  "",
+  "empty",
+  "none",
+  "null",
+  "dummy",
+  "no_auth",
+  "anonymous",
+  "na",
+  "n/a",
+  "disabled",
+  "undefined",
+]);
+
+/**
+ * Returns true if the token is null, undefined, empty, or a known
+ * anonymous placeholder like "empty", "none", "dummy", "null", "no_auth", "anonymous".
+ */
+export function isAnonymousPlaceholder(token: string | null | undefined): boolean {
+  if (!token) return true;
+  return ANONYMOUS_PLACEHOLDERS.has(token.trim().toLowerCase());
+}
+
 /**
  * Non-sensitive preview of the primary secret value (e.g. "sk-ab…x8Qzt").
  *
@@ -198,6 +221,10 @@ export function inspectCiphertextKeyId(ciphertext: string): string {
  *
  * The secret half of a `keypair` is preferred over the public half
  * because it is what users recognise in their vault.
+ *
+ * CONTRACT: Anonymous placeholder tokens (e.g. "empty", "none", "null")
+ * are not confidential secrets and are returned in full so admins immediately
+ * recognize an unauthenticated / anonymous credential in management views.
  */
 export function extractKeyPreview(payload: Record<string, unknown>): string {
   const raw =
@@ -208,6 +235,12 @@ export function extractKeyPreview(payload: Record<string, unknown>): string {
     payload.secretKey ??
     payload.publicKey;
   if (typeof raw !== "string") return "…????";
+
+  const trimmed = raw.trim();
+  if (isAnonymousPlaceholder(trimmed) && trimmed !== "") {
+    return trimmed;
+  }
+
   if (raw.length >= 11) {
     return `${raw.slice(0, 5)}…${raw.slice(-5)}`;
   }

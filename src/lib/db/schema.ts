@@ -659,6 +659,8 @@ export const CredentialTable = pgTable(
 export interface CredentialMetadata {
   /** Last few characters of the key for identification, e.g. "...x8Qz". */
   keyPreview?: string;
+  /** Custom HTTP header name for api_key credentials (e.g. "X-API-Key", "Authorization"). */
+  headerName?: string;
   /** ISO-8601 expiry date, if the credential has a known TTL. */
   expiresAt?: string;
   /** Any other provider-specific display hints. */

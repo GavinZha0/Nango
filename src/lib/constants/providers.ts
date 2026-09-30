@@ -25,23 +25,20 @@ export interface ProviderEntry {
 
 export const PROVIDERS: ProviderEntry[] = [
   // LLM providers
-  { value: "openai",    label: "OpenAI",       service: "llm" },
-  { value: "anthropic", label: "Anthropic",    service: "llm" },
-  { value: "google",    label: "Google AI",    service: "llm" },
+  { value: "openai",            label: "OpenAI",              service: "llm", defaultRestUrl: "https://api.openai.com/v1" },
+  { value: "anthropic",         label: "Anthropic",           service: "llm", defaultRestUrl: "https://api.anthropic.com/v1" },
+  { value: "google",            label: "Google AI",           service: "llm", defaultRestUrl: "https://generativelanguage.googleapis.com/v1beta" },
   { value: "groq",              label: "Groq",                service: "llm", defaultRestUrl: "https://api.groq.com/openai/v1" },
-  { value: "deepseek",          label: "DeepSeek",            service: "llm" },
-  { value: "xai",               label: "xAI (Grok)",          service: "llm" },
-  { value: "openrouter",        label: "OpenRouter",          service: "llm" },
-  { value: "ollama",            label: "Ollama",              service: "llm" },
-  { value: "siliconflow",      label: "SiliconFlow",         service: "llm", defaultRestUrl: "https://api.siliconflow.cn/v1" },
-  { value: "modelstudio",      label: "ModelStudio",         service: "llm", defaultRestUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
-  { value: "modelscope",       label: "ModelScope",          service: "llm", defaultRestUrl: "https://api-inference.modelscope.cn/v1" },
-  { value: "volcengine-ark",   label: "Volcengine Ark",      service: "llm", defaultRestUrl: "https://ark.cn-beijing.volces.com/api/v3" },
-  { value: "litellm",          label: "LiteLLM",             service: "llm" },
-  { value: "portkey",          label: "Portkey",             service: "llm", defaultRestUrl: "https://api.portkey.ai/v1" },
-  // OpenAI-Chat-Completions-compatible endpoints (vLLM, LM Studio, TGI,
-  // Together, Fireworks, gateways). Requires `restUrl`. Built-in agents only.
-  { value: "openai-compatible", label: "OpenAI-Compatible",   service: "llm" },
+  { value: "deepseek",          label: "DeepSeek",            service: "llm", defaultRestUrl: "https://api.deepseek.com/v1" },
+  { value: "xai",               label: "xAI (Grok)",          service: "llm", defaultRestUrl: "https://api.x.ai/v1" },
+  { value: "openrouter",        label: "OpenRouter",          service: "llm", defaultRestUrl: "https://openrouter.ai/api/v1" },
+  { value: "ollama",            label: "Ollama",              service: "llm", defaultRestUrl: "http://127.0.0.1:11434" },
+  { value: "siliconflow",       label: "SiliconFlow",         service: "llm", defaultRestUrl: "https://api.siliconflow.cn/v1" },
+  { value: "modelstudio",       label: "ModelStudio",         service: "llm", defaultRestUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
+  { value: "modelscope",        label: "ModelScope",          service: "llm", defaultRestUrl: "https://api-inference.modelscope.cn/v1" },
+  { value: "volcengine-ark",    label: "Volcengine Ark",      service: "llm", defaultRestUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+  { value: "litellm",           label: "LiteLLM",             service: "llm", defaultRestUrl: "http://localhost:4000/v1" },
+  { value: "portkey",           label: "Portkey",             service: "llm", defaultRestUrl: "https://api.portkey.ai/v1" },
 
   // Agent platforms
   // Backends whose models / apps are *agents* (LLM already bound to

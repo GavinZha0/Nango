@@ -39,7 +39,7 @@ export interface CredentialRow {
   provider: string | null;
   restUrl: string | null;
   aguiUrl: string | null;
-  metadata: { keyPreview?: string; expiresAt?: string } | null;
+  metadata: { keyPreview?: string; expiresAt?: string; headerName?: string } | null;
   enabled: boolean;
   createdAt: string | Date;
   updatedAt: string | Date;
@@ -68,11 +68,17 @@ interface PayloadField {
 }
 
 const PAYLOAD_FIELDS: Record<CredentialType, PayloadField[]> = {
-  api_key: [
-    { key: "key", label: "API Key", placeholder: "sk-…", type: "password" },
-  ],
   bearer_token: [
     { key: "token", label: "Bearer Token", placeholder: "eyJ…", type: "password" },
+  ],
+  api_key: [
+    { key: "key", label: "API Key", placeholder: "sk-…", type: "password" },
+    {
+      key: "headerName",
+      label: "Header Name",
+      placeholder: "X-API-Key (default) or Authorization",
+      type: "text",
+    },
   ],
   basic_auth: [
     { key: "username", label: "Username" },
@@ -102,8 +108,8 @@ const PAYLOAD_FIELDS: Record<CredentialType, PayloadField[]> = {
 };
 
 const CREDENTIAL_TYPES: { value: CredentialType; label: string }[] = [
-  { value: "api_key", label: "API Key" },
   { value: "bearer_token", label: "Bearer Token" },
+  { value: "api_key", label: "API Key" },
   { value: "basic_auth", label: "Basic Auth (username + password)" },
   { value: "oauth_client", label: "OAuth Client" },
   { value: "keypair", label: "Key Pair (public + secret)" },
@@ -112,7 +118,19 @@ const CREDENTIAL_TYPES: { value: CredentialType; label: string }[] = [
 
 // Component
 
-const INITIAL_PAYLOAD: Record<string, string> = {};
+const DEFAULT_API_KEY_HEADER = "X-API-Key";
+
+function getInitialPayloadForType(
+  type: CredentialType,
+  editing?: CredentialRow,
+): Record<string, string> {
+  if (type === "api_key") {
+    return {
+      headerName: editing?.metadata?.headerName || DEFAULT_API_KEY_HEADER,
+    };
+  }
+  return {};
+}
 
 interface FormState {
   name: string;
@@ -125,13 +143,14 @@ interface FormState {
 }
 
 function initialFormState(editing?: CredentialRow): FormState {
+  const type = (editing?.type as CredentialType) ?? "bearer_token";
   return {
     name: editing?.name ?? "",
-    type: (editing?.type as CredentialType) ?? "api_key",
+    type,
     provider: editing?.provider ?? "",
     restUrl: editing?.restUrl ?? "",
     aguiUrl: editing?.aguiUrl ?? "",
-    payload: INITIAL_PAYLOAD,
+    payload: getInitialPayloadForType(type, editing),
     error: "",
   };
 }
@@ -175,12 +194,34 @@ export function CredentialFormDialog({
       return;
     }
 
-    // In edit mode, payload is optional (only re-encrypt if user filled anything)
+    // For api_key, ensure headerName defaults to X-API-Key if empty or cleared
+    const currentPayload = { ...form.payload };
+    if (form.type === "api_key") {
+      const trimmedHeader = currentPayload.headerName?.trim();
+      currentPayload.headerName = trimmedHeader || DEFAULT_API_KEY_HEADER;
+    }
+
+    // In edit mode, payload is optional (only re-encrypt if user filled or changed anything)
     const fields = PAYLOAD_FIELDS[form.type];
-    const hasPayloadInput = fields.some((f) => form.payload[f.key]?.trim());
+    const hasPayloadInput = isEdit
+      ? fields.some((f) => {
+          if (f.key === "headerName") {
+            const oldHeader = editing?.metadata?.headerName || DEFAULT_API_KEY_HEADER;
+            return currentPayload.headerName !== oldHeader;
+          }
+          return Boolean(currentPayload[f.key]?.trim());
+        })
+      : fields
+          .filter((f) => f.key !== "headerName")
+          .some((f) => Boolean(currentPayload[f.key]?.trim()));
 
     if (!isEdit && !hasPayloadInput) {
-      setField("error", "Please fill in the credential fields.");
+      setField(
+        "error",
+        form.type === "api_key"
+          ? "Please fill in the API Key."
+          : "Please fill in the credential fields.",
+      );
       return;
     }
 
@@ -199,7 +240,11 @@ export function CredentialFormDialog({
       if (hasPayloadInput) {
         const builtPayload: Record<string, string> = {};
         for (const f of fields) {
-          if (form.payload[f.key]?.trim()) builtPayload[f.key] = form.payload[f.key].trim();
+          if (f.key === "headerName") {
+            builtPayload.headerName = currentPayload.headerName;
+          } else if (currentPayload[f.key]?.trim()) {
+            builtPayload[f.key] = currentPayload[f.key].trim();
+          }
         }
         body.payload = builtPayload;
       }
@@ -338,7 +383,7 @@ export function CredentialFormDialog({
           </div>
 
           <div className="flex items-center gap-3">
-            <Label className="w-[140px] shrink-0">Credential Type</Label>
+            <Label htmlFor="cred-type" className="w-[140px] shrink-0">Credential Type</Label>
             {!isEdit ? (
               // Select's root isn't a flex child; the wrapper keeps it
               // from collapsing to content width.
@@ -346,9 +391,16 @@ export function CredentialFormDialog({
                 <Select
                   value={form.type}
                   items={CREDENTIAL_TYPES.map((ct) => ({ value: ct.value, label: ct.label }))}
-                  onValueChange={(v) => setForm((f) => ({ ...f, type: v as CredentialType, payload: INITIAL_PAYLOAD }))}
+                  onValueChange={(v) => {
+                    const nextType = v as CredentialType;
+                    setForm((f) => ({
+                      ...f,
+                      type: nextType,
+                      payload: getInitialPayloadForType(nextType, editing),
+                    }));
+                  }}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="cred-type" aria-label="Credential Type" data-testid="cred-type-select" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -362,6 +414,7 @@ export function CredentialFormDialog({
               </div>
             ) : (
               <Input
+                id="cred-type"
                 value={CREDENTIAL_TYPES.find((ct) => ct.value === form.type)?.label ?? form.type}
                 disabled
                 className="flex-1"
@@ -411,6 +464,11 @@ export function CredentialFormDialog({
                     type={f.type ?? "text"}
                     value={form.payload[f.key] ?? ""}
                     onChange={(e) => setPayloadField(f.key, e.target.value)}
+                    onBlur={(e) => {
+                      if (f.key === "headerName" && !e.target.value.trim()) {
+                        setPayloadField(f.key, DEFAULT_API_KEY_HEADER);
+                      }
+                    }}
                     placeholder={placeholder}
                     autoComplete="off"
                     className={cn("flex-1", isEdit && isSecret && "placeholder:text-yellow-400")}

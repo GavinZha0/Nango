@@ -14,6 +14,7 @@ import { childLogger } from "@/lib/observability/logger";
 import type { ChatContext, EntityKind, IBackendChatHandler } from "../types";
 import {
   attachBridgeConfig,
+  buildAuthHeaders,
   buildPassthroughAgentIfConfigured,
   createBridgeRunObservable,
   lastUserText,
@@ -112,6 +113,8 @@ async function* readSseMessages(
 interface BridgeConfig {
   baseUrl: string;
   apiKey: string;
+  type?: string;
+  headerName?: string | null;
   entityId: string;
   entityKind: EntityKind;
   log: Logger;
@@ -214,7 +217,11 @@ class AgnoBridgeAgent extends AbstractAgent {
           method: "POST",
           signal: abortSignal,
           headers: {
-            Authorization: `Bearer ${this.cfg.apiKey}`,
+            ...buildAuthHeaders(
+              this.cfg.apiKey,
+              this.cfg.type,
+              this.cfg.headerName,
+            ),
             Accept: "text/event-stream",
           },
           body: form,
@@ -413,6 +420,8 @@ export const agnoChatHandler: IBackendChatHandler = {
     return new AgnoBridgeAgent({
       baseUrl: credential.value.baseUrl,
       apiKey: credential.value.apiKey,
+      type: credential.value.credential.type,
+      headerName: credential.value.credential.headerName,
       entityId: ctx.agentId,
       entityKind: ctx.agentKind,
       log,

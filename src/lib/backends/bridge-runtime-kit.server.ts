@@ -18,7 +18,10 @@ import {
 } from "@/lib/copilot/index.server";
 import { Observable } from "rxjs";
 
-import { getAgentCredentialConfigById } from "@/lib/credentials/lookup";
+import {
+  getAgentCredentialConfigById,
+  type AgentCredentialConfig,
+} from "@/lib/credentials/lookup";
 import type { ChatContext } from "./types";
 
 const DEFAULT_ERROR_BODY_MAX_LEN: number = 200;
@@ -166,6 +169,7 @@ export async function assertValidSseResponse(response: Response): Promise<void> 
 export interface BridgeCredentialResolution {
   baseUrl: string;
   apiKey: string;
+  credential: AgentCredentialConfig;
 }
 
 export type BridgeCredentialResult =
@@ -238,8 +242,48 @@ export async function resolveBridgeCredential(
     value: {
       baseUrl,
       apiKey: credential.token,
+      credential,
     },
   };
+}
+
+import {
+  ANONYMOUS_PLACEHOLDERS,
+  isAnonymousPlaceholder,
+} from "@/lib/credentials/crypto";
+
+export { ANONYMOUS_PLACEHOLDERS, isAnonymousPlaceholder };
+
+/**
+ * Construct outbound HTTP auth headers, safely omitting authorization headers
+ * if token is empty or an anonymous placeholder.
+ *
+ * Rules:
+ * - If token is missing or an anonymous placeholder (e.g. "empty", "none"), returns {}.
+ * - If type === "api_key":
+ *   - Defaults header to "X-API-Key" unless a custom headerName is provided (Option B).
+ *   - If headerName is "Authorization" (case-insensitive), formats as `Bearer ${cleanToken}`.
+ *   - Otherwise, sends raw cleanToken with the specified headerName.
+ * - Otherwise (default/bearer_token): formats as `Authorization: Bearer ${cleanToken}`.
+ */
+export function buildAuthHeaders(
+  token: string | null | undefined,
+  type: string = "bearer_token",
+  headerName?: string | null,
+): Record<string, string> {
+  if (!token || isAnonymousPlaceholder(token)) return {};
+  const cleanToken = token.trim();
+  if (!cleanToken) return {};
+
+  if (type === "api_key") {
+    const finalHeader = headerName?.trim() || "X-API-Key";
+    if (finalHeader.toLowerCase() === "authorization") {
+      return { Authorization: `Bearer ${cleanToken}` };
+    }
+    return { [finalHeader]: cleanToken };
+  }
+
+  return { Authorization: `Bearer ${cleanToken}` };
 }
 
 // AG-UI passthrough fast-path
@@ -265,7 +309,11 @@ export async function buildPassthroughAgentIfConfigured(
 
   return new HttpAgent({
     url,
-    headers: { Authorization: `Bearer ${credential.token}` },
+    headers: buildAuthHeaders(
+      credential.token,
+      credential.type,
+      credential.headerName,
+    ),
   });
 }
 

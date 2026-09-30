@@ -7,7 +7,11 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { CredentialTable, CREDENTIAL_TYPES, type CredentialType } from "@/lib/db/schema";
+import {
+  CredentialTable,
+  CREDENTIAL_TYPES,
+  type CredentialType,
+} from "@/lib/db/schema";
 import { decrypt } from "./crypto";
 import { logger } from "@/lib/observability/logger";
 import { isSupportedBackend } from "@/lib/backends/types";
@@ -36,7 +40,9 @@ export interface AgentCredentialConfig extends CredentialFullConfig {
 
 export interface CredentialFullConfig {
   id: string;
+  type?: CredentialType;
   token: string | null;
+  headerName?: string | null;
   restUrl: string | null;
   aguiUrl: string | null;
   /** Provider slug (e.g. "agno", "mastra", "openai"). */
@@ -100,12 +106,21 @@ function decryptPayloadSafely(encryptedPayload: string): Record<string, unknown>
   }
 }
 
-function extractTokenFromEncryptedPayload(encryptedPayload: string): string | null {
+function extractCredentialsFromEncryptedPayload(encryptedPayload: string): {
+  token: string | null;
+  headerName: string | null;
+} {
   const payload = decryptPayloadSafely(encryptedPayload);
-  if (!payload) return null;
+  if (!payload) return { token: null, headerName: null };
   const raw = payload.token ?? payload.key ?? payload.password;
-  if (typeof raw === "string" && raw.length > 0) return raw;
-  return null;
+  const token = typeof raw === "string" && raw.length > 0 ? raw : null;
+  const rawHeaderName = payload.headerName;
+  const headerName = typeof rawHeaderName === "string" && rawHeaderName.trim().length > 0 ? rawHeaderName.trim() : null;
+  return { token, headerName };
+}
+
+function extractTokenFromEncryptedPayload(encryptedPayload: string): string | null {
+  return extractCredentialsFromEncryptedPayload(encryptedPayload).token;
 }
 
 // In-memory cache — all sub-caches use lru-cache for unified TTL management.
@@ -294,6 +309,7 @@ export async function getCredentialConfigById(credentialId: string): Promise<Cre
   const rows = await db
     .select({
       id: CredentialTable.id,
+      type: CredentialTable.type,
       encryptedPayload: CredentialTable.encryptedPayload,
       restUrl: CredentialTable.restUrl,
       aguiUrl: CredentialTable.aguiUrl,
@@ -311,9 +327,12 @@ export async function getCredentialConfigById(credentialId: string): Promise<Cre
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  const { token, headerName } = extractCredentialsFromEncryptedPayload(row.encryptedPayload);
   const config: CredentialFullConfig = {
     id: row.id,
-    token: extractTokenFromEncryptedPayload(row.encryptedPayload),
+    type: (row.type as CredentialType) ?? "bearer_token",
+    token,
+    headerName,
     restUrl: row.restUrl ?? null,
     aguiUrl: row.aguiUrl ?? null,
     provider: row.provider ?? null,
@@ -338,6 +357,7 @@ export async function getAgentCredentialConfigById(
   const rows = await db
     .select({
       id: CredentialTable.id,
+      type: CredentialTable.type,
       encryptedPayload: CredentialTable.encryptedPayload,
       restUrl: CredentialTable.restUrl,
       aguiUrl: CredentialTable.aguiUrl,
@@ -358,9 +378,12 @@ export async function getAgentCredentialConfigById(
   const row = rows[0];
   if (!isSupportedBackend(row.provider)) return null;
 
+  const { token, headerName } = extractCredentialsFromEncryptedPayload(row.encryptedPayload);
   const config: AgentCredentialConfig = {
     id: row.id,
-    token: extractTokenFromEncryptedPayload(row.encryptedPayload),
+    type: (row.type as CredentialType) ?? "bearer_token",
+    token,
+    headerName,
     restUrl: row.restUrl ?? null,
     aguiUrl: row.aguiUrl ?? null,
     provider: row.provider,
@@ -379,6 +402,7 @@ export async function getAllAgentCredentials(): Promise<CredentialFullConfig[]> 
   const rows = await db
     .select({
       id: CredentialTable.id,
+      type: CredentialTable.type,
       encryptedPayload: CredentialTable.encryptedPayload,
       restUrl: CredentialTable.restUrl,
       aguiUrl: CredentialTable.aguiUrl,
@@ -393,13 +417,18 @@ export async function getAllAgentCredentials(): Promise<CredentialFullConfig[]> 
     )
     .orderBy(desc(CredentialTable.createdAt));
 
-  const configs: CredentialFullConfig[] = rows.map((row) => ({
-    id: row.id,
-    token: extractTokenFromEncryptedPayload(row.encryptedPayload),
-    restUrl: row.restUrl ?? null,
-    aguiUrl: row.aguiUrl ?? null,
-    provider: row.provider ?? null,
-  }));
+  const configs: CredentialFullConfig[] = rows.map((row) => {
+    const { token, headerName } = extractCredentialsFromEncryptedPayload(row.encryptedPayload);
+    return {
+      id: row.id,
+      type: (row.type as CredentialType) ?? "bearer_token",
+      token,
+      headerName,
+      restUrl: row.restUrl ?? null,
+      aguiUrl: row.aguiUrl ?? null,
+      provider: row.provider ?? null,
+    };
+  });
 
   agentCredentialsCache.set(SINGLETON, configs);
 

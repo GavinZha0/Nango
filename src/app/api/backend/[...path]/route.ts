@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { getAgentCredentialConfigById } from "@/lib/credentials/lookup";
 import { CREDENTIAL_ID_HEADER, CREDENTIAL_ID_PATTERN } from "@/lib/http/chat-headers";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
+import { buildAuthHeaders } from "@/lib/backends/bridge-runtime-kit.server";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,11 @@ async function proxy(
 
   // Forward a strict allowlist only.
   const forwardHeaders = buildForwardHeaders(request.headers);
-  forwardHeaders.set("Authorization", `Bearer ${cfg.token}`);
+  for (const [headerName, headerValue] of Object.entries(
+    buildAuthHeaders(cfg.token, cfg.type, cfg.headerName),
+  )) {
+    forwardHeaders.set(headerName, headerValue);
+  }
 
   const targetUrl = `${effectiveRestUrl}/${path.join("/")}${request.nextUrl.search}`;
 

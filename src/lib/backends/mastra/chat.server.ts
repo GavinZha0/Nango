@@ -15,6 +15,7 @@ import type { ChatContext, IBackendChatHandler } from "../types";
 import {
   assertValidSseResponse,
   attachBridgeConfig,
+  buildAuthHeaders,
   buildPassthroughAgentIfConfigured,
   createBridgeRunObservable,
   readSseLines,
@@ -47,6 +48,8 @@ interface BridgeConfig {
   /** Already trimmed of trailing slash, e.g. "http://localhost:4111/api". */
   baseUrl: string;
   apiKey: string;
+  type?: string;
+  headerName?: string | null;
   agentId: string;
 }
 
@@ -70,7 +73,11 @@ class MastraBridgeAgent extends AbstractAgent {
         signal: abortSignal,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.cfg.apiKey}`,
+          ...buildAuthHeaders(
+            this.cfg.apiKey,
+            this.cfg.type,
+            this.cfg.headerName,
+          ),
           Accept: "text/event-stream",
         },
         body: JSON.stringify({
@@ -235,6 +242,8 @@ export const mastraChatHandler: IBackendChatHandler = {
     return new MastraBridgeAgent({
       baseUrl: credential.value.baseUrl,
       apiKey: credential.value.apiKey,
+      type: credential.value.credential.type,
+      headerName: credential.value.credential.headerName,
       agentId: ctx.agentId,
     });
   },

@@ -226,4 +226,15 @@ describe("extractKeyPreview", () => {
       "the-t…en-yy",
     );
   });
+
+  it("returns full token string for anonymous placeholders", () => {
+    expect(extractKeyPreview({ token: "empty" })).toBe("empty");
+    expect(extractKeyPreview({ key: "none" })).toBe("none");
+    expect(extractKeyPreview({ token: "null" })).toBe("null");
+    expect(extractKeyPreview({ token: "dummy" })).toBe("dummy");
+    expect(extractKeyPreview({ token: "no_auth" })).toBe("no_auth");
+    expect(extractKeyPreview({ token: "anonymous" })).toBe("anonymous");
+    expect(extractKeyPreview({ token: "n/a" })).toBe("n/a");
+    expect(extractKeyPreview({ token: "disabled" })).toBe("disabled");
+  });
 });

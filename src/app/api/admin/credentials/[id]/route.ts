@@ -11,7 +11,7 @@ import {
   McpServerTable,
   CREDENTIAL_SERVICE_TYPES,
 } from "@/lib/db/schema";
-import { encrypt, extractKeyPreview } from "@/lib/credentials/crypto";
+import { decrypt, encrypt, extractKeyPreview } from "@/lib/credentials/crypto";
 import { invalidateForCredentialChange } from "@/lib/cache/invalidation";
 import { ApiError, withAdmin } from "@/lib/http/route-handlers";
 import {
@@ -60,32 +60,73 @@ export const PATCH = withAdmin<{ id: string }>(
     if (body.aguiUrl !== undefined) updates.aguiUrl = body.aguiUrl;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
 
-    if (body.payload) {
-      updates.encryptedPayload = encrypt(body.payload);
-      updates.metadata = { keyPreview: extractKeyPreview(body.payload) };
-    }
+    const row = await db.transaction(async (tx) => {
+      if (body.payload) {
+        const [existing] = await tx
+          .select({
+            encryptedPayload: CredentialTable.encryptedPayload,
+            metadata: CredentialTable.metadata,
+          })
+          .from(CredentialTable)
+          .where(eq(CredentialTable.id, id))
+          .limit(1);
 
-    const [row] = await db
-      .update(CredentialTable)
-      .set(updates)
-      .where(eq(CredentialTable.id, id))
-      .returning({
-        id: CredentialTable.id,
-        name: CredentialTable.name,
-        type: CredentialTable.type,
-        serviceType: CredentialTable.serviceType,
-        provider: CredentialTable.provider,
-        restUrl: CredentialTable.restUrl,
-        aguiUrl: CredentialTable.aguiUrl,
-        metadata: CredentialTable.metadata,
-        enabled: CredentialTable.enabled,
-        createdAt: CredentialTable.createdAt,
-        updatedAt: CredentialTable.updatedAt,
-      });
+        if (!existing) {
+          throw new ApiError("NOT_FOUND", 404, "Credential not found.");
+        }
 
-    if (!row) {
-      throw new ApiError("NOT_FOUND", 404, "Credential not found.");
-    }
+        let mergedPayload = body.payload;
+
+        if (existing.encryptedPayload) {
+          try {
+            const oldPayload = decrypt(existing.encryptedPayload);
+            mergedPayload = { ...oldPayload, ...body.payload };
+          } catch {
+            throw new ApiError(
+              "INTERNAL",
+              500,
+              "Failed to decrypt existing credential payload. Please verify CREDENTIAL_ENCRYPTION_KEYRING configuration.",
+            );
+          }
+        }
+
+        updates.encryptedPayload = encrypt(mergedPayload);
+        const headerName =
+          typeof mergedPayload.headerName === "string" && mergedPayload.headerName.trim()
+            ? mergedPayload.headerName.trim()
+            : existing.metadata?.headerName;
+
+        updates.metadata = {
+          ...existing.metadata,
+          keyPreview: extractKeyPreview(mergedPayload),
+          ...(headerName ? { headerName } : {}),
+        };
+      }
+
+      const [updatedRow] = await tx
+        .update(CredentialTable)
+        .set(updates)
+        .where(eq(CredentialTable.id, id))
+        .returning({
+          id: CredentialTable.id,
+          name: CredentialTable.name,
+          type: CredentialTable.type,
+          serviceType: CredentialTable.serviceType,
+          provider: CredentialTable.provider,
+          restUrl: CredentialTable.restUrl,
+          aguiUrl: CredentialTable.aguiUrl,
+          metadata: CredentialTable.metadata,
+          enabled: CredentialTable.enabled,
+          createdAt: CredentialTable.createdAt,
+          updatedAt: CredentialTable.updatedAt,
+        });
+
+      if (!updatedRow) {
+        throw new ApiError("NOT_FOUND", 404, "Credential not found.");
+      }
+
+      return updatedRow;
+    });
 
     // Credential payload or enabled-state changes can affect builtin agent
     // runtimes — drop only the AgentSpec / MCP entries that reference this

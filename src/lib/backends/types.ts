@@ -211,11 +211,17 @@ export function describeFetchStatus(status: number): string {
   }
 }
 
+export interface EntityFetchOptions {
+  type?: string;
+  headerName?: string | null;
+}
+
 /** Server-only entity-discovery fetcher used by `EntityCatalog`. */
 export type EntityFetcher = (
   credId: string,
   restUrl: string,
   token: string,
+  options?: EntityFetchOptions,
 ) => Promise<EntityFetchResult>;
 
 /**

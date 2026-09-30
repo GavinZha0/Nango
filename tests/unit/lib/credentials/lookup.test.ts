@@ -26,6 +26,7 @@ vi.mock("@/lib/credentials/crypto", () => ({
   decrypt: vi.fn((ciphertext: string) => {
     if (ciphertext === "valid-encrypted") return { token: "decrypted-token" };
     if (ciphertext === "key-only") return { key: "my-api-key" };
+    if (ciphertext === "key-with-header") return { key: "my-api-key", headerName: "X-Custom-Auth" };
     if (ciphertext === "bad-payload") return { foo: "bar" };
     throw new Error("decryption failed");
   }),
@@ -35,6 +36,7 @@ vi.mock("@/lib/credentials/crypto", () => ({
 vi.mock("@/lib/db/schema", () => ({
   CredentialTable: {
     id: "id",
+    type: "type",
     encryptedPayload: "encrypted_payload",
     restUrl: "rest_url",
     aguiUrl: "agui_url",
@@ -105,6 +107,7 @@ describe("getCredentialConfigById", () => {
   it("returns full config with decrypted token", async () => {
     mockDbQuery([{
       id: "cred-1",
+      type: "bearer_token",
       encryptedPayload: "valid-encrypted",
       restUrl: "http://localhost:7878",
       aguiUrl: "http://localhost:7878/agui/{agentId}/agui",
@@ -115,8 +118,32 @@ describe("getCredentialConfigById", () => {
     expect(result).toEqual({
       id: "cred-1",
       token: "decrypted-token",
+      type: "bearer_token",
+      headerName: null,
       restUrl: "http://localhost:7878",
       aguiUrl: "http://localhost:7878/agui/{agentId}/agui",
+      provider: "agno",
+    });
+  });
+
+  it("returns type and custom headerName for api_key credential", async () => {
+    mockDbQuery([{
+      id: "cred-2",
+      type: "api_key",
+      encryptedPayload: "key-with-header",
+      restUrl: "http://localhost:7878",
+      aguiUrl: null,
+      provider: "agno",
+    }]);
+
+    const result = await getCredentialConfigById("cred-2");
+    expect(result).toEqual({
+      id: "cred-2",
+      token: "my-api-key",
+      type: "api_key",
+      headerName: "X-Custom-Auth",
+      restUrl: "http://localhost:7878",
+      aguiUrl: null,
       provider: "agno",
     });
   });

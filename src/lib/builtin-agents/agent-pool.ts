@@ -194,6 +194,8 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
     sharedStateEnabled: resolveSharedStateEnabled(agent),
     maxSteps: agent.maxSteps,
     apiKey: credential.token,
+    credentialType: credential.type,
+    headerName: credential.headerName,
     restUrl: credential.restUrl,
     tools,
   };
