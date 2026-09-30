@@ -211,13 +211,17 @@ export function buildExtractDatasetTool(
       // snapshot is a historical artefact, and re-checking would
       // force a re-extract every time the policy tightens. The next
       // miss naturally re-applies the new policy.
+      // CONTRACT: A cache hit requires the query hash AND data source ID to match.
+      // Reusing the same dataset name with a different source or different query
+      // is a slot reassignment and must re-extract.
       const status = await getCacheStatus(args.dataset_name);
       if (
         !args.force_refresh &&
         status.exists &&
         status.isFresh &&
         status.meta &&
-        status.meta.queryHash === queryHash
+        status.meta.queryHash === queryHash &&
+        status.meta.dataSourceId === resolved.id
       ) {
         const preview =
           rowLimit > 0 && status.meta.rowCount > 0
@@ -237,14 +241,15 @@ export function buildExtractDatasetTool(
         } satisfies ExtractDatasetResult;
       }
 
-      // Slot semantics: same name + different query is a slot
-      // reassignment, not an error. commitWriteSlot does `rm -rf
+      // Slot semantics: same name + different query or different source
+      // is a slot reassignment, not an error. commitWriteSlot does `rm -rf
       // <final> && rename(tmp, final)` atomically. The log line
       // preserves observability so an admin can audit reassignments.
       const replacedPrior: boolean =
         status.exists &&
         status.meta != null &&
-        status.meta.queryHash !== queryHash;
+        (status.meta.queryHash !== queryHash ||
+          status.meta.dataSourceId !== resolved.id);
       if (replacedPrior && status.meta) {
         log.info(
           {
@@ -252,10 +257,16 @@ export function buildExtractDatasetTool(
             name: args.dataset_name,
             oldQueryHash: status.meta.queryHash,
             newQueryHash: queryHash,
+            oldDataSourceId: status.meta.dataSourceId,
+            newDataSourceId: resolved.id,
             oldRowCount: status.meta.rowCount,
             dataSourceName: args.data_source_name,
           },
-          `dataset "${args.dataset_name}" slot reassigned (different query)`,
+          `dataset "${args.dataset_name}" slot reassigned (${
+            status.meta.dataSourceId !== resolved.id
+              ? "different data source"
+              : "different query"
+          })`,
         );
       }
 

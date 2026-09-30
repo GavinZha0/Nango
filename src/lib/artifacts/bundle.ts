@@ -40,6 +40,8 @@ export interface ArtifactBundle {
   snapshotAt?: string;
   /** User-supplied input values applied during this live execution (if any). */
   appliedInputs?: Record<string, unknown>;
+  /** Input keys provided by caller that were not defined in workflow schema and were ignored. */
+  ignoredInputKeys?: string[];
 }
 
 export interface DataResolution {
@@ -85,6 +87,8 @@ export interface BundleOptions {
   forceFresh?: boolean;
   /** Optional user-supplied input values to override/populate input_schema defaults. */
   inputValues?: Record<string, unknown>;
+  /** When true, return stored snapshot if present, bypassing live workflow execution. */
+  preferSnapshot?: boolean;
 }
 
 // ─── Entry point ───────────────────────────────────────────────────────
@@ -146,12 +150,17 @@ export async function buildArtifactBundle(
     node.snapshot !== null &&
     node.snapshot !== undefined;
 
-  if (
-    (isSlideWithSnapshot || options?.forceFresh !== true) &&
-    (isSlideWithSnapshot || node.viewMode === "snapshot") &&
+  const shouldUseSnapshot =
+    (options?.preferSnapshot === true ||
+      isSlideWithSnapshot ||
+      options?.forceFresh !== true) &&
+    (options?.preferSnapshot === true ||
+      isSlideWithSnapshot ||
+      node.viewMode === "snapshot") &&
     node.snapshot !== null &&
-    node.snapshot !== undefined
-  ) {
+    node.snapshot !== undefined;
+
+  if (shouldUseSnapshot) {
     return {
       node,
       workflow: workflowMeta,

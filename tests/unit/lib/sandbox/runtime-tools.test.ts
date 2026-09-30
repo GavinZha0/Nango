@@ -90,6 +90,32 @@ describe("buildRunInSandboxTool", () => {
     });
   });
 
+  it("execute forwards params serialized into env overlay", async () => {
+    mockRun.mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 5,
+    });
+    const tool = buildRunInSandboxTool();
+    await tool.execute!({
+      language: "python",
+      code_text: "print(1)",
+      params: { threshold: 42, label: "test", active: true },
+    });
+    expect(mockRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        language: "python3",
+        env: {
+          __PARAMS__: JSON.stringify({ threshold: 42, label: "test", active: true }),
+          threshold: "42",
+          label: "test",
+          active: "true",
+        },
+      }),
+    );
+  });
+
   it("includes termination in the result when set", async () => {
     mockRun.mockResolvedValue({
       stdout: "",
@@ -107,6 +133,20 @@ describe("buildRunInSandboxTool", () => {
     // The adapter's `termination` field is not forwarded (not in CodeOutputEnvelope).
     expect((result as { ok: boolean }).ok).toBe(false);
     expect((result as { error: string | null }).error).toBe("killed");
+  });
+
+  it("rejects reserved __PARAMS__ key in params with validation error (P8)", async () => {
+    const tool = buildRunInSandboxTool();
+    const result = await tool.execute!({
+      language: "python",
+      code_text: "print(1)",
+      params: { __PARAMS__: "conflict", other: 123 },
+    });
+    expect((result as { ok: boolean }).ok).toBe(false);
+    expect((result as { error: string }).error).toContain(
+      "'__PARAMS__' is a reserved system parameter name and cannot be used in params",
+    );
+    expect(mockRun).not.toHaveBeenCalled();
   });
 });
 

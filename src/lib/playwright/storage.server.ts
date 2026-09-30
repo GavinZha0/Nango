@@ -90,18 +90,18 @@ export async function readPlaywrightScreenshot(
   // Candidate paths to check (handling both direct root and .playwright-mcp subdirectories)
   const ext = path.extname(filename).toLowerCase();
   const candidates: string[] = [
-    path.join(outputDir, filename),
-    path.join(outputDir, ".playwright-mcp", filename),
+    path.join(/*turbopackIgnore: true*/ outputDir, filename),
+    path.join(/*turbopackIgnore: true*/ outputDir, ".playwright-mcp", filename),
   ];
 
   if (!ext) {
     candidates.push(
-      path.join(outputDir, `${filename}.png`),
-      path.join(outputDir, `${filename}.webp`),
-      path.join(outputDir, `${filename}.jpg`),
-      path.join(outputDir, `${filename}.jpeg`),
-      path.join(outputDir, ".playwright-mcp", `${filename}.png`),
-      path.join(outputDir, ".playwright-mcp", `${filename}.webp`),
+      path.join(/*turbopackIgnore: true*/ outputDir, `${filename}.png`),
+      path.join(/*turbopackIgnore: true*/ outputDir, `${filename}.webp`),
+      path.join(/*turbopackIgnore: true*/ outputDir, `${filename}.jpg`),
+      path.join(/*turbopackIgnore: true*/ outputDir, `${filename}.jpeg`),
+      path.join(/*turbopackIgnore: true*/ outputDir, ".playwright-mcp", `${filename}.png`),
+      path.join(/*turbopackIgnore: true*/ outputDir, ".playwright-mcp", `${filename}.webp`),
     );
   }
 
@@ -114,7 +114,10 @@ export async function readPlaywrightScreenshot(
     }
 
     try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      if (
+        fs.existsSync(/*turbopackIgnore: true*/ candidate) &&
+        fs.statSync(/*turbopackIgnore: true*/ candidate).isFile()
+      ) {
         foundPath = candidate;
         break;
       }
@@ -137,7 +140,7 @@ export async function readPlaywrightScreenshot(
   }
 
   try {
-    const buffer = await fs.promises.readFile(foundPath);
+    const buffer = await fs.promises.readFile(/*turbopackIgnore: true*/ foundPath);
     const foundExt = path.extname(foundPath).toLowerCase();
     const mimeType = MIME_MAP[foundExt] || "image/png";
 

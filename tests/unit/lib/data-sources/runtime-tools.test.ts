@@ -311,6 +311,51 @@ describe("extract_dataset_by_sql tool — extraction path", () => {
     expect(mockExtract).not.toHaveBeenCalled();
   });
 
+  it("on same-name + same-query but DIFFERENT data_source_id, does NOT hit cache and replaces the slot", async () => {
+    const multiTool = buildExtractDatasetTool(["ds-uuid-1", "ds-uuid-2"]);
+
+    // First call extracts from data source 1
+    arrangeSuccessfulExtract([{ id: 1, name: "alice" }], {
+      id: "ds-uuid-1",
+      name: "source_a",
+    });
+    const first = (await multiTool.execute!({
+      dataset_name: "shared_slot",
+      data_source_name: "source_a",
+      sql_text: "SELECT * FROM users",
+    })) as { cache_hit: boolean; total_rows: number };
+    expect(first.cache_hit).toBe(false);
+    expect(first.total_rows).toBe(1);
+
+    // Second call with EXACT SAME dataset name and EXACT SAME SQL, but on data source 2
+    mockExtract.mockClear();
+    arrangeSuccessfulExtract([{ id: 2, name: "bob" }], {
+      id: "ds-uuid-2",
+      name: "source_b",
+    });
+    const second = (await multiTool.execute!({
+      dataset_name: "shared_slot",
+      data_source_name: "source_b",
+      sql_text: "SELECT * FROM users",
+    })) as { cache_hit: boolean; replaced_prior?: boolean; total_rows: number };
+
+    // Must NOT hit cache from source 1!
+    expect(second.cache_hit).toBe(false);
+    expect(second.replaced_prior).toBe(true);
+    expect(second.total_rows).toBe(1);
+    expect(mockExtract).toHaveBeenCalledTimes(1);
+
+    // Third call with source_b hits source_b's new cache
+    mockExtract.mockClear();
+    const third = (await multiTool.execute!({
+      dataset_name: "shared_slot",
+      data_source_name: "source_b",
+      sql_text: "SELECT * FROM users",
+    })) as { cache_hit: boolean; replaced_prior?: boolean };
+    expect(third.cache_hit).toBe(true);
+    expect(mockExtract).not.toHaveBeenCalled();
+  });
+
   it("does NOT set replaced_prior on force_refresh of an identical query", async () => {
     arrangeSuccessfulExtract([{ id: 1, name: "alice" }]);
     await tool.execute!(baseArgs);

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildWorkflowSpecFromRunEvents,
+  pruneUnreachableNodes,
   type ToolInvocation,
 } from "@/lib/workflows/build-from-events";
-import { LLMWorkflowSpecSchema } from "@/lib/workflows/spec/schema";
+import { LLMWorkflowSpecSchema, type LLMNode } from "@/lib/workflows/spec/schema";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────
 
@@ -21,6 +22,39 @@ function inv(
     ok: true,
     ...overrides,
   };
+}
+
+/** Captured `generate_echarts_config` invocation with data-bearing option. */
+function chartInvocation(opts: {
+  callId: string;
+  seq: number;
+  source: unknown[];
+}): ToolInvocation {
+  return inv({
+    callId: opts.callId,
+    toolName: "generate_echarts_config",
+    seq: opts.seq,
+    inputs: {
+      chart_id: "monthly-sales",
+      title: "Monthly Sales",
+      option: {
+        xAxis: { type: "category" },
+        yAxis: { type: "value" },
+        series: [
+          {
+            type: "bar",
+            encode: { x: "month", y: "sales" },
+          },
+        ],
+        dataset: { source: opts.source },
+      },
+    },
+    result: {
+      ok: true,
+      chart_id: "monthly-sales",
+      title: "Monthly Sales",
+    },
+  });
 }
 
 // ─── Step 2 / 3: locate artifact creator + filter chain ───────────────
@@ -131,12 +165,10 @@ describe("buildWorkflowSpecFromRunEvents — frontend_tool stripping", () => {
     });
   });
 
-  it("keeps every successful call except the artifact creator as a workflow node", () => {
-    // After the FRONTEND_TOOL_NAMES enumeration was retired, this
-    // means a stray earlier rendering call WILL show up in the
-    // workflow. That's acceptable (lineage report records it; a
-    // refresh would re-run it; not silent corruption) and matches
-    // the simpler "trust the supplied id" contract.
+  it("prunes stray earlier invocations that do not contribute to the terminal output", () => {
+    // With backward reachability pruning enabled, a stray earlier call
+    // (c1) that is not referenced by the terminal node's dependency chain
+    // is silently pruned from the persisted spec.
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
         inv({ callId: "c1", toolName: "fetch_data_table", seq: 1 }),
@@ -145,13 +177,12 @@ describe("buildWorkflowSpecFromRunEvents — frontend_tool stripping", () => {
       ],
       artifactCreatingCallId: "c3",
     });
-    // Only c3 (the artifact creator) is stripped; c1 + c2 BOTH
-    // become workflow nodes.
-    expect(out.spec.nodes).toHaveLength(2);
-    expect(out.spec.nodes.map((n) => (n as { inputs: { name: string } }).inputs.name)).toEqual([
-      "fetch_data_table",
+    // c3 is stripped as creator; c1 is unreferenced by c2 (which is the output node) → c1 pruned
+    expect(out.spec.nodes).toHaveLength(1);
+    expect((out.spec.nodes[0] as { inputs: { name: string } }).inputs.name).toBe(
       "render_markdown",
-    ]);
+    );
+    expect(out.lineageReport.pruned_node_ids).toEqual([0]);
   });
 
   it("emits a placeholder no-op node when there are no data invocations", () => {
@@ -173,8 +204,8 @@ describe("buildWorkflowSpecFromRunEvents — node bucket + ids", () => {
   it("assigns monotonic numeric ids in chronological order (D29)", () => {
     const out = buildWorkflowSpecFromRunEvents({
       invocations: [
-        inv({ callId: "c1", toolName: "fetch_data_table", seq: 1 }),
-        inv({ callId: "c2", toolName: "transform_dataset", seq: 2 }),
+        inv({ callId: "c1", toolName: "fetch_data_table", seq: 1, result: { dataset: "ds_orders_12345" } }),
+        inv({ callId: "c2", toolName: "transform_dataset", seq: 2, inputs: { source: "ds_orders_12345" } }),
         inv({ callId: "c3", toolName: "chart_renderer", seq: 3 }),
       ],
       artifactCreatingCallId: "c3",
@@ -407,6 +438,7 @@ describe("buildWorkflowSpecFromRunEvents — output passes LLMWorkflowSpecSchema
           inputs: {
             agent: "Builtin / DataAnalyst",
             task: "Summarise the dataset",
+            context: "ds_abc",
           },
           result: { summary: "5 rows" },
         }),
@@ -597,12 +629,14 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ ambiguous-match", () =>
       ],
       artifactCreatingCallId: "c4",
     });
-    const node3 = out.spec.nodes[2] as {
+    const consumerNode = (out.spec.nodes.find(
+      (n) => (n as { inputs: { name: string } }).inputs.name === "consumer",
+    ) ?? out.spec.nodes[0]) as {
       inputs: { arguments: Record<string, unknown> };
       depends_on: number[];
     };
-    expect(node3.inputs.arguments.from).toBe("ds_shared_id"); // kept literal
-    expect(node3.depends_on).toEqual([]); // no deps added
+    expect(consumerNode.inputs.arguments.from).toBe("ds_shared_id"); // kept literal
+    expect(consumerNode.depends_on).toEqual([]); // no deps added
     expect(out.lineageReport.ambiguous_matches).toHaveLength(1);
     expect(out.lineageReport.ambiguous_matches[0]!.value).toBe("ds_shared_id");
     expect(out.lineageReport.ambiguous_matches[0]!.possible_sources).toEqual([
@@ -739,11 +773,13 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ nested object (M1)", ()
       ],
       artifactCreatingCallId: "c2",
     });
-    const node1 = out.spec.nodes[1] as unknown as {
+    const consumerNode = (out.spec.nodes.find(
+      (n) => (n as { inputs: { name: string } }).inputs.name === "consumer",
+    ) ?? out.spec.nodes[0]) as unknown as {
       inputs: { arguments: { filter: Record<string, unknown> } };
     };
     // 8 chars: above top-level threshold but below nested threshold → NOT rewritten
-    expect(node1.inputs.arguments.filter.id).toBe(shortId);
+    expect(consumerNode.inputs.arguments.filter.id).toBe(shortId);
   });
 
   it("does NOT recurse into objects at depth 2 (only one level deep)", () => {
@@ -771,11 +807,13 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ nested object (M1)", ()
       ],
       artifactCreatingCallId: "c2",
     });
-    const node1 = out.spec.nodes[1] as unknown as {
+    const consumerNode = (out.spec.nodes.find(
+      (n) => (n as { inputs: { name: string } }).inputs.name === "consumer",
+    ) ?? out.spec.nodes[0]) as unknown as {
       inputs: { arguments: { a: { b: { id: string } } } };
     };
     // depth 2 is not walked → value stays literal
-    expect(node1.inputs.arguments.a.b.id).toBe(deepId);
+    expect(consumerNode.inputs.arguments.a.b.id).toBe(deepId);
   });
 
   it("still rewrites top-level values normally when the same input also has a nested object", () => {
@@ -1052,7 +1090,9 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c4",
     });
-    const node = out.spec.nodes[2] as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
+    const node = (out.spec.nodes.find(
+      (n) => (n as { inputs: { name: string } }).inputs.name === "sandbox",
+    ) ?? out.spec.nodes[0]) as { inputs: { arguments: Record<string, unknown> }; depends_on: number[]  };
     // Multi-source → stay literal, depends_on unchanged
     expect(node.inputs.arguments.datasets).toEqual(["shared-dataset-id"]);
     expect(node.depends_on).toEqual([]);
@@ -1082,7 +1122,9 @@ describe("buildWorkflowSpecFromRunEvents — Strategy Z+ array recursion (V1.1)"
       ],
       artifactCreatingCallId: "c3",
     });
-    const node = out.spec.nodes[1] as { inputs: { arguments: Record<string, unknown> } };
+    const node = (out.spec.nodes.find(
+      (n) => (n as { inputs: { name: string } }).inputs.name === "tool_b",
+    ) ?? out.spec.nodes[0]) as { inputs: { arguments: Record<string, unknown> } };
     expect(node.inputs.arguments.weights).toEqual([0.5, 1.5, 2.5]);
     expect(node.inputs.arguments.flags).toEqual([true, false]);
   });
@@ -1526,39 +1568,6 @@ describe("buildWorkflowSpecFromRunEvents — assembleSqlNode (D36)", () => {
 // ─── Chart artifact creator (Phase 1.4) ───────────────────────────────
 
 describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
-  /** Captured `generate_echarts_config` invocation with data-bearing option. */
-  function chartInvocation(opts: {
-    callId: string;
-    seq: number;
-    source: unknown[];
-  }): ToolInvocation {
-    return inv({
-      callId: opts.callId,
-      toolName: "generate_echarts_config",
-      seq: opts.seq,
-      inputs: {
-        chart_id: "monthly-sales",
-        title: "Monthly Sales",
-        option: {
-          xAxis: { type: "category" },
-          yAxis: { type: "value" },
-          series: [
-            {
-              type: "bar",
-              encode: { x: "month", y: "sales" },
-            },
-          ],
-          dataset: { source: opts.source },
-        },
-      },
-      result: {
-        ok: true,
-        chart_id: "monthly-sales",
-        title: "Monthly Sales",
-      },
-    });
-  }
-
   const ROWS = [
     { month: "2026-01", sales: 12500 },
     { month: "2026-02", sales: 13200 },
@@ -1980,3 +1989,296 @@ describe("buildWorkflowSpecFromRunEvents — chart artifact creator", () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+// ─── Backward Reachability Dead-Node Pruning ───────────────────────────
+
+describe("buildWorkflowSpecFromRunEvents — backward reachability pruning", () => {
+  it("prunes unrelated earlier tool calls when chart depends on SQL", () => {
+    const rows = [{ date: "2026-01-01", total: 100 }];
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c_weather",
+          toolName: "get_weather",
+          seq: 1,
+          inputs: { city: "Tokyo" },
+          result: { temp: 20 },
+        }),
+        inv({
+          callId: "c_sql",
+          toolName: "extract_dataset_by_sql",
+          seq: 2,
+          inputs: {
+            data_source_name: "sales-db",
+            sql_text: "SELECT date, total FROM sales",
+          },
+          result: {
+            dataset_name: "ds_sales_2026",
+            rows,
+            returned_rows: 1,
+            total_rows: 1,
+          },
+        }),
+        chartInvocation({
+          callId: "c_chart",
+          seq: 3,
+          source: rows,
+        }),
+      ],
+      artifactCreatingCallId: "c_chart",
+    });
+
+    // Unrelated get_weather call is pruned; only SQL and chart remain
+    expect(out.spec.nodes).toHaveLength(2);
+    expect(out.spec.nodes.map((n) => n.type)).toEqual(["sql", "chart"]);
+    const chart = out.spec.nodes[1]!;
+    expect(chart.depends_on).toEqual([1]); // c_sql had id 1 before pruning
+    expect(out.lineageReport.pruned_node_ids).toEqual([0]); // c_weather had id 0
+  });
+
+  it("retains multi-step dependency chain (SQL -> Code -> Chart)", () => {
+    const rawRows = [{ raw_val: 10 }, { raw_val: 20 }];
+    const aggRows = [{ sum_val: 30 }];
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c_unrelated",
+          toolName: "search_web",
+          seq: 1,
+          inputs: { query: "finance news" },
+          result: { snippets: [] },
+        }),
+        inv({
+          callId: "c_sql",
+          toolName: "extract_dataset_by_sql",
+          seq: 2,
+          inputs: {
+            data_source_name: "db",
+            sql_text: "SELECT raw_val FROM t",
+          },
+          result: {
+            dataset_name: "ds_raw_12345",
+            rows: rawRows,
+            returned_rows: 2,
+            total_rows: 2,
+          },
+        }),
+        inv({
+          callId: "c_code",
+          toolName: "run_code_in_sandbox",
+          seq: 3,
+          inputs: {
+            language: "python",
+            code_text: "df = duckdb.read_parquet(...)",
+            datasets: ["ds_raw_12345"],
+          },
+          result: { rows: aggRows },
+        }),
+        chartInvocation({
+          callId: "c_chart",
+          seq: 4,
+          source: aggRows,
+        }),
+      ],
+      artifactCreatingCallId: "c_chart",
+    });
+
+    expect(out.spec.nodes).toHaveLength(3);
+    expect(out.spec.nodes.map((n) => n.type)).toEqual(["sql", "code", "chart"]);
+    expect(out.lineageReport.pruned_node_ids).toEqual([0]);
+  });
+
+  it("retains converging branches where downstream depends on multiple upstream nodes", () => {
+    const rowsA = [{ a: 1 }];
+    const rowsB = [{ b: 2 }];
+    const rowsC = [{ merged: 3 }];
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        inv({
+          callId: "c_sql_a",
+          toolName: "extract_dataset_by_sql",
+          seq: 1,
+          inputs: { data_source_name: "db", sql_text: "SELECT a FROM t1" },
+          result: { dataset_name: "ds_a_123456", rows: rowsA },
+        }),
+        inv({
+          callId: "c_sql_b",
+          toolName: "extract_dataset_by_sql",
+          seq: 2,
+          inputs: { data_source_name: "db", sql_text: "SELECT b FROM t2" },
+          result: { dataset_name: "ds_b_123456", rows: rowsB },
+        }),
+        inv({
+          callId: "c_stray",
+          toolName: "calculator",
+          seq: 3,
+          inputs: { expr: "1 + 1" },
+          result: { val: 2 },
+        }),
+        inv({
+          callId: "c_code",
+          toolName: "run_code_in_sandbox",
+          seq: 4,
+          inputs: {
+            language: "python",
+            code_text: "merge(ds_a, ds_b)",
+            datasets: ["ds_a_123456", "ds_b_123456"],
+          },
+          result: { rows: rowsC },
+        }),
+        chartInvocation({
+          callId: "c_chart",
+          seq: 5,
+          source: rowsC,
+        }),
+      ],
+      artifactCreatingCallId: "c_chart",
+    });
+
+    // c_sql_a, c_sql_b, c_code, c_chart are retained; c_stray is pruned
+    expect(out.spec.nodes).toHaveLength(4);
+    expect(out.spec.nodes.map((n) => n.type)).toEqual(["sql", "sql", "code", "chart"]);
+    expect(out.lineageReport.pruned_node_ids).toEqual([2]);
+  });
+
+  it("preserves standalone single-node workflows without errors", () => {
+    const out = buildWorkflowSpecFromRunEvents({
+      invocations: [
+        chartInvocation({
+          callId: "c_chart_alone",
+          seq: 1,
+          source: [{ a: 1 }],
+        }),
+      ],
+      artifactCreatingCallId: "c_chart_alone",
+    });
+
+    expect(out.spec.nodes).toHaveLength(1);
+    expect(out.spec.nodes[0]!.type).toBe("chart");
+    expect(out.lineageReport.pruned_node_ids).toBeUndefined();
+  });
+});
+
+describe("pruneUnreachableNodes — cycle detection & resilience (P1, P2, P3)", () => {
+  const dummyToolNode = (id: number, dependsOn: number[] = []): LLMNode => ({
+    id,
+    type: "tool",
+    inputs: { source: "builtin", name: `tool_${id}`, arguments: {} },
+    depends_on: dependsOn,
+  });
+
+  it("detects direct cycle between two nodes, logs warning, and avoids infinite loop", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Node 1 depends on 0, Node 0 depends on 1 (cycle)
+    const nodes: LLMNode[] = [
+      dummyToolNode(0, [1]),
+      dummyToolNode(1, [0]),
+      dummyToolNode(2, []), // unreachable
+    ];
+
+    const result = pruneUnreachableNodes({
+      nodes,
+      outputs: { final: "@nodes.1.output" },
+      artifactCreatingCallId: "none",
+      dataInvocations: [],
+    });
+
+    // Both 0 and 1 are reachable from output node 1; node 2 is pruned
+    expect(result.prunedNodes.map((n) => n.id)).toEqual([0, 1]);
+    expect(result.prunedNodeIds).toEqual([2]);
+
+    // Warning was logged for cycle
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[pruneUnreachableNodes] Cycle detected"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("detects self-loop (node depends on itself), logs warning, and skips the edge", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Node 0 depends on 0 (self loop)
+    const nodes: LLMNode[] = [
+      dummyToolNode(0, [0]),
+      dummyToolNode(1, [0]),
+    ];
+
+    const result = pruneUnreachableNodes({
+      nodes,
+      outputs: { final: "@nodes.1.output" },
+      artifactCreatingCallId: "none",
+      dataInvocations: [],
+    });
+
+    expect(result.prunedNodes.map((n) => n.id)).toEqual([0, 1]);
+    expect(result.prunedNodeIds).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[pruneUnreachableNodes] Cycle detected"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("handles multi-node loop (2 -> 1 -> 0 -> 2) without hanging", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const nodes: LLMNode[] = [
+      dummyToolNode(0, [2]),
+      dummyToolNode(1, [0]),
+      dummyToolNode(2, [1]),
+      dummyToolNode(3, []), // disconnected
+    ];
+
+    const result = pruneUnreachableNodes({
+      nodes,
+      outputs: { final: "@nodes.2.output" },
+      artifactCreatingCallId: "none",
+      dataInvocations: [],
+    });
+
+    expect(result.prunedNodes.map((n) => n.id)).toEqual([0, 1, 2]);
+    expect(result.prunedNodeIds).toEqual([3]);
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it("safely skips references to non-existent node IDs in depends_on", () => {
+    const nodes: LLMNode[] = [
+      dummyToolNode(0, [999]), // 999 does not exist
+      dummyToolNode(1, []),
+    ];
+
+    const result = pruneUnreachableNodes({
+      nodes,
+      outputs: { final: "@nodes.0.output" },
+      artifactCreatingCallId: "none",
+      dataInvocations: [],
+    });
+
+    expect(result.prunedNodes.map((n) => n.id)).toEqual([0]);
+    expect(result.prunedNodeIds).toEqual([1]);
+  });
+
+  it("falls back to retaining all nodes when no valid terminal node can be identified", () => {
+    const nodes: LLMNode[] = [
+      dummyToolNode(0, []),
+      dummyToolNode(1, []),
+    ];
+
+    const result = pruneUnreachableNodes({
+      nodes,
+      // Ref points to non-existent node 888 and no valid creator
+      outputs: { final: "@nodes.888.output" },
+      artifactCreatingCallId: "non_existent_call",
+      dataInvocations: [],
+    });
+
+    expect(result.prunedNodes.map((n) => n.id)).toEqual([0, 1]);
+    expect(result.prunedNodeIds).toEqual([]);
+  });
+});
+
+

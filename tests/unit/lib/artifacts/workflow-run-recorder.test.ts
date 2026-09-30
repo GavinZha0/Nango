@@ -19,6 +19,8 @@ vi.mock("@/lib/runner/event-store", () => ({
 import {
   mapEngineEventToEventType,
   startRecording,
+  summarizeOutputsForEvent,
+  MAX_EVENT_PREVIEW_ROWS,
 } from "@/lib/artifacts/workflow-run-recorder";
 import type { WorkflowEngineEvent } from "@/lib/workflows/engine";
 
@@ -242,3 +244,178 @@ describe("startRecording — failure modes are best-effort", () => {
     await expect(recorder!.fail(new Error("boom"))).resolves.toBeUndefined();
   });
 });
+
+describe("summarizeOutputsForEvent & bounded audit persistence", () => {
+  it("caps large rows array to MAX_EVENT_PREVIEW_ROWS and sets rows_truncated", () => {
+    const rawRows = Array.from({ length: 150 }, (_, i) => ({ id: i, val: `v-${i}` }));
+    const outputs = {
+      dataset_name: "ds_large",
+      total_rows: 150,
+      rows: rawRows,
+    };
+
+    const summarized = summarizeOutputsForEvent(outputs);
+
+    expect(summarized.dataset_name).toBe("ds_large");
+    expect(summarized.total_rows).toBe(150);
+    expect(Array.isArray(summarized.rows)).toBe(true);
+    expect((summarized.rows as unknown[]).length).toBe(MAX_EVENT_PREVIEW_ROWS);
+    expect(summarized.rows_truncated).toBe(true);
+    // Original array is not mutated
+    expect(rawRows.length).toBe(150);
+  });
+
+  it("leaves small rows array (<= 20) untouched", () => {
+    const rawRows = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    const outputs = {
+      dataset_name: "ds_small",
+      rows: rawRows,
+    };
+
+    const summarized = summarizeOutputsForEvent(outputs);
+
+    expect(summarized.rows).toEqual(rawRows);
+    expect(summarized.rows_truncated).toBeUndefined();
+  });
+
+  it("summarizes large ECharts option.dataset.source", () => {
+    const rawSource = Array.from({ length: 50 }, (_, i) => ({ x: i, y: i * 2 }));
+    const outputs = {
+      option: {
+        series: [{ type: "bar" }],
+        dataset: {
+          source: rawSource,
+        },
+      },
+    };
+
+    const summarized = summarizeOutputsForEvent(outputs);
+    const option = summarized.option as Record<string, unknown>;
+    const dataset = option.dataset as Record<string, unknown>;
+
+    expect(Array.isArray(dataset.source)).toBe(true);
+    expect((dataset.source as unknown[]).length).toBe(MAX_EVENT_PREVIEW_ROWS);
+    expect(dataset.source_truncated).toBe(true);
+    expect(dataset.total_source_items).toBe(50);
+  });
+
+  it("truncates excessively large string properties (> 10,000 chars)", () => {
+    const hugeString = "a".repeat(25_000);
+    const outputs = {
+      huge_text: hugeString,
+    };
+
+    const summarized = summarizeOutputsForEvent(outputs);
+
+    expect(typeof summarized.huge_text).toBe("string");
+    expect((summarized.huge_text as string).length).toBeLessThan(2000);
+    expect(summarized.huge_text_truncated).toBe(true);
+  });
+
+  it("emit() persists summarized outputs to recordEvent without mutating original event", async () => {
+    recordRunStart.mockResolvedValue({ id: "run-bounded" });
+    recordEvent.mockResolvedValue(undefined);
+
+    const recorder = await startRecording({
+      workflowId: "wf-bounded",
+      ownerId: "user-1",
+    });
+
+    const originalRows = Array.from({ length: 100 }, (_, i) => ({ id: i }));
+    const event: WorkflowEngineEvent = {
+      type: "workflow_node_completed",
+      runId: "run-bounded",
+      nodeId: 1,
+      attempt: 1,
+      durationMs: 45,
+      outputs: {
+        dataset_name: "ds_test",
+        total_rows: 100,
+        rows: originalRows,
+      },
+    };
+
+    recorder!.emit(event);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recordEvent).toHaveBeenCalledTimes(1);
+    const [, , , persistedPayload] = recordEvent.mock.calls[0] as [
+      string,
+      number,
+      string,
+      Record<string, unknown>,
+    ];
+
+    expect(persistedPayload.type).toBe("workflow_node_completed");
+    const persistedOutputs = persistedPayload.outputs as Record<string, unknown>;
+    expect((persistedOutputs.rows as unknown[]).length).toBe(MAX_EVENT_PREVIEW_ROWS);
+    expect(persistedOutputs.rows_truncated).toBe(true);
+
+    // Verify original event object was NOT mutated
+    expect((event.outputs.rows as unknown[]).length).toBe(100);
+  });
+
+  it("P5: preserves both head and tail snippets when truncating oversized strings", () => {
+    const headText = "Error: Process terminated abnormally\nStack trace line 1\n";
+    const tailText = "\nCaused by: ConnectionRefusedError: port 5432 unreachable at db.ts:99";
+    const middlePadding = "x".repeat(30_000);
+    const hugeLog = headText + middlePadding + tailText;
+
+    const summarized = summarizeOutputsForEvent({ error_log: hugeLog });
+    const result = summarized.error_log as string;
+
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeLessThan(2000);
+    expect(result.startsWith(headText)).toBe(true);
+    expect(result.endsWith(tailText)).toBe(true);
+    expect(result).toContain("[truncated");
+    expect(summarized.error_log_truncated).toBe(true);
+    expect(summarized.error_log_truncated_position).toBe("middle");
+  });
+
+  it("P6: recursively caps large arrays nested inside objects", () => {
+    const nestedBigArray = Array.from({ length: 80 }, (_, i) => ({ item: i }));
+    const outputs = {
+      result: {
+        payload: {
+          items: nestedBigArray,
+        },
+      },
+    };
+
+    const summarized = summarizeOutputsForEvent(outputs);
+    const result = summarized.result as Record<string, unknown>;
+    const payload = result.payload as Record<string, unknown>;
+
+    expect(Array.isArray(payload.items)).toBe(true);
+    expect((payload.items as unknown[]).length).toBe(MAX_EVENT_PREVIEW_ROWS);
+    expect(payload.items_truncated).toBe(true);
+    expect(payload.items_total_count).toBe(80);
+  });
+
+  it("P6: restricts deep recursion beyond MAX_EVENT_NESTING_DEPTH", () => {
+    const deepObject = {
+      l1: {
+        l2: {
+          l3: {
+            l4: {
+              data: "too deep",
+            },
+          },
+        },
+      },
+    };
+
+    const summarized = summarizeOutputsForEvent(deepObject);
+    const l1 = summarized.l1 as Record<string, unknown>;
+    const l2 = l1.l2 as Record<string, unknown>;
+    const l3 = l2.l3 as Record<string, unknown>;
+
+    // At depth 3, l3 is truncated
+    expect(l3).toEqual({ _truncated_depth: true });
+  });
+});
+
+

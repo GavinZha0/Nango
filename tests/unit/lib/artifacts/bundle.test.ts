@@ -421,4 +421,31 @@ describe("buildArtifactBundle — snapshot mode", () => {
     expect(bundle.fromSnapshot).toBe(false);
     expect(deps.executeCalls).toHaveLength(1);
   });
+
+  it("returns snapshot data when preferSnapshot=true even if viewMode='live'", async () => {
+    const snapshotData = { rows: [{ id: 100 }] };
+    const snapshotAt = new Date("2026-05-24T10:00:00Z");
+    const deps = buildDeps({
+      getArtifact: async () =>
+        artifactRow({
+          viewMode: "live",
+          snapshot: snapshotData,
+          snapshotAt,
+        }),
+      executeWorkflow: async () => ({
+        data: { rows: [{ id: 200 }] },
+        fromCache: false,
+        executedAt: new Date("2026-05-24T11:00:00Z"),
+      }),
+    });
+    const bundle = await buildArtifactBundle(ARTIFACT_ID, OWNER, deps, {
+      preferSnapshot: true,
+    });
+
+    expect(bundle.data).toEqual(snapshotData);
+    expect(bundle.fromSnapshot).toBe(true);
+    expect(bundle.snapshotAt).toBe(snapshotAt.toISOString());
+    expect(deps.executeCalls).toHaveLength(0);
+  });
 });
+

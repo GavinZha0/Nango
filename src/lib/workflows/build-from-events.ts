@@ -11,7 +11,7 @@
  * See docs/workflow.md.
  */
 
-import { isRefCandidate } from "./spec/refs";
+import { isRefCandidate, parseRef } from "./spec/refs";
 import {
   type ChartRenderer,
   type CodeLanguage,
@@ -112,6 +112,11 @@ export interface SaveLineageReport {
     field: string;
     full_value: string;
   }>;
+  /**
+   * Node ids that were pruned because they are not in the backward
+   * reachability closure of the terminal output nodes.
+   */
+  pruned_node_ids?: ReadonlyArray<number>;
 }
 
 /**
@@ -318,10 +323,22 @@ export function buildWorkflowSpecFromRunEvents(
         dataInvocations,
       );
 
+  const { prunedNodes, prunedNodeIds } = pruneUnreachableNodes({
+    nodes: reconciled.nodes,
+    outputs,
+    artifactCreatingCallId,
+    dataInvocations,
+  });
+
+  const lineageReport: SaveLineageReport = {
+    ...reconciled.lineageReport,
+    ...(prunedNodeIds.length > 0 && { pruned_node_ids: prunedNodeIds }),
+  };
+
   const spec: LLMWorkflowSpec = {
     name: deriveWorkflowName(artifactCreator),
-    nodes: reconciled.nodes.length > 0
-      ? reconciled.nodes
+    nodes: prunedNodes.length > 0
+      ? prunedNodes
       : [placeholderNoOpNode()],
     outputs,
   };
@@ -330,7 +347,7 @@ export function buildWorkflowSpecFromRunEvents(
     spec,
     strippedFrontendConfig,
     artifactCreatorToolName: artifactCreator.toolName,
-    lineageReport: reconciled.lineageReport,
+    lineageReport,
   };
 }
 
@@ -1456,4 +1473,109 @@ function readObjectField(
   const v = obj[key];
   if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined;
   return v as Record<string, unknown>;
+}
+
+// ─── Backward Reachability Pruning ──────────────────────────────────────
+
+export interface PruneNodesInput {
+  nodes: ReadonlyArray<LLMNode>;
+  outputs: Record<string, string>;
+  artifactCreatingCallId: string;
+  dataInvocations: ReadonlyArray<ToolInvocation>;
+}
+
+export interface PruneNodesOutput {
+  prunedNodes: LLMNode[];
+  prunedNodeIds: number[];
+}
+
+/**
+ * Prune nodes that do not contribute to the workflow's terminal outputs.
+ *
+ * An artifact is produced by a specific terminal invocation (e.g. chart, html,
+ * or the last active data tool). Any captured tool invocations in the chat thread
+ * that do not contribute (via @nodes refs or transitive `depends_on` edges) to
+ * the terminal output nodes are orphan / dead nodes (such as exploratory dead-end
+ * queries, intermediate attempts, or unrelated chit-chat).
+ *
+ * This function performs backward reachability traversal from all nodes
+ * referenced in `outputs` (and the artifact creator node itself) through their
+ * transitive `depends_on` lists, and retains only reachable ancestor nodes.
+ */
+export function pruneUnreachableNodes(input: PruneNodesInput): PruneNodesOutput {
+  const { nodes, outputs, artifactCreatingCallId, dataInvocations } = input;
+
+  if (nodes.length <= 1) {
+    return { prunedNodes: [...nodes], prunedNodeIds: [] };
+  }
+
+  // 1. Build index of nodes
+  const nodeById = new Map<number, LLMNode>();
+  for (const node of nodes) {
+    nodeById.set(node.id, node);
+  }
+
+  // 2. Identify terminal root nodes from spec.outputs refs
+  const terminalNodeIds = new Set<number>();
+  for (const refStr of Object.values(outputs)) {
+    const parsed = parseRef(refStr);
+    if (parsed !== null && parsed.kind === "node" && nodeById.has(parsed.nodeId)) {
+      terminalNodeIds.add(parsed.nodeId);
+    }
+  }
+
+  // Also include the node corresponding to the artifact creator invocation if present in dataInvocations
+  const creatorIdx = dataInvocations.findIndex(
+    (inv) => inv.callId === artifactCreatingCallId,
+  );
+  if (creatorIdx >= 0 && creatorIdx < nodes.length) {
+    terminalNodeIds.add(nodes[creatorIdx]!.id);
+  }
+
+  // If no terminal nodes can be identified, do not prune (conservative fallback)
+  if (terminalNodeIds.size === 0) {
+    return { prunedNodes: [...nodes], prunedNodeIds: [] };
+  }
+
+  // 3. DFS backward reachability traversal with cycle detection (visiting set)
+  const reachableNodeIds = new Set<number>();
+  const visiting = new Set<number>();
+
+  function dfs(currentId: number) {
+    if (reachableNodeIds.has(currentId)) return;
+    visiting.add(currentId);
+
+    const node = nodeById.get(currentId);
+    if (node && Array.isArray(node.depends_on)) {
+      for (const depId of node.depends_on) {
+        if (!nodeById.has(depId)) continue;
+        if (depId === currentId || visiting.has(depId)) {
+          console.warn(
+            `[pruneUnreachableNodes] Cycle detected: node ${currentId} depends on ${depId} which is already in the traversal path. Skipping dependency edge.`,
+          );
+          continue;
+        }
+        if (!reachableNodeIds.has(depId)) {
+          dfs(depId);
+        }
+      }
+    }
+
+    visiting.delete(currentId);
+    reachableNodeIds.add(currentId);
+  }
+
+  for (const termId of terminalNodeIds) {
+    dfs(termId);
+  }
+
+  const prunedNodes = nodes.filter((n) => reachableNodeIds.has(n.id));
+  const prunedNodeIds = nodes
+    .filter((n) => !reachableNodeIds.has(n.id))
+    .map((n) => n.id);
+
+  return {
+    prunedNodes,
+    prunedNodeIds,
+  };
 }

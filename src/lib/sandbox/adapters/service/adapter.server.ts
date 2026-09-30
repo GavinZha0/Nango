@@ -77,19 +77,35 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
       let preamble =
         `import os as __nango_os, sys as __nango_sys\n` +
         `__nango_data_root = '/tmp/data'\n` +
-        `DATA_DIR = __nango_data_root\n`;
+        `DATA_DIR = __nango_data_root\n` +
+        `params = {}\n`;
 
+      if (input.env) {
+        for (const [k, v] of Object.entries(input.env)) {
+          preamble += `__nango_os.environ[${JSON.stringify(k)}] = ${JSON.stringify(v)}\n`;
+        }
+      }
       if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
-        const rawParams = input.env[SANDBOX_PARAMS_ENV_KEY];
-        preamble += `__nango_os.environ['${SANDBOX_PARAMS_ENV_KEY}'] = ${JSON.stringify(rawParams)}\n`;
+        preamble +=
+          `import json as __nango_json\n` +
+          `try:\n` +
+          `    params = __nango_json.loads(__nango_os.environ['${SANDBOX_PARAMS_ENV_KEY}'])\n` +
+          `except Exception:\n` +
+          `    pass\n`;
       }
       code = preamble + code;
     } else if (language === "javascript") {
-      if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
-        const rawParams = input.env[SANDBOX_PARAMS_ENV_KEY];
-        const preamble = `process.env[${JSON.stringify(SANDBOX_PARAMS_ENV_KEY)}] = ${JSON.stringify(rawParams)};\n`;
-        code = preamble + code;
+      let preamble = `let params = {};\n`;
+      if (input.env) {
+        for (const [k, v] of Object.entries(input.env)) {
+          preamble += `process.env[${JSON.stringify(k)}] = ${JSON.stringify(v)};\n`;
+        }
       }
+      if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
+        preamble +=
+          `try { params = JSON.parse(process.env[${JSON.stringify(SANDBOX_PARAMS_ENV_KEY)}] || '{}'); } catch {}\n`;
+      }
+      code = preamble + code;
     }
 
     const endpoint = `${baseUrl}/v1/sandbox/run`;

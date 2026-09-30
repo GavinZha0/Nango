@@ -352,12 +352,14 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
       const activeSessionInputs = sessionAppliedInputsMap.get(artifactId);
       const inputsToSave = inputs ?? activeSessionInputs;
 
-      let slideSnapshot: Record<string, unknown> | undefined;
+      let currentSnapshot: Record<string, unknown> | undefined;
       if (node?.type === "slide") {
         const liveDoc = await getBentoDocFromIframe(slideIframeRef.current);
         if (liveDoc && isSlideDoc(liveDoc)) {
-          slideSnapshot = liveDoc;
+          currentSnapshot = liveDoc;
         }
+      } else if (data?.data && typeof data.data === "object") {
+        currentSnapshot = data.data as Record<string, unknown>;
       }
 
       const res = await fetch(`/api/artifacts/${artifactId}/snapshot`, {
@@ -365,7 +367,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           inputs: inputsToSave && Object.keys(inputsToSave).length > 0 ? inputsToSave : undefined,
-          snapshot: slideSnapshot,
+          snapshot: currentSnapshot,
         }),
       });
       if (!res.ok) {
@@ -383,7 +385,7 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     } catch (err) {
       toast.error(`Save snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [artifactId, node]);
+  }, [artifactId, node, data]);
 
   const handleLoadSnapshot = useCallback(async (): Promise<void> => {
     if (!node || node.viewMode === "snapshot") return;

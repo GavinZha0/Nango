@@ -1,6 +1,6 @@
 # Workflow Dataflow, Parameters, and Filters (Spec v2)
 
-> **Status:** Approved design, not yet implemented. See `workflow.md`, `artifact-filters.md`, `data-sources.md`, and `sandbox.md` for existing behavior. Existing workflow rows are deleted rather than migrated (S10, D9); the execution plan is S9.
+> **Status:** Active Implementation. **Phase 0 (Early-Bird Groundwork & Hardening) is COMPLETE (tested & verified)**; Phase 1 (Spec v2 Engine Rewrite) is queued next. See `workflow.md`, `artifact-filters.md`, `data-sources.md`, and `sandbox.md` for existing behavior. Existing workflow rows are deleted rather than migrated (S10, D9); the execution plan is §9.
 
 ## 0. Design principles
 
@@ -233,8 +233,8 @@ A ref is recognized **only when the whole string value is exactly one ref**; the
 | Severity | Effect | Examples |
 |---|---|---|
 | `error` | Blocks the write | `Unknown ref`, `cycle`, `SPEC_REF_NOT_ALLOWED`, `SQL_PARAMS_NOT_ENABLED`, `DATA_SOURCE_NOT_FOUND` |
-| `not_refreshable` | Write succeeds; `artifact.refreshable = false`; message shown in the UI | Chart with baked data (§4.3), data from an omitted non-replayable invocation, `HARDCODED_DATASET_PATH` |
-| `warning` | Informational only | Unused node, ambiguous Strategy Z+ match kept literal |
+| `not_refreshable` | Write succeeds; sets `artifact.refreshable = false` **if and only if** the issue falls within the ancestor closure of `artifact.workflow_output_field` (§6). If present only in an unrelated branch, surfaces as a spec warning without disabling refresh for the selected output; message shown in the UI | Chart bound to truncated SQL rows exceeding inline budget (§4.3), data from an omitted non-replayable invocation, `HARDCODED_DATASET_PATH` |
+| `warning` | Informational only | Unused node, ambiguous Strategy Z+ match kept literal, `not_refreshable` issue in an unselected branch |
 
 The Inspector and a future agent editor fix every issue in one pass.
 
@@ -423,6 +423,7 @@ Non-replayable invocations are **omitted from the DAG**, and their outputs stay 
 3. Code `datasets` elements that uniquely match an upstream captured `dataset_name` become `@nodes.<id>.dataset_name` (Strategy Z+, unchanged). Ambiguous values stay literal and are reported in the lineage report.
 4. The captured chat `dataset_name` becomes the SQL node's optional `dataset_label`.
 5. Node ids are derived from the tool and position (`sql_1`, `code_1`, `chart_1`) and are never renumbered later.
+6. **Dead-node pruning via backward reachability (save-time slicing).** The save pipeline must produce a clean, minimal DAG. After Strategy Z+ and deterministic `dataset_id` bindings reconstruct `@nodes.*` references, the pipeline performs a backward reachability traversal from the artifact-creating terminal node (e.g. `chart_1`) through all inferred data references to compute its exact ancestor set (`RequiredAncestorNodeIds`). Any successful tool invocation captured earlier in the thread that does not contribute to this ancestor closure (such as exploratory dead-end queries, unrelated tool calls from chit-chat, or abandoned intermediate attempts) is **silently pruned from `nodes` before persisting**. The pruned invocation IDs are recorded in `lineageReport.pruned_invocations` for forensic audit. This guarantees that the persisted workflow contains zero dangling/orphan nodes and triggers zero `Unused node` lint warnings.
 
 ### 4.3 Direct SQL -> chart cases at Save
 
@@ -432,16 +433,16 @@ The agent may return up to 200 rows in chat. It reports `total_rows`, and it sho
 |---|---|
 | `returned_rows === total_rows` (≤ 200) | Bind chart to SQL `rows`. Refreshable. |
 | Truncated in chat, `total_rows` ≤ workflow inline budget (e.g. 350 total, 200 shown) | Bind chart to SQL `rows`. Refreshable. The first run (§4.4) produces the *complete* chart, better than the chat preview. The Save response notes that the saved chart shows all rows. |
-| `total_rows` > workflow inline budget | Keep the chat option's baked data (existing not-refreshable fallback). Save succeeds with a `not_refreshable` issue: "result exceeds chart budget; aggregate in SQL or add a Python step". |
+| `total_rows` > workflow inline budget | Store the chat-captured rendered chart in `artifact.snapshot` (viewable immediately), while keeping `chart.inputs.config` as a pure data-free template (preventing spec bloat and avoiding `CHART_CONFIG_TOO_LARGE`). Save succeeds with a `not_refreshable` issue on the chart node: "result exceeds chart budget; aggregate in SQL or add a Python step". |
 | Chart data from Python `rows` | Bind to `@nodes.<code_id>.rows`. Refreshable if the code uses `datasets[i]` (no hard-coded path) and output fits the budget. |
 
 ### 4.4 Save = compile + first run
 
-Save runs `compile` + `lint`, persists the authoring spec, then executes the workflow once with `force_refresh = false` (as `saveArtifact` already does today). Because cache lookup is by query identity (§7), the SQL nodes hit the Parquet the chat just wrote. The first run does not query the source unless the chat dataset expired or was replaced. That first run's output becomes the initial snapshot (with `snapshot_inputs` and `snapshot_at`), so the saved artifact shows workflow-produced data rather than LLM-copied data.
+Save runs `compile` + `lint` on the pruned minimal spec, persists the authoring spec, then executes the workflow once with `force_refresh = false` (as `saveArtifact` already does today). Because cache lookup is by query identity (§7), the SQL nodes hit the Parquet the chat just wrote. The first run does not query the source unless the chat dataset expired or was replaced. That first run's output becomes the initial snapshot (with `snapshot_inputs` and `snapshot_at`), so the saved artifact shows workflow-produced data rather than LLM-copied data.
 
 If the first run fails, the artifact is **still saved** with the chat-captured snapshot, and the failure is persisted in `artifact.last_run_error` ( `{ code, message, node_id, at }` ). The UI shows it until a later refresh succeeds, so the user can fix the spec in the Inspector (S10, D3). Today `saveArtifact` already runs a non-fatal first execution, but `executeWorkflow` turns a `WorkflowError` into `null` and the failure only reaches a server log. Making it visible is the change.
 
-`artifact.refreshable` is recomputed on every write: `false` exactly when `lint` reports any `not_refreshable` issue (§2.5). Those messages are returned with the save response and shown on the artifact.
+`artifact.refreshable` is recomputed on every write: `false` exactly when `lint` reports any `not_refreshable` issue **within the ancestor closure of `artifact.workflow_output_field`** (§2.5, §6). Those messages are returned with the save response and shown on the artifact. Issues outside the closure do not disable refresh.
 
 ### 4.5 Save does not create filters
 
@@ -471,7 +472,7 @@ A chat-derived spec has baked-in SQL and an empty `input_schema`, and the Filter
 3. **Count check.** Collect parameter nodes from the AST. Their count must equal the substitution count. A token that was inside a string literal (`'@inputs.x'`) or a comment does not appear as a parameter node, so a mismatch rejects the template.
 4. **Position check.** Every parameter node must be in a value-expression position. Reject identifiers, table/function names, LIMIT / ORDER BY targets, or any other non-value slot.
 5. **Bind.** Emit the provider's real placeholders (`$n` / `?`) or adapter-rendered literals, with typed values: strings (including ISO dates), finite numbers, booleans, explicit null. A repeated key reuses one binding. Nullable optional filters use `(@inputs.k IS NULL OR col = @inputs.k)`, never `= NULL`.
-6. **Arrays.** Only `col IN (@inputs.arr)` is supported. Expand to one placeholder per element. An empty array compiles to a constant-false predicate (`1=0`), never `IN ()`. `NOT IN` and other array uses are rejected in v1.
+6. **Arrays.** Only `col IN (@inputs.arr)` is supported. A non-empty array expands to one placeholder per element: `col IN ($1, $2, ...)`. When the resolved input array is empty, the compiler rewrites the **entire** `col IN (@inputs.arr)` predicate in the AST into a constant-false predicate `(1=0)`, never invalid SQL like `col IN ()` or type-mismatched `col IN (1=0)`. `NOT IN` and other array uses are rejected in v1.
 7. **Policy.** Run the source's read-only/table policy on the SQL that will execute, at extraction time.
 
 If a dialect cannot be parsed reliably, that provider does not support filter parameters yet; its unparameterized extraction keeps working. Providers that cannot bind (the DuckDB-extension `COPY` path and current Vertica adapter reject `ExtractInput.params`) need an adapter-owned, value-position-only literal renderer, tested for quoting/arrays/null, before filters are enabled for them. Changing a TypeScript type is not an implementation. Until this compiler ships, `@inputs` in `sql_text` is a lint error (§2.4).
@@ -491,23 +492,42 @@ A future `GET /api/artifacts/[id]/filters` uses `withSession` plus the artifact'
 
 ### 5.5 Filter UI
 
-Keep the existing View/Workflow switch, the chart preview, the graph, and the horizontally resizable chart/Filter layout (Filter collapsed when there are no properties). RJSF with the shadcn theme renders `input_schema`. Apply sends `POST /api/artifacts/[id]/refresh { inputs }`. SQL is the pushdown point, Python receives the same `inputs`, and ECharts must not silently re-filter the same field (presentation-only transforms such as sorting remain fine).
+Keep the existing View/Workflow switch, the chart preview, the graph, and the horizontally resizable chart/Filter layout (Filter collapsed when there are no properties). RJSF with the shadcn theme renders `input_schema`. Apply sends `POST /api/artifacts/[id]/refresh { inputs }`, which executes the workflow against live source data and updates the in-session display **without automatically overwriting the persisted snapshot**. If the user wishes to save the refreshed result as the baseline, they explicitly click "Save as snapshot" (triggering `POST /api/artifacts/[id]/snapshot { inputs }`). SQL is the pushdown point, Python receives the same `inputs`, and ECharts must not silently re-filter the same field (presentation-only transforms such as sorting remain fine).
 
-## 6. Run semantics
+## 6. Run semantics and operation contracts
 
-| Action | Executes workflow | Persists |
-|---|---|---|
-| `GET /api/artifacts/[id]` | **No.** Returns `snapshot`, `snapshot_inputs`, `snapshot_at`, `last_run_error`, `refreshable`, and the spec. | Nothing |
-| `POST /[id]/refresh { inputs }` | **Yes**, `force_refresh = false` (normally a cache hit right after a refresh). The server never trusts client-supplied chart output. | `snapshot`, `snapshot_inputs`, `snapshot_at`. It no longer writes `value` into the spec (today `save-snapshot.ts` does). The slide `directSnapshot` path is unchanged. |
-| Save (§4.4) | **Yes**, once, `force_refresh = false` | Initial snapshot, or `last_run_error` |
+The engine strictly decouples **Save**, **Refresh**, and **Save Snapshot** into distinct contracts, rather than conflating source extraction freshness, event recording, and snapshot persistence behind a single overloaded `forceFresh` flag:
 
-An artifact execution evaluates only the ancestor closure of the node referenced by the artifact's `workflow_output_field`. Unrelated branches (another chart, its code nodes) are neither executed nor able to fail the run. Engine-level tests may still run a full DAG.
+| Action | Reason / Mode | Data Freshness | Executes workflow | Persists |
+|---|---|---|---|---|
+| `GET /api/artifacts/[id]` | `view` | `from_storage` | **No.** Returns stored `snapshot`, `snapshot_inputs`, `snapshot_at`, `last_run_error`, closure-scoped `refreshable`, and `spec`. | Nothing |
+| `POST /[id]/refresh { inputs }` | `refresh` | `force_fresh` (re-queries source SQL; bypasses Parquet cache hit) | **Yes**, evaluates only the ancestor closure of `artifact.workflow_output_field`. | **Does NOT save snapshot.** Writes/updates `last_run_error` on failure, clears `last_run_error` on success. Returns fresh rendered `data` and `executedAt` to the client session. |
+| `POST /[id]/snapshot { inputs }` | `snapshot` | `from_session` | **No re-execution needed** when persisting the verified in-memory session result; or controlled verification run. | Persists `snapshot`, `snapshot_inputs`, `snapshot_at`. Triggered **only** when user explicitly clicks "Save as snapshot". |
+| Save (§4.4) | `save` | `allow_cache` (hits chat-extracted Parquet slot) | **Yes**, once for initial verification. | Persists authoring `spec`, initial `snapshot`, `snapshot_inputs`, `snapshot_at` (or `last_run_error`). |
 
-A failed refresh returns an actionable error (node id, error code, hint), writes `last_run_error`, and keeps the last snapshot. Missing data is never treated as success. A successful refresh clears `last_run_error`.
+### 6.1 Decoupled Execution Parameters
 
-Today GET executes the workflow when `view_mode = 'live'`, or when the snapshot is NULL. Both paths are removed (S10, D2). `artifact.view_mode` is dropped. The UI's "Snapshot / Live" toggle becomes client state: it shows the stored snapshot, or the latest refresh result of this session (unsaved until the user saves it as the snapshot). An artifact without a snapshot shows an empty state with a Refresh button.
+In code, the adapter interface (`executeWorkflow`) decouples the overloaded flags into explicit dimensions:
+1. `reason`: `"save" | "refresh" | "snapshot"` (drives event timeline labeling and audit logs).
+2. `forceFresh`: `boolean` (when `true`, SQL extraction re-queries the database source; `false` allows Parquet identity cache hits). **Refresh requests always specify `forceFresh: true`**.
+3. `persistSnapshot`: `boolean` (only `true` on Save and Save Snapshot; **never** on Refresh).
+4. `subAgentPolicy`: `"dispatch" | "stub"` (agents execute on explicit user refresh; stubbed during unattended initial validations).
+
+### 6.2 Scope of Execution & Refreshability
+
+- An artifact execution evaluates **only the ancestor closure** of the node referenced by the artifact's `workflow_output_field`. Unrelated branches (another chart, its code nodes) are neither executed nor able to fail the run.
+- `artifact.refreshable` is computed strictly against the **same ancestor closure**: if a not-refreshable issue (such as hardcoded paths or untracked tool dependencies) exists only in an unselected branch, it produces a workflow warning but does **not** mark the artifact as unrefreshable.
+- A failed refresh returns an actionable error (node id, error code, hint), writes `last_run_error`, and keeps the last snapshot intact. Missing data is never treated as success. A successful refresh clears `last_run_error`.
+- Today GET executes the workflow when `view_mode = 'live'`, or when the snapshot is NULL. Both paths are removed (S10, D2). `artifact.view_mode` is dropped. The UI's "Snapshot / Live" toggle becomes purely client-side session state: it displays the stored snapshot, or the latest refresh result of this session (unsaved until the user clicks "Save as snapshot"). An artifact without a snapshot shows an empty state with a Refresh button.
 
 Artifact columns after this change: `snapshot` (rendered output, unchanged shape), `snapshot_inputs` jsonb (new), `snapshot_at`, `last_run_error` jsonb (new), `refreshable` boolean NOT NULL DEFAULT true (new). `view_mode` is dropped.
+
+### 6.3 Terminal Output Contract Verification (ZEN Engine pattern)
+
+Beyond graph-level topological reachability and JSON syntax validity, the engine enforces a strict **Terminal Output Contract** on the selected `artifact.workflow_output_field` before declaring any execution successful:
+1. **Chart outputs**: The resolved `option` object must be a non-null, valid renderer template (with valid series/axes), and every bound dataset must prove completeness (`returned_rows === total_rows`). Truncated previews or malformed option structures fail the run immediately with `CHART_DATA_INCOMPLETE` or `OUTPUT_SCHEMA_MISMATCH`.
+2. **Code / Tool outputs**: The emitted payload must strictly conform to its declared runtime envelope or `output_schema`.
+3. **Failure semantics**: An execution where intermediate nodes ran with exit code 0 but the terminal output field fails this contract is marked failed, writes `last_run_error`, and keeps the previous snapshot. It never renders a blank canvas or displays partial data under a "Refresh successful" badge.
 
 ## 7. Shared Parquet cache
 
@@ -526,11 +546,26 @@ Keep the local cache, TTL (24 h default), boot purge, source-deletion purge, and
 
 Every write goes through `compile + lint` (§2.5): `build-from-events`, `PATCH /api/artifacts/[id]/nodes/[nodeId]`, and any future agent editor. Clients send the authoring form only. Today `updateArtifact` / `updateWorkflowNode` only run `validate` and write the client-supplied canonical node directly; they must switch to authoring-form input plus compile. Deleting a node that is still referenced is an error issue pointing at the referring fields. Concurrent node edits keep the existing row lock.
 
+**Explicit field binding in Inspector (Windmill pattern).** While `build-from-events` mechanically infers `@nodes.*` references during Save (§4.2), human editing in the Inspector must not require hand-typing `@nodes.<id>.<field>` ref strings. Ref-carrier fields (e.g. `chart.inputs.dataset`, `code.inputs.datasets`, `code.inputs.params.*`) render a dual-mode control: toggle between "Literal value" and "Upstream node output" (a dropdown populated with available upstream nodes and their compatible output fields, such as `sales (sql_1) -> rows`). Renaming or rewiring upstream dependencies updates the declarative authoring spec cleanly without syntax typos.
+
 **Future agent editing (design kept, implementation deferred).** A copilot in the artifact view receives the authoring spec, the available data sources and their schema, and the `input_schema`. It proposes a full authoring spec or changed nodes, then iterates on `lint` issues. It never writes resolved ids or compile output. The preview reuses the existing draft pattern (`useCopilotDraft`) with an explicit user confirm before saving.
 
 ## 9. Execution plan
 
 Priorities: **P0** must land together to replace v1 (the v1 engine and specs are deleted, so there is no mixed state); **P1** data correctness that must precede filters; **P2** filters; **P3** deferred.
+
+### Phase 0 (Completed): Early-Bird Groundwork & Resilience
+
+The following high-impact improvements were identified during review as standalone capabilities and safety barriers that could be delivered ahead of the Phase 1 spec rewrite without architectural entanglement. All items have been fully implemented, reviewed across multiple rounds (P1–P8 hardening), and verified with comprehensive unit test coverage.
+
+| Item | Focus & Delivered Contract | Key Files Modified | Hardening & Review Outcomes (P1–P8) | Verification Status |
+|---|---|---|---|---|
+| **P0-0** (D14) | **Backward Reachability Dead-Node Pruning**<br>Traverses transitive `depends_on` from terminal output nodes & artifact creator, discarding exploratory dead-ends and chit-chat tool calls. | `src/lib/workflows/build-from-events.ts` | • **P1:** Added 3-color DFS active-call-stack cycle detection with structured `console.warn` & dependency edge skipping.<br>• **P2:** Replaced $O(N)$ `queue.shift()` with recursive DFS ($O(V+E)$ optimal).<br>• **P3:** Validated terminal node existence before traversal and simplified dead fallback branches. | ✅ `tests/unit/lib/workflows/build-from-events.test.ts` (78 tests passed) |
+| **P0-1** (D12) | **DataSource Cache Isolation**<br>Binds cache lookup strictly to `(data_source_id, sql_text)`. Prevents cross-database data leakage when queries match across different sources. | `src/lib/data-sources/runtime-tools.ts` | • Validates `status.meta.dataSourceId === resolved.id` for cache hits.<br>• Logs explicit audit events distinguishing SQL changes from data-source ID switches. | ✅ `tests/unit/lib/data-sources/runtime-tools.test.ts` (104 tests passed) |
+| **P0-2** (D2, D6) | **Snapshot Preservation & Config Integrity**<br>Ensures snapshot saves renderable data directly without re-execution. Strictly protects `config` from slide document leakage on non-slide artifacts. | `src/components/main-panels/ArtifactDetail.tsx`<br>`src/lib/artifacts/save-snapshot.ts`<br>`src/lib/artifacts/bundle.ts` | • Non-slide artifacts never write to `config.doc`.<br>• `preferSnapshot: true` skips redundant executions.<br>• **P4:** `updateWorkflowInputValues` warns on schema-mismatched keys and surfaces `ignoredInputKeys` on the bundle. | ✅ `tests/unit/lib/artifacts/save-snapshot.test.ts` (7 tests passed) |
+| **P0-3** (§1.9, §3.4) | **Bounded Event Summaries**<br>Caps oversized result sets before writing to `entity_run_event`, preventing append-only audit DB bloat. | `src/lib/artifacts/workflow-run-recorder.ts` | • **P5:** Head-tail string truncation (`truncateHeadTail`) preserving first 500 + last 500 characters so terminal stack traces are never lost.<br>• **P6:** Bounded recursive object/array summarizer enforcing `MAX_EVENT_NESTING_DEPTH = 3` and capping nested arrays to 20 rows. | ✅ `tests/unit/lib/artifacts/workflow-run-recorder.test.ts` (19 tests passed) |
+| **P0-4** (§2.3) | **Sandbox Params Transport & Guardrails**<br>Serializes `params` as `__PARAMS__` JSON payload alongside scalar env vars for sandbox code execution. | `src/lib/sandbox/runtime-tools.ts`<br>`src/lib/sandbox/adapters/service/adapter.server.ts` | • **P7:** Python & JS preambles unconditionally declare `params = {}` / `let params = {};` so unparameterized scripts never throw `NameError`/`ReferenceError`.<br>• **P8:** `RunInSandboxArgs` validates and rejects reserved key `__PARAMS__` to prevent payload corruption. | ✅ `tests/unit/lib/sandbox/` (44 tests passed) |
+| **P0-5** | **Build & Compiler Warning Hygiene**<br>Resolved dynamic filesystem access warnings in Turbopack. | `src/lib/playwright/storage.server.ts` | • Added `/*turbopackIgnore: true*/` annotations.<br>• Build warnings reduced to 0. | ✅ `pnpm build` (0 warnings, 59 pages generated) |
 
 Phase 1 is an engine rewrite (compile/lint, string ids, whole-field refs, compiled graph), not a small prerequisite of filters. It keeps the v1 `inputs` wrapper and field names wherever semantics are unchanged to limit churn. Work on a branch. Each step ships with unit tests and keeps `pnpm check-types` green, but Phase 1 merges as one unit.
 
@@ -540,13 +575,13 @@ Goal: the SQL -> chart and SQL -> Python -> chart chat paths save as v2 workflow
 
 | Step | Tasks | Depends on | Done when |
 |---|---|---|---|
-| 1.1 Spec v2 schema | Zod schemas for §2.1-2.3 (strict). Registry output types (`Rows`, `DatasetName`, `RowSchema`, `option`, `CodeOutputEnvelope`). Delete the LLM-emit/canonical split, canonical-only fields, and v1 schemas. | - | Examples A-D in §2.6 parse. v1-only shapes (numeric ids, `schema_version`, `data_source_id`, `@workflow.*`, `row_limit`) are rejected. |
+| 1.1 Spec v2 schema | Zod schemas for §2.1-2.3 (strict). Registry output types (`Rows`, `DatasetName`, `RowSchema`, `option`, `CodeOutputEnvelope`). Delete the LLM-emit/canonical split, canonical-only fields, and v1 schemas. | - | Examples A-C in §2.6 parse and run end-to-end. Example D parses syntactically, but its execution is deferred to Phase 3 (as `@inputs` in SQL is guarded by `SQL_PARAMS_NOT_ENABLED` in Phase 1). v1-only shapes (numeric ids, `schema_version`, `data_source_id`, `@workflow.*`, `row_limit`) are rejected. |
 | 1.2 compile + lint | Pure functions with injected catalogs: name resolution within allowed data sources, agents, tools; ref-carrier rules (§2.4) including `SQL_PARAMS_NOT_ENABLED`; inferred deps ∪ `after`; cycle/reachability/type checks; size caps; replayability. Issue list with JSON pointers and the three severities. | 1.1 | Unit tests cover every §2.4 row, multiple issues returned at once, `@inputs` in `data_source_name` / `sql_text` rejected, deleted source -> `DATA_SOURCE_NOT_FOUND`, `not_refreshable` issues do not block. |
 | 1.3 Engine on compiled graph | Scheduler over string ids and compiled deps, restricted to the selected output's ancestor closure (§6). Whole-field ref resolution only (remove embedded interpolation from `execution-context.ts`). Node executors read v2 `inputs`. Chart enforces completeness/size per dataset element (§3.2). | 1.2 | Engine tests for A-C with stubbed deps. `CHART_DATA_INCOMPLETE` / `CHART_DATA_TOO_LARGE` raised, including one bad element of a multi-dataset chart. Selecting `trend` in C never runs `by_region`. |
 | 1.4 Extraction service, budget, identity lookup | Extract the shared extraction service from `extract_dataset_by_sql` (source resolution, authorization, policy, cache, extract, result assembly). The chat tool keeps its LLM caps and slot contract. The SQL node calls the service with workflow inline max rows = 1000, workflow inline max bytes = 1 MB (bytes enforced). Identity index and identity lookup (§7.1), hits also compare `data_source_id`. Replace the `sql.inline_max_*` config keys. | 1.3 | A 350-row result gives the workflow SQL node `returned_rows = total_rows = 350` while chat still caps at 200. A workflow node with the chat's source + SQL hits the chat slot. The same label/SQL on another source misses. |
-| 1.5 Save mapping | `build-from-events` v2 | Emit v2 authoring form: derived string ids, v2 `inputs`, replayable flag in the tool registry (SQL, code, chart, `delegate_to_agent`, and the echo-only creators `generate_html_page` / `generate_bento_slides` are replayable; screenshot tools are not, so image artifacts become snapshot-only). Omit non-replayable invocations. Do not copy chat `row_limit`. Chat `dataset_name` -> `dataset_label`. `dataset_id` -> first chart binding, Strategy Z+ fallback. §4.3 outcome rules. | 1.2 | Tests for each §4.3 row. A chat `row_limit: 5` never reaches the node. HTML and slide saves still work. |
-| 1.6 Save orchestration | Compile + lint on save. Persist the authoring spec. First run with `force_refresh = false` -> snapshot / `snapshot_inputs` / `snapshot_at`. A failure keeps the chat snapshot and writes `last_run_error`. Compute `refreshable` from `not_refreshable` issues and return the messages. | 1.4, 1.5, 1.7 (columns) | Save right after a chat extraction issues no source query. A truncated-preview chart (≤ 1000 total) yields a complete snapshot. An oversized chart saves with `refreshable = false` and its message. A forced first-run failure is visible in GET. |
-| 1.7 Data migration + run semantics | **Irreversible; take a `pg_dump` of the `workflow` table first.** `pnpm db:generate --name=workflow_v2_artifact_columns`: add `snapshot_inputs`, `last_run_error`, `refreshable`; drop `view_mode`. A custom Drizzle migration deletes all workflow rows: the FK sets `artifact.workflow_id` to NULL, those artifacts are set `refreshable = false`, and only their snapshots remain viewable. `entity_run` history is kept. GET returns snapshot only. Refresh writes/clears `last_run_error`. The snapshot endpoint re-executes with validated inputs and stops writing value into the spec. | 1.1 | Old artifacts open from their snapshot without executing anything. Artifacts with a NULL snapshot and no workflow show an empty state. No GET path calls `executeWorkflow`. |
+| 1.5 Save mapping | `build-from-events` v2 | Emit v2 authoring form: derived string ids, v2 `inputs`, replayable flag in the tool registry (SQL, code, chart, `delegate_to_agent`, and the echo-only creators `generate_html_page` / `generate_bento_slides` are replayable; screenshot tools are not, so image artifacts become snapshot-only). Omit non-replayable invocations. **Dead-node pruning via backward reachability traversal from the artifact-creating terminal node (§4.2 rule 6)**, discarding unrelated or abandoned intermediate tool calls. Do not copy chat `row_limit`. Chat `dataset_name` -> `dataset_label`. `dataset_id` -> first chart binding, Strategy Z+ fallback. §4.3 outcome rules. | 1.2 | Tests for each §4.3 row. A chat `row_limit: 5` never reaches the node. A thread with unrelated intermediate tool calls (e.g. user chit-chat or abandoned exploratory queries) produces a minimal spec containing strictly the artifact's ancestor nodes, with zero dangling nodes and zero unused-node warnings. HTML and slide saves still work. |
+| 1.6 Save orchestration | Compile + lint on save. Persist the authoring spec. First run with `force_refresh = false` -> snapshot / `snapshot_inputs` / `snapshot_at`. A failure keeps the chat snapshot and writes `last_run_error`. Compute `refreshable` strictly from `not_refreshable` issues in the selected output's ancestor closure, and return any messages. | 1.4, 1.5, 1.7 (columns) | Save right after a chat extraction issues no source query. A truncated-preview chart (≤ 1000 total) yields a complete snapshot. An oversized chart saves with `refreshable = false` and its message without corrupting `inputs.config`. A forced first-run failure is visible in GET. |
+| 1.7 Data migration + run semantics | **Irreversible; take a `pg_dump` of the `workflow` and `artifact` tables first.** `pnpm db:generate --name=workflow_v2_artifact_columns`: add `snapshot_inputs`, `last_run_error`, `refreshable`; drop `view_mode`. **CRITICAL FOREIGN KEY SAFETY:** Existing DB schema defines `artifact.workflow_id` with `ON DELETE CASCADE`. A naive `DELETE FROM workflow` would wipe all existing artifacts! The custom migration MUST: 1) Alter the FK on `artifact.workflow_id` to `ON DELETE SET NULL`; 2) Explicitly execute `UPDATE artifact SET workflow_id = NULL, refreshable = false WHERE workflow_id IS NOT NULL` to preserve existing snapshots; 3) Only then execute `DELETE FROM workflow`. `entity_run` history is kept. GET returns snapshot only. Refresh writes/clears `last_run_error` without updating snapshot. User-triggered snapshot endpoint persists verified inputs/data. | 1.1 | Old artifacts open from their snapshot without executing anything. Artifacts with a NULL snapshot and no workflow show an empty state. No GET path calls `executeWorkflow`. Existing artifacts are completely preserved. |
 | 1.8 Edit paths + Inspector | `PATCH /api/artifacts/[id]` (spec) and `PATCH .../nodes/[nodeId]` accept authoring-form input, run compile + lint, and return issues (HTTP 400 with the issue list on error; 200 with `not_refreshable` / `warning` issues otherwise). Inspector forms read/write v2 `inputs`, display issues inline at their JSON pointers, and support node rename with ref rewrite. The graph uses string ids. Deletion is blocked while a node is still referenced. `artifactDetail` loses the server-side view-mode toggle (§6). | 1.2, 1.7 | An invalid edit shows every issue next to its field. Changing `data_source_name` to a source outside the allowed set is rejected. |
 | 1.9 Events | The recorder persists node summaries (§3.4) instead of full outputs. | 1.3 | Event payload size is bounded regardless of row counts. |
 | 1.10 Docs | Replace `workflow.md` with the v2 as-built reference. Update `artifact-filters.md` examples. Update `AGENTS.md` rule references where needed. | 1.1-1.9 | Docs match code. |
@@ -565,8 +600,8 @@ Goal: the SQL -> chart and SQL -> Python -> chart chat paths save as v2 workflow
 | Step | Tasks | Done when |
 |---|---|---|
 | 3.1 | Inputs | Validate the §5.1 subset at compile. Resolve the input bag per run (request > default). Persist `snapshot_inputs`. | Unknown/mistyped/missing inputs rejected server-side before any IO. |
-| 3.2 | SQL parameter compiler | §5.3 algorithm (substitute -> parse -> count check -> position check -> bind). Enable per provider only after its tests pass: native binding where available, adapter-owned literal renderer for the DuckDB `COPY` path / Vertica. Policy on executed SQL. Lift `SQL_PARAMS_NOT_ENABLED` per enabled provider. | Per provider: quoted token and commented token rejected by the count check, identifier misuse, null, empty/non-empty `IN (1=0)`, repeated refs, wrong types. |
-| 3.3 | Filter UI | RJSF panel wired to `POST /refresh { inputs }`, pre-filled from `snapshot_inputs`. Reset to defaults. Save-as-snapshot with inputs. Inspector "promote literal to input" (adds a property and rewrites the literal to `@inputs.<key>`). | Example D works end to end from a chat-saved example A. |
+| 3.2 | SQL parameter compiler | §5.3 algorithm (substitute -> parse -> count check -> position check -> bind). Enable per provider only after its tests pass: native binding where available, adapter-owned literal renderer for the DuckDB `COPY` path / Vertica. Policy on executed SQL. Lift `SQL_PARAMS_NOT_ENABLED` per enabled provider. | Per provider: quoted token and commented token rejected by the count check, identifier misuse, null, empty array rewritten to `(1=0)` predicate, non-empty `IN ($1, ...)`, repeated refs, wrong types. |
+| 3.3 | Filter UI | RJSF panel wired to `POST /refresh { inputs }` (re-queries live source, updates view without altering snapshot), pre-filled from `snapshot_inputs`. Reset to defaults. Explicit user-triggered "Save as snapshot" button calling `POST /snapshot { inputs }`. Inspector "promote literal to input" (adds a property and rewrites the literal to `@inputs.<key>`). | Example D works end to end from a chat-saved example A. Refresh retrieves fresh source data without altering stored snapshot; Save-as-snapshot persists state explicitly. |
 
 ### Phase 4 (P3): Deferred
 
@@ -594,25 +629,29 @@ Multi-chart artifacts, dynamic `options_source` (§5.4), agent editing in the ar
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Multiple charts per artifact | Deferred. A spec may contain several chart outputs; an artifact renders one `workflow_output_field`, and executes only its ancestor closure. |
-| D2 | GET behavior | GET returns the stored snapshot only; only an explicit refresh executes. `view_mode` is dropped. |
+| D2 | GET behavior & Refresh semantics | GET returns the stored snapshot only; only explicit refresh executes against live source data (`force_fresh: true`, re-queries DB source, does NOT automatically overwrite snapshot). `view_mode` is dropped. Persisting snapshot requires explicit user "Save as snapshot" action. |
 | D3 | First-run failure at Save | Save anyway with the chat-captured snapshot and a persisted, visible `last_run_error`. |
 | D4 | Workflow inline budget | 1000 rows / 1 MB for now (config keys, §3.1). |
 | D5 | Stored form | Persist the authoring form only. Compile on every write and run. No stored lock map or resolved ids. |
-| D6 | Oversized chat charts | Save succeeds with a `not_refreshable` issue; `refreshable = false`. |
+| D6 | Oversized chat charts | Saved into `artifact.snapshot` so the chart remains immediately viewable. `chart.inputs.config` strictly remains a pure data-free template (preventing spec bloat and avoiding `CHART_CONFIG_TOO_LARGE`). The chart node receives a `not_refreshable` issue. |
 | D7 | SQL parameter syntax | Keep `@inputs.key`. |
 | D8 | Agent and generic tool nodes | Keep both: agent executes on refresh / Save's first run only; tool nodes only when `replayable`. |
-| D9 | Existing workflows | Delete all `workflow` rows (irreversible; `pg_dump` first). Artifacts keep their snapshots and become not refreshable. |
+| D9 | Existing workflows & CASCADE safety | Delete all `workflow` rows (irreversible; `pg_dump` first). The migration MUST alter the FK constraint to `ON DELETE SET NULL` and explicitly run `UPDATE artifact SET workflow_id = NULL, refreshable = false` before deleting `workflow` rows, preventing DB `ON DELETE CASCADE` from wiping existing artifacts. |
 | D10 | Node shape | Keep the v1 `inputs` wrapper and field names where semantics are unchanged; string ids, auto-derived at Save. |
 | D11 | Resolved-id locks | None. Data-source names are immutable after creation; resolve by name within the allowed set on every compile. Revisit (with a separate `workflow` column, outside the authoring JSON) only if names become mutable. |
 | D12 | Cache lookup | Identity-based lookup (`data_source_id` + executed SQL + bound values) lands in Phase 1 so Save hits the chat cache; the chat slot contract is unchanged. |
+| D13 | Refreshable scoping | `artifact.refreshable` is evaluated strictly against the ancestor closure of `artifact.workflow_output_field`. Issues in unselected outputs produce spec warnings without disabling refresh for the selected chart. |
+| D14 | Save-time dead-node pruning | **[Delivered in Phase 0]** The save pipeline performs a backward reachability traversal from the artifact-creating terminal node to prune orphan/unrelated invocations before persisting, guaranteeing a clean minimal DAG with zero dangling nodes. |
 
 ### Appendix: external ideas (borrow the contract, not the platform)
 
 | Project | Borrowed here | Not imported |
 |---|---|---|
-| Windmill | JSON-Schema flow inputs driving the form; per-argument bindings (static value vs reference) -> whole-field refs and the ref-carrier table; large data exchanged by dataset reference | Worker fleet, loop DSL, S3/GCS storage |
-| Zen Engine | Validate the whole graph before execution; input and output schemas at both ends | Decision tables, a rules engine, forward edges as grammar |
-| Flowcraft (TypeScript) | Serializable blueprint + executor registry; LintBlueprint - style issue lists; keep UI layout out of the executable spec | A second runtime, distributed adapters |
-| Node-RED | Approachable graph editing | Mutable message bus as a carrier for analytical data |
-| dbt | Dependencies derived from references (`ref()` -> `@nodes`); viewable compiled SQL | `var()` -style literal Jinja rendering as a parameter mechanism (that is exactly the injection path §5.3 avoids); incremental/ephemeral models |
-| Dagster | Data vs order-only dependencies (`@nodes` refs vs `after`); keep large data out of orchestration memory; row count/schema metadata on outputs | IO managers, partitions, asset versioning |
+| Windmill | JSON-Schema flow inputs driving the form; per-argument bindings (static literal vs upstream reference) -> whole-field refs in the spec and explicit dual-mode binding in the Inspector (§8) answering *"where does this data come from without guessing raw ref strings?"*; large data exchanged by dataset reference | Worker fleet, loop DSL, S3/GCS storage, JS expressions in args |
+| Zen Engine | Validate the whole graph before execution; terminal output contract verification (§6.3) ensuring the evaluated terminal output actually drives the artifact (complete rows + valid option) answering *"can the calculated output actually power the artifact?"* | Decision tables, a rules engine, forward edges as grammar |
+| Flowcraft (TypeScript) | Serializable blueprint + executor registry; LintBlueprint - style issue lists; keep UI layout out of the executable spec; map runtime errors back to nodes and fields for Inspector triage | A second runtime, distributed adapters |
+| Node-RED | Approachable graph editing; typed inspection panels | Mutable message bus as a carrier for analytical data |
+| dbt | Dependencies derived from references (`ref()` -> `@nodes`); viewable compiled SQL with parameter preview in Inspector; testable data contracts | `var()` -style literal Jinja rendering as a parameter mechanism (that is exactly the injection path §5.3 avoids); incremental/ephemeral models |
+| Dagster | Data vs order-only dependencies (`@nodes` refs vs `after`); keep large data out of orchestration memory; row count/schema metadata on outputs; execute ancestor closure of selected output | IO managers, partitions, asset versioning |
+
+> **Key takeaway on workflow trust**: Among external patterns, the two most impactful for Nango's operational credibility are **Windmill's explicit field binding** (§8) and **ZEN Engine's terminal output contract** (§6.3). The former eliminates syntax errors and ref guessing when inspecting data lineage, while the latter guarantees that a "successful run" actually yields complete, renderable data for the user's artifact.

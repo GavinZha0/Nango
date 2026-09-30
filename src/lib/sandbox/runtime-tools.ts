@@ -14,6 +14,7 @@ import { getActiveAdapter } from "./registry.server";
 import { assembleCodeOutput } from "./code-output";
 import { BackendUnavailableError } from "./errors";
 import { scanCodeStatic } from "./static-scan";
+import { SANDBOX_PARAMS_ENV_KEY } from "./types";
 
 const RunInSandboxArgs = z.object({
   /** Interpreter to execute `code_text` in. Maps to a fixed
@@ -64,8 +65,8 @@ const RunInSandboxArgs = z.object({
     .optional()
     .describe(
       "Parameters serialised into the sandbox process env. Read " +
-        "with `os.environ['<KEY>']`. Non-string values are coerced " +
-        "to strings. Do NOT put secrets here.",
+        "with `os.environ['<KEY>']` (Python) or `process.env['<KEY>']` (JS), or access via the parsed 'params' object. " +
+        "Do NOT put secrets here. Note: '__PARAMS__' is a reserved system parameter name and cannot be used as a key.",
     ),
   // SECONDS, not milliseconds. The field is named explicitly to keep
   // the LLM from defaulting to its setTimeout intuition.
@@ -198,19 +199,42 @@ export function buildRunInSandboxTool(): ToolDefinition {
         throw err;
       }
       const command = LANGUAGE_COMMAND[args.language];
-      // QUIRK: `params` is accepted at the tool boundary but not
-      // yet plumbed into the sandbox env — the SandboxInput
-      // adapter contract has no per-call env overlay (only the
-      // operator-tuned allowlist). The workflow code-node
-      // executor has the same limitation. Wiring lands when the
-      // sandbox adapters grow an `env?: Record<string, string>`
-      // slot.
+      // Build env overlay for params:
+      // 1. Serialize all params as JSON into __PARAMS__ (aligned with workflow code-node and Python/JS bridge)
+      // 2. Also expose individual scalar/stringified values as separate env vars so code can read via os.environ['KEY']
+      let env: Record<string, string> | undefined;
+      if (args.params && typeof args.params === "object" && Object.keys(args.params).length > 0) {
+        // SECURITY / CONTRACT: Reject collision with internal payload transport key
+        if (Object.prototype.hasOwnProperty.call(args.params, SANDBOX_PARAMS_ENV_KEY)) {
+          return {
+            ok: false,
+            duration_ms: 0,
+            rows: null,
+            row_count: null,
+            row_schema: null,
+            message: null,
+            files: null,
+            error: `[Validation Error]: '${SANDBOX_PARAMS_ENV_KEY}' is a reserved system parameter name and cannot be used in params.`,
+            backend: null,
+          };
+        }
+
+        env = {
+          [SANDBOX_PARAMS_ENV_KEY]: JSON.stringify(args.params),
+        };
+        for (const [k, v] of Object.entries(args.params)) {
+          if (k === SANDBOX_PARAMS_ENV_KEY) continue;
+          env[k] = typeof v === "string" ? v : JSON.stringify(v);
+        }
+      }
+
       const targetLanguage = args.language === "python" ? "python3" : "javascript";
       const out = await adapter.run({
         language: targetLanguage,
         command: [...command],
         stdin: args.code_text,
         datasets: args.datasets,
+        env,
         // Convert seconds → ms at the boundary; internals stay
         // millisecond-typed throughout (project convention).
         timeoutMs:

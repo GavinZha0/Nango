@@ -67,4 +67,113 @@ describe("ServiceSandboxAdapter", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("injects env overlay and sets up params deserialization in python preamble", async () => {
+    const adapter = new ServiceSandboxAdapter();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        message: "success",
+        data: { stdout: "ok\n" },
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await adapter.run({
+      language: "python3",
+      command: ["python3", "-"],
+      stdin: "print(params['threshold'])",
+      env: {
+        __PARAMS__: JSON.stringify({ threshold: 42 }),
+        threshold: "42",
+      },
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as {
+      code: string;
+      language: string;
+    };
+    expect(sentBody.language).toBe("python3");
+    expect(sentBody.code).toContain("__nango_os.environ[\"threshold\"] = \"42\"");
+    expect(sentBody.code).toContain("__nango_os.environ[\"__PARAMS__\"] = \"{\\\"threshold\\\":42}\"");
+    expect(sentBody.code).toContain("params = __nango_json.loads(__nango_os.environ['__PARAMS__'])");
+    expect(sentBody.code).toContain("print(params['threshold'])");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("injects env overlay and sets up params deserialization in javascript preamble", async () => {
+    const adapter = new ServiceSandboxAdapter();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        message: "success",
+        data: { stdout: "ok\n" },
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await adapter.run({
+      language: "javascript",
+      command: ["node", "-"],
+      stdin: "console.log(params.threshold);",
+      env: {
+        __PARAMS__: JSON.stringify({ threshold: 42 }),
+        threshold: "42",
+      },
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as {
+      code: string;
+      language: string;
+    };
+    expect(sentBody.language).toBe("javascript");
+    expect(sentBody.code).toContain("process.env[\"threshold\"] = \"42\";");
+    expect(sentBody.code).toContain("process.env[\"__PARAMS__\"] = \"{\\\"threshold\\\":42}\";");
+    expect(sentBody.code).toContain("params = JSON.parse(process.env[\"__PARAMS__\"]");
+    expect(sentBody.code).toContain("console.log(params.threshold);");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("unconditionally defines params = {} in python and javascript preambles when __PARAMS__ is absent (P7)", async () => {
+    const adapter = new ServiceSandboxAdapter();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        message: "success",
+        data: { stdout: "ok\n" },
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    // Python without __PARAMS__
+    await adapter.run({
+      language: "python3",
+      command: ["python3", "-"],
+      stdin: "print(len(params))",
+    });
+
+    const pyBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as { code: string };
+    expect(pyBody.code).toContain("params = {}\n");
+    expect(pyBody.code).not.toContain("__nango_json.loads");
+
+    // JavaScript without __PARAMS__
+    await adapter.run({
+      language: "javascript",
+      command: ["node", "-"],
+      stdin: "console.log(Object.keys(params).length);",
+    });
+
+    const jsBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as { code: string };
+    expect(jsBody.code).toContain("let params = {};\n");
+    expect(jsBody.code).not.toContain("JSON.parse");
+
+    vi.unstubAllGlobals();
+  });
 });
