@@ -347,5 +347,72 @@ in) lives in `docs/runner-events.md` §6.
 - **Custom HTTP Headers**: The system strictly uses two custom headers for routing because they represent user choices the server cannot derive:
   - `X-Credential-Id`: Identifies the backend.
   - `X-Orchestration-Mode`: Carries the user's transient session preference (`auto`, `tool-call`, etc.).
-- **Coalescing Storage**: `entity_run_event` buffers assembled text in memory and flushes ONE row at each natural boundary to prevent DB spam.
 - **Boot Recovery**: A single `process_boot` row anchors the server epoch. Any `running` run older than the boot timestamp is immediately flipped to `failed` to recover stranded runs.
+
+---
+
+## 11. Known Open Issue: Asynchronous Continuation & Post-Task Orchestration (Pending / Proposed)
+
+Status: **Pending / Unimplemented (Identified Architectural Gap — Scheduled for Future Enhancement)**
+
+### 11.1 Problem Statement
+Currently, `delegate_async` operates as a **"Fire and Notify User"** pattern rather than an **autonomous feedback loop**. When the Supervisor dispatches an async run (`mode: "async"`):
+1. The tool returns `{ ok: true, runId }` immediately.
+2. The Supervisor concludes its turn with a message like *"I have started the task in the background, you'll be notified when done."*
+3. The HTTP connection closes, ending the active conversational turn.
+4. When the background task reaches a terminal state (`run_completed`), `runner.ts` inserts a row into `notification` and emits an SSE frame to the browser bell icon.
+
+**The Architectural Gap**: The Supervisor is **never re-awakened**. If a user request requires a sequential multi-step autonomous pipeline (e.g. *"First crawl 50 sites in the background, and once done, analyze the results and produce report B"*), the Supervisor cannot automatically retrieve the output and continue. The workflow dead-ends at the user's notification bell, requiring the human to manually read the notification, paste the result back into the chat, and prompt Nango to proceed.
+
+---
+
+### 11.2 Candidate Solutions & Inherent Challenges
+
+#### Scheme 1: Server-Side Autonomous Continuation (Server Loop)
+- **Concept**: In `runner.ts` `complete` callback, when `input.initiator === "orchestrator"`, the server automatically starts a new programmatic run (`mode: "sync", initiator: "system"`) against the original `threadId`, injecting the completed output as a system continuation message.
+- **Inherent Challenges**:
+  1. **Concurrent Thread Mutation (Race Conditions)**: If the user is actively chatting with Nango or generating tokens when the background task finishes, two generation streams collide in the same thread.
+  2. **Context Divergence / Interruption**: If the user has already moved on to a completely different conversation topic, an unexpected background result violently interrupts the active context.
+- **Engineering Mitigations**:
+  - **Thread-Level Mailbox / Mutex Lock**: If `entity_run.status === "running"` for that `threadId`, queue the completion in a pending mailbox. When the active turn ends, Nango drains the mailbox (*"By the way, your background analysis task also just finished..."*).
+  - **Headless Pipeline (Isolated Sub-Threads)**: Multi-step composite workflows execute within an isolated backend orchestration context, completely decoupled from the interactive chat thread, producing only a single final outcome.
+
+#### Scheme 2: Client-Side Reactive Wakeup (UI-Driven Callback)
+- **Concept**: The browser SSE listener (`/api/runs/stream`) receives `run_completed`. If the user is currently on the conversation thread, the UI automatically dispatches a continuation turn injecting the background result.
+- **Inherent Challenges**:
+  1. **Ephemeral Browser Lifecycle**: Browsers are not persistent daemons. If the user closes the tab, locks the screen, puts the laptop to sleep, or switches away, the JavaScript event loop and SSE connection are suspended or killed. Client-side wakeup fails to fire.
+- **Engineering Mitigations**:
+  - **Durable State + "Continue in Chat" Action**: The background result is permanently saved in the database. When the user returns and views the notification, the notification card features an interactive **[💬 Continue in Chat]** action button. Clicking it navigates to the thread, hydrates the result into the chat input/context, and prompts Nango to resume.
+  - **Visibility Reconnection Replay**: On `visibilitychange` or SSE reconnection, the client inspects pending unread notifications and prompts the user to resume.
+
+---
+
+### 11.3 The Ultimate Target Architecture: Dual-Loop Orchestration (Proposed)
+
+```mermaid
+flowchart TD
+    UserReq["User Dispatches Complex Async Task"] --> PipelineCheck{"Is it a Multi-Step<br/>Sequential Pipeline?"}
+
+    PipelineCheck -- "Yes (Steps A -> B -> C)" --> HeadlessPipeline["Server-Side Headless Pipeline<br/>(Isolated Run Forest)"]
+    HeadlessPipeline --> RunSteps["Server executes step A -> step B -> step C<br/>(Zero browser dependency, zero chat thread collision)"]
+    RunSteps --> PipelineDone["Entire Pipeline Completed<br/>Write final report to notification"]
+
+    PipelineCheck -- "No (Single Background Task)" --> SingleAsync["delegate_async<br/>(Dispatches Background Task)"]
+    SingleAsync --> TaskDone["Task Terminal<br/>Write to notification table"]
+
+    PipelineDone --> DualDelivery
+    TaskDone --> DualDelivery["Dual-Channel Delivery"]
+
+    DualDelivery --> OnlineCheck{"Is User Active on Thread<br/>& Thread Idle?"}
+    OnlineCheck -- "Yes (User Watching Thread)" --> AutoStream["SSE emits inline completion card;<br/>Nango smoothly continues reply"]
+    OnlineCheck -- "No (User Busy / Tab Closed / Screen Locked)" --> InboxAction["Notification Inbox Fallback<br/>(Durable Storage in PostgreSQL)"]
+
+    InboxAction --> ReturnUser["User Returns / Opens Notification"]
+    ReturnUser --> ResumeBtn["User clicks [💬 Continue in Chat]<br/>One-click context rehydration & resume"]
+```
+
+1. **Headless Execution for Multi-Step Pipelines**: Chained multi-agent jobs run in an isolated server-side forest without relying on or colliding with the active chat UI.
+2. **Thread Mailbox for Active Sessions**: When the user is present and the thread is idle, live inline continuation smoothly resumes.
+3. **Durable Inbox Action for Offline Users**: Safe, deterministic resumption via an interactive "Continue in Chat" button on notifications.
+
+*Note: This architecture is documented here as an approved design guideline for the next dedicated iteration on the orchestration kernel.*
