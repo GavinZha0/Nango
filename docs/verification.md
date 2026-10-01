@@ -241,6 +241,7 @@ export interface ToolPrefixRule {
 
 - An empty assertions array acts as a smoke test (passes if no upstream tool error).
 - Assertions can target raw MCP output by prefixing paths with `$` or using the `root` JS binding.
+- Wildcard array paths (`items[*].field`) evaluate strictly with **"every"** semantics. When paired with `exists` (e.g. `items[*].id exists`), every element in the array must contain the target property. Any unsatisfied items report their 0-indexed positions (e.g. `[1, 2]`).
 
 ### 5.1 Save-Time Semantic Validation
 

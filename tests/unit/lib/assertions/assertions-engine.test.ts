@@ -65,6 +65,95 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[2].ok).toBe(true);
       expect(outcome.deterministicResults[3].ok).toBe(false);
     });
+
+    it("evaluates wildcard [*] with every-element semantics and reports failed indices", () => {
+      const collectionPayload = {
+        items: [
+          { id: 1, status: "active", price: 20 },
+          { id: 2, status: "pending", price: 35 },
+          { id: 3, status: "active", price: -5 },
+        ],
+        emptyItems: [],
+      };
+
+      // 1. All elements pass
+      const allActive: AssertionSpec[] = [
+        { type: "jsonpath", path: "items[*].price", operator: "!=", expected: 0 },
+      ];
+      const outcomePass = evaluateAssertions(collectionPayload, allActive);
+      expect(outcomePass.allDeterministicPassed).toBe(true);
+      expect(outcomePass.deterministicResults[0].ok).toBe(true);
+
+      // 2. Single element failure: item 1 is "pending", not "active"
+      const allEqual: AssertionSpec[] = [
+        { type: "jsonpath", path: "items[*].status", operator: "==", expected: "active" },
+      ];
+      const outcomeFail = evaluateAssertions(collectionPayload, allEqual);
+      expect(outcomeFail.allDeterministicPassed).toBe(false);
+      expect(outcomeFail.deterministicResults[0].ok).toBe(false);
+      expect(outcomeFail.deterministicResults[0].actual).toEqual([1]);
+      expect(outcomeFail.deterministicResults[0].message).toBe("unsatisfied item(s): [1]");
+
+      // 3. Price > 0 fails for item 2 (-5)
+      const pricePositive: AssertionSpec[] = [
+        { type: "jsonpath", path: "items[*].price", operator: ">", expected: 0 },
+      ];
+      const outcomePrice = evaluateAssertions(collectionPayload, pricePositive);
+      expect(outcomePrice.allDeterministicPassed).toBe(false);
+      expect(outcomePrice.deterministicResults[0].actual).toEqual([2]);
+
+      // 4. Empty items list
+      const emptyCheck: AssertionSpec[] = [
+        { type: "jsonpath", path: "emptyItems[*].id", operator: "==", expected: 1 },
+      ];
+      const outcomeEmpty = evaluateAssertions(collectionPayload, emptyCheck);
+      expect(outcomeEmpty.allDeterministicPassed).toBe(false);
+      expect(outcomeEmpty.deterministicResults[0].message).toContain("matched 0 items");
+
+      // 5. Missing leaf fields do not shift original array indices (P1-1)
+      const missingFieldPayload = {
+        items: [
+          { status: "active" }, // index 0: passes
+          { other: 1 },          // index 1: missing status -> fails
+          { status: "pending" }, // index 2: pending != active -> fails
+        ],
+      };
+      const missingFieldCheck: AssertionSpec[] = [
+        { type: "jsonpath", path: "items[*].status", operator: "==", expected: "active" },
+      ];
+      const outcomeMissing = evaluateAssertions(missingFieldPayload, missingFieldCheck);
+      expect(outcomeMissing.allDeterministicPassed).toBe(false);
+      expect(outcomeMissing.deterministicResults[0].ok).toBe(false);
+      expect(outcomeMissing.deterministicResults[0].actual).toEqual([1, 2]);
+      expect(outcomeMissing.deterministicResults[0].message).toBe("unsatisfied item(s): [1, 2]");
+
+      // 6. Wildcard [*] with exists operator enforces every-element existence (P2-3)
+      const existsPayload = {
+        items: [
+          { id: 1, name: "Alice" },
+          { id: 2 }, // missing 'name'
+          { id: 3, name: "Charlie" },
+        ],
+      };
+      const existsCheck: AssertionSpec[] = [
+        { type: "jsonpath", path: "items[*].name", operator: "exists" },
+      ];
+      const outcomeExists = evaluateAssertions(existsPayload, existsCheck);
+      expect(outcomeExists.allDeterministicPassed).toBe(false);
+      expect(outcomeExists.deterministicResults[0].ok).toBe(false);
+      expect(outcomeExists.deterministicResults[0].actual).toEqual([1]);
+      expect(outcomeExists.deterministicResults[0].message).toBe("unsatisfied item(s): [1]");
+
+      const allExistPayload = {
+        items: [
+          { id: 1, name: "Alice" },
+          { id: 2, name: "Bob" },
+        ],
+      };
+      const outcomeAllExist = evaluateAssertions(allExistPayload, existsCheck);
+      expect(outcomeAllExist.allDeterministicPassed).toBe(true);
+      expect(outcomeAllExist.deterministicResults[0].ok).toBe(true);
+    });
   });
 
   describe("2. JSON Schema assertions", () => {
@@ -428,6 +517,77 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
         threshold: Number.POSITIVE_INFINITY,
       });
       expect(infinity.ok).toBe(false);
+    });
+  });
+
+  describe("7. Protocol _meta and multi-modal content extraction", () => {
+    it("preserves and attaches _meta for JSONPath and JS expression assertions", () => {
+      const payloadWithMeta = {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ user: { id: 101, name: "Alice" } }),
+          },
+        ],
+        _meta: {
+          traceId: "trace-xyz-789",
+          cached: true,
+          gatewayLatencyMs: 42,
+        },
+      };
+
+      const assertions: AssertionSpec[] = [
+        // Business field
+        { type: "jsonpath", path: "user.id", operator: "==", expected: 101 },
+        // _meta via structured path (without $)
+        { type: "jsonpath", path: "_meta.traceId", operator: "==", expected: "trace-xyz-789" },
+        // _meta via root envelope path (with $)
+        { type: "jsonpath", path: "$._meta.cached", operator: "==", expected: true },
+        // JS expression testing root._meta and result._meta
+        {
+          type: "js_expression",
+          expression: "root._meta.traceId === 'trace-xyz-789' && result._meta.cached === true && _meta.gatewayLatencyMs === 42",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payloadWithMeta, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(4);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(true);
+      expect(outcome.deterministicResults[3].ok).toBe(true);
+    });
+
+    it("unwraps single non-text content items (e.g. image) for direct field assertions", () => {
+      const imagePayload = {
+        content: [
+          {
+            type: "image",
+            data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            mimeType: "image/png",
+          },
+        ],
+        _meta: {
+          dimensions: { width: 1, height: 1 },
+        },
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "type", operator: "==", expected: "image" },
+        { type: "jsonpath", path: "mimeType", operator: "==", expected: "image/png" },
+        { type: "jsonpath", path: "data", operator: "exists" },
+        { type: "jsonpath", path: "_meta.dimensions.width", operator: "==", expected: 1 },
+        {
+          type: "js_expression",
+          expression: "result.type === 'image' && result.mimeType === 'image/png' && root._meta.dimensions.height === 1",
+        },
+      ];
+
+      const outcome = evaluateAssertions(imagePayload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(5);
+      expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
     });
   });
 });

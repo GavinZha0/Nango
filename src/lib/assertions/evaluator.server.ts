@@ -174,6 +174,126 @@ function evaluateJsonPath(
   const expected = substituteInputTemplates(spec.expected, options.input, mergedContext);
   const { json, absolutePath } = resolveJsonPathScope(spec.path, payload);
 
+  // If path contains [*], evaluate wildcard "every" semantics preserving original array indices
+  if (absolutePath.includes("[*]")) {
+    const starIdx = absolutePath.indexOf("[*]");
+    let prefix = absolutePath.slice(0, starIdx);
+    const suffix = absolutePath.slice(starIdx + 3);
+
+    if (prefix.endsWith(".")) {
+      prefix = prefix.slice(0, -1);
+    }
+
+    let targetArray: unknown;
+    try {
+      if (!prefix || prefix === "$") {
+        targetArray = json;
+      } else {
+        const parentMatches = JSONPath({
+          path: prefix,
+          json: json as never,
+          wrap: true,
+        });
+        targetArray = parentMatches.length > 0 ? parentMatches[0] : undefined;
+      }
+    } catch (err) {
+      return {
+        index,
+        type: spec.type,
+        ok: false,
+        errored: true,
+        errorSource: "config",
+        path: spec.path,
+        message: `JSONPath parse failed: ${errMessage(err)}`,
+      };
+    }
+
+    if (!Array.isArray(targetArray) || targetArray.length === 0) {
+      return {
+        index,
+        type: spec.type,
+        ok: false,
+        path: spec.path,
+        expected,
+        actual: "0 items",
+        message: `Path "${spec.path}" matched 0 items`,
+      };
+    }
+
+    const subPath =
+      suffix.startsWith(".") || suffix.startsWith("[")
+        ? "$" + suffix
+        : suffix
+          ? "$." + suffix
+          : "";
+
+    const failedIndices: number[] = [];
+
+    for (let i = 0; i < targetArray.length; i++) {
+      const item = targetArray[i];
+      let itemVal: unknown = undefined;
+      let itemExists = true;
+
+      if (!subPath) {
+        itemVal = item;
+      } else if (item != null && typeof item === "object") {
+        try {
+          const itemMatches = JSONPath({
+            path: subPath,
+            json: item as never,
+            wrap: true,
+          });
+          if (itemMatches.length > 0) {
+            itemVal = itemMatches[0];
+          } else {
+            itemExists = false;
+          }
+        } catch {
+          itemExists = false;
+        }
+      } else {
+        itemExists = false;
+      }
+
+      let itemPassed = false;
+      if (operator === "exists") {
+        itemPassed = itemExists;
+      } else {
+        const res = evaluateOperator(itemVal, operator, expected);
+        itemPassed = res.ok;
+      }
+
+      if (!itemPassed) {
+        failedIndices.push(i);
+      }
+    }
+
+    if (failedIndices.length === 0) {
+      return {
+        index,
+        type: spec.type,
+        ok: true,
+        path: spec.path,
+        expected,
+      };
+    }
+
+    const displayIndices =
+      failedIndices.length <= 5
+        ? failedIndices
+        : [...failedIndices.slice(0, 5), `+${failedIndices.length - 5} more`];
+
+    return {
+      index,
+      type: spec.type,
+      ok: false,
+      path: spec.path,
+      expected,
+      actual: displayIndices,
+      message: `unsatisfied item(s): [${displayIndices.join(", ")}]`,
+    };
+  }
+
   let actualList: unknown[];
   try {
     const matches = JSONPath({
@@ -208,10 +328,26 @@ function evaluateJsonPath(
   }
 
   const actual: unknown =
-    actualList.length === 1 && !absolutePath.includes("[*]")
-      ? actualList[0]
-      : actualList;
+    actualList.length === 1 ? actualList[0] : actualList;
 
+  const { ok, mismatchReason } = evaluateOperator(actual, operator, expected);
+
+  return {
+    index,
+    type: spec.type,
+    ok,
+    path: spec.path,
+    expected,
+    actual,
+    message: ok ? undefined : mismatchReason,
+  };
+}
+
+function evaluateOperator(
+  actual: unknown,
+  operator: string,
+  expected: unknown,
+): { ok: boolean; mismatchReason?: string } {
   let ok = false;
   let mismatchReason: string | undefined;
 
@@ -265,17 +401,13 @@ function evaluateJsonPath(
       if (!ok) mismatchReason = `target does not match regex /${expected}/`;
       break;
     }
+    default:
+      ok = false;
+      mismatchReason = `unknown operator "${operator}"`;
+      break;
   }
 
-  return {
-    index,
-    type: spec.type,
-    ok,
-    path: spec.path,
-    expected,
-    actual,
-    message: ok ? undefined : mismatchReason,
-  };
+  return { ok, mismatchReason };
 }
 
 function resolveJsonPathScope(
@@ -295,25 +427,46 @@ function resolveJsonPathScope(
 export function extractStructuredData(payload: unknown): unknown {
   if (typeof payload !== "object" || payload === null) return {};
 
-  const env = payload as { content?: unknown; structuredContent?: unknown; result?: unknown; page?: unknown };
+  const env = payload as {
+    content?: unknown;
+    structuredContent?: unknown;
+    result?: unknown;
+    page?: unknown;
+    _meta?: unknown;
+  };
+
+  const meta = env._meta;
+
+  const attachMeta = <T>(target: T): T => {
+    if (
+      meta !== undefined &&
+      typeof target === "object" &&
+      target !== null &&
+      !Array.isArray(target) &&
+      !("_meta" in (target as Record<string, unknown>))
+    ) {
+      return { ...(target as Record<string, unknown>), _meta: meta } as T;
+    }
+    return target;
+  };
 
   if (env.result !== undefined && env.result !== null) {
-    return env.result;
+    return attachMeta(env.result);
   }
   if (env.structuredContent !== undefined && env.structuredContent !== null) {
-    return env.structuredContent;
+    return attachMeta(env.structuredContent);
   }
 
   if (Array.isArray(env.content) && env.content.length > 0) {
     for (const item of env.content) {
       if (item && typeof item === "object" && "type" in item && item.type === "text" && "text" in item) {
         const text = item.text;
-        if (typeof text === "object" && text !== null) return text;
+        if (typeof text === "object" && text !== null) return attachMeta(text);
         if (typeof text === "string") {
           const trimmed = text.trim();
           if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
             try {
-              return JSON.parse(trimmed);
+              return attachMeta(JSON.parse(trimmed));
             } catch {
               // ignore and continue
             }
@@ -321,10 +474,16 @@ export function extractStructuredData(payload: unknown): unknown {
         }
       }
     }
-    return env.content;
+
+    // Non-text content (e.g. image, resource): if single item, unwrap it directly
+    if (env.content.length === 1 && env.content[0] && typeof env.content[0] === "object") {
+      return attachMeta(env.content[0]);
+    }
+
+    return attachMeta(env.content);
   }
 
-  return payload;
+  return attachMeta(payload);
 }
 
 // ── 2. JSON Schema Evaluation ────────────────────────────────────────────────
