@@ -9,8 +9,7 @@
  * Invariants (see docs/verification.md):
  *
  *   - Serial, alphabetical by case name
- *   - Failure-tolerant: errored/failed/timeout cases do NOT abort
- *   - Suite timeout marks remaining cases as `skipped`
+ *   - Failure-tolerant: errored/failed cases do NOT abort
  *   - SSE frames published per case + at start/end
  *   - MCP cases only
  */
@@ -27,7 +26,6 @@ import { publishVerificationFrame } from "./event-bus-channel";
 import { runMcpCase } from "./runner-mcp";
 import { resolveEffectiveToolName } from "./tool-name";
 import * as storage from "./storage";
-import { timeoutError } from "./error-source";
 import {
   normalizeCaseName,
   extractMcpStructuredData,
@@ -40,17 +38,6 @@ import type {
 } from "./types";
 
 const log = childLogger({ component: "verification-orchestrator" });
-
-/**
- * Per-case wall-clock cap. Independent of the suite-level timeout —
- * a single hung `tool.execute` MUST NOT block the whole serial loop
- * indefinitely, because the suite-level check only fires between
- * cases. The MCP pool exposes no AbortSignal in V1, so the dangling
- * promise is detached (`.catch` guards against UnhandledRejection)
- * and the provider-pool's refcount / idle reaper eventually reclaims
- * the client when this case's borrow is released.
- */
-const PER_CASE_MAX_MS = 60_000;
 
 export interface SuiteRunFinishPayload {
   status: VerificationRunStatus;
@@ -145,7 +132,6 @@ export async function startSuiteRun(
     suiteId: input.suiteId,
     groupId: suite.groupId,
     ownerId: input.ownerId,
-    timeoutSec: suite.timeoutSec,
     targetName: suite.name,
     cases,
     suppressNotification: input.suppressNotification,
@@ -267,7 +253,6 @@ interface ExecuteSuiteLoopInput {
   suiteId: string;
   groupId?: string | null;
   ownerId: string;
-  timeoutSec: number;
   targetName: string;
   cases: Awaited<ReturnType<typeof storage.listEnabledCasesForRun>>;
   suppressNotification?: boolean;
@@ -279,7 +264,6 @@ interface LoopCounters {
   failedCount: number;
   erroredCount: number;
   skippedCount: number;
-  timedOut: boolean;
 }
 
 async function executeSuiteLoop(input: ExecuteSuiteLoopInput): Promise<void> {
@@ -288,7 +272,6 @@ async function executeSuiteLoop(input: ExecuteSuiteLoopInput): Promise<void> {
     failedCount: 0,
     erroredCount: 0,
     skippedCount: 0,
-    timedOut: false,
   };
 
   try {
@@ -303,8 +286,6 @@ async function runSuiteCases(
   input: ExecuteSuiteLoopInput,
   counters: LoopCounters,
 ): Promise<void> {
-  const suiteStartedAt: number = Date.now();
-  const timeoutMs: number = input.timeoutSec * 1000;
   let currentSuiteId: string | null = null;
   let suiteContext: Record<string, unknown> = {};
   let suiteLiteralVariables: Record<string, unknown> = {};
@@ -345,31 +326,6 @@ async function runSuiteCases(
       continue;
     }
 
-    const elapsed: number = Date.now() - suiteStartedAt;
-    if (elapsed > timeoutMs) {
-      counters.timedOut = true;
-      const skippedOutcome: CaseExecutionOutcome = {
-        status: "skipped",
-        resolvedInput: (c.input ?? {}) as Record<string, unknown>,
-        resultPayload: null,
-        resultTruncated: false,
-        assertionResults: [],
-        error: timeoutError("suite", elapsed),
-        startedAt: Date.now(),
-        durationMs: 0,
-      };
-      await persistAndPublish({
-        ownerId: input.ownerId,
-        runId: input.runId,
-        caseId: c.id,
-        outcome: skippedOutcome,
-        originalToolName: c.toolName ?? "",
-        effectiveToolName: c.toolName ?? "",
-      });
-      counters.skippedCount += 1;
-      continue;
-    }
-
     if (!c.mcpServerId || !c.toolName) {
       const outcome: CaseExecutionOutcome = {
         status: "errored",
@@ -402,27 +358,19 @@ async function runSuiteCases(
       c.toolPrefixRule,
     );
 
-    const remainingSuiteMs = Math.max(0, timeoutMs - elapsed);
-    const perCaseCapMs = Math.max(1, Math.min(remainingSuiteMs, PER_CASE_MAX_MS));
-    const outcome: CaseExecutionOutcome = await runCaseWithCap({
-      runId: input.runId,
-      caseId: c.id,
-      perCaseCapMs,
-      rawInput: (c.input ?? {}) as Record<string, unknown>,
-      runner: () =>
-        runMcpCase(
-          {
-            mcpServerId: c.mcpServerId!,
-            toolName: effectiveToolName,
-            input: (c.input ?? {}) as Record<string, unknown>,
-            assertions: (c.assertions ?? []) as readonly AssertionSpec[],
-            originalToolName: c.toolName ?? "",
-            serverName: c.mcpServerName ?? "",
-            rule: c.toolPrefixRule ?? null,
-          },
-          { cases: suiteContext, variables: suiteLiteralVariables },
-        ),
-    });
+    const outcome: CaseExecutionOutcome = await runMcpCase(
+      {
+        mcpServerId: c.mcpServerId!,
+        toolName: effectiveToolName,
+        input: (c.input ?? {}) as Record<string, unknown>,
+        assertions: (c.assertions ?? []) as readonly AssertionSpec[],
+        originalToolName: c.toolName ?? "",
+        serverName: c.mcpServerName ?? "",
+        rule: c.toolPrefixRule ?? null,
+        toolTimeoutSec: c.toolTimeoutSec ?? null,
+      },
+      { cases: suiteContext, variables: suiteLiteralVariables },
+    );
 
     await persistAndPublish({
       ownerId: input.ownerId,
@@ -464,7 +412,6 @@ async function finaliseAndAnnounce(
   counters: LoopCounters,
 ): Promise<void> {
   const finalStatus: VerificationRunStatus = computeFinalStatus({
-    timedOut: counters.timedOut,
     passedCount: counters.passedCount,
     failedCount: counters.failedCount,
     erroredCount: counters.erroredCount,
@@ -603,68 +550,11 @@ async function handleSuiteLoopCrash(
   });
 }
 
-async function runCaseWithCap(args: {
-  runId: string;
-  caseId: number;
-  perCaseCapMs: number;
-  rawInput: Record<string, unknown>;
-  runner: () => Promise<CaseExecutionOutcome>;
-}): Promise<CaseExecutionOutcome> {
-  const startedAt = Date.now();
-  let timerHandle: ReturnType<typeof setTimeout> | null = null;
-
-  const runnerPromise = args.runner();
-
-  runnerPromise.catch((err) => {
-    log.warn(
-      {
-        event: "verification_case_after_cap_rejected",
-        runId: args.runId,
-        caseId: args.caseId,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      "verification case promise rejected after per-case cap fired",
-    );
-  });
-
-  const timeoutPromise = new Promise<CaseExecutionOutcome>((resolve) => {
-    timerHandle = setTimeout(() => {
-      log.warn(
-        {
-          event: "verification_case_cap_exceeded",
-          runId: args.runId,
-          caseId: args.caseId,
-          perCaseCapMs: args.perCaseCapMs,
-        },
-        "verification case exceeded per-case wall-clock cap; abandoning",
-      );
-      resolve({
-        status: "errored",
-        resolvedInput: args.rawInput,
-        resultPayload: null,
-        resultTruncated: false,
-        assertionResults: [],
-        error: timeoutError("case", args.perCaseCapMs),
-        startedAt,
-        durationMs: args.perCaseCapMs,
-      });
-    }, args.perCaseCapMs);
-  });
-
-  try {
-    return await Promise.race([runnerPromise, timeoutPromise]);
-  } finally {
-    if (timerHandle !== null) clearTimeout(timerHandle);
-  }
-}
-
 function computeFinalStatus(args: {
-  timedOut: boolean;
   passedCount: number;
   failedCount: number;
   erroredCount: number;
 }): VerificationRunStatus {
-  if (args.timedOut) return "timeout";
   if (args.erroredCount > 0) return "errored";
   if (args.failedCount > 0) return "failed";
   return "passed";

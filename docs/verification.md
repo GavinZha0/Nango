@@ -24,9 +24,9 @@ reference; everything operational is here.
 Three needs the existing surfaces don't cover:
 
 1. **MCP tool contract tests** — verify that our own MCP servers, and
-   any REST APIs we wrap via MCPHub, behave as the LLM-facing schema
+   any REST APIs we wrap via an MCP gateway (e.g. OpenAPI→MCP bridge), behave as the LLM-facing schema
    promises. The MCP tool layer is the one the agent actually sees;
-   testing at this layer catches MCPHub conversion errors that a raw
+   testing at this layer catches gateway conversion errors that a raw
    REST test (Postman) cannot.
 2. **Business-driven repeatable case organisation** — group suites into
    business catalogs (`Group -> Suite -> Case`), decouple test cases from
@@ -38,7 +38,7 @@ Three needs the existing surfaces don't cover:
 4. **Failure forensics & audit fidelity** — freeze both `originalToolName` and
    `effectiveToolName` in execution snapshots so historical replays remain
    accurate even after subsequent case edits, surfacing *which layer* failed
-   (MCPHub vs upstream vs assertion vs configuration).
+   (endpoint vs protocol vs tool vs assertion vs configuration).
 
 What this is **not**:
 
@@ -80,7 +80,7 @@ erDiagram
         jsonb variables "Suite literal variables"
         boolean enabled "Active/Inactive flag"
         text visibility "private | public"
-        integer timeout_sec "Per-suite wall-clock cap"
+        integer tool_timeout_sec "Per-case tool execution timeout (default 60s)"
         uuid created_by FK "references user(id), NOT NULL"
         uuid updated_by FK "references user(id), NOT NULL"
         timestamp created_at "CURRENT_TIMESTAMP"
@@ -179,7 +179,7 @@ export interface ToolPrefixRule {
   If the server returns `-32601 Method not found`, the runner reports structured diagnostic details:
   ```json
   {
-    "source": "upstream",
+    "source": "endpoint",
     "message": "MCP tool \"crm_search_leads\" not found on server \"crm-server\". (Original toolName: \"search_leads\", Mode: \"add\")"
   }
   ```
@@ -194,7 +194,7 @@ export interface ToolPrefixRule {
 
 ```json
 {
-  "source": "mcphub" | "upstream" | "transport" | "assertion" | "timeout" | "config" | "internal",
+  "source": "endpoint" | "protocol" | "tool" | "transport" | "assertion" | "timeout" | "config" | "crashed" | "internal",
   "message": "...",
   "details": { ... }
 }
@@ -202,13 +202,29 @@ export interface ToolPrefixRule {
 
 | `source` | When | `details` examples |
 |---|---|---|
-| `mcphub` | MCPHub returned an error (502, 504, or own envelope). | `{ httpStatus: 502, mcphubRouteId: "..." }` |
-| `upstream` | Upstream returned a non-success or tool not found. | `{ httpStatus: 401, wwwAuthenticate: "Bearer ..." }` |
-| `transport` | Network / connection / DNS failure. | `{ kind: "ECONNREFUSED", target: "mcphub:3000" }` |
+| `endpoint` | MCP endpoint returned an HTTP error (4xx/5xx, e.g. 401/403/500/502) or tool not found. | `{ httpStatus: 502 }` / `{ httpStatus: 401 }` |
+| `protocol` | Server returned a standard JSON-RPC error object (`raw.jsonRpcError`). | `{ code: -32602, data: { field: "limit" } }` |
+| `tool` | Tool execution returned `isError: true` or violated declared `outputSchema`. | `{ message: "Invalid date format" }` |
+| `transport` | Network / connection / DNS failure before or during HTTP/SSE session. | `{ kind: "ECONNREFUSED", target: "127.0.0.1:3000" }` |
 | `assertion` | Tool returned successfully but assertions failed. | `{ assertionPath: "$.data.id", expected: "abc", actual: "xyz" }` |
-| `timeout` | Per-case wall-clock or suite-level timeout reached. | `{ scope: "case" | "suite", elapsedMs: 30000 }` |
-| `config` | Prohibited credential variable or missing configuration. | `{ variableKey: "SECRET_KEY" }` |
+| `timeout` | Per-case tool execution timeout reached. | `{ scope: "case", elapsedMs: 60000 }` |
+| `config` | Prohibited credential variable, malformed assertion syntax, or missing configuration. | `{ variableKey: "SECRET_KEY" }` |
+| `crashed` | MCP server subprocess exited unexpectedly. | `{ exitCode: 1 }` |
 | `internal` | Unexpected throw inside runner. Always a bug. | `{ stack: "..." }` |
+
+### 4.1 Three-State Mapping and Negative Testing Contract
+
+1. **Smoke test mode** (empty `assertions` array):
+   - Smoke tests verify basic execution capability without custom assertions.
+   - If the tool execution succeeds without error, status is `passed`.
+   - If the tool returns a `protocol` error (e.g. JSON-RPC `-32602`) or a `tool` error (`isError: true`), status evaluates to `failed` (with `source: "protocol"` or `source: "tool"` recorded in the error envelope).
+   - Infrastructure, connection, or process errors (`transport`, `endpoint`, `timeout`, `internal`, `crashed`) evaluate to `errored`.
+
+2. **Assertion-driven testing & Negative tests**:
+   - When `assertions` are configured, pass/fail outcome is strictly governed by assertion verdicts.
+   - For negative testing (e.g. validating parameter rejection or expected error conditions), authors write explicit assertions targeting `result.jsonRpcError.code == -32602`, `result.jsonRpcError.data.field == "limit"`, or `result.isError == true`.
+   - When the expected error assertions match, the case evaluates to `passed`. If assertions do not match, status is `failed` (`source: "assertion"`).
+   - Assertion syntax compile errors evaluate to `errored` (`source: "config"`).
 
 ---
 
@@ -221,9 +237,20 @@ export interface ToolPrefixRule {
 | `json_schema` | Validates against a JSON Schema (Draft 2020-12). | `{"type": "object", "required": ["id"]}` |
 | `jsonpath` | Evaluates a JSONPath query against target operators. | `path: "items[0].id", operator: "==", expected: "abc"` |
 | `js_expression` | Executes a pure JS expression in a restricted `node:vm`. | `result.totalCount > 42` |
+| `metric` | Asserts on numerical metrics such as `duration_s` (execution time in seconds). | `metric: "duration_s", operator: "<", threshold: 5` |
 
 - An empty assertions array acts as a smoke test (passes if no upstream tool error).
 - Assertions can target raw MCP output by prefixing paths with `$` or using the `root` JS binding.
+
+### 5.1 Save-Time Semantic Validation
+
+Assertions are pre-checked for semantic syntax at save time (`POST /api/verification-cases`, `PATCH /api/verification-cases/[id]`, and Tester Agent tools) via `validateAssertionSyntax`:
+- `js_expression`: verified with AST compilation (`new Script('(${expr})')` without execution).
+- `json_schema`: compiled with Ajv Draft 2020-12.
+- `jsonpath`: parsed with `JSONPath` against structured path selectors and mock filter arrays; regex patterns verified for `matches` operator.
+- `metric`: restricted to allowed category metrics (e.g. `duration_s` with `<` or `>`) and finite thresholds.
+
+Any syntax errors trigger an immediate HTTP 400 Bad Request at save time, surfacing instant feedback in the UI editor before test execution.
 
 ---
 

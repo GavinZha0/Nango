@@ -149,7 +149,7 @@ export interface CaseResultDiagnosticItem {
   score?: number | null;
   feedback?: string | null;
   error?: string | null;
-  // Layered root-cause attribution (mcphub/upstream/transport/assertion/timeout/internal/config...).
+  // Layered root-cause attribution (endpoint/protocol/tool/transport/assertion/timeout/config/internal...).
   errorSource?: string | null;
   assertionResults: CaseAssertionResultItem[];
 }

@@ -50,8 +50,10 @@ export const TOOL_FAILURE_CAUSE: unique symbol = Symbol.for(
  * Never crosses the LLM boundary (see {@link TOOL_FAILURE_CAUSE}).
  */
 export interface ToolFailureCause {
-  /** Node `Error.code` — e.g. "ECONNREFUSED", "ETIMEDOUT". */
-  code?: string;
+  /** Node `Error.code` or JSON-RPC numeric error code — e.g. "ECONNREFUSED", -32001. */
+  code?: string | number;
+  /** Extra error payload (e.g. JSON-RPC error.data or McpError.data). */
+  data?: unknown;
   /** HTTP status if the error came from an HTTP layer. */
   httpStatus?: number;
   /** Response headers — typed loosely so `Headers` / plain record both fit. */
@@ -127,7 +129,13 @@ export function toToolFailure(
   if (err instanceof Error) {
     const cause: ToolFailureCause = { name: err.name, stack: err.stack };
     const rawCode = (err as { code?: unknown }).code;
-    if (typeof rawCode === "string") cause.code = rawCode;
+    if (typeof rawCode === "string" || typeof rawCode === "number") {
+      cause.code = rawCode;
+    }
+    const rawData = (err as { data?: unknown }).data;
+    if (rawData !== undefined) {
+      cause.data = rawData;
+    }
     const rawStatus =
       (err as { status?: unknown }).status ??
       (err as { statusCode?: unknown }).statusCode;

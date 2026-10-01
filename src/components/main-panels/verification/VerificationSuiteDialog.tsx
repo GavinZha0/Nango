@@ -90,6 +90,9 @@ export function VerificationSuiteDialog({
     suite?.toolPrefixRule?.mode ?? "none",
   );
   const [prefixText, setPrefixText] = useState<string>(suite?.toolPrefixRule?.prefix ?? "");
+  const [toolTimeoutSec, setToolTimeoutSec] = useState<number | string>(
+    suite?.toolTimeoutSec ?? 60,
+  );
 
   const [servers, setServers] = useState<McpServerItem[]>([]);
   const [groups, setGroups] = useState<VerificationGroupRow[]>([]);
@@ -114,6 +117,7 @@ export function VerificationSuiteDialog({
       setCustomGroupName("");
       setPrefixMode(suite?.toolPrefixRule?.mode ?? "none");
       setPrefixText(suite?.toolPrefixRule?.prefix ?? "");
+      setToolTimeoutSec(suite?.toolTimeoutSec ?? 60);
       setError(null);
     }
   }
@@ -178,6 +182,10 @@ export function VerificationSuiteDialog({
     const resolvedGroupName =
       selectedGroupId === "__new__" ? customGroupName.trim() : undefined;
 
+    const parsedTimeout = Number(toolTimeoutSec);
+    const resolvedToolTimeoutSec =
+      !Number.isNaN(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 60;
+
     if (isEdit) {
       setSubmitting(true);
       setError(null);
@@ -190,6 +198,7 @@ export function VerificationSuiteDialog({
           mcpServerId: serverId || null,
           toolPrefixRule,
           variables,
+          toolTimeoutSec: resolvedToolTimeoutSec,
         });
         onOpenChange(false);
       } catch (err) {
@@ -216,6 +225,7 @@ export function VerificationSuiteDialog({
         name: trimmedName,
         description: description.trim() || null,
         variables,
+        toolTimeoutSec: resolvedToolTimeoutSec,
       });
       if (created) {
         toast.success("Verification suite created");
@@ -239,7 +249,7 @@ export function VerificationSuiteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl h-[720px] max-h-[92vh] flex flex-col">
+      <DialogContent className="sm:max-w-xl h-[820px] max-h-[94vh] flex flex-col">
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
             <DialogHeader className="flex flex-row items-center justify-between border-b pb-3 pr-8 shrink-0">
@@ -426,6 +436,25 @@ export function VerificationSuiteDialog({
                       />
                     </div>
                   </div>
+                </div>
+
+                {/* Tool Timeout */}
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="suite-tool-timeout">Tool Timeout (Seconds)</Label>
+                  <Input
+                    id="suite-tool-timeout"
+                    type="number"
+                    min={1}
+                    max={3600}
+                    value={toolTimeoutSec}
+                    onChange={(e) => setToolTimeoutSec(e.target.value)}
+                    placeholder="60"
+                    disabled={submitting}
+                    data-testid="suite-tool-timeout-input"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Per-case tool execution timeout (in seconds). Overrides the global MCP execution timeout (defaults to 60s).
+                  </p>
                 </div>
 
                 {/* Description */}

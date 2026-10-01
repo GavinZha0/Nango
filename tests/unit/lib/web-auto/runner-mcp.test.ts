@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mockBorrow = vi.fn();
 const mockRelease = vi.fn();
@@ -145,7 +145,7 @@ describe("runWebAutoMcp", () => {
     });
 
     expect(outcome.status).toBe("failed");
-    expect(outcome.error?.source).toBe("upstream");
+    expect(outcome.error?.source).toBe("tool");
     expect(outcome.error?.message).toBe("Target element not found");
     expect(mockRelease).toHaveBeenCalledWith("server-1", mockProvider);
   });

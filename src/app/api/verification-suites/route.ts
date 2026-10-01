@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { asc, eq, sql } from "drizzle-orm";
 
+import { getConfigNumber } from "@/lib/config";
 import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { McpServerTable, VerificationSuiteTable } from "@/lib/db/schema";
@@ -41,7 +42,7 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
       visibility: VerificationSuiteTable.visibility,
       variables: VerificationSuiteTable.variables,
       enabled: VerificationSuiteTable.enabled,
-      timeoutSec: VerificationSuiteTable.timeoutSec,
+      toolTimeoutSec: VerificationSuiteTable.toolTimeoutSec,
       createdBy: VerificationSuiteTable.createdBy,
       updatedBy: VerificationSuiteTable.updatedBy,
       createdAt: VerificationSuiteTable.createdAt,
@@ -83,7 +84,7 @@ const createSchema = z
       .nullable(),
     variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
-    timeoutSec: z.number().int().min(10).max(7200).optional(),
+    toolTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
   })
   .strict();
 
@@ -110,6 +111,12 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     resolvedGroupId = group.id;
   }
 
+  const defaultToolTimeout = getConfigNumber("mcp.execution_timeout", 60);
+  const resolvedToolTimeoutSec =
+    typeof body.toolTimeoutSec === "number" && body.toolTimeoutSec > 0
+      ? body.toolTimeoutSec
+      : defaultToolTimeout;
+
   try {
     const [row] = await db
       .insert(VerificationSuiteTable)
@@ -122,7 +129,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         toolPrefixRule: body.toolPrefixRule ?? null,
         variables: body.variables ?? {},
         visibility: body.visibility ?? "private",
-        timeoutSec: body.timeoutSec ?? 300,
+        toolTimeoutSec: resolvedToolTimeoutSec,
         createdBy: session.user.id,
         updatedBy: session.user.id,
       })

@@ -165,6 +165,12 @@ export interface AssertionResult {
   errorSource?: string;
   details?: unknown;
   /**
+   * True when the assertion itself failed to evaluate due to a configuration
+   * error (e.g. invalid syntax, schema compilation failure, execution timeout,
+   * or unsupported type), rather than the target data failing the assertion.
+   */
+  errored?: boolean;
+  /**
    * True when this assertion was NOT evaluated (e.g. an llm_judge row whose
    * suite has no evaluator agent configured, or a judge row gated out by a
    * deterministic failure). Renders as "not evaluated", never as a scored
@@ -239,7 +245,21 @@ export const CATEGORY_TYPE_MAPPING: Record<
   TestCategoryName,
   readonly AssertionTypeName[]
 > = {
-  verification: ["jsonpath", "json_schema", "js_expression"],
+  verification: ["jsonpath", "json_schema", "js_expression", "metric"],
   evaluation: ["jsonpath", "js_expression", "llm_judge", "metric", "tool_call"],
   "web-auto": ["js_expression", "jsonpath", "llm_judge"],
+};
+
+/**
+ * Single source of truth for the metric names each test category supports.
+ * Verification only evaluates duration_s for single MCP tool execution,
+ * whereas Evaluation supports multi-turn dialogue metrics (tokens, tool calls).
+ */
+export const CATEGORY_METRIC_MAPPING: Record<
+  TestCategoryName,
+  readonly MetricName[]
+> = {
+  verification: ["duration_s"],
+  evaluation: ["duration_s", "output_tokens", "total_tool_calls"],
+  "web-auto": [],
 };

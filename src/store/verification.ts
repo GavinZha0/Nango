@@ -25,7 +25,7 @@ export interface VerificationSuiteRow {
   visibility: VerificationVisibility;
   variables?: Record<string, unknown>;
   enabled: boolean;
-  timeoutSec: number;
+  toolTimeoutSec: number;
   createdBy: string;
   updatedBy: string | null;
   createdAt: string;
@@ -126,7 +126,7 @@ export interface CreateSuiteInput {
   toolPrefixRule?: ToolPrefixRule | null;
   variables?: Record<string, unknown>;
   visibility?: VerificationVisibility;
-  timeoutSec?: number;
+  toolTimeoutSec?: number;
 }
 
 export interface PatchSuiteInput {
@@ -139,7 +139,7 @@ export interface PatchSuiteInput {
   variables?: Record<string, unknown>;
   visibility?: VerificationVisibility;
   enabled?: boolean;
-  timeoutSec?: number;
+  toolTimeoutSec?: number;
 }
 
 async function readErrorMessage(res: Response): Promise<string> {

@@ -1,4 +1,12 @@
-import { assertionSpecSchema, isJudgeDependentType } from "@/lib/assertions/types";
+import {
+  assertionSpecSchema,
+  isJudgeDependentType,
+  CATEGORY_TYPE_MAPPING,
+  CATEGORY_METRIC_MAPPING,
+  type TestCategoryName,
+  type AssertionTypeName,
+} from "@/lib/assertions/types";
+import { validateAssertionSyntax } from "@/lib/assertions";
 
 /** Standard warning for suites that hold llm_judge/expectation assertions but
  *  bind no evaluator agent — such cases return `errored` (never a silent pass). */
@@ -18,12 +26,13 @@ export function containsJudgeDependentAssertions(
 }
 
 /**
- * Normalizes common model formatting aliases and performs lightweight
- * validation against the universal assertion specification schema.
+ * Normalizes common model formatting aliases and performs validation
+ * against the universal assertion specification schema and optional category limits.
  */
 export function normalizeAndValidateAssertions(
   rawAssertions: unknown[],
   caseName: string,
+  category?: TestCategoryName,
 ): Array<Record<string, unknown>> {
   if (!Array.isArray(rawAssertions) || rawAssertions.length === 0) {
     return [];
@@ -58,6 +67,34 @@ export function normalizeAndValidateAssertions(
       const issue = parsed.error.issues[0]?.message ?? "unsupported format";
       throw new Error(
         `Invalid assertion at index #${i} in case '${caseName}': ${issue}. Supported assertion types are: 'js_expression' (expression), 'jsonpath' (path, operator, expected), 'json_schema' (schema), 'metric' (metric, operator, threshold), 'tool_call' (toolName), 'llm_judge' (expectation).`,
+      );
+    }
+
+    // 3. Category constraint enforcement
+    if (category) {
+      const allowed = CATEGORY_TYPE_MAPPING[category];
+      if (!allowed.includes(item.type as AssertionTypeName)) {
+        throw new Error(
+          `Invalid assertion at index #${i} in case '${caseName}': type '${item.type}' is not supported for category '${category}'. Allowed assertion types for ${category} are: ${allowed.map((t) => `'${t}'`).join(", ")}.`,
+        );
+      }
+
+      if (item.type === "metric") {
+        const allowedMetrics = CATEGORY_METRIC_MAPPING[category];
+        const metricName = (item as { metric?: string }).metric;
+        if (!metricName || !allowedMetrics.includes(metricName as never)) {
+          throw new Error(
+            `Invalid assertion at index #${i} in case '${caseName}': metric '${metricName}' is not supported for category '${category}'. Allowed metrics for ${category} are: ${allowedMetrics.map((m) => `'${m}'`).join(", ")}.`,
+          );
+        }
+      }
+    }
+
+    // 4. Semantic / syntax validation pre-check
+    const syntaxCheck = validateAssertionSyntax(item);
+    if (!syntaxCheck.ok) {
+      throw new Error(
+        `Invalid assertion at index #${i} in case '${caseName}': ${syntaxCheck.error}`,
       );
     }
 

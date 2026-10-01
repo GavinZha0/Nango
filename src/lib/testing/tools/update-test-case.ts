@@ -146,7 +146,11 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         if (toolName !== undefined) updates.toolName = toolName;
         if (input !== undefined) updates.input = input;
         if (assertions !== undefined) {
-          updates.assertions = normalizeAndValidateAssertions(assertions, existing.caseRow.name);
+          updates.assertions = normalizeAndValidateAssertions(
+            assertions,
+            existing.caseRow.name,
+            "verification",
+          );
         }
 
         let updated: typeof VerificationCaseTable.$inferSelect | undefined;
@@ -218,7 +222,11 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         if (name !== undefined) updates.name = name;
         if (enabled !== undefined) updates.enabled = enabled;
         if (assertions !== undefined) {
-          updates.assertions = normalizeAndValidateAssertions(assertions, existing.caseRow.name);
+          updates.assertions = normalizeAndValidateAssertions(
+            assertions,
+            existing.caseRow.name,
+            "evaluation",
+          );
         }
         if (turns !== undefined) {
           updates.input = {
@@ -314,7 +322,11 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         if (name !== undefined) updates.name = name;
         if (enabled !== undefined) updates.enabled = enabled;
         if (assertions !== undefined) {
-          updates.assertions = normalizeAndValidateAssertions(assertions, existing.caseRow.name);
+          updates.assertions = normalizeAndValidateAssertions(
+            assertions,
+            existing.caseRow.name,
+            "web-auto",
+          );
         }
         if (script !== undefined || steps !== undefined) {
           const existingInput = (existing.caseRow.input ?? {}) as Record<string, unknown>;

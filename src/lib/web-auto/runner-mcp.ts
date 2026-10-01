@@ -35,7 +35,7 @@ export interface RunWebAutoMcpInput {
  *
  * Decision table for the returned `status`:
  *
- *   tool throw (transport / mcphub / upstream 4xx-5xx) → "errored"
+ *   tool throw (transport / endpoint 4xx-5xx)          → "errored"
  *   tool returned `{isError: true}` (MCP server-side)  → "failed"
  *   tool returned successfully                         → continue to assertion layers
  *
@@ -150,7 +150,7 @@ export async function runWebAutoMcp(
         status: "failed",
         executionOutput: raw,
         error: {
-          source: "upstream",
+          source: "tool",
           message: extractMcpErrorText(raw) ?? "Playwright execution failed",
           details: { mcpIsError: true },
         },

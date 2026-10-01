@@ -19,7 +19,10 @@ import {
   type TesterToolContext,
 } from "../types";
 
-function buildSchemaItem(type: AssertionTypeEnum): AssertionSchemaItem {
+function buildSchemaItem(
+  type: AssertionTypeEnum,
+  category?: "verification" | "evaluation" | "web-auto",
+): AssertionSchemaItem {
   switch (type) {
     case "jsonpath": {
       const { $schema, ...cleanSchema } = z.toJSONSchema(jsonPathAssertionSchema) as Record<string, unknown>;
@@ -85,6 +88,30 @@ function buildSchemaItem(type: AssertionTypeEnum): AssertionSchemaItem {
       };
     }
     case "metric": {
+      if (category === "verification") {
+        const verificationMetricSchema = z
+          .object({
+            type: z.literal("metric"),
+            metric: z.literal("duration_s"),
+            operator: z.enum(["<", ">"]),
+            threshold: z.number(),
+          })
+          .strict();
+        const { $schema, ...cleanSchema } = z.toJSONSchema(verificationMetricSchema) as Record<string, unknown>;
+        return {
+          type: "metric",
+          description:
+            "Asserts tool execution duration in seconds (duration_s) using comparison operators (<, >).",
+          jsonSchema: cleanSchema,
+          example: {
+            type: "metric",
+            metric: "duration_s",
+            operator: "<",
+            threshold: 5.0,
+          },
+        };
+      }
+
       const { $schema, ...cleanSchema } = z.toJSONSchema(metricAssertionSchema) as Record<string, unknown>;
       return {
         type: "metric",
@@ -153,7 +180,7 @@ export function buildGetAssertionSchemaTool(ctx: TesterToolContext): ToolDefinit
       const targetTypes: AssertionTypeEnum[] = args.assertionType
         ? [args.assertionType]
         : [...validTypes];
-      const schemas = targetTypes.map((t) => buildSchemaItem(t));
+      const schemas = targetTypes.map((t) => buildSchemaItem(t, args.category));
 
       return {
         category: args.category,

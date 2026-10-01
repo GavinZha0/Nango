@@ -1,0 +1,1 @@
+ALTER TABLE "verification_suite" DROP COLUMN "timeout_sec";

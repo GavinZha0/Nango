@@ -108,6 +108,9 @@ function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMod
   if (mode === "verification") {
     const hasSchema = assertions.some((a) => a.type === "json_schema");
     if (hasSchema) return "schema";
+
+    const hasMetrics = assertions.some((a) => a.type === "metric");
+    if (hasMetrics) return "metric";
   }
 
   if (mode === "evaluation") {
@@ -260,9 +263,10 @@ export function UniversalAssertionsEditor({
     list.push({ id: "expression", label: "JS Expression", hasDot: hasExpressions });
     list.push({ id: "path_match", label: "JSONPath", hasDot: hasPathMatches });
 
-    // 2. Only Verification has Schema
+    // 2. Verification has Schema and Metrics
     if (mode === "verification") {
       list.push({ id: "schema", label: "Schema", hasDot: hasSchema });
+      list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
     }
 
     // 3. Evaluation has Tool Calls & Metrics
@@ -384,9 +388,17 @@ export function UniversalAssertionsEditor({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {(draft?.parseError || rawJsonError) && (
+            <span
+              className="max-w-[280px] truncate font-mono text-[10px] font-medium text-destructive"
+              title={draft?.parseError || rawJsonError || ""}
+            >
+              {draft?.parseError || rawJsonError}
+            </span>
+          )}
           {isSaving && (
-            <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
+            <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground shrink-0" />
           )}
         </div>
       </div>
@@ -677,7 +689,9 @@ export function UniversalAssertionsEditor({
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground">
-                  • Execution performance limits: duration, token consumption, and tool call count.
+                  {mode === "verification"
+                    ? "• Tool execution performance: duration limit in seconds (duration_s)."
+                    : "• Execution performance limits: duration, token consumption, and tool call count."}
                 </Label>
               </div>
               {!readOnly && (
@@ -690,7 +704,7 @@ export function UniversalAssertionsEditor({
                     addAssertion({
                       type: "metric",
                       metric: "duration_s",
-                      operator: "<=",
+                      operator: "<",
                       threshold: 10,
                     })
                   }
@@ -703,13 +717,28 @@ export function UniversalAssertionsEditor({
             <div className="space-y-2">
               {currentAssertions.map((spec, idx) => {
                 if (spec.type !== "metric") return null;
+                const effectiveOperator =
+                  spec.metric === "duration_s" && !["<", ">"].includes(spec.operator)
+                    ? "<"
+                    : spec.operator;
+
                 return (
                   <div key={idx} className="flex items-center gap-1.5">
                     <Select
                       value={spec.metric}
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
-                        if (val) updateAssertionAt(idx, { ...spec, metric: val as MetricName });
+                        if (val) {
+                          const nextOperator =
+                            val === "duration_s" && !["<", ">"].includes(spec.operator)
+                              ? "<"
+                              : spec.operator;
+                          updateAssertionAt(idx, {
+                            ...spec,
+                            metric: val as MetricName,
+                            operator: nextOperator,
+                          });
+                        }
                       }}
                     >
                       <SelectTrigger className="w-36 h-7 text-xs bg-muted/20 border-muted-foreground/20 font-mono">
@@ -717,13 +746,17 @@ export function UniversalAssertionsEditor({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="duration_s">duration_s</SelectItem>
-                        <SelectItem value="output_tokens">output_tokens</SelectItem>
-                        <SelectItem value="total_tool_calls">total_tool_calls</SelectItem>
+                        {mode === "evaluation" && (
+                          <>
+                            <SelectItem value="output_tokens">output_tokens</SelectItem>
+                            <SelectItem value="total_tool_calls">total_tool_calls</SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
 
                     <Select
-                      value={spec.operator}
+                      value={effectiveOperator}
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
                         if (val) updateAssertionAt(idx, { ...spec, operator: val as MetricOperator });
@@ -733,11 +766,20 @@ export function UniversalAssertionsEditor({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="<=">&lt;=</SelectItem>
-                        <SelectItem value="<">&lt;</SelectItem>
-                        <SelectItem value="==">==</SelectItem>
-                        <SelectItem value=">">&gt;</SelectItem>
-                        <SelectItem value=">=">&gt;=</SelectItem>
+                        {spec.metric === "duration_s" ? (
+                          <>
+                            <SelectItem value="<">&lt;</SelectItem>
+                            <SelectItem value=">">&gt;</SelectItem>
+                          </>
+                        ) : (
+                          <>
+                            <SelectItem value="<=">&lt;=</SelectItem>
+                            <SelectItem value="<">&lt;</SelectItem>
+                            <SelectItem value="==">==</SelectItem>
+                            <SelectItem value=">">&gt;</SelectItem>
+                            <SelectItem value=">=">&gt;=</SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
 

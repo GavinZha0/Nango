@@ -64,7 +64,7 @@ describe("redactErrorEnvelope", () => {
   it("redacts message and details inside an ErrorEnvelope", () => {
     const sensitive = new Set(["my_hidden_key_value"]);
     const error = {
-      source: "upstream",
+      source: "endpoint",
       message: "Connection failed with key my_hidden_key_value",
       details: {
         rawResponse: "Error for key my_hidden_key_value at /endpoint",

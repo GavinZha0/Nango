@@ -188,7 +188,11 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
                   name: c.name,
                   toolName: c.toolName ?? null,
                   input: c.input ?? {},
-                  assertions: normalizeAndValidateAssertions(c.assertions ?? [], c.name),
+                  assertions: normalizeAndValidateAssertions(
+                    c.assertions ?? [],
+                    c.name,
+                    "verification",
+                  ),
                   enabled: false, // Contract: always false
                   createdBy: ctx.userId,
                 })),
@@ -269,7 +273,11 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
                     suiteId,
                     name: c.name,
                     input: { turns: formattedTurns },
-                    assertions: normalizeAndValidateAssertions(c.assertions ?? [], c.name),
+                    assertions: normalizeAndValidateAssertions(
+                      c.assertions ?? [],
+                      c.name,
+                      "evaluation",
+                    ),
                     enabled: false, // Contract: always false
                     createdBy: ctx.userId,
                   };
@@ -356,7 +364,11 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
                     script: c.script ?? "",
                     steps: c.steps ?? "",
                   },
-                  assertions: normalizeAndValidateAssertions(c.assertions ?? [], c.name),
+                  assertions: normalizeAndValidateAssertions(
+                    c.assertions ?? [],
+                    c.name,
+                    "web-auto",
+                  ),
                   enabled: false, // Contract: always false
                   createdBy: ctx.userId,
                 })),

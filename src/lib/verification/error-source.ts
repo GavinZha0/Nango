@@ -28,15 +28,14 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set([
  * Classify a thrown error from {@link McpClient.callTool} (or the
  * pool borrow path) into a structured {@link ErrorEnvelope}.
  *
- * Layering rule (best-effort in V1 — V2 may sidecar-probe upstream
- * directly to disambiguate further):
+ * Layering rule (gateway-agnostic, single-node execution):
  *
  *   - Node transport code (ECONNREFUSED, etc.)  → "transport"
- *   - HTTP 4xx                                  → "upstream"
- *   - HTTP 5xx with `x-mcphub-source: upstream` → "upstream"
- *   - HTTP 5xx with `x-mcphub-source: mcphub`   → "mcphub"
- *   - HTTP 5xx without source header            → "mcphub" (conservative)
- *   - Anything else                             → "internal"
+ *   - Timeout code (-32001 / TimeoutError)     → "timeout"
+ *   - Connection code (-32000)                 → "transport"
+ *   - JSON-RPC numeric code (-32602, etc.)     → "protocol"
+ *   - HTTP 4xx / 5xx                           → "endpoint"
+ *   - Anything else                            → "internal"
  *
  * The MCP TypeScript SDK throws a generic `Error` for HTTP failures
  * with the message containing `HTTP NNN` text. We parse that out as
@@ -44,37 +43,77 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set([
  */
 export function classifyMcpError(err: unknown): ErrorEnvelope {
   if (err instanceof Error) {
-    const code: string | undefined = readErrorCode(err);
-    if (code && TRANSPORT_CODES.has(code)) {
+    const code: string | number | undefined = readErrorCode(err);
+    if (code !== undefined) {
+      if (typeof code === "string" && TRANSPORT_CODES.has(code)) {
+        return {
+          source: "transport",
+          message: err.message || code,
+          details: { code, target: readErrorTarget(err) },
+        };
+      }
+      // JSON-RPC / MCP specific codes
+      if (code === -32001) {
+        return {
+          source: "timeout",
+          message: err.message || "MCP request timed out",
+          details: { code },
+        };
+      }
+      if (code === -32000) {
+        return {
+          source: "transport",
+          message: err.message || "MCP connection error",
+          details: { code },
+        };
+      }
+      if (typeof code === "number") {
+        const rawData = (err as { data?: unknown }).data;
+        return {
+          source: "protocol",
+          message: err.message || `JSON-RPC error ${code}`,
+          details: {
+            code,
+            ...(rawData !== undefined ? { data: rawData } : {}),
+          },
+        };
+      }
+    }
+
+    if (err.message && err.message.includes("is in failure cooldown")) {
       return {
         source: "transport",
-        message: err.message || code,
-        details: { code, target: readErrorTarget(err) },
+        message: err.message,
+        details: { cooldown: true },
+      };
+    }
+
+    if (err.name === "TimeoutError") {
+      return {
+        source: "timeout",
+        message: err.message || "Operation timed out",
+        details: { code, name: err.name },
       };
     }
 
     const status: number | null = extractHttpStatus(err);
-    const source: string | null = readMcphubSourceHeader(err);
-
     if (status !== null) {
-      if (status >= 400 && status < 500) {
-        return {
-          source: "upstream",
-          message: err.message,
-          details: { httpStatus: status, ...(source ? { mcphubSource: source } : {}) },
-        };
-      }
-      if (status >= 500) {
-        // 5xx — disambiguate by header if present, otherwise default
-        // to "mcphub" (the layer Nango owns) so the user looks at the
-        // proxy first.
-        const inferred = source === "upstream" ? "upstream" : "mcphub";
-        return {
-          source: inferred,
-          message: err.message,
-          details: { httpStatus: status, ...(source ? { mcphubSource: source } : {}) },
-        };
-      }
+      return {
+        source: "endpoint",
+        message: err.message,
+        details: { httpStatus: status },
+      };
+    }
+
+    // QUIRK: Text-only timeout phrases without a verified -32001 code or TimeoutError
+    // represent external/gateway dropouts, not execution of Nango's configured case timeout.
+    // Classify as transport so V1-7 duration_s logic does not falsely mark them as failed assertions.
+    if (/(?:timed?\s*out|timeout)/i.test(err.message)) {
+      return {
+        source: "transport",
+        message: err.message,
+        details: { code, unconfirmedTimeout: true },
+      };
     }
 
     return {
@@ -127,9 +166,10 @@ export function assertionError(
 
 // --- Internals ---------------------------------------------------------------
 
-function readErrorCode(err: Error): string | undefined {
+function readErrorCode(err: Error): string | number | undefined {
   const c = (err as unknown as { code?: unknown }).code;
-  return typeof c === "string" ? c : undefined;
+  if (typeof c === "string" || typeof c === "number") return c;
+  return undefined;
 }
 
 function readErrorTarget(err: Error): string | undefined {
@@ -159,18 +199,3 @@ function extractHttpStatus(err: Error): number | null {
   return null;
 }
 
-/**
- * Read `x-mcphub-source` header from the error if MCPHub forwarded
- * it. The MCP SDK doesn't expose response headers in a stable place
- * — this is best-effort and defaults to `null` when unavailable.
- */
-function readMcphubSourceHeader(err: Error): string | null {
-  const headers = (err as unknown as { headers?: Headers | Record<string, string> })
-    .headers;
-  if (!headers) return null;
-  if (typeof (headers as Headers).get === "function") {
-    return (headers as Headers).get("x-mcphub-source");
-  }
-  const rec = headers as Record<string, string>;
-  return rec["x-mcphub-source"] ?? rec["X-MCPHub-Source"] ?? null;
-}

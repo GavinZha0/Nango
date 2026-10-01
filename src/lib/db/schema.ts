@@ -1713,7 +1713,7 @@ export const VerificationSuiteTable = pgTable(
     variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     enabled: boolean("enabled").notNull().default(true),
     visibility: text("visibility").notNull().default("private"),
-    timeoutSec: integer("timeout_sec").notNull().default(300),
+    toolTimeoutSec: integer("tool_timeout_sec").notNull().default(60),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => UserTable.id, {
@@ -1838,7 +1838,7 @@ export type VerificationRunStatus =
  * history view displays the snapshot, not today's case definition.
  *
  * `error` JSON shape: { source, message, details? } where source ∈
- * { mcphub | upstream | transport | assertion | timeout | internal }.
+ * { endpoint | protocol | tool | transport | assertion | timeout | config | crashed | internal }.
  * See docs/verification.md.
  */
 export const VerificationCaseResultTable = pgTable(
@@ -1892,13 +1892,17 @@ export type VerificationErrorSource =
    *  by the boot-epoch recovery sweep. Distinct from "internal" so the
    *  UI can label it as an infrastructure event rather than a bug. */
   | "crashed"
-  | "mcphub"
-  | "upstream"
+  | "endpoint"
+  | "protocol"
+  | "tool"
   | "transport"
   | "assertion"
   | "timeout"
   | "config"
-  | "internal";
+  | "internal"
+  /** @deprecated Retained for backwards compatibility with historical test runs. */
+  | "mcphub"
+  | "upstream";
 
 // ---------------------------------------------------------------------------
 // Evaluation subsystem — see docs/evaluation.md.

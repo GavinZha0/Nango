@@ -193,7 +193,7 @@ export async function runWebAutoCase(
       index: 0,
       type: "error",
       ok: false,
-      errorSource: sanitizedMcpError?.source ?? "upstream",
+      errorSource: sanitizedMcpError?.source ?? "tool",
       message: sanitizedMcpError?.message ?? "Playwright execution returned error",
     };
     return {

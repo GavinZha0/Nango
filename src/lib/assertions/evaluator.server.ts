@@ -12,7 +12,7 @@
 
 import "server-only";
 
-import { runInNewContext } from "node:vm";
+import { runInNewContext, Script } from "node:vm";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import { JSONPath } from "jsonpath-plus";
 
@@ -150,6 +150,8 @@ function evaluateSingleDeterministic(
         index,
         type: (spec as { type: string }).type,
         ok: false,
+        errored: true,
+        errorSource: "config",
         message: `Unknown assertion type: ${(spec as { type: string }).type}`,
       };
     }
@@ -185,6 +187,8 @@ function evaluateJsonPath(
       index,
       type: spec.type,
       ok: false,
+      errored: true,
+      errorSource: "config",
       path: spec.path,
       message: `JSONPath parse failed: ${errMessage(err)}`,
     };
@@ -338,6 +342,8 @@ function evaluateJsonSchema(
       index,
       type: "json_schema",
       ok: false,
+      errored: true,
+      errorSource: "config",
       message: `Schema compile failed: ${errMessage(err)}`,
     };
   }
@@ -405,11 +411,25 @@ function evaluateJsExpression(
       message: ok ? undefined : "Expression returned falsy",
     };
   } catch (err) {
+    const errName = (err as { name?: string })?.name;
+    const isTimeout =
+      (err as { code?: string })?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT" ||
+      errMessage(err).includes("timed out");
+    const isSyntax = err instanceof SyntaxError || errName === "SyntaxError";
+    const isTypeError = err instanceof TypeError || errName === "TypeError";
+    // Runtime TypeErrors (e.g. data missing expected property) are treated as assertion failed (ok: false, errored: false)
+    // Syntax errors, timeouts, or unknown evaluation issues are treated as configuration errors (errored: true)
+    const isConfigError = isTimeout || isSyntax || !isTypeError;
+
     return {
       index,
       type: "js_expression",
       ok: false,
-      message: `Expression threw: ${errMessage(err)}`,
+      errored: isConfigError ? true : undefined,
+      errorSource: isConfigError ? "config" : undefined,
+      message: isTimeout
+        ? "Expression execution timed out"
+        : `Expression threw: ${errMessage(err)}`,
     };
   }
 }
@@ -513,6 +533,8 @@ function evaluateMetric(
       index,
       type: "metric",
       ok: false,
+      errored: true,
+      errorSource: "config",
       message: `Metric "${spec.metric}" was not recorded for this execution`,
     };
   }
@@ -593,3 +615,153 @@ function deepEqual(a: unknown, b: unknown): boolean {
   }
   return false;
 }
+
+// ── Syntax & Semantic Validation ─────────────────────────────────────────────
+
+export interface SyntaxValidationResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * CONTRACT: validateAssertionSyntax never throws; returns { ok: true } or { ok: false, error: string }.
+ *
+ * Validates the static syntax/semantics of a single assertion specification.
+ *
+ * Checks:
+ * - `js_expression`: valid JavaScript AST syntax (Script compilation without execution).
+ * - `json_schema`: valid JSON Schema (Ajv compilation).
+ * - `jsonpath`: valid JSONPath syntax, and valid regex if operator === "matches".
+ * - `metric`: valid numeric threshold and operator.
+ */
+export function validateAssertionSyntax(spec: unknown): SyntaxValidationResult {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    return { ok: false, error: "Assertion must be a JSON object" };
+  }
+
+  const obj = spec as Record<string, unknown>;
+  const type = obj.type;
+
+  switch (type) {
+    case "js_expression": {
+      const expr = obj.expression;
+      if (typeof expr !== "string" || !expr.trim()) {
+        return { ok: false, error: "Expression must be a non-empty string" };
+      }
+      try {
+        // QUIRK: Script compilation verifies AST syntax without calling runInContext,
+        // avoiding execution side-effects or variable dependency requirements.
+        new Script(`(${expr})`);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: `Invalid JavaScript expression syntax: ${errMessage(err)}`,
+        };
+      }
+    }
+
+    case "json_schema": {
+      const schema = obj.schema;
+      if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+        return { ok: false, error: "Schema must be a JSON object" };
+      }
+      try {
+        ajv.compile(schema as object);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: `Invalid JSON Schema: ${errMessage(err)}`,
+        };
+      }
+    }
+
+    case "jsonpath": {
+      const path = obj.path;
+      if (typeof path !== "string" || !path.trim()) {
+        return { ok: false, error: "JSONPath path must be a non-empty string" };
+      }
+      const rawPath = path.trim();
+      const absolutePath = rawPath.startsWith("$")
+        ? rawPath
+        : rawPath.startsWith("[")
+          ? `$${rawPath}`
+          : `$.${rawPath}`;
+
+      try {
+        // QUIRK: jsonpath-plus only compiles [?(...)] filter expressions when iterating
+        // over actual array elements. buildDummyForJsonPath populates mock arrays along the
+        // path segments so filter syntax errors trigger Jsep compilation errors at check time.
+        const dummy = buildDummyForJsonPath(absolutePath);
+        JSONPath({ path: absolutePath, json: dummy as never, wrap: true });
+      } catch (err) {
+        return {
+          ok: false,
+          error: `Invalid JSONPath syntax: ${errMessage(err)}`,
+        };
+      }
+
+      if (obj.operator === "matches" && typeof obj.expected === "string" && !obj.expected.includes("{{")) {
+        try {
+          new RegExp(obj.expected);
+        } catch (err) {
+          return {
+            ok: false,
+            error: `Invalid regular expression: ${errMessage(err)}`,
+          };
+        }
+      }
+      return { ok: true };
+    }
+
+    case "metric": {
+      if (typeof obj.threshold !== "number" || !Number.isFinite(obj.threshold)) {
+        return { ok: false, error: "Metric threshold must be a finite number" };
+      }
+      return { ok: true };
+    }
+
+    default:
+      return { ok: true };
+  }
+}
+
+function buildDummyForJsonPath(path: string): unknown {
+  try {
+    const segs = JSONPath.toPathArray(path);
+    if (segs.length <= 1) return {};
+    if (segs[1].startsWith("?(")) {
+      return [{}];
+    }
+    const root: Record<string, unknown> = {};
+    let cur: unknown = root;
+    for (let i = 1; i < segs.length; i++) {
+      const s = segs[i];
+      if (s.startsWith("?(")) {
+        if (Array.isArray(cur) && cur.length === 0) {
+          cur.push({});
+        }
+      } else {
+        const next = segs[i + 1];
+        if (next && next.startsWith("?(")) {
+          const arr: unknown[] = [{}];
+          (cur as Record<string, unknown>)[s] = arr;
+          cur = arr;
+        } else {
+          const child: Record<string, unknown> = {};
+          if (Array.isArray(cur)) {
+            cur.push(child);
+          } else if (typeof cur === "object" && cur !== null) {
+            (cur as Record<string, unknown>)[s] = child;
+          }
+          cur = child;
+        }
+      }
+    }
+    return root;
+  } catch {
+    return {};
+  }
+}
+

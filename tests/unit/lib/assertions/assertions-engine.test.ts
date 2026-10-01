@@ -5,6 +5,7 @@ import {
   resolveInput,
   substituteInputTemplates,
   normalizeCaseName,
+  validateAssertionSyntax,
   type AssertionSpec,
 } from "@/lib/assertions";
 
@@ -306,6 +307,127 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
 
     it("normalizes case names", () => {
       expect(normalizeCaseName("  Test Case #1: Login Flow! ")).toBe("test_case_1_login_flow");
+    });
+  });
+
+  describe("6. validateAssertionSyntax semantic pre-check", () => {
+    it("validates js_expression syntax", () => {
+      const valid = validateAssertionSyntax({
+        type: "js_expression",
+        expression: "result.status === 200 && input.id > 0",
+      });
+      expect(valid.ok).toBe(true);
+
+      const invalid = validateAssertionSyntax({
+        type: "js_expression",
+        expression: "result.status === 200 && (input.id > 0",
+      });
+      expect(invalid.ok).toBe(false);
+      expect(invalid.error).toContain("Invalid JavaScript expression syntax");
+
+      const empty = validateAssertionSyntax({
+        type: "js_expression",
+        expression: "   ",
+      });
+      expect(empty.ok).toBe(false);
+    });
+
+    it("validates json_schema syntax with Ajv", () => {
+      const valid = validateAssertionSyntax({
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+          },
+          required: ["name"],
+        },
+      });
+      expect(valid.ok).toBe(true);
+
+      const invalid = validateAssertionSyntax({
+        type: "json_schema",
+        schema: {
+          type: "not_a_valid_json_schema_type",
+        },
+      });
+      expect(invalid.ok).toBe(false);
+      expect(invalid.error).toContain("Invalid JSON Schema");
+    });
+
+    it("validates jsonpath syntax", () => {
+      const valid = validateAssertionSyntax({
+        type: "jsonpath",
+        path: "$.data.items[0].id",
+      });
+      expect(valid.ok).toBe(true);
+
+      const validWithoutDollar = validateAssertionSyntax({
+        type: "jsonpath",
+        path: "data.items[*].id",
+      });
+      expect(validWithoutDollar.ok).toBe(true);
+
+      const invalid = validateAssertionSyntax({
+        type: "jsonpath",
+        path: "$.items[?(@.id===)]",
+      });
+      expect(invalid.ok).toBe(false);
+      expect(invalid.error).toContain("Invalid JSONPath syntax");
+    });
+
+    it("validates regex pattern in jsonpath matches operator", () => {
+      const validRegex = validateAssertionSyntax({
+        type: "jsonpath",
+        path: "$.email",
+        operator: "matches",
+        expected: "^[a-z]+@[a-z]+\\.com$",
+      });
+      expect(validRegex.ok).toBe(true);
+
+      const invalidRegex = validateAssertionSyntax({
+        type: "jsonpath",
+        path: "$.email",
+        operator: "matches",
+        expected: "[unclosed_regex_class",
+      });
+      expect(invalidRegex.ok).toBe(false);
+      expect(invalidRegex.error).toContain("Invalid regular expression");
+
+      // Template variable in expected should not trigger regex compile failure
+      const templateRegex = validateAssertionSyntax({
+        type: "jsonpath",
+        path: "$.email",
+        operator: "matches",
+        expected: "{{variables.pattern}}",
+      });
+      expect(templateRegex.ok).toBe(true);
+    });
+
+    it("validates metric thresholds", () => {
+      const valid = validateAssertionSyntax({
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: 2.5,
+      });
+      expect(valid.ok).toBe(true);
+
+      const nan = validateAssertionSyntax({
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: Number.NaN,
+      });
+      expect(nan.ok).toBe(false);
+
+      const infinity = validateAssertionSyntax({
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: Number.POSITIVE_INFINITY,
+      });
+      expect(infinity.ok).toBe(false);
     });
   });
 });

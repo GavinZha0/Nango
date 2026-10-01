@@ -56,6 +56,16 @@ import {
   jsonPathAssertionSchema,
   jsExpressionAssertionSchema,
 } from "@/lib/assertions/types";
+import { validateAssertionSyntax } from "@/lib/assertions";
+
+export const verificationMetricAssertionSchema = z
+  .object({
+    type: z.literal("metric"),
+    metric: z.literal("duration_s"),
+    operator: z.enum(["<", ">"]),
+    threshold: z.number(),
+  })
+  .strict();
 
 export {
   jsonSchemaAssertionSchema,
@@ -73,6 +83,7 @@ const taggedAssertionSchema = z.discriminatedUnion("type", [
   jsonSchemaAssertionSchema,
   jsonPathAssertionSchema,
   jsExpressionAssertionSchema,
+  verificationMetricAssertionSchema,
 ]);
 
 /**
@@ -82,6 +93,7 @@ const taggedAssertionSchema = z.discriminatedUnion("type", [
  *   - `schema`     → `json_schema`
  *   - `path`       → `jsonpath`
  *   - `expression` → `js_expression`
+ *   - `metric`     → `metric`
  *
  * IMPORTANT: this inference only works while the marker fields are
  * DISJOINT across types. If a future assertion variant needs to share
@@ -101,8 +113,17 @@ export const assertionSchema = z.preprocess((raw) => {
   if ("schema" in obj) return { ...obj, type: "json_schema" };
   if ("path" in obj) return { ...obj, type: "jsonpath" };
   if ("expression" in obj) return { ...obj, type: "js_expression" };
+  if ("metric" in obj) return { ...obj, type: "metric" };
   return obj; // No marker — let the union emit its native error.
-}, taggedAssertionSchema);
+}, taggedAssertionSchema).superRefine((val, ctx) => {
+  const result = validateAssertionSyntax(val);
+  if (!result.ok) {
+    ctx.addIssue({
+      code: "custom",
+      message: result.error || "Invalid assertion syntax",
+    });
+  }
+});
 
 export const assertionsArraySchema = z.array(assertionSchema).max(50);
 

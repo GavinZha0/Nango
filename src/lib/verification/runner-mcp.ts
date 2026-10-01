@@ -40,6 +40,7 @@ export interface RunMcpCaseInput {
   originalToolName?: string;
   serverName?: string;
   rule?: ToolPrefixRule | null;
+  toolTimeoutSec?: number | null;
 }
 
 /**
@@ -47,7 +48,7 @@ export interface RunMcpCaseInput {
  *
  * Decision table for the returned `status`:
  *
- *   tool throw (transport / mcphub / connection refused) → "errored"
+ *   tool throw (transport / endpoint / connection refused) → "errored"
  *   tool not found on server                             → "errored"
  *   tool returned + user assertions present:
  *     - all assertions pass                              → "passed" (supports negative testing)
@@ -90,6 +91,42 @@ export async function runMcpCase(
       string,
       unknown
     >;
+
+    // QUIRK: Discovery may have timed out or failed, resulting in empty cachedTools.
+    // Check provider.health BEFORE concluding that the tool itself doesn't exist on the server.
+    const graceful = provider as unknown as {
+      health?: string;
+      lastErrorMessage?: string | null;
+    };
+    if (graceful.health === "discovery-timed-out") {
+      return failedOutcome({
+        startedAt,
+        durationMs: Date.now() - startedAt,
+        error: {
+          source: "timeout",
+          message:
+            graceful.lastErrorMessage
+            || `Tool discovery exceeded configured timeout on server "${input.serverName || input.mcpServerId}"`,
+          details: { mcpServerId: input.mcpServerId, health: graceful.health },
+        },
+        resolvedInput,
+      });
+    }
+    if (graceful.health === "discovery-failed") {
+      return failedOutcome({
+        startedAt,
+        durationMs: Date.now() - startedAt,
+        error: {
+          source: "transport",
+          message:
+            graceful.lastErrorMessage
+            || `Tool discovery failed on server "${input.serverName || input.mcpServerId}"`,
+          details: { mcpServerId: input.mcpServerId, health: graceful.health },
+        },
+        resolvedInput,
+      });
+    }
+
     const tool = tools[input.toolName] as
       | {
           execute?: (args: Record<string, unknown>) => Promise<unknown>;
@@ -105,7 +142,7 @@ export async function runMcpCase(
         startedAt,
         durationMs: Date.now() - startedAt,
         error: {
-          source: "upstream",
+          source: "endpoint",
           message: `MCP tool "${input.toolName}" not found${serverLabel}.${originalInfo}`,
           details: {
             mcpServerId: input.mcpServerId,
@@ -122,15 +159,27 @@ export async function runMcpCase(
     // throws become `{isError: true, message, toolName}` instead of
     // throwing. We distinguish that envelope from a genuine MCP
     // CallToolResult.isError by the absence of `content`.
+    let toolDurationMs = 0;
     let raw: unknown;
+    const toolStart = performance.now();
     try {
-      const executed = await tool.execute(resolvedInput);
+      const executeOpts = input.toolTimeoutSec
+        ? { timeoutMs: input.toolTimeoutSec * 1000 }
+        : undefined;
+      const executed = await (
+        tool.execute as (
+          args: unknown,
+          opts?: unknown,
+        ) => Promise<unknown>
+      )(resolvedInput, executeOpts);
+      toolDurationMs = Math.round(performance.now() - toolStart);
       raw = normalizeMcpToolResult(executed, { parseForUi: true });
     } catch (err) {
+      toolDurationMs = Math.round(performance.now() - toolStart);
       // wrapToolExecute should have caught this, but defend in depth.
       return failedOutcome({
         startedAt,
-        durationMs: Date.now() - startedAt,
+        durationMs: toolDurationMs,
         error: classifyMcpError(err),
         resolvedInput,
       });
@@ -139,19 +188,11 @@ export async function runMcpCase(
     // Inspect the result shape.
     const wrapperFailure = isWrapperFailure(raw);
     if (wrapperFailure) {
-      // Rebuild a synthetic Error that mimics the ORIGINAL thrown
-      // error so `classifyMcpError` can apply its normal heuristics
-      // (transport-code → "transport", HTTP 4xx → "upstream", 5xx +
-      // mcphub-source header → "mcphub" / "upstream"). Without this,
-      // the classifier only sees an Error whose sole field is the
-      // message and unconditionally falls through to "internal" —
-      // the bug noted in the verification subsystem review.
       const cause = readToolFailureCause(raw);
       const synthetic = new Error(wrapperFailure.message);
       if (cause) {
         if (cause.name) synthetic.name = cause.name;
         if (cause.stack) synthetic.stack = cause.stack;
-        // Mirror the fields `classifyMcpError` reads off the Error.
         const aug = synthetic as unknown as Record<string, unknown>;
         if (cause.code !== undefined) aug.code = cause.code;
         if (cause.httpStatus !== undefined) aug.status = cause.httpStatus;
@@ -159,31 +200,158 @@ export async function runMcpCase(
         if (cause.address !== undefined) aug.address = cause.address;
         if (cause.port !== undefined) aug.port = cause.port;
       }
-      return failedOutcome({
-        startedAt,
-        durationMs: Date.now() - startedAt,
-        error: classifyMcpError(synthetic),
-        resolvedInput,
-      });
+      const classifiedError = classifyMcpError(synthetic);
+
+      // V1-2: 1. outputSchema violation check — server answered, but payload violates declared schema
+      const msgLower = wrapperFailure.message.toLowerCase();
+      if (
+        msgLower.includes("output validation failed")
+        || msgLower.includes("outputschema")
+      ) {
+        return {
+          status: "failed",
+          resolvedInput,
+          resultPayload: raw,
+          resultTruncated: false,
+          assertionResults: [],
+          error: {
+            source: "tool",
+            message: `Tool output violated declared outputSchema: ${wrapperFailure.message}`,
+            details: {
+              outputSchemaViolation: true,
+              originalMessage: wrapperFailure.message,
+            },
+          },
+          startedAt,
+          durationMs: toolDurationMs,
+        };
+      }
+
+      // V1-2: 2. JSON-RPC error response check (e.g. -32602 invalid params)
+      // When the server actively returned a protocol/business error (not transport drop or timeout)
+      if (
+        typeof cause?.code === "number"
+        && cause.code !== -32001
+        && cause.code !== -32000
+      ) {
+        // Transform into assertable payload so user assertions can inspect jsonRpcError
+        raw = {
+          jsonRpcError: {
+            code: cause.code,
+            message: wrapperFailure.message,
+            data: cause.data !== undefined ? cause.data : null,
+          },
+        };
+      } else if (classifiedError.source === "timeout") {
+        // V1-7: Check if case has duration_s assertion where timeout limit C > threshold T
+        const durationAssertion = input.assertions.find(
+          (a) =>
+            a.type === "metric"
+            && (a as { metric?: string }).metric === "duration_s",
+        ) as
+          | {
+              type: "metric";
+              metric: string;
+              operator: string;
+              threshold: number;
+            }
+          | undefined;
+
+        const effectiveTimeoutSec = input.toolTimeoutSec ?? 60;
+        if (
+          durationAssertion
+          && (durationAssertion.operator === "<"
+            || durationAssertion.operator === "<=")
+          && effectiveTimeoutSec > durationAssertion.threshold
+        ) {
+          return {
+            status: "failed",
+            resolvedInput,
+            resultPayload: null,
+            resultTruncated: false,
+            assertionResults: [
+              {
+                index: input.assertions.indexOf(durationAssertion as never),
+                type: "metric",
+                ok: false,
+                expected: `${durationAssertion.operator} ${durationAssertion.threshold}s`,
+                actual: `>= ${effectiveTimeoutSec}s (timed out)`,
+                message: `Tool execution timed out at ${effectiveTimeoutSec}s, exceeding duration threshold of ${durationAssertion.threshold}s`,
+              },
+            ],
+            error: {
+              source: "assertion",
+              message: `Tool execution timed out at ${effectiveTimeoutSec}s, exceeding duration threshold of ${durationAssertion.threshold}s`,
+              details: {
+                timeoutSec: effectiveTimeoutSec,
+                threshold: durationAssertion.threshold,
+              },
+            },
+            startedAt,
+            durationMs: toolDurationMs,
+          };
+        }
+
+        return failedOutcome({
+          startedAt,
+          durationMs: toolDurationMs,
+          error: classifiedError,
+          resolvedInput,
+        });
+      } else {
+        return failedOutcome({
+          startedAt,
+          durationMs: toolDurationMs,
+          error: classifiedError,
+          resolvedInput,
+        });
+      }
     }
 
-    const mcpIsError = isMcpIsError(raw);
+    const mcpIsError =
+      isMcpIsError(raw)
+      || Boolean((raw as Record<string, unknown>)?.jsonRpcError);
     const variables =
       (runContext?.variables as Record<string, unknown> | undefined) ?? {};
     const outcome = evaluateAssertions(raw, input.assertions, {
       input: resolvedInput,
       variables,
       runContext,
+      metrics: {
+        durationMs: toolDurationMs,
+      },
     });
     const assertionResults = outcome.deterministicResults;
     const allAssertionsPassed = outcome.allDeterministicPassed;
+
+    // V1-3: Runtime fallback for errored assertions (syntax/compile/timeout errors)
+    const firstErrored = assertionResults.find((r) => r.errored);
+    if (firstErrored) {
+      return {
+        status: "errored",
+        resolvedInput,
+        resultPayload: raw,
+        resultTruncated: false,
+        assertionResults,
+        error: {
+          source: "config",
+          message: firstErrored.message ?? "Assertion configuration error",
+          details: {
+            assertionIndex: firstErrored.index,
+            type: firstErrored.type,
+          },
+        },
+        startedAt,
+        durationMs: toolDurationMs,
+      };
+    }
 
     let passed: boolean;
     let topLineError: ErrorEnvelope | null = null;
 
     if (input.assertions.length > 0) {
       // User-defined assertions: pass/fail outcome is strictly governed by assertion verdicts.
-      // Negative testing (e.g. testing root.isError == true) passes when assertions pass.
+      // Negative testing (e.g. testing root.isError == true or jsonRpcError.code == -32602) passes when assertions pass.
       passed = allAssertionsPassed;
       if (!passed) {
         const firstFail = assertionResults.find((r) => !r.ok);
@@ -200,13 +368,22 @@ export async function runMcpCase(
         }
       }
     } else {
-      // Smoke test mode (no assertions configured): passes if tool executed without isError.
+      // Smoke test mode (no assertions configured): passes if tool executed without isError or jsonRpcError.
       passed = !mcpIsError;
       if (mcpIsError) {
+        const isProtocolError = Boolean((raw as Record<string, unknown>)?.jsonRpcError);
         topLineError = {
-          source: "upstream",
-          message: extractMcpErrorText(raw) ?? "MCP tool returned isError",
-          details: { mcpIsError: true },
+          source: isProtocolError ? "protocol" : "tool",
+          message:
+            extractMcpErrorText(raw)
+            ?? ((raw as { jsonRpcError?: { message?: string } })?.jsonRpcError
+              ?.message)
+            ?? (isProtocolError ? "MCP JSON-RPC protocol error" : "MCP tool returned error"),
+          details: isProtocolError
+            ? {
+                jsonRpcError: (raw as Record<string, unknown>)?.jsonRpcError,
+              }
+            : { mcpIsError: true },
         };
       }
     }
@@ -227,7 +404,7 @@ export async function runMcpCase(
       assertionResults,
       error: topLineError,
       startedAt,
-      durationMs: Date.now() - startedAt,
+      durationMs: toolDurationMs,
     };
   } finally {
     if (provider) {

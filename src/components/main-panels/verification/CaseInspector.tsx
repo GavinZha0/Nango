@@ -37,7 +37,7 @@ import { AssertionVerdictList } from "@/components/main-panels/common/verdicts";
 import { formatTimestamp } from "@/components/admin/format";
 import { JsonView } from "@/components/ui/json-view";
 import { sanitizeWebAutoOutput } from "@/lib/web-auto/image-extractor";
-import { caseActions, type VerificationCaseRow } from "@/store/verification-cases";
+import { caseActions, useCasesStore, type VerificationCaseRow } from "@/store/verification-cases";
 import type {
   AssertionSpec,
   CaseExecutionOutcome,
@@ -243,6 +243,9 @@ function useJsonDraft<T>(opts: JsonDraftOptions<T>): JsonDraft {
       setTextState(canonicalText);
       setLastCommitted(canonicalText);
       return true;
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -294,21 +297,23 @@ function validateAssertionsArray(
       if (
         type !== "json_schema" &&
         type !== "jsonpath" &&
-        type !== "js_expression"
+        type !== "js_expression" &&
+        type !== "metric"
       ) {
         return {
           ok: false,
-          error: `Item #${i + 1}: type must be one of jsonpath, json_schema, js_expression.`,
+          error: `Item #${i + 1}: type must be one of jsonpath, json_schema, js_expression, metric.`,
         };
       }
     } else if (
       !("schema" in obj) &&
       !("path" in obj) &&
-      !("expression" in obj)
+      !("expression" in obj) &&
+      !("metric" in obj)
     ) {
       return {
         ok: false,
-        error: `Item #${i + 1}: needs either a "type" or one of "schema" / "path" / "expression".`,
+        error: `Item #${i + 1}: needs either a "type" or one of "schema" / "path" / "expression" / "metric".`,
       };
     }
   }
@@ -324,6 +329,9 @@ function validateAssertionsArray(
     }
     if (item.type === "json_schema") {
       return item.schema && Object.keys(item.schema).length > 0;
+    }
+    if (item.type === "metric") {
+      return Boolean(item.metric) && typeof item.threshold === "number";
     }
     return true;
   });
@@ -350,14 +358,32 @@ export function CaseInspector({
   const inputDraft = useJsonDraft<Record<string, unknown>>({
     initial: caseRow.input ?? {},
     validate: validateInputObject,
-    commit: (value) => caseActions.patch(caseRow, { input: value }),
+    commit: async (value) => {
+      const row = await caseActions.patch(caseRow, { input: value });
+      if (!row) {
+        throw new Error(
+          useCasesStore.getState().errorFor[caseRow.suiteId] ||
+            "Failed to save input to server.",
+        );
+      }
+      return row;
+    },
   });
 
   // Assertions pane — JSON array of AssertionSpec.
   const assertionsDraft = useJsonDraft<AssertionSpec[]>({
     initial: caseRow.assertions ?? [],
     validate: validateAssertionsArray,
-    commit: (value) => caseActions.patch(caseRow, { assertions: value }),
+    commit: async (value) => {
+      const row = await caseActions.patch(caseRow, { assertions: value });
+      if (!row) {
+        throw new Error(
+          useCasesStore.getState().errorFor[caseRow.suiteId] ||
+            "Failed to save assertions to server.",
+        );
+      }
+      return row;
+    },
   });
 
   const [copied, setCopied] = useState(false);

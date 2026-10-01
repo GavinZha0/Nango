@@ -31,7 +31,7 @@ export function createMockVerificationSuite(
     toolPrefixRule: null,
     enabled: true,
     visibility: "private",
-    timeoutSec: 300,
+    toolTimeoutSec: 60,
     createdBy: "user-editor-1",
     updatedBy: "user-editor-1",
     createdAt: new Date("2026-01-01T00:00:00Z"),

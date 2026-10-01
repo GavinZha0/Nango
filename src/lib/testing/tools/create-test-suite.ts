@@ -185,7 +185,7 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
               mcpServerName: serverRow.serverTitle || serverRow.name,
               enabled: true,
               visibility: "private",
-              timeoutSec: 300,
+              toolTimeoutSec: 60,
               createdBy: ctx.userId,
               updatedBy: ctx.userId,
             })

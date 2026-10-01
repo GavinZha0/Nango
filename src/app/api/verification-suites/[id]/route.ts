@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { getConfigNumber } from "@/lib/config";
 import {
   canChangeVisibility,
   canDeleteResource,
@@ -80,7 +81,7 @@ const updateSchema = z
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
-    timeoutSec: z.number().int().min(10).max(7200).optional(),
+    toolTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
   })
   .strict();
 
@@ -103,7 +104,7 @@ export const PATCH = withEditor<{ id: string }>(
       || body.mcpServerId !== undefined
       || body.toolPrefixRule !== undefined
       || body.variables !== undefined
-      || body.timeoutSec !== undefined;
+      || body.toolTimeoutSec !== undefined;
     const flagEdit =
       body.enabled !== undefined || body.visibility !== undefined;
 
@@ -128,7 +129,13 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.variables !== undefined) updates.variables = body.variables;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
-    if (body.timeoutSec !== undefined) updates.timeoutSec = body.timeoutSec;
+    if (body.toolTimeoutSec !== undefined) {
+      const defaultToolTimeout = getConfigNumber("mcp.execution_timeout", 60);
+      updates.toolTimeoutSec =
+        typeof body.toolTimeoutSec === "number" && body.toolTimeoutSec > 0
+          ? body.toolTimeoutSec
+          : defaultToolTimeout;
+    }
     if (body.toolPrefixRule !== undefined) {
       updates.toolPrefixRule = body.toolPrefixRule;
     }

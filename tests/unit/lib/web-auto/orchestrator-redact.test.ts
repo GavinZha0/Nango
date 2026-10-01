@@ -201,7 +201,7 @@ describe("Web-Auto Orchestrator - Variable Resolution & Earliest Sanitization", 
       executionOutput: null,
       durationMs: 80,
       error: {
-        source: "upstream",
+        source: "tool",
         message: "Failed to authenticate with api_key_secret_9999 at https://api.example.com",
         stack: "Error: Failed with key api_key_secret_9999\n    at login.ts:12",
       },

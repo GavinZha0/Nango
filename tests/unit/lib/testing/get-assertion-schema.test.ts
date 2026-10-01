@@ -62,8 +62,8 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("verification");
-      expect(res.types).toEqual(["jsonpath", "json_schema", "js_expression"]);
-      expect(res.schemas.length).toBe(3);
+      expect(res.types).toEqual(["jsonpath", "json_schema", "js_expression", "metric"]);
+      expect(res.schemas.length).toBe(4);
 
       const jsonpathItem = res.schemas.find((s) => s.type === "jsonpath");
       expect(jsonpathItem).toBeDefined();
@@ -136,6 +136,24 @@ describe("get_assertion_schema tool", () => {
         type: "metric",
         metric: "duration_s",
         operator: "<=",
+        threshold: 5.0,
+      });
+    });
+
+    it("returns tailored duration_s metric schema for verification category", async () => {
+      const res = (await tool.execute!({
+        category: "verification",
+        assertionType: "metric",
+      })) as GetAssertionSchemaResult;
+
+      expect(res.types).toEqual(["metric"]);
+      expect(res.schemas.length).toBe(1);
+      expect(res.schemas[0].type).toBe("metric");
+      expect(res.schemas[0].description).toContain("duration_s");
+      expect(res.schemas[0].example).toMatchObject({
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
         threshold: 5.0,
       });
     });

@@ -267,11 +267,13 @@ function wrapTools(
         // force strict so the LLM only sends what the schema permits.
         additionalProperties: false,
       } as Record<string, unknown>),
-      execute: async (args: unknown) => {
-        const timeoutMs = getConfigMs(
-          "mcp.execution_timeout",
-          DEFAULT_EXECUTION_TIMEOUT_S,
-        );
+      execute: async (args: unknown, options?: unknown) => {
+        const timeoutMs =
+          (options as { timeoutMs?: number } | undefined)?.timeoutMs ??
+          getConfigMs(
+            "mcp.execution_timeout",
+            DEFAULT_EXECUTION_TIMEOUT_S,
+          );
         const result = await client.callTool(
           {
             name: raw.name,

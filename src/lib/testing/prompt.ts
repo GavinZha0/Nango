@@ -116,7 +116,7 @@ Dedicated guidance for the \`verification\` category — deterministic interface
 5. **Author cases from the schema**: Build \`input\` payloads that exercise the schema — valid minimum inputs, full valid inputs, and invalid/missing/out-of-range inputs mapped from the schema's \`required\` list and type constraints.
 6. **Assert deterministically on the tool result**: Prefer \`js_expression\`, \`jsonpath\`, and \`json_schema\` over the result envelope (e.g. \`result.isError == false\`, \`result.items.length > 0\`). Inspect \`get_assertion_schema\` for exact expected shapes.
 7. **Debug rapidly**: Use \`run_test_case\` to iterate on a single case's input/assertions before batch regression.
-8. **Triage the layered error envelope**: Verification failures carry a categorized \`source\` (mcphub / upstream / transport / assertion / timeout / internal). When diagnosing, check \`error.details.unresolvedReferences\` if references failed to resolve, and map the failure to its source to distinguish infra problems from real assertion mismatches.
+8. **Triage the layered error envelope**: Verification failures carry a categorized \`source\` (endpoint / protocol / tool / transport / assertion / timeout / config / internal). When diagnosing, check \`error.details.unresolvedReferences\` if references failed to resolve, and map the failure to its source to distinguish infra problems from real assertion mismatches.
 
 ### 7. Evaluation Workflow (Conversational AI Agent Testing)
 

@@ -47,4 +47,21 @@ describe("normalizeAndValidateAssertions", () => {
       /Invalid assertion at index #0 in case 'Case 1'/,
     );
   });
+
+  it("throws descriptive error when assertion has invalid syntax", () => {
+    const invalidJs = [{ type: "js_expression", expression: "a === && b" }];
+    expect(() => normalizeAndValidateAssertions(invalidJs, "Case 1")).toThrow(
+      /Invalid JavaScript expression syntax/,
+    );
+
+    const invalidSchema = [{ type: "json_schema", schema: { type: "bogus_type" } }];
+    expect(() => normalizeAndValidateAssertions(invalidSchema, "Case 1")).toThrow(
+      /Invalid JSON Schema/,
+    );
+
+    const invalidJsonPath = [{ type: "jsonpath", path: "$.items[?(@.x===)]" }];
+    expect(() => normalizeAndValidateAssertions(invalidJsonPath, "Case 1")).toThrow(
+      /Invalid JSONPath syntax/,
+    );
+  });
 });

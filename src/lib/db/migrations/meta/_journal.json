@@ -43,6 +43,20 @@
       "when": 1790387839575,
       "tag": "0005_rename_ppt_to_slides",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790885454698,
+      "tag": "0006_add_tool_timeout_sec",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790885465867,
+      "tag": "0007_remove_timeout_sec",
+      "breakpoints": true
     }
   ]
 }
