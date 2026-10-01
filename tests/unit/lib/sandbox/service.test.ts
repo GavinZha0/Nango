@@ -176,4 +176,37 @@ describe("ServiceSandboxAdapter", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("does not produce duplicate params declarations or SyntaxError when script already declares params", async () => {
+    const adapter = new ServiceSandboxAdapter();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        message: "success",
+        data: { stdout: "ok\n" },
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    // Case 1: Script has existing const params
+    await adapter.run({
+      language: "javascript",
+      command: ["node", "-"],
+      stdin: "const params = { x: 1 };\nconsole.log(params.x);",
+      env: {
+        __PARAMS__: JSON.stringify({ x: 2 }),
+      },
+    });
+
+    const body1 = JSON.parse(mockFetch.mock.calls[0][1].body as string) as { code: string };
+    // Should NOT inject `let params = {};`
+    expect(body1.code).not.toContain("let params = {};");
+
+    // Case 2: Verify both generated bodies compile cleanly in Node.js VM without SyntaxError
+    const vm = await import("node:vm");
+    expect(() => new vm.Script(body1.code)).not.toThrow();
+
+    vi.unstubAllGlobals();
+  });
 });

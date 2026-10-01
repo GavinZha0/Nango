@@ -1537,7 +1537,31 @@ export function pruneUnreachableNodes(input: PruneNodesInput): PruneNodesOutput 
     return { prunedNodes: [...nodes], prunedNodeIds: [] };
   }
 
-  // 3. DFS backward reachability traversal with cycle detection (visiting set)
+  // 3. Safety guard: If terminal nodes have no dependencies (e.g. Strategy Z+ could not
+  // infer lineage) but upstream data extraction or compute nodes exist in the graph,
+  // pruning would erase all data queries. Conservatively retain all nodes to prevent lineage loss.
+  const hasTerminalWithDeps = Array.from(terminalNodeIds).some(
+    (id) => (nodeById.get(id)?.depends_on?.length ?? 0) > 0,
+  );
+  if (!hasTerminalWithDeps) {
+    const hasUpstreamExtraction = nodes.some(
+      (n) =>
+        !terminalNodeIds.has(n.id) &&
+        (n.type === "sql" ||
+          n.type === "code" ||
+          (n.type === "tool" &&
+            (n.inputs.name === "extract_dataset_by_sql" ||
+              n.inputs.name === "run_code_in_sandbox"))),
+    );
+    if (hasUpstreamExtraction) {
+      console.warn(
+        `[pruneUnreachableNodes] Terminal node has no dependencies but upstream data extraction nodes exist (unlinked lineage). Skipping pruning to preserve data lineage.`,
+      );
+      return { prunedNodes: [...nodes], prunedNodeIds: [] };
+    }
+  }
+
+  // 4. DFS backward reachability traversal with cycle detection (visiting set)
   const reachableNodeIds = new Set<number>();
   const visiting = new Set<number>();
 

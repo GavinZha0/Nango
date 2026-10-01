@@ -193,6 +193,12 @@ export const EVENT_STRING_HEAD_TAIL_CHARS = 500;
 /** Maximum nesting depth for audit event output serialization. */
 export const MAX_EVENT_NESTING_DEPTH = 3;
 
+/** Maximum number of keys preserved in any object before truncation. */
+export const MAX_EVENT_OBJECT_KEYS = 50;
+
+/** Hard upper bound on serialized event payload size (64KB). */
+export const MAX_EVENT_PAYLOAD_BYTES = 64 * 1024;
+
 /**
  * Truncate oversized string by retaining head and tail snippets.
  * Preserves critical diagnostic messages and stack traces located at the end.
@@ -214,6 +220,8 @@ export function truncateHeadTail(
  * Prevents multi-megabyte result sets from bloating the append-only
  * entity_run_event table.
  * - Caps row and collection arrays to MAX_EVENT_PREVIEW_ROWS.
+ * - Caps object keys to MAX_EVENT_OBJECT_KEYS.
+ * - Caps ECharts dataset.source and series[i].data.
  * - Caps long strings retaining head + tail diagnostic snippets (P5).
  * - Restricts recursion depth to MAX_EVENT_NESTING_DEPTH (P6).
  * - Retains metadata (total_rows, returned_rows, dataset_name, schema, etc.).
@@ -227,8 +235,19 @@ export function summarizeOutputsForEvent(
   }
 
   const summarized: Record<string, unknown> = {};
+  const allEntries = Object.entries(outputs);
+  const totalKeys = allEntries.length;
+  const entriesToProcess =
+    totalKeys > MAX_EVENT_OBJECT_KEYS
+      ? allEntries.slice(0, MAX_EVENT_OBJECT_KEYS)
+      : allEntries;
 
-  for (const [key, value] of Object.entries(outputs)) {
+  if (totalKeys > MAX_EVENT_OBJECT_KEYS) {
+    summarized._keys_truncated = true;
+    summarized._total_keys = totalKeys;
+  }
+
+  for (const [key, value] of entriesToProcess) {
     if (key === "rows" && Array.isArray(value)) {
       if (value.length > MAX_EVENT_PREVIEW_ROWS) {
         summarized.rows = value
@@ -249,14 +268,12 @@ export function summarizeOutputsForEvent(
       !Array.isArray(value)
     ) {
       const optionObj = value as Record<string, unknown>;
-      if (
-        optionObj.dataset !== null &&
-        typeof optionObj.dataset === "object"
-      ) {
-        if (Array.isArray(optionObj.dataset)) {
-          summarized.option = {
-            ...optionObj,
-            dataset: optionObj.dataset.map((ds) => {
+      const summarizedOption: Record<string, unknown> = {};
+
+      for (const [optKey, optVal] of Object.entries(optionObj)) {
+        if (optKey === "dataset" && optVal !== null && typeof optVal === "object") {
+          if (Array.isArray(optVal)) {
+            summarizedOption.dataset = optVal.map((ds) => {
               if (ds !== null && typeof ds === "object") {
                 const dsObj = ds as Record<string, unknown>;
                 if (Array.isArray(dsObj.source) && dsObj.source.length > MAX_EVENT_PREVIEW_ROWS) {
@@ -268,27 +285,48 @@ export function summarizeOutputsForEvent(
                   };
                 }
               }
-              return ds;
-            }),
-          };
-          continue;
-        }
-
-        const ds = optionObj.dataset as Record<string, unknown>;
-        if (Array.isArray(ds.source) && ds.source.length > MAX_EVENT_PREVIEW_ROWS) {
-          summarized.option = {
-            ...optionObj,
-            dataset: {
-              ...ds,
-              source: ds.source.slice(0, MAX_EVENT_PREVIEW_ROWS),
-              source_truncated: true,
-              total_source_items: ds.source.length,
-            },
-          };
-          continue;
+              return summarizeNestedValue(ds, depth + 1);
+            });
+          } else {
+            const ds = optVal as Record<string, unknown>;
+            if (Array.isArray(ds.source) && ds.source.length > MAX_EVENT_PREVIEW_ROWS) {
+              summarizedOption.dataset = {
+                ...ds,
+                source: ds.source.slice(0, MAX_EVENT_PREVIEW_ROWS),
+                source_truncated: true,
+                total_source_items: ds.source.length,
+              };
+            } else {
+              summarizedOption.dataset = summarizeNestedValue(optVal, depth + 1);
+            }
+          }
+        } else if (optKey === "series" && Array.isArray(optVal)) {
+          summarizedOption.series = optVal
+            .slice(0, MAX_EVENT_PREVIEW_ROWS)
+            .map((s) => {
+              if (s !== null && typeof s === "object") {
+                const sObj = s as Record<string, unknown>;
+                if (Array.isArray(sObj.data) && sObj.data.length > MAX_EVENT_PREVIEW_ROWS) {
+                  return {
+                    ...sObj,
+                    data: sObj.data.slice(0, MAX_EVENT_PREVIEW_ROWS),
+                    data_truncated: true,
+                    total_data_items: sObj.data.length,
+                  };
+                }
+              }
+              return summarizeNestedValue(s, depth + 1);
+            });
+          if (optVal.length > MAX_EVENT_PREVIEW_ROWS) {
+            summarizedOption.series_truncated = true;
+            summarizedOption.total_series_count = optVal.length;
+          }
+        } else {
+          summarizedOption[optKey] = summarizeNestedValue(optVal, depth + 1);
         }
       }
-      summarized.option = summarizeNestedValue(value, depth + 1);
+
+      summarized.option = summarizedOption;
     } else if (typeof value === "string") {
       if (value.length > MAX_EVENT_STRING_LENGTH) {
         summarized[key] = truncateHeadTail(value);
@@ -357,22 +395,57 @@ function summarizeNestedValue(value: unknown, depth: number): unknown {
 
 /**
  * Sanitize workflow engine events before writing to `entity_run_event`.
- * Ensures payload size is bounded regardless of data volume.
+ * Ensures payload size is strictly bounded (<= 64KB) regardless of data volume.
  */
 export function sanitizeEngineEventForPersistence(
   event: WorkflowEngineEvent,
 ): Record<string, unknown> {
+  let sanitized: Record<string, unknown>;
   if (event.type === "workflow_node_completed") {
-    return {
+    sanitized = {
       ...event,
       outputs: summarizeOutputsForEvent(event.outputs),
     };
-  }
-  if (event.type === "workflow_completed") {
-    return {
+  } else if (event.type === "workflow_completed") {
+    sanitized = {
       ...event,
       output: summarizeOutputsForEvent(event.output),
     };
+  } else {
+    sanitized = { ...event };
   }
-  return event;
+
+  // Hard payload byte budget check (P0-3 / Problem 2)
+  try {
+    const jsonStr = JSON.stringify(sanitized);
+    const byteLength =
+      typeof Buffer !== "undefined"
+        ? Buffer.byteLength(jsonStr, "utf8")
+        : new TextEncoder().encode(jsonStr).length;
+
+    if (byteLength > MAX_EVENT_PAYLOAD_BYTES) {
+      if (sanitized.outputs && typeof sanitized.outputs === "object") {
+        sanitized.outputs = {
+          _payload_truncated_bytes: true,
+          _original_size_bytes: byteLength,
+          _budget_bytes: MAX_EVENT_PAYLOAD_BYTES,
+          summary:
+            "Outputs payload exceeded 64KB hard limit and was truncated for persistence safety.",
+        };
+      }
+      if (sanitized.output && typeof sanitized.output === "object") {
+        sanitized.output = {
+          _payload_truncated_bytes: true,
+          _original_size_bytes: byteLength,
+          _budget_bytes: MAX_EVENT_PAYLOAD_BYTES,
+          summary:
+            "Workflow output exceeded 64KB hard limit and was truncated for persistence safety.",
+        };
+      }
+    }
+  } catch {
+    // If JSON serialization fails, fall through safely
+  }
+
+  return sanitized;
 }

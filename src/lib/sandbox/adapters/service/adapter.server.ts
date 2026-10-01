@@ -95,15 +95,19 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
       }
       code = preamble + code;
     } else if (language === "javascript") {
-      let preamble = `let params = {};\n`;
+      let preamble = "";
       if (input.env) {
         for (const [k, v] of Object.entries(input.env)) {
           preamble += `process.env[${JSON.stringify(k)}] = ${JSON.stringify(v)};\n`;
         }
       }
-      if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
-        preamble +=
-          `try { params = JSON.parse(process.env[${JSON.stringify(SANDBOX_PARAMS_ENV_KEY)}] || '{}'); } catch {}\n`;
+      const alreadyDeclaresParams = /\b(?:const|let|var)\s+params\b/.test(code);
+      if (!alreadyDeclaresParams) {
+        preamble += `let params = {};\n`;
+        if (input.env?.[SANDBOX_PARAMS_ENV_KEY]) {
+          preamble +=
+            `try { params = JSON.parse(process.env[${JSON.stringify(SANDBOX_PARAMS_ENV_KEY)}] || '{}'); } catch {}\n`;
+        }
       }
       code = preamble + code;
     }

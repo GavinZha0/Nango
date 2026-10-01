@@ -20,7 +20,10 @@ import {
   mapEngineEventToEventType,
   startRecording,
   summarizeOutputsForEvent,
+  sanitizeEngineEventForPersistence,
   MAX_EVENT_PREVIEW_ROWS,
+  MAX_EVENT_OBJECT_KEYS,
+  MAX_EVENT_PAYLOAD_BYTES,
 } from "@/lib/artifacts/workflow-run-recorder";
 import type { WorkflowEngineEvent } from "@/lib/workflows/engine";
 
@@ -416,6 +419,74 @@ describe("summarizeOutputsForEvent & bounded audit persistence", () => {
     // At depth 3, l3 is truncated
     expect(l3).toEqual({ _truncated_depth: true });
   });
+
+  it("Problem 2: caps objects with more than MAX_EVENT_OBJECT_KEYS keys", () => {
+    const hugeObject: Record<string, number> = {};
+    for (let i = 0; i < 150; i++) {
+      hugeObject[`k_${i}`] = i;
+    }
+
+    const summarized = summarizeOutputsForEvent(hugeObject);
+    const keys = Object.keys(summarized).filter(
+      (k) => !k.startsWith("_"),
+    );
+
+    expect(keys.length).toBe(MAX_EVENT_OBJECT_KEYS);
+    expect(summarized._keys_truncated).toBe(true);
+    expect(summarized._total_keys).toBe(150);
+  });
+
+  it("Problem 2: truncates large series[i].data arrays in ECharts option", () => {
+    const rawData = Array.from({ length: 100 }, (_, i) => [i, i * 10]);
+    const outputs = {
+      option: {
+        series: [
+          {
+            type: "line",
+            name: "metric_a",
+            data: rawData,
+          },
+        ],
+      },
+    };
+
+    const summarized = summarizeOutputsForEvent(outputs);
+    const option = summarized.option as Record<string, unknown>;
+    const series = option.series as Array<Record<string, unknown>>;
+
+    expect(Array.isArray(series)).toBe(true);
+    expect(series.length).toBe(1);
+    expect(Array.isArray(series[0]!.data)).toBe(true);
+    expect((series[0]!.data as unknown[]).length).toBe(MAX_EVENT_PREVIEW_ROWS);
+    expect(series[0]!.data_truncated).toBe(true);
+    expect(series[0]!.total_data_items).toBe(100);
+  });
+
+  it("Problem 2: enforces MAX_EVENT_PAYLOAD_BYTES hard budget on serialized events", () => {
+    // Generate an event that would exceed 64KB
+    const largeObject: Record<string, string> = {};
+    for (let i = 0; i < 40; i++) {
+      largeObject[`key_${i}`] = "x".repeat(3000); // 40 * ~3000 bytes = ~120KB
+    }
+
+    const event: WorkflowEngineEvent = {
+      type: "workflow_node_completed",
+      runId: "run-overflow",
+      nodeId: 99,
+      attempt: 1,
+      durationMs: 10,
+      outputs: largeObject,
+    };
+
+    const sanitized = sanitizeEngineEventForPersistence(event);
+    const serialized = JSON.stringify(sanitized);
+
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(MAX_EVENT_PAYLOAD_BYTES);
+    const outputs = sanitized.outputs as Record<string, unknown>;
+    expect(outputs._payload_truncated_bytes).toBe(true);
+    expect((outputs._original_size_bytes as number)).toBeGreaterThan(MAX_EVENT_PAYLOAD_BYTES);
+  });
 });
+
 
 

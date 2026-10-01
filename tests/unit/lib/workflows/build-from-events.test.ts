@@ -2279,6 +2279,41 @@ describe("pruneUnreachableNodes — cycle detection & resilience (P1, P2, P3)", 
     expect(result.prunedNodes.map((n) => n.id)).toEqual([0, 1]);
     expect(result.prunedNodeIds).toEqual([]);
   });
+
+  it("Problem 4: preserves upstream SQL/code extraction nodes when terminal node has no dependencies (unlinked lineage)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const sqlNode: LLMNode = {
+      id: 0,
+      type: "sql",
+      inputs: { data_source_name: "prod_db", sql_text: "SELECT * FROM sales" },
+      depends_on: [],
+    };
+    const terminalChartNode: LLMNode = {
+      id: 1,
+      type: "chart",
+      inputs: { renderer: "echarts", config: {} },
+      // Strategy Z+ failed to link, so depends_on is empty
+      depends_on: [],
+    };
+
+    const result = pruneUnreachableNodes({
+      nodes: [sqlNode, terminalChartNode],
+      outputs: { chart: "@nodes.1.option" },
+      artifactCreatingCallId: "none",
+      dataInvocations: [],
+    });
+
+    // Guard should conservatively retain all nodes so the SQL node is not lost
+    expect(result.prunedNodes.map((n) => n.id)).toEqual([0, 1]);
+    expect(result.prunedNodeIds).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[pruneUnreachableNodes] Terminal node has no dependencies but upstream data extraction nodes exist"),
+    );
+
+    warnSpy.mockRestore();
+  });
 });
+
 
 

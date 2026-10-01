@@ -395,25 +395,18 @@ function buildSandboxStdin(
 
 function buildPythonStdin(
   datasets: string[],
-  paramsJson: string | undefined,
+  _paramsJson: string | undefined,
   code: string | undefined,
   codeFile: string | undefined,
 ): string {
   const lines: string[] = [];
-  if (paramsJson !== undefined) {
-    lines.push("import json as __nango_json, os as __nango_os");
-  }
   if (datasets.length > 0) {
     // Embed dataset names directly — they are plain strings, not typed
     // data, and embedding avoids an extra env var round-trip.
     lines.push(`datasets = ${JSON.stringify(datasets)}`);
   }
-  if (paramsJson !== undefined) {
-    // Read the JSON-serialized params from the env var set by the
-    // engine. json.loads preserves int / float / bool / list shapes;
-    // env var transport keeps the serialization boundary clean.
-    lines.push(`params = __nango_json.loads(__nango_os.environ['${SANDBOX_PARAMS_ENV_KEY}'])`);
-  }
+  // Note: params deserialization is handled uniformly by the sandbox adapter layer
+  // via SANDBOX_PARAMS_ENV_KEY in req.env.
   const preamble = lines.length > 0 ? lines.join("\n") + "\n" : "";
 
   if (code !== undefined) {
@@ -440,18 +433,14 @@ function buildPythonStdin(
  *  - CommonJS mode — `import` / `export` are not supported; use
  *    `require()`. The entrypoint runs under `node -` (stdin script).
  *
- * `params` is the only preamble binding: one JSON.parse line that
- * reads SANDBOX_PARAMS_ENV_KEY from the process env. See
- * docs/workflow-spec.md for the engine-injected variables contract.
+ * `params` is handled uniformly by the sandbox adapter layer via
+ * `input.env[SANDBOX_PARAMS_ENV_KEY]`.
  */
 function buildJavaScriptStdin(
-  paramsJson: string | undefined,
+  _paramsJson: string | undefined,
   code: string | undefined,
 ): string {
-  const preamble = paramsJson !== undefined
-    ? `const params = JSON.parse(process.env[${JSON.stringify(SANDBOX_PARAMS_ENV_KEY)}] ?? '{}');\n`
-    : "";
-  return preamble + (code ?? "");
+  return code ?? "";
 }
 
 /** Convert a `ToolDefinition` (CopilotKit shape:
