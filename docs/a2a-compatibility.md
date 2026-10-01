@@ -808,3 +808,95 @@ flowchart LR
 - **Official A2A 1.0 Specification**: https://github.com/a2aproject/A2A/blob/main/docs/specification.md
 - **Official A2A TypeScript/JavaScript SDK**: https://github.com/a2aproject/a2a-js (`@a2a-js/sdk`)
 - **A2A Protocol Website**: https://a2a-protocol.org
+
+---
+
+## 9. 架构评审意见与整改备忘（Architecture Review & Revision Notes）
+
+> **评审结论**：**方向可取，但不建议按当前文档直接进入代码实施**。  
+> 将 A2A 作为服务端 backend bridge、让 Supervisor 通过现有 `runner.start()` 委派、并继续使用 `entity_run` 记录审计，符合 Nango 整体架构。方案对 `Message | Task` 两种返回形态、流式与轮询降级也有充分考虑。  
+> 但文档目前将“支持 A2A 1.0”写得比实际设计范围宽得多，且存在协议细节混淆、旧草案（v0.3）模型残留、虚构持久化字段、SSRF 安全隐患以及与 Nango 现有异步调度/代码库脱节等硬伤。**建议先按本章意见修订协议契约与任务状态设计，再拆阶段推进落地**。
+
+### 9.1 调查核实与事实证据对照表
+
+| 评审关注项 | 核查结论 | 源码 / 规范证据与事实对照 |
+|---|:---:|---|
+| **1. 传输绑定混淆** | **必须解决** | 文档 L124-127 把 `HTTP+JSON` 描述为“JSON-RPC 2.0 或 REST”，取消操作写成 `DELETE /tasks/{id}`（L327）。在 A2A 1.0 规范中，`JSONRPC` 与 `HTTP+JSON` 是两种完全不同的独立绑定，后者为 REST 风格，标准取消接口为 **`POST /tasks/{id}:cancel`**。必须按 `supportedInterfaces` 精确匹配绑定并交付 SDK 对应 transport，不可用“统一 HTTP”含混处理。 |
+| **2. 缺少版本协商** | **必须解决** | A2A 1.0 规范明确要求客户端请求头携带 **`A2a-Version: 1.0`**，缺省时服务端可能降级按 0.3 解释。发现 Agent Card、获取扩展卡及后续请求均须带上此头，并显式拒绝仅支持 0.x 的端点。 |
+| **3. 远端 Task 恢复信息无落地** | **必须解决** | 文档 L354 规划开机时从 `metadata.a2aTaskId` 取消任务。经核查 `src/lib/db/schema.ts:1171-1248`，**`entity_run` 表根本没有 `metadata` 列**！现有 `recovery.ts:35-86` 仅简单批量标记 `failed`，没有任何针对 A2A 外部任务的取消或对账扩展钩子。远端 `taskId`、`interfaceUrl`、协议绑定在进程重启后丢失。 |
+| **4. 伪取消（Fire-and-forget）** | **必须解决** | 文档拟在 abort listener 中 fire-and-forget 发起取消，本地立刻结束。远端可能拒绝取消、已执行完毕或请求根本未送达。应区分“本地已停止等待”与“远端已确认取消”，并在重连或异常时通过 `GetTask` 对账，不可在未确认时向用户宣称资源已释放。 |
+| **5. 动态端点引发 SSRF 与 Token 泄露** | **必须解决** | 文档 L119 规定若扩展卡声明了新的内部 URL，数据面自动切换并附带静态 Token 请求。外部卡片是不可信输入，这构成了高危的 **SSRF 内部探测与敏感鉴权 Token 外泄漏洞**。必须对初始端点建立 Host 白名单，禁止无条件跨 Host 切换并附带认证头。 |
+| **6. 发现路径不可写死** | **重要修订** | 文档强行将发现路径写死为 `{restUrl}/.well-known/agent-card.json`。平台多 Agent 托管模式或网关反代模式下，卡片通常发布在专属子路径上。应允许管理员配置显式的 Card URL。 |
+| **7. 混淆 v0.3 与 v1.0 数据模型** | **重要修订** | 文档 L364-367 仍使用已被废弃的 `TextPart`、`FilePart`、`DataPart`，而 A2A 1.0 规范已统一合并为单模型 `Part`（按 `text`、`raw`、`url`、`data` 字段区分）；认证需求字段在 A2A 规范中为 `security`，文档误写为 `securityRequirements`；缺少 `tenant` 绑定参数。 |
+| **8. 产物与前端 Store 语境混淆** | **重要修订** | 文档 L373 称将产物写入“`OutcomeStore`”，但 `outcome-store.ts` 是纯客户端 Zustand 临时状态，不是服务端文件持久化目录；`PersistingAgent` 也不会拦截处理 `ARTIFACT_CREATED` 事件。首期应聚焦于文本及有界结构化结果，不应过早承诺完整文件落地能力。 |
+| **9. 现有代码接点冲突与重复建设** | **重要修订** | `src/lib/backends/types.ts:214` 中已有 `EntityFetchOptions`（包含 `type`、`headerName`），文档若替换为纯 `metadata` 会破坏已有认证配置；`isAnonymousPlaceholder` 和 `buildAuthHeaders` 已经在 `bridge-runtime-kit.server.ts:250-286` 完整实现，不应重复编写；页面组件实际为 `CredentialFormDialog.tsx`，详情页原有 loading/404 引导逻辑需保留。 |
+
+---
+
+### 9.2 关键架构硬伤与系统限制
+
+#### 1. 异步任务与 Supervisor 唤醒闭环断层（Known Gap 碰撞）
+* **现状矛盾**：方案极力强调利用 A2A 的异步长任务（`delegate_async`），并设计后台轮询完成后推送通知铃铛。
+* **架构断层**：根据项目核心架构文档 `docs/orchestrator.md` §11，**Nango 当前的 Supervisor 是单向触发的（Fire-and-Notify），在异步任务结束后根本不会被自动唤醒**。若用户指令为 *“先让 A2A 外部 Agent 跑 20 分钟深度分析，完成后给我总结生成报告”*，当前架构下任务执行完毕后只会滞留在用户铃铛中，无法自动驱动后续分析。本方案不能暗示已经具备跨任务自动连续编排能力。
+
+#### 2. 30 分钟 Node 进程内长轮询隐患
+* Nango 定位为单一常驻 Node.js 进程（Single long-running Node process）。方案拟在 `chat.server.ts` 内部使用 `while + sleep` 挂起维持长达 1800 秒的轮询。
+* 多任务并发长轮询将持续霸占事件循环资源，且在遭遇部署热重载（HMR / 重启）时协程中断且无法续跑。需设立并发任务数硬顶上限。
+
+#### 3. 直接对话（Direct Chat）时上下文记忆彻底丢失
+* 文档 §3.8 明确在 V1 丢弃 A2A 的 `contextId`。
+* 若用户在左侧面板点击该 Agent 发起 1:1 独立聊天（走 `/api/copilotkit/[...path]`），因没有透传 `contextId`，外部 A2A 平台会将每轮输入视为独立的新会话，**导致多轮对话记忆完全丢失**。首期必须在 UI 上明确标为 `[仅限委派调度]` 并隐藏直接对话入口，或在直接对话时注入 `contextId = threadId`。
+
+---
+
+### 9.3 建议调整的产品边界与真实承诺
+
+方案作者应将原文档中过宽的“Full A2A Parity / Strict Compliance”收敛为准确严谨的 V1 范围说明：
+
+> **“Nango A2A V1.0 客户端边界界定”**：  
+> 1. **协议支持**：首期仅支持基于 HTTP 的 `JSONRPC` 与 `HTTP+JSON` 经测试验证的传输绑定；不支持 `GRPC` 绑定。  
+> 2. **身份与认证**：仅支持预共享静态 Bearer Token / API Key；不支持动态 OAuth2 / OIDC 交互式授权换票。  
+> 3. **任务形态**：支持文本型及有界结构化数据的同步委派（`delegate_to_agent`）与后台跟踪通知（`delegate_async`）；不支持不可中断的人机交互式续办（`INPUT_REQUIRED` / `AUTH_REQUIRED` 视为需人工介入的阻断终态并终止运行）。  
+> 4. **产物管理**：首期仅解析文本与轻量结构化数据摘要，暂不支持任意外部二进制大文件落盘与解析。  
+> 5. **编排联动**：异步委派完成后仅负责落库 `notification` 并广播铃铛，不具备自动唤醒 Supervisor 连续自治执行后续步骤的能力。
+
+---
+
+### 9.4 实施整改路线图与验收矩阵
+
+建议放弃粗放的四阶段规划，调整为如下严谨的实施顺序：
+
+```mermaid
+flowchart LR
+    P0["阶段 0: 真实端点协议切片 (Spike)"] --> P1["阶段 1: 句柄持久化与可靠对账"]
+    P1 --> P2["阶段 2: SSRF 白名单与接点修正"]
+    P2 --> P3["阶段 3: 控制面容错与两栏 UI 呈现"]
+```
+
+#### 阶段 0：最小真实协议切片验证（Spike）
+1. 锁定 `@a2a-js/sdk` 具体小版本依赖；
+2. 所有出站 HTTP 请求强制携带 `A2a-Version: 1.0`；
+3. 解析 `supportedInterfaces`，严格区分并路由至 `JsonRpcTransport` 或 `RestTransport`，取消端点固定为 `POST /tasks/{id}:cancel`；
+4. 纠正数据模型为统一 `Part` 结构，使用标准 `security` 与 `tenant` 字段。
+
+#### 阶段 1：持久化句柄与可靠取消
+1. **持久化锚点**：不改表结构前提下，统一利用 `entity_run.input_params`（`jsonb`）落盘保存 `{ a2aTaskId, interfaceUrl, protocolBinding, credentialId }`；
+2. **对账与取消**：区分“本地超时停止”与“远端确认取消”，记录取消调用的 HTTP 状态与错误；异常断流重连时主动通过 `GetTask` 核验状态。
+
+#### 阶段 2：安全沙箱与代码接点修正
+1. **SSRF 防御**：Extended Card 声明的 URL 必须与管理员填写的初始凭证 URL 保持同 Host；若域名发生变化，必须经管理员授权，严禁静默带 Token 跨域外发；
+2. **接点复用**：全面复用 `src/lib/backends/bridge-runtime-kit.server.ts` 已有的 `buildAuthHeaders` 和 `isAnonymousPlaceholder`；
+3. **保持类型兼容**：在 `EntityFetchOptions` 中将 `metadata` 作为非破坏性扩展字段加入，绝不破坏原有 `type` 与 `headerName`。
+
+#### 阶段 3：控制面容错与两栏 UI 呈现
+1. **并发隔离**：在 `fetchA2AEntitiesServer` 遍历多 Agent 时引入 `Promise.allSettled` 与 `p-limit(5)` 并发限制，单个请求 3 秒超时熔断；
+2. **对话模式隔离**：在前端 `AgentPanel` 与详情页将 A2A Agent 标示为 `[仅支持委派调度]`，隐藏 1:1 直接对话入口（或补齐 `contextId = threadId` 映射）；
+3. **两栏式展示**：保留现有 `ExternalAgentDetailPage` 的加载态（`agentsLoaded`）与返回逻辑，渲染 Advertised Skills 列表。
+
+#### 验收测试矩阵
+* [ ] **传输兼容性**：覆盖标准 `JSONRPC` 与 `HTTP+JSON` 两种服务，验证 `POST /message:send` 与 `POST /tasks/{id}:cancel`。
+* [ ] **版本门禁**：验证请求头携带 `A2a-Version: 1.0`，且仅声明 0.x 的外部服务会被明确报错拒绝。
+* [ ] **断流对账**：模拟中间 SSE 意外断开，系统通过 `GetTask` 准确查询终态而不会陷入死循环。
+* [ ] **非流式轮询**：外部声明 `streaming: false` 时，能够通过指数退避轮询正常完成任务。
+* [ ] **SSRF 拦截**：模拟返回私有跨域 IP 的 Extended Card，验证系统拦截跨域外发 Token。
+* [ ] **中断态处理**：模拟返回 `TASK_STATE_INPUT_REQUIRED`，验证提取提示文本后结构化失败退出。
