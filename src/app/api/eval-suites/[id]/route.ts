@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
 import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import { loadSuite } from "@/lib/evaluation/access";
 import * as storage from "@/lib/evaluation/storage";
@@ -70,6 +71,14 @@ export const PATCH = withEditor<{ id: string }>(
 
     if (flagEdit && !canChangeVisibility(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "Only the creator or admin can change visibility / enabled.");
+    }
+
+    // SECURITY: Evaluator agent must be visible if updated.
+    if (body.evaluatorAgentId) {
+      const evalVisible = await isAgentVisibleTo(body.evaluatorAgentId, session.user.id);
+      if (!evalVisible) {
+        throw new ApiError("NOT_FOUND", 404, "Evaluator agent not found.");
+      }
     }
 
     try {

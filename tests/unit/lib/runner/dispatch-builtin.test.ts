@@ -849,20 +849,8 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
     });
 
     describe("evaluator role", () => {
-      it("mounts submit_evaluation_scores tool when role is evaluator", async () => {
+      it("mounts submit_evaluation_scores tool when role is evaluator and initiator is evaluator", async () => {
         agentPoolGetMock.mockResolvedValue(makeSpec({ role: "evaluator" }));
-
-        await buildBuiltinAgents(["agent-1"], mockLogger, {
-          userId: "user-1",
-        });
-
-        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalled();
-        const tools = agentArgs().tools as unknown[];
-        expect(tools.some((t) => (t as { name: string }).name === "submit_evaluation_scores")).toBe(true);
-      });
-
-      it("mounts evaluator tool when initiator is evaluator even if role is null", async () => {
-        agentPoolGetMock.mockResolvedValue(makeSpec({ role: null }));
 
         await buildBuiltinAgents(["agent-1"], mockLogger, {
           userId: "user-1",
@@ -870,14 +858,32 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         });
 
         expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalled();
+        const tools = agentArgs().tools as unknown[];
+        expect(tools.some((t) => (t as { name: string }).name === "submit_evaluation_scores")).toBe(true);
       });
 
-      it("mounts submit_evaluation_scores tool when context is missing", async () => {
+      it("does not mount submit_evaluation_scores tool when role is null even if initiator is evaluator", async () => {
+        agentPoolGetMock.mockResolvedValue(makeSpec({ role: null }));
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, {
+          userId: "user-1",
+          initiator: "evaluator",
+        });
+
+        expect(buildSubmitEvaluationScoresToolMock).not.toHaveBeenCalled();
+        const tools = agentArgs().tools as unknown[];
+        expect(tools.some((t) => (t as { name: string }).name === "submit_evaluation_scores")).toBe(false);
+      });
+
+      it("does not mount submit_evaluation_scores tool when role is evaluator but initiator is not evaluator", async () => {
         agentPoolGetMock.mockResolvedValue(makeSpec({ role: "evaluator" }));
 
-        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+        await buildBuiltinAgents(["agent-1"], mockLogger, {
+          userId: "user-1",
+          initiator: "user",
+        });
 
-        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalled();
+        expect(buildSubmitEvaluationScoresToolMock).not.toHaveBeenCalled();
       });
     });
 

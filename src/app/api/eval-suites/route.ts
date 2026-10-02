@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
 import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
 import * as storage from "@/lib/evaluation/storage";
 
@@ -46,6 +47,23 @@ const createSchema = z
 
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
+
+  // SECURITY: Target agent must be visible to the creator when source is builtin.
+  const agentSource = body.agentSource ?? "builtin";
+  if (agentSource === "builtin") {
+    const targetVisible = await isAgentVisibleTo(body.agentId, session.user.id);
+    if (!targetVisible) {
+      throw new ApiError("NOT_FOUND", 404, "Target agent not found.");
+    }
+  }
+
+  // SECURITY: Evaluator agent must be visible to the creator if specified.
+  if (body.evaluatorAgentId) {
+    const evalVisible = await isAgentVisibleTo(body.evaluatorAgentId, session.user.id);
+    if (!evalVisible) {
+      throw new ApiError("NOT_FOUND", 404, "Evaluator agent not found.");
+    }
+  }
 
   try {
     const row = await storage.createSuite({

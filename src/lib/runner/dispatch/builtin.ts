@@ -337,7 +337,7 @@ export async function buildBuiltinAgents(
     }
     
     const isEvaluator: boolean =
-      spec.role === "evaluator" || ctx?.initiator === "evaluator";
+      spec.role === "evaluator" && ctx?.initiator === "evaluator";
     const evaluatorTools: ToolDefinition[] = [];
     if (isEvaluator) {
       const { buildSubmitEvaluationScoresTool } = await import(
