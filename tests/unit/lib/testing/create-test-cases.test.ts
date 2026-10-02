@@ -245,7 +245,7 @@ describe("create_test_cases tool", () => {
             id: 201,
             name: "Refund Policy Case",
             assertions: [
-              { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 },
+              { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
             ],
           },
         ],
@@ -259,7 +259,7 @@ describe("create_test_cases tool", () => {
             name: "Refund Policy Case",
             turns: ["Can I get a refund?", "Where do I send the item?"],
             assertions: [
-              { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 },
+              { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
             ],
           },
         ],

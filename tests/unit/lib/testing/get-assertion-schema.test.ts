@@ -139,7 +139,7 @@ describe("get_assertion_schema tool", () => {
       expect(res.schemas[0].example).toMatchObject({
         type: "metric",
         metric: "duration_s",
-        operator: "<=",
+        operator: "<",
         threshold: 5.0,
       });
     });

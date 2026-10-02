@@ -24,14 +24,14 @@ adminTest.describe("Admin Guardrails Control Plane", () => {
     await expect(page.getByText("24h:", { exact: true })).toBeVisible();
 
     // 3. Verify Tool Risk Registry Table in Right Column
-    await expect(page.getByText("Tool Risk Registry")).toBeVisible();
+    await expect(page.getByText("Tool Risk Registry", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add tool" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Tool Name" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Risk Level" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Approval" })).toBeVisible();
 
     // 4. Verify Safety Policies Table in Right Column
-    await expect(page.getByText("Safety Policies")).toBeVisible();
+    await expect(page.getByText("Safety Policies", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add policy" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Policy Name" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Category" })).toBeVisible();
@@ -61,6 +61,6 @@ adminTest.describe("Admin Guardrails Control Plane", () => {
 
     // 5. Switch back to Config tab and verify return to default view
     await header.getByRole("button", { name: "Config", exact: true }).click();
-    await expect(page.getByText("Tool Risk Registry")).toBeVisible();
+    await expect(page.getByText("Tool Risk Registry", { exact: true })).toBeVisible();
   });
 });

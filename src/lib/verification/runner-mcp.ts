@@ -67,6 +67,11 @@ export async function runMcpCase(
   const startedAt: number = Date.now();
   const resolvedInput: Record<string, unknown> = resolveInput(input.input, runContext);
 
+  const effectiveTimeoutSec =
+    typeof input.toolTimeoutSec === "number" && input.toolTimeoutSec > 0
+      ? input.toolTimeoutSec
+      : 60;
+
   // Borrow → tools → execute. All wrapped in try/finally so the
   // refcount is always released, even on internal throws.
   let provider: Awaited<ReturnType<typeof mcpProviderPool.borrow>> | null = null;
@@ -163,9 +168,7 @@ export async function runMcpCase(
     let raw: unknown;
     const toolStart = performance.now();
     try {
-      const executeOpts = input.toolTimeoutSec
-        ? { timeoutMs: input.toolTimeoutSec * 1000 }
-        : undefined;
+      const executeOpts = { timeoutMs: effectiveTimeoutSec * 1000 };
       const executed = await (
         tool.execute as (
           args: unknown,
@@ -257,11 +260,9 @@ export async function runMcpCase(
             }
           | undefined;
 
-        const effectiveTimeoutSec = input.toolTimeoutSec ?? 60;
         if (
           durationAssertion
-          && (durationAssertion.operator === "<"
-            || durationAssertion.operator === "<=")
+          && durationAssertion.operator === "<"
           && effectiveTimeoutSec > durationAssertion.threshold
         ) {
           return {

@@ -64,6 +64,20 @@
       "when": 1790907683709,
       "tag": "0008_eval_refactor_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790957786603,
+      "tag": "0009_replace_tool_call_count_with_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790968137587,
+      "tag": "0010_add_target_timeout_to_eval_suite",
+      "breakpoints": true
     }
   ]
 }

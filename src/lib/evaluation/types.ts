@@ -371,3 +371,26 @@ export interface CriteriaCheckResult {
   actual?: string;            // actual value for failed checks (e.g. "12.3s" for a metric)
   message?: string;           // failure explanation or detail
 }
+
+// ─── Tool Call Summary & Audit Types ────────────────────────────────
+
+export interface ToolCallAbnormalDetail {
+  toolName: string;
+  status: "failed" | "blocked";
+  code?: string;
+  reason?: string;
+}
+
+export interface ToolCallSummary {
+  /** Total tool calls in this turn/case */
+  totalCalls: number;
+  /** Number of tool calls that returned an error / threw an exception */
+  failureCount: number;
+  /** Number of tool calls blocked by security policy (e.g. G20 Headless Deny) */
+  blockedCount: number;
+  /** Invocation frequency mapped by tool name (e.g. { "run_ssh_command": 5 }) */
+  toolFrequency: Record<string, number>;
+  /** Details for abnormal invocations only (failed and blocked) */
+  abnormalDetails: ToolCallAbnormalDetail[];
+}
+

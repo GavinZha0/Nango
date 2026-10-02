@@ -119,6 +119,7 @@ export function EvaluationSuiteEditor({
       feedback: row.feedback,
       durationMs: row.durationMs,
       outputTokens: row.outputTokens,
+      toolCallSummary: row.toolCallSummary,
       startedAt: row.startedAt,
     };
   }, [runSnapshot, selectedCaseId]);
@@ -203,6 +204,7 @@ export function EvaluationSuiteEditor({
             agentSource: suiteData.agentSource,
             evaluatorAgentId: suiteData.evaluatorAgentId,
             threshold: suiteData.threshold,
+            targetTimeoutSec: suiteData.targetTimeoutSec,
             caseCount: cases.length,
             variables: suiteData.variables ?? {},
           }

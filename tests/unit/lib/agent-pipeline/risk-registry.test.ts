@@ -154,7 +154,9 @@ describe("G20 Headless Deny in toolApprovalMiddleware", () => {
 
     expect(decision).toEqual({
       isError: true,
-      message: "Headless execution denied for tool requiring manual approval: run_ssh_command",
+      toolName: "run_ssh_command",
+      code: "POLICY_DENIED",
+      message: "Headless execution denied by policy",
     });
   });
 

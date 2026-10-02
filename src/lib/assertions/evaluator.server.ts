@@ -26,6 +26,7 @@ import type {
   LlmDimAssertion,
   MetricAssertion,
   ToolCallAssertion,
+  AssertionToolCallSummary,
 } from "./types";
 import { substituteInputTemplates } from "./variable-resolver";
 
@@ -44,6 +45,7 @@ export interface EvaluateAssertionsOptions {
     outputTokens?: number;
     toolCallCount?: number;
   };
+  toolCallSummary?: AssertionToolCallSummary;
 }
 
 export interface EvaluationOutcome {
@@ -612,39 +614,52 @@ function evaluateToolCall(
     options.toolCalls ??
     (options.actualToolCallNames?.map((name) => ({ name, args: undefined })) || []);
   const matchingCalls = actualCalls.filter((c) => c.name === spec.toolName);
-  const callCount = matchingCalls.length;
 
-  const expectedCalls = spec.expectedCalls !== undefined ? spec.expectedCalls : 1;
+  const target = spec.target ?? "calls";
+  const op = spec.operator;
+  const threshold = spec.expectedCalls !== undefined ? spec.expectedCalls : 1;
 
-  if (expectedCalls === 0) {
-    const ok = callCount === 0;
-    return {
-      index,
-      type: "tool_call",
-      ok,
-      toolName: spec.toolName,
-      expectedCalls: 0,
-      expected: `0 calls to ${spec.toolName}`,
-      actual: `${callCount} calls`,
-      message: ok ? undefined : `Forbidden tool "${spec.toolName}" was called ${callCount} time(s)`,
-    };
+  let actualCount = 0;
+  if (target === "calls") {
+    actualCount = options.toolCallSummary
+      ? (options.toolCallSummary.toolFrequency[spec.toolName] ?? 0)
+      : matchingCalls.length;
+  } else if (target === "failed" || target === "blocked") {
+    if (!options.toolCallSummary) {
+      return {
+        index,
+        type: "tool_call",
+        ok: false,
+        errored: true,
+        errorSource: "config",
+        toolName: spec.toolName,
+        target,
+        operator: op,
+        expectedCalls: threshold,
+        message: `Tool call abnormal status "${target}" requires toolCallSummary, but none was recorded for this execution`,
+      };
+    }
+    actualCount =
+      options.toolCallSummary.abnormalDetails?.filter(
+        (d) => d.toolName === spec.toolName && d.status === target,
+      ).length ?? 0;
   }
 
-  if (callCount < expectedCalls) {
-    return {
-      index,
-      type: "tool_call",
-      ok: false,
-      toolName: spec.toolName,
-      expectedCalls,
-      expected: `>= ${expectedCalls} calls to ${spec.toolName}`,
-      actual: `${callCount} calls`,
-      message: `Tool "${spec.toolName}" was expected at least ${expectedCalls} time(s) but called ${callCount} time(s)`,
-    };
+  // Evaluate condition
+  let ok = false;
+  if (op === "<") {
+    ok = actualCount < threshold;
+  } else if (op === ">") {
+    ok = actualCount > threshold;
+  } else if (op === "==") {
+    ok = actualCount === threshold;
   }
 
-  // Check arguments if specified
-  if (spec.expectedArgs && typeof spec.expectedArgs === "object") {
+  const expectedDesc = `${target} ${op} ${threshold}`;
+  const actualDesc = `${actualCount} ${target}`;
+
+  // Check arguments if specified (only applies when target === "calls")
+  if (ok && target === "calls" && spec.expectedArgs && typeof spec.expectedArgs === "object") {
     const hasMatchingArgs = matchingCalls.some((call) => {
       if (!call.args || typeof call.args !== "object") return false;
       const callArgs = call.args as Record<string, unknown>;
@@ -660,10 +675,12 @@ function evaluateToolCall(
         type: "tool_call",
         ok: false,
         toolName: spec.toolName,
-        expectedCalls,
+        expectedCalls: threshold,
+        operator: op,
+        target,
         expected: spec.expectedArgs,
         actual: matchingCalls.map((c) => c.args),
-        message: `Tool "${spec.toolName}" was called, but none of the invocations matched the expected arguments`,
+        message: `Tool "${spec.toolName}" matched count (${actualDesc}), but none of the invocations matched the expected arguments`,
       };
     }
   }
@@ -671,13 +688,16 @@ function evaluateToolCall(
   return {
     index,
     type: "tool_call",
-    ok: true,
+    ok,
     toolName: spec.toolName,
-    expectedCalls,
-    expected: spec.expectedArgs !== undefined
-      ? spec.expectedArgs
-      : (expectedCalls > 1 ? `>= ${expectedCalls} calls to ${spec.toolName}` : `Call ${spec.toolName}`),
-    actual: `${callCount} calls`,
+    expectedCalls: threshold,
+    operator: op,
+    target,
+    expected: spec.expectedArgs !== undefined && target === "calls" ? spec.expectedArgs : expectedDesc,
+    actual: actualDesc,
+    message: ok
+      ? undefined
+      : `Tool "${spec.toolName}" ${target} was ${actualCount}, which failed condition "${op} ${threshold}"`,
   };
 }
 
@@ -702,7 +722,14 @@ function evaluateMetric(
       actualValue = metrics.outputTokens;
       break;
     case "total_tool_calls":
-      actualValue = metrics.toolCallCount;
+      actualValue =
+        options.toolCallSummary?.totalCalls ?? metrics.toolCallCount;
+      break;
+    case "tool_failures":
+      actualValue = options.toolCallSummary?.failureCount;
+      break;
+    case "tool_blocked":
+      actualValue = options.toolCallSummary?.blockedCount;
       break;
   }
 
@@ -724,14 +751,8 @@ function evaluateMetric(
     case "<":
       ok = actualValue < spec.threshold;
       break;
-    case "<=":
-      ok = actualValue <= spec.threshold;
-      break;
     case ">":
       ok = actualValue > spec.threshold;
-      break;
-    case ">=":
-      ok = actualValue >= spec.threshold;
       break;
     case "==":
       ok = actualValue === spec.threshold;

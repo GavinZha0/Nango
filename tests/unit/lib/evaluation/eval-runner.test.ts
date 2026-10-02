@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { EntityRunEventEntity } from "@/lib/db/schema";
 
 const { mockRunnerStart, mockReadEvents, mockWriteCaseResult, mockGetConfigNumber } =
   vi.hoisted(() => ({
@@ -30,7 +31,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
   };
 });
 
-const { runEvalCase } = await import("@/lib/evaluation/eval-runner");
+const { runEvalCase, analyzeToolCallEvents } = await import("@/lib/evaluation/eval-runner");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -218,7 +219,7 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
         assertions: [
           { type: "js_expression", expression: "true" }, // index 0 (deterministic)
           { type: "llm_custom", expectation: "Clear and safe answer" }, // index 1 (LLM)
-          { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 }, // index 2 (deterministic)
+          { type: "metric", metric: "duration_s", operator: "<", threshold: 10 }, // index 2 (deterministic)
           { type: "llm_dim", dim: "safety" }, // index 3 (LLM)
         ],
       }),
@@ -255,5 +256,215 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
     expect(rows[3].score).toBe(4);
     expect(rows[3].reason).toBe("Second LLM item passed");
     expect(rows[3].dim).toBe("safety");
+    expect(result.toolCallSummary).toBeDefined();
+    expect(result.toolCallSummary?.totalCalls).toBe(0);
+  });
+});
+
+describe("analyzeToolCallEvents", () => {
+  it("correctly audits success, failure, and POLICY_DENIED blocked tool calls", () => {
+    const events: EntityRunEventEntity[] = [
+      // 1. Success tool call
+      {
+        runId: "r1",
+        seq: 1,
+        type: "tool_call_chunk",
+        ts: new Date("2026-10-02T12:00:01Z"),
+        payload: { toolCallId: "call_1", toolName: "read_file" },
+      },
+      {
+        runId: "r1",
+        seq: 2,
+        type: "tool_call_result",
+        ts: new Date("2026-10-02T12:00:02Z"),
+        payload: { toolCallId: "call_1", content: JSON.stringify({ content: "hello world" }) },
+      },
+      // 2. Failed tool call
+      {
+        runId: "r1",
+        seq: 3,
+        type: "tool_call_chunk",
+        ts: new Date("2026-10-02T12:00:03Z"),
+        payload: { toolCallId: "call_2", toolName: "extract_dataset_by_sql" },
+      },
+      {
+        runId: "r1",
+        seq: 4,
+        type: "tool_call_result",
+        ts: new Date("2026-10-02T12:00:04Z"),
+        payload: {
+          toolCallId: "call_2",
+          content: JSON.stringify({ isError: true, message: "Database connection timed out" }),
+        },
+      },
+      // 3. Blocked tool call (POLICY_DENIED via G20 Headless Deny)
+      {
+        runId: "r1",
+        seq: 5,
+        type: "tool_call_chunk",
+        ts: new Date("2026-10-02T12:00:05Z"),
+        payload: { toolCallId: "call_3", toolName: "run_ssh_command" },
+      },
+      {
+        runId: "r1",
+        seq: 6,
+        type: "tool_call_result",
+        ts: new Date("2026-10-02T12:00:06Z"),
+        payload: {
+          toolCallId: "call_3",
+          content: JSON.stringify({
+            isError: true,
+            toolName: "run_ssh_command",
+            code: "POLICY_DENIED",
+            message: "Headless execution denied by policy",
+          }),
+        },
+      },
+      // 4. Repeated tool call (second run_ssh_command, also blocked)
+      {
+        runId: "r1",
+        seq: 7,
+        type: "tool_call_chunk",
+        ts: new Date("2026-10-02T12:00:07Z"),
+        payload: { toolCallId: "call_4", toolName: "run_ssh_command" },
+      },
+      {
+        runId: "r1",
+        seq: 8,
+        type: "tool_call_result",
+        ts: new Date("2026-10-02T12:00:08Z"),
+        payload: {
+          toolCallId: "call_4",
+          content: JSON.stringify({
+            isError: true,
+            toolName: "run_ssh_command",
+            code: "POLICY_DENIED",
+            message: "Headless execution denied by policy",
+          }),
+        },
+      },
+    ];
+
+    const summary = analyzeToolCallEvents(events);
+
+    expect(summary.totalCalls).toBe(4);
+    expect(summary.failureCount).toBe(1);
+    expect(summary.blockedCount).toBe(2);
+    expect(summary.toolFrequency).toEqual({
+      read_file: 1,
+      extract_dataset_by_sql: 1,
+      run_ssh_command: 2,
+    });
+    expect(summary.abnormalDetails).toHaveLength(3);
+
+    // First abnormal detail: failed extract_dataset_by_sql
+    expect(summary.abnormalDetails[0]).toEqual({
+      toolName: "extract_dataset_by_sql",
+      status: "failed",
+      code: undefined,
+      reason: "Database connection timed out",
+    });
+
+    // Second abnormal detail: blocked run_ssh_command
+    expect(summary.abnormalDetails[1]).toEqual({
+      toolName: "run_ssh_command",
+      status: "blocked",
+      code: "POLICY_DENIED",
+      reason: "Headless execution denied by policy",
+    });
+
+    // Third abnormal detail: blocked run_ssh_command
+    expect(summary.abnormalDetails[2]).toEqual({
+      toolName: "run_ssh_command",
+      status: "blocked",
+      code: "POLICY_DENIED",
+      reason: "Headless execution denied by policy",
+    });
+  });
+
+  it("preserves specific blocked code such as TOOL_HEADLESS_DENIED in abnormalDetails", () => {
+    const events: EntityRunEventEntity[] = [
+      {
+        runId: "r1",
+        seq: 1,
+        type: "tool_call_chunk",
+        ts: new Date("2026-10-02T12:00:01Z"),
+        payload: { toolCallId: "call_1", toolName: "run_shell_script" },
+      },
+      {
+        runId: "r1",
+        seq: 2,
+        type: "tool_call_result",
+        ts: new Date("2026-10-02T12:00:02Z"),
+        payload: {
+          toolCallId: "call_1",
+          content: JSON.stringify({
+            isError: true,
+            toolName: "run_shell_script",
+            code: "TOOL_HEADLESS_DENIED",
+            message: "Interactive confirmation denied in headless mode",
+          }),
+        },
+      },
+    ];
+
+    const summary = analyzeToolCallEvents(events);
+    expect(summary.blockedCount).toBe(1);
+    expect(summary.abnormalDetails[0]).toEqual({
+      toolName: "run_shell_script",
+      status: "blocked",
+      code: "TOOL_HEADLESS_DENIED",
+      reason: "Interactive confirmation denied in headless mode",
+    });
+  });
+});
+
+describe("runEvalCase — targetTimeoutSec override", () => {
+  it("times out target agent turn when custom targetTimeoutSec is exceeded", async () => {
+    mockRunnerStart.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve({ status: "succeeded" }), 100)),
+    );
+
+    const result = await runEvalCase({
+      ...makeInput(),
+      targetTimeoutSec: 0.01, // 10ms timeout
+    });
+
+    expect(result.status).toBe("errored");
+    expect(result.error).toMatch(/timed out/i);
+    expect(mockWriteCaseResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "errored",
+        error: expect.objectContaining({
+          message: expect.stringMatching(/timed out/i),
+        }),
+      }),
+    );
+  });
+
+  it("completes normally when target agent finishes within targetTimeoutSec", async () => {
+    mockRunnerStart.mockResolvedValue({
+      status: "succeeded",
+      runId: "run-target",
+      summary: "Completed quickly",
+    });
+
+    const result = await runEvalCase({
+      ...makeInput(),
+      targetTimeoutSec: 60,
+    });
+
+    expect(result.status).toBe("passed");
+  });
+
+  it("defaults to 300s fallback when targetTimeoutSec is not provided", async () => {
+    mockRunnerStart.mockResolvedValue({
+      status: "succeeded",
+      runId: "run-target",
+      summary: "Completed with default timeout",
+    });
+
+    const result = await runEvalCase(makeInput());
+    expect(result.status).toBe("passed");
   });
 });

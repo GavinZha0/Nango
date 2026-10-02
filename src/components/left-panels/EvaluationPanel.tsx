@@ -450,6 +450,7 @@ export function EvaluationPanel(): ReactNode {
     description?: string | null;
     evaluatorAgentId?: string | null;
     threshold: number;
+    targetTimeoutSec?: number | null;
     variables?: Record<string, unknown>;
   }): Promise<void> => {
     if (!editingSuite) return;

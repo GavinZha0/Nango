@@ -95,7 +95,7 @@ describe("get_test_suite_details tool", () => {
           enabled: false,
           assertions: [
             { type: "js_expression", expression: "root.code.length > 0" },
-            { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 },
+            { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
           ],
         },
       ]);

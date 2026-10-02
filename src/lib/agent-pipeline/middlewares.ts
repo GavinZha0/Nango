@@ -83,7 +83,9 @@ export function toolApprovalMiddleware(opts: {
             action: "block",
             result: {
               isError: true,
-              message: `Headless execution denied for tool requiring manual approval: ${call.toolName}`,
+              toolName: call.toolName,
+              code: "POLICY_DENIED",
+              message: "Headless execution denied by policy",
             },
           };
         }

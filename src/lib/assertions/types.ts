@@ -55,14 +55,35 @@ export type JsExpressionAssertion = z.infer<typeof jsExpressionAssertionSchema>;
 
 // ── 4. Tool Call Trajectory Assertion Schema ─────────────────────────────────
 
+export const toolCallOperatorSchema = z.enum(["<", ">", "=="]);
+export type ToolCallOperator = z.infer<typeof toolCallOperatorSchema>;
+
+export const toolCallTargetSchema = z.enum(["calls", "failed", "blocked"]);
+export type ToolCallTarget = z.infer<typeof toolCallTargetSchema>;
+
 export const toolCallAssertionSchema = z.object({
   type: z.literal("tool_call"),
-  toolName: z.string().min(1).describe("Name of the required tool"),
-  expectedCalls: z.number().int().min(0).optional().describe("Expected invocation count (default >= 1, 0 = forbidden)"),
+  toolName: z.string().min(1).describe("Name of the target tool"),
+  operator: toolCallOperatorSchema.describe("Comparison operator (<, >, ==)"),
+  target: toolCallTargetSchema.optional().describe("Target metric to evaluate ('calls' | 'failed' | 'blocked'). Default is 'calls'"),
+  expectedCalls: z.number().int().min(0).optional().describe("Expected count threshold"),
   expectedArgs: z.record(z.string(), z.unknown()).optional().describe("Key-value subset expected in tool call args"),
 });
 
 export type ToolCallAssertion = z.infer<typeof toolCallAssertionSchema>;
+
+export interface AssertionToolCallSummary {
+  totalCalls: number;
+  failureCount: number;
+  blockedCount: number;
+  toolFrequency: Record<string, number>;
+  abnormalDetails?: Array<{
+    toolName: string;
+    status: "failed" | "blocked";
+    code?: string;
+    reason?: string;
+  }>;
+}
 
 // ── 5. Metric & Performance Assertion Schema ─────────────────────────────────
 
@@ -70,18 +91,20 @@ export const metricNameSchema = z.enum([
   "duration_s",
   "output_tokens",
   "total_tool_calls",
+  "tool_failures",
+  "tool_blocked",
 ]);
 
 export type MetricName = z.infer<typeof metricNameSchema>;
 
-export const metricOperatorSchema = z.enum(["<", "<=", ">", ">=", "=="]);
+export const metricOperatorSchema = z.enum(["<", ">", "=="]);
 
 export type MetricOperator = z.infer<typeof metricOperatorSchema>;
 
 export const metricAssertionSchema = z.object({
   type: z.literal("metric"),
   metric: metricNameSchema.describe("Target metric key"),
-  operator: metricOperatorSchema.describe("Comparison operator"),
+  operator: metricOperatorSchema.describe("Comparison operator (<, >, ==)"),
   threshold: z.number().describe("Numerical threshold limit"),
 });
 
@@ -140,6 +163,8 @@ export interface AssertionResult {
   /** Deterministic snapshot metadata for self-contained inspection */
   toolName?: string;
   expectedCalls?: number;
+  operator?: string;
+  target?: string;
   metric?: string;
   expression?: string;
   /** Optional human-readable explanation */
@@ -257,6 +282,12 @@ export const CATEGORY_METRIC_MAPPING: Record<
   readonly MetricName[]
 > = {
   verification: ["duration_s"],
-  evaluation: ["duration_s", "output_tokens", "total_tool_calls"],
+  evaluation: [
+    "duration_s",
+    "output_tokens",
+    "total_tool_calls",
+    "tool_failures",
+    "tool_blocked",
+  ],
   "web-auto": [],
 };

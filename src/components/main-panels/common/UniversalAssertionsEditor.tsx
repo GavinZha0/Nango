@@ -643,7 +643,7 @@ export function UniversalAssertionsEditor({
                   variant="outline"
                   size="sm"
                   className="h-5 px-1.5 text-[9px] gap-1 hover:bg-muted font-semibold"
-                  onClick={() => addAssertion({ type: "tool_call", toolName: "", expectedCalls: 1 })}
+                  onClick={() => addAssertion({ type: "tool_call", toolName: "", target: "calls", operator: "<", expectedCalls: 3 })}
                 >
                   <Plus className="h-2.5 w-2.5" /> Add
                 </Button>
@@ -658,10 +658,42 @@ export function UniversalAssertionsEditor({
                     <Input
                       value={spec.toolName}
                       onChange={(e) => updateAssertionAt(idx, { ...spec, toolName: e.target.value })}
-                      placeholder="tool_name (e.g. search_knowledge_base)"
+                      placeholder="tool_name"
                       disabled={readOnly}
                       className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
                     />
+                    <Select
+                      value={spec.target ?? "calls"}
+                      disabled={readOnly}
+                      onValueChange={(val: string | null) => {
+                        if (val) updateAssertionAt(idx, { ...spec, target: val as "calls" | "failed" | "blocked" });
+                      }}
+                    >
+                      <SelectTrigger className="w-24 h-7 text-xs bg-muted/20 border-muted-foreground/20 font-mono">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="calls">calls</SelectItem>
+                        <SelectItem value="failed">failed</SelectItem>
+                        <SelectItem value="blocked">blocked</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={spec.operator ?? "<"}
+                      disabled={readOnly}
+                      onValueChange={(val: string | null) => {
+                        if (val) updateAssertionAt(idx, { ...spec, operator: val as "<" | ">" | "==" });
+                      }}
+                    >
+                      <SelectTrigger className="w-16 h-7 text-xs bg-muted/20 border-muted-foreground/20 font-mono">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="<">&lt;</SelectItem>
+                        <SelectItem value=">">&gt;</SelectItem>
+                        <SelectItem value="==">==</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Input
                       type="number"
                       min={0}
@@ -672,9 +704,9 @@ export function UniversalAssertionsEditor({
                           expectedCalls: parseInt(e.target.value, 10) || 0,
                         })
                       }
-                      placeholder=">= 1 calls"
+                      placeholder="threshold"
                       disabled={readOnly}
-                      className="h-7 text-xs w-24 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
+                      className="h-7 text-xs w-20 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
                     />
                     {!readOnly && (
                       <Button
@@ -728,10 +760,6 @@ export function UniversalAssertionsEditor({
             <div className="space-y-2">
               {currentAssertions.map((spec, idx) => {
                 if (spec.type !== "metric") return null;
-                const effectiveOperator =
-                  spec.metric === "duration_s" && !["<", ">"].includes(spec.operator)
-                    ? "<"
-                    : spec.operator;
 
                 return (
                   <div key={idx} className="flex items-center gap-1.5">
@@ -740,14 +768,9 @@ export function UniversalAssertionsEditor({
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
                         if (val) {
-                          const nextOperator =
-                            val === "duration_s" && !["<", ">"].includes(spec.operator)
-                              ? "<"
-                              : spec.operator;
                           updateAssertionAt(idx, {
                             ...spec,
                             metric: val as MetricName,
-                            operator: nextOperator,
                           });
                         }
                       }}
@@ -761,13 +784,15 @@ export function UniversalAssertionsEditor({
                           <>
                             <SelectItem value="output_tokens">output_tokens</SelectItem>
                             <SelectItem value="total_tool_calls">total_tool_calls</SelectItem>
+                            <SelectItem value="tool_failures">tool_failures</SelectItem>
+                            <SelectItem value="tool_blocked">tool_blocked</SelectItem>
                           </>
                         )}
                       </SelectContent>
                     </Select>
 
                     <Select
-                      value={effectiveOperator}
+                      value={spec.operator ?? "<"}
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
                         if (val) updateAssertionAt(idx, { ...spec, operator: val as MetricOperator });
@@ -777,20 +802,9 @@ export function UniversalAssertionsEditor({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {spec.metric === "duration_s" ? (
-                          <>
-                            <SelectItem value="<">&lt;</SelectItem>
-                            <SelectItem value=">">&gt;</SelectItem>
-                          </>
-                        ) : (
-                          <>
-                            <SelectItem value="<=">&lt;=</SelectItem>
-                            <SelectItem value="<">&lt;</SelectItem>
-                            <SelectItem value="==">==</SelectItem>
-                            <SelectItem value=">">&gt;</SelectItem>
-                            <SelectItem value=">=">&gt;=</SelectItem>
-                          </>
-                        )}
+                        <SelectItem value="<">&lt;</SelectItem>
+                        <SelectItem value=">">&gt;</SelectItem>
+                        <SelectItem value="==">==</SelectItem>
                       </SelectContent>
                     </Select>
 

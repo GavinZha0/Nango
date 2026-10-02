@@ -184,7 +184,7 @@ export function VerificationSuiteDialog({
 
     const parsedTimeout = Number(toolTimeoutSec);
     const resolvedToolTimeoutSec =
-      !Number.isNaN(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 60;
+      !Number.isNaN(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined;
 
     if (isEdit) {
       setSubmitting(true);
@@ -198,7 +198,7 @@ export function VerificationSuiteDialog({
           mcpServerId: serverId || null,
           toolPrefixRule,
           variables,
-          toolTimeoutSec: resolvedToolTimeoutSec,
+          toolTimeoutSec: resolvedToolTimeoutSec ?? null,
         });
         onOpenChange(false);
       } catch (err) {
@@ -453,7 +453,7 @@ export function VerificationSuiteDialog({
                     data-testid="suite-tool-timeout-input"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Per-case tool execution timeout (in seconds). Overrides the global MCP execution timeout (defaults to 60s).
+                    Per-case tool execution timeout (in seconds). Overrides the global MCP execution timeout.
                   </p>
                 </div>
 

@@ -18,7 +18,7 @@
 
 import "server-only";
 
-import type { EvalCriteria, CriteriaCheckResult } from "./types";
+import type { EvalCriteria, CriteriaCheckResult, ToolCallSummary } from "./types";
 import { evaluateAssertions, type AssertionSpec } from "@/lib/assertions";
 
 // ─── Input ──────────────────────────────────────────────────────────
@@ -40,6 +40,8 @@ export interface DeterministicCheckInput {
   };
   /** Suite-level literal variables for assertion evaluation */
   variables?: Record<string, unknown>;
+  /** Structured tool invocation and audit summary */
+  toolCallSummary?: ToolCallSummary;
 }
 
 // ─── Output ─────────────────────────────────────────────────────────
@@ -70,8 +72,10 @@ function getAssertionDescription(spec: AssertionSpec): string {
       return "JSON Schema Draft 2020-12 validation";
     case "js_expression":
       return spec.expression;
-    case "tool_call":
-      return `Tool Call ${spec.toolName}${spec.expectedCalls !== undefined ? ` (>= ${spec.expectedCalls})` : ""}`;
+    case "tool_call": {
+      const targetStr = spec.target && spec.target !== "calls" ? ` (${spec.target})` : "";
+      return `Tool Call ${spec.toolName}${targetStr} ${spec.operator} ${spec.expectedCalls ?? 1}`;
+    }
     case "metric":
       return `${spec.metric} ${spec.operator} ${spec.threshold}`;
     case "llm_dim":
@@ -109,6 +113,7 @@ export function runDeterministicChecks(
       toolCalls: input.toolCalls,
       metrics: input.metrics,
       variables: input.variables,
+      toolCallSummary: input.toolCallSummary,
     });
 
     const assertionResults = outcome.deterministicResults;

@@ -26,7 +26,7 @@ describe("normalizeAndValidateAssertions", () => {
   it("passes standard valid assertions without change", () => {
     const raw = [
       { type: "js_expression", expression: "root.status === 200" },
-      { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 },
+      { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
       { type: "llm_custom", expectation: "Answer is clear and helpful" },
     ];
     const result = normalizeAndValidateAssertions(raw, "Case 1");

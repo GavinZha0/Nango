@@ -2,6 +2,11 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getConfigNumber } from "@/lib/config";
+import {
+  CONFIG_KEY_TARGET_TIMEOUT,
+  DEFAULT_EVAL_TARGET_TIMEOUT_S,
+} from "@/lib/evaluation/config";
 import {
   canChangeVisibility,
   canDeleteResource,
@@ -35,6 +40,7 @@ const updateSchema = z
     description: z.string().max(1000).optional().nullable(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     threshold: z.number().int().min(1).max(5).optional(),
+    targetTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
@@ -58,6 +64,7 @@ export const PATCH = withEditor<{ id: string }>(
       body.description !== undefined ||
       body.evaluatorAgentId !== undefined ||
       body.threshold !== undefined ||
+      body.targetTimeoutSec !== undefined ||
       body.dimensionIds !== undefined ||
       body.variables !== undefined;
 
@@ -81,8 +88,29 @@ export const PATCH = withEditor<{ id: string }>(
       }
     }
 
+    let targetTimeoutSecToSave: number | undefined;
+    if (body.targetTimeoutSec !== undefined) {
+      const defaultTargetTimeout = getConfigNumber(
+        CONFIG_KEY_TARGET_TIMEOUT,
+        DEFAULT_EVAL_TARGET_TIMEOUT_S,
+      );
+      targetTimeoutSecToSave =
+        typeof body.targetTimeoutSec === "number" && body.targetTimeoutSec > 0
+          ? body.targetTimeoutSec
+          : defaultTargetTimeout;
+    }
+
     try {
-      const updated = await storage.updateSuite(suite.id, body, session.user.id);
+      const updated = await storage.updateSuite(
+        suite.id,
+        {
+          ...body,
+          ...(targetTimeoutSecToSave !== undefined
+            ? { targetTimeoutSec: targetTimeoutSecToSave }
+            : {}),
+        },
+        session.user.id,
+      );
       const caseCount = await storage.getCaseCount(suite.id);
       return NextResponse.json({ ...updated, caseCount });
     } catch (err) {

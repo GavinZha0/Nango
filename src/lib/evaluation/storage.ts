@@ -18,6 +18,7 @@ import {
   type EvalRunStatus,
   type EvalSuiteEntity,
 } from "@/lib/db/schema";
+import type { ToolCallSummary } from "./types";
 
 // --- Suites -----------------------------------------------------------------
 
@@ -29,6 +30,7 @@ export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   threshold?: number;
+  targetTimeoutSec?: number | null;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
@@ -48,6 +50,7 @@ export async function createSuite(
       name: input.name,
       description: input.description ?? null,
       threshold: input.threshold ?? 3,
+      targetTimeoutSec: input.targetTimeoutSec ?? 300,
       variables: input.variables ?? {},
       enabled: input.enabled ?? true,
       visibility: input.visibility ?? "private",
@@ -104,6 +107,7 @@ export interface UpdateSuiteInput {
   description?: string | null;
   evaluatorAgentId?: string | null;
   threshold?: number;
+  targetTimeoutSec?: number | null;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
@@ -120,6 +124,8 @@ export async function updateSuite(
   if (input.evaluatorAgentId !== undefined)
     updates.evaluatorAgentId = input.evaluatorAgentId;
   if (input.threshold !== undefined) updates.threshold = input.threshold;
+  if (input.targetTimeoutSec !== undefined)
+    updates.targetTimeoutSec = input.targetTimeoutSec;
   if (input.variables !== undefined) updates.variables = input.variables;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.visibility !== undefined) updates.visibility = input.visibility;
@@ -286,6 +292,7 @@ export async function listSuitesByAgentWithCaseCount(
       name: EvalSuiteTable.name,
       description: EvalSuiteTable.description,
       threshold: EvalSuiteTable.threshold,
+      targetTimeoutSec: EvalSuiteTable.targetTimeoutSec,
       variables: EvalSuiteTable.variables,
       enabled: EvalSuiteTable.enabled,
       visibility: EvalSuiteTable.visibility,
@@ -367,7 +374,7 @@ export interface WriteCaseResultInput {
   error?: unknown;
   durationMs?: number | null;
   outputTokens?: number | null;
-  toolCallCount?: number | null;
+  toolCallSummary?: ToolCallSummary | null;
 }
 
 export async function writeCaseResult(
@@ -385,7 +392,7 @@ export async function writeCaseResult(
     error: input.error ?? null,
     durationMs: input.durationMs ?? null,
     outputTokens: input.outputTokens ?? null,
-    toolCallCount: input.toolCallCount ?? null,
+    toolCallSummary: input.toolCallSummary ?? null,
   });
 }
 

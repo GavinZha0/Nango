@@ -27,6 +27,7 @@ function timestamp(name: string) {
 }
 
 import type { ArtifactKind, ArtifactType } from "@/lib/domain/artifact";
+import type { ToolCallSummary } from "@/lib/evaluation/types";
 
 /**
  * Postgres `bytea` column mapped to Node `Buffer`.
@@ -1926,6 +1927,7 @@ export const EvalSuiteTable = pgTable(
     description: text("description"),
     variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     threshold: integer("threshold").notNull().default(3),
+    targetTimeoutSec: integer("target_timeout_sec").notNull().default(300),
     enabled: boolean("enabled").notNull().default(true),
     visibility: text("visibility").notNull().default("private"),
     createdBy: uuid("created_by")
@@ -2047,8 +2049,8 @@ export const EvalCaseResultTable = pgTable(
     durationMs: integer("duration_ms"),
     /** Output token count (renamed from `tokens` in migration eval-stage2). */
     outputTokens: integer("output_tokens"),
-    /** Number of tool calls the target agent made. */
-    toolCallCount: integer("tool_call_count"),
+    /** Structured summary of tool calls, frequency, and abnormal events. */
+    toolCallSummary: jsonb("tool_call_summary").$type<ToolCallSummary>(),
     startedAt: timestamp("started_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

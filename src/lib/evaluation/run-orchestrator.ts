@@ -114,6 +114,7 @@ export async function startEvalSuiteRun(
     evaluatorAgentId: suite.evaluatorAgentId ?? null,
     dimensionIds: [],
     threshold: suite.threshold ?? 3,
+    targetTimeoutSec: suite.targetTimeoutSec,
     targetAgentId: suite.agentId,
     targetCredentialId: suite.credentialId ?? undefined,
     targetAgentSource: suite.agentSource,
@@ -134,6 +135,7 @@ interface SuiteLoopInput {
   evaluatorAgentId?: string | null;
   dimensionIds: string[];
   threshold?: number;
+  targetTimeoutSec?: number | null;
   targetAgentId: string;
   targetCredentialId?: string;
   targetAgentSource: string;
@@ -213,6 +215,7 @@ async function runAllCases(
         evaluatorAgentId: input.evaluatorAgentId,
         dimensionIds: input.dimensionIds,
         threshold: input.threshold,
+        targetTimeoutSec: input.targetTimeoutSec,
         turns: caseTurns,
         assertions: caseAssertions,
         ownerId: input.ownerId,
@@ -243,6 +246,7 @@ async function runAllCases(
       feedback: result.feedback,
       durationMs: result.durationMs,
       outputTokens: result.outputTokens,
+      toolCallSummary: result.toolCallSummary,
     });
   }
 }

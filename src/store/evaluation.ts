@@ -25,6 +25,7 @@ export interface EvalSuiteRow {
   name: string;
   description: string | null;
   threshold: number;
+  targetTimeoutSec: number;
   variables?: Record<string, unknown>;
   enabled: boolean;
   visibility: "private" | "public";
@@ -147,6 +148,7 @@ export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   threshold?: number;
+  targetTimeoutSec?: number;
   variables?: Record<string, unknown>;
 }
 
@@ -155,6 +157,7 @@ export interface PatchSuiteInput {
   description?: string | null;
   evaluatorAgentId?: string | null;
   threshold?: number;
+  targetTimeoutSec?: number | null;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "private" | "public";

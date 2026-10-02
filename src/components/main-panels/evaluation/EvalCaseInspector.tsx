@@ -33,6 +33,7 @@ import {
   BUILTIN_EVAL_DIMENSIONS,
   type EvalTurn,
   type CriteriaCheckResult,
+  type ToolCallSummary,
 } from "@/lib/evaluation/types";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 import type { AssertionSpec } from "@/lib/assertions";
@@ -242,6 +243,7 @@ export interface PinnedOutcome {
   outputTokens: number | null;
   startedAt: Date | string | null;
   error?: unknown;
+  toolCallSummary?: ToolCallSummary | null;
 }
 
 export interface EvalCaseInspectorDraftHandle {
@@ -376,6 +378,11 @@ export function EvalCaseInspector({
   const displayOutputTokens = pinnedOutcome
     ? pinnedOutcome.outputTokens
     : (runOutcome ? (runOutcome.outputTokens ?? null) : (liveCaseResult?.outputTokens ?? (historicalResult?.outputTokens ?? null)));
+  const displayToolCallSummary = pinnedOutcome
+    ? (pinnedOutcome.toolCallSummary ?? null)
+    : (runOutcome
+        ? (runOutcome.toolCallSummary ?? null)
+        : ((liveCaseResult?.toolCallSummary as ToolCallSummary | undefined) ?? (historicalResult?.toolCallSummary ?? null)));
 
   const resolvedRunId = pinnedOutcome
     ? pinnedRunId
@@ -760,6 +767,7 @@ export function EvalCaseInspector({
               feedback={displayFeedback}
               durationMs={displayDurationMs}
               outputTokens={displayOutputTokens}
+              toolCallSummary={displayToolCallSummary}
               selectedRunSeq={selectedRunSeq}
               startedAt={pinnedOutcome?.startedAt}
               status={resolvedStatus}
@@ -780,6 +788,7 @@ interface EvaluationPanelProps {
   feedback: string | null;
   durationMs: number | null;
   outputTokens: number | null;
+  toolCallSummary?: ToolCallSummary | null;
   selectedRunSeq?: number | null;
   startedAt?: Date | string | null;
   status?: string | null;
@@ -792,6 +801,7 @@ function EvaluationPanel({
   feedback,
   durationMs,
   outputTokens,
+  toolCallSummary = null,
   selectedRunSeq = null,
   startedAt = null,
   status = null,
@@ -881,8 +891,8 @@ function EvaluationPanel({
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-3 space-y-3">
           {/* Metrics header */}
-          {hasResult && (durationMs !== null || outputTokens !== null) && (
-            <div className="flex items-center gap-4 text-[11px] text-muted-foreground pb-2 border-b border-muted">
+          {hasResult && (durationMs !== null || outputTokens !== null || toolCallSummary != null) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground pb-2 border-b border-muted">
               {durationMs !== null && (
                 <div className="flex gap-1.5 items-center">
                   <span className="font-semibold text-foreground/80">Duration:</span>
@@ -894,6 +904,22 @@ function EvaluationPanel({
                   <span className="font-semibold text-foreground/80">Output token:</span>
                   <span>{outputTokens}</span>
                 </div>
+              )}
+              {toolCallSummary != null && (
+                <>
+                  <div className="flex gap-1.5 items-center">
+                    <span className="font-semibold text-foreground/80">Tools:</span>
+                    <span>{toolCallSummary.totalCalls}</span>
+                  </div>
+                  <div className="flex gap-1.5 items-center">
+                    <span className="font-semibold text-foreground/80">Fail tools:</span>
+                    <span>{toolCallSummary.failureCount}</span>
+                  </div>
+                  <div className="flex gap-1.5 items-center">
+                    <span className="font-semibold text-foreground/80">Blocked tools:</span>
+                    <span>{toolCallSummary.blockedCount}</span>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -998,8 +1024,8 @@ function EvaluationPanel({
                               </span>
 
                               {isSkipped && (
-                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                                  Not evaluated
+                                <span className="shrink-0 text-muted-foreground/70 font-mono text-[10px]">
+                                  (Skipped)
                                 </span>
                               )}
 
@@ -1063,9 +1089,6 @@ function EvaluationPanel({
                           item.message ||
                           "Custom Check";
 
-                        const isUnexpectation = Boolean(item.unexpectation);
-                        const isReference = Boolean(item.reference && !item.expectation);
-
                         return (
                           <li key={i} className="text-xs">
                             <button
@@ -1078,20 +1101,10 @@ function EvaluationPanel({
                               ) : isSkipped ? (
                                 <Info
                                   className="h-3.5 w-3.5 text-amber-500 shrink-0"
-                                  aria-label="Not evaluated"
+                                  aria-label="Skipped"
                                 />
                               ) : (
                                 <X className="h-3.5 w-3.5 text-rose-500 shrink-0" />
-                              )}
-
-                              {isSkipped ? (
-                                <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0 shadow-xs" title="Not evaluated" />
-                              ) : isUnexpectation ? (
-                                <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 shadow-xs" title="Unexpectation" />
-                              ) : isReference ? (
-                                <span className="h-2 w-2 rounded-full bg-sky-500 shrink-0 shadow-xs" title="Reference" />
-                              ) : (
-                                <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 shadow-xs" title="Expectation" />
                               )}
 
                               <span className="truncate flex-1 text-foreground/90 font-mono text-[11px]">
@@ -1099,8 +1112,8 @@ function EvaluationPanel({
                               </span>
 
                               {isSkipped && (
-                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                                  Not evaluated
+                                <span className="shrink-0 text-muted-foreground/70 font-mono text-[10px]">
+                                  (Skipped)
                                 </span>
                               )}
 

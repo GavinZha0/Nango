@@ -23,6 +23,7 @@ export interface EvalCaseLive {
   feedback?: string | null;
   durationMs?: number | null;
   outputTokens?: number | null;
+  toolCallSummary?: unknown;
 }
 
 export interface EvaluationRunLiveState {
@@ -111,6 +112,7 @@ export function useEvaluationRunStream(
             feedback: (frame.feedback as string) ?? null,
             durationMs: (frame.durationMs as number) ?? null,
             outputTokens: (frame.outputTokens as number) ?? null,
+            toolCallSummary: frame.toolCallSummary ?? null,
           });
           return { ...base, caseResults: next };
         });

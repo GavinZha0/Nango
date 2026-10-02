@@ -24,6 +24,7 @@ import type {
 import {
   BUILTIN_EVAL_DIMENSIONS,
   type CriteriaCheckResult,
+  type ToolCallSummary,
 } from "./types";
 import { formatChecksForPrompt } from "./deterministic-checks";
 
@@ -36,6 +37,8 @@ export interface PromptBuilderInput {
   checkResults?: CriteriaCheckResult[];
   /** Full conversation transcript (user + agent turns). */
   conversationText: string;
+  /** Structured tool invocation and audit summary. */
+  toolCallSummary?: ToolCallSummary;
 }
 
 /**
@@ -123,7 +126,53 @@ export function buildEvaluationBrief(input: PromptBuilderInput): string {
     }
   }
 
-  // 3. Conversation transcript
+  // 3. Tool execution audit & statistics
+  if (input.toolCallSummary && input.toolCallSummary.totalCalls > 0) {
+    const s = input.toolCallSummary;
+    const lines = [
+      "[TOOL EXECUTION AUDIT]",
+      `Total Tool Calls: ${s.totalCalls}`,
+      `Failed Calls: ${s.failureCount}`,
+      `Blocked Calls by Security Policy: ${s.blockedCount}`,
+    ];
+
+    const freqEntries = Object.entries(s.toolFrequency ?? {});
+    if (freqEntries.length > 0) {
+      lines.push("Tool Call Frequency:");
+      for (const [name, count] of freqEntries) {
+        const tag = count >= 5 ? " [High Frequency]" : "";
+        lines.push(`  - ${name}: ${count}${tag}`);
+      }
+    }
+
+    const blockedList = s.abnormalDetails?.filter((d) => d.status === "blocked") ?? [];
+    if (blockedList.length > 0) {
+      lines.push(
+        "Blocked Calls by Security Policy (Notice: These calls were blocked by security policy, permissions, or headless approval barriers. Evaluate objectively based on whether the agent adhered to guidelines, selected appropriate tools, and handled the restriction gracefully):",
+      );
+      for (const d of blockedList) {
+        const codePart = d.code ? ` [Code: ${d.code}]` : "";
+        const reasonPart = d.reason ? `: ${d.reason}` : "";
+        lines.push(`  - ${d.toolName}${codePart}${reasonPart}`);
+      }
+    }
+
+    const failedList = s.abnormalDetails?.filter((d) => d.status === "failed") ?? [];
+    if (failedList.length > 0) {
+      lines.push(
+        "Failed Calls (Notice: These calls encountered invalid arguments or runtime errors; factor these objectively into tool-correctness and task-completion scores):",
+      );
+      for (const d of failedList) {
+        const codePart = d.code ? ` [Code: ${d.code}]` : "";
+        const reasonPart = d.reason ? `: ${d.reason}` : "";
+        lines.push(`  - ${d.toolName}${codePart}${reasonPart}`);
+      }
+    }
+
+    sections.push(lines.join("\n"));
+  }
+
+  // 4. Conversation transcript
   sections.push(
     "CONVERSATION TO EVALUATE\n" +
     "The following is the complete conversation between the user and " +

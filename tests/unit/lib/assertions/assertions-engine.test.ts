@@ -6,6 +6,7 @@ import {
   substituteInputTemplates,
   normalizeCaseName,
   validateAssertionSyntax,
+  toolCallAssertionSchema,
   type AssertionSpec,
 } from "@/lib/assertions";
 
@@ -239,17 +240,20 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
         {
           type: "tool_call",
           toolName: "search_knowledge_base",
+          operator: "==",
           expectedCalls: 1,
           expectedArgs: { query: "refund policy" },
         },
         {
           type: "tool_call",
           toolName: "delete_database",
+          operator: "==",
           expectedCalls: 0, // forbidden
         },
         {
           type: "tool_call",
           toolName: "charge_credit_card",
+          operator: "==",
           expectedCalls: 1, // missing tool call
         },
       ];
@@ -258,6 +262,167 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[0].ok).toBe(true);
       expect(outcome.deterministicResults[1].ok).toBe(true);
       expect(outcome.deterministicResults[2].ok).toBe(false);
+    });
+
+    it("evaluates operators (<, >, ==) with toolCallSummary for calls, failed, and blocked targets", () => {
+      const toolCallSummary = {
+        totalCalls: 5,
+        failureCount: 1,
+        blockedCount: 2,
+        toolFrequency: {
+          run_ssh_command: 3,
+          read_file: 2,
+        },
+        abnormalDetails: [
+          { toolName: "read_file", status: "failed" as const, reason: "File not found" },
+          { toolName: "run_ssh_command", status: "blocked" as const, code: "POLICY_DENIED", reason: "Headless execution denied by policy" },
+          { toolName: "run_ssh_command", status: "blocked" as const, code: "POLICY_DENIED", reason: "Headless execution denied by policy" },
+        ],
+      };
+
+      const assertions: AssertionSpec[] = [
+        // 1. calls < 4 for run_ssh_command (actual is 3 -> passes)
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "<",
+          target: "calls",
+          expectedCalls: 4,
+        },
+        // 2. calls < 3 for run_ssh_command (actual is 3 -> fails)
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "<",
+          target: "calls",
+          expectedCalls: 3,
+        },
+        // 3. calls == 2 for read_file (actual is 2 -> passes)
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          operator: "==",
+          target: "calls",
+          expectedCalls: 2,
+        },
+        // 4. calls > 1 for read_file (actual is 2 -> passes)
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          operator: ">",
+          target: "calls",
+          expectedCalls: 1,
+        },
+        // 5. read_file failed == 1 (actual is 1 -> passes)
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          operator: "==",
+          target: "failed",
+          expectedCalls: 1,
+        },
+        // 6. read_file failed < 1 (actual is 1 -> fails)
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          operator: "<",
+          target: "failed",
+          expectedCalls: 1,
+        },
+        // 7. run_ssh_command failed == 0 (actual is 0 -> passes)
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "==",
+          target: "failed",
+          expectedCalls: 0,
+        },
+        // 8. run_ssh_command blocked == 2 (actual is 2 -> passes)
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "==",
+          target: "blocked",
+          expectedCalls: 2,
+        },
+        // 9. run_ssh_command blocked < 3 (actual is 2 -> passes)
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "<",
+          target: "blocked",
+          expectedCalls: 3,
+        },
+        // 10. run_ssh_command blocked == 0 (actual is 2 -> fails)
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "==",
+          target: "blocked",
+          expectedCalls: 0,
+        },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, { toolCallSummary });
+      const results = outcome.deterministicResults;
+
+      expect(results[0].ok).toBe(true);  // run_ssh_command calls < 4 (3 < 4)
+      expect(results[1].ok).toBe(false); // run_ssh_command calls < 3 (3 < 3)
+      expect(results[2].ok).toBe(true);  // read_file calls == 2 (2 == 2)
+      expect(results[3].ok).toBe(true);  // read_file calls > 1 (2 > 1)
+      expect(results[4].ok).toBe(true);  // read_file failed == 1 (1 == 1)
+      expect(results[5].ok).toBe(false); // read_file failed < 1 (1 < 1 is false)
+      expect(results[6].ok).toBe(true);  // run_ssh_command failed == 0 (0 == 0)
+      expect(results[7].ok).toBe(true);  // run_ssh_command blocked == 2 (2 == 2)
+      expect(results[8].ok).toBe(true);  // run_ssh_command blocked < 3 (2 < 3)
+      expect(results[9].ok).toBe(false); // run_ssh_command blocked == 0 (2 == 0)
+    });
+
+    it("requires operator in toolCallAssertionSchema and rejects when omitted", () => {
+      const valid = toolCallAssertionSchema.safeParse({
+        type: "tool_call",
+        toolName: "read_file",
+        operator: "<",
+        expectedCalls: 2,
+      });
+      expect(valid.success).toBe(true);
+
+      const missingOp = toolCallAssertionSchema.safeParse({
+        type: "tool_call",
+        toolName: "read_file",
+        expectedCalls: 2,
+      });
+      expect(missingOp.success).toBe(false);
+      expect(missingOp.error?.issues[0]?.path).toContain("operator");
+    });
+
+    it("sets errored: true when evaluating target 'failed' or 'blocked' without toolCallSummary", () => {
+      const assertions: AssertionSpec[] = [
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          operator: "<",
+          target: "failed",
+          expectedCalls: 1,
+        },
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "==",
+          target: "blocked",
+          expectedCalls: 0,
+        },
+      ];
+
+      // No toolCallSummary provided in options
+      const outcome = evaluateAssertions({}, assertions, {});
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].errored).toBe(true);
+      expect(outcome.deterministicResults[0].errorSource).toBe("config");
+      expect(outcome.deterministicResults[0].message).toContain("requires toolCallSummary");
+      expect(outcome.deterministicResults[1].errored).toBe(true);
+      expect(outcome.deterministicResults[1].errorSource).toBe("config");
+      expect(outcome.deterministicResults[1].message).toContain("requires toolCallSummary");
     });
   });
 
@@ -272,11 +437,11 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
 
     it("evaluates performance and resource metrics", () => {
       const assertions: AssertionSpec[] = [
-        { type: "metric", metric: "duration_s", operator: "<=", threshold: 5 },
+        { type: "metric", metric: "duration_s", operator: "<", threshold: 5 },
         { type: "metric", metric: "output_tokens", operator: "<", threshold: 1000 },
-        { type: "metric", metric: "total_tool_calls", operator: "<=", threshold: 3 },
-        // Failed rule: 3.2s <= 2s is false
-        { type: "metric", metric: "duration_s", operator: "<=", threshold: 2 },
+        { type: "metric", metric: "total_tool_calls", operator: "==", threshold: 2 },
+        // Failed rule: 3.2s < 2s is false
+        { type: "metric", metric: "duration_s", operator: "<", threshold: 2 },
       ];
 
       const outcome = evaluateAssertions({}, assertions, options);
@@ -286,6 +451,58 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[2].ok).toBe(true);
       expect(outcome.deterministicResults[3].ok).toBe(false);
       expect(outcome.deterministicResults[3].actual).toBe(3.2);
+    });
+
+    it("evaluates tool_failures and tool_blocked metrics with operators (<, >, ==)", () => {
+      const toolCallSummary = {
+        totalCalls: 5,
+        failureCount: 1,
+        blockedCount: 2,
+        toolFrequency: {
+          run_ssh_command: 3,
+          read_file: 2,
+        },
+        abnormalDetails: [
+          { toolName: "read_file", status: "failed" as const, reason: "File not found" },
+          { toolName: "run_ssh_command", status: "blocked" as const, code: "POLICY_DENIED", reason: "Headless execution denied by policy" },
+          { toolName: "run_ssh_command", status: "blocked" as const, code: "POLICY_DENIED", reason: "Headless execution denied by policy" },
+        ],
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "metric", metric: "tool_failures", operator: "<", threshold: 2 },
+        { type: "metric", metric: "tool_failures", operator: "==", threshold: 1 },
+        { type: "metric", metric: "tool_failures", operator: ">", threshold: 0 },
+        { type: "metric", metric: "tool_blocked", operator: "<", threshold: 3 },
+        { type: "metric", metric: "tool_blocked", operator: "==", threshold: 2 },
+        { type: "metric", metric: "tool_blocked", operator: "==", threshold: 0 },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, { toolCallSummary });
+      const results = outcome.deterministicResults;
+      expect(results[0].ok).toBe(true);  // 1 < 2
+      expect(results[1].ok).toBe(true);  // 1 == 1
+      expect(results[2].ok).toBe(true);  // 1 > 0
+      expect(results[3].ok).toBe(true);  // 2 < 3
+      expect(results[4].ok).toBe(true);  // 2 == 2
+      expect(results[5].ok).toBe(false); // 2 == 0
+    });
+
+    it("sets errored: true on tool_failures and tool_blocked metrics when toolCallSummary is missing", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "metric", metric: "tool_failures", operator: "<", threshold: 1 },
+        { type: "metric", metric: "tool_blocked", operator: "==", threshold: 0 },
+      ];
+
+      // No toolCallSummary passed
+      const outcome = evaluateAssertions({}, assertions, {});
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].errored).toBe(true);
+      expect(outcome.deterministicResults[0].errorSource).toBe("config");
+      expect(outcome.deterministicResults[0].message).toContain("was not recorded for this execution");
+      expect(outcome.deterministicResults[1].errored).toBe(true);
+      expect(outcome.deterministicResults[1].errorSource).toBe("config");
+      expect(outcome.deterministicResults[1].message).toContain("was not recorded for this execution");
     });
   });
 

@@ -78,6 +78,7 @@ export function createMockEvalSuite(
     agentSource: "builtin",
     evaluatorAgentId: null,
     threshold: 3,
+    targetTimeoutSec: 300,
     credentialId: null,
     visibility: "private",
     enabled: true,

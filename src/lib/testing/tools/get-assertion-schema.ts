@@ -78,13 +78,14 @@ function buildSchemaItem(
       return {
         type: "tool_call",
         description:
-          "Verifies agent tool invocation trajectories during evaluation runs, checking that expected tools were called with valid argument subsets (expectedArgs) and invocation counts (expectedCalls).",
+          "Verifies agent tool invocation trajectories, failure counts, or security policy blocks during evaluation runs using operators (<, >, ==).",
         jsonSchema: cleanSchema,
         example: {
           type: "tool_call",
-          toolName: "fetch_calendar_events",
-          expectedCalls: 1,
-          expectedArgs: { days: 7 },
+          toolName: "run_ssh_command",
+          operator: "<",
+          target: "calls",
+          expectedCalls: 3,
         },
       };
     }
@@ -94,7 +95,7 @@ function buildSchemaItem(
           .object({
             type: z.literal("metric"),
             metric: z.literal("duration_s"),
-            operator: z.enum(["<", ">"]),
+            operator: z.enum(["<", ">", "=="]),
             threshold: z.number(),
           })
           .strict();
@@ -102,7 +103,7 @@ function buildSchemaItem(
         return {
           type: "metric",
           description:
-            "Asserts tool execution duration in seconds (duration_s) using comparison operators (<, >).",
+            "Asserts tool execution duration in seconds (duration_s) using comparison operators (<, >, ==).",
           jsonSchema: cleanSchema,
           example: {
             type: "metric",
@@ -117,12 +118,12 @@ function buildSchemaItem(
       return {
         type: "metric",
         description:
-          "Asserts numerical performance constraints including duration_s (execution seconds), output_tokens, or total_tool_calls using comparison operators (<, <=, >, >=, ==).",
+          "Asserts numerical performance constraints including duration_s (execution seconds), output_tokens, total_tool_calls, tool_failures, or tool_blocked using comparison operators (<, >, ==).",
         jsonSchema: cleanSchema,
         example: {
           type: "metric",
           metric: "duration_s",
-          operator: "<=",
+          operator: "<",
           threshold: 5.0,
         },
       };

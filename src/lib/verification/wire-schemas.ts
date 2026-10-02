@@ -55,6 +55,7 @@ import {
   jsonSchemaAssertionSchema,
   jsonPathAssertionSchema,
   jsExpressionAssertionSchema,
+  metricOperatorSchema,
 } from "@/lib/assertions/types";
 import { validateAssertionSyntax } from "@/lib/assertions";
 
@@ -62,7 +63,7 @@ export const verificationMetricAssertionSchema = z
   .object({
     type: z.literal("metric"),
     metric: z.literal("duration_s"),
-    operator: z.enum(["<", ">"]),
+    operator: metricOperatorSchema,
     threshold: z.number(),
   })
   .strict();

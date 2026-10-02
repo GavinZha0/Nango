@@ -20,7 +20,6 @@ import {
   ChevronRight,
   ChevronDown,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { AssertionResult, AssertionSpec } from "@/lib/assertions";
 
 interface AssertionVerdictRowProps {
@@ -52,16 +51,6 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
 
   const titleText = formatVerdictTitle(verdict, spec);
 
-  // 3-color dot indicators for LLM Judge
-  const isUnexpectation = Boolean(
-    verdict.unexpectation ||
-      (spec && "unexpectation" in spec && spec.unexpectation),
-  );
-  const isReference = Boolean(
-    (verdict.reference && !verdict.expectation) ||
-      (spec && "reference" in spec && spec.reference && !("expectation" in spec && spec.expectation)),
-  );
-
   return (
     <li className="rounded border border-border/40 bg-background/50 text-xs overflow-hidden transition-colors">
       <div
@@ -85,40 +74,15 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
             <XCircle className="h-3.5 w-3.5 text-rose-500 shrink-0" />
           )}
 
-          {/* Three-color dot for LLM Judge */}
-          {isLlmJudge && (
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full shrink-0 shadow-xs",
-                isSkipped
-                  ? "bg-amber-500"
-                  : isUnexpectation
-                    ? "bg-rose-500"
-                    : isReference
-                      ? "bg-sky-500"
-                      : "bg-emerald-500",
-              )}
-              title={
-                isSkipped
-                  ? "Not evaluated"
-                  : isUnexpectation
-                    ? "Unexpectation / Forbidden"
-                    : isReference
-                      ? "Reference Context"
-                      : "Expectation"
-              }
-            />
-          )}
-
           {/* Title description */}
           <span className="font-mono text-[11px] truncate text-foreground/90 flex-1">
             {titleText}
           </span>
 
-          {/* Skipped / not-evaluated marker */}
+          {/* Skipped marker */}
           {isSkipped && (
-            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-              Not evaluated
+            <span className="shrink-0 text-muted-foreground/70 font-mono text-[10px]">
+              (Skipped)
             </span>
           )}
 
@@ -212,14 +176,21 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
       return `${path || "path"} ${op} ${formatValue(expected)}`;
     }
     if (spec.type === "json_schema") return "JSON Schema validation";
-    if (spec.type === "tool_call") return `Tool: ${spec.toolName}`;
+    if (spec.type === "tool_call") {
+      const targetStr = spec.target && spec.target !== "calls" ? ` (${spec.target})` : "";
+      return `Tool: ${spec.toolName}${targetStr} ${spec.operator} ${spec.expectedCalls ?? 1}`;
+    }
     if (spec.type === "metric") return `${spec.metric} ${spec.operator} ${spec.threshold}`;
   }
 
   // Fallbacks using verdict's self-contained snapshot fields when spec is omitted
   if (verdict.type === "tool_call" || (verdict as { toolName?: string }).toolName) {
-    const toolName = (verdict as { toolName?: string }).toolName;
-    return toolName ? `Tool: ${toolName}` : "Tool Call";
+    const toolName = (verdict as { toolName?: string }).toolName || "Tool";
+    const op = (verdict as { operator?: string }).operator ?? "<";
+    const target = (verdict as { target?: string }).target;
+    const targetStr = target && target !== "calls" ? ` (${target})` : "";
+    const expected = (verdict as { expectedCalls?: number }).expectedCalls;
+    return expected !== undefined ? `Tool: ${toolName}${targetStr} ${op} ${expected}` : `Tool: ${toolName}`;
   }
 
   if (verdict.type === "js_expression" && (verdict as { expression?: string }).expression) {

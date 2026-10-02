@@ -13,7 +13,7 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
       {
         type: "metric",
         metric: "duration_s",
-        operator: "<=",
+        operator: "<",
         threshold: 2.5,
       },
     ];
@@ -91,11 +91,11 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
       {
         type: "metric",
         metric: "duration_s",
-        operator: "<=",
+        operator: "<",
         threshold: 1.5,
       },
     ];
-    // 1200ms = 1.2s <= 1.5s -> pass
+    // 1200ms = 1.2s < 1.5s -> pass
     const passOutcome = evaluateAssertions(
       { success: true },
       assertions,
@@ -172,7 +172,7 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
       {
         type: "metric",
         metric: "output_tokens",
-        operator: "<=",
+        operator: "<",
         threshold: 100,
       },
     ];
@@ -191,7 +191,7 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
       {
         type: "metric",
         metric: "output_tokens",
-        operator: "<=",
+        operator: "<",
         threshold: 100,
       },
     ];

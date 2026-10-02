@@ -36,6 +36,34 @@ describe("buildEvaluationBrief — Dynamic LLM Checklist", () => {
     expect(brief).toContain("item_scores: Array with one entry for each of the 3 check items above");
     expect(brief).toContain("call `submit_evaluation_scores` EXACTLY ONCE");
   });
+
+  it("formats tool execution audit and statistics when summary is provided", () => {
+    const brief = buildEvaluationBrief({
+      assertions: [],
+      conversationText: "User: run command\n\nAgent: blocked",
+      toolCallSummary: {
+        totalCalls: 3,
+        failureCount: 1,
+        blockedCount: 1,
+        toolFrequency: { run_ssh_command: 2, extract_dataset_by_sql: 1 },
+        abnormalDetails: [
+          { toolName: "run_ssh_command", status: "blocked", code: "POLICY_DENIED", reason: "Headless execution denied by policy" },
+          { toolName: "extract_dataset_by_sql", status: "failed", reason: "Connection timeout" },
+        ],
+      },
+    });
+
+    expect(brief).toContain("[TOOL EXECUTION AUDIT]");
+    expect(brief).toContain("Total Tool Calls: 3");
+    expect(brief).toContain("Failed Calls: 1");
+    expect(brief).toContain("Blocked Calls by Security Policy: 1");
+    expect(brief).toContain("- run_ssh_command: 2");
+    expect(brief).toContain("- extract_dataset_by_sql: 1");
+    expect(brief).toContain("run_ssh_command [Code: POLICY_DENIED]: Headless execution denied by policy");
+    expect(brief).toContain("extract_dataset_by_sql: Connection timeout");
+    expect(brief).toContain("Blocked Calls by Security Policy (Notice: These calls were blocked by security policy, permissions, or headless approval barriers");
+    expect(brief).toContain("tool-correctness");
+  });
 });
 
 describe("buildSubmitEvaluationScoresTool", () => {

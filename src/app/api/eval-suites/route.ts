@@ -3,6 +3,11 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getConfigNumber } from "@/lib/config";
+import {
+  CONFIG_KEY_TARGET_TIMEOUT,
+  DEFAULT_EVAL_TARGET_TIMEOUT_S,
+} from "@/lib/evaluation/config";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
@@ -38,6 +43,7 @@ const createSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
     threshold: z.number().int().min(1).max(5).optional(),
+    targetTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
@@ -65,9 +71,19 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
+  const defaultTargetTimeout = getConfigNumber(
+    CONFIG_KEY_TARGET_TIMEOUT,
+    DEFAULT_EVAL_TARGET_TIMEOUT_S,
+  );
+  const resolvedTargetTimeoutSec =
+    typeof body.targetTimeoutSec === "number" && body.targetTimeoutSec > 0
+      ? body.targetTimeoutSec
+      : defaultTargetTimeout;
+
   try {
     const row = await storage.createSuite({
       ...body,
+      targetTimeoutSec: resolvedTargetTimeoutSec,
       createdBy: session.user.id,
     });
     return NextResponse.json({ ...row, caseCount: 0 }, { status: 201 });

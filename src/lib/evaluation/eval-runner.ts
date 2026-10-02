@@ -43,12 +43,14 @@ import {
 } from "./deterministic-checks";
 import { buildEvaluationBrief } from "./prompt-builder";
 import type { SubmitEvaluationScoresSuccess } from "./runtime-tools";
+import type { ToolCallSummary, ToolCallAbnormalDetail } from "./types";
+import { buildToolCallAggregates, type ToolEventRow } from "@/lib/runner/tool-call-aggregator";
+import { detectToolResultStatus, extractErrorMessage } from "@/lib/copilot/detect-tool-result-status";
 import * as storage from "./storage";
 import { getConfigNumber } from "@/lib/config";
 import {
   DEFAULT_EVAL_TARGET_TIMEOUT_S,
   DEFAULT_EVAL_EVALUATOR_TIMEOUT_S,
-  CONFIG_KEY_TARGET_TIMEOUT,
   CONFIG_KEY_EVALUATOR_TIMEOUT,
 } from "./config";
 
@@ -73,6 +75,8 @@ export interface RunEvalCaseInput {
   dimensionIds?: string[];
   /** Suite pass threshold (1-5, default 3). */
   threshold?: number;
+  /** Per-turn execution timeout for the target agent in seconds. Overrides global config. */
+  targetTimeoutSec?: number | null;
   /** Case conversation turns (user messages only). */
   turns: Array<{ userMessage: string }>;
   /** Case assertions (deterministic + llm_dim + llm_custom). */
@@ -91,6 +95,7 @@ export interface RunEvalCaseResult {
   durationMs?: number;
   outputTokens?: number;
   threadId?: string;
+  toolCallSummary?: ToolCallSummary;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -104,6 +109,105 @@ function extractToolCallNames(events: EntityRunEventEntity[]): string[] {
     if (payload?.toolName) names.add(payload.toolName);
   }
   return [...names];
+}
+
+/**
+ * Analyze all tool call chunks and results across conversation turns.
+ * Identifies total calls, failures, security policy blocks (e.g. G20 Headless Deny),
+ * invocation frequencies per tool, and abnormal execution details.
+ */
+export function analyzeToolCallEvents(events: EntityRunEventEntity[]): ToolCallSummary {
+  const toolRows: ToolEventRow[] = events
+    .filter((e) => e.type === "tool_call_chunk" || e.type === "tool_call_result")
+    .map((e) => ({
+      runId: e.runId,
+      seq: e.seq,
+      type: e.type,
+      ts: e.ts,
+      payload: e.payload,
+    }));
+
+  const aggregates = buildToolCallAggregates(toolRows);
+  const toolFrequency: Record<string, number> = {};
+  const abnormalDetails: ToolCallAbnormalDetail[] = [];
+  let totalCalls = 0;
+  let failureCount = 0;
+  let blockedCount = 0;
+
+  for (const agg of aggregates.values()) {
+    const toolName = agg.toolName || "unknown_tool";
+    totalCalls++;
+    toolFrequency[toolName] = (toolFrequency[toolName] || 0) + 1;
+
+    if (agg.resultContent) {
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(agg.resultContent);
+      } catch {
+        parsed = null;
+      }
+
+      // Check if blocked by security policy (G20 Headless Deny, etc.)
+      const isBlocked = Boolean(
+        parsed &&
+          typeof parsed === "object" &&
+          ((parsed as { code?: string }).code === "POLICY_DENIED" ||
+            (parsed as { code?: string }).code === "TOOL_HEADLESS_DENIED" ||
+            (parsed as { details?: { code?: string } }).details?.code === "POLICY_DENIED" ||
+            (parsed as { details?: { code?: string } }).details?.code === "TOOL_HEADLESS_DENIED" ||
+            (parsed as { error?: string }).error === "POLICY_DENIED" ||
+            (parsed as { error?: string }).error === "TOOL_HEADLESS_DENIED"),
+      );
+
+      if (isBlocked) {
+        blockedCount++;
+        const reason =
+          parsed && typeof (parsed as { message?: string }).message === "string"
+            ? (parsed as { message: string }).message
+            : "Headless execution denied by policy";
+        const code =
+          parsed && typeof (parsed as { code?: string }).code === "string"
+            ? (parsed as { code: string }).code
+            : parsed && typeof (parsed as { details?: { code?: string } }).details?.code === "string"
+              ? (parsed as { details: { code: string } }).details.code
+              : parsed && typeof (parsed as { error?: string }).error === "string"
+                ? (parsed as { error: string }).error
+                : "POLICY_DENIED";
+        abnormalDetails.push({
+          toolName,
+          status: "blocked",
+          code,
+          reason,
+        });
+      } else {
+        const status = detectToolResultStatus(agg.resultContent);
+        if (status === "failure") {
+          failureCount++;
+          const reason = extractErrorMessage(agg.resultContent) || "Tool execution failed";
+          const code =
+            parsed && typeof (parsed as { code?: string }).code === "string"
+              ? (parsed as { code: string }).code
+              : parsed && typeof (parsed as { error?: string }).error === "string"
+                ? (parsed as { error: string }).error
+                : undefined;
+          abnormalDetails.push({
+            toolName,
+            status: "failed",
+            code,
+            reason,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    totalCalls,
+    failureCount,
+    blockedCount,
+    toolFrequency,
+    abnormalDetails,
+  };
 }
 
 /** Rough token estimate: ~4 chars per token for English text. */
@@ -238,11 +342,14 @@ export async function runEvalCase(
   const startMs = Date.now();
   const threshold = input.threshold ?? 3;
 
-  // Read configurable turn timeouts (default: 180s = 3m)
-  const targetTimeoutSec = await getConfigNumber(CONFIG_KEY_TARGET_TIMEOUT, DEFAULT_EVAL_TARGET_TIMEOUT_S);
-  const targetTimeoutMs = (targetTimeoutSec > 0 ? targetTimeoutSec : DEFAULT_EVAL_TARGET_TIMEOUT_S) * 1000;
+  // Target agent turn timeout is defined by the suite specification (defaulting to 300s code fallback)
+  const targetTimeoutSec =
+    typeof input.targetTimeoutSec === "number" && input.targetTimeoutSec > 0
+      ? input.targetTimeoutSec
+      : DEFAULT_EVAL_TARGET_TIMEOUT_S;
+  const targetTimeoutMs = targetTimeoutSec * 1000;
 
-  const evaluatorTimeoutSec = await getConfigNumber(CONFIG_KEY_EVALUATOR_TIMEOUT, DEFAULT_EVAL_EVALUATOR_TIMEOUT_S);
+  const evaluatorTimeoutSec = getConfigNumber(CONFIG_KEY_EVALUATOR_TIMEOUT, DEFAULT_EVAL_EVALUATOR_TIMEOUT_S);
   const evaluatorTimeoutMs = (evaluatorTimeoutSec > 0 ? evaluatorTimeoutSec : DEFAULT_EVAL_EVALUATOR_TIMEOUT_S) * 1000;
 
   const targetEntityKind: "agent" | "team" | "workflow" | undefined =
@@ -271,7 +378,7 @@ export async function runEvalCase(
         evaluatorThreadId: null,
         durationMs: Date.now() - startMs,
         outputTokens: null,
-        toolCallCount: null,
+        toolCallSummary: null,
         error: { message: "No evaluator agent configured on suite", source: "config" },
       });
     }
@@ -293,6 +400,7 @@ export async function runEvalCase(
   let outputTokens = 0;
   const actualToolCalls: string[] = [];
   let finalTargetSummary = "";
+  const allTargetEvents: EntityRunEventEntity[] = [];
 
   for (const turn of input.turns) {
     let targetResult;
@@ -336,6 +444,7 @@ export async function runEvalCase(
     finalTargetSummary = targetResult.summary;
 
     const targetEvents = await readEvents(targetResult.runId);
+    allTargetEvents.push(...targetEvents);
     actualToolCalls.push(...extractToolCallNames(targetEvents));
     outputTokens += estimateOutputTokens(targetResult.summary);
 
@@ -344,7 +453,8 @@ export async function runEvalCase(
   }
 
   durationMs = Date.now() - startMs;
-  const toolCallCount = actualToolCalls.length;
+  const toolCallSummary = analyzeToolCallEvents(allTargetEvents);
+  const toolCallCount = toolCallSummary.totalCalls;
 
   // ── ② Deterministic checks ───────────────────────────────────
 
@@ -353,6 +463,7 @@ export async function runEvalCase(
     actualToolCalls,
     metrics: { durationMs, outputTokens, toolCallCount },
     variables: input.variables,
+    toolCallSummary,
   };
   const checks = runDeterministicChecks(assertions, checkInput);
 
@@ -378,7 +489,7 @@ export async function runEvalCase(
         evaluatorThreadId: null,
         durationMs,
         outputTokens,
-        toolCallCount,
+        toolCallSummary,
       });
     }
 
@@ -389,6 +500,7 @@ export async function runEvalCase(
       durationMs,
       outputTokens,
       threadId: currentThreadId,
+      toolCallSummary,
     };
   }
 
@@ -412,7 +524,7 @@ export async function runEvalCase(
         evaluatorThreadId: null,
         durationMs,
         outputTokens,
-        toolCallCount,
+        toolCallSummary,
       });
     }
 
@@ -423,6 +535,7 @@ export async function runEvalCase(
       durationMs,
       outputTokens,
       threadId: currentThreadId,
+      toolCallSummary,
     };
   }
 
@@ -445,7 +558,7 @@ export async function runEvalCase(
         evaluatorThreadId: null,
         durationMs,
         outputTokens,
-        toolCallCount,
+        toolCallSummary,
       });
     }
 
@@ -456,6 +569,7 @@ export async function runEvalCase(
       durationMs,
       outputTokens,
       threadId: currentThreadId,
+      toolCallSummary,
     };
   }
 
@@ -467,6 +581,7 @@ export async function runEvalCase(
     assertions,
     checkResults: checks.results,
     conversationText,
+    toolCallSummary,
   });
 
   // ── ④ Dispatch evaluator agent (with retry) ──────────────────
@@ -542,7 +657,7 @@ export async function runEvalCase(
       evaluatorThreadId: evaluatorResult?.runId ?? null,
       durationMs,
       outputTokens,
-      toolCallCount,
+      toolCallSummary,
     });
   }
 
@@ -553,6 +668,7 @@ export async function runEvalCase(
     durationMs,
     outputTokens,
     threadId: currentThreadId,
+    toolCallSummary,
     error: !scores ? (lastError || "Evaluator did not call submit_evaluation_scores") : undefined,
   };
 }
@@ -569,7 +685,7 @@ async function writeErrorResult(
     assertionResults?: AssertionResult[];
     durationMs?: number;
     outputTokens?: number;
-    toolCallCount?: number;
+    toolCallSummary?: ToolCallSummary;
   },
 ): Promise<void> {
   if (!input.runId) return;
@@ -594,7 +710,7 @@ async function writeErrorResult(
       assertionResults: errorAssertionResults,
       durationMs: deterministicDetails?.durationMs ?? (Date.now() - startMs),
       outputTokens: deterministicDetails?.outputTokens ?? null,
-      toolCallCount: deterministicDetails?.toolCallCount ?? null,
+      toolCallSummary: deterministicDetails?.toolCallSummary ?? null,
     });
   } catch (err) {
     log.error(

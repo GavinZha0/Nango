@@ -176,10 +176,12 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
       const expCalls = detRes.expectedCalls ?? (tc.expectedCalls !== undefined ? tc.expectedCalls : 1);
       detRes.toolName = detRes.toolName ?? tc.toolName;
       detRes.expectedCalls = expCalls;
+      detRes.operator = detRes.operator ?? tc.operator;
+      detRes.target = detRes.target ?? tc.target ?? "calls";
       if (detRes.expected === undefined) {
         detRes.expected = tc.expectedArgs !== undefined
           ? tc.expectedArgs
-          : (expCalls > 1 ? `>= ${expCalls} calls to ${tc.toolName}` : `Call ${tc.toolName}`);
+          : `${detRes.target} ${tc.operator} ${expCalls}`;
       }
     } else if (spec.type === "metric") {
       const ma = spec as MetricAssertion;

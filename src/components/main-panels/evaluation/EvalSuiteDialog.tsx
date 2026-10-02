@@ -48,6 +48,7 @@ export interface EvalSuiteDialogProps {
     description?: string | null;
     evaluatorAgentId?: string | null;
     threshold: number;
+    targetTimeoutSec?: number | null;
     variables?: Record<string, unknown>;
   }) => void;
 }
@@ -88,6 +89,9 @@ export function EvalSuiteDialog({
     suite?.evaluatorAgentId ?? "",
   );
   const [threshold, setThreshold] = useState<number>(suite?.threshold ?? 3);
+  const [targetTimeoutSec, setTargetTimeoutSec] = useState<number | string>(
+    suite?.targetTimeoutSec ?? 300,
+  );
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const variablesEditorRef = useRef<SuiteVariablesEditorRef>(null);
@@ -107,6 +111,7 @@ export function EvalSuiteDialog({
       setSelectedAgentId(suite?.agentId ?? defaultAgentId ?? (candidateAgents[0]?.id ?? ""));
       setSelectedEvalId(suite?.evaluatorAgentId ?? (isEdit ? "" : (evaluators[0]?.id ?? "")));
       setThreshold(suite?.threshold ?? 3);
+      setTargetTimeoutSec(suite?.targetTimeoutSec ?? 300);
       setError(null);
     }
   }
@@ -118,12 +123,20 @@ export function EvalSuiteDialog({
       return;
     }
 
+    const parsedTimeout =
+      typeof targetTimeoutSec === "string"
+        ? parseInt(targetTimeoutSec, 10)
+        : targetTimeoutSec;
+    const resolvedTimeout =
+      Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined;
+
     if (isEdit) {
       onUpdated?.({
         name: trimmed,
         description: description.trim() || null,
         evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
         threshold,
+        targetTimeoutSec: resolvedTimeout ?? null,
         variables,
       });
       onOpenChange(false);
@@ -146,6 +159,7 @@ export function EvalSuiteDialog({
         description: description.trim() || null,
         evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
         threshold,
+        targetTimeoutSec: resolvedTimeout,
         variables,
       });
 
@@ -313,7 +327,26 @@ export function EvalSuiteDialog({
                   disabled={submitting}
                 />
                 <p className="text-[10px] text-muted-foreground leading-tight">
-                  Minimum score required across all LLM dimensions and custom checks for a case to pass (default 3).
+                  Minimum score required across all LLM dimensions and custom checks for a case to pass.
+                </p>
+              </div>
+
+              {/* Target Agent Timeout */}
+              <div className="space-y-1.5">
+                <Label htmlFor="eval-target-timeout">Target Agent Timeout (Seconds)</Label>
+                <Input
+                  id="eval-target-timeout"
+                  data-testid="eval-suite-target-timeout-input"
+                  type="number"
+                  min={1}
+                  max={3600}
+                  value={targetTimeoutSec}
+                  onChange={(e) => setTargetTimeoutSec(e.target.value)}
+                  placeholder="300"
+                  disabled={submitting}
+                />
+                <p className="text-[10px] text-muted-foreground leading-tight">
+                  Per-turn execution timeout for the target agent (in seconds). Overrides the global eval.step_timeout.target.
                 </p>
               </div>
             </TabsContent>
