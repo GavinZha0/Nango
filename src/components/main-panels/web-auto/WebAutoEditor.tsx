@@ -826,6 +826,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         onOpenChange={(open) => { setCaseDialogOpen(open); if(!open) setCaseToEdit(null); }}
         suiteId={suiteId}
         caseToEdit={caseToEdit}
+        cases={cases ?? []}
       />
       <AlertDialog
         open={caseToDelete !== null}

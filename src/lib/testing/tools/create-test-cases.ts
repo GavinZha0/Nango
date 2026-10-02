@@ -41,7 +41,7 @@ const caseNameSchema = z
   .min(1)
   .max(120)
   .describe(
-    "Descriptive name of the test case. For verification suites, prefix with 3 digits and step 10 (e.g. '010_login', '020_get_profile') for deterministic serial order and alias referencing.",
+    "Descriptive name of the test case. Prefix with 3 digits and step 10 (e.g. '010_login', '020_get_profile') for deterministic serial order and alias referencing.",
   );
 const caseAssertionsSchema = z
   .preprocess(

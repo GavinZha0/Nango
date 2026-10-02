@@ -123,11 +123,12 @@ Dedicated guidance for the \`verification\` category — deterministic interface
 Dedicated guidance for the \`evaluation\` category — stochastic LLM-as-Judge quality/safety scoring of a target AI agent:
 
 1. **Understand the target agent first**: ALWAYS call \`get_agent_spec\` with the suite's \`agentId\`. Read its \`systemPrompt\`, \`description\`, bound \`tools\`, and \`skills\` to understand its real purpose and capabilities.
-2. **Design \`turns\` against that purpose**: Author multi-turn user prompts that exercise what the agent is actually built to do — happy paths, edge cases, refusals of out-of-scope requests, and safety boundaries.
-3. **Assert with the mixed surface**: Use \`llm_custom\` for semantic criteria (with expectations/unexpectations/references), \`llm_dim\` for standard evaluation dimensions, \`tool_call\` to verify intended tool invocations, and \`metric\` for quantitative walls (e.g. \`duration_s < 10\`).
-4. **Bind an evaluator**: Judge-dependent assertions require an \`evaluatorAgentId\` (see §1 shared contract). Warn the user if a suite lacks one.
-5. **Mind the cost/time**: A single evaluation case is synchronous and expensive (it dispatches the target agent and a separate evaluator). For multiple cases, prefer a full \`run_test_suite\` over repeated \`run_test_case\` calls.
-6. **Read scores correctly**: Evaluator scores are graded in four default bands (≥80 Excellent, ≥60 Pass, ≥40 Poor, <40 Fail); thresholds are configurable via \`eval.threshold.*\`. Report band + score, do not reduce to a bare number.
+2. **Deterministic serial ordering via 3-digit prefix**: Suite runs execute cases in lexicographical order. When creating evaluation cases, ALWAYS prefix names with a 3-digit sequential number with a step of 10 (e.g. \`010_greeting\`, \`020_order_inquiry\`, \`030_refusal\`). Inspect existing cases in the suite to determine the highest existing number (e.g. if \`020_...\` exists, start next cases at \`030_\`).
+3. **Design \`turns\` against that purpose**: Author multi-turn user prompts that exercise what the agent is actually built to do — happy paths, edge cases, refusals of out-of-scope requests, and safety boundaries.
+4. **Assert with the mixed surface**: Use \`llm_custom\` for semantic criteria (with expectations/unexpectations/references), \`llm_dim\` for standard evaluation dimensions, \`tool_call\` to verify intended tool invocations, and \`metric\` for quantitative walls (e.g. \`duration_s < 10\`).
+5. **Bind an evaluator**: Judge-dependent assertions require an \`evaluatorAgentId\` (see §1 shared contract). Warn the user if a suite lacks one.
+6. **Mind the cost/time**: A single evaluation case is synchronous and expensive (it dispatches the target agent and a separate evaluator). For multiple cases, prefer a full \`run_test_suite\` over repeated \`run_test_case\` calls.
+7. **Read scores correctly**: Evaluator scores are graded in four default bands (≥80 Excellent, ≥60 Pass, ≥40 Poor, <40 Fail); thresholds are configurable via \`eval.threshold.*\`. Report band + score, do not reduce to a bare number.
 
 ### 8. Web Auto Workflow (Playwright Browser Automation)
 
@@ -135,7 +136,8 @@ Dedicated guidance for the \`web-auto\` category — the highest-authoring-cost 
 
 1. **Establish the target site**: The base URL / target site comes from suite-level variables (e.g. \`variables.baseUrl\`) or from the user. If neither is present, ask the user rather than guessing.
 2. **Explore before scripting (when possible)**: If this agent has Playwright MCP browsing tools bound (e.g. \`browser_navigate\`, \`browser_snapshot\`, \`browser_click\`), use them first to open the target page and read the live DOM/accessibility tree before writing a script. This grounds the script in the real page structure.
-3. **Write an executable script — exact form**: The \`script\` field is executed via the Playwright MCP tool \`browser_run_code_unsafe\`. The script MUST be an **async function body** of the form \`async (page) => { ... }\` — the \`page\` argument is a Playwright Page handle provided by the server. Do NOT write bare statements like \`await page.click(...)\` without wrapping them in the function. Example:
+3. **Deterministic serial ordering via 3-digit prefix**: Suite runs execute cases in lexicographical order. When creating web-auto cases, ALWAYS prefix names with a 3-digit sequential number with a step of 10 (e.g. \`010_navigate_home\`, \`020_login\`, \`030_checkout\`). Inspect existing cases in the suite to determine the highest existing number (e.g. if \`020_...\` exists, start next cases at \`030_\`).
+4. **Write an executable script — exact form**: The \`script\` field is executed via the Playwright MCP tool \`browser_run_code_unsafe\`. The script MUST be an **async function body** of the form \`async (page) => { ... }\` — the \`page\` argument is a Playwright Page handle provided by the server. Do NOT write bare statements like \`await page.click(...)\` without wrapping them in the function. Example:
    \`\`\`javascript
    async (page) => {
      await page.goto('https://example.com');
@@ -143,23 +145,23 @@ Dedicated guidance for the \`web-auto\` category — the highest-authoring-cost 
      return { title, loaded: true };
    }
    \`\`\`
-4. **Return structured data — not raw DOM**: The script MUST end by returning a **JSON-serializable plain object** (do NOT just \`console.log\`). Assertions consume the returned value. Never return DOM elements, functions, circular references, or Playwright handles — these cannot be serialized and will break the output pipeline. Return plain values only: strings, numbers, booleans, arrays, plain objects.
-5. **Understand the output pipeline**: \`browser_run_code_unsafe\` returns markdown with sections. The runner extracts the \`### Result\` section as the \`result\` consumed by assertions, and \`### Page\` as the \`page.{url,title,console}\` metadata. Deterministic assertions run against the unwrapped \`result\`. \`js_expression\` sandbox bindings are \`result\` / \`root\` / \`input\` / \`variables\`. The Playwright \`page\` handle is NOT injected into the assertion sandbox — only plain JSON data is available.
-6. **Mind the shared context**: The \`page\` handle is **shared** across all \`browser_run_code_unsafe\` calls within the same MCP session. Cookies, localStorage, and navigation state persist between script calls. If your test requires a clean state, explicitly reset it inside the script (e.g. \`await page.context().clearCookies()\`, \`await page.goto('about:blank')\` before starting). Do NOT assume a fresh browser for each case.
-7. **\`steps\` is documentation, not execution**: The \`steps\` field is a non-executable natural-language description for humans. Only \`script\` drives execution.
-8. **Keep environments consistent**: The MCP server the agent uses to EXPLORE and the \`mcpServerId\` the suite uses to EXECUTE must be the same Playwright server; otherwise explored DOM may not match the execution environment.
-9. **Assert visually and structurally**: Use \`llm_custom\` with screenshots/reference images for visual or layout verification, alongside deterministic \`js_expression\`/\`jsonpath\` checks on the returned structure, and \`metric\` for execution duration SLA limits (e.g. \`duration_s < 10\`). Note that the \`page\` metadata available to assertions is only \`{url,title,console}\` — not a live DOM snapshot. For DOM-level checks, extract the needed values in the script and return them as part of the structured object.
-10. **Error semantics — script vs infrastructure**: A script syntax error, selector timeout, or runtime exception surfaces as \`failed\` (the tool returns \`isError: true\` with the error message). A missing \`browser_run_code_unsafe\` tool, MCP transport failure, or server timeout surfaces as \`errored\` (configuration/infrastructure). Do NOT conflate the two.
-11. **Batch creation example (\`create_test_cases\`)**: When creating web-auto cases with \`create_test_cases\`, pass a native array in \`cases\`:
+5. **Return structured data — not raw DOM**: The script MUST end by returning a **JSON-serializable plain object** (do NOT just \`console.log\`). Assertions consume the returned value. Never return DOM elements, functions, circular references, or Playwright handles — these cannot be serialized and will break the output pipeline. Return plain values only: strings, numbers, booleans, arrays, plain objects.
+6. **Understand the output pipeline**: \`browser_run_code_unsafe\` returns markdown with sections. The runner extracts the \`### Result\` section as the \`result\` consumed by assertions, and \`### Page\` as the \`page.{url,title,console}\` metadata. Deterministic assertions run against the unwrapped \`result\`. \`js_expression\` sandbox bindings are \`result\` / \`root\` / \`input\` / \`variables\`. The Playwright \`page\` handle is NOT injected into the assertion sandbox — only plain JSON data is available.
+7. **Mind the shared context**: The \`page\` handle is **shared** across all \`browser_run_code_unsafe\` calls within the same MCP session. Cookies, localStorage, and navigation state persist between script calls. If your test requires a clean state, explicitly reset it inside the script (e.g. \`await page.context().clearCookies()\`, \`await page.goto('about:blank')\` before starting). Do NOT assume a fresh browser for each case.
+8. **\`steps\` is documentation, not execution**: The \`steps\` field is a non-executable natural-language description for humans. Only \`script\` drives execution.
+9. **Keep environments consistent**: The MCP server the agent uses to EXPLORE and the \`mcpServerId\` the suite uses to EXECUTE must be the same Playwright server; otherwise explored DOM may not match the execution environment.
+10. **Assert visually and structurally**: Use \`llm_custom\` with screenshots/reference images for visual or layout verification, alongside deterministic \`js_expression\`/\`jsonpath\` checks on the returned structure, and \`metric\` for execution duration SLA limits (e.g. \`duration_s < 10\`). Note that the \`page\` metadata available to assertions is only \`{url,title,console}\` — not a live DOM snapshot. For DOM-level checks, extract the needed values in the script and return them as part of the structured object.
+11. **Error semantics — script vs infrastructure**: A script syntax error, selector timeout, or runtime exception surfaces as \`failed\` (the tool returns \`isError: true\` with the error message). A missing \`browser_run_code_unsafe\` tool, MCP transport failure, or server timeout surfaces as \`errored\` (configuration/infrastructure). Do NOT conflate the two.
+12. **Batch creation example (\`create_test_cases\`)**: When creating web-auto cases with \`create_test_cases\`, pass a native array in \`cases\`:
     \`\`\`json
     {
       "category": "web-auto",
       "suiteId": "855eec71-a8a3-400b-bb9a-ba1f03955036",
       "cases": [
         {
-          "name": "Verify homepage headlines",
+          "name": "010_verify_homepage_headlines",
           "steps": "1. Navigate to target URL. 2. Extract news headlines. 3. Return structured count.",
-          "script": "async (page) => {\n  await page.goto('https://example.com');\n  return { success: true, count: 3 };\n}",
+          "script": "async (page) => {\\n  await page.goto('https://example.com');\\n  return { success: true, count: 3 };\\n}",
           "assertions": [
             { "type": "js_expression", "expression": "result.success === true && result.count === 3" }
           ]

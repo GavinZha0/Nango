@@ -476,6 +476,7 @@ export function EvaluationSuiteEditor({
           onOpenChange={setIsCreatingCase}
           agentId={suiteData?.agentId}
           defaultSuiteId={suiteId}
+          cases={cases}
           onSave={handleCaseCreate}
         />
       )}

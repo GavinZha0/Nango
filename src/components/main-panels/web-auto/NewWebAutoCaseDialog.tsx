@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { mutate } from "swr";
+import useSWR, { mutate } from "swr";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,13 +15,21 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useWebAutoStore } from "@/store/web-auto-store";
+import { useWebAutoStore, type WebAutoCaseRow } from "@/store/web-auto-store";
+import { computeNextCasePrefix } from "@/lib/testing/case-prefix";
+
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch cases");
+  return res.json();
+};
 
 export interface NewWebAutoCaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   suiteId: string;
   caseToEdit?: { id: number; name: string } | null;
+  cases?: Array<{ name: string }>;
 }
 
 export function NewWebAutoCaseDialog({
@@ -29,25 +37,52 @@ export function NewWebAutoCaseDialog({
   onOpenChange,
   suiteId,
   caseToEdit,
+  cases,
 }: NewWebAutoCaseDialogProps): ReactNode {
   const bumpCaseCount = useWebAutoStore((s) => s.bumpCaseCount);
   const setSelectedCaseId = useWebAutoStore((s) => s.setSelectedCaseId);
-  
-  const [name, setName] = useState("");
+
+  // Fallback fetch if cases prop is not provided by parent
+  const { data: fetchedCases } = useSWR<WebAutoCaseRow[]>(
+    open && !cases ? `/api/web-auto-suites/${suiteId}/cases` : null,
+    fetcher
+  );
+  const effectiveCases = cases ?? fetchedCases ?? [];
+
+  const [name, setName] = useState<string>(() => {
+    if (caseToEdit) return caseToEdit.name;
+    return computeNextCasePrefix(effectiveCases);
+  });
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Initialize form state when editing
-  const [lastOpen, setLastOpen] = useState<boolean>(open);
-  if (open !== lastOpen) {
-    setLastOpen(open);
-    if (open) {
-      if (caseToEdit) {
-        setName(caseToEdit.name);
-      } else {
-        setName("");
+  // Track open and fallback transitions during render
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevCaseToEdit, setPrevCaseToEdit] = useState(caseToEdit);
+  const [prevFetchedCases, setPrevFetchedCases] = useState(fetchedCases);
+
+  if (open && !prevOpen) {
+    setPrevOpen(true);
+    setPrevCaseToEdit(caseToEdit);
+    setSubmitError(null);
+    if (caseToEdit) {
+      setName(caseToEdit.name);
+    } else {
+      setName(computeNextCasePrefix(effectiveCases));
+    }
+  } else if (!open && prevOpen) {
+    setPrevOpen(false);
+  } else if (caseToEdit !== prevCaseToEdit) {
+    setPrevCaseToEdit(caseToEdit);
+    if (caseToEdit) {
+      setName(caseToEdit.name);
+    }
+  } else if (!cases && fetchedCases !== prevFetchedCases) {
+    setPrevFetchedCases(fetchedCases);
+    if (!caseToEdit && fetchedCases && fetchedCases.length > 0) {
+      if (/^\d+_?$/.test(name.trim()) || name.trim() === "") {
+        setName(computeNextCasePrefix(fetchedCases));
       }
-      setSubmitError(null);
     }
   }
 
@@ -93,13 +128,12 @@ export function NewWebAutoCaseDialog({
       await mutate(`/api/web-auto-suites/${suiteId}/cases`);
       bumpCaseCount(suiteId, 1);
       setSelectedCaseId(createdCase.id);
-      
+
       toast.success("Created case", {
         description: `Case "${createdCase.name}"`,
       });
 
       onOpenChange(false);
-      setName("");
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -113,7 +147,6 @@ export function NewWebAutoCaseDialog({
       onOpenChange={(isOpen) => {
         if (!isOpen && !submitting) {
           onOpenChange(false);
-          setName("");
           setSubmitError(null);
         } else if (isOpen) {
           onOpenChange(true);
@@ -125,29 +158,35 @@ export function NewWebAutoCaseDialog({
           <DialogTitle>{caseToEdit ? "Rename Case" : "New Case"}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-            <Label htmlFor="caseName" className="text-sm font-semibold">
+        <div className="space-y-4 py-3">
+          <div className="grid grid-cols-[100px_1fr] items-start gap-2">
+            <Label htmlFor="caseName" className="text-xs pt-2.5">
               Case Name <span className="text-destructive">*</span>
             </Label>
-            <Input
-              id="caseName"
-              data-testid="web-auto-case-name-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-              disabled={submitting}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && canSubmit) {
-                  e.preventDefault();
-                  void handleSubmit();
-                }
-              }}
-            />
+            <div className="space-y-1 flex-1">
+              <Input
+                id="caseName"
+                data-testid="web-auto-case-name-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="text-xs"
+                autoFocus
+                disabled={submitting}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canSubmit) {
+                    e.preventDefault();
+                    void handleSubmit();
+                  }
+                }}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Use 3-digit prefix (e.g. <code>010_login</code>) for ordered serial execution.
+              </p>
+            </div>
           </div>
 
           {submitError && (
-            <div className="text-sm text-destructive font-medium">{submitError}</div>
+            <div className="text-xs text-destructive font-medium">{submitError}</div>
           )}
         </div>
 
@@ -156,6 +195,7 @@ export function NewWebAutoCaseDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={submitting}
+            className="text-xs"
             data-testid="cancel-web-auto-case-button"
           >
             Cancel
@@ -163,9 +203,10 @@ export function NewWebAutoCaseDialog({
           <Button
             onClick={() => void handleSubmit()}
             disabled={!canSubmit}
+            className="text-xs"
             data-testid="save-web-auto-case-dialog-button"
           >
-            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {submitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             {caseToEdit ? "Save" : "Create"}
           </Button>
         </DialogFooter>

@@ -5,10 +5,10 @@
  *
  * Fields:
  * 1. Suite Name (parent suite selector, displays sibling suites under same agent)
- * 2. Case Name (input)
+ * 2. Case Name (input with auto-computed 3-digit serial prefix)
  */
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { EvalSuiteRow, EvalCaseRow } from "@/store/evaluation";
+import { useEvalCasesStore, evalCaseActions } from "@/store/evaluation-cases";
+import { computeNextCasePrefix } from "@/lib/testing/case-prefix";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -42,6 +44,7 @@ interface EvalCaseEditDialogProps {
   defaultSuiteId?: string;
   agentId?: string;
   suites?: EvalSuiteRow[];
+  cases?: Array<{ name: string }>;
   onSave: (updated: { name: string; suiteId: string }) => void;
 }
 
@@ -52,6 +55,7 @@ export function EvalCaseEditDialog({
   defaultSuiteId,
   agentId,
   suites,
+  cases,
   onSave,
 }: EvalCaseEditDialogProps): ReactNode {
   const { data: fetchedSuites = [] } = useSWR<EvalSuiteRow[]>(
@@ -65,22 +69,65 @@ export function EvalCaseEditDialog({
     return [];
   }, [fetchedSuites, suites]);
 
-  const [name, setName] = useState(evalCase?.name ?? "");
-  const [selectedSuiteId, setSelectedSuiteId] = useState(
-    evalCase?.suiteId ?? defaultSuiteId ?? (suites?.[0]?.id ?? "")
-  );
+  const initialSuiteId =
+    evalCase?.suiteId ?? defaultSuiteId ?? (suites?.[0]?.id ?? "");
 
-  // Sync state when dialog opens
-  const [lastOpen, setLastOpen] = useState<boolean>(open);
-  if (open !== lastOpen) {
-    setLastOpen(open);
-    if (open) {
-      setName(evalCase?.name ?? "");
-      setSelectedSuiteId(
-        evalCase?.suiteId ?? defaultSuiteId ?? (availableSuites[0]?.id ?? suites?.[0]?.id ?? "")
-      );
+  const [selectedSuiteId, setSelectedSuiteId] = useState(initialSuiteId);
+
+  const [name, setName] = useState<string>(() => {
+    if (evalCase) return evalCase.name;
+    const existing =
+      cases ??
+      (initialSuiteId ? useEvalCasesStore.getState().bySuite[initialSuiteId] : undefined) ??
+      [];
+    return computeNextCasePrefix(existing);
+  });
+
+  // Track props transition for controlled open changes without unmounting
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevEvalCase, setPrevEvalCase] = useState(evalCase);
+
+  if (open && !prevOpen) {
+    setPrevOpen(true);
+    setPrevEvalCase(evalCase);
+    const targetId = evalCase?.suiteId ?? defaultSuiteId ?? (suites?.[0]?.id ?? "");
+    setSelectedSuiteId(targetId);
+    if (evalCase) {
+      setName(evalCase.name);
+    } else {
+      const existing =
+        (targetId === defaultSuiteId ? cases : undefined) ??
+        (targetId ? useEvalCasesStore.getState().bySuite[targetId] : undefined) ??
+        [];
+      setName(computeNextCasePrefix(existing));
+    }
+  } else if (!open && prevOpen) {
+    setPrevOpen(false);
+  } else if (evalCase !== prevEvalCase) {
+    setPrevEvalCase(evalCase);
+    if (evalCase) {
+      setSelectedSuiteId(evalCase.suiteId);
+      setName(evalCase.name);
     }
   }
+
+
+  // Asynchronously resolve prefix on cache miss for selected suite
+  useEffect(() => {
+    if (evalCase || !selectedSuiteId) return;
+    const existing =
+      (selectedSuiteId === defaultSuiteId ? cases : undefined) ??
+      useEvalCasesStore.getState().bySuite[selectedSuiteId];
+    if (existing === undefined) {
+      void evalCaseActions.refresh(selectedSuiteId).then(() => {
+        const fresh = useEvalCasesStore.getState().bySuite[selectedSuiteId] ?? [];
+        const freshPrefix = computeNextCasePrefix(fresh);
+        setName((prev) =>
+          /^\d+_?$/.test(prev.trim()) || prev.trim() === "" ? freshPrefix : prev
+        );
+      });
+    }
+  }, [evalCase, selectedSuiteId, defaultSuiteId, cases]);
 
   function handleSave(): void {
     const trimmed = name.trim();
@@ -106,7 +153,34 @@ export function EvalCaseEditDialog({
               Suite Name <span className="text-destructive">*</span>
             </Label>
             <div className="flex-1 text-xs">
-              <Select value={selectedSuiteId} onValueChange={(val) => setSelectedSuiteId(val ?? "")}>
+              <Select
+                value={selectedSuiteId}
+                onValueChange={(val) => {
+                  const nextSuiteId = val ?? "";
+                  setSelectedSuiteId(nextSuiteId);
+                  if (!evalCase) {
+                    const existing =
+                      (nextSuiteId === defaultSuiteId ? cases : undefined) ??
+                      (nextSuiteId ? useEvalCasesStore.getState().bySuite[nextSuiteId] : undefined);
+                    setName((prev) => {
+                      if (/^\d+_?$/.test(prev.trim()) || prev.trim() === "") {
+                        return computeNextCasePrefix(existing ?? []);
+                      }
+                      return prev;
+                    });
+
+                    if (nextSuiteId && existing === undefined) {
+                      void evalCaseActions.refresh(nextSuiteId).then(() => {
+                        const fresh = useEvalCasesStore.getState().bySuite[nextSuiteId] ?? [];
+                        const freshPrefix = computeNextCasePrefix(fresh);
+                        setName((prev) =>
+                          /^\d+_?$/.test(prev.trim()) || prev.trim() === "" ? freshPrefix : prev
+                        );
+                      });
+                    }
+                  }
+                }}
+              >
                 <SelectTrigger id="case-suite" data-testid="eval-case-suite-select" className="w-full text-xs">
                   <SelectValue placeholder="Select a suite...">
                     {selectedSuiteId ? (
@@ -126,18 +200,23 @@ export function EvalCaseEditDialog({
           </div>
 
           {/* 2. Case Name */}
-          <div className="grid grid-cols-[100px_1fr] items-center gap-2">
-            <Label htmlFor="case-name" className="text-xs">
+          <div className="grid grid-cols-[100px_1fr] items-start gap-2">
+            <Label htmlFor="case-name" className="text-xs pt-2.5">
               Case Name <span className="text-destructive">*</span>
             </Label>
-            <Input
-              id="case-name"
-              data-testid="eval-case-name-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="flex-1 text-xs"
-              autoFocus
-            />
+            <div className="space-y-1 flex-1">
+              <Input
+                id="case-name"
+                data-testid="eval-case-name-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="text-xs"
+                autoFocus
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Use 3-digit prefix (e.g. <code>010_greeting</code>) for ordered serial execution.
+              </p>
+            </div>
           </div>
         </div>
 
