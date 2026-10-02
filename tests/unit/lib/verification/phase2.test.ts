@@ -163,6 +163,7 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
   it("restricts CATEGORY_METRIC_MAPPING.verification strictly to duration_s", async () => {
     const { CATEGORY_METRIC_MAPPING } = await import("@/lib/assertions/types");
     expect(CATEGORY_METRIC_MAPPING.verification).toEqual(["duration_s"]);
+    expect(CATEGORY_METRIC_MAPPING["web-auto"]).toEqual(["duration_s"]);
     expect(CATEGORY_METRIC_MAPPING.evaluation).toContain("output_tokens");
     expect(CATEGORY_METRIC_MAPPING.evaluation).toContain("total_tool_calls");
   });

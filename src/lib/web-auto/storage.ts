@@ -57,7 +57,7 @@ export async function createWebAutoSuite(
       parentId: input.parentId ?? null,
       variables: input.variables ?? {},
       visibility: input.visibility ?? "private",
-      timeoutSec: input.timeoutSec ?? 300,
+      timeoutSec: input.timeoutSec ?? 60,
       evaluatorAgentId: input.evaluatorAgentId ?? null,
       mcpServerId: input.mcpServerId ?? null,
       createdBy: input.createdBy,

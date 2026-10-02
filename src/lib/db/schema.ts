@@ -2206,7 +2206,7 @@ export const WebAutoSuiteTable = pgTable("web_auto_suite", {
   variables: jsonb("variables").notNull().default({}),
   enabled: boolean("enabled").notNull().default(true),
   visibility: text("visibility").notNull().default("private"),
-  timeoutSec: integer("timeout_sec").notNull().default(300),
+  timeoutSec: integer("timeout_sec").notNull().default(60),
   evaluatorAgentId: uuid("evaluator_agent_id").references(
     () => BuiltinAgentTable.id,
     { onDelete: "set null" }

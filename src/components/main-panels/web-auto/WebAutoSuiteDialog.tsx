@@ -89,6 +89,9 @@ export function WebAutoSuiteDialog({
   const [selectedEvalId, setSelectedEvalId] = useState<string>(
     suite?.evaluatorAgentId ?? "",
   );
+  const [timeoutSec, setTimeoutSec] = useState<number | string>(
+    suite?.timeoutSec ?? 60,
+  );
   const [userSelectedMcpId, setUserSelectedMcpId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const variablesEditorRef = useRef<SuiteVariablesEditorRef>(null);
@@ -109,6 +112,7 @@ export function WebAutoSuiteDialog({
       setName(suite?.name ?? "");
       setDescription(suite?.description ?? "");
       setVariables((suite?.variables as SuiteVariablesMap) ?? {});
+      setTimeoutSec(suite?.timeoutSec ?? 60);
       setNewTargetName("");
       setSelectedEvalId(suite?.evaluatorAgentId ?? "");
       setUserSelectedMcpId(suite?.mcpServerId ?? null);
@@ -130,6 +134,11 @@ export function WebAutoSuiteDialog({
       return;
     }
 
+    const parsedTimeout = typeof timeoutSec === "string" ? parseInt(timeoutSec, 10) : timeoutSec;
+    const resolvedTimeout = Number.isFinite(parsedTimeout) && parsedTimeout >= 10
+      ? parsedTimeout
+      : undefined;
+
     if (isEdit && suite) {
       setIsSubmitting(true);
       try {
@@ -141,6 +150,7 @@ export function WebAutoSuiteDialog({
             description: description.trim() || null,
             evaluatorAgentId: !isTarget && selectedEvalId ? selectedEvalId : null,
             mcpServerId: !isTarget && effectiveMcpId ? effectiveMcpId : null,
+            ...(!isTarget && resolvedTimeout ? { timeoutSec: resolvedTimeout } : {}),
             ...(!isTarget ? { variables } : {}),
           }),
         });
@@ -187,6 +197,7 @@ export function WebAutoSuiteDialog({
           parentId: targetId,
           mcpServerId: effectiveMcpId ? effectiveMcpId : null,
           evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
+          ...(resolvedTimeout ? { timeoutSec: resolvedTimeout } : {}),
           variables,
         }),
       });
@@ -206,7 +217,13 @@ export function WebAutoSuiteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={isTarget ? "sm:max-w-md" : "sm:max-w-xl h-[600px] max-h-[85vh] flex flex-col"}>
+      <DialogContent
+        className={
+          isTarget
+            ? "sm:max-w-md"
+            : "sm:max-w-xl h-[680px] max-h-[90vh] flex flex-col"
+        }
+      >
         {isTarget ? (
           <>
             <DialogHeader>
@@ -418,6 +435,25 @@ export function WebAutoSuiteDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* Script Execution Timeout */}
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="web-auto-timeout">Execution Timeout (Seconds)</Label>
+                  <Input
+                    id="web-auto-timeout"
+                    data-testid="web-auto-suite-timeout-input"
+                    type="number"
+                    min={10}
+                    max={7200}
+                    value={timeoutSec}
+                    onChange={(e) => setTimeoutSec(e.target.value)}
+                    placeholder="60"
+                    disabled={isSubmitting}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Per-case Playwright script execution timeout (in seconds). Overrides the global MCP timeout.
+                  </p>
                 </div>
 
                 {/* Description */}

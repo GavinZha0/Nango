@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getConfigNumber } from "@/lib/config";
 import { visibilitySql } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { WebAutoSuiteTable } from "@/lib/db/schema";
@@ -100,6 +101,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   }
 
   try {
+    // Default to global MCP execution timeout (60s) if timeoutSec is not explicitly provided.
+    const defaultTimeout = getConfigNumber("mcp.execution_timeout", 60);
     const [row] = await db
       .insert(WebAutoSuiteTable)
       .values({
@@ -109,7 +112,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         variables: body.variables ?? {},
         visibility: body.visibility ?? "private",
         enabled: body.enabled ?? true,
-        timeoutSec: body.timeoutSec ?? 300,
+        timeoutSec: body.timeoutSec ?? defaultTimeout,
         evaluatorAgentId: body.evaluatorAgentId ?? null,
         mcpServerId: mcpServerId,
         createdBy: session.user.id,

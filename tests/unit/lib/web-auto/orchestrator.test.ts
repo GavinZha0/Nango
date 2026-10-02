@@ -109,7 +109,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { success: true } },
       error: null,
-      durationMs: 300,
+      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
     });
 
     const outcome = await runWebAutoCase({
@@ -133,7 +133,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: true } },
       error: null,
-      durationMs: 300,
+      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
     });
 
     const outcome = await runWebAutoCase({
@@ -172,7 +172,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: false } },
       error: null,
-      durationMs: 300,
+      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
     });
 
     const outcome = await runWebAutoCase({
@@ -209,7 +209,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: true } },
       error: null,
-      durationMs: 300,
+      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
     });
     mockRunWebAutoEvaluation.mockResolvedValueOnce({
       passed: true,
@@ -249,7 +249,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: true } },
       error: null,
-      durationMs: 300,
+      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
     });
     mockRunWebAutoEvaluation.mockResolvedValueOnce({
       passed: false,
@@ -278,6 +278,104 @@ describe("runWebAutoCase", () => {
     expect(llm?.ok).toBe(false);
     expect(llm?.score).toBe(2);
     expect(llm?.skipped).toBeUndefined();
+  });
+
+  it("passes suite.timeoutSec to runWebAutoMcp and evaluates duration_s metric assertion successfully", async () => {
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { loaded: true } },
+      error: null,
+      durationMs: 1500, // 1.5 seconds
+    });
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: { ...dummySuite, timeoutSec: 45 },
+      case: {
+        id: 1,
+        input: { script: "return { loaded: true };" },
+        assertions: [
+          { type: "metric", metric: "duration_s", operator: "<", threshold: 3.0 },
+        ],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+    });
+
+    expect(mockRunWebAutoMcp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutSec: 45,
+      }),
+    );
+    expect(outcome.status).toBe("passed");
+    expect(outcome.verdict.deterministic.passed).toBe(true);
+    const metricRes = outcome.assertionResults.find((r) => r.type === "metric");
+    expect(metricRes?.ok).toBe(true);
+    expect(metricRes?.metric).toBe("duration_s");
+    expect(metricRes?.actual).toBe(1.5);
+  });
+
+  it("fails duration_s metric assertion when execution duration exceeds threshold", async () => {
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { loaded: true } },
+      error: null,
+      durationMs: 4200, // 4.2 seconds
+    });
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: dummySuite,
+      case: {
+        id: 1,
+        input: { script: "return { loaded: true };" },
+        assertions: [
+          { type: "metric", metric: "duration_s", operator: "<", threshold: 2.0 },
+        ],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+    });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.verdict.deterministic.passed).toBe(false);
+    const metricRes = outcome.assertionResults.find((r) => r.type === "metric");
+    expect(metricRes?.ok).toBe(false);
+    expect(metricRes?.metric).toBe("duration_s");
+    expect(metricRes?.actual).toBe(4.2);
+  });
+
+  it("reclassifies timeout errored to failed when duration_s SLA threshold is lower than timeoutSec", async () => {
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "errored",
+      executionOutput: null,
+      error: {
+        source: "timeout",
+        message: "Tool execution timed out",
+      },
+      durationMs: 60000,
+    });
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: { ...dummySuite, timeoutSec: 60 },
+      case: {
+        id: 1,
+        input: { script: "return { loaded: true };" },
+        assertions: [
+          { type: "metric", metric: "duration_s", operator: "<", threshold: 10.0 },
+        ],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+    });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.verdict.deterministic.passed).toBe(false);
+    expect(outcome.verdict.overall.reason).toContain("exceeding SLA threshold of 10s");
+    const metricRes = outcome.assertionResults.find((r) => r.type === "metric");
+    expect(metricRes?.ok).toBe(false);
+    expect(metricRes?.actual).toBe(">= 60s (timed out)");
   });
 });
 

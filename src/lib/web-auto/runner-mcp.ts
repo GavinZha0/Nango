@@ -28,6 +28,8 @@ export interface RunWebAutoMcpInput {
   mcpServerId: string;
   /** Playwright script content to execute */
   scriptContent: string;
+  /** Execution timeout in seconds (inherits suite timeoutSec, defaults to 60) */
+  timeoutSec?: number;
 }
 
 /**
@@ -51,6 +53,9 @@ export async function runWebAutoMcp(
   durationMs: number;
 }> {
   const startedAt: number = Date.now();
+  const effectiveTimeoutSec = typeof input.timeoutSec === "number" && input.timeoutSec > 0
+    ? input.timeoutSec
+    : 60;
 
   // Build tool input for browser_run_code_unsafe
   const toolInput = {
@@ -86,7 +91,10 @@ export async function runWebAutoMcp(
     const toolName = "browser_run_code_unsafe";
     const tool = tools[toolName] as
       | {
-          execute?: (args: Record<string, unknown>) => Promise<unknown>;
+          execute?: (
+            args: Record<string, unknown>,
+            options?: { timeoutMs?: number },
+          ) => Promise<unknown>;
         }
       | undefined;
 
@@ -106,7 +114,9 @@ export async function runWebAutoMcp(
     // Execute the Playwright script
     let raw: unknown;
     try {
-      const executed = await tool.execute(toolInput);
+      const executed = await tool.execute(toolInput, {
+        timeoutMs: effectiveTimeoutSec * 1000,
+      });
       raw = normalizeMcpToolResult(executed, { parseForUi: true });
     } catch (err) {
       // wrapToolExecute should have caught this, but defend in depth.

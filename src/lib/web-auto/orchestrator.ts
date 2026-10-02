@@ -148,9 +148,11 @@ export async function runWebAutoCase(
 })()`;
 
   // Step 3: MCP execution (Playwright script)
+  const effectiveTimeoutSec = input.suite.timeoutSec ?? 60;
   const mcpResult = await runWebAutoMcp({
     mcpServerId: input.suite.mcpServerId,
     scriptContent: scriptWithVariables,
+    timeoutSec: effectiveTimeoutSec,
   });
 
   // ★ Earliest Sanitization ★
@@ -165,7 +167,48 @@ export async function runWebAutoCase(
     sensitiveValues,
   );
 
+  const assertions = (input.case.assertions ?? []) as readonly import("@/lib/assertions").AssertionSpec[];
+
   if (mcpResult.status === "errored") {
+    // If the tool timed out and the case specified a duration_s SLA threshold lower
+    // than the timeout cap, attribute the failure to the metric assertion instead of infra errored.
+    if (sanitizedMcpError?.source === "timeout") {
+      const durationAssertion = assertions.find(
+        (a) => a.type === "metric" && (a as { metric?: string }).metric === "duration_s",
+      ) as { type: "metric"; metric: string; operator: string; threshold: number } | undefined;
+
+      if (
+        durationAssertion
+        && durationAssertion.operator === "<"
+        && effectiveTimeoutSec > durationAssertion.threshold
+      ) {
+        const metricResult: import("@/lib/assertions").AssertionResult = {
+          index: assertions.indexOf(durationAssertion as never),
+          type: "metric",
+          ok: false,
+          expected: `${durationAssertion.operator} ${durationAssertion.threshold}s`,
+          actual: `>= ${effectiveTimeoutSec}s (timed out)`,
+          message: `Playwright script execution timed out at ${effectiveTimeoutSec}s, exceeding duration threshold of ${durationAssertion.threshold}s`,
+        };
+        return {
+          status: "failed",
+          executionOutput: sanitizedOutput,
+          outputTruncated: false,
+          assertionResults: [metricResult],
+          verdict: {
+            deterministic: { passed: false, results: [metricResult] },
+            overall: {
+              passed: false,
+              reason: `Execution timed out at ${effectiveTimeoutSec}s, exceeding SLA threshold of ${durationAssertion.threshold}s`,
+            },
+          },
+          error: sanitizedMcpError,
+          startedAt,
+          durationMs: mcpResult.durationMs,
+        };
+      }
+    }
+
     const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
       index: 0,
       type: "error",
@@ -213,9 +256,9 @@ export async function runWebAutoCase(
 
   // Step 4: Evaluate assertions using universal engine
   // Pass literalVariables ONLY so credentials never leak into assertion error diffs or LLM evaluators
-  const assertions = (input.case.assertions ?? []) as readonly import("@/lib/assertions").AssertionSpec[];
   const outcome = evaluateAssertions(sanitizedOutput, assertions, {
     variables: literalVariables,
+    metrics: { durationMs: mcpResult.durationMs },
   });
 
   const deterministicResult = {

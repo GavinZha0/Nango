@@ -183,6 +183,35 @@ describe("runWebAutoMcp", () => {
         console: undefined,
       },
     });
+    expect(mockTool.execute).toHaveBeenCalledWith(
+      { code: "return { ok: true };" },
+      { timeoutMs: 60000 },
+    );
     expect(mockRelease).toHaveBeenCalledWith("server-1", mockProvider);
+  });
+
+  it("passes configured timeoutSec as timeoutMs to tool.execute", async () => {
+    const mockTool = {
+      execute: vi.fn().mockResolvedValue({
+        content: [{ type: "text", text: "### Result\n```json\n{\"ok\": true}\n```" }],
+      }),
+    };
+    const mockProvider = {
+      tools: vi.fn().mockResolvedValue({
+        browser_run_code_unsafe: mockTool,
+      }),
+    };
+    mockBorrow.mockResolvedValueOnce(mockProvider);
+
+    await runWebAutoMcp({
+      mcpServerId: "server-1",
+      scriptContent: "return { ok: true };",
+      timeoutSec: 120,
+    });
+
+    expect(mockTool.execute).toHaveBeenCalledWith(
+      { code: "return { ok: true };" },
+      { timeoutMs: 120000 },
+    );
   });
 });

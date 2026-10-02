@@ -15,5 +15,5 @@ export default function WebAutoSuitePage(): ReactNode {
     );
   }
 
-  return <WebAutoEditor suiteId={id} />;
+  return <WebAutoEditor key={id} suiteId={id} />;
 }

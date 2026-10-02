@@ -269,7 +269,7 @@ export const CATEGORY_TYPE_MAPPING: Record<
 > = {
   verification: ["jsonpath", "json_schema", "js_expression", "metric"],
   evaluation: ["jsonpath", "js_expression", "tool_call", "metric", "llm_dim", "llm_custom"],
-  "web-auto": ["js_expression", "jsonpath", "llm_custom"],
+  "web-auto": ["js_expression", "jsonpath", "metric", "llm_custom"],
 };
 
 /**
@@ -289,5 +289,5 @@ export const CATEGORY_METRIC_MAPPING: Record<
     "tool_failures",
     "tool_blocked",
   ],
-  "web-auto": [],
+  "web-auto": ["duration_s"],
 };

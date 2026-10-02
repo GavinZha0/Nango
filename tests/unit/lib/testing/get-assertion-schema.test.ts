@@ -104,8 +104,8 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("web-auto");
-      expect(res.types).toEqual(["js_expression", "jsonpath", "llm_custom"]);
-      expect(res.schemas.length).toBe(3);
+      expect(res.types).toEqual(["js_expression", "jsonpath", "metric", "llm_custom"]);
+      expect(res.schemas.length).toBe(4);
     });
 
     it("returns filtered single schema when assertionType is specified", async () => {

@@ -20,6 +20,7 @@ import { canViewResource } from "@/lib/auth/permissions";
 import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
 import { isUniqueViolation } from "@/lib/http/validation";
 import { discoverPublicPlaywrightMcpServer } from "@/lib/web-auto/discovery.server";
+import { getConfigNumber } from "@/lib/config";
 
 const suiteNameSchema = z
   .string()
@@ -310,13 +311,14 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
         }
 
         try {
+          const defaultTimeout = getConfigNumber("mcp.execution_timeout", 60);
           const [inserted] = await db
             .insert(WebAutoSuiteTable)
             .values({
               name,
               description: description ?? null,
               mcpServerId: boundMcpServerId,
-              timeoutSec: 300,
+              timeoutSec: defaultTimeout,
               enabled: true,
               visibility: "private",
               createdBy: ctx.userId,
@@ -333,7 +335,7 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
             name: inserted.name,
             description: inserted.description ?? null,
             mcpServerId: inserted.mcpServerId ?? null,
-            timeoutSec: inserted.timeoutSec ?? 300,
+            timeoutSec: inserted.timeoutSec ?? defaultTimeout,
             caseCount: 0,
             enabled: Boolean(inserted.enabled),
             visibility: inserted.visibility as "private" | "public",

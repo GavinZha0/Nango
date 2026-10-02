@@ -132,6 +132,9 @@ function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMod
   }
 
   if (mode === "web-auto") {
+    const hasMetrics = assertions.some((a) => a.type === "metric");
+    if (hasMetrics) return "metric";
+
     const hasLlmCustoms = assertions.some((a) => a.type === "llm_custom");
     if (hasLlmCustoms) return "llm_custom";
   }
@@ -286,8 +289,9 @@ export function UniversalAssertionsEditor({
       list.push({ id: "llm_custom", label: "Custom", hasDot: hasLlmCustoms });
     }
 
-    // 4. Web Auto has Custom Semantic
+    // 4. Web Auto has Metrics and Custom Semantic
     if (mode === "web-auto") {
+      list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
       list.push({ id: "llm_custom", label: "Custom", hasDot: hasLlmCustoms });
     }
 
@@ -732,7 +736,7 @@ export function UniversalAssertionsEditor({
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground">
-                  {mode === "verification"
+                  {mode === "verification" || mode === "web-auto"
                     ? "• Tool execution performance: duration limit in seconds (duration_s)."
                     : "• Execution performance limits: duration, token consumption, and tool call count."}
                 </Label>

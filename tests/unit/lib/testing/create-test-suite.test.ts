@@ -254,7 +254,7 @@ describe("create_test_suite tool", () => {
           name: "E2E Checkout Flow",
           description: null,
           mcpServerId: "playwright-server-uuid",
-          timeoutSec: 300,
+          timeoutSec: 60,
           enabled: true,
           visibility: "private",
         },
@@ -268,6 +268,7 @@ describe("create_test_suite tool", () => {
       expect(result.category).toBe("web-auto");
       expect(result.suite.id).toBe("suite-web-uuid");
       expect(result.suite.mcpServerId).toBe("playwright-server-uuid");
+      expect(result.suite.timeoutSec).toBe(60);
       expect(result.suite.caseCount).toBe(0);
       expect(result.suite.enabled).toBe(true);
     });
@@ -282,7 +283,7 @@ describe("create_test_suite tool", () => {
           name: "E2E Checkout Flow",
           description: null,
           mcpServerId: null,
-          timeoutSec: 300,
+          timeoutSec: 60,
           enabled: true,
           visibility: "private",
         },
@@ -294,6 +295,7 @@ describe("create_test_suite tool", () => {
       })) as CreateTestSuiteResult;
 
       expect(result.suite.mcpServerId).toBeNull();
+      expect(result.suite.timeoutSec).toBe(60);
     });
 
     it("binds an explicitly provided private playwright server", async () => {
@@ -307,7 +309,7 @@ describe("create_test_suite tool", () => {
             name: "E2E Checkout Flow",
             description: null,
             mcpServerId: "private-pw-uuid",
-            timeoutSec: 300,
+            timeoutSec: 60,
             enabled: true,
             visibility: "private",
           },

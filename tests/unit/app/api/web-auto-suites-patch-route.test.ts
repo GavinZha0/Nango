@@ -98,4 +98,17 @@ describe("PATCH /api/web-auto-suites/[id] — content vs visibility gates", () =
     expect(res.status).toBe(200);
     expect(db.update).toHaveBeenCalledTimes(1);
   });
+
+  it("6. author can update timeoutSec", async () => {
+    mockDbSuite(ownSuite);
+
+    const res = await PATCH(makeRequest({ timeoutSec: 600 }), {
+      params: Promise.resolve({ id: SUITE_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(db.update).toHaveBeenCalledTimes(1);
+    expect(dbMock._chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutSec: 600 }),
+    );
+  });
 });

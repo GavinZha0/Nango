@@ -90,8 +90,8 @@ function buildSchemaItem(
       };
     }
     case "metric": {
-      if (category === "verification") {
-        const verificationMetricSchema = z
+      if (category === "verification" || category === "web-auto") {
+        const singleToolMetricSchema = z
           .object({
             type: z.literal("metric"),
             metric: z.literal("duration_s"),
@@ -99,11 +99,13 @@ function buildSchemaItem(
             threshold: z.number(),
           })
           .strict();
-        const { $schema, ...cleanSchema } = z.toJSONSchema(verificationMetricSchema) as Record<string, unknown>;
+        const { $schema, ...cleanSchema } = z.toJSONSchema(singleToolMetricSchema) as Record<string, unknown>;
         return {
           type: "metric",
           description:
-            "Asserts tool execution duration in seconds (duration_s) using comparison operators (<, >, ==).",
+            category === "web-auto"
+              ? "Asserts Playwright execution duration in seconds (duration_s) using comparison operators (<, >, ==)."
+              : "Asserts tool execution duration in seconds (duration_s) using comparison operators (<, >, ==).",
           jsonSchema: cleanSchema,
           example: {
             type: "metric",

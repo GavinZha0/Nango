@@ -202,6 +202,25 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     return formatWebAutoOutputForDisplay(displayOutcome?.executionOutput);
   }, [displayOutcome?.executionOutput]);
 
+  // Clean up selected case in store on unmount
+  useEffect(() => {
+    return () => {
+      setSelectedCaseId(null);
+    };
+  }, [setSelectedCaseId]);
+
+  // Auto-select first case when cases load and none is selected or current selection is invalid
+  useEffect(() => {
+    if (inHistoryView) return;
+    if (cases && cases.length > 0) {
+      if (selectedCaseId === null || !cases.some((c) => c.id === selectedCaseId)) {
+        setSelectedCaseId(cases[0].id);
+      }
+    } else if (cases && cases.length === 0 && selectedCaseId !== null) {
+      setSelectedCaseId(null);
+    }
+  }, [inHistoryView, cases, selectedCaseId, setSelectedCaseId]);
+
   // Auto-select first case if history snapshot arrives and no valid case is active
   useEffect(() => {
     if (inHistoryView && runSnapshot && runSnapshot.results.length > 0) {
@@ -272,7 +291,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         id: selectedSuite?.id ?? suiteId,
         name: selectedSuite?.name ?? "",
         description: selectedSuite?.description ?? null,
-        timeoutSec: selectedSuite?.timeoutSec ?? 300,
+        timeoutSec: selectedSuite?.timeoutSec ?? 60,
         caseCount: cases?.length ?? 0,
         variables: selectedSuite?.variables ?? {},
       },
@@ -398,6 +417,8 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
       await handleSave();
     }
 
+    // Clear previous execution outcome and images before starting new run
+    setRunOutcome(null);
     setRunning(true);
     try {
       const res = await fetch(`/api/web-auto-cases/${targetId}/run`, {
@@ -496,7 +517,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
           cases={cases ?? []}
           verdictByCaseId={verdictByCaseId}
           selectedCaseId={selectedCaseId}
-          onSelectCase={setSelectedCaseId}
+          onSelectCase={(id) => {
+            setSelectedCaseId(id);
+            setRunOutcome(null);
+          }}
           onNewCase={() => {
             setCaseToEdit(null);
             setCaseDialogOpen(true);
@@ -645,7 +669,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     }`}
                   >
                     Images
-                    {extractedImages.length > 0 && (
+                    {!running && extractedImages.length > 0 && (
                       <span className="rounded-full bg-primary/10 px-1.5 py-0.2 text-[10px] font-semibold text-primary">
                         {extractedImages.length}
                       </span>
@@ -703,7 +727,12 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                       </div>
                     ) : (
                       <div className="h-full w-full overflow-hidden rounded-md border bg-background/50 flex flex-col">
-                        {extractedImages.length === 0 ? (
+                        {running ? (
+                          <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            Executing case & capturing images...
+                          </div>
+                        ) : extractedImages.length === 0 ? (
                           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                             No image
                           </div>
