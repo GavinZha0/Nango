@@ -432,7 +432,7 @@ describe("create_test_cases tool", () => {
       ).rejects.toThrow(/duplicate case name\(s\) \['Existing UI Case'\] already exist/);
     });
 
-    it("warns (non-blocking) when creating llm_judge cases under an evaluation suite with no evaluatorAgentId", async () => {
+    it("warns (non-blocking) when creating llm_custom cases under an evaluation suite with no evaluatorAgentId", async () => {
       dbMock.$enqueue(
         [
           {
@@ -446,7 +446,7 @@ describe("create_test_cases tool", () => {
           {
             id: 1,
             name: "Judge case",
-            assertions: [{ type: "llm_judge", expectation: "clear answer" }],
+            assertions: [{ type: "llm_custom", expectation: "clear answer" }],
           },
         ],
       );
@@ -458,7 +458,7 @@ describe("create_test_cases tool", () => {
           {
             name: "Judge case",
             turns: ["hello"],
-            assertions: [{ type: "llm_judge", expectation: "clear answer" }],
+            assertions: [{ type: "llm_custom", expectation: "clear answer" }],
           },
         ],
       })) as CreateTestCasesResult;
@@ -467,7 +467,7 @@ describe("create_test_cases tool", () => {
       expect(result.warnings?.[0]).toContain("no evaluatorAgentId");
     });
 
-    it("warns (non-blocking) when creating llm_judge cases under a web-auto suite with no evaluatorAgentId", async () => {
+    it("warns (non-blocking) when creating llm_custom cases under a web-auto suite with no evaluatorAgentId", async () => {
       dbMock.$enqueue(
         [
           {
@@ -481,7 +481,7 @@ describe("create_test_cases tool", () => {
           {
             id: 2,
             name: "Visual check",
-            assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+            assertions: [{ type: "llm_custom", expectation: "banner is visible" }],
           },
         ],
       );
@@ -493,7 +493,7 @@ describe("create_test_cases tool", () => {
           {
             name: "Visual check",
             script: "await page.goto('/');",
-            assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+            assertions: [{ type: "llm_custom", expectation: "banner is visible" }],
           },
         ],
       })) as CreateTestCasesResult;

@@ -28,7 +28,7 @@ export interface CreateSuiteInput {
   evaluatorAgentId?: string | null;
   name: string;
   description?: string | null;
-  dimensionIds?: string[];
+  threshold?: number;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
@@ -47,7 +47,7 @@ export async function createSuite(
       evaluatorAgentId: input.evaluatorAgentId ?? null,
       name: input.name,
       description: input.description ?? null,
-      dimensionIds: input.dimensionIds ?? [],
+      threshold: input.threshold ?? 3,
       variables: input.variables ?? {},
       enabled: input.enabled ?? true,
       visibility: input.visibility ?? "private",
@@ -103,7 +103,7 @@ export interface UpdateSuiteInput {
   name?: string;
   description?: string | null;
   evaluatorAgentId?: string | null;
-  dimensionIds?: string[];
+  threshold?: number;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
@@ -119,7 +119,7 @@ export async function updateSuite(
   if (input.description !== undefined) updates.description = input.description;
   if (input.evaluatorAgentId !== undefined)
     updates.evaluatorAgentId = input.evaluatorAgentId;
-  if (input.dimensionIds !== undefined) updates.dimensionIds = input.dimensionIds;
+  if (input.threshold !== undefined) updates.threshold = input.threshold;
   if (input.variables !== undefined) updates.variables = input.variables;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.visibility !== undefined) updates.visibility = input.visibility;
@@ -285,8 +285,8 @@ export async function listSuitesByAgentWithCaseCount(
       evaluatorAgentId: EvalSuiteTable.evaluatorAgentId,
       name: EvalSuiteTable.name,
       description: EvalSuiteTable.description,
+      threshold: EvalSuiteTable.threshold,
       variables: EvalSuiteTable.variables,
-      dimensionIds: EvalSuiteTable.dimensionIds,
       enabled: EvalSuiteTable.enabled,
       visibility: EvalSuiteTable.visibility,
       createdBy: EvalSuiteTable.createdBy,
@@ -315,6 +315,7 @@ export async function listSuitesByAgentWithCaseCount(
 export interface CreateRunInput {
   suiteId: string;
   totalCount: number;
+  threshold?: number;
   triggeredBy: "manual" | "schedule";
 }
 
@@ -325,6 +326,7 @@ export async function createRun(
     .insert(EvalRunTable)
     .values({
       suiteId: input.suiteId,
+      threshold: input.threshold ?? 3,
       status: "running",
       totalCount: input.totalCount,
       triggeredBy: input.triggeredBy,
@@ -336,7 +338,6 @@ export async function createRun(
 export interface FinalizeRunInput {
   runId: string;
   status: EvalRunStatus;
-  score?: number | null;
   passedCount: number;
   failedCount: number;
   erroredCount: number;
@@ -347,7 +348,6 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     .update(EvalRunTable)
     .set({
       status: input.status,
-      score: input.score ?? null,
       passedCount: input.passedCount,
       failedCount: input.failedCount,
       erroredCount: input.erroredCount,
@@ -360,10 +360,6 @@ export interface WriteCaseResultInput {
   runId: string;
   caseId: number;
   status: string;
-  score?: number | null;
-  dimensionScores?: Record<string, number> | null;
-  assertionScore?: number | null;
-  criteriaScore?: number | null;
   assertionResults?: unknown;
   feedback?: string | null;
   threadId?: string | null;
@@ -382,9 +378,6 @@ export async function writeCaseResult(
     runId: input.runId,
     caseId: input.caseId,
     status: input.status,
-    score: input.score ?? null,
-    dimensionScores: input.dimensionScores ?? null,
-    criteriaScore: input.assertionScore ?? input.criteriaScore ?? null,
     assertionResults: results,
     feedback: input.feedback ?? null,
     threadId: input.threadId ?? null,

@@ -7,22 +7,22 @@ describe("evaluateAssertions for Web Auto payloads", () => {
   it("extracts expectation assertions and ignores deterministic assertions in llmAssertions", () => {
     const assertions: AssertionSpec[] = [
       { type: "js_expression", expression: "result.success === true" },
-      { type: "expectation", expectation: "Title should be visible" },
-      { type: "llm_expectation", expectation: "Card has correct price" },
+      { type: "llm_custom", expectation: "Title should be visible" },
+      { type: "llm_custom", expectation: "Card has correct price" },
       { type: "jsonpath", path: "$.status", expected: "ok" },
     ];
 
     const outcome = evaluateAssertions({ result: { status: "ok", success: true } }, assertions);
 
     expect(outcome.llmAssertions).toHaveLength(2);
-    expect(outcome.llmAssertions[0].spec.expectation).toBe("Title should be visible");
-    expect(outcome.llmAssertions[1].spec.expectation).toBe("Card has correct price");
+    expect((outcome.llmAssertions[0].spec as import("@/lib/assertions").LlmCustomAssertion).expectation).toBe("Title should be visible");
+    expect((outcome.llmAssertions[1].spec as import("@/lib/assertions").LlmCustomAssertion).expectation).toBe("Card has correct price");
   });
 
   it("passes smoke test when no deterministic assertions are present", () => {
     const output = { result: { ok: true } };
     const outcome = evaluateAssertions(output, [
-      { type: "expectation", expectation: "Visual check" },
+      { type: "llm_custom", expectation: "Visual check" },
     ]);
 
     expect(outcome.allDeterministicPassed).toBe(true);

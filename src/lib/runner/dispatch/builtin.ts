@@ -343,13 +343,8 @@ export async function buildBuiltinAgents(
       const { buildSubmitEvaluationScoresTool } = await import(
         "@/lib/evaluation/runtime-tools"
       );
-      const dimensionIds = Array.isArray(ctx?.context?.expectedDimensionIds)
-        ? (ctx.context.expectedDimensionIds as string[])
-        : [];
       evaluatorTools.push(
-        buildSubmitEvaluationScoresTool({
-          expectedDimensionIds: dimensionIds,
-        }),
+        buildSubmitEvaluationScoresTool(),
       );
     }
 

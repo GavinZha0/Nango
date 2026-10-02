@@ -613,8 +613,8 @@ export async function seedBaseEvalSuite(adminEmail: string): Promise<void> {
       suiteId = suiteRes.rows[0].id;
     } else {
       const insertSuiteRes = await client.query<{ id: string }>(
-        `INSERT INTO eval_suite (name, description, agent_id, agent_source, evaluator_agent_id, dimension_ids, enabled, visibility, created_by, updated_by)
-         VALUES ($1, $2, $3, 'builtin', $4, '["groundedness", "task_completion"]'::jsonb, true, 'public', $5, $5)
+        `INSERT INTO eval_suite (name, description, agent_id, agent_source, evaluator_agent_id, enabled, visibility, created_by, updated_by)
+         VALUES ($1, $2, $3, 'builtin', $4, true, 'public', $5, $5)
          RETURNING id`,
         [
           BASE_NAMES.evalSuite,
@@ -640,8 +640,8 @@ export async function seedBaseEvalSuite(adminEmail: string): Promise<void> {
       });
       const assertionsJson = JSON.stringify([
         {
-          type: "contains",
-          expected: "assistant",
+          type: "llm_custom",
+          expectation: "Agent should introduce itself and mention assistant capabilities",
         },
       ]);
       await client.query(

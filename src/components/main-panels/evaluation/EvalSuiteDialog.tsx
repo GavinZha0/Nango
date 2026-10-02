@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -33,7 +32,6 @@ import {
   type SuiteVariablesEditorRef,
 } from "@/components/common/SuiteVariablesEditor";
 import type { SuiteVariablesMap } from "@/lib/testing/types";
-import { BUILTIN_DIMENSIONS, DIMENSION_CATEGORIES } from "@/lib/evaluation/types";
 import { useWorkspaceStore } from "@/store/workspace";
 import { evalActions, type EvalSuiteRow } from "@/store/evaluation";
 
@@ -49,7 +47,7 @@ export interface EvalSuiteDialogProps {
     name: string;
     description?: string | null;
     evaluatorAgentId?: string | null;
-    dimensionIds: string[];
+    threshold: number;
     variables?: Record<string, unknown>;
   }) => void;
 }
@@ -89,9 +87,7 @@ export function EvalSuiteDialog({
   const [selectedEvalId, setSelectedEvalId] = useState<string>(
     suite?.evaluatorAgentId ?? "",
   );
-  const [selectedDims, setSelectedDims] = useState<Set<string>>(
-    new Set(suite?.dimensionIds ?? ["groundedness", "task_completion"]),
-  );
+  const [threshold, setThreshold] = useState<number>(suite?.threshold ?? 3);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const variablesEditorRef = useRef<SuiteVariablesEditorRef>(null);
@@ -110,27 +106,9 @@ export function EvalSuiteDialog({
       setVariables((suite?.variables as SuiteVariablesMap) ?? {});
       setSelectedAgentId(suite?.agentId ?? defaultAgentId ?? (candidateAgents[0]?.id ?? ""));
       setSelectedEvalId(suite?.evaluatorAgentId ?? (isEdit ? "" : (evaluators[0]?.id ?? "")));
-      setSelectedDims(
-        new Set(suite?.dimensionIds ?? ["groundedness", "task_completion"]),
-      );
+      setThreshold(suite?.threshold ?? 3);
       setError(null);
     }
-  }
-
-  const grouped = useMemo(() => {
-    return DIMENSION_CATEGORIES.map((cat) => ({
-      category: cat,
-      dimensions: BUILTIN_DIMENSIONS.filter((d) => d.category === cat),
-    }));
-  }, []);
-
-  function toggleDimension(dimId: string): void {
-    setSelectedDims((prev) => {
-      const next = new Set(prev);
-      if (next.has(dimId)) next.delete(dimId);
-      else next.add(dimId);
-      return next;
-    });
   }
 
   const handleSave = async (): Promise<void> => {
@@ -145,7 +123,7 @@ export function EvalSuiteDialog({
         name: trimmed,
         description: description.trim() || null,
         evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
-        dimensionIds: Array.from(selectedDims),
+        threshold,
         variables,
       });
       onOpenChange(false);
@@ -167,7 +145,7 @@ export function EvalSuiteDialog({
         name: trimmed,
         description: description.trim() || null,
         evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
-        dimensionIds: Array.from(selectedDims),
+        threshold,
         variables,
       });
 
@@ -318,37 +296,25 @@ export function EvalSuiteDialog({
                 </Select>
               </div>
 
-              {/* Evaluation Dimensions */}
-              <div className="space-y-2">
-                <Label>Evaluation Dimensions</Label>
-                <div className="max-h-[220px] overflow-y-auto rounded-md border p-2.5 space-y-3">
-                  {grouped.map((group) => (
-                    <div key={group.category}>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-                        {group.category}
-                      </p>
-                      <div className="space-y-1">
-                        {group.dimensions.map((dim) => (
-                          <label
-                            key={dim.id}
-                            className="flex cursor-pointer items-start gap-2 rounded px-1 py-0.5 hover:bg-muted/40"
-                          >
-                            <Checkbox
-                              checked={selectedDims.has(dim.id)}
-                              onCheckedChange={() => toggleDimension(dim.id)}
-                              className="mt-0.5"
-                              disabled={submitting}
-                            />
-                            <div className="min-w-0">
-                              <p className="text-xs font-medium leading-tight">{dim.name}</p>
-                              <p className="text-[10px] text-muted-foreground leading-tight">{dim.description}</p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {/* Pass Threshold */}
+              <div className="space-y-1.5">
+                <Label htmlFor="eval-threshold">Pass Threshold (1–5)</Label>
+                <Input
+                  id="eval-threshold"
+                  type="number"
+                  min={1}
+                  max={5}
+                  step={1}
+                  value={threshold}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    setThreshold(Number.isNaN(v) ? 3 : Math.max(1, Math.min(5, v)));
+                  }}
+                  disabled={submitting}
+                />
+                <p className="text-[10px] text-muted-foreground leading-tight">
+                  Minimum score required across all LLM dimensions and custom checks for a case to pass (default 3).
+                </p>
               </div>
             </TabsContent>
 

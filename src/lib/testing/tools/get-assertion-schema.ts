@@ -8,7 +8,8 @@ import {
   jsExpressionAssertionSchema,
   toolCallAssertionSchema,
   metricAssertionSchema,
-  llmJudgeAssertionSchema,
+  llmDimAssertionSchema,
+  llmCustomAssertionSchema,
   CATEGORY_TYPE_MAPPING,
 } from "@/lib/assertions/types";
 import {
@@ -126,15 +127,28 @@ function buildSchemaItem(
         },
       };
     }
-    case "llm_judge": {
-      const { $schema, ...cleanSchema } = z.toJSONSchema(llmJudgeAssertionSchema) as Record<string, unknown>;
+    case "llm_dim": {
+      const { $schema, ...cleanSchema } = z.toJSONSchema(llmDimAssertionSchema) as Record<string, unknown>;
       return {
-        type: "llm_judge",
+        type: "llm_dim",
         description:
-          "Evaluates conversational responses or visual UI states using LLM-as-Judge semantic criteria. Specify expected behavior (expectation), prohibited behavior (unexpectation), and ground truth reference.",
+          "Evaluates conversational responses against predefined quality dimensions (e.g. task-completion, safety, fluency, faithfulness, tool-correctness, code-quality, format-compliance, tone-persona) on a 1-5 discrete scale.",
         jsonSchema: cleanSchema,
         example: {
-          type: "llm_judge",
+          type: "llm_dim",
+          dim: "faithfulness",
+        },
+      };
+    }
+    case "llm_custom": {
+      const { $schema, ...cleanSchema } = z.toJSONSchema(llmCustomAssertionSchema) as Record<string, unknown>;
+      return {
+        type: "llm_custom",
+        description:
+          "Evaluates conversational responses or visual UI states using custom natural language semantic criteria. Specify expected behavior (expectation), prohibited behavior (unexpectation), and ground truth reference.",
+        jsonSchema: cleanSchema,
+        example: {
+          type: "llm_custom",
           expectation: "The assistant must provide a concise 3-step explanation without hallucinating internal APIs.",
           unexpectation: "Must not expose internal database connection strings or passwords.",
         },
@@ -149,7 +163,7 @@ export const getAssertionSchemaInputSchema = z.object({
     .describe("Target test category ('verification' | 'evaluation' | 'web-auto')"),
   assertionType: z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), z.enum(ASSERTION_TYPES).nullish())
     .describe(
-      "Optional assertion type filter ('jsonpath' | 'json_schema' | 'js_expression' | 'tool_call' | 'metric' | 'llm_judge'). Returns all supported schemas if null or omitted.",
+      "Optional assertion type filter ('jsonpath' | 'json_schema' | 'js_expression' | 'tool_call' | 'metric' | 'llm_dim' | 'llm_custom'). Returns all supported schemas if null or omitted.",
     ),
 });
 
@@ -163,7 +177,7 @@ export function buildGetAssertionSchemaTool(ctx: TesterToolContext): ToolDefinit
   return defineTool({
     name: "get_assertion_schema",
     description:
-      "Inspect the exact JSON Schema definitions, allowed operators, field constraints, and working examples for universal test assertions. Pass the mandatory target test `category` ('verification' | 'evaluation' | 'web-auto'), and optionally filter by `assertionType` ('jsonpath' | 'json_schema' | 'js_expression' | 'tool_call' | 'metric' | 'llm_judge'). If assertionType is omitted or null, returns all schemas applicable to the category.",
+      "Inspect the exact JSON Schema definitions, allowed operators, field constraints, and working examples for universal test assertions. Pass the mandatory target test `category` ('verification' | 'evaluation' | 'web-auto'), and optionally filter by `assertionType` ('jsonpath' | 'json_schema' | 'js_expression' | 'tool_call' | 'metric' | 'llm_dim' | 'llm_custom'). If assertionType is omitted or null, returns all schemas applicable to the category.",
     parameters: getAssertionSchemaInputSchema,
     execute: async (args: {
       category: "verification" | "evaluation" | "web-auto";

@@ -854,12 +854,9 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
 
         await buildBuiltinAgents(["agent-1"], mockLogger, {
           userId: "user-1",
-          context: { expectedDimensionIds: ["dim-1", "dim-2"] },
         });
 
-        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalledWith({
-          expectedDimensionIds: ["dim-1", "dim-2"],
-        });
+        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalled();
         const tools = agentArgs().tools as unknown[];
         expect(tools.some((t) => (t as { name: string }).name === "submit_evaluation_scores")).toBe(true);
       });
@@ -872,19 +869,15 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
           initiator: "evaluator",
         });
 
-        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalledWith({
-          expectedDimensionIds: [],
-        });
+        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalled();
       });
 
-      it("defaults expectedDimensionIds to empty array when context is missing", async () => {
+      it("mounts submit_evaluation_scores tool when context is missing", async () => {
         agentPoolGetMock.mockResolvedValue(makeSpec({ role: "evaluator" }));
 
         await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
 
-        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalledWith({
-          expectedDimensionIds: [],
-        });
+        expect(buildSubmitEvaluationScoresToolMock).toHaveBeenCalled();
       });
     });
 

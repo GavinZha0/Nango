@@ -282,7 +282,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
             failed,
             errored,
             passRate,
-            averageScore: run.score ?? null,
+            averageScore: null,
           };
 
           let cases: CaseResultDiagnosticItem[] | undefined = undefined;
@@ -312,7 +312,7 @@ export function buildGetTestResultsTool(ctx: TesterToolContext): ToolDefinition 
                   caseId: cr.result.caseId,
                   caseName: cr.caseName,
                   status: cr.result.status,
-                  score: cr.result.score,
+                  score: null,
                   feedback: cr.result.feedback,
                   error: rawError?.message ?? null,
                   errorSource: rawError?.source ?? null,

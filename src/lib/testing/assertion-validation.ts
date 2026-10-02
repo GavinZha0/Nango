@@ -8,13 +8,13 @@ import {
 } from "@/lib/assertions/types";
 import { validateAssertionSyntax } from "@/lib/assertions";
 
-/** Standard warning for suites that hold llm_judge/expectation assertions but
+/** Standard warning for suites that hold llm_custom/llm_dim assertions but
  *  bind no evaluator agent — such cases return `errored` (never a silent pass). */
 export const WARNING_EVALUATOR_MISSING =
-  "Suite has no evaluatorAgentId: cases with llm_judge/expectation assertions return 'errored' when run. Bind an evaluator agent or keep only deterministic assertions.";
+  "Suite has no evaluatorAgentId: cases with llm_custom/llm_dim assertions return 'errored' when run. Bind an evaluator agent or keep only deterministic assertions.";
 
-/** True when any assertion requires an LLM evaluator agent (llm_judge,
- *  expectation, llm_expectation). Used to warn when a suite has no evaluator. */
+/** True when any assertion requires an LLM evaluator agent (llm_custom,
+ *  llm_dim). Used to warn when a suite has no evaluator. */
 export function containsJudgeDependentAssertions(
   assertions: unknown[] | undefined | null,
 ): boolean {
@@ -66,7 +66,7 @@ export function normalizeAndValidateAssertions(
     if (!parsed.success) {
       const issue = parsed.error.issues[0]?.message ?? "unsupported format";
       throw new Error(
-        `Invalid assertion at index #${i} in case '${caseName}': ${issue}. Supported assertion types are: 'js_expression' (expression), 'jsonpath' (path, operator, expected), 'json_schema' (schema), 'metric' (metric, operator, threshold), 'tool_call' (toolName), 'llm_judge' (expectation).`,
+        `Invalid assertion at index #${i} in case '${caseName}': ${issue}. Supported assertion types are: 'js_expression' (expression), 'jsonpath' (path, operator, expected), 'json_schema' (schema), 'metric' (metric, operator, threshold), 'tool_call' (toolName), 'llm_dim' (dim), 'llm_custom' (expectation).`,
       );
     }
 

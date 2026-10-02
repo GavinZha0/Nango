@@ -295,7 +295,6 @@ export async function getTaskProgress(
           passedCount: EvalRunTable.passedCount,
           failedCount: EvalRunTable.failedCount,
           erroredCount: EvalRunTable.erroredCount,
-          score: EvalRunTable.score,
           suiteName: EvalSuiteTable.name,
         })
         .from(EvalRunTable)
@@ -319,7 +318,7 @@ export async function getTaskProgress(
         startedAt: row.startedAt,
         finishedAt: row.finishedAt,
         progressText: `${completed}/${row.totalCount} cases completed (${row.passedCount} passed, ${row.failedCount} failed, ${row.erroredCount} errored)`,
-        summary: `Evaluation Suite '${row.suiteName}' finished with score: ${row.score}% (status: ${row.status}).`,
+        summary: `Evaluation Suite '${row.suiteName}' finished (status: ${row.status}, ${row.passedCount}/${row.totalCount} passed).`,
       };
     }
 

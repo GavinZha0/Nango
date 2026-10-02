@@ -112,9 +112,9 @@ export function EvaluationSuiteEditor({
     const resultsList = (row.assertionResults ?? []) as unknown[];
     return {
       status: row.status as "passed" | "failed" | "errored",
-      score: row.score,
-      dimensionScores: row.dimensionScores as Record<string, number>,
-      assertionScore: (row as unknown as { assertionScore?: number }).assertionScore ?? row.criteriaScore ?? null,
+      score: null,
+      dimensionScores: {},
+      assertionScore: null,
       assertionResults: resultsList,
       feedback: row.feedback,
       durationMs: row.durationMs,
@@ -202,7 +202,7 @@ export function EvaluationSuiteEditor({
             agentId: suiteData.agentId,
             agentSource: suiteData.agentSource,
             evaluatorAgentId: suiteData.evaluatorAgentId,
-            dimensionIds: suiteData.dimensionIds,
+            threshold: suiteData.threshold,
             caseCount: cases.length,
             variables: suiteData.variables ?? {},
           }

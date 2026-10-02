@@ -47,8 +47,8 @@ export interface DeterministicCheckInput {
 export interface DeterministicCheckOutput {
   /** Standard assertion results for DB storage and UI rendering */
   assertionResults: import("@/lib/assertions").AssertionResult[];
-  /** Partitioned LLM judge assertions */
-  llmAssertions: Array<{ index: number; spec: import("@/lib/assertions").LlmJudgeAssertion }>;
+  /** Partitioned LLM assertions */
+  llmAssertions: Array<{ index: number; spec: import("@/lib/assertions").LlmDimAssertion | import("@/lib/assertions").LlmCustomAssertion }>;
   /** Full checklist — LLM items have `passed: null`, deterministic
    *  items have `passed: true/false`. */
   results: CriteriaCheckResult[];
@@ -74,15 +74,15 @@ function getAssertionDescription(spec: AssertionSpec): string {
       return `Tool Call ${spec.toolName}${spec.expectedCalls !== undefined ? ` (>= ${spec.expectedCalls})` : ""}`;
     case "metric":
       return `${spec.metric} ${spec.operator} ${spec.threshold}`;
-    case "llm_judge":
-    case "expectation":
-    case "llm_expectation": {
+    case "llm_dim":
+      return `Dimension: ${spec.dim}`;
+    case "llm_custom": {
       const label =
-        ("expectation" in spec && spec.expectation) ? spec.expectation :
-        ("unexpectation" in spec && spec.unexpectation) ? `[Unexpectation] ${spec.unexpectation}` :
-        ("reference" in spec && spec.reference) ? `[Reference] ${spec.reference}` :
-        "LLM Judge";
-      return `LLM Judge: ${label}`;
+        spec.expectation ? spec.expectation :
+        spec.unexpectation ? `[Unexpectation] ${spec.unexpectation}` :
+        spec.reference ? `[Reference] ${spec.reference}` :
+        "LLM Custom";
+      return `LLM Custom: ${label}`;
     }
     default:
       return "Custom assertion check";

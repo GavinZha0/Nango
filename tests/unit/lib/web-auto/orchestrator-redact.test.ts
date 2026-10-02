@@ -317,13 +317,13 @@ describe("Web-Auto Orchestrator - Variable Resolution & Earliest Sanitization", 
 
     runWebAutoEvaluationMock.mockResolvedValueOnce({
       passed: true,
-      score: 95,
+      score: 5,
       feedback: "The page correctly displayed banner using xyz_token_secret_888.",
       expectationResults: [
         {
           index: 0,
           passed: true,
-          score: 95,
+          score: 5,
           reason: "Verified banner presence with xyz_token_secret_888.",
         },
       ],
@@ -334,7 +334,7 @@ describe("Web-Auto Orchestrator - Variable Resolution & Earliest Sanitization", 
       ...baseCase,
       assertions: [
         {
-          type: "llm_expectation",
+          type: "llm_custom",
           expectation: "Banner should indicate logged in status",
         },
       ],

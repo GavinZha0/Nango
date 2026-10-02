@@ -70,6 +70,7 @@ export async function startEvalSuiteRun(
   const run = await storage.createRun({
     suiteId: input.suiteId,
     totalCount: cases.length,
+    threshold: suite.threshold ?? 3,
     triggeredBy: input.triggeredBy,
   });
 
@@ -111,7 +112,8 @@ export async function startEvalSuiteRun(
     suiteId: input.suiteId,
     suiteName: suite.name,
     evaluatorAgentId: suite.evaluatorAgentId ?? null,
-    dimensionIds: (suite.dimensionIds ?? []) as string[],
+    dimensionIds: [],
+    threshold: suite.threshold ?? 3,
     targetAgentId: suite.agentId,
     targetCredentialId: suite.credentialId ?? undefined,
     targetAgentSource: suite.agentSource,
@@ -131,6 +133,7 @@ interface SuiteLoopInput {
   suiteName: string;
   evaluatorAgentId?: string | null;
   dimensionIds: string[];
+  threshold?: number;
   targetAgentId: string;
   targetCredentialId?: string;
   targetAgentSource: string;
@@ -174,9 +177,6 @@ async function runAllCases(
         runId: input.runId,
         caseId: c.id,
         status: "errored",
-        score: null,
-        dimensionScores: {},
-        assertionScore: null,
         assertionResults: [],
         feedback: resolveError.message,
         error: resolveError.message,
@@ -212,6 +212,7 @@ async function runAllCases(
         agentSource: input.targetAgentSource === "builtin" ? "builtin" : "backend",
         evaluatorAgentId: input.evaluatorAgentId,
         dimensionIds: input.dimensionIds,
+        threshold: input.threshold,
         turns: caseTurns,
         assertions: caseAssertions,
         ownerId: input.ownerId,
@@ -224,7 +225,7 @@ async function runAllCases(
         { event: "case_unexpected_throw", runId: input.runId, caseId: c.id, err: message },
         "unexpected throw from runEvalCase",
       );
-      result = { status: "errored", score: null, error: message };
+      result = { status: "errored", error: message };
     }
 
     if (result.status === "passed") counters.passedCount++;
@@ -238,9 +239,6 @@ async function runAllCases(
       caseId: c.id,
       caseName: c.name,
       status: result.status,
-      score: result.score,
-      dimensionScores: result.dimensionScores,
-      assertionScore: result.assertionScore,
       assertionResults: result.assertionResults,
       feedback: result.feedback,
       durationMs: result.durationMs,
@@ -265,7 +263,6 @@ async function finaliseAndAnnounce(
   await storage.finalizeRun({
     runId: input.runId,
     status,
-    score: passRate,
     passedCount: counters.passedCount,
     failedCount: counters.failedCount,
     erroredCount: counters.erroredCount,
@@ -277,7 +274,7 @@ async function finaliseAndAnnounce(
       runId: input.runId,
       kind: status === "passed" ? "run_completed" : "run_failed",
       title: `Evaluation: ${input.suiteName}`,
-      body: `Score: ${passRate}%, ✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored`,
+      body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored`,
       sourceLabel: "Evaluation Suite",
       task: `Run evaluation suite '${input.suiteName}'`,
       initiator: "evaluation",
@@ -302,7 +299,6 @@ async function finaliseAndAnnounce(
     passedCount: counters.passedCount,
     failedCount: counters.failedCount,
     erroredCount: counters.erroredCount,
-    score: passRate,
   });
 
   log.info(
@@ -404,6 +400,7 @@ export async function startEvalAgentAllRuns(
         const run = await storage.createRun({
           suiteId: suite.id,
           totalCount: cases.length,
+          threshold: suite.threshold ?? 3,
           triggeredBy: input.triggeredBy,
         });
 
@@ -422,7 +419,8 @@ export async function startEvalAgentAllRuns(
           suiteId: suite.id,
           suiteName: suite.name,
           evaluatorAgentId: suite.evaluatorAgentId ?? null,
-          dimensionIds: (suite.dimensionIds ?? []) as string[],
+          dimensionIds: [],
+          threshold: suite.threshold ?? 3,
           targetAgentId: suite.agentId,
           targetCredentialId: suite.credentialId ?? undefined,
           targetAgentSource: suite.agentSource,

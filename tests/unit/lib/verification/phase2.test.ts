@@ -22,16 +22,16 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
     expect(validated[0].metric).toBe("duration_s");
   });
 
-  it("rejects unsupported assertion types (e.g. llm_judge) for verification category with clear error", () => {
+  it("rejects unsupported assertion types (e.g. llm_custom) for verification category with clear error", () => {
     const raw = [
       {
-        type: "llm_judge",
+        type: "llm_custom",
         expectation: "Tool should succeed gracefully",
       },
     ];
     expect(() =>
       normalizeAndValidateAssertions(raw, "case_invalid", "verification"),
-    ).toThrow(/type 'llm_judge' is not supported for category 'verification'/);
+    ).toThrow(/type 'llm_custom' is not supported for category 'verification'/);
   });
 
   it("sets errored: true on JSONPath syntax parse failure", () => {

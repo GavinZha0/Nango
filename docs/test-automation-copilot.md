@@ -135,8 +135,8 @@ All tools live under `src/lib/testing/tools/` and are wrapped by `defineTool`. R
 - **Parameters**: `category` (required); `assertionType?` (optional filter).
 - **Behavior**: Draft 2020-12 JSON Schema definitions, allowed operators, validation rules, and working examples per category:
   - **`verification`**: `["jsonpath", "json_schema", "js_expression"]`
-  - **`evaluation`**: `["jsonpath", "js_expression", "llm_judge", "metric", "tool_call"]`
-  - **`web-auto`**: `["js_expression", "jsonpath", "llm_judge"]`
+  - **`evaluation`**: `["jsonpath", "js_expression", "tool_call", "metric", "llm_dim", "llm_custom"]`
+  - **`web-auto`**: `["js_expression", "jsonpath", "llm_custom"]`
 
 ### 4.3 Suite & Case Management (CRUD)
 

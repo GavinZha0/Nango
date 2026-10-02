@@ -77,7 +77,7 @@ export function createMockEvalSuite(
     agentId: makeSeqUuid("01918a3f", seq),
     agentSource: "builtin",
     evaluatorAgentId: null,
-    dimensionIds: [],
+    threshold: 3,
     credentialId: null,
     visibility: "private",
     enabled: true,

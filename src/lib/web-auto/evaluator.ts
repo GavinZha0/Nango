@@ -127,9 +127,9 @@ function buildWebAutoEvaluationPrompt(
     "INSTRUCTIONS\n" +
     "Analyse the execution output above, then call `submit_evaluation_scores` " +
     "EXACTLY ONCE in a single tool call with:\n" +
-    "  - baseline_score (always required, 0-100)\n" +
-    `  - llm_judge_results (array with one entry for each of the ${expectations.length} check items above, matching index 0 to ${expectations.length - 1}: [{ index: 0, score: 0-100, reason: "..." }, ...])\n` +
-    "  - feedback (2-5 sentence overall summary)\n\n" +
+    `  - item_scores: Array with one entry for each of the ${expectations.length} check items above: ` +
+    `[{ index: 0, score: 1-5, reason: "..." }, ...]\n` +
+    "  - feedback: 2-5 sentence overall summary\n\n" +
     "CRITICAL: You MUST use the `submit_evaluation_scores` tool to return all your scores together. Do not output normal text.",
   );
 
@@ -153,18 +153,17 @@ function extractEvaluatorScores(
 
     try {
       const args = JSON.parse(payload.args) as Record<string, unknown>;
-      if (typeof args.baseline_score !== "number") continue;
       if (typeof args.feedback !== "string") continue;
 
-      const llmJudgeResults: Array<{ index: number; score: number; reason: string }> = [];
-      if (Array.isArray(args.llm_judge_results)) {
-        for (const item of args.llm_judge_results) {
+      const itemScores: Array<{ index: number; score: number; reason: string }> = [];
+      if (Array.isArray(args.item_scores)) {
+        for (const item of args.item_scores) {
           if (
             typeof item === "object" && item !== null &&
             typeof (item as { index?: unknown }).index === "number" &&
             typeof (item as { score?: unknown }).score === "number"
           ) {
-            llmJudgeResults.push({
+            itemScores.push({
               index: (item as { index: number }).index,
               score: (item as { score: number }).score,
               reason:
@@ -178,12 +177,7 @@ function extractEvaluatorScores(
 
       return {
         ok: true,
-        baseline_score: args.baseline_score as number,
-        dimension_scores: {},
-        criteria_score:
-          typeof args.criteria_score === "number" ? args.criteria_score : null,
-        llm_judge_results:
-          llmJudgeResults.length > 0 ? llmJudgeResults : undefined,
+        item_scores: itemScores,
         feedback: args.feedback as string,
       };
     } catch {
@@ -300,20 +294,15 @@ export async function runWebAutoEvaluation(
 
   // Extract individual check items with dual-insurance fallback
   const expectationResults: WebAutoExpectationResult[] = [];
-
   const individualScores: number[] = [];
 
   for (let i = 0; i < input.expectations.length; i++) {
     const exp = input.expectations[i];
     const itemResult =
-      scores.llm_judge_results?.find((r) => r.index === i) ??
-      scores.llm_judge_results?.[i];
+      scores.item_scores?.find((r) => r.index === i) ??
+      scores.item_scores?.[i];
 
-    const itemScore =
-      itemResult?.score ??
-      scores.criteria_score ??
-      scores.baseline_score ??
-      0;
+    const itemScore = itemResult?.score ?? 1;
     const itemReason = itemResult?.reason || scores.feedback;
 
     individualScores.push(itemScore);
@@ -328,20 +317,12 @@ export async function runWebAutoEvaluation(
     });
   }
 
-  // Overall score: average of all atomic LLM checks (or criteria_score)
-  const overallScore =
-    individualScores.length > 0
-      ? Math.round(
-          individualScores.reduce((a, b) => a + b, 0) /
-            individualScores.length,
-        )
-      : (scores.criteria_score ?? scores.baseline_score ?? 0);
-
-  const passed = overallScore >= 60; // 60% pass threshold
+  const minScore = individualScores.length > 0 ? Math.min(...individualScores) : 1;
+  const passed = minScore >= 3; // 3 on 1-5 scale
 
   return {
     passed,
-    score: overallScore,
+    score: minScore,
     feedback: scores.feedback,
     expectationResults,
     durationMs: Date.now() - startMs,

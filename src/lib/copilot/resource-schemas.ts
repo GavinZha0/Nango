@@ -109,7 +109,7 @@ export const WebAutoDraftSchema = z.object({
     script: z.string().optional().describe("Playwright automation script code"),
     steps: z.string().optional().describe("Natural language test steps"),
   }).passthrough().optional().describe("Test case input containing script and steps"),
-  assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("List of assertion specs: array of { type: 'js_expression' | 'jsonpath' | 'llm_judge', ... }"),
+  assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("List of assertion specs: array of { type: 'js_expression' | 'jsonpath' | 'llm_custom', ... }"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     input: z.object({
@@ -142,7 +142,7 @@ export const EvaluationDraftSchema = z.object({
       expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
     })).optional(),
   }).passthrough().optional().describe("Case input structure"),
-  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'llm_judge' | 'jsonpath' | 'js_expression' | 'metric' | 'tool_call', ... } or JSON string"),
+  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'llm_dim' | 'llm_custom' | 'jsonpath' | 'js_expression' | 'metric' | 'tool_call', ... } or JSON string"),
   turns: z.array(z.object({
     userMessage: z.string().min(1).describe("User message input for this turn"),
     expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),

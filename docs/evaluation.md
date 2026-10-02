@@ -28,7 +28,7 @@ Complementary to **Verification** (deterministic assert-on-output).
 ├─────────────────────────────────────────────────────────┤
 │  Suite Dimensions (0–5 selectable — suite-level)         │
 │  faithfulness · tool-correctness · format-compliance     │
-│  code-accuracy · tone-persona                            │
+│  code-quality · tone-persona                             │
 ├─────────────────────────────────────────────────────────┤
 │  Case Criteria (per-case — LLM + deterministic + metrics)│
 │  expectation · assertions · keywords · tool_calls        │
@@ -110,7 +110,7 @@ to `errored` on boot via `instrumentation.ts`.
 ### 3.3 Evaluator-Not-Configured System Contract
 
 A case that depends on an LLM evaluator — any judge-dependent assertion
-(`llm_judge`, `expectation`, `llm_expectation`) **or** a suite that selects
+(`llm_custom`, `llm_dim`) **or** a suite that selects
 `dimensionIds` (baseline + dimensions are judge-scored) — cannot produce a
 verdict when the suite binds no Evaluator Agent (`evaluatorAgentId` is null):
 

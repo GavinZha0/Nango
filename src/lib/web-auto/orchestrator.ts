@@ -15,7 +15,7 @@ import "server-only";
 import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { recordRunNotification } from "@/lib/runner/notifications";
-import { evaluateAssertions, REASON_EVALUATOR_NOT_CONFIGURED } from "@/lib/assertions";
+import { evaluateAssertions, determineCaseVerdict } from "@/lib/assertions";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import { redactSensitiveData, redactErrorEnvelope } from "@/lib/testing/redact";
 import { runWebAutoMcp } from "./runner-mcp";
@@ -232,13 +232,16 @@ export async function runWebAutoCase(
   let llmResult: import("./evaluator").WebAutoEvaluationResult | null = null;
 
   if (evaluatorAgentId && llmRequired) {
-    const expectations = outcome.llmAssertions.map((item) => ({
-      expectation: item.spec.expectation,
-      unexpectation: item.spec.unexpectation,
-      reference: item.spec.reference,
-      referenceImage: item.spec.referenceImage,
-      context: item.spec.context,
-    }));
+    const expectations = outcome.llmAssertions.map((item) => {
+      const customSpec = item.spec.type === "llm_custom" ? item.spec : undefined;
+      return {
+        expectation: customSpec?.expectation,
+        unexpectation: customSpec?.unexpectation,
+        reference: customSpec?.reference,
+        referenceImage: customSpec?.referenceImage,
+        context: customSpec?.context,
+      };
+    });
 
     if (expectations.length > 0) {
       try {
@@ -256,11 +259,11 @@ export async function runWebAutoCase(
         );
         llmResult = {
           passed: false,
-          score: 0,
+          score: 1,
           feedback: "LLM evaluation failed",
           expectationResults: expectations.map((exp, idx) => ({
             index: idx,
-            score: 0,
+            score: 1,
             reason: "LLM evaluation failed",
             feedback: "LLM evaluation failed",
             expectation: exp.expectation,
@@ -272,8 +275,7 @@ export async function runWebAutoCase(
     }
   }
 
-  // Step 6: Merge unified assertionResults array (1:1 with input assertions)
-  // Ensure LLM feedback is also sanitized in case the LLM echoed any secrets
+  // Step 6: Compute unified verdict and assertionResults
   const sanitizedFeedback = llmResult?.feedback
     ? redactSensitiveData(llmResult.feedback, sensitiveValues)
     : undefined;
@@ -284,89 +286,33 @@ export async function runWebAutoCase(
     sensitiveValues,
   );
 
-  const unifiedAssertionResults: import("@/lib/assertions").AssertionResult[] = [
-    ...(sanitizedDeterministicResults ?? []),
-  ];
-
-  if (outcome.llmAssertions.length > 0) {
-    outcome.llmAssertions.forEach((item, i) => {
-      const base = {
-        index: item.index,
-        type: "llm_judge" as const,
-        expectation: item.spec.expectation,
-        unexpectation: item.spec.unexpectation,
-        reference: item.spec.reference,
-        referenceImage: item.spec.referenceImage,
-      };
-
-      if (!llmResult) {
-        // Evaluator agent not configured: the LLM judge portion was skipped.
-        // Mark it as not evaluated (never a scored 0 failure) so the UI can
-        // render an amber "not evaluated" row instead of a red failure.
-        unifiedAssertionResults.push({
-          ...base,
-          ok: false,
-          skipped: true,
-          reason: REASON_EVALUATOR_NOT_CONFIGURED,
-        });
-        return;
-      }
-
-      const expRes =
-        llmResult.expectationResults?.find((r) => r.index === i) ??
-        llmResult.expectationResults?.[i];
-
-      const itemScore = expRes?.score ?? llmResult.score ?? undefined;
-      const rawReason = expRes?.reason || llmResult.feedback;
-      const itemReason = rawReason
-        ? redactSensitiveData(rawReason, sensitiveValues)
-        : undefined;
-
-      unifiedAssertionResults.push({
-        ...base,
-        ok: itemScore !== undefined ? itemScore >= 60 : llmResult.passed,
-        score: itemScore,
-        reason: itemReason,
-        feedback: itemReason,
-      });
-    });
-    unifiedAssertionResults.sort((a, b) => a.index - b.index);
-  }
-
-  // ── Status & error classification ─────────────────────────────────────
-  //
-  // When a case requires an evaluator that is not configured, the LLM judge
-  // portion was skipped (rows marked `skipped` above). Deterministic failures
-  // still surface as `failed` — they are real defects and must not be masked
-  // by the configuration error. Otherwise the verdict is incomplete, so we
-  // report `errored` (never `passed`, never a fabricated 0 score).
-  const evaluatorMissing = llmRequired && !evaluatorConfigured;
-  const missingEvaluatorMessage =
-    `${REASON_EVALUATOR_NOT_CONFIGURED} Suite '${input.suiteId}': bind an ` +
-    `evaluatorAgentId (or drop the llm_judge assertions) before running this case.`;
-
-  let status: "passed" | "failed" | "errored";
-  let statusReason: string;
-  let statusError: ErrorEnvelope | null = null;
-
-  if (!deterministicResult.passed) {
-    status = "failed";
-    statusReason = "Deterministic assertions failed";
-  } else if (evaluatorMissing) {
-    status = "errored";
-    statusReason = missingEvaluatorMessage;
-    statusError = {
-      source: "config",
-      message: missingEvaluatorMessage,
-      details: { missing: "evaluatorAgentId", suiteId: input.suiteId },
+  const llmScoresForVerdict = llmResult?.expectationResults?.map((r, i) => {
+    const originalIndex = outcome.llmAssertions[i]?.index ?? r.index;
+    return {
+      index: originalIndex,
+      score: r.score,
+      reason: r.reason ? redactSensitiveData(r.reason, sensitiveValues) : undefined,
     };
-  } else if (llmResult && !llmResult.passed) {
-    status = "failed";
-    statusReason = "LLM evaluation failed";
-  } else {
-    status = "passed";
-    statusReason = "All assertions passed";
-  }
+  });
+
+  const caseVerdict = determineCaseVerdict({
+    assertions,
+    deterministicResults: sanitizedDeterministicResults,
+    llmScores: llmScoresForVerdict,
+    evaluatorConfigured,
+    evaluatorError: llmResult?.error?.message,
+    threshold: 3,
+    evaluatorFeedback: sanitizedFeedback,
+  });
+
+  const unifiedAssertionResults = caseVerdict.assertionResults;
+  const status = caseVerdict.status;
+  const statusReason = caseVerdict.feedback ?? "Execution completed";
+  const statusError: ErrorEnvelope | null = status === "errored" ? {
+    source: "config",
+    message: statusReason,
+    details: { missing: "evaluatorAgentId", suiteId: input.suiteId },
+  } : null;
 
   const verdict: WebAutoVerdict = {
     deterministic: {

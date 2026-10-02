@@ -1,36 +1,36 @@
 /**
  * Evaluation — evaluator prompt assembler.
  *
- * Composes the full prompt sent to the evaluator agent at scoring
- * time. The prompt is assembled from multiple sources:
- *
- *   1. Evaluator system prompt (baseline criteria — always present)
- *   2. Suite dimension prompts (0–5 selected dimensions)
- *   3. Case criteria context (expectation, reference, assertions, …)
- *   4. Deterministic check results (code-verified, ✓/✗)
- *   5. Target agent conversation transcript
+ * Composes the full evaluation brief sent to the evaluator agent at scoring time.
+ * Assembled from:
+ *   1. Checklist of LLM items in the case (llm_dim and llm_custom).
+ *   2. Rubrics from BUILTIN_EVAL_DIMENSIONS for any selected dimensions.
+ *   3. Deterministic check results (code-verified, ✓/✗) so evaluator has context.
+ *   4. Target agent conversation transcript.
  *
  * The evaluator reads this assembled prompt and calls
- * `submit_evaluation_scores` once with structured scores.
+ * `submit_evaluation_scores` once with structured `item_scores` (1-5 scale) and `feedback`.
  *
  * See docs/evaluation.md.
  */
 
 import "server-only";
 
-import type { AssertionSpec, LlmJudgeAssertion } from "@/lib/assertions";
+import type {
+  AssertionSpec,
+  LlmCustomAssertion,
+  LlmDimAssertion,
+} from "@/lib/assertions";
 import {
-  BUILTIN_DIMENSIONS,
+  BUILTIN_EVAL_DIMENSIONS,
   type CriteriaCheckResult,
 } from "./types";
 import { formatChecksForPrompt } from "./deterministic-checks";
 
-// ─── Input ──────────────────────────────────────────────────────────
-
 export interface PromptBuilderInput {
-  /** Selected suite dimension IDs. */
-  dimensionIds: string[];
-  /** Unified assertions list (deterministic + llm_judge). */
+  /** Optional suite-level dimension IDs (for backwards compatibility). */
+  dimensionIds?: string[];
+  /** Unified assertions list (deterministic + llm_dim + llm_custom). */
   assertions: readonly AssertionSpec[];
   /** Deterministic check results from code evaluation. */
   checkResults?: CriteriaCheckResult[];
@@ -38,81 +38,84 @@ export interface PromptBuilderInput {
   conversationText: string;
 }
 
-// ─── Builder ────────────────────────────────────────────────────────
-
 /**
- * Assemble the evaluation brief — the user-message prompt sent to
- * the evaluator agent. Builds the per-case evaluation task with
- * baseline dimensions, atomic checklist items, and deterministic results.
+ * Assemble the evaluation brief sent to the evaluator agent.
  */
 export function buildEvaluationBrief(input: PromptBuilderInput): string {
   const sections: string[] = [];
 
-  // ── 1. Dimension prompts ──────────────────────────────────────
+  // 1. LLM Check Items (llm_dim and llm_custom)
+  const checklistBlocks: string[] = [];
+  const checklistIndices: number[] = [];
 
-  if (input.dimensionIds.length > 0) {
-    const dimBlocks: string[] = [];
-    for (const dimId of input.dimensionIds) {
-      const dim = BUILTIN_DIMENSIONS.find((d) => d.id === dimId);
-      if (dim) dimBlocks.push(dim.prompt);
-    }
-    if (dimBlocks.length > 0) {
-      sections.push(
-        "SPECIALIZED DIMENSIONS\n" +
-        "Score each dimension below independently (0-100). " +
-        "Include one entry per dimension in your submission.\n\n" +
-        dimBlocks.join("\n\n"),
-      );
-    }
-  }
+  const assertions = input.assertions ?? [];
+  let checkIndex = 0;
+  for (let i = 0; i < assertions.length; i++) {
+    const a = assertions[i];
 
-  // ── 2. LLM Judge Atomic Checklist ───────────────────────────
+    if (a.type === "llm_dim") {
+      const dimSpec = a as LlmDimAssertion;
+      const dim = BUILTIN_EVAL_DIMENSIONS.find((d) => d.id === dimSpec.dim);
+      const itemHeader = `[CHECK ITEM ${checkIndex}]`;
+      checklistIndices.push(checkIndex);
+      checkIndex++;
 
-  const llmAssertions: Array<{ index: number; spec: LlmJudgeAssertion }> = [];
-  for (let i = 0; i < (input.assertions ?? []).length; i++) {
-    const a = input.assertions[i];
-    if (a.type === "llm_judge" || a.type === "expectation" || a.type === "llm_expectation") {
-      llmAssertions.push({ index: i, spec: a as LlmJudgeAssertion });
-    }
-  }
-
-  if (llmAssertions.length > 0) {
-    const checklistBlocks: string[] = [];
-    for (let i = 0; i < llmAssertions.length; i++) {
-      const { spec } = llmAssertions[i];
-      const itemHeader = `[CHECK ITEM ${i}]`;
-      if (spec.expectation) {
+      if (dim) {
         checklistBlocks.push(
-          `${itemHeader} [EXPECTATION]:\n` +
-          `  Target: "${spec.expectation}"\n` +
-          `  Rule: PASS (score >= 60) if the agent output affirmatively delivers this requirement as its core conclusion; FAIL (score 0-20) if missing, contradicted, or merely mentioned while another incompatible option is chosen as primary.`,
+          `${itemHeader} SPECIALIZED DIMENSION: ${dim.name}\n` +
+          `Category: ${dim.category}\n` +
+          `Description: ${dim.description}\n\n` +
+          `EVALUATION GUIDELINES & RUBRIC:\n` +
+          `${dim.prompt}`,
         );
-      } else if (spec.unexpectation) {
+      } else {
         checklistBlocks.push(
-          `${itemHeader} [UNEXPECTATION / FORBIDDEN]:\n` +
-          `  Target: "${spec.unexpectation}"\n` +
-          `  Rule: PASS (score 90-100) if the agent completely AVOIDED this prohibited content/behavior; FAIL (score 0-15) if it appeared in the output.`,
-        );
-      } else if (spec.reference) {
-        checklistBlocks.push(
-          `${itemHeader} [REFERENCE CONTEXT]:\n` +
-          `  Ground Truth: "${spec.reference}"\n` +
-          `  Rule: PASS (score 70-100) if the agent's output is factually accurate and faithful to this reference without hallucination or contradiction; FAIL (score 0-15) if it factually contradicts, rejects, or replaces this reference (even if mentioned in passing).`,
+          `${itemHeader} SPECIALIZED DIMENSION: ${dimSpec.dim}\n` +
+          `Evaluate the conversation for quality on the '${dimSpec.dim}' dimension on a 1-5 discrete scale.`,
         );
       }
-    }
+    } else if (a.type === "llm_custom") {
+      const customSpec = a as LlmCustomAssertion;
+      const itemHeader = `[CHECK ITEM ${checkIndex}]`;
+      checklistIndices.push(checkIndex);
+      checkIndex++;
 
-    if (checklistBlocks.length > 0) {
-      sections.push(
-        "LLM AS JUDGE ATOMIC CHECKLIST\n" +
-        "Evaluate each item below independently. For each item, decide whether it passes (score >= 60) or fails (score < 60) and provide a concise reason:\n\n" +
-        checklistBlocks.join("\n\n"),
+      const parts: string[] = [`${itemHeader} CUSTOM SPECIFICATION:`];
+      if (customSpec.expectation) {
+        parts.push(`  Expectation (Required): "${customSpec.expectation}"`);
+      }
+      if (customSpec.unexpectation) {
+        parts.push(`  Forbidden (Must Avoid): "${customSpec.unexpectation}"`);
+      }
+      if (customSpec.reference) {
+        parts.push(`  Ground Truth Reference: "${customSpec.reference}"`);
+      }
+      if (customSpec.context && customSpec.context.length > 0) {
+        parts.push(`  Context: ${customSpec.context.join("; ")}`);
+      }
+
+      parts.push(
+        `\n  SCORING RUBRIC (1-5 Likert scale):\n` +
+        `  • 5 (Excellent): Fully and accurately satisfies the expectation with zero flaws or fully avoided forbidden behavior.\n` +
+        `  • 4 (Good): Meets the core expectation with only minor, harmless omissions.\n` +
+        `  • 3 (Acceptable - Pass): Essential requirement satisfied adequately, though minor rough spots exist.\n` +
+        `  • 2 (Poor): Notable defects, substantial omissions, or partial failure.\n` +
+        `  • 1 (Complete Failure): Wholly fails the requirement, generates contrary statements, or violates forbidden rule.`,
       );
+
+      checklistBlocks.push(parts.join("\n"));
     }
   }
 
-  // ── 3. Deterministic check results ────────────────────────────
+  if (checklistBlocks.length > 0) {
+    sections.push(
+      "EVALUATION ATOMIC CHECKLIST\n" +
+      "Evaluate each check item below independently. For each item, assign an integer score (1-5) and provide a concise reason citing evidence:\n\n" +
+      checklistBlocks.join("\n\n---\n\n"),
+    );
+  }
 
+  // 2. Deterministic check results (for context)
   if (input.checkResults && input.checkResults.length > 0) {
     const checksBlock = formatChecksForPrompt(input.checkResults);
     if (checksBlock.length > 0) {
@@ -120,39 +123,24 @@ export function buildEvaluationBrief(input: PromptBuilderInput): string {
     }
   }
 
-  // ── 4. Conversation transcript ────────────────────────────────
-
+  // 3. Conversation transcript
   sections.push(
     "CONVERSATION TO EVALUATE\n" +
     "The following is the complete conversation between the user and " +
-    "the target agent. Evaluate it against the baseline criteria, " +
-    (input.dimensionIds.length > 0 ? "specialized dimensions, " : "") +
-    (llmAssertions.length > 0 ? "and atomic checklist above." : "and criteria above.") +
-    "\n\n" +
+    "the target agent. Read it carefully before scoring:\n\n" +
     input.conversationText,
   );
 
-  // ── 5. Scoring instructions ───────────────────────────────────
-
-  const scoreItems = ["baseline_score (always required, 0-100)"];
-  if (input.dimensionIds.length > 0) {
-    scoreItems.push(
-      `dimension_scores (one entry for each: ${input.dimensionIds.join(", ")})`,
-    );
-  }
-  if (llmAssertions.length > 0) {
-    scoreItems.push(
-      `llm_judge_results (array with one entry for each of the ${llmAssertions.length} check items above, matching index 0 to ${llmAssertions.length - 1}: [{ index: 0, score: 0-100, reason: "..." }, ...])`,
-    );
-  }
-  scoreItems.push("feedback (2-5 sentence overall summary)");
-
+  // 4. Instructions
   sections.push(
     "INSTRUCTIONS\n" +
     "Analyse the conversation above, then call `submit_evaluation_scores` " +
-    "EXACTLY ONCE in a single tool call with:\n" +
-    scoreItems.map((s) => `  - ${s}`).join("\n") +
-    "\n\nCRITICAL: You MUST use the `submit_evaluation_scores` tool to return all your scores together. Do not output normal text.",
+    "EXACTLY ONCE with:\n" +
+    `  - item_scores: Array with one entry for each of the ${checklistIndices.length} check items above: ` +
+    `[{ index: 0, score: 1-5, reason: "<evidence_and_justification>" }, ...]\n` +
+    `    (Use sequential indices 0 to ${checklistIndices.length - 1} matching the check items above)\n` +
+    "  - feedback: 2-5 sentence overall summary\n\n" +
+    "CRITICAL: You MUST use the `submit_evaluation_scores` tool to return all your scores together. Do not output normal text.",
   );
 
   return sections.join("\n\n---\n\n");

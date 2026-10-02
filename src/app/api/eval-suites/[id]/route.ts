@@ -33,6 +33,7 @@ const updateSchema = z
     name: z.string().trim().min(1).max(120).optional(),
     description: z.string().max(1000).optional().nullable(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
+    threshold: z.number().int().min(1).max(5).optional(),
     dimensionIds: z.array(z.string()).optional(),
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
@@ -55,6 +56,7 @@ export const PATCH = withEditor<{ id: string }>(
       body.name !== undefined ||
       body.description !== undefined ||
       body.evaluatorAgentId !== undefined ||
+      body.threshold !== undefined ||
       body.dimensionIds !== undefined ||
       body.variables !== undefined;
 

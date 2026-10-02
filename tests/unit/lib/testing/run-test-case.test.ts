@@ -154,7 +154,7 @@ describe("run_test_case tool", () => {
       expect(result.category).toBe("evaluation");
       expect(result.caseId).toBe(201);
       expect(result.status).toBe("passed");
-      expect(result.score).toBe(95);
+      expect(result.score).toBeNull();
       expect(result.feedback).toBe("Comprehensive and polite answer.");
       expect(mockRunEvalCase).toHaveBeenCalled();
     });

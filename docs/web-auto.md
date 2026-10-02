@@ -220,8 +220,7 @@ Severity: ERRORED > FAILED > PASSED
 
 ### 6.1 Evaluator-Not-Configured Contract
 
-When a case contains judge-dependent assertions (`llm_judge`, `expectation`,
-`llm_expectation`) but its suite does not bind an Evaluator Agent
+When a case contains judge-dependent assertions (`llm_custom`) but its suite does not bind an Evaluator Agent
 (`evaluatorAgentId` is null):
 
 - The Playwright script and deterministic assertions **still execute** — an

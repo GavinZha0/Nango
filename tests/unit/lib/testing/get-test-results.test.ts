@@ -175,9 +175,9 @@ describe("get_test_results tool", () => {
       expect(result.category).toBe("evaluation");
       expect(result.suiteName).toBe("Support Benchmark");
       expect(result.runs).toHaveLength(3);
-      expect(result.runs[0]?.summary.averageScore).toBe(90);
-      expect(result.runs[1]?.summary.averageScore).toBe(75);
-      expect(result.runs[2]?.summary.averageScore).toBe(65);
+      expect(result.runs[0]?.summary.averageScore).toBeNull();
+      expect(result.runs[1]?.summary.averageScore).toBeNull();
+      expect(result.runs[2]?.summary.averageScore).toBeNull();
     });
 
     it("filters cases with failedOnly=true", async () => {

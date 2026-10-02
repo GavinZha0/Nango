@@ -13,8 +13,8 @@ describe("isDeepEqual", () => {
   });
 
   it("handles object key re-ordering without false-dirty", () => {
-    const objA = { type: "llm_judge", expectation: "valid", score: 100 };
-    const objB = { score: 100, type: "llm_judge", expectation: "valid" };
+    const objA = { type: "llm_custom", expectation: "valid", score: 100 };
+    const objB = { score: 100, type: "llm_custom", expectation: "valid" };
     expect(isDeepEqual(objA, objB)).toBe(true);
   });
 

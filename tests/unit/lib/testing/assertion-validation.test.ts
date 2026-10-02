@@ -27,13 +27,13 @@ describe("normalizeAndValidateAssertions", () => {
     const raw = [
       { type: "js_expression", expression: "root.status === 200" },
       { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 },
-      { type: "llm_judge", expectation: "Answer is clear and helpful" },
+      { type: "llm_custom", expectation: "Answer is clear and helpful" },
     ];
     const result = normalizeAndValidateAssertions(raw, "Case 1");
     expect(result.length).toBe(3);
     expect(result[0]?.type).toBe("js_expression");
     expect(result[1]?.type).toBe("metric");
-    expect(result[2]?.type).toBe("llm_judge");
+    expect(result[2]?.type).toBe("llm_custom");
   });
 
   it("throws descriptive error when assertion type is unsupported or missing required fields", () => {

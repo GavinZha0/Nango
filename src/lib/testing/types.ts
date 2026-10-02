@@ -84,7 +84,7 @@ export interface CreateTestCasesResult {
   suiteId: string;
   createdCount: number;
   cases: CreatedCaseItem[];
-  /** Non-blocking configuration warnings surfaced to the agent (e.g. llm_judge
+  /** Non-blocking configuration warnings surfaced to the agent (e.g. llm_custom/llm_dim
    *  assertions created under a suite that binds no evaluator agent). */
   warnings?: string[];
 }
@@ -222,7 +222,8 @@ export const ASSERTION_TYPES = [
   "js_expression",
   "tool_call",
   "metric",
-  "llm_judge",
+  "llm_dim",
+  "llm_custom",
 ] as const;
 
 export type AssertionTypeEnum = (typeof ASSERTION_TYPES)[number];

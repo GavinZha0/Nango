@@ -10,3 +10,4 @@
 export * from "./types";
 export * from "./variable-resolver";
 export * from "./evaluator.server";
+export * from "./verdict-engine.server";

@@ -348,7 +348,7 @@ describe("update_test_case tool", () => {
             name: "Visual check",
             enabled: true,
             input: { script: "await page.goto('/');", steps: "" },
-            assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+            assertions: [{ type: "llm_custom", expectation: "banner is visible" }],
           },
         ],
       );
@@ -356,7 +356,7 @@ describe("update_test_case tool", () => {
       const result = (await tool.execute!({
         category: "web-auto",
         caseId: 301,
-        assertions: [{ type: "llm_judge", expectation: "banner is visible" }],
+        assertions: [{ type: "llm_custom", expectation: "banner is visible" }],
       })) as UpdateTestCaseResult;
 
       expect(result.warnings).toBeDefined();

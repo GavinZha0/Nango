@@ -22,7 +22,8 @@ import type {
   JsExpressionAssertion,
   JsonPathAssertion,
   JsonSchemaAssertion,
-  LlmJudgeAssertion,
+  LlmCustomAssertion,
+  LlmDimAssertion,
   MetricAssertion,
   ToolCallAssertion,
 } from "./types";
@@ -47,7 +48,7 @@ export interface EvaluateAssertionsOptions {
 
 export interface EvaluationOutcome {
   deterministicResults: AssertionResult[];
-  llmAssertions: Array<{ index: number; spec: LlmJudgeAssertion }>;
+  llmAssertions: Array<{ index: number; spec: LlmDimAssertion | LlmCustomAssertion }>;
   allDeterministicPassed: boolean;
 }
 
@@ -84,30 +85,35 @@ export function evaluateAssertions(
   };
 
   const deterministicResults: AssertionResult[] = [];
-  const llmAssertions: Array<{ index: number; spec: LlmJudgeAssertion }> = [];
+  const llmAssertions: Array<{ index: number; spec: LlmDimAssertion | LlmCustomAssertion }> = [];
 
   for (let index = 0; index < assertions.length; index++) {
     const spec = assertions[index];
-    if (spec.type === "llm_judge" || spec.type === "expectation" || spec.type === "llm_expectation") {
-      const llmSpec = spec as LlmJudgeAssertion;
+    if (spec.type === "llm_dim") {
+      llmAssertions.push({ index, spec });
+      continue;
+    }
+
+    if (spec.type === "llm_custom") {
+      const customSpec = spec as LlmCustomAssertion;
       const mergedContext: Record<string, unknown> = {
         variables: mergedOptions.variables,
         ...(mergedOptions.runContext ?? {}),
       };
 
-      const resolvedSpec: LlmJudgeAssertion = {
-        ...llmSpec,
-        expectation: llmSpec.expectation
-          ? String(substituteInputTemplates(llmSpec.expectation, mergedOptions.input, mergedContext))
+      const resolvedSpec: LlmCustomAssertion = {
+        ...customSpec,
+        expectation: customSpec.expectation
+          ? String(substituteInputTemplates(customSpec.expectation, mergedOptions.input, mergedContext))
           : undefined,
-        unexpectation: llmSpec.unexpectation
-          ? String(substituteInputTemplates(llmSpec.unexpectation, mergedOptions.input, mergedContext))
+        unexpectation: customSpec.unexpectation
+          ? String(substituteInputTemplates(customSpec.unexpectation, mergedOptions.input, mergedContext))
           : undefined,
-        reference: llmSpec.reference
-          ? String(substituteInputTemplates(llmSpec.reference, mergedOptions.input, mergedContext))
+        reference: customSpec.reference
+          ? String(substituteInputTemplates(customSpec.reference, mergedOptions.input, mergedContext))
           : undefined,
-        context: llmSpec.context
-          ? llmSpec.context.map((c) => String(substituteInputTemplates(c, mergedOptions.input, mergedContext)))
+        context: customSpec.context
+          ? customSpec.context.map((c) => String(substituteInputTemplates(c, mergedOptions.input, mergedContext)))
           : undefined,
       };
 
@@ -567,6 +573,7 @@ function evaluateJsExpression(
       index,
       type: "js_expression",
       ok: Boolean(ok),
+      expression: spec.expression,
       message: ok ? undefined : "Expression returned falsy",
     };
   } catch (err) {
@@ -584,6 +591,7 @@ function evaluateJsExpression(
       index,
       type: "js_expression",
       ok: false,
+      expression: spec.expression,
       errored: isConfigError ? true : undefined,
       errorSource: isConfigError ? "config" : undefined,
       message: isTimeout
@@ -614,6 +622,8 @@ function evaluateToolCall(
       index,
       type: "tool_call",
       ok,
+      toolName: spec.toolName,
+      expectedCalls: 0,
       expected: `0 calls to ${spec.toolName}`,
       actual: `${callCount} calls`,
       message: ok ? undefined : `Forbidden tool "${spec.toolName}" was called ${callCount} time(s)`,
@@ -625,6 +635,8 @@ function evaluateToolCall(
       index,
       type: "tool_call",
       ok: false,
+      toolName: spec.toolName,
+      expectedCalls,
       expected: `>= ${expectedCalls} calls to ${spec.toolName}`,
       actual: `${callCount} calls`,
       message: `Tool "${spec.toolName}" was expected at least ${expectedCalls} time(s) but called ${callCount} time(s)`,
@@ -647,6 +659,8 @@ function evaluateToolCall(
         index,
         type: "tool_call",
         ok: false,
+        toolName: spec.toolName,
+        expectedCalls,
         expected: spec.expectedArgs,
         actual: matchingCalls.map((c) => c.args),
         message: `Tool "${spec.toolName}" was called, but none of the invocations matched the expected arguments`,
@@ -658,6 +672,11 @@ function evaluateToolCall(
     index,
     type: "tool_call",
     ok: true,
+    toolName: spec.toolName,
+    expectedCalls,
+    expected: spec.expectedArgs !== undefined
+      ? spec.expectedArgs
+      : (expectedCalls > 1 ? `>= ${expectedCalls} calls to ${spec.toolName}` : `Call ${spec.toolName}`),
     actual: `${callCount} calls`,
   };
 }
@@ -694,6 +713,8 @@ function evaluateMetric(
       ok: false,
       errored: true,
       errorSource: "config",
+      metric: spec.metric,
+      expected: `${spec.operator} ${spec.threshold}`,
       message: `Metric "${spec.metric}" was not recorded for this execution`,
     };
   }
@@ -721,6 +742,7 @@ function evaluateMetric(
     index,
     type: "metric",
     ok,
+    metric: spec.metric,
     expected: `${spec.operator} ${spec.threshold}`,
     actual: actualValue,
     message: ok ? undefined : `Metric ${spec.metric} (${actualValue}) failed rule: ${spec.operator} ${spec.threshold}`,

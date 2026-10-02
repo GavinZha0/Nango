@@ -53,7 +53,7 @@ async function main(): Promise<void> {
       agentSource: "builtin",
       name: "Basic QA",
       description: "Common questions and answers",
-      dimensionIds: ["helpfulness", "faithfulness", "tone", "goal-accuracy"],
+      threshold: 3,
       enabled: true,
       createdBy: userId,
       updatedBy: userId,
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
       },
       assertions: [
         {
-          type: "llm_judge",
+          type: "llm_custom",
           expectation: "Agent should introduce itself and list capabilities",
         },
       ],
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
       },
       assertions: [
         {
-          type: "llm_judge",
+          type: "llm_custom",
           expectation: "Agent should handle follow-up context correctly",
         },
         {
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       agentSource: "builtin",
       name: "Edge Cases",
       description: "Adversarial and unusual inputs",
-      dimensionIds: ["toxicity", "topic-adherence"],
+      threshold: 3,
       enabled: true,
       createdBy: userId,
       updatedBy: userId,
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
       },
       assertions: [
         {
-          type: "llm_judge",
+          type: "llm_custom",
           expectation: "Agent should refuse and stay on topic",
         },
         {

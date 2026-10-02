@@ -24,7 +24,7 @@ export interface EvalSuiteRow {
   evaluatorAgentId: string | null;
   name: string;
   description: string | null;
-  dimensionIds: string[];
+  threshold: number;
   variables?: Record<string, unknown>;
   enabled: boolean;
   visibility: "private" | "public";
@@ -146,7 +146,7 @@ export interface CreateSuiteInput {
   evaluatorAgentId?: string | null;
   name: string;
   description?: string | null;
-  dimensionIds?: string[];
+  threshold?: number;
   variables?: Record<string, unknown>;
 }
 
@@ -154,7 +154,7 @@ export interface PatchSuiteInput {
   name?: string;
   description?: string | null;
   evaluatorAgentId?: string | null;
-  dimensionIds?: string[];
+  threshold?: number;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "private" | "public";
@@ -279,7 +279,7 @@ export const evalActions = {
       agentSource,
       credentialId: credentialId ?? null,
       name: "Drafts",
-      dimensionIds: [],
+      threshold: 3,
       description: "Auto-generated suite for capturing conversational feedback.",
     });
     

@@ -289,19 +289,19 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
     });
   });
 
-  describe("6. LLM Judge partitioning", () => {
-    it("partitions LLM judge assertions for Tier 2 evaluation", () => {
+  describe("6. LLM dim and custom partitioning", () => {
+    it("partitions LLM assertions for Tier 2 evaluation", () => {
       const assertions: AssertionSpec[] = [
         { type: "jsonpath", path: "$.status", operator: "==", expected: "ok" },
-        { type: "llm_judge", expectation: "Assistant should explain the policy politely", reference: "Refunds take 3 days." },
-        { type: "expectation", expectation: "Banner should display successfully" },
+        { type: "llm_custom", expectation: "Assistant should explain the policy politely", reference: "Refunds take 3 days." },
+        { type: "llm_dim", dim: "politeness" },
       ];
 
       const outcome = evaluateAssertions({ status: "ok" }, assertions);
       expect(outcome.deterministicResults).toHaveLength(1);
       expect(outcome.deterministicResults[0].ok).toBe(true);
       expect(outcome.llmAssertions).toHaveLength(2);
-      expect(outcome.llmAssertions[0].spec.expectation).toBe("Assistant should explain the policy politely");
+      expect((outcome.llmAssertions[0].spec as import("@/lib/assertions").LlmCustomAssertion).expectation).toBe("Assistant should explain the policy politely");
       expect(outcome.allDeterministicPassed).toBe(true);
     });
   });
@@ -370,10 +370,10 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(substituted.url).toBe("https://example.com/api");
     });
 
-    it("interpolates variable and input templates in LLM Judge assertions", () => {
+    it("interpolates variable and input templates in LLM Custom assertions", () => {
       const assertions: AssertionSpec[] = [
         {
-          type: "llm_judge",
+          type: "llm_custom",
           expectation: "User name should be {{variables.targetUser}}",
           unexpectation: "Must not mention {{input.forbiddenKeyword}}",
           reference: "Standard policy of {{variables.orgName}}",
@@ -388,10 +388,13 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
 
       expect(outcome.llmAssertions).toHaveLength(1);
       const resolvedLlm = outcome.llmAssertions[0].spec;
-      expect(resolvedLlm.expectation).toBe("User name should be Alice");
-      expect(resolvedLlm.unexpectation).toBe("Must not mention ConfidentialSecret");
-      expect(resolvedLlm.reference).toBe("Standard policy of Acme Corp");
-      expect(resolvedLlm.context).toEqual(["Testing on environment production"]);
+      expect(resolvedLlm.type).toBe("llm_custom");
+      if (resolvedLlm.type === "llm_custom") {
+        expect(resolvedLlm.expectation).toBe("User name should be Alice");
+        expect(resolvedLlm.unexpectation).toBe("Must not mention ConfidentialSecret");
+        expect(resolvedLlm.reference).toBe("Standard policy of Acme Corp");
+        expect(resolvedLlm.context).toEqual(["Testing on environment production"]);
+      }
     });
 
     it("normalizes case names", () => {

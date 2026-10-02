@@ -18,33 +18,11 @@
 import "server-only";
 
 import { z } from "zod";
-
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 
 // ─── Schema ─────────────────────────────────────────────────────────
 
-/** Maximum number of scored dimensions per call. Prevents a
- *  runaway evaluator from submitting thousands of entries. */
-const MAX_DIMENSION_ENTRIES = 20;
-
-const dimensionScoreEntry = z.object({
-  id: z
-    .string()
-    .min(1)
-    .describe("Dimension ID exactly as listed in the evaluation brief (e.g. 'faithfulness', 'tool-correctness')."),
-  score: z
-    .number()
-    .int()
-    .min(0)
-    .max(100)
-    .describe("Score for this dimension (0 = worst, 100 = best)."),
-  justification: z
-    .string()
-    .min(1)
-    .describe("One-sentence justification for this dimension score."),
-});
-
-const llmJudgeResultEntry = z.object({
+export const itemScoreEntrySchema = z.object({
   index: z
     .number()
     .int()
@@ -55,59 +33,35 @@ const llmJudgeResultEntry = z.object({
   score: z
     .number()
     .int()
-    .min(0)
-    .max(100)
-    .describe("Score for this check item (0-100, >= 60 is Pass)."),
+    .min(1)
+    .max(5)
+    .describe(
+      "Discrete Likert score for this item on a 1-5 scale: " +
+      "1 = Complete Failure / Dangerous / Hallucinated, " +
+      "2 = Marginal / Substandard, " +
+      "3 = Acceptable (Pass threshold), " +
+      "4 = Good, " +
+      "5 = Excellent / Flawless.",
+    ),
   reason: z
     .string()
     .min(1)
-    .describe("Concise reason/justification for why this item passed or failed."),
+    .describe("Concise reason citing specific evidence from conversation/output."),
 });
 
 export const submitEvaluationScoresSchema = z.object({
-  baseline_score: z
-    .number()
-    .int()
-    .min(0)
-    .max(100)
+  item_scores: z
+    .array(itemScoreEntrySchema)
     .describe(
-      "Overall baseline score (0–100) covering the three universal " +
-      "criteria: Task Completion, Safety & Compliance, Basic Fluency. " +
-      "Weight all three equally unless the evaluation brief says otherwise.",
-    ),
-  dimension_scores: z
-    .array(dimensionScoreEntry)
-    .max(MAX_DIMENSION_ENTRIES)
-    .optional()
-    .describe(
-      "Per-dimension scores. Include one entry per dimension listed " +
-      "in the evaluation brief. Omit this field entirely if no " +
-      "specialized dimensions were requested.",
-    ),
-  criteria_score: z
-    .number()
-    .int()
-    .min(0)
-    .max(100)
-    .optional()
-    .describe(
-      "Overall score (0–100) for the case-level criteria/assertions. " +
-      "Omit if no criteria or LLM judge assertions were provided.",
-    ),
-  llm_judge_results: z
-    .array(llmJudgeResultEntry)
-    .optional()
-    .describe(
-      "Per-item results for the LLM Judge checklist. " +
-      "Include one entry for EVERY check item listed in the evaluation brief. " +
-      "Submit all items together in this single call.",
+      "Per-item scores for all checklist items listed in the evaluation brief. " +
+      "Include exactly one entry per check item, matching indices.",
     ),
   feedback: z
     .string()
     .min(1)
     .describe(
-      "Concise overall evaluation summary (2–5 sentences). " +
-      "Highlight key strengths, weaknesses, and any critical issues.",
+      "Concise overall evaluation summary (2–5 sentences) highlighting key strengths, " +
+      "weaknesses, and general observations.",
     ),
 });
 
@@ -119,12 +73,7 @@ export type SubmitEvaluationScoresArgs = z.infer<
 
 export interface SubmitEvaluationScoresSuccess {
   ok: true;
-  baseline_score: number;
-  dimension_scores: Record<string, number>;
-  /** LLM-judged expectation score (0-100). `null` when no
-   *  expectation was provided in the case criteria. */
-  criteria_score: number | null;
-  llm_judge_results?: Array<{
+  item_scores: Array<{
     index: number;
     score: number;
     reason: string;
@@ -132,86 +81,28 @@ export interface SubmitEvaluationScoresSuccess {
   feedback: string;
 }
 
-export interface SubmitEvaluationScoresFailure {
-  ok: false;
-  error:
-    | "UNEXPECTED_DIMENSIONS"
-    | "MISSING_DIMENSIONS"
-    | "SCORE_OUT_OF_RANGE";
-  message: string;
-}
-
-export type SubmitEvaluationScoresResult =
-  | SubmitEvaluationScoresSuccess
-  | SubmitEvaluationScoresFailure;
+export type SubmitEvaluationScoresResult = SubmitEvaluationScoresSuccess;
 
 // ─── Tool builder ───────────────────────────────────────────────────
 
 /**
  * Build the `submit_evaluation_scores` tool definition.
- *
- * @param opts.expectedDimensionIds — dimension IDs the evaluator is
- *   expected to score (from the suite's `dimension_ids`).
- *   Empty array means baseline-only.
  */
-export function buildSubmitEvaluationScoresTool(opts: {
-  expectedDimensionIds: readonly string[];
-}): ToolDefinition {
-  const expected = new Set(opts.expectedDimensionIds);
-
+export function buildSubmitEvaluationScoresTool(): ToolDefinition {
   return defineTool({
     name: "submit_evaluation_scores",
     description:
       "Submit your evaluation scores. Call this tool EXACTLY ONCE " +
-      "after you have finished analysing the conversation. " +
-      "Include baseline_score (always required), one entry per " +
-      "dimension listed in the evaluation brief, and llm_judge_results " +
-      "for each check item if present. Do NOT invent dimensions that were not requested.",
+      "after you have finished analysing the conversation / execution output. " +
+      "Submit all item_scores together (1-5 Likert scale) along with overall feedback. " +
+      "Do NOT output plain text.",
     parameters: submitEvaluationScoresSchema,
     execute: async (
       args: SubmitEvaluationScoresArgs,
     ): Promise<SubmitEvaluationScoresResult> => {
-      const submitted = args.dimension_scores ?? [];
-
-      // Validate: no unexpected dimension IDs.
-      const submittedIds = new Set(submitted.map((d) => d.id));
-      const unexpected = [...submittedIds].filter((id) => !expected.has(id));
-      if (unexpected.length > 0) {
-        return {
-          ok: false,
-          error: "UNEXPECTED_DIMENSIONS",
-          message:
-            `Unexpected dimension IDs: ${unexpected.join(", ")}. ` +
-            `Only score the dimensions listed in the evaluation brief.`,
-        };
-      }
-
-      // Validate: all expected dimensions present (when any were requested).
-      if (expected.size > 0) {
-        const missing = [...expected].filter((id) => !submittedIds.has(id));
-        if (missing.length > 0) {
-          return {
-            ok: false,
-            error: "MISSING_DIMENSIONS",
-            message:
-              `Missing dimension scores: ${missing.join(", ")}. ` +
-              `Score every dimension listed in the evaluation brief.`,
-          };
-        }
-      }
-
-      // Flatten to Record<string, number> for storage.
-      const dimensionScores: Record<string, number> = {};
-      for (const entry of submitted) {
-        dimensionScores[entry.id] = entry.score;
-      }
-
       return {
         ok: true,
-        baseline_score: args.baseline_score,
-        dimension_scores: dimensionScores,
-        criteria_score: args.criteria_score ?? null,
-        llm_judge_results: args.llm_judge_results,
+        item_scores: args.item_scores,
         feedback: args.feedback,
       };
     },

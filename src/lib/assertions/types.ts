@@ -87,37 +87,25 @@ export const metricAssertionSchema = z.object({
 
 export type MetricAssertion = z.infer<typeof metricAssertionSchema>;
 
-// ── 6. LLM Judge / Semantic Assertion Schema ─────────────────────────────────
+// ── 6. LLM Dimensions & Custom Semantic Assertion Schemas ────────────────────
 
-export const llmJudgeAssertionSchema = z.object({
-  type: z.literal("llm_judge"),
+export const llmDimAssertionSchema = z.object({
+  type: z.literal("llm_dim"),
+  dim: z.string().min(1).describe("Predefined evaluation dimension ID, e.g. task-completion, safety, fluency, faithfulness, tool-correctness, code-quality, format-compliance, tone-persona"),
+});
+
+export type LlmDimAssertion = z.infer<typeof llmDimAssertionSchema>;
+
+export const llmCustomAssertionSchema = z.object({
+  type: z.literal("llm_custom"),
   expectation: z.string().min(1).optional().describe("Natural language expected behavior or outcome"),
   unexpectation: z.string().min(1).optional().describe("Natural language prohibited or unexpected behavior"),
   reference: z.string().min(1).optional().describe("Ground truth reference context"),
-  dimensionId: z.string().optional().describe("Optional evaluation dimension identifier"),
   context: z.array(z.string()).optional().describe("Supplementary context notes"),
   referenceImage: z.string().optional().describe("Visual reference screenshot (Web Auto)"),
 });
 
-export type LlmJudgeAssertion = z.infer<typeof llmJudgeAssertionSchema>;
-
-export const llmExpectationAssertionSchema = z.object({
-  type: z.literal("llm_expectation"),
-  expectation: z.string().min(1),
-  unexpectation: z.string().optional(),
-  reference: z.string().optional(),
-});
-
-export type LlmExpectationAssertion = z.infer<typeof llmExpectationAssertionSchema>;
-
-export const expectationAssertionSchema = z.object({
-  type: z.literal("expectation"),
-  expectation: z.string().min(1),
-  unexpectation: z.string().optional(),
-  reference: z.string().optional(),
-});
-
-export type ExpectationAssertion = z.infer<typeof expectationAssertionSchema>;
+export type LlmCustomAssertion = z.infer<typeof llmCustomAssertionSchema>;
 
 // ── 7. Discriminated Union & Array Schemas ───────────────────────────────────
 
@@ -127,9 +115,8 @@ export const assertionSpecSchema = z.discriminatedUnion("type", [
   jsExpressionAssertionSchema,
   toolCallAssertionSchema,
   metricAssertionSchema,
-  llmJudgeAssertionSchema,
-  llmExpectationAssertionSchema,
-  expectationAssertionSchema,
+  llmDimAssertionSchema,
+  llmCustomAssertionSchema,
 ]);
 
 export const assertionsArraySchema = z.array(assertionSpecSchema);
@@ -144,10 +131,17 @@ export interface AssertionResult {
   index: number;
   type: string;
   ok: boolean;
+  /** Dimension ID if this is an llm_dim assertion */
+  dim?: string;
   /** Type-specific metadata */
   path?: string;
   expected?: unknown;
   actual?: unknown;
+  /** Deterministic snapshot metadata for self-contained inspection */
+  toolName?: string;
+  expectedCalls?: number;
+  metric?: string;
+  expression?: string;
   /** Optional human-readable explanation */
   message?: string;
   /** LLM evaluation score (0-100) */
@@ -171,7 +165,7 @@ export interface AssertionResult {
    */
   errored?: boolean;
   /**
-   * True when this assertion was NOT evaluated (e.g. an llm_judge row whose
+   * True when this assertion was NOT evaluated (e.g. an llm_custom/llm_dim row whose
    * suite has no evaluator agent configured, or a judge row gated out by a
    * deterministic failure). Renders as "not evaluated", never as a scored
    * failure.
@@ -189,15 +183,15 @@ export interface ErrorEnvelope {
 }
 
 /**
- * Standard reason attached to skipped llm_judge rows and to the error envelope
+ * Standard reason attached to skipped LLM rows and to the error envelope
  * when a case requires LLM evaluation but its suite binds no evaluator agent.
  * Shared across Evaluation & Web Auto so both modules describe the condition
  * identically (config problem — never a 0-score "model was bad" signal).
  */
 export const REASON_EVALUATOR_NOT_CONFIGURED =
-  "Evaluator agent is not configured; the LLM judge portion of this case was not evaluated.";
+  "Evaluator agent is not configured; the LLM portion of this case was not evaluated.";
 
-/** Reason on llm_judge rows gated out by a deterministic assertion failure. */
+/** Reason on LLM rows gated out by a deterministic assertion failure. */
 export const REASON_SKIPPED_DETERMINISTIC_GATE =
   "Skipped: deterministic assertion(s) failed before this item was evaluated.";
 
@@ -207,29 +201,32 @@ export const REASON_DIMENSIONS_REQUIRE_EVALUATOR =
 
 /**
  * Assertion types evaluated by an LLM evaluator agent rather than by code.
- * Single source of truth for the "judge-dependent" type set.
+ * Single source of truth for the LLM assertion type set.
  */
-export type JudgeDependentType = "llm_judge" | "expectation" | "llm_expectation";
+export type LlmAssertionType = "llm_dim" | "llm_custom";
+export type JudgeDependentType = LlmAssertionType;
 
 /**
- * True for assertion types that are evaluated by an LLM evaluator agent rather
- * than by code: `llm_judge` plus the legacy `expectation` / `llm_expectation`
- * aliases. Shared so every module classifies "judge-dependent" identically.
+ * True for assertion types that are evaluated by an LLM evaluator agent:
+ * `llm_dim` and `llm_custom`.
  */
-export function isJudgeDependentType(type: string): type is JudgeDependentType {
-  return type === "llm_judge" || type === "expectation" || type === "llm_expectation";
+export function isLlmAssertionType(type: string): type is LlmAssertionType {
+  return type === "llm_dim" || type === "llm_custom";
 }
+
+export const isJudgeDependentType = isLlmAssertionType;
 
 // ── 9. Category Assertion-Type Contract ─────────────────────────────────────
 
-/** Canonical assertion type names (legacy `expectation` variants excluded). */
+/** Canonical assertion type names. */
 export type AssertionTypeName =
   | "jsonpath"
   | "json_schema"
   | "js_expression"
   | "tool_call"
   | "metric"
-  | "llm_judge";
+  | "llm_dim"
+  | "llm_custom";
 
 export type TestCategoryName = "verification" | "evaluation" | "web-auto";
 
@@ -246,8 +243,8 @@ export const CATEGORY_TYPE_MAPPING: Record<
   readonly AssertionTypeName[]
 > = {
   verification: ["jsonpath", "json_schema", "js_expression", "metric"],
-  evaluation: ["jsonpath", "js_expression", "llm_judge", "metric", "tool_call"],
-  "web-auto": ["js_expression", "jsonpath", "llm_judge"],
+  evaluation: ["jsonpath", "js_expression", "tool_call", "metric", "llm_dim", "llm_custom"],
+  "web-auto": ["js_expression", "jsonpath", "llm_custom"],
 };
 
 /**

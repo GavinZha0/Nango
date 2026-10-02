@@ -93,7 +93,7 @@ export function SaveToEvalDialog({
         : "Draft Case " + new Date().toISOString().slice(0, 10);
 
       const assertions = expectedOutcome.trim()
-        ? [{ type: "llm_judge", expectation: expectedOutcome.trim() }]
+        ? [{ type: "llm_custom", expectation: expectedOutcome.trim() }]
         : [];
 
       const input: CreateCaseInput = {

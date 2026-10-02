@@ -1925,10 +1925,7 @@ export const EvalSuiteTable = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
-    dimensionIds: jsonb("dimension_ids")
-      .notNull()
-      .default(sql`'[]'::jsonb`)
-      .$type<string[]>(),
+    threshold: integer("threshold").notNull().default(3),
     enabled: boolean("enabled").notNull().default(true),
     visibility: text("visibility").notNull().default("private"),
     createdBy: uuid("created_by")
@@ -1988,38 +1985,6 @@ export const EvalCaseTable = pgTable(
 
 export type EvalCaseEntity = typeof EvalCaseTable.$inferSelect;
 
-/** EvalAgentRun — agent-level batch execution. See docs/evaluation.md. */
-export const EvalAgentRunTable = pgTable(
-  "eval_agent_run",
-  {
-    id: uuid("id").primaryKey().notNull().defaultRandom(),
-    agentId: text("agent_id").notNull(),
-    status: text("status").notNull(),
-    score: integer("score"),
-    totalCount: integer("total_count").notNull(),
-    passedCount: integer("passed_count").notNull().default(0),
-    failedCount: integer("failed_count").notNull().default(0),
-    erroredCount: integer("errored_count").notNull().default(0),
-    triggeredBy: text("triggered_by").notNull(),
-    createdBy: uuid("created_by")
-      .notNull()
-      .references(() => UserTable.id, { onDelete: "cascade" }),
-    startedAt: timestamp("started_at")
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP`),
-    finishedAt: timestamp("finished_at"),
-  },
-  (t) => [
-    index("eval_agent_run_agent_idx").on(
-      t.agentId,
-      t.startedAt.desc(),
-    ),
-  ],
-);
-
-export type EvalAgentRunEntity = typeof EvalAgentRunTable.$inferSelect;
-export type EvalAgentRunStatus = "running" | "passed" | "failed" | "errored";
-
 /** EvalRun — suite-level execution. See docs/evaluation.md. */
 export const EvalRunTable = pgTable(
   "eval_run",
@@ -2028,11 +1993,8 @@ export const EvalRunTable = pgTable(
     suiteId: uuid("suite_id")
       .notNull()
       .references(() => EvalSuiteTable.id, { onDelete: "cascade" }),
-    agentRunId: uuid("agent_run_id").references(() => EvalAgentRunTable.id, {
-      onDelete: "cascade",
-    }),
+    threshold: integer("threshold").notNull().default(3),
     status: text("status").notNull(),
-    score: integer("score"),
     totalCount: integer("total_count").notNull(),
     passedCount: integer("passed_count").notNull().default(0),
     failedCount: integer("failed_count").notNull().default(0),
@@ -2048,7 +2010,6 @@ export const EvalRunTable = pgTable(
       t.suiteId,
       t.startedAt.desc(),
     ),
-    index("eval_run_agent_run_idx").on(t.agentRunId),
     index("eval_run_recovery_idx")
       .on(t.startedAt)
       .where(sql`${t.status} = 'running'`),
@@ -2069,14 +2030,6 @@ export const EvalCaseResultTable = pgTable(
       .notNull()
       .references(() => EvalCaseTable.id, { onDelete: "cascade" }),
     status: text("status").notNull(),
-    /** Overall case score (0-100). */
-    score: integer("score"),
-    /** Per-dimension scores from evaluator: { "faithfulness": 90, ... }. */
-    dimensionScores: jsonb("dimension_scores").$type<
-      Record<string, number>
-    >(),
-    /** Case-level criteria score (evaluator expectation score × deterministic pass rate). */
-    criteriaScore: integer("criteria_score"),
     /** Unified per-assertion verdict list (deterministic & LLM judge). */
     assertionResults: jsonb("assertion_results")
       .notNull()

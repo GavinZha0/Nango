@@ -83,12 +83,16 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("evaluation");
-      expect(res.types).toEqual(["jsonpath", "js_expression", "llm_judge", "metric", "tool_call"]);
-      expect(res.schemas.length).toBe(5);
+      expect(res.types).toEqual(["jsonpath", "js_expression", "tool_call", "metric", "llm_dim", "llm_custom"]);
+      expect(res.schemas.length).toBe(6);
 
-      const llmJudgeItem = res.schemas.find((s) => s.type === "llm_judge");
-      expect(llmJudgeItem).toBeDefined();
-      expect(llmJudgeItem?.example).toHaveProperty("expectation");
+      const llmCustomItem = res.schemas.find((s) => s.type === "llm_custom");
+      expect(llmCustomItem).toBeDefined();
+      expect(llmCustomItem?.example).toHaveProperty("expectation");
+
+      const llmDimItem = res.schemas.find((s) => s.type === "llm_dim");
+      expect(llmDimItem).toBeDefined();
+      expect(llmDimItem?.example).toHaveProperty("dim");
 
       const jsonpathItem = res.schemas.find((s) => s.type === "jsonpath");
       expect(jsonpathItem).toBeDefined();
@@ -100,7 +104,7 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("web-auto");
-      expect(res.types).toEqual(["js_expression", "jsonpath", "llm_judge"]);
+      expect(res.types).toEqual(["js_expression", "jsonpath", "llm_custom"]);
       expect(res.schemas.length).toBe(3);
     });
 
@@ -162,7 +166,7 @@ describe("get_assertion_schema tool", () => {
       await expect(
         tool.execute!({
           category: "verification",
-          assertionType: "llm_judge",
+          assertionType: "llm_custom",
         }),
       ).rejects.toThrow(/not supported for category 'verification'/i);
     });

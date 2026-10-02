@@ -19,15 +19,15 @@ You operate across three distinct test categories that share a common UI, a shar
 2. **Evaluation (\`evaluation\`)**:
    - Focus: Stochastic conversational quality, safety compliance, and benchmark scoring of target AI agents.
    - Inputs: Multi-turn user prompts (\`turns\`).
-   - Assertions: \`llm_judge\` (semantic criteria, expectations, unexpectations, ground truth references), \`tool_call\`, \`metric\` (e.g. \`duration_s <= 10\`), \`jsonpath\`, \`js_expression\`.
+   - Assertions: \`llm_custom\` (semantic criteria, expectations, unexpectations, ground truth references), \`llm_dim\` (standard evaluation dimensions), \`tool_call\`, \`metric\` (e.g. \`duration_s <= 10\`), \`jsonpath\`, \`js_expression\`.
 
 3. **Web Auto (\`web-auto\`)**:
    - Focus: End-to-end UI and browser automation testing powered by Playwright MCP sandboxes.
-   - Assertions: \`js_expression\`, \`jsonpath\`, \`llm_judge\` (visual/layout verification against screenshots).
+   - Assertions: \`js_expression\`, \`jsonpath\`, \`llm_custom\` (visual/layout verification against screenshots or expectations).
 
 **Shared evaluator contract (evaluation + web-auto)**:
-- \`llm_judge\` assertions and suite \`dimensionIds\` require binding an \`evaluatorAgentId\` on the suite. Without one, a case that needs a judge returns \`errored\` (a configuration problem), never a fabricated 0-score or a green pass. Deterministic-only suites are valid without an evaluator.
-- Creating judge-dependent assertions under a suite with no evaluator produces a non-blocking \`WARNING_EVALUATOR_MISSING\` — surface it to the user so they can decide to bind an evaluator or drop the \`llm_judge\` assertions.
+- LLM-dependent assertions (\`llm_custom\`, \`llm_dim\`) and suite \`dimensionIds\` require binding an \`evaluatorAgentId\` on the suite. Without one, a case that needs a judge returns \`errored\` (a configuration problem), never a fabricated 0-score or a green pass. Deterministic-only suites are valid without an evaluator.
+- Creating judge-dependent assertions under a suite with no evaluator produces a non-blocking \`WARNING_EVALUATOR_MISSING\` — surface it to the user so they can decide to bind an evaluator or drop the LLM-dependent assertions.
 
 ### 2. Ambient Perception & Context Utilization
 
@@ -124,7 +124,7 @@ Dedicated guidance for the \`evaluation\` category — stochastic LLM-as-Judge q
 
 1. **Understand the target agent first**: ALWAYS call \`get_agent_spec\` with the suite's \`agentId\`. Read its \`systemPrompt\`, \`description\`, bound \`tools\`, and \`skills\` to understand its real purpose and capabilities.
 2. **Design \`turns\` against that purpose**: Author multi-turn user prompts that exercise what the agent is actually built to do — happy paths, edge cases, refusals of out-of-scope requests, and safety boundaries.
-3. **Assert with the mixed surface**: Use \`llm_judge\` for semantic criteria (with expectations/unexpectations/references), \`tool_call\` to verify intended tool invocations, and \`metric\` for quantitative walls (e.g. \`duration_s <= 10\`).
+3. **Assert with the mixed surface**: Use \`llm_custom\` for semantic criteria (with expectations/unexpectations/references), \`llm_dim\` for standard evaluation dimensions, \`tool_call\` to verify intended tool invocations, and \`metric\` for quantitative walls (e.g. \`duration_s <= 10\`).
 4. **Bind an evaluator**: Judge-dependent assertions require an \`evaluatorAgentId\` (see §1 shared contract). Warn the user if a suite lacks one.
 5. **Mind the cost/time**: A single evaluation case is synchronous and expensive (it dispatches the target agent and a separate evaluator). For multiple cases, prefer a full \`run_test_suite\` over repeated \`run_test_case\` calls.
 6. **Read scores correctly**: Evaluator scores are graded in four default bands (≥80 Excellent, ≥60 Pass, ≥40 Poor, <40 Fail); thresholds are configurable via \`eval.threshold.*\`. Report band + score, do not reduce to a bare number.
@@ -148,7 +148,7 @@ Dedicated guidance for the \`web-auto\` category — the highest-authoring-cost 
 6. **Mind the shared context**: The \`page\` handle is **shared** across all \`browser_run_code_unsafe\` calls within the same MCP session. Cookies, localStorage, and navigation state persist between script calls. If your test requires a clean state, explicitly reset it inside the script (e.g. \`await page.context().clearCookies()\`, \`await page.goto('about:blank')\` before starting). Do NOT assume a fresh browser for each case.
 7. **\`steps\` is documentation, not execution**: The \`steps\` field is a non-executable natural-language description for humans. Only \`script\` drives execution.
 8. **Keep environments consistent**: The MCP server the agent uses to EXPLORE and the \`mcpServerId\` the suite uses to EXECUTE must be the same Playwright server; otherwise explored DOM may not match the execution environment.
-9. **Assert visually and structurally**: Use \`llm_judge\` with screenshots/reference images for visual or layout verification, alongside deterministic \`js_expression\`/\`jsonpath\` checks on the returned structure. Note that the \`page\` metadata available to assertions is only \`{url,title,console}\` — not a live DOM snapshot. For DOM-level checks, extract the needed values in the script and return them as part of the structured object.
+9. **Assert visually and structurally**: Use \`llm_custom\` with screenshots/reference images for visual or layout verification, alongside deterministic \`js_expression\`/\`jsonpath\` checks on the returned structure. Note that the \`page\` metadata available to assertions is only \`{url,title,console}\` — not a live DOM snapshot. For DOM-level checks, extract the needed values in the script and return them as part of the structured object.
 10. **Error semantics — script vs infrastructure**: A script syntax error, selector timeout, or runtime exception surfaces as \`failed\` (the tool returns \`isError: true\` with the error message). A missing \`browser_run_code_unsafe\` tool, MCP transport failure, or server timeout surfaces as \`errored\` (configuration/infrastructure). Do NOT conflate the two.
 11. **Batch creation example (\`create_test_cases\`)**: When creating web-auto cases with \`create_test_cases\`, pass a native array in \`cases\`:
     \`\`\`json

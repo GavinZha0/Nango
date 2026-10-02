@@ -47,7 +47,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
     evaluatorAgentId: "evaluator-agent-1",
     visibility: "private",
     createdBy: editorUser.id,
-    dimensionIds: ["helpfulness", "clarity"],
+    threshold: 3,
     credentialId: null,
   });
 
@@ -103,7 +103,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
         caseId: 42,
         targetAgentId: "agent-target-1",
         evaluatorAgentId: "evaluator-agent-1",
-        dimensionIds: ["helpfulness", "clarity"],
+        threshold: 3,
         ownerId: editorUser.id,
       }),
     );

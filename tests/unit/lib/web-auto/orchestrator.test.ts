@@ -128,7 +128,7 @@ describe("runWebAutoCase", () => {
     expect(outcome.verdict.overall.passed).toBe(true);
   });
 
-  it("returns errored (never a silent pass) when evaluator is missing but llm_judge expectations exist and deterministic assertions pass", async () => {
+  it("returns errored (never a silent pass) when evaluator is missing but llm_custom expectations exist and deterministic assertions pass", async () => {
     mockRunWebAutoMcp.mockResolvedValueOnce({
       status: "success",
       executionOutput: { result: { ok: true } },
@@ -145,7 +145,7 @@ describe("runWebAutoCase", () => {
         input: { script: "return { ok: true };" },
         assertions: [
           { type: "js_expression", expression: "result.ok === true" },
-          { type: "expectation", expectation: "Success banner is visible" },
+          { type: "llm_custom", expectation: "Success banner is visible" },
         ],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
@@ -154,12 +154,12 @@ describe("runWebAutoCase", () => {
     expect(outcome.status).toBe("errored");
     expect(outcome.score).toBeUndefined();
     expect(outcome.verdict.overall.passed).toBe(false);
-    expect(outcome.verdict.overall.reason).toContain("Evaluator agent is not configured");
+    expect(outcome.verdict.overall.reason).toContain("no evaluator agent is configured");
     expect(outcome.error?.source).toBe("config");
     expect(outcome.error?.details).toEqual({ missing: "evaluatorAgentId", suiteId: "suite-1" });
 
     const deterministic = outcome.assertionResults.find((r) => r.type === "js_expression");
-    const llm = outcome.assertionResults.find((r) => r.type === "llm_judge");
+    const llm = outcome.assertionResults.find((r) => r.type === "llm_custom");
     expect(deterministic?.ok).toBe(true);
     expect(llm?.ok).toBe(false);
     expect(llm?.skipped).toBe(true);
@@ -184,7 +184,7 @@ describe("runWebAutoCase", () => {
         input: { script: "return { ok: false };" },
         assertions: [
           { type: "js_expression", expression: "result.ok === true" },
-          { type: "expectation", expectation: "Success banner is visible" },
+          { type: "llm_custom", expectation: "Success banner is visible" },
         ],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
@@ -193,10 +193,10 @@ describe("runWebAutoCase", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.score).toBe(0);
     expect(outcome.verdict.overall.passed).toBe(false);
-    expect(outcome.verdict.overall.reason).toBe("Deterministic assertions failed");
+    expect(outcome.verdict.overall.reason).toContain("Deterministic assertion checks failed");
 
     const deterministic = outcome.assertionResults.find((r) => r.type === "js_expression");
-    const llm = outcome.assertionResults.find((r) => r.type === "llm_judge");
+    const llm = outcome.assertionResults.find((r) => r.type === "llm_custom");
     expect(deterministic?.ok).toBe(false);
     expect(llm?.ok).toBe(false);
     expect(llm?.skipped).toBe(true);
@@ -213,9 +213,9 @@ describe("runWebAutoCase", () => {
     });
     mockRunWebAutoEvaluation.mockResolvedValueOnce({
       passed: true,
-      score: 88,
+      score: 4,
       feedback: "Looks good",
-      expectationResults: [{ index: 0, score: 88, reason: "Banner present" }],
+      expectationResults: [{ index: 0, score: 4, reason: "Banner present" }],
     });
 
     const outcome = await runWebAutoCase({
@@ -227,7 +227,7 @@ describe("runWebAutoCase", () => {
         input: { script: "return { ok: true };" },
         assertions: [
           { type: "js_expression", expression: "result.ok === true" },
-          { type: "expectation", expectation: "Success banner is visible" },
+          { type: "llm_custom", expectation: "Success banner is visible" },
         ],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
@@ -235,11 +235,11 @@ describe("runWebAutoCase", () => {
 
     expect(mockRunWebAutoEvaluation).toHaveBeenCalledTimes(1);
     expect(outcome.status).toBe("passed");
-    expect(outcome.score).toBe(88);
+    expect(outcome.score).toBe(4);
 
-    const llm = outcome.assertionResults.find((r) => r.type === "llm_judge");
+    const llm = outcome.assertionResults.find((r) => r.type === "llm_custom");
     expect(llm?.ok).toBe(true);
-    expect(llm?.score).toBe(88);
+    expect(llm?.score).toBe(4);
     expect(llm?.skipped).toBeUndefined();
   });
 
@@ -253,9 +253,9 @@ describe("runWebAutoCase", () => {
     });
     mockRunWebAutoEvaluation.mockResolvedValueOnce({
       passed: false,
-      score: 40,
+      score: 2,
       feedback: "Banner missing",
-      expectationResults: [{ index: 0, score: 40, reason: "not visible" }],
+      expectationResults: [{ index: 0, score: 2, reason: "not visible" }],
     });
 
     const outcome = await runWebAutoCase({
@@ -265,18 +265,18 @@ describe("runWebAutoCase", () => {
       case: {
         id: 1,
         input: { script: "return { ok: true };" },
-        assertions: [{ type: "expectation", expectation: "Success banner is visible" }],
+        assertions: [{ type: "llm_custom", expectation: "Success banner is visible" }],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
     });
 
     expect(outcome.status).toBe("failed");
-    expect(outcome.score).toBe(40);
+    expect(outcome.score).toBe(2);
     expect(outcome.error).toBeNull();
 
-    const llm = outcome.assertionResults.find((r) => r.type === "llm_judge");
+    const llm = outcome.assertionResults.find((r) => r.type === "llm_custom");
     expect(llm?.ok).toBe(false);
-    expect(llm?.score).toBe(40);
+    expect(llm?.score).toBe(2);
     expect(llm?.skipped).toBeUndefined();
   });
 });

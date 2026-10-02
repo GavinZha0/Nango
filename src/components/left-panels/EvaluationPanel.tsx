@@ -449,7 +449,7 @@ export function EvaluationPanel(): ReactNode {
     name: string;
     description?: string | null;
     evaluatorAgentId?: string | null;
-    dimensionIds: string[];
+    threshold: number;
     variables?: Record<string, unknown>;
   }): Promise<void> => {
     if (!editingSuite) return;

@@ -33,7 +33,8 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
   const isErrorType = verdict.type === "error";
   const isSkipped = verdict.skipped === true;
   const isLlmJudge =
-    verdict.type === "llm_judge" ||
+    verdict.type === "llm_custom" ||
+    verdict.type === "llm_dim" ||
     verdict.type === "expectation" ||
     verdict.type === "llm_expectation";
 
@@ -181,7 +182,16 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
     return `${prefix}${verdict.message ?? "Execution error"}`;
   }
 
-  if (verdict.type === "llm_judge" || verdict.type === "expectation" || verdict.type === "llm_expectation") {
+  if (
+    verdict.type === "llm_custom" ||
+    verdict.type === "llm_dim" ||
+    verdict.type === "expectation" ||
+    verdict.type === "llm_expectation"
+  ) {
+    if (verdict.type === "llm_dim") {
+      const dimName = verdict.dim || (spec && "dim" in spec ? spec.dim : undefined);
+      return dimName ? `Dimension: ${dimName}` : "LLM Dimension";
+    }
     const verdictText = verdict.expectation || verdict.unexpectation || verdict.reference;
     if (verdictText) return verdictText;
     if (spec) {
@@ -206,7 +216,21 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
     if (spec.type === "metric") return `${spec.metric} ${spec.operator} ${spec.threshold}`;
   }
 
+  // Fallbacks using verdict's self-contained snapshot fields when spec is omitted
+  if (verdict.type === "tool_call" || (verdict as { toolName?: string }).toolName) {
+    const toolName = (verdict as { toolName?: string }).toolName;
+    return toolName ? `Tool: ${toolName}` : "Tool Call";
+  }
+
+  if (verdict.type === "js_expression" && (verdict as { expression?: string }).expression) {
+    return (verdict as { expression: string }).expression;
+  }
+
   if (verdict.type === "metric") {
+    const metricName = (verdict as { metric?: string }).metric;
+    if (metricName && verdict.expected !== undefined) {
+      return `${metricName} ${formatValue(verdict.expected)}`;
+    }
     if (verdict.expected !== undefined) {
       return `${formatValue(verdict.expected)}`;
     }
@@ -215,6 +239,7 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
         .replace(/^Metric:\s*/i, "")
         .replace(/^Metric\s+/i, "");
     }
+    return "Metric check";
   }
 
   if (verdict.path) {

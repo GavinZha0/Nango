@@ -65,16 +65,16 @@ function makeInput(overrides: RunCaseOverrides = {}) {
 }
 
 describe("runEvalCase — evaluator-not-configured semantics", () => {
-  it("short-circuits before target dispatch when suite selects dimensions without an evaluator", async () => {
+  it("short-circuits before target dispatch when case selects dimensions without an evaluator", async () => {
     const result = await runEvalCase(
       makeInput({
-        dimensionIds: ["faithfulness"],
-        assertions: [{ type: "js_expression", expression: "true" }],
+        assertions: [
+          { type: "llm_dim", dim: "faithfulness" },
+        ],
       }),
     );
 
     expect(result.status).toBe("errored");
-    expect(result.score).toBeNull();
     expect(mockRunnerStart).not.toHaveBeenCalled();
     expect(mockWriteCaseResult).toHaveBeenCalledWith(
       expect.objectContaining({ status: "errored", error: expect.objectContaining({ source: "config" }) }),
@@ -84,18 +84,17 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
   it("short-circuits before target dispatch for judge-only cases without an evaluator", async () => {
     const result = await runEvalCase(
       makeInput({
-        assertions: [{ type: "llm_judge", expectation: "Clear and safe answer" }],
+        assertions: [{ type: "llm_custom", expectation: "Clear and safe answer" }],
       }),
     );
 
     expect(result.status).toBe("errored");
-    expect(result.score).toBeNull();
     expect(mockRunnerStart).not.toHaveBeenCalled();
 
     const rows = result.assertionResults ?? [];
     expect(rows).toHaveLength(1);
     const row = rows[0];
-    expect(row.type).toBe("llm_judge");
+    expect(row.type).toBe("llm_custom");
     expect(row.ok).toBe(false);
     expect(row.skipped).toBe(true);
     expect(row.score).toBeUndefined();
@@ -106,24 +105,23 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
       makeInput({
         assertions: [
           { type: "js_expression", expression: "true" },
-          { type: "llm_judge", expectation: "Clear and safe answer" },
+          { type: "llm_custom", expectation: "Clear and safe answer" },
         ],
       }),
     );
 
     expect(result.status).toBe("errored");
-    expect(result.score).toBeNull();
     expect(mockRunnerStart).toHaveBeenCalledTimes(1); // target dispatched, judge not
 
     const rows = result.assertionResults ?? [];
     expect(rows).toHaveLength(2);
     const deterministic = rows.find((r) => r.type === "js_expression");
-    const llm = rows.find((r) => r.type === "llm_judge");
+    const llm = rows.find((r) => r.type === "llm_custom");
     expect(deterministic?.ok).toBe(true);
     expect(llm?.ok).toBe(false);
     expect(llm?.skipped).toBe(true);
     expect(llm?.score).toBeUndefined();
-    expect(result.feedback).toContain("Evaluator agent is not configured");
+    expect(result.feedback).toContain("no evaluator agent is configured");
   });
 
   it("fails on deterministic assertions even without an evaluator, marking judge rows skipped (1:1 index kept)", async () => {
@@ -131,18 +129,17 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
       makeInput({
         assertions: [
           { type: "js_expression", expression: "false" },
-          { type: "llm_judge", expectation: "Clear and safe answer" },
+          { type: "llm_custom", expectation: "Clear and safe answer" },
         ],
       }),
     );
 
     expect(result.status).toBe("failed");
-    expect(result.score).toBe(0);
 
     const rows = result.assertionResults ?? [];
     expect(rows).toHaveLength(2);
     const deterministic = rows.find((r) => r.type === "js_expression");
-    const llm = rows.find((r) => r.type === "llm_judge");
+    const llm = rows.find((r) => r.type === "llm_custom");
     expect(deterministic?.ok).toBe(false);
     expect(llm?.ok).toBe(false);
     expect(llm?.skipped).toBe(true);
@@ -150,11 +147,11 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
     expect(llm?.score).toBeUndefined();
 
     expect(mockWriteCaseResult).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "failed", score: 0 }),
+      expect.objectContaining({ status: "failed" }),
     );
   });
 
-  it("keeps pure-deterministic suites passing at 100 when no evaluator and no dimensions are configured", async () => {
+  it("keeps pure-deterministic suites passing when no evaluator and no dimensions are configured", async () => {
     const result = await runEvalCase(
       makeInput({
         assertions: [{ type: "js_expression", expression: "true" }],
@@ -162,13 +159,12 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
     );
 
     expect(result.status).toBe("passed");
-    expect(result.score).toBe(100);
     expect(mockRunnerStart).toHaveBeenCalledTimes(1);
     const rows = result.assertionResults ?? [];
     expect(rows).toHaveLength(1);
     expect(rows[0].ok).toBe(true);
     expect(mockWriteCaseResult).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "passed", score: 100 }),
+      expect.objectContaining({ status: "passed" }),
     );
   });
 
@@ -178,7 +174,7 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
         evaluatorAgentId: "eval-1",
         assertions: [
           { type: "js_expression", expression: "true" },
-          { type: "llm_judge", expectation: "Clear and safe answer" },
+          { type: "llm_custom", expectation: "Clear and safe answer" },
         ],
       }),
     );
@@ -186,16 +182,78 @@ describe("runEvalCase — evaluator-not-configured semantics", () => {
     // 1 target dispatch + 2 evaluator retries
     expect(mockRunnerStart).toHaveBeenCalledTimes(3);
     expect(result.status).toBe("errored");
-    expect(result.score).toBeNull();
     expect(result.error).toContain("Evaluator did not call submit_evaluation_scores");
 
     const rows = result.assertionResults ?? [];
     expect(rows).toHaveLength(2);
     const deterministic = rows.find((r) => r.type === "js_expression");
-    const llm = rows.find((r) => r.type === "llm_judge");
+    const llm = rows.find((r) => r.type === "llm_custom");
     expect(deterministic?.ok).toBe(true);
     expect(llm?.ok).toBe(false);
-    expect(llm?.skipped).toBe(true);
     expect(llm?.reason).toContain("Evaluator failed");
+  });
+
+  it("remaps 0-based relative checklist scores back to interleaved assertion indices and retains self-contained metadata", async () => {
+    mockReadEvents
+      .mockResolvedValueOnce([]) // for target agent
+      .mockResolvedValueOnce([   // for evaluator agent
+        {
+          type: "tool_call_chunk",
+          payload: {
+            toolName: "submit_evaluation_scores",
+            args: JSON.stringify({
+              item_scores: [
+                { index: 0, score: 5, reason: "First LLM item passed" },
+                { index: 1, score: 4, reason: "Second LLM item passed" },
+              ],
+              feedback: "Overall good performance.",
+            }),
+          },
+        },
+      ]);
+
+    const result = await runEvalCase(
+      makeInput({
+        evaluatorAgentId: "eval-1",
+        assertions: [
+          { type: "js_expression", expression: "true" }, // index 0 (deterministic)
+          { type: "llm_custom", expectation: "Clear and safe answer" }, // index 1 (LLM)
+          { type: "metric", metric: "duration_s", operator: "<=", threshold: 10 }, // index 2 (deterministic)
+          { type: "llm_dim", dim: "safety" }, // index 3 (LLM)
+        ],
+      }),
+    );
+
+    expect(result.status).toBe("passed");
+    const rows = result.assertionResults ?? [];
+    expect(rows).toHaveLength(4);
+
+    // Row 0: js_expression
+    expect(rows[0].index).toBe(0);
+    expect(rows[0].type).toBe("js_expression");
+    expect(rows[0].ok).toBe(true);
+    expect(rows[0].expression).toBe("true");
+
+    // Row 1: llm_custom (remapped from relative index 0)
+    expect(rows[1].index).toBe(1);
+    expect(rows[1].type).toBe("llm_custom");
+    expect(rows[1].ok).toBe(true);
+    expect(rows[1].score).toBe(5);
+    expect(rows[1].reason).toBe("First LLM item passed");
+    expect(rows[1].expectation).toBe("Clear and safe answer");
+
+    // Row 2: metric
+    expect(rows[2].index).toBe(2);
+    expect(rows[2].type).toBe("metric");
+    expect(rows[2].ok).toBe(true);
+    expect(rows[2].metric).toBe("duration_s");
+
+    // Row 3: llm_dim (remapped from relative index 1)
+    expect(rows[3].index).toBe(3);
+    expect(rows[3].type).toBe("llm_dim");
+    expect(rows[3].ok).toBe(true);
+    expect(rows[3].score).toBe(4);
+    expect(rows[3].reason).toBe("Second LLM item passed");
+    expect(rows[3].dim).toBe("safety");
   });
 });

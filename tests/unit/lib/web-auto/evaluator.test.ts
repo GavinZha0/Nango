@@ -49,7 +49,7 @@ describe("runWebAutoEvaluation", () => {
     expect(res.error).toBeDefined();
   });
 
-  it("passes when evaluator submits score >= 60", async () => {
+  it("passes when evaluator submits score >= threshold", async () => {
     mockRunnerStart.mockResolvedValueOnce({ status: "succeeded", runId: "run-eval-2" });
     mockReadEvents.mockResolvedValueOnce([
       {
@@ -57,8 +57,7 @@ describe("runWebAutoEvaluation", () => {
         payload: {
           toolName: "submit_evaluation_scores",
           args: JSON.stringify({
-            baseline_score: 90,
-            criteria_score: 85,
+            item_scores: [{ index: 0, score: 4, reason: "UI looks good and match expectations" }],
             feedback: "UI looks good and match expectations",
           }),
         },
@@ -73,11 +72,11 @@ describe("runWebAutoEvaluation", () => {
     });
 
     expect(res.passed).toBe(true);
-    expect(res.score).toBe(85);
+    expect(res.score).toBe(4);
     expect(res.feedback).toBe("UI looks good and match expectations");
   });
 
-  it("marks as failed when evaluator submits score < 60", async () => {
+  it("marks as failed when evaluator submits score < threshold", async () => {
     mockRunnerStart.mockResolvedValueOnce({ status: "succeeded", runId: "run-eval-3" });
     mockReadEvents.mockResolvedValueOnce([
       {
@@ -85,8 +84,7 @@ describe("runWebAutoEvaluation", () => {
         payload: {
           toolName: "submit_evaluation_scores",
           args: JSON.stringify({
-            baseline_score: 40,
-            criteria_score: 45,
+            item_scores: [{ index: 0, score: 2, reason: "Button was missing in the DOM" }],
             feedback: "Button was missing in the DOM",
           }),
         },
@@ -101,11 +99,11 @@ describe("runWebAutoEvaluation", () => {
     });
 
     expect(res.passed).toBe(false);
-    expect(res.score).toBe(45);
+    expect(res.score).toBe(2);
     expect(res.feedback).toBe("Button was missing in the DOM");
   });
 
-  it("supports batch llm_judge_results with individual scores and reasons", async () => {
+  it("supports batch item_scores with individual scores and reasons", async () => {
     mockRunnerStart.mockResolvedValueOnce({ status: "succeeded", runId: "run-eval-4" });
     mockReadEvents.mockResolvedValueOnce([
       {
@@ -113,11 +111,10 @@ describe("runWebAutoEvaluation", () => {
         payload: {
           toolName: "submit_evaluation_scores",
           args: JSON.stringify({
-            baseline_score: 80,
-            llm_judge_results: [
-              { index: 0, score: 95, reason: "Header is perfectly visible." },
-              { index: 1, score: 100, reason: "No error toast appeared." },
-              { index: 2, score: 85, reason: "Matches reference text." },
+            item_scores: [
+              { index: 0, score: 5, reason: "Header is perfectly visible." },
+              { index: 1, score: 5, reason: "No error toast appeared." },
+              { index: 2, score: 4, reason: "Matches reference text." },
             ],
             feedback: "Overall UI workflow succeeded cleanly.",
           }),
@@ -137,13 +134,13 @@ describe("runWebAutoEvaluation", () => {
     });
 
     expect(res.passed).toBe(true);
-    expect(res.score).toBe(93); // avg(95, 100, 85) = 93.33 -> 93
+    expect(res.score).toBe(4);
     expect(res.expectationResults).toHaveLength(3);
-    expect(res.expectationResults[0].score).toBe(95);
+    expect(res.expectationResults[0].score).toBe(5);
     expect(res.expectationResults[0].reason).toBe("Header is perfectly visible.");
-    expect(res.expectationResults[1].score).toBe(100);
+    expect(res.expectationResults[1].score).toBe(5);
     expect(res.expectationResults[1].reason).toBe("No error toast appeared.");
-    expect(res.expectationResults[2].score).toBe(85);
+    expect(res.expectationResults[2].score).toBe(4);
     expect(res.expectationResults[2].reason).toBe("Matches reference text.");
   });
 });

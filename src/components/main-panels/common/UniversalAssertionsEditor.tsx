@@ -31,9 +31,12 @@ import { cn } from "@/lib/utils";
 import type {
   AssertionSpec,
   JsonPathOperator,
+  LlmCustomAssertion,
+  LlmDimAssertion,
   MetricName,
   MetricOperator,
 } from "@/lib/assertions";
+import { BUILTIN_EVAL_DIMENSIONS } from "@/lib/evaluation/types";
 
 export type UniversalEditorMode = "verification" | "web-auto" | "evaluation";
 
@@ -62,7 +65,8 @@ type TabType =
   | "schema"
   | "tool_call"
   | "metric"
-  | "llm_judge"
+  | "llm_dim"
+  | "llm_custom"
   | "json";
 
 const SCHEMA_TEMPLATES = [
@@ -119,13 +123,17 @@ function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMod
 
     const hasMetrics = assertions.some((a) => a.type === "metric");
     if (hasMetrics) return "metric";
+
+    const hasLlmDims = assertions.some((a) => a.type === "llm_dim");
+    if (hasLlmDims) return "llm_dim";
+
+    const hasLlmCustoms = assertions.some((a) => a.type === "llm_custom");
+    if (hasLlmCustoms) return "llm_custom";
   }
 
-  if (mode === "web-auto" || mode === "evaluation") {
-    const hasLlmJudges = assertions.some(
-      (a) => a.type === "llm_judge" || a.type === "expectation" || a.type === "llm_expectation",
-    );
-    if (hasLlmJudges) return "llm_judge";
+  if (mode === "web-auto") {
+    const hasLlmCustoms = assertions.some((a) => a.type === "llm_custom");
+    if (hasLlmCustoms) return "llm_custom";
   }
 
   return "expression";
@@ -220,11 +228,12 @@ export function UniversalAssertionsEditor({
     () => currentAssertions.some((a) => a.type === "metric"),
     [currentAssertions],
   );
-  const hasLlmJudges = useMemo(
-    () =>
-      currentAssertions.some(
-        (a) => a.type === "llm_judge" || a.type === "expectation" || a.type === "llm_expectation",
-      ),
+  const hasLlmDims = useMemo(
+    () => currentAssertions.some((a) => a.type === "llm_dim"),
+    [currentAssertions],
+  );
+  const hasLlmCustoms = useMemo(
+    () => currentAssertions.some((a) => a.type === "llm_custom"),
     [currentAssertions],
   );
 
@@ -255,7 +264,7 @@ export function UniversalAssertionsEditor({
   const setSchemaRawText = (val: string) => setSchemaTextState((prev) => ({ ...prev, text: val }));
   const [schemaError, setSchemaError] = useState<string | null>(null);
 
-  // Tab definitions: JS Expression FIRST -> JSONPath NEXT -> Domain-specific -> LLM Judge -> JSON Last
+  // Tab definitions: JS Expression FIRST -> JSONPath NEXT -> Domain-specific -> Dimensions & Custom -> JSON Last
   const TABS = useMemo(() => {
     const list: Array<{ id: TabType; label: string; hasDot: boolean }> = [];
 
@@ -269,21 +278,23 @@ export function UniversalAssertionsEditor({
       list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
     }
 
-    // 3. Evaluation has Tool Calls & Metrics
+    // 3. Evaluation has Tool Calls, Metrics, Dimensions, and Custom
     if (mode === "evaluation") {
       list.push({ id: "tool_call", label: "Tool Calls", hasDot: hasToolCalls });
       list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
+      list.push({ id: "llm_dim", label: "Dimensions", hasDot: hasLlmDims });
+      list.push({ id: "llm_custom", label: "Custom", hasDot: hasLlmCustoms });
     }
 
-    // 4. Web Auto and Evaluation have LLM Judge (Stochastic)
-    if (mode === "web-auto" || mode === "evaluation") {
-      list.push({ id: "llm_judge", label: "LLM Judge", hasDot: hasLlmJudges });
+    // 4. Web Auto has Custom Semantic
+    if (mode === "web-auto") {
+      list.push({ id: "llm_custom", label: "Custom", hasDot: hasLlmCustoms });
     }
 
     // 5. All modes end with JSON
     list.push({ id: "json", label: "JSON", hasDot: false });
     return list;
-  }, [mode, hasExpressions, hasPathMatches, hasSchema, hasToolCalls, hasMetrics, hasLlmJudges]);
+  }, [mode, hasExpressions, hasPathMatches, hasSchema, hasToolCalls, hasMetrics, hasLlmDims, hasLlmCustoms]);
 
   const isHistoryView = overrideText !== null;
   const activeTab = isHistoryView ? "json" : subTab;
@@ -815,13 +826,69 @@ export function UniversalAssertionsEditor({
           </div>
         )}
 
-        {/* 6. LLM Judge Tab (Atomic: expectation, unexpectation, or reference) */}
-        {activeTab === "llm_judge" && (
+        {/* 6. Dimensions Tab (llm_dim: specialized quality dimensions) */}
+        {activeTab === "llm_dim" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <Label className="text-[10px] font-semibold text-muted-foreground block">
+                • Specialized Quality Dimensions (1-5 Likert scale evaluated by Evaluator Agent). Select to enable:
+              </Label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {BUILTIN_EVAL_DIMENSIONS.map((dim) => {
+                const isSelected = currentAssertions.some(
+                  (a) => a.type === "llm_dim" && (a as LlmDimAssertion).dim === dim.id,
+                );
+
+                const handleToggle = () => {
+                  if (readOnly) return;
+                  if (isSelected) {
+                    commitAssertions(
+                      currentAssertions.filter(
+                        (a) => !(a.type === "llm_dim" && (a as LlmDimAssertion).dim === dim.id),
+                      ),
+                    );
+                  } else {
+                    commitAssertions([
+                      ...currentAssertions,
+                      { type: "llm_dim", dim: dim.id },
+                    ]);
+                  }
+                };
+
+                return (
+                  <div
+                    key={dim.id}
+                    onClick={handleToggle}
+                    className={cn(
+                      "flex flex-col justify-between p-2 rounded-md border text-left transition-all cursor-pointer select-none",
+                      isSelected
+                        ? "border-amber-500/50 bg-amber-500/10 text-foreground"
+                        : "border-border/40 bg-muted/10 text-muted-foreground hover:border-border hover:bg-muted/20",
+                      readOnly && "pointer-events-none opacity-80"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold">{dim.name}</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/80 mt-1 line-clamp-3 leading-snug">
+                      {dim.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 7. Custom Semantic Tab (llm_custom: expectation, unexpectation, or reference) */}
+        {activeTab === "llm_custom" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground block">
-                  • Evaluated by LLM Judge: Atomic checks for expected outcomes, forbidden constraints, or reference facts.
+                  • Custom Semantic Assertions (1-5 Likert scale evaluated by LLM Judge).
                 </Label>
               </div>
               {!readOnly && (
@@ -830,7 +897,7 @@ export function UniversalAssertionsEditor({
                   variant="outline"
                   size="sm"
                   className="h-5 px-1.5 text-[9px] gap-1 hover:bg-muted font-semibold shrink-0"
-                  onClick={() => addAssertion({ type: "llm_judge", expectation: "" })}
+                  onClick={() => addAssertion({ type: "llm_custom", expectation: "" })}
                 >
                   <Plus className="h-2.5 w-2.5" /> Add
                 </Button>
@@ -839,43 +906,38 @@ export function UniversalAssertionsEditor({
 
             <div className="space-y-2">
               {currentAssertions.map((spec, idx) => {
-                if (
-                  spec.type !== "llm_judge" &&
-                  spec.type !== "expectation" &&
-                  spec.type !== "llm_expectation"
-                )
-                  return null;
+                if (spec.type !== "llm_custom") return null;
 
+                const customSpec = spec as LlmCustomAssertion;
                 const kind =
-                  "unexpectation" in spec && spec.unexpectation !== undefined
+                  customSpec.unexpectation !== undefined
                     ? "unexpectation"
-                    : "reference" in spec && spec.reference !== undefined && !("expectation" in spec && spec.expectation)
+                    : customSpec.reference !== undefined && !customSpec.expectation
                       ? "reference"
                       : "expectation";
 
                 const currentValue =
                   kind === "unexpectation"
-                    ? (spec as { unexpectation?: string }).unexpectation ?? ""
+                    ? customSpec.unexpectation ?? ""
                     : kind === "reference"
-                      ? (spec as { reference?: string }).reference ?? ""
-                      : (spec as { expectation?: string }).expectation ?? "";
+                      ? customSpec.reference ?? ""
+                      : customSpec.expectation ?? "";
 
                 return (
                   <div
                     key={idx}
                     className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/10 p-1.5"
                   >
-                    {/* Compact mode dropdown selector with 3-color ball indicators */}
                     <Select
                       value={kind}
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
                         if (!val) return;
                         const { expectation: _e, unexpectation: _u, reference: _r, ...rest } =
-                          spec as Record<string, unknown>;
+                          customSpec as Record<string, unknown>;
                         updateAssertionAt(idx, {
                           ...rest,
-                          type: "llm_judge",
+                          type: "llm_custom",
                           [val]: currentValue,
                         } as AssertionSpec);
                       }}
@@ -917,16 +979,15 @@ export function UniversalAssertionsEditor({
                       </SelectContent>
                     </Select>
 
-                    {/* Single atomic input box */}
                     <Input
                       value={currentValue}
                       onChange={(e) => {
                         const val = e.target.value;
                         const { expectation: _e, unexpectation: _u, reference: _r, ...rest } =
-                          spec as Record<string, unknown>;
+                          customSpec as Record<string, unknown>;
                         updateAssertionAt(idx, {
                           ...rest,
-                          type: "llm_judge",
+                          type: "llm_custom",
                           [kind]: val,
                         } as AssertionSpec);
                       }}

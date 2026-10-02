@@ -185,7 +185,8 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           targetCredentialId: suite.credentialId ?? undefined,
           agentSource: suite.agentSource === "backend" ? "backend" : "builtin",
           evaluatorAgentId: suite.evaluatorAgentId,
-          dimensionIds: (suite.dimensionIds ?? []) as string[],
+          dimensionIds: [],
+          threshold: suite.threshold ?? 3,
           turns,
           assertions: specs,
           ownerId: ctx.userId,
@@ -210,7 +211,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           status,
           durationMs: outcome.durationMs ?? 0,
           assertionResults,
-          score: outcome.score ?? null,
+          score: null,
           feedback: outcome.feedback ?? null,
           error: outcome.error ?? null,
         };
