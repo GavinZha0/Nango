@@ -141,6 +141,16 @@ Web Auto is the only test subsystem permitted to reference credentials for real-
 * **Assertion Division of Rights (`literalVariables`)**: `evaluateAssertions` receives strictly `literalVariables`. Credential secrets never reach assertion diffs or sandbox scopes.
 * **Evaluator Feedback Redaction**: Feedback and expectation reasons returned by the Evaluator Agent are sanitized before persisting to `web_auto_case_result` and returning to the frontend.
 
+### 3.7 Cross-Case Variable Referencing & 3-Digit Numeric Aliases
+Sequential suite execution collects outputs from each completed case into `suiteContext`:
+* **Data Extraction (`extractWebAutoStructuredData`)**: Unwraps MCP `{ result: ... }` payloads into clean business objects while retaining optional `page` metadata.
+* **Registration & Aliasing**: Registers completed cases under both normalized full name (e.g. `010_create_order`) and 3-digit prefix alias (e.g. `010`).
+* **Script Interpolation & JS Scope**:
+  1. **Template Interpolation**: Script and steps strings interpolate `{{cases.010.output.<path>}}` as well as dynamic generators (`{{$uuid}}`, `{{$timestamp}}`) prior to execution.
+  2. **Frozen JS Object**: Injected into the IIFE wrapper as `const cases = Object.freeze(...)`, directly accessible in Playwright scripts as `cases["010"].output.<prop>`.
+* **Assertion Engine Support**: Injected into `evaluateAssertions`'s `runContext.cases`, enabling `js_expression` assertions (`cases["010"].output.orderId === result.orderId`) and `jsonpath` templates.
+* **Security & Sanitization**: Earliest sanitization applies before registering output into `suiteContext`, ensuring secrets never leak downstream.
+
 ---
 
 ## 4. End-to-End Workflows

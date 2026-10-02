@@ -174,6 +174,8 @@ export interface RunWebAutoCaseInput {
    * Omit for standalone single-case runs (API / tester tool) — they self-resolve.
    */
   preResolved?: import("@/lib/testing/variable-resolver.server").ResolvedSuiteVariablesResult;
+  /** Suite context containing prior executed case inputs and outputs */
+  suiteContext?: Record<string, unknown>;
 }
 
 export interface RunWebAutoSuiteInput {

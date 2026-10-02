@@ -39,6 +39,7 @@ export function findUnresolvedTokens(node: unknown): string[] {
 }
 
 export { computeNextCasePrefix } from "./prefix";
+export { registerCaseInSuiteContext, type SuiteCaseContextData } from "@/lib/testing/suite-context";
 
 
 /**

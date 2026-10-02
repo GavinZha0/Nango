@@ -554,6 +554,8 @@ function evaluateJsExpression(
     const variables =
       (sanitizeForSandbox(options.variables ?? {}) as Record<string, unknown>) ?? {};
     const root = sanitizeForSandbox(options.runContext?.root ?? payload);
+    const cases =
+      (sanitizeForSandbox(options.runContext?.cases ?? {}) as Record<string, unknown>) ?? {};
 
     // 白名单注入纯数据；不再展开 options.runContext → 自动剥离 page 及任意宿主句柄。
     const contextObj = Object.freeze({
@@ -563,6 +565,7 @@ function evaluateJsExpression(
       root,
       input,
       variables,
+      cases,
       ...variables,
     });
 

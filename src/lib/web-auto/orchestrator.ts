@@ -15,7 +15,12 @@ import "server-only";
 import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { recordRunNotification } from "@/lib/runner/notifications";
-import { evaluateAssertions, determineCaseVerdict } from "@/lib/assertions";
+import {
+  evaluateAssertions,
+  determineCaseVerdict,
+  resolveInput,
+} from "@/lib/assertions";
+import { registerCaseInSuiteContext } from "@/lib/testing/suite-context";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import { redactSensitiveData, redactErrorEnvelope } from "@/lib/testing/redact";
 import { runWebAutoMcp } from "./runner-mcp";
@@ -35,6 +40,27 @@ function publishWebAutoFrame(ownerId: string, frame: WebAutoFrame): void {
   publish(ownerId, { kind: "web_auto", ownerId, frame });
 }
 
+/**
+ * Extract structured business output from a Playwright execution output.
+ * Unwraps `{ result: ... }` while preserving optional page metadata.
+ */
+export function extractWebAutoStructuredData(executionOutput: unknown): unknown {
+  if (
+    executionOutput &&
+    typeof executionOutput === "object" &&
+    "result" in executionOutput
+  ) {
+    const env = executionOutput as { result?: unknown; page?: unknown };
+    if (env.result !== undefined && env.result !== null) {
+      if (typeof env.result === "object" && !Array.isArray(env.result) && env.page) {
+        return { page: env.page, ...(env.result as Record<string, unknown>) };
+      }
+      return env.result;
+    }
+  }
+  return executionOutput ?? {};
+}
+
 // ─── Single case execution ─────────────────────────────────────────────
 
 /**
@@ -46,10 +72,9 @@ export async function runWebAutoCase(
 ): Promise<WebAutoExecutionOutcome> {
   const startedAt: number = Date.now();
 
-  // Step 1: MCP execution (Playwright script)
   const rawInput = (input.case.input ?? {}) as Record<string, unknown>;
-  const scriptContent = typeof rawInput.script === "string" ? rawInput.script : null;
-  if (!scriptContent) {
+  const rawScript = typeof rawInput.script === "string" ? rawInput.script : null;
+  if (!rawScript) {
     const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
       index: 0,
       type: "error",
@@ -136,18 +161,32 @@ export async function runWebAutoCase(
     };
   }
 
-  // Step 2: Wrap script with IIFE and inject resolved variables
+  // Step 2: Resolve dynamic generators and cross-case references in input payload
+  const contextForResolution = {
+    cases: input.suiteContext ?? {},
+    variables: resolvedVariables,
+    ...resolvedVariables,
+  };
+  const resolvedInput = resolveInput(rawInput, contextForResolution);
+  const effectiveScript =
+    typeof resolvedInput.script === "string" ? resolvedInput.script : rawScript;
+
+  // Step 3: Wrap script with IIFE and inject resolved variables and cases
   // QUIRK: JSON.stringify does not escape U+2028/U+2029 which are line
   // terminators in ES5 string literals — raw embedding would SyntaxError.
   const safeJson = JSON.stringify(resolvedVariables)
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
+  const safeCasesJson = JSON.stringify(input.suiteContext ?? {})
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
   const scriptWithVariables = `(() => {
   const variables = Object.freeze(${safeJson});
-  return (${scriptContent.trim()});
+  const cases = Object.freeze(${safeCasesJson});
+  return (${effectiveScript.trim()});
 })()`;
 
-  // Step 3: MCP execution (Playwright script)
+  // Step 4: MCP execution (Playwright script)
   const effectiveTimeoutSec = input.suite.timeoutSec ?? 60;
   const mcpResult = await runWebAutoMcp({
     mcpServerId: input.suite.mcpServerId,
@@ -254,11 +293,14 @@ export async function runWebAutoCase(
     };
   }
 
-  // Step 4: Evaluate assertions using universal engine
+  // Step 5: Evaluate assertions using universal engine
   // Pass literalVariables ONLY so credentials never leak into assertion error diffs or LLM evaluators
   const outcome = evaluateAssertions(sanitizedOutput, assertions, {
     variables: literalVariables,
     metrics: { durationMs: mcpResult.durationMs },
+    runContext: {
+      cases: input.suiteContext ?? {},
+    },
   });
 
   const deterministicResult = {
@@ -395,6 +437,7 @@ export async function runWebAutoCase(
 
   return {
     status,
+    resolvedInput,
     executionOutput: sanitizedOutput,
     outputTruncated: false,
     assertionResults: unifiedAssertionResults,
@@ -521,6 +564,7 @@ async function runWebAutoSuiteCases(
 ): Promise<void> {
   const suiteStartedAt: number = Date.now();
   const timeoutMs: number = input.suite.timeoutSec * 1000;
+  const suiteContext: Record<string, unknown> = {};
 
   // Resolve suite variables once for the entire suite run (aligns with
   // Verification/Evaluation one-shot pattern). All cases in this run see
@@ -562,7 +606,7 @@ async function runWebAutoSuiteCases(
       continue;
     }
 
-    // Execute case with pre-resolved variables
+    // Execute case with pre-resolved variables and suite context
     const outcome = await runWebAutoCase({
       caseId: c.id,
       suiteId: input.suiteId,
@@ -570,6 +614,13 @@ async function runWebAutoSuiteCases(
       case: c,
       ownerId: input.ownerId,
       preResolved,
+      suiteContext,
+    });
+
+    const outputData = extractWebAutoStructuredData(outcome.executionOutput);
+    registerCaseInSuiteContext(suiteContext, c.name, {
+      input: outcome.resolvedInput ?? (c.input as Record<string, unknown> ?? {}),
+      output: outputData,
     });
 
     // Persist result

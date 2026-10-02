@@ -27,8 +27,8 @@ import { runMcpCase } from "./runner-mcp";
 import { resolveEffectiveToolName } from "./tool-name";
 import * as storage from "./storage";
 import {
-  normalizeCaseName,
   extractMcpStructuredData,
+  registerCaseInSuiteContext,
 } from "@/lib/verification/resolve-input";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import type {
@@ -381,24 +381,16 @@ async function runSuiteCases(
       effectiveToolName,
     });
 
-    const normalizedKey = normalizeCaseName(c.name);
     const structured = extractMcpStructuredData(outcome.resultPayload);
     const outputData =
       structured !== undefined && structured !== null
         ? structured
         : (outcome.resultPayload ?? {});
 
-    const caseData = {
+    registerCaseInSuiteContext(suiteContext, c.name, {
       input: outcome.resolvedInput ?? {},
       output: outputData,
-    };
-
-    suiteContext[normalizedKey] = caseData;
-
-    const prefixMatch = normalizedKey.match(/^(\d+)/);
-    if (prefixMatch) {
-      suiteContext[prefixMatch[1]] = caseData;
-    }
+    });
 
     if (outcome.status === "passed") counters.passedCount += 1;
     else if (outcome.status === "failed") counters.failedCount += 1;
