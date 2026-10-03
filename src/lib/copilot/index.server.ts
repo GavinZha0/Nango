@@ -56,7 +56,7 @@ export type {
 //   2. The discriminated union below relies on `EventType.XXX` as the
 //      narrowing tag (TS string-enum branding), so `EventType` and the
 //      type aliases must come from the same resolution path.
-export { EventType, EventSchemas } from "@ag-ui/client";
+export { EventType } from "@ag-ui/client";
 
 // Concrete event types — the discriminants of {@link AgUiEvent}.
 export type {

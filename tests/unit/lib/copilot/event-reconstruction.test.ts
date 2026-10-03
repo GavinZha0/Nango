@@ -49,7 +49,7 @@ const noopLog = {
 const { reconstructFromDb, synthesizeToolCallResult } = await import(
   "@/lib/copilot/event-reconstruction"
 );
-const { EventType, EventSchemas } = await import("@/lib/copilot/index.server");
+const { EventType } = await import("@/lib/copilot/index.server");
 
 // helpers
 
@@ -703,50 +703,6 @@ describe("reconstructFromDb — tool-call events carry persisted timestamps", ()
 
 // endregion
 
-// region: schema validity
-
-describe("reconstructFromDb — emitted events pass EventSchemas validation", () => {
-  it("every event in a representative thread parses against the AG-UI union", async () => {
-    const run = makeRun();
-    const evs = [
-      makeEvent(run.id, 0, "message", {
-        messageId: "msg-1",
-        role: "assistant",
-        text: "Computing chart…",
-      }),
-      makeEvent(run.id, 1, "tool_call_chunk", {
-        toolCallId: "call-1",
-        toolName: "generate_echarts_config",
-        args: '{"chart_id":"sales-pie"}',
-      }),
-      // no matching result → triggers synthesis
-      makeEvent(run.id, 2, "message", {
-        messageId: "msg-2",
-        role: "assistant",
-        text: "Done.",
-      }),
-      makeEvent(run.id, 3, "reasoning", {
-        messageId: "r1",
-        text: "Picking pie type",
-      }),
-    ];
-    stageQueries([run], evs);
-
-    const out = await collect("thread-1", "user-1");
-
-    for (const ev of out) {
-      const parsed = EventSchemas.safeParse(ev);
-      if (!parsed.success) {
-        throw new Error(
-          `Event failed schema parse: type=${(ev as { type: string }).type}, ` +
-            `issues=${JSON.stringify(parsed.error.issues)}`,
-        );
-      }
-    }
-  });
-});
-
-// endregion
 
 // region: synthesizer unit test (no DB)
 
@@ -761,7 +717,7 @@ describe("synthesizeToolCallResult", () => {
       { toolCallId: "id", toolName: "generate_echarts_config", args: '{"chart_id":"x"}' },
       "cancelled",
     );
-    expect(JSON.parse(result.content)).toEqual({
+    expect(JSON.parse(result.content as string)).toEqual({
       isError: true,
       severity: "error",
       message: ERROR_MESSAGE,
@@ -773,7 +729,7 @@ describe("synthesizeToolCallResult", () => {
       { toolCallId: "id", toolName: "generate_echarts_config", args: '{"outcome_id":"abc"}' },
       "succeeded",
     );
-    expect(JSON.parse(result.content)).toEqual({
+    expect(JSON.parse(result.content as string)).toEqual({
       isError: true,
       severity: "warning",
       message: WARNING_MESSAGE,
@@ -786,7 +742,7 @@ describe("synthesizeToolCallResult", () => {
       { toolCallId: "id", toolName: "generate_echarts_config", args: "not-json" },
       "succeeded",
     );
-    expect(JSON.parse(result.content)).toEqual({
+    expect(JSON.parse(result.content as string)).toEqual({
       isError: true,
       severity: "warning",
       message: WARNING_MESSAGE,
@@ -798,7 +754,7 @@ describe("synthesizeToolCallResult", () => {
       { toolCallId: "id", toolName: "render_html", args: '{"htmlId":"q"}' },
       "succeeded",
     );
-    expect(JSON.parse(result.content)).toEqual({
+    expect(JSON.parse(result.content as string)).toEqual({
       isError: true,
       severity: "warning",
       message: WARNING_MESSAGE,

@@ -228,7 +228,7 @@ export class PersistingAgent extends AbstractAgent {
               flushMessage();
               pendingMessage = {
                 messageId: ev.messageId,
-                role: ev.role,
+                role: ev.role ?? "assistant",
                 text: "",
                 startTs: new Date(),
               };
