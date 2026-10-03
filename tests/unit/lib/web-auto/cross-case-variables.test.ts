@@ -56,7 +56,22 @@ describe("extractWebAutoStructuredData", () => {
     expect(structured).toEqual({
       orderId: "ORD-123",
       amount: 99,
+      _page: { url: "https://example.com/checkout", title: "Checkout" },
       page: { url: "https://example.com/checkout", title: "Checkout" },
+    });
+  });
+
+  it("preserves business page property when result contains its own page field", () => {
+    const output = {
+      result: { page: 2, pageSize: 20, total: 100 },
+      page: { url: "https://example.com/list", title: "List" },
+    };
+    const structured = extractWebAutoStructuredData(output);
+    expect(structured).toEqual({
+      page: 2,
+      pageSize: 20,
+      total: 100,
+      _page: { url: "https://example.com/list", title: "List" },
     });
   });
 

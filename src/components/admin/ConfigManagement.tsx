@@ -187,7 +187,7 @@ function GroupHeader({
         className={cn("h-3.5 w-3.5 shrink-0 transition-transform text-muted-foreground", open && "rotate-90")}
       />
       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {group}
+        {group === "eval" ? "EVALUATION" : group}
       </span>
       <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
         {count}

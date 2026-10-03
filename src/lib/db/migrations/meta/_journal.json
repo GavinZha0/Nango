@@ -78,6 +78,13 @@
       "when": 1790968137587,
       "tag": "0010_add_target_timeout_to_eval_suite",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790985495955,
+      "tag": "0011_update_agent_defaults",
+      "breakpoints": true
     }
   ]
 }

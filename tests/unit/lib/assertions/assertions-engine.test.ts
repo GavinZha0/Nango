@@ -378,6 +378,27 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(results[9].ok).toBe(false); // run_ssh_command blocked == 0 (2 == 0)
     });
 
+    it("handles toolCallSummary with missing or undefined toolFrequency safely without throwing", () => {
+      const toolCallSummary = {
+        totalCalls: 0,
+        failureCount: 0,
+        blockedCount: 0,
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "tool_call",
+          toolName: "run_ssh_command",
+          operator: "==",
+          target: "calls",
+          expectedCalls: 0,
+        },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, { toolCallSummary });
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+    });
+
     it("requires operator in toolCallAssertionSchema and rejects when omitted", () => {
       const valid = toolCallAssertionSchema.safeParse({
         type: "tool_call",

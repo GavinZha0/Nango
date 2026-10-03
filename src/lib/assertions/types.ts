@@ -76,7 +76,7 @@ export interface AssertionToolCallSummary {
   totalCalls: number;
   failureCount: number;
   blockedCount: number;
-  toolFrequency: Record<string, number>;
+  toolFrequency?: Record<string, number>;
   abnormalDetails?: Array<{
     toolName: string;
     status: "failed" | "blocked";

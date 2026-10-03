@@ -931,11 +931,11 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   /** Maximum number of tokens the model may generate. null = provider default. */
   maxTokens: integer("max_tokens"),
 
-  /** Maximum number of tool-call steps per run (default 10). */
-  maxSteps: integer("max_steps").notNull().default(10),
+  /** Maximum number of tool-call steps per run (default 20). */
+  maxSteps: integer("max_steps").notNull().default(20),
 
-  /** Tool execution approval mode: "always" | "auto" | "never". Default "never". */
-  toolApprovalMode: text("tool_approval_mode").notNull().default("never"),
+  /** Tool execution approval mode: "always" | "auto" | "never". Default "auto". */
+  toolApprovalMode: text("tool_approval_mode").notNull().default("auto"),
 
   /** Whether conversation memory is enabled (reserved for future use). */
   memoryEnabled: boolean("memory_enabled").notNull().default(false),

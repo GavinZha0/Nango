@@ -625,7 +625,7 @@ function evaluateToolCall(
   let actualCount = 0;
   if (target === "calls") {
     actualCount = options.toolCallSummary
-      ? (options.toolCallSummary.toolFrequency[spec.toolName] ?? 0)
+      ? (options.toolCallSummary.toolFrequency?.[spec.toolName] ?? 0)
       : matchingCalls.length;
   } else if (target === "failed" || target === "blocked") {
     if (!options.toolCallSummary) {

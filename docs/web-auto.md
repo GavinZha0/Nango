@@ -143,7 +143,7 @@ Web Auto is the only test subsystem permitted to reference credentials for real-
 
 ### 3.7 Cross-Case Variable Referencing & 3-Digit Numeric Aliases
 Sequential suite execution collects outputs from each completed case into `suiteContext`:
-* **Data Extraction (`extractWebAutoStructuredData`)**: Unwraps MCP `{ result: ... }` payloads into clean business objects while retaining optional `page` metadata.
+* **Data Extraction (`extractWebAutoStructuredData`)**: Unwraps MCP `{ result: ... }` payloads into clean business objects while retaining optional page metadata (`_page` is always available without collision; `page` is a convenience alias when business data does not define `page`).
 * **Registration & Aliasing**: Registers completed cases under both normalized full name (e.g. `010_create_order`) and 3-digit prefix alias (e.g. `010`).
 * **Script Interpolation & JS Scope**:
   1. **Template Interpolation**: Script and steps strings interpolate `{{cases.010.output.<path>}}` as well as dynamic generators (`{{$uuid}}`, `{{$timestamp}}`) prior to execution.

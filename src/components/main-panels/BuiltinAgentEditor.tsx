@@ -207,8 +207,8 @@ const EMPTY_FORM: FormState = {
   modelProvider: "",
   credentialId: null,
   prompt: "",
-  toolApprovalMode: "never",
-  maxSteps: 10,
+  toolApprovalMode: "auto",
+  maxSteps: 20,
   temperature: 0.3,
   role: null,
   sharedStateEnabled: false,
@@ -224,8 +224,8 @@ function formFromDetail(data: AgentDetail): FormState {
     modelProvider: data.modelProvider,
     credentialId: data.credentialId ?? null,
     prompt: data.prompt ?? "",
-    toolApprovalMode: data.toolApprovalMode ?? "never",
-    maxSteps: data.maxSteps ?? 10,
+    toolApprovalMode: data.toolApprovalMode ?? "auto",
+    maxSteps: data.maxSteps ?? 20,
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
     sharedStateEnabled: resolveSharedStateEnabled(data),
@@ -976,7 +976,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 <Label className="w-20 shrink-0 text-xs">Tool Approval</Label>
                 <Select
                   value={form.toolApprovalMode}
-                  onValueChange={(v: string | null) => update("toolApprovalMode", v ?? "never")}
+                  onValueChange={(v: string | null) => update("toolApprovalMode", v ?? "auto")}
                 >
                   <SelectTrigger className="h-8 flex-1 text-xs">
                     <SelectValue />

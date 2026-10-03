@@ -43,6 +43,9 @@ function publishWebAutoFrame(ownerId: string, frame: WebAutoFrame): void {
 /**
  * Extract structured business output from a Playwright execution output.
  * Unwraps `{ result: ... }` while preserving optional page metadata.
+ *
+ * Page metadata is always exposed under `_page` to prevent collision with
+ * business payload fields, and mirrored to `page` when not defined on `result`.
  */
 export function extractWebAutoStructuredData(executionOutput: unknown): unknown {
   if (
@@ -53,7 +56,13 @@ export function extractWebAutoStructuredData(executionOutput: unknown): unknown 
     const env = executionOutput as { result?: unknown; page?: unknown };
     if (env.result !== undefined && env.result !== null) {
       if (typeof env.result === "object" && !Array.isArray(env.result) && env.page) {
-        return { page: env.page, ...(env.result as Record<string, unknown>) };
+        const res = env.result as Record<string, unknown>;
+        const hasPageProp = "page" in res;
+        return {
+          _page: env.page,
+          ...(hasPageProp ? {} : { page: env.page }),
+          ...res,
+        };
       }
       return env.result;
     }
