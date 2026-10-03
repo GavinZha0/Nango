@@ -50,21 +50,20 @@ describe("extractWebAutoStructuredData", () => {
   it("unwraps result object and merges page metadata", () => {
     const output = {
       result: { orderId: "ORD-123", amount: 99 },
-      page: { url: "https://example.com/checkout", title: "Checkout" },
+      _page: { url: "https://example.com/checkout", title: "Checkout" },
     };
     const structured = extractWebAutoStructuredData(output);
     expect(structured).toEqual({
       orderId: "ORD-123",
       amount: 99,
       _page: { url: "https://example.com/checkout", title: "Checkout" },
-      page: { url: "https://example.com/checkout", title: "Checkout" },
     });
   });
 
   it("preserves business page property when result contains its own page field", () => {
     const output = {
       result: { page: 2, pageSize: 20, total: 100 },
-      page: { url: "https://example.com/list", title: "List" },
+      _page: { url: "https://example.com/list", title: "List" },
     };
     const structured = extractWebAutoStructuredData(output);
     expect(structured).toEqual({
@@ -178,6 +177,11 @@ describe("runWebAutoCase - cross-case variable referencing", () => {
             type: "js_expression",
             expression: "result.currentToken === cases['010'].output.token",
           },
+          {
+            type: "jsonpath",
+            path: "currentToken",
+            expected: "{{cases.010.output.token}}",
+          },
         ],
       } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
       ownerId: "user-1",
@@ -185,7 +189,9 @@ describe("runWebAutoCase - cross-case variable referencing", () => {
     });
 
     expect(outcome.status).toBe("passed");
+    expect(outcome.assertionResults).toHaveLength(2);
     expect(outcome.assertionResults[0].ok).toBe(true);
+    expect(outcome.assertionResults[1].ok).toBe(true);
   });
 });
 

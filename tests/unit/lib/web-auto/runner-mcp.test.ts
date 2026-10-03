@@ -56,11 +56,11 @@ await page.click('button');
 
     const parsed = parsePlaywrightOutput(raw) as {
       result: { saved: boolean; id: string };
-      page?: { url?: string; title?: string; console?: string };
+      _page?: { url?: string; title?: string; console?: string };
     };
 
     expect(parsed.result).toEqual({ saved: true, id: "123" });
-    expect(parsed.page).toEqual({
+    expect(parsed._page).toEqual({
       url: "https://example.com/checkout",
       title: "Checkout Page",
       console: "[info] Loaded",
@@ -79,11 +79,11 @@ await page.click('button');
 
     const parsed = parsePlaywrightOutput(raw) as {
       result: string;
-      page?: { url?: string };
+      _page?: { url?: string };
     };
 
     expect(parsed.result).toBe("Plain text output");
-    expect(parsed.page?.url).toBe("https://example.com");
+    expect(parsed._page?.url).toBe("https://example.com");
   });
 
   it("falls back to direct JSON parsing for raw json text", () => {
@@ -177,7 +177,7 @@ describe("runWebAutoMcp", () => {
     expect(outcome.error).toBeNull();
     expect(outcome.executionOutput).toEqual({
       result: { ok: true },
-      page: {
+      _page: {
         url: "https://example.com",
         title: "Example",
         console: undefined,

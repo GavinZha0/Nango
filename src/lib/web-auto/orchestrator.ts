@@ -42,10 +42,10 @@ function publishWebAutoFrame(ownerId: string, frame: WebAutoFrame): void {
 
 /**
  * Extract structured business output from a Playwright execution output.
- * Unwraps `{ result: ... }` while preserving optional page metadata.
+ * Unwraps `{ result: ... }` while preserving optional page metadata under `_page`.
  *
- * Page metadata is always exposed under `_page` to prevent collision with
- * business payload fields, and mirrored to `page` when not defined on `result`.
+ * Page metadata is strictly exposed under `_page` to prevent collision with
+ * business payload fields (e.g. pagination `page: 1`).
  */
 export function extractWebAutoStructuredData(executionOutput: unknown): unknown {
   if (
@@ -53,15 +53,12 @@ export function extractWebAutoStructuredData(executionOutput: unknown): unknown 
     typeof executionOutput === "object" &&
     "result" in executionOutput
   ) {
-    const env = executionOutput as { result?: unknown; page?: unknown };
+    const env = executionOutput as { result?: unknown; _page?: unknown };
     if (env.result !== undefined && env.result !== null) {
-      if (typeof env.result === "object" && !Array.isArray(env.result) && env.page) {
-        const res = env.result as Record<string, unknown>;
-        const hasPageProp = "page" in res;
+      if (typeof env.result === "object" && !Array.isArray(env.result) && env._page) {
         return {
-          _page: env.page,
-          ...(hasPageProp ? {} : { page: env.page }),
-          ...res,
+          _page: env._page,
+          ...(env.result as Record<string, unknown>),
         };
       }
       return env.result;
@@ -309,6 +306,7 @@ export async function runWebAutoCase(
     metrics: { durationMs: mcpResult.durationMs },
     runContext: {
       cases: input.suiteContext ?? {},
+      isWebAuto: true,
     },
   });
 

@@ -64,4 +64,25 @@ describe("normalizeAndValidateAssertions", () => {
       /Invalid JSONPath syntax/,
     );
   });
+
+  it("enforces category constraints and rejects jsonpath and js_expression in evaluation category", () => {
+    const jsonPathAssertion = [{ type: "jsonpath", path: "$.status", operator: "==", expected: "ok" }];
+    expect(() => normalizeAndValidateAssertions(jsonPathAssertion, "EvalCase", "evaluation")).toThrow(
+      /type 'jsonpath' is not supported for category 'evaluation'/,
+    );
+
+    const jsAssertion = [{ type: "js_expression", expression: "result.count === 1" }];
+    expect(() => normalizeAndValidateAssertions(jsAssertion, "EvalCase", "evaluation")).toThrow(
+      /type 'js_expression' is not supported for category 'evaluation'/,
+    );
+
+    // tool_call, metric, llm_dim, llm_custom are allowed for evaluation
+    const validEval = [
+      { type: "tool_call", toolName: "calculator", operator: "==", target: "calls", expectedCalls: 1 },
+      { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
+      { type: "llm_dim", dim: "safety" },
+      { type: "llm_custom", expectation: "clear answer" },
+    ];
+    expect(normalizeAndValidateAssertions(validEval, "EvalCase", "evaluation")).toHaveLength(4);
+  });
 });

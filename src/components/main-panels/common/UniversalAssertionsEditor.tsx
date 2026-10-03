@@ -103,20 +103,6 @@ const SCHEMA_TEMPLATES = [
 ];
 
 function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMode): TabType {
-  const hasExpressions = assertions.some((a) => a.type === "js_expression");
-  if (hasExpressions) return "expression";
-
-  const hasPathMatches = assertions.some((a) => a.type === "jsonpath");
-  if (hasPathMatches) return "path_match";
-
-  if (mode === "verification") {
-    const hasSchema = assertions.some((a) => a.type === "json_schema");
-    if (hasSchema) return "schema";
-
-    const hasMetrics = assertions.some((a) => a.type === "metric");
-    if (hasMetrics) return "metric";
-  }
-
   if (mode === "evaluation") {
     const hasToolCalls = assertions.some((a) => a.type === "tool_call");
     if (hasToolCalls) return "tool_call";
@@ -129,6 +115,22 @@ function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMod
 
     const hasLlmCustoms = assertions.some((a) => a.type === "llm_custom");
     if (hasLlmCustoms) return "llm_custom";
+
+    return "llm_dim";
+  }
+
+  const hasExpressions = assertions.some((a) => a.type === "js_expression");
+  if (hasExpressions) return "expression";
+
+  const hasPathMatches = assertions.some((a) => a.type === "jsonpath");
+  if (hasPathMatches) return "path_match";
+
+  if (mode === "verification") {
+    const hasSchema = assertions.some((a) => a.type === "json_schema");
+    if (hasSchema) return "schema";
+
+    const hasMetrics = assertions.some((a) => a.type === "metric");
+    if (hasMetrics) return "metric";
   }
 
   if (mode === "web-auto") {
@@ -271,9 +273,11 @@ export function UniversalAssertionsEditor({
   const TABS = useMemo(() => {
     const list: Array<{ id: TabType; label: string; hasDot: boolean }> = [];
 
-    // 1. All modes have JS Expression and JSONPath first
-    list.push({ id: "expression", label: "JS Expression", hasDot: hasExpressions });
-    list.push({ id: "path_match", label: "JSONPath", hasDot: hasPathMatches });
+    // 1. Verification and Web-Auto have JS Expression and JSONPath first (Evaluation does not evaluate structured JSON)
+    if (mode !== "evaluation") {
+      list.push({ id: "expression", label: "JS Expression", hasDot: hasExpressions });
+      list.push({ id: "path_match", label: "JSONPath", hasDot: hasPathMatches });
+    }
 
     // 2. Verification has Schema and Metrics
     if (mode === "verification") {
@@ -426,8 +430,7 @@ export function UniversalAssertionsEditor({
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground block">
-                  • Paths with <code className="text-amber-500 font-semibold">$</code> query root (e.g. $.isError). Paths without query <code className="text-amber-500 font-semibold">structuredContent</code>.<br />
-                  • Expected value supports literal values or <code className="text-amber-500 font-semibold">{"{{ input.path }}"}</code> variable templates.
+                  • Bindings: <code className="font-semibold text-amber-500">result</code>=structured output, <code className="font-semibold text-amber-500">root</code>=<code className="font-semibold text-amber-500">$</code>=full payload, <code className="font-semibold text-amber-500">{"{{input.xx}}"}</code> and <code className="font-semibold text-amber-500">{"{{variables.yy}}"}</code>
                 </Label>
               </div>
               {!readOnly && (
@@ -542,8 +545,8 @@ export function UniversalAssertionsEditor({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="text-[10px] font-semibold text-muted-foreground">
-                  • Bindings: <code className="font-semibold text-amber-500">result</code> (structured output), <code className="font-semibold text-amber-500">root</code> (full payload), <code className="font-semibold text-amber-500">input</code>.
+                <Label className="text-[10px] font-semibold text-muted-foreground block">
+                  • Bindings: <code className="font-semibold text-amber-500">result</code>=structured output, <code className="font-semibold text-amber-500">root</code>=<code className="font-semibold text-amber-500">$</code>=full payload, <code className="font-semibold text-amber-500">input.xx</code> and <code className="font-semibold text-amber-500">variables.yy</code>
                 </Label>
               </div>
               {!readOnly && (
@@ -737,8 +740,8 @@ export function UniversalAssertionsEditor({
               <div className="space-y-0.5">
                 <Label className="text-[10px] font-semibold text-muted-foreground">
                   {mode === "verification" || mode === "web-auto"
-                    ? "• Tool execution performance: duration limit in seconds (duration_s)."
-                    : "• Execution performance limits: duration, token consumption, and tool call count."}
+                    ? "• Execution performance: duration limit in seconds."
+                    : "• Execution performance: duration, token consumption, and tool call count."}
                 </Label>
               </div>
               {!readOnly && (

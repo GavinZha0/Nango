@@ -215,11 +215,11 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
     });
 
 
-    it("never exposes the page handle to js_expression", () => {
-      const payload = { result: { status: "ok", count: 5 }, page: { evaluate: () => "host-secret" } };
+    it("never exposes the _page handle to js_expression", () => {
+      const payload = { result: { status: "ok", count: 5 }, _page: { evaluate: () => "host-secret" } };
       const assertions: AssertionSpec[] = [
         { type: "js_expression", expression: "result.count === 5" },
-        { type: "js_expression", expression: "typeof page !== 'undefined'" },
+        { type: "js_expression", expression: "typeof _page !== 'undefined'" },
       ];
       const outcome = evaluateAssertions(payload, assertions);
       expect(outcome.deterministicResults[0].ok).toBe(true);
@@ -828,6 +828,224 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       const outcome = evaluateAssertions(imagePayload, assertions);
       expect(outcome.allDeterministicPassed).toBe(true);
       expect(outcome.deterministicResults).toHaveLength(5);
+      expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
+    });
+  });
+
+  describe("8. Unified Bindings Model (root, $, result, _page)", () => {
+    it("binds root and $ identically to the raw envelope in JS expressions", () => {
+      const envelope = {
+        content: [{ type: "text", text: JSON.stringify({ orderId: 1001, status: "completed" }) }],
+        _meta: { traceId: "trace-abc-123", timestamp: 1700000000 },
+      };
+
+      const assertions: AssertionSpec[] = [
+        // root and $ both point to the envelope
+        {
+          type: "js_expression",
+          expression: "root._meta.traceId === 'trace-abc-123' && $._meta.traceId === 'trace-abc-123'",
+        },
+        {
+          type: "js_expression",
+          expression: "root === $ && $._meta.timestamp === 1700000000",
+        },
+        // result points to structured content
+        {
+          type: "js_expression",
+          expression: "result.orderId === 1001 && result.status === 'completed'",
+        },
+        // direct field spread works
+        {
+          type: "js_expression",
+          expression: "orderId === 1001 && status === 'completed'",
+        },
+      ];
+
+      const outcome = evaluateAssertions(envelope, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(4);
+    });
+
+    it("evaluates JSONPath with root., $., result., and direct field paths", () => {
+      const envelope = {
+        content: [{ type: "text", text: JSON.stringify({ orderId: 1001, status: "completed" }) }],
+        _meta: { traceId: "trace-abc-123" },
+      };
+
+      const assertions: AssertionSpec[] = [
+        // Envelope paths
+        { type: "jsonpath", path: "$._meta.traceId", expected: "trace-abc-123" },
+        { type: "jsonpath", path: "root._meta.traceId", expected: "trace-abc-123" },
+        // Business result paths
+        { type: "jsonpath", path: "result.orderId", expected: 1001 },
+        { type: "jsonpath", path: "orderId", expected: 1001 },
+        { type: "jsonpath", path: "result.status", expected: "completed" },
+        { type: "jsonpath", path: "status", expected: "completed" },
+      ];
+
+      const outcome = evaluateAssertions(envelope, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(6);
+    });
+
+    it("handles business data containing a field named result without ambiguity", () => {
+      const payloadWithResultField = {
+        content: [{ type: "text", text: JSON.stringify({ result: "APPROVED", code: 200 }) }],
+      };
+
+      const assertions: AssertionSpec[] = [
+        // JSONPath: path: "result" matches the whole structured object
+        {
+          type: "jsonpath",
+          path: "result",
+          expected: { result: "APPROVED", code: 200 },
+        },
+        // JSONPath: path: "result.result" accesses the child property "result"
+        {
+          type: "jsonpath",
+          path: "result.result",
+          expected: "APPROVED",
+        },
+        // JSONPath: path: "result.code" and "code" access code
+        {
+          type: "jsonpath",
+          path: "result.code",
+          expected: 200,
+        },
+        {
+          type: "jsonpath",
+          path: "code",
+          expected: 200,
+        },
+        // JS Expression: result.result accesses the child property, result is whole object
+        {
+          type: "js_expression",
+          expression: "result.result === 'APPROVED' && result.code === 200 && code === 200",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payloadWithResultField, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(5);
+    });
+
+    it("correctly handles Web-Auto payload with _page metadata", () => {
+      const webAutoPayload = {
+        result: { count: 42, active: true },
+        _page: { url: "https://example.com/checkout", title: "Checkout" },
+      };
+
+      const assertions: AssertionSpec[] = [
+        // Envelope access for _page
+        { type: "jsonpath", path: "$._page.url", expected: "https://example.com/checkout" },
+        { type: "jsonpath", path: "root._page.title", expected: "Checkout" },
+        // Business result access
+        { type: "jsonpath", path: "result.count", expected: 42 },
+        { type: "jsonpath", path: "count", expected: 42 },
+        {
+          type: "js_expression",
+          expression: "root._page.url === 'https://example.com/checkout' && $._page.title === 'Checkout'",
+        },
+        {
+          type: "js_expression",
+          expression: "result.count === 42 && active === true",
+        },
+      ];
+
+      const outcome = evaluateAssertions(webAutoPayload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(6);
+    });
+
+    it("does not demangle non-envelope objects containing result property", () => {
+      // Direct business JSON without _page or content: should NOT be unwrapped!
+      const plainBusinessPayload = {
+        result: "SUCCESS",
+        count: 10,
+        details: { mode: "batch" },
+      };
+
+      const assertions: AssertionSpec[] = [
+        // count is NOT stripped
+        { type: "jsonpath", path: "count", expected: 10 },
+        { type: "jsonpath", path: "result.count", expected: 10 },
+        { type: "jsonpath", path: "result.result", expected: "SUCCESS" },
+        {
+          type: "js_expression",
+          expression: "count === 10 && result.result === 'SUCCESS' && result.details.mode === 'batch'",
+        },
+      ];
+
+      const outcome = evaluateAssertions(plainBusinessPayload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(4);
+    });
+
+    it("supports cases in JS expressions using standard bracket syntax", () => {
+      const payload = {
+        content: [{ type: "text", text: JSON.stringify({ userId: "u-999" }) }],
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "js_expression",
+          expression: "cases['010'].output.createdId === result.userId",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions, {
+        runContext: {
+          cases: {
+            "010": { output: { createdId: "u-999" } },
+          },
+        },
+      });
+
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+    });
+
+    it("supports input, variables, and cases simultaneously across JSONPath and JS expressions", () => {
+      const payload = {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              orderId: "ORD-500",
+              environment: "staging",
+              token: "tok-abc",
+            }),
+          },
+        ],
+      };
+
+      const assertions: AssertionSpec[] = [
+        // JSONPath with string templates
+        { type: "jsonpath", path: "orderId", expected: "{{input.expectedOrderId}}" },
+        { type: "jsonpath", path: "environment", expected: "{{variables.ENV}}" },
+        { type: "jsonpath", path: "token", expected: "{{cases.010.output.token}}" },
+        // JS expression with native syntax
+        {
+          type: "js_expression",
+          expression:
+            "result.orderId === input.expectedOrderId && " +
+            "result.environment === variables.ENV && " +
+            "result.token === cases['010'].output.token",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions, {
+        input: { expectedOrderId: "ORD-500" },
+        variables: { ENV: "staging" },
+        runContext: {
+          cases: {
+            "010": { output: { token: "tok-abc" } },
+          },
+        },
+      });
+
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(4);
       expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
     });
   });

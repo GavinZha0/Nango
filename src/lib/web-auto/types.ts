@@ -59,7 +59,7 @@ export interface NormalizedWebAutoOutput {
   /** The pure return value of the executed script */
   result: unknown;
   /** Optional page metadata */
-  page?: {
+  _page?: {
     url?: string;
     title?: string;
     console?: string;

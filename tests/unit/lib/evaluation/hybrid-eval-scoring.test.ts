@@ -14,9 +14,10 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
   it("computes deterministic checks and partitions atomic LLM custom checks", () => {
     const assertions: AssertionSpec[] = [
       {
-        type: "jsonpath",
-        path: "$.status",
-        expected: "success",
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: 5,
       },
       {
         type: "llm_custom",
@@ -50,9 +51,10 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
   it("determines passed verdict when all deterministic pass and min(LLM scores) >= threshold", () => {
     const assertions: AssertionSpec[] = [
       {
-        type: "jsonpath",
-        path: "$.status",
-        expected: "success",
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: 5,
       },
       {
         type: "llm_dim",
@@ -95,9 +97,10 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
   it("determines failed verdict when any LLM score < threshold", () => {
     const assertions: AssertionSpec[] = [
       {
-        type: "jsonpath",
-        path: "$.status",
-        expected: "success",
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: 5,
       },
       {
         type: "llm_dim",
@@ -130,9 +133,10 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
   it("short-circuits with failed and marks LLM items skipped when deterministic assertion fails", () => {
     const assertions: AssertionSpec[] = [
       {
-        type: "jsonpath",
-        path: "$.status",
-        expected: "success",
+        type: "metric",
+        metric: "duration_s",
+        operator: "<",
+        threshold: 1, // dummyMetrics duration is 1.2s, so 1.2 < 1 fails
       },
       {
         type: "llm_dim",

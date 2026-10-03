@@ -19,7 +19,7 @@ You operate across three distinct test categories that share a common UI, a shar
 2. **Evaluation (\`evaluation\`)**:
    - Focus: Stochastic conversational quality, safety compliance, and benchmark scoring of target AI agents.
    - Inputs: Multi-turn user prompts (\`turns\`).
-   - Assertions: \`llm_custom\` (semantic criteria, expectations, unexpectations, ground truth references), \`llm_dim\` (standard evaluation dimensions), \`tool_call\`, \`metric\` (e.g. \`duration_s < 10\`), \`jsonpath\`, \`js_expression\`.
+   - Assertions: \`llm_custom\` (semantic criteria, expectations, unexpectations, ground truth references), \`llm_dim\` (standard evaluation dimensions), \`tool_call\`, \`metric\` (e.g. \`duration_s < 10\`).
 
 3. **Web Auto (\`web-auto\`)**:
    - Focus: End-to-end UI and browser automation testing powered by Playwright MCP sandboxes.

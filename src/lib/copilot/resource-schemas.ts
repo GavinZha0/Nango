@@ -142,7 +142,7 @@ export const EvaluationDraftSchema = z.object({
       expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
     })).optional(),
   }).passthrough().optional().describe("Case input structure"),
-  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'llm_dim' | 'llm_custom' | 'jsonpath' | 'js_expression' | 'metric' | 'tool_call', ... } or JSON string"),
+  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'llm_dim' | 'llm_custom' | 'tool_call' | 'metric', ... } or JSON string"),
   turns: z.array(z.object({
     userMessage: z.string().min(1).describe("User message input for this turn"),
     expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),

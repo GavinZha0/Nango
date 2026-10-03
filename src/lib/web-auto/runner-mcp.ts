@@ -314,7 +314,7 @@ export function parsePlaywrightOutput(raw: unknown): unknown {
 
     const structured: NormalizedWebAutoOutput = {
       result: parsedResult,
-      ...(pageMeta ? { page: pageMeta } : {}),
+      _page: pageMeta,
     };
 
     return structured;

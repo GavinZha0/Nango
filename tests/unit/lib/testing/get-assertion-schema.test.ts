@@ -83,8 +83,8 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("evaluation");
-      expect(res.types).toEqual(["jsonpath", "js_expression", "tool_call", "metric", "llm_dim", "llm_custom"]);
-      expect(res.schemas.length).toBe(6);
+      expect(res.types).toEqual(["tool_call", "metric", "llm_dim", "llm_custom"]);
+      expect(res.schemas.length).toBe(4);
 
       const llmCustomItem = res.schemas.find((s) => s.type === "llm_custom");
       expect(llmCustomItem).toBeDefined();
@@ -94,8 +94,11 @@ describe("get_assertion_schema tool", () => {
       expect(llmDimItem).toBeDefined();
       expect(llmDimItem?.example).toHaveProperty("dim");
 
-      const jsonpathItem = res.schemas.find((s) => s.type === "jsonpath");
-      expect(jsonpathItem).toBeDefined();
+      const toolCallItem = res.schemas.find((s) => s.type === "tool_call");
+      expect(toolCallItem).toBeDefined();
+
+      const metricItem = res.schemas.find((s) => s.type === "metric");
+      expect(metricItem).toBeDefined();
     });
 
     it("returns all supported schemas for web-auto", async () => {
@@ -169,6 +172,20 @@ describe("get_assertion_schema tool", () => {
           assertionType: "llm_custom",
         }),
       ).rejects.toThrow(/not supported for category 'verification'/i);
+
+      await expect(
+        tool.execute!({
+          category: "evaluation",
+          assertionType: "jsonpath",
+        }),
+      ).rejects.toThrow(/not supported for category 'evaluation'/i);
+
+      await expect(
+        tool.execute!({
+          category: "evaluation",
+          assertionType: "js_expression",
+        }),
+      ).rejects.toThrow(/not supported for category 'evaluation'/i);
     });
   });
 });

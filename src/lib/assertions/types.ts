@@ -268,7 +268,7 @@ export const CATEGORY_TYPE_MAPPING: Record<
   readonly AssertionTypeName[]
 > = {
   verification: ["jsonpath", "json_schema", "js_expression", "metric"],
-  evaluation: ["jsonpath", "js_expression", "tool_call", "metric", "llm_dim", "llm_custom"],
+  evaluation: ["tool_call", "metric", "llm_dim", "llm_custom"],
   "web-auto": ["js_expression", "jsonpath", "metric", "llm_custom"],
 };
 

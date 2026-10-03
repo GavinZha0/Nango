@@ -68,16 +68,18 @@ export function evaluateAssertions(
     runContext.root = payload;
   }
 
-  if (
+  const isWebAutoEnvelope =
     typeof payload === "object" &&
     payload !== null &&
     "result" in payload &&
-    !("content" in payload)
-  ) {
-    const norm = payload as { result?: unknown; page?: unknown };
+    !("content" in payload) &&
+    ("_page" in payload || Boolean(options.runContext?.isWebAuto));
+
+  if (isWebAutoEnvelope) {
+    const norm = payload as { result?: unknown; _page?: unknown };
     targetPayload = norm.result;
-    if (norm.page && !runContext.page) {
-      runContext.page = norm.page;
+    if (norm._page && !runContext._page) {
+      runContext._page = norm._page;
     }
   }
 
@@ -146,7 +148,7 @@ function evaluateSingleDeterministic(
     case "jsonpath":
       return evaluateJsonPath(spec as JsonPathAssertion, payload, index, options);
     case "json_schema":
-      return evaluateJsonSchema(spec as JsonSchemaAssertion, payload, index);
+      return evaluateJsonSchema(spec as JsonSchemaAssertion, payload, index, options);
     case "js_expression":
       return evaluateJsExpression(spec as JsExpressionAssertion, payload, index, options);
     case "tool_call":
@@ -180,7 +182,9 @@ function evaluateJsonPath(
     ...(options.runContext ?? {}),
   };
   const expected = substituteInputTemplates(spec.expected, options.input, mergedContext);
-  const { json, absolutePath } = resolveJsonPathScope(spec.path, payload);
+  const rootEnvelope = options.runContext?.root ?? payload;
+  const isWebAuto = Boolean(options.runContext?.isWebAuto || (payload && typeof payload === "object" && "_page" in payload));
+  const { json, absolutePath } = resolveJsonPathScope(spec.path, payload, rootEnvelope, { isWebAuto });
 
   // If path contains [*], evaluate wildcard "every" semantics preserving original array indices
   if (absolutePath.includes("[*]")) {
@@ -421,25 +425,57 @@ function evaluateOperator(
 function resolveJsonPathScope(
   rawPath: string,
   payload: unknown,
+  rootEnvelope?: unknown,
+  options?: { isWebAuto?: boolean },
 ): { json: unknown; absolutePath: string } {
-  if (rawPath.startsWith("$")) {
-    return { json: payload, absolutePath: rawPath };
+  const root = rootEnvelope ?? payload;
+  const trimmed = rawPath.trim();
+
+  // 1. Raw envelope addressing: starts with '$', 'root.', or 'root['
+  if (trimmed.startsWith("$")) {
+    return { json: root, absolutePath: trimmed };
   }
-  const structured = extractStructuredData(payload);
-  const absolutePath = rawPath.startsWith("[")
-    ? `$${rawPath}`
-    : `$.${rawPath}`;
+  if (trimmed.startsWith("root.") || trimmed.startsWith("root[")) {
+    const subPath = trimmed.startsWith("root.")
+      ? trimmed.slice(5)
+      : trimmed.slice(4);
+    const absolutePath = subPath.startsWith("[") ? `$${subPath}` : `$.${subPath}`;
+    return { json: root, absolutePath };
+  }
+
+  // 2. Extract structured business data
+  const structured = extractStructuredData(payload, options);
+
+  // 3. Whole structured result matching: exact 'result'
+  if (trimmed === "result") {
+    return { json: structured, absolutePath: "$" };
+  }
+
+  // 4. Structured business data child property: starts with 'result.' or 'result['
+  if (trimmed.startsWith("result.") || trimmed.startsWith("result[")) {
+    const subPath = trimmed.startsWith("result.")
+      ? trimmed.slice(7)
+      : trimmed.slice(6);
+    const absolutePath = subPath.startsWith("[") ? `$${subPath}` : `$.${subPath}`;
+    return { json: structured, absolutePath };
+  }
+
+  // 5. Direct field addressing on structured business data (e.g. 'orderId', 'items[0]')
+  const absolutePath = trimmed.startsWith("[") ? `$${trimmed}` : `$.${trimmed}`;
   return { json: structured, absolutePath };
 }
 
-export function extractStructuredData(payload: unknown): unknown {
-  if (typeof payload !== "object" || payload === null) return {};
+export function extractStructuredData(
+  payload: unknown,
+  options?: { isWebAuto?: boolean },
+): unknown {
+  if (typeof payload !== "object" || payload === null) return payload;
 
   const env = payload as {
     content?: unknown;
     structuredContent?: unknown;
     result?: unknown;
-    page?: unknown;
+    _page?: unknown;
     _meta?: unknown;
   };
 
@@ -458,13 +494,12 @@ export function extractStructuredData(payload: unknown): unknown {
     return target;
   };
 
-  if (env.result !== undefined && env.result !== null) {
-    return attachMeta(env.result);
-  }
+  // 1. MCP standard structuredContent
   if (env.structuredContent !== undefined && env.structuredContent !== null) {
     return attachMeta(env.structuredContent);
   }
 
+  // 2. Standard MCP CallToolResult.content text entry
   if (Array.isArray(env.content) && env.content.length > 0) {
     for (const item of env.content) {
       if (item && typeof item === "object" && "type" in item && item.type === "text" && "text" in item) {
@@ -491,6 +526,16 @@ export function extractStructuredData(payload: unknown): unknown {
     return attachMeta(env.content);
   }
 
+  // 3. Web-Auto envelope: has `result` and either `_page` or explicitly marked as isWebAuto
+  if (
+    env.result !== undefined &&
+    env.result !== null &&
+    ("_page" in env || Boolean(options?.isWebAuto))
+  ) {
+    return attachMeta(env.result);
+  }
+
+  // 4. Otherwise, payload is already structured business data (never unwrap a standalone `result` field!)
   return attachMeta(payload);
 }
 
@@ -500,6 +545,7 @@ function evaluateJsonSchema(
   spec: JsonSchemaAssertion,
   payload: unknown,
   index: number,
+  options?: EvaluateAssertionsOptions,
 ): AssertionResult {
   let validate: ValidateFunction;
   try {
@@ -515,7 +561,11 @@ function evaluateJsonSchema(
     };
   }
 
-  const target = extractStructuredData(payload);
+  const isWebAuto = Boolean(
+    options?.runContext?.isWebAuto ||
+      (payload && typeof payload === "object" && "_page" in payload),
+  );
+  const target = extractStructuredData(payload, { isWebAuto });
   const ok = validate(target);
   if (ok) {
     return { index, type: "json_schema", ok: true };
@@ -547,7 +597,11 @@ function evaluateJsExpression(
   options: EvaluateAssertionsOptions,
 ): AssertionResult {
   try {
-    const structured = extractStructuredData(payload);
+    const isWebAuto = Boolean(
+      options.runContext?.isWebAuto ||
+        (payload && typeof payload === "object" && "_page" in payload),
+    );
+    const structured = extractStructuredData(payload, { isWebAuto });
     const flat = sanitizeForSandbox(structured) as Record<string, unknown> | null;
     const input =
       (sanitizeForSandbox(options.input ?? {}) as Record<string, unknown>) ?? {};
@@ -557,11 +611,12 @@ function evaluateJsExpression(
     const cases =
       (sanitizeForSandbox(options.runContext?.cases ?? {}) as Record<string, unknown>) ?? {};
 
-    // 白名单注入纯数据；不再展开 options.runContext → 自动剥离 page 及任意宿主句柄。
+    // 白名单注入纯数据；不再展开 options.runContext → 自动剥离宿主句柄。
+    // CONTRACT: $ 与 root 统一绑定为原始信封；result 绑定为业务整包数据。
     const contextObj = Object.freeze({
       ...(flat && typeof flat === "object" && !Array.isArray(flat) ? flat : {}),
       result: flat,
-      $: flat,
+      $: root,
       root,
       input,
       variables,
