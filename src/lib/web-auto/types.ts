@@ -184,6 +184,11 @@ export interface RunWebAutoCaseInput {
     executionOutput: unknown;
     durationMs: number;
   }) => void | Promise<void>;
+  /**
+   * Optional cancellation (e.g. playground client disconnected). Checked at
+   * phase boundaries only — an in-flight MCP call is not interrupted.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RunWebAutoSuiteInput {

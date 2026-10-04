@@ -107,15 +107,16 @@ subsystem (shared with Verification and Evaluation) — see `docs/verification.m
 * **Fault Tolerance**: Never throws. All network, MCP server, tool wrapper, and upstream protocol errors are classified into structured outcomes.
 
 ### 3.2 Deterministic Assertion Engine (unified: `src/lib/assertions/`)
-* **Context Unpacking**: Unpacks structured outputs (`{ result, page }`) so assertions can access `result` and `root` (the `page` handle is never exposed to the assertion sandbox).
-* **VM Sandboxing**: Executes `js_expression` assertions in a hardened Node `vm` context — inputs are JSON-deep-copied to strip host handles before injection, exposing `result`, `$`, `input`, `variables`, and `root` (hardened, not a true isolate).
-* **Standard Matchers**: Evaluates `jsonpath` and `json_schema` rules.
-* **Expectation Extraction**: Filters out `type: "expectation"` and `type: "llm_expectation"` rules for handoff to the evaluation layer.
+* **Contract-Supported Types**: `js_expression`, `jsonpath`, `metric` (`duration_s`, `output_chars`), and `llm_custom` (as defined in `CATEGORY_TYPE_MAPPING["web-auto"]`).
+* **Context Unpacking**: Unpacks structured outputs (`{ result, page }`) so assertions can access `result` and `root` (the `page` handle is never exposed to the assertion sandbox; page metadata lives under `_page` with `page` as alias when non-conflicting).
+* **VM Sandboxing & Context Reuse**: Executes `js_expression` assertions in a hardened Node `vm` context created once per evaluation pass (`vm.createContext`) and reused across clauses. Inputs are JSON-deep-copied to strip host handles, exposing `result`, `$`, `input`, `variables`, and `root`. Standard assertion convention applies: LHS evaluates the actual dynamic property and RHS specifies the expected comparison target.
+* **Standard Matchers**: Evaluates `jsonpath` and `metric` rules.
+* **Expectation Extraction**: Filters out `type: "expectation"`, `type: "llm_expectation"`, and `type: "llm_custom"` rules for handoff to the evaluation layer.
 
 ### 3.3 `evaluator.ts` (LLM-as-Judge Layer)
 * **Agent Dispatch**: Programmatically triggers the configured `evaluatorAgentId` via `runner.start({ mode: "sync", initiator: "evaluator" })`.
 * **Prompt Assembly**: Generates evaluation prompts including structured output, DOM state, and expectations.
-* **Score Extraction**: Reads `submit_evaluation_scores` tool calls from `entity_run_event` to obtain objective scores (`criteria_score >= 60` threshold for pass).
+* **Score Extraction**: Reads `submit_evaluation_scores` tool calls from `entity_run_event` to obtain objective scores on a 1–5 discrete Likert scale (`score >= 3` threshold for pass).
 
 ### 3.4 `orchestrator.ts` (Execution Orchestrator)
 * **Single Case Dispatch (`runWebAutoCase`)**: Executes MCP -> Deterministic Assertions -> LLM Evaluation -> Formats unified `WebAutoExecutionOutcome`.
@@ -157,14 +158,17 @@ Sequential suite execution collects outputs from each completed case into `suite
 
 ### 4.1 Single Case Execution (Interactive Debugging)
 1. **User Action**: The user selects a case in `WebAutoEditor` and clicks **Run** in the script editor header.
-2. **API Dispatch**: Client posts to `POST /api/web-auto-runs/case` with `{ caseId, suiteId }`.
-3. **Execution**: Server executes `runWebAutoCase`:
-   - Executes script via MCP Playwright.
-   - Evaluates deterministic assertions in the VM sandbox.
-   - (Optional) Evaluates expectations if an evaluator agent is configured.
-4. **Response & Inspector Display**: Returns `WebAutoExecutionOutcome`.
-   - Top-right pane renders raw Execution Output.
+2. **API Dispatch**: Client posts to `POST /api/web-auto-cases/[id]/run?stream=true` with `Accept: application/x-ndjson`.
+3. **Execution & Decoupled Streaming**: Server executes `runWebAutoCase`:
+   - **Phase 1 (Script Execution)**: Executes script via MCP Playwright, redacts sensitive values, and immediately emits `{ type: "execution_complete", executionOutput, durationMs }`. The UI immediately renders execution output, page metadata, and captured screenshots.
+   - **Deterministic Assertions**: Evaluates deterministic assertions in the VM sandbox. If any fail, Phase 2 is short-circuited (fail-fast).
+   - **Phase 2 (LLM Evaluation)**: (Optional) Evaluates expectations if an evaluator agent is configured and deterministic assertions passed. If the client disconnected or cancelled, Phase 2 is skipped with `status: "errored"` and `source: "cancelled"`.
+4. **Terminal Verdict**: Server emits `{ type: "verdict_complete", outcome }`.
+   - Top-right pane renders Execution Output and screenshots tab.
    - Bottom-right pane renders Verdicts with exact assertion conditions and actual values.
+- **Streaming Channel Contract**:
+  - **Batch runs (`POST /api/web-auto-runs`)**: Shared SSE broadcast (`/api/runs/stream`), persisted in DB (`web_auto_run`), tracked via Global Header Active Task badge.
+  - **Playground runs (`POST /api/web-auto-cases/[id]/run`)**: Request-scoped NDJSON streaming, zero DB persistence, isolated point-to-point. Switching cases or unmounting cancels the run via `AbortController`.
 
 ### 4.2 Full Suite Batch Run (Background & Real-Time Streaming)
 1. **Trigger**: User clicks the green **Play** icon next to "New Case" in the Suite cases header, or issues `POST /api/web-auto-runs`.
@@ -224,7 +228,7 @@ Severity: ERRORED > FAILED > PASSED
 | Case missing script / suite missing MCP | `errored` | Client validation failure |
 | Playwright script runtime error (page crash / syntax) | `failed` | Tool-level execution failure (`isError: true`) |
 | Deterministic assertion mismatch | `failed` | Test condition failed |
-| LLM expectation score `< 60` | `failed` | Visual / semantic criteria failed |
+| LLM expectation score `< 3` (on 1–5 scale) | `failed` | Visual / semantic criteria failed |
 | LLM expectation(s) present but suite binds no Evaluator Agent | `errored` | Configuration error (`error.source = "config"`) — LLM judge half not evaluated |
 | Script succeeded & all assertions passed | `passed` | Test passed |
 

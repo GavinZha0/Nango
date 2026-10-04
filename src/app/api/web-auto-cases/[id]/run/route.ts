@@ -6,6 +6,7 @@ import { canEditResource, ResourceWithRBAC } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { WebAutoCaseTable, WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
+import { ndjsonResponse, wantsNdjson } from "@/lib/http/ndjson.server";
 import { runWebAutoCase } from "@/lib/web-auto/orchestrator";
 import { eq } from "drizzle-orm";
 
@@ -64,11 +65,6 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    const url = new URL(req.url);
-    const wantsStream =
-      req.headers.get("accept")?.includes("application/x-ndjson") ||
-      url.searchParams.get("stream") === "true";
-
     const caseInput = {
       caseId: caseRow.id,
       suiteId: suite.id,
@@ -77,41 +73,14 @@ export const POST = withEditor<{ id: string }>(
       ownerId: session.user.id,
     };
 
-    if (wantsStream) {
-      const stream = new TransformStream();
-      const writer = stream.writable.getWriter();
-      const encoder = new TextEncoder();
-
-      void (async () => {
-        try {
-          const outcome = await runWebAutoCase({
-            ...caseInput,
-            onExecutionComplete: async (execData) => {
-              const frame =
-                JSON.stringify({ type: "execution_complete", ...execData }) + "\n";
-              await writer.write(encoder.encode(frame));
-            },
-          });
-          const frame =
-            JSON.stringify({ type: "verdict_complete", outcome }) + "\n";
-          await writer.write(encoder.encode(frame));
-        } catch (err) {
-          const errMessage = err instanceof Error ? err.message : String(err);
-          const frame =
-            JSON.stringify({ type: "error", error: errMessage }) + "\n";
-          await writer.write(encoder.encode(frame));
-        } finally {
-          await writer.close();
-        }
-      })();
-
-      return new Response(stream.readable, {
-        headers: {
-          "Content-Type": "application/x-ndjson",
-          "Cache-Control": "no-cache, no-transform",
-          "X-Accel-Buffering": "no",
-        },
-      });
+    if (wantsNdjson(req)) {
+      return ndjsonResponse(req, (emit, signal) =>
+        runWebAutoCase({
+          ...caseInput,
+          signal,
+          onExecutionComplete: (execData) => emit({ type: "execution_complete", ...execData }),
+        }),
+      );
     }
 
     const outcome = await runWebAutoCase(caseInput);

@@ -12,7 +12,7 @@
 
 import "server-only";
 
-import { runInNewContext, Script } from "node:vm";
+import { createContext, runInContext, Script } from "node:vm";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import { JSONPath } from "jsonpath-plus";
 
@@ -624,9 +624,11 @@ function evaluateJsExpression(
       ...variables,
     });
 
-    const ok = runInNewContext(
+    const sandbox = createContext(contextObj);
+
+    const ok = runInContext(
       `(${spec.expression})`,
-      contextObj,
+      sandbox,
       { timeout: JS_EXPRESSION_TIMEOUT_MS, displayErrors: false },
     );
 
@@ -641,7 +643,7 @@ function evaluateJsExpression(
 
     const { actual, expected, operator } = extractJsExpressionActual(
       spec.expression,
-      contextObj,
+      sandbox,
       ok,
     );
 
@@ -685,14 +687,6 @@ interface ExtractedJsActual {
   actual?: unknown;
   expected?: unknown;
   operator?: string;
-}
-
-function isJsLiteral(s: string): boolean {
-  const t = s.trim();
-  if (/^-?\d+(\.\d+)?$/.test(t)) return true;
-  if (/^(".*"|'.*'|`.*`)$/.test(t)) return true;
-  if (t === "true" || t === "false" || t === "null" || t === "undefined" || t === "NaN") return true;
-  return false;
 }
 
 function parseJsComparison(expr: string): { lhs: string; op: string; rhs: string } | null {
@@ -813,7 +807,7 @@ function splitLogicalAnd(expr: string): string[] {
 
 function extractJsExpressionActual(
   expression: string,
-  contextObj: Record<string, unknown>,
+  sandbox: import("node:vm").Context,
   rawResult: unknown,
 ): ExtractedJsActual {
   const andParts = splitLogicalAnd(expression);
@@ -821,7 +815,7 @@ function extractJsExpressionActual(
   if (andParts.length > 1) {
     for (const part of andParts) {
       try {
-        const partOk = runInNewContext(`(${part})`, contextObj, {
+        const partOk = runInContext(`(${part})`, sandbox, {
           timeout: JS_EXPRESSION_TIMEOUT_MS,
           displayErrors: false,
         });
@@ -838,16 +832,13 @@ function extractJsExpressionActual(
 
   const parsedComp = parseJsComparison(targetExpr);
   if (parsedComp) {
-    const isLhsLit = isJsLiteral(parsedComp.lhs);
-    const isRhsLit = isJsLiteral(parsedComp.rhs);
-    const dynamicExpr = isLhsLit && !isRhsLit ? parsedComp.rhs : parsedComp.lhs;
-    const staticExpr = dynamicExpr === parsedComp.lhs ? parsedComp.rhs : parsedComp.lhs;
-
+    // CONTRACT: Standard assertion structure — LHS is target expression (actual),
+    // RHS is expected value/expression. No inverted Yoda condition guesswork.
     let actual: unknown = undefined;
     let expected: unknown = undefined;
 
     try {
-      actual = runInNewContext(`(${dynamicExpr})`, contextObj, {
+      actual = runInContext(`(${parsedComp.lhs})`, sandbox, {
         timeout: JS_EXPRESSION_TIMEOUT_MS,
         displayErrors: false,
       });
@@ -856,12 +847,12 @@ function extractJsExpressionActual(
     }
 
     try {
-      expected = runInNewContext(`(${staticExpr})`, contextObj, {
+      expected = runInContext(`(${parsedComp.rhs})`, sandbox, {
         timeout: JS_EXPRESSION_TIMEOUT_MS,
         displayErrors: false,
       });
     } catch {
-      expected = staticExpr;
+      expected = parsedComp.rhs;
     }
 
     return { actual, expected, operator: parsedComp.op };
@@ -870,7 +861,7 @@ function extractJsExpressionActual(
   if (targetExpr.trim().startsWith("!")) {
     const negated = targetExpr.trim().slice(1).trim();
     try {
-      const actual = runInNewContext(`(${negated})`, contextObj, {
+      const actual = runInContext(`(${negated})`, sandbox, {
         timeout: JS_EXPRESSION_TIMEOUT_MS,
         displayErrors: false,
       });

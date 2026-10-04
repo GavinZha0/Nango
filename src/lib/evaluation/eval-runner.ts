@@ -91,6 +91,11 @@ export interface RunEvalCaseInput {
     executionStats: ExecutionStats;
     toolCallSummary: ToolCallSummary;
   }) => void | Promise<void>;
+  /**
+   * Optional cancellation (e.g. playground client disconnected). Checked at
+   * phase boundaries only — an in-flight `runner.start` is not interrupted.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RunEvalCaseResult {
@@ -238,6 +243,15 @@ function buildConversationText(
   return turns
     .map((t) => `[${t.role.toUpperCase()}]\n${t.content}`)
     .join("\n\n");
+}
+
+export const EVAL_CANCELLED_MESSAGE = "Cancelled: client disconnected before the run finished";
+
+/** CONTRACT: cancellation is `errored` (never a graded failure) and writes no DB rows. */
+function cancelledResult(
+  extra: Pick<RunEvalCaseResult, "threadId" | "executionStats" | "toolCallSummary"> = {},
+): RunEvalCaseResult {
+  return { status: "errored", error: EVAL_CANCELLED_MESSAGE, ...extra };
 }
 
 /** Timeout wrapper for runner.start dispatches. */
@@ -424,6 +438,7 @@ export async function runEvalCase(
   const allTargetEvents: EntityRunEventEntity[] = [];
 
   for (const turn of input.turns) {
+    if (input.signal?.aborted) return cancelledResult({ threadId: currentThreadId });
     let targetResult;
     try {
       targetResult = await withStepTimeout(
@@ -610,6 +625,10 @@ export async function runEvalCase(
 
   // ── ③ Assemble evaluator prompt ──────────────────────────────
 
+  if (input.signal?.aborted) {
+    return cancelledResult({ threadId: currentThreadId, executionStats, toolCallSummary });
+  }
+
   const conversationText = buildConversationText(history);
   const brief = buildEvaluationBrief({
     dimensionIds: input.dimensionIds,
@@ -627,6 +646,9 @@ export async function runEvalCase(
   let lastError = "";
 
   while (retries < 2) {
+    if (retries > 0 && input.signal?.aborted) {
+      return cancelledResult({ threadId: currentThreadId, executionStats, toolCallSummary });
+    }
     let currentTask = brief;
     if (retries > 0) {
       currentTask += "\n\nSYSTEM WARNING: In your previous attempt, you failed to use the `submit_evaluation_scores` tool. You MUST use the tool to submit your scores. Do NOT output plain text.";

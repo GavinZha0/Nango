@@ -1109,7 +1109,7 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
         { type: "js_expression", expression: "result.results.length > 10" },
         { type: "js_expression", expression: "result.status === 'success'" },
         { type: "js_expression", expression: "result.count >= 1" },
-        { type: "js_expression", expression: "10 < result.results.length" },
+        { type: "js_expression", expression: "result.results.length === 5" },
       ];
 
       const outcome = evaluateAssertions(payload, assertions);
@@ -1120,20 +1120,25 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[0].ok).toBe(false);
       expect(outcome.deterministicResults[0].actual).toBe(3);
       expect(outcome.deterministicResults[0].expected).toBe(10);
+      expect(outcome.deterministicResults[0].operator).toBe(">");
 
       // result.status === 'success' -> actual: 'pending'
       expect(outcome.deterministicResults[1].ok).toBe(false);
       expect(outcome.deterministicResults[1].actual).toBe("pending");
       expect(outcome.deterministicResults[1].expected).toBe("success");
+      expect(outcome.deterministicResults[1].operator).toBe("===");
 
       // result.count >= 1 -> actual: 0
       expect(outcome.deterministicResults[2].ok).toBe(false);
       expect(outcome.deterministicResults[2].actual).toBe(0);
       expect(outcome.deterministicResults[2].expected).toBe(1);
+      expect(outcome.deterministicResults[2].operator).toBe(">=");
 
-      // Yoda condition 10 < result.results.length -> actual: 3
+      // result.results.length === 5 -> actual: 3, expected: 5, operator: '==='
       expect(outcome.deterministicResults[3].ok).toBe(false);
       expect(outcome.deterministicResults[3].actual).toBe(3);
+      expect(outcome.deterministicResults[3].expected).toBe(5);
+      expect(outcome.deterministicResults[3].operator).toBe("===");
     });
 
     it("extracts failing sub-expression actual value in compound && expressions", () => {

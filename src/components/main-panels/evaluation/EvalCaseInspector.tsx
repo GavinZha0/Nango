@@ -9,7 +9,8 @@
  * Header hosts Add Turn and Evaluate buttons.
  */
 
-import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { readNdjson } from "@/lib/http/read-ndjson";
 import {
   Play,
   Loader2,
@@ -431,6 +432,11 @@ export function EvalCaseInspector({
   const [playgroundToolCallSummary, setPlaygroundToolCallSummary] = useState<ToolCallSummary | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
+  // CONTRACT: at most one in-flight single-case run; only the run whose
+  // controller is current may write component state.
+  const runAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => runAbortRef.current?.abort(), []);
+
   // Derive display results: prefer pinnedOutcome (history snapshot), then runOutcome (local run), then liveRun, then latest-result SWR
   const liveCaseResult = liveRun.caseResults.get(evalCase.id);
   
@@ -665,6 +671,10 @@ export function EvalCaseInspector({
     setPlaygroundToolCallSummary(null);
     setRunPhase("running_target");
     setRunning(true);
+    runAbortRef.current?.abort();
+    const controller = new AbortController();
+    runAbortRef.current = controller;
+    const isCurrent = (): boolean => runAbortRef.current === controller;
     try {
       if (canSave) {
         await handleSave();
@@ -674,7 +684,7 @@ export function EvalCaseInspector({
         headers: {
           Accept: "application/x-ndjson",
         },
-        signal: AbortSignal.timeout(600_000),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -683,54 +693,33 @@ export function EvalCaseInspector({
 
       const contentType = res.headers.get("content-type") ?? "";
       if (contentType.includes("application/x-ndjson") && res.body) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const frame = JSON.parse(trimmed) as
-                | {
-                    type: "target_complete";
-                    threadId: string;
-                    executionStats: ExecutionStats;
-                    toolCallSummary: ToolCallSummary;
-                  }
-                | { type: "verdict_complete"; outcome: RunEvalCaseResult }
-                | { type: "error"; error: string };
-
-              if (frame.type === "target_complete") {
-                setPlaygroundThreadId(frame.threadId);
-                setPlaygroundStats(frame.executionStats);
-                setPlaygroundToolCallSummary(frame.toolCallSummary);
-                setRunPhase("evaluating_verdicts");
-                setResponseTurnIdx(Math.max(0, turns.length - 1));
-              } else if (frame.type === "verdict_complete") {
-                setRunOutcome(frame.outcome);
-                if (frame.outcome.threadId) {
-                  setPlaygroundThreadId(frame.outcome.threadId);
-                }
-              } else if (frame.type === "error") {
-                throw new Error(frame.error);
-              }
-            } catch (frameErr) {
-              if (frameErr instanceof Error && frameErr.message !== trimmed) {
-                throw frameErr;
-              }
+        type Frame =
+          | {
+              type: "target_complete";
+              threadId: string;
+              executionStats: ExecutionStats;
+              toolCallSummary: ToolCallSummary;
             }
+          | { type: "verdict_complete"; outcome: RunEvalCaseResult };
+        const outcome = await readNdjson<Frame, RunEvalCaseResult>(res.body, (frame) => {
+          if (!isCurrent()) return;
+          if (frame.type === "target_complete") {
+            setPlaygroundThreadId(frame.threadId);
+            setPlaygroundStats(frame.executionStats);
+            setPlaygroundToolCallSummary(frame.toolCallSummary);
+            setRunPhase("evaluating_verdicts");
+            setResponseTurnIdx(Math.max(0, turns.length - 1));
+          }
+        });
+        if (isCurrent()) {
+          setRunOutcome(outcome);
+          if (outcome.threadId) {
+            setPlaygroundThreadId(outcome.threadId);
           }
         }
       } else {
         const outcome = (await res.json()) as RunEvalCaseResult;
+        if (!isCurrent()) return;
         setRunOutcome(outcome);
         if (outcome.threadId) {
           setPlaygroundThreadId(outcome.threadId);
@@ -738,14 +727,18 @@ export function EvalCaseInspector({
         setResponseTurnIdx(Math.max(0, turns.length - 1));
       }
     } catch (err) {
+      if (!isCurrent() || controller.signal.aborted) return;
       if (err instanceof Error && err.name === "TimeoutError") {
         setRunError("Evaluation timed out on client side after 600s. Consider reducing turns or testing with shorter prompts.");
       } else {
         setRunError(err instanceof Error ? err.message : String(err));
       }
     } finally {
-      setRunning(false);
-      setRunPhase("idle");
+      if (isCurrent()) {
+        runAbortRef.current = null;
+        setRunning(false);
+        setRunPhase("idle");
+      }
     }
   };
 

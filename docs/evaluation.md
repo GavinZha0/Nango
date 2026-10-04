@@ -19,38 +19,33 @@ Complementary to **Verification** (deterministic assert-on-output).
 
 ---
 
-## 2. Three-Layer Evaluation Architecture
+## 2. Evaluation Architecture & Unified Assertions
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Baseline (3 criteria — always evaluated)                │
-│  Task Completion · Safety & Compliance · Fluency         │
+│  Builtin Evaluation Dimensions (8 across 4 categories)  │
+│  Task & Capabilities · Knowledge & Quality              │
+│  Safety & Persona · Language & Formatting               │
 ├─────────────────────────────────────────────────────────┤
-│  Suite Dimensions (0–5 selectable — suite-level)         │
-│  faithfulness · tool-correctness · format-compliance     │
-│  code-quality · tone-persona                             │
-├─────────────────────────────────────────────────────────┤
-│  Case Criteria (per-case — LLM + deterministic + metrics)│
-│  expectation · assertions · keywords · tool_calls        │
-│  max_duration_s · max_output_tokens · max_tool_calls     │
+│  Unified Assertions (per-case AssertionSpec[])          │
+│  tool_call · metric · llm_dim · llm_custom              │
+│  duration_s · output_chars · tool_calls/failures/blocked │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Baseline** — baked into the evaluator's system prompt. Three
-sub-criteria with scoring rubrics (0–100). Uses strict-bias policy
-and a min-cap rule. Baseline and dimensions are judge-scored: they are
-evaluated only when the suite binds an Evaluator Agent — see §3.3 for
-the evaluator-not-configured contract.
+**Builtin Dimensions** — 8 specialized dimensions grouped into 4 categories (`DIMENSION_CATEGORIES`):
+1. **Task & Capabilities**: `task-completion`, `tool-correctness`
+2. **Knowledge & Quality**: `faithfulness`, `code-quality`
+3. **Safety & Persona**: `safety`, `tone-persona`
+4. **Language & Formatting**: `fluency`, `format-compliance`
 
-**Dimensions** — 5 builtin specialized dimensions, each with a full
-evaluation prompt (OBJECTIVE → STEPS → RULES → RUBRIC). Designed
-following DeepEval/RAGAS best practices: chain-of-thought, strict
-bias, 5-level anchored rubric. Suite-level selection only.
+Each dimension contains a tailored prompt template following DeepEval/RAGAS best practices (OBJECTIVE → STEPS → RULES → RUBRIC). Suite-level dimensions are selected on `eval_suite.dimensionIds` and merged into the evaluation checklist alongside case-level items.
 
-**Criteria** — per-case JSON with 11 fields in 3 categories.
-Validated by Zod (`.strict()`). LLM-evaluated fields are sent to
-the evaluator; deterministic fields are verified by code;
-execution metrics are measured by the runner.
+**Unified Assertions** — per-case `assertions: AssertionSpec[]` validated against `assertionSpecSchema` (`src/lib/assertions/types.ts`):
+- **`tool_call`**: evaluates tool execution counts, arguments subset matching, or failure/blocked frequencies (`calls`, `failed`, `blocked`).
+- **`metric`**: checks multi-turn conversation and performance metrics (`duration_s`, `output_chars`, `total_tool_calls`, `tool_failures`, `tool_blocked`).
+- **`llm_dim`**: evaluates against one of the predefined dimension rubrics above.
+- **`llm_custom`**: natural language semantic criteria (`expectation`, `unexpectation`, `reference`, `context`).
 
 **Suite Variables (Literal Variables)** — defined on `eval_suite.variables`.
 Literal variables (e.g. `TARGET_PHRASE`, `THRESHOLD`, `ENVIRONMENT`) are resolved
@@ -77,20 +72,23 @@ Background loop (serial, alphabetical by case name):
     │     via runner.start({ mode: "sync", initiator: "evaluator" })
     │
     ├─ ② Run deterministic checks (code)
-    │     keywords · tool_calls · execution metrics
-    │     Output: per-item pass/fail + pass_rate
+    ├─ ② Run deterministic checks (code)
+    │     tool_calls · metrics (duration_s, output_chars, tool counts)
+    │     Output: per-item pass/fail verdict
     │
     ├─ ③ Assemble evaluator prompt
-    │     baseline + dimension prompts + criteria context
-    │     + deterministic results + conversation text
+    │     Evaluation brief with atomic checklist [CHECK ITEM 0], [1], ...
+    │     combining suite dimensions and case-level LLM assertions
+    │     + conversation transcript + deterministic execution facts
     │
     ├─ ④ Dispatch evaluator agent
     │     Calls submit_evaluation_scores tool once
-    │     Returns: baseline_score + dimension_scores
-    │     + criteria_score + feedback
+    │     Returns: item_scores: [{ index, score: 1..5, reason }]
+    │     + optional overall feedback
     │
-    ├─ ⑤ Compute final criteria score
-    │     = evaluator criteria_score × deterministic pass_rate
+    ├─ ⑤ Compute item and case verdicts
+    │     Each item passes if score >= threshold (default 3 on 1-5 Likert scale)
+    │     Case status = passed only if all deterministic and LLM items pass
     │
     ├─ ⑥ Write eval_case_result + publish SSE
     │
@@ -100,8 +98,11 @@ Finalize: aggregate passed/failed/errored counts → eval_run
 ```
 
 ### 3.2 Single Case Run (Synchronous Playground Mode)
-- **Zero DB pollution**: `POST /api/eval-cases/[id]/run` executes the 6-step pipeline synchronously inline without persisting `eval_run` or `eval_case_result` records (mirrors Verification & Web Auto).
-- **Direct UI Feedback**: Returns `RunEvalCaseResult` JSON directly (200 OK) to populate the case inspector outcome state.
+- **Zero DB pollution**: `POST /api/eval-cases/[id]/run` executes the pipeline synchronously inline without persisting `eval_run` or `eval_case_result` records (mirrors Verification & Web Auto).
+- **Direct UI Feedback**: Returns `RunEvalCaseResult` JSON directly (200 OK) or streams two-phase results via request-scoped NDJSON (`Accept: application/x-ndjson` or `?stream=true`).
+- **Streaming Channel Contract**:
+  - **Batch runs (Suite/Group)** use the shared SSE channel (`/api/runs/stream`) — asynchronous, persisted in DB (`eval_run`), lightweight status frames broadcasted across user tabs.
+  - **Playground single-case runs** use request-scoped NDJSON streams — ephemeral, zero DB writes, point-to-point. Emits Phase 1 (`target_complete`) immediately so the user can inspect target output and messages while Phase 2 evaluates in background. Client disconnect or cancellation (`AbortController`) terminates remaining evaluator dispatches.
 - **Thread Replay**: Ephemeral conversation messages are retrieved on-demand via `/api/eval-runs/playground/messages?threadId=...` bounded by session owner authentication.
 
 Recovery: stranded `eval_run` rows (`status='running'`) are swept
@@ -111,7 +112,7 @@ to `errored` on boot via `instrumentation.ts`.
 
 A case that depends on an LLM evaluator — any judge-dependent assertion
 (`llm_custom`, `llm_dim`) **or** a suite that selects
-`dimensionIds` (baseline + dimensions are judge-scored) — cannot produce a
+`dimensionIds` (dimensions are judge-scored) — cannot produce a
 verdict when the suite binds no Evaluator Agent (`evaluatorAgentId` is null):
 
 - **Dimension-bearing suites** (`dimensionIds.length > 0`): every case
@@ -141,16 +142,16 @@ never a silent green pass with unjudged assertions.**
 
 ## 4. Scoring & Levels
 
-**Case-level** — overall score aggregates baseline + dimensions +
-criteria (weighted average). Pass/fail determined by configurable
-threshold.
+**Item-level (Discrete Likert Scale)** — Evaluator agents grade each checklist item on an integer 1–5 scale:
+- **5 (Excellent)**: Fully satisfies all criteria with exceptional quality.
+- **4 (Good)**: Meets core requirements with only minor, negligible imperfections.
+- **3 (Acceptable / Pass Threshold)**: Meets essential requirements adequately; default passing cutoff.
+- **2 (Marginal / Substandard)**: Significant omissions, noticeable errors, or poor quality.
+- **1 (Complete Failure)**: Wholly fails requirement, toxic/harmful, or completely hallucinated.
 
-**Suite-level** — pass/fail ratio, not numeric average. Status is
-`passed` (all cases pass), `failed` (any fails), or `errored`
-(any runner error). UI shows `8/10 Passed (2 Failed)`.
+**Case-level** — overall score combines deterministic checks and judge scores. A case passes if all deterministic assertions succeed and all evaluated judge items achieve `score >= threshold` (default threshold is 3).
 
-**4 evaluation levels** with configurable thresholds
-(DB keys `eval.threshold.*`):
+**Suite-level & Run Aggregates** — percentage-based scoring (0–100) mapped to 4 evaluation levels with configurable thresholds (DB keys `eval.threshold.*`):
 
 | Level | Default | Color |
 |---|---|---|
@@ -159,18 +160,17 @@ threshold.
 | Poor | ≥ 40 | Amber |
 | Fail | < 40 | Red |
 
+Suite status is `passed` (all cases pass), `failed` (any fails), or `errored` (any runner error). UI shows `8/10 Passed (2 Failed)`.
+
 ---
 
 ## 5. Evaluator Tool
 
-`submit_evaluation_scores` — server tool injected into evaluator
-agents during programmatic dispatch. Tool calls are natively
-structured (Zod-validated JSON args), making score extraction
-deterministic vs. parsing free text.
+`submit_evaluation_scores` — server tool injected into evaluator agents (`role = 'evaluator'`) during programmatic dispatch. Tool calls are natively structured (Zod-validated JSON args), making score extraction deterministic vs. parsing free text.
 
-Accepts: `baseline_score`, `dimension_scores[]` (with per-dimension
-justification), `criteria_score`, `feedback`. Validates expected
-dimension IDs; rejects unknown or missing dimensions.
+Accepts:
+- `item_scores`: `Array<{ index: number, score: number, reason: string }>` where `index` matches `[CHECK ITEM 0]`, `[CHECK ITEM 1]`, etc., `score` is an integer 1–5, and `reason` cites specific conversational evidence.
+- `feedback`: optional string providing high-level evaluation feedback.
 
 ---
 

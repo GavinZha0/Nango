@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
+import { readNdjson } from "@/lib/http/read-ndjson";
 import { Play, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -161,6 +162,18 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const [playgroundExecutionOutput, setPlaygroundExecutionOutput] = useState<unknown>(null);
   const [playgroundDurationMs, setPlaygroundDurationMs] = useState<number | null>(null);
   const [copiedOutput, setCopiedOutput] = useState(false);
+
+  // CONTRACT: at most one in-flight single-case run; only the run whose
+  // controller is current may write component state.
+  const runAbortRef = useRef<AbortController | null>(null);
+  const cancelSingleRun = useCallback((): void => {
+    if (!runAbortRef.current) return;
+    runAbortRef.current.abort();
+    runAbortRef.current = null;
+    setRunning(false);
+    setRunPhase("idle");
+  }, []);
+  useEffect(() => () => runAbortRef.current?.abort(), []);
 
   // Compute effective outcome (prioritizes historical snapshot when in history view)
   const displayOutcome = useMemo<SingleCaseRunOutcome | null>(() => {
@@ -481,13 +494,17 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     setPlaygroundDurationMs(null);
     setRunPhase("running_script");
     setRunning(true);
+    runAbortRef.current?.abort();
+    const controller = new AbortController();
+    runAbortRef.current = controller;
+    const isCurrent = (): boolean => runAbortRef.current === controller;
     try {
       const res = await fetch(`/api/web-auto-cases/${targetId}/run?stream=true`, {
         method: "POST",
         headers: {
           Accept: "application/x-ndjson",
         },
-        signal: AbortSignal.timeout(600_000),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]),
       });
       if (!res.ok) {
         const errData = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -496,49 +513,22 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
       const contentType = res.headers.get("content-type") ?? "";
       if (contentType.includes("application/x-ndjson") && res.body) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const frame = JSON.parse(trimmed) as
-                | { type: "execution_complete"; executionOutput: unknown; durationMs: number }
-                | { type: "verdict_complete"; outcome: SingleCaseRunOutcome }
-                | { type: "error"; error: string };
-
-              if (frame.type === "execution_complete") {
-                setPlaygroundExecutionOutput(frame.executionOutput);
-                setPlaygroundDurationMs(frame.durationMs);
-                setRunPhase("evaluating_verdicts");
-                const imgs = extractWebAutoImages(frame.executionOutput);
-                if (imgs.length > 0) {
-                  setOutputTab("images");
-                }
-              } else if (frame.type === "verdict_complete") {
-                setRunOutcome(frame.outcome);
-                setRunPhase("idle");
-              } else if (frame.type === "error") {
-                throw new Error(frame.error);
-              }
-            } catch (frameErr) {
-              if (frameErr instanceof Error && frameErr.message !== trimmed) {
-                throw frameErr;
-              }
-            }
+        type Frame =
+          | { type: "execution_complete"; executionOutput: unknown; durationMs: number }
+          | { type: "verdict_complete"; outcome: SingleCaseRunOutcome };
+        const outcome = await readNdjson<Frame, SingleCaseRunOutcome>(res.body, (frame) => {
+          if (!isCurrent() || frame.type !== "execution_complete") return;
+          setPlaygroundExecutionOutput(frame.executionOutput);
+          setPlaygroundDurationMs(frame.durationMs);
+          setRunPhase("evaluating_verdicts");
+          if (extractWebAutoImages(frame.executionOutput).length > 0) {
+            setOutputTab("images");
           }
-        }
+        });
+        if (isCurrent()) setRunOutcome(outcome);
       } else {
         const data = await res.json();
+        if (!isCurrent()) return;
         setRunOutcome(data);
         const imgs = extractWebAutoImages(data.executionOutput);
         if (imgs.length > 0) {
@@ -546,14 +536,19 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         }
       }
     } catch (err: unknown) {
+      // Superseded, or cancelled by case switch / unmount — not a user-facing error.
+      if (!isCurrent() || controller.signal.aborted) return;
       if (err instanceof Error && err.name === "TimeoutError") {
         toast.error("Execution timed out on client side after 600s.");
       } else {
         toast.error(err instanceof Error ? err.message : String(err));
       }
     } finally {
-      setRunning(false);
-      setRunPhase("idle");
+      if (isCurrent()) {
+        runAbortRef.current = null;
+        setRunning(false);
+        setRunPhase("idle");
+      }
     }
   };
 
@@ -635,6 +630,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
           verdictByCaseId={verdictByCaseId}
           selectedCaseId={selectedCaseId}
           onSelectCase={(id) => {
+            cancelSingleRun();
             setSelectedCaseId(id);
             setRunOutcome(null);
             setPlaygroundExecutionOutput(null);

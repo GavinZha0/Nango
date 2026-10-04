@@ -237,11 +237,14 @@ export interface ToolPrefixRule {
 | `json_schema` | Validates against a JSON Schema (Draft 2020-12). | `{"type": "object", "required": ["id"]}` |
 | `jsonpath` | Evaluates a JSONPath query against target operators. | `path: "items[0].id", operator: "==", expected: "abc"` |
 | `js_expression` | Executes a pure JS expression in a restricted `node:vm`. | `result.totalCount > 42` |
-| `metric` | Asserts on numerical metrics such as `duration_s` (execution time in seconds). | `metric: "duration_s", operator: "<", threshold: 5` |
+| `metric` | Asserts on numerical metrics: `duration_s` (execution time) and `output_chars` (payload character length). | `metric: "duration_s", operator: "<", threshold: 5` |
 
 - An empty assertions array acts as a smoke test (passes if no upstream tool error).
 - Assertions can target raw MCP output by prefixing paths with `$` or using the `root` JS binding.
 - Wildcard array paths (`items[*].field`) evaluate strictly with **"every"** semantics. When paired with `exists` (e.g. `items[*].id exists`), every element in the array must contain the target property. Any unsatisfied items report their 0-indexed positions (e.g. `[1, 2]`).
+- **`js_expression` Evaluation Contract**:
+  - **VM Context Reuse**: Evaluation initializes a hardened Node `vm` context once per case execution via `vm.createContext` and reuses it across clause probes and value extraction via `runInContext`.
+  - **Standard Operand Convention**: The value extractor (`extractJsExpressionActual`) adheres strictly to standard assertion conventions where the Left-Hand Side (LHS) is the dynamic property under test (e.g. `result.count`) and the Right-Hand Side (RHS) is the static threshold/expected literal (e.g. `5`). Inverted forms with literals on the left (e.g. `5 < result.count`) are not supported for value extraction to ensure unambiguous verdict diagnostics.
 
 ### 5.1 Save-Time Semantic Validation
 
@@ -249,7 +252,7 @@ Assertions are pre-checked for semantic syntax at save time (`POST /api/verifica
 - `js_expression`: verified with AST compilation (`new Script('(${expr})')` without execution).
 - `json_schema`: compiled with Ajv Draft 2020-12.
 - `jsonpath`: parsed with `JSONPath` against structured path selectors and mock filter arrays; regex patterns verified for `matches` operator.
-- `metric`: restricted to allowed category metrics (e.g. `duration_s` with `<` or `>`) and finite thresholds.
+- `metric`: restricted to category metrics (`duration_s`, `output_chars` with `<` or `>`) and finite thresholds.
 
 Any syntax errors trigger an immediate HTTP 400 Bad Request at save time, surfacing instant feedback in the UI editor before test execution.
 

@@ -37,6 +37,9 @@ import type {
 
 const log = childLogger({ component: "web-auto-orchestrator" });
 
+export const WEB_AUTO_CANCELLED_MESSAGE =
+  "Cancelled: client disconnected before LLM evaluation";
+
 function publishWebAutoFrame(ownerId: string, frame: WebAutoFrame): void {
   publish(ownerId, { kind: "web_auto", ownerId, frame });
 }
@@ -351,6 +354,23 @@ export async function runWebAutoCase(
       },
       "short-circuiting LLM evaluation: deterministic assertions failed",
     );
+  } else if (evaluatorAgentId && llmRequired && input.signal?.aborted) {
+    return {
+      status: "errored",
+      executionOutput: sanitizedOutput,
+      outputTruncated: false,
+      assertionResults: redactSensitiveData(outcome.deterministicResults, sensitiveValues),
+      verdict: {
+        deterministic: {
+          passed: deterministicResult.passed,
+          results: redactSensitiveData(outcome.deterministicResults, sensitiveValues),
+        },
+        overall: { passed: false, reason: WEB_AUTO_CANCELLED_MESSAGE },
+      },
+      error: { source: "cancelled", message: WEB_AUTO_CANCELLED_MESSAGE },
+      startedAt,
+      durationMs: mcpResult.durationMs,
+    };
   } else if (evaluatorAgentId && llmRequired && deterministicResult.passed) {
     const expectations = outcome.llmAssertions.map((item) => {
       const customSpec = item.spec.type === "llm_custom" ? item.spec : undefined;

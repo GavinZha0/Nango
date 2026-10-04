@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { canEditResource } from "@/lib/auth/permissions";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
+import { NDJSON_CONTENT_TYPE, ndjsonResponse, wantsNdjson } from "@/lib/http/ndjson.server";
 import { loadCase } from "@/lib/evaluation/access";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
@@ -46,10 +47,7 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    const url = new URL(req.url);
-    const wantsStream =
-      req.headers.get("accept")?.includes("application/x-ndjson") ||
-      url.searchParams.get("stream") === "true";
+    const wantsStream = wantsNdjson(req);
 
     const { literalVariables, error: resolveError } = await resolveSuiteVariables(
       suite.variables,
@@ -69,7 +67,7 @@ export const POST = withEditor<{ id: string }>(
             },
           }) + "\n",
           {
-            headers: { "Content-Type": "application/x-ndjson" },
+            headers: { "Content-Type": NDJSON_CONTENT_TYPE },
           },
         );
       }
@@ -101,40 +99,13 @@ export const POST = withEditor<{ id: string }>(
     };
 
     if (wantsStream) {
-      const stream = new TransformStream();
-      const writer = stream.writable.getWriter();
-      const encoder = new TextEncoder();
-
-      void (async () => {
-        try {
-          const outcome = await runEvalCase({
-            ...evalInput,
-            onTargetComplete: async (targetData) => {
-              const frame =
-                JSON.stringify({ type: "target_complete", ...targetData }) + "\n";
-              await writer.write(encoder.encode(frame));
-            },
-          });
-          const frame =
-            JSON.stringify({ type: "verdict_complete", outcome }) + "\n";
-          await writer.write(encoder.encode(frame));
-        } catch (err) {
-          const errMessage = err instanceof Error ? err.message : String(err);
-          const frame =
-            JSON.stringify({ type: "error", error: errMessage }) + "\n";
-          await writer.write(encoder.encode(frame));
-        } finally {
-          await writer.close();
-        }
-      })();
-
-      return new Response(stream.readable, {
-        headers: {
-          "Content-Type": "application/x-ndjson",
-          "Cache-Control": "no-cache, no-transform",
-          "X-Accel-Buffering": "no",
-        },
-      });
+      return ndjsonResponse(req, (emit, signal) =>
+        runEvalCase({
+          ...evalInput,
+          signal,
+          onTargetComplete: (targetData) => emit({ type: "target_complete", ...targetData }),
+        }),
+      );
     }
 
     const outcome = await runEvalCase(evalInput);

@@ -217,11 +217,15 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `/api/mcp-servers`, `/[id]/discover`, `/[id]/call-tool` | CRUD/RPC | MCP server registration, tool discovery, invocation | session |
 | `/api/skills`, `/api/skills/[id]`, `/api/skills/[id]/files/[...]` | CRUD | Skills CRUD + helper-file read | session |
 | `/api/verification-suites[/id]`, `/api/verification-cases/[id]`, `/api/verification-runs[/id]`, `/api/verification-servers/[id]` | CRUD/RPC | Verification suites, cases, runs (suite + server-wide, viewer-scoped) and results | editor |
-| `/api/eval-suites[/id]`, `/api/eval-cases/[id]`, `/api/eval-runs[/id]` | CRUD/RPC | Evaluation suites, cases, runs (suite + agent batch) and results | editor |
-| `/api/web-auto-suites[/id]`, `/api/web-auto-cases/[id]`, `/api/web-auto-runs[/id]` | CRUD/RPC | Web Auto suites, cases, execution batches and case results | editor |
+| `/api/eval-suites[/id]`, `/api/eval-cases/[id]`, `/api/eval-runs[/id]` | CRUD/RPC | Evaluation suites, cases, runs (suite + agent batch), and results. Single-case runs (`/api/eval-cases/[id]/run?stream=true`) support request-scoped NDJSON two-phase streaming. | editor |
+| `/api/web-auto-suites[/id]`, `/api/web-auto-cases/[id]`, `/api/web-auto-runs[/id]` | CRUD/RPC | Web Auto suites, cases, execution batches, and results. Single-case runs (`/api/web-auto-cases/[id]/run?stream=true`) support request-scoped NDJSON two-phase streaming. | editor |
 | `/api/media/tool-image/[id]` | GET | Stream temporary media cache images produced by MCP tools | session |
 | `/api/notifications`, `/api/notifications/[id]` | GET/POST/PATCH/DELETE | Inbox list / mark-all-read / mark-read / delete | session |
 | `/api/runs/stream` | GET (SSE) | Live notification + `run_finalized` stream keyed by ownerId. Notification frames carry `id: <uuidv7>`; on EventSource auto-reconnect we replay missed `notification` rows via `Last-Event-ID` (header or `?lastEventId=`), capped at 200 rows per resume. | session |
+> **Testing Streaming Channels Contract**:
+> - **Batch Runs (Suite/Group)**: Asynchronous, DB-persisted, owner-scoped broadcast via `/api/runs/stream` (SSE).
+> - **Playground Single-Case Runs**: Ephemeral, zero DB writes, point-to-point via request-scoped NDJSON (`Accept: application/x-ndjson` or `?stream=true`). Decouples execution (Phase 1) from LLM evaluation (Phase 2), with client disconnect aborting remaining phases.
+
 | `/api/threads`, `/api/threads/[id]`, `/api/threads/[id]/messages` | GET / DELETE / GET | Unified chat history surface. Lists threads (filtered by optional `?entityId=`), reconstructs AG-UI `Message[]` from `entity_run.input_task` + post-coalesce `entity_run_event` rows, deletes a thread + its delegation sub-tree via recursive CTE. owner-scoped end to end (`owner_id = session.user.id`); sub-runs excluded by `parent_run_id IS NULL`. Replaces the previous reverse-proxy of upstream agent platform `/sessions` APIs. | session |
 | `/api/threads/[threadId]/outcomes` | GET | Retrieve transient outcomes generated within a conversation thread | session |
 | `/api/schedules`, `/api/schedules/[id]`, `/api/schedules/[id]/trigger` | CRUD/RPC | Schedule CRUD + manual trigger | session |
