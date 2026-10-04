@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.26.0](https://github.com/GavinZha0/Nango/compare/v0.25.1...v0.26.0) (2026-10-04)
+
+
+### Features
+
+* **assertions:** support text_match assertions and re-enable jsonpath/js for eval ([fddfd3d](https://github.com/GavinZha0/Nango/commit/fddfd3d3abd93cb99a3aa0f36c3f95f984d43322))
+* **assertions:** support wildcard array evaluation, _meta preservatio ([5c2c8c1](https://github.com/GavinZha0/Nango/commit/5c2c8c1888220fd8ac982e8071ad2992108c9c3f))
+* **credentials:** custom api key headers, safe patch merge, and placeholder display ([6d4e7b6](https://github.com/GavinZha0/Nango/commit/6d4e7b69386c4e01e42c1a35281faaa232e88ece))
+* **eval/verification:** refine assertion verdicts, tool execution UI, and metrics assertions ([f7c5475](https://github.com/GavinZha0/Nango/commit/f7c5475c14c669eeba5cbe632394d32253ab486a))
+* **eval/web-auto:** decouple phases, add execution timer, and polish UI ([ec73706](https://github.com/GavinZha0/Nango/commit/ec73706c1c71e1a5716e71074cb9c411031b4d41))
+* **eval:** enhance evaluation suite timeout, tool call audit, and assertion robustness ([6f70a7c](https://github.com/GavinZha0/Nango/commit/6f70a7c432ea06f993ef695e1a6165afeeba5cfd))
+* **eval:** modernize evaluation subsystem with unified assertions ([adfaf68](https://github.com/GavinZha0/Nango/commit/adfaf68069ca7cab12453ea21e02ee2ba0947d16))
+* **evaluation:** 3-digit prefix of case for ordered execution ([1de5f2b](https://github.com/GavinZha0/Nango/commit/1de5f2b1a206e76c3eb9ec6024053bdbc854058a))
+* **testing:** unify bingdings of output ([c4c25f8](https://github.com/GavinZha0/Nango/commit/c4c25f8665fb2e4792178f26d1b192fbb44e5771))
+* **trace:** add tool call stats, state sharing, and progressive disclosure ([dcc1191](https://github.com/GavinZha0/Nango/commit/dcc1191782368a12bc42bbe790b9f9677f2f5939))
+* **verification:** tool timeout, assertion validation, and error classification ([fae76d1](https://github.com/GavinZha0/Nango/commit/fae76d1d5c1442bc567e68ee70d0bada827b9714))
+* **web-auto:** cross-case variable referencing and shared suite context ([0cec55a](https://github.com/GavinZha0/Nango/commit/0cec55a6eeb63888014c2e8945b6f706f95bc83b))
+* **web-auto:** execution timeout, metric assertions, and editor UX improvements ([fc9c23c](https://github.com/GavinZha0/Nango/commit/fc9c23c3e26ffcdabaacec71d799f5ae2ff43e9b))
+* **workflow:** implement Phase 0 groundwork and review hardening ([8b5f640](https://github.com/GavinZha0/Nango/commit/8b5f6403f3924e62fb7978f71fd33b753fcd2fd9))
+
+
+### Bug Fixes
+
+* **e2e:** fix auth setup race conditions and update copilotkit to 1.77.0 ([f1c6990](https://github.com/GavinZha0/Nango/commit/f1c69902a889679133a48f7d43dc869c42d66211))
+* **evaluatiion:** visibility issue of target agent ([4afd5cd](https://github.com/GavinZha0/Nango/commit/4afd5cd604223553daf8b1234416c46a84d2492b))
+* **web-auto:** page issue ([f1590f9](https://github.com/GavinZha0/Nango/commit/f1590f9c5baac03a1ccd431b34c43a9f339cd961))
+* **workflow:** harden sandbox params, bounded audit events, and pruning guard ([e75493a](https://github.com/GavinZha0/Nango/commit/e75493ab4f632e71d1f16a4d6af1a7ec5f61180f))
+
 ## [0.25.1](https://github.com/GavinZha0/Nango/compare/v0.25.0...v0.25.1) (2026-09-29)
 
 
