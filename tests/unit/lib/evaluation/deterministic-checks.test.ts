@@ -134,6 +134,61 @@ describe("runDeterministicChecks", () => {
     expect(result.passedCount).toBe(1);
     expect(result.assertionResults[0]?.ok).toBe(true);
   });
+
+  it("evaluates jsonpath and js_expression on structured JSON agentText", () => {
+    const assertions = [
+      {
+        type: "jsonpath",
+        path: "$.status",
+        operator: "==",
+        expected: "success",
+      },
+      {
+        type: "js_expression",
+        expression: "result.count > 10",
+      },
+    ];
+    const result = runDeterministicChecks(assertions, {
+      agentText: '```json\n{"status": "success", "count": 42}\n```',
+      actualToolCalls: [],
+      metrics: BASE_METRICS,
+    });
+    expect(result.passRate).toBe(1.0);
+    expect(result.passedCount).toBe(2);
+    expect(result.assertionResults[0]?.ok).toBe(true);
+    expect(result.assertionResults[1]?.ok).toBe(true);
+  });
+
+  it("evaluates text_match assertions with contains, not_contains, and matches", () => {
+    const assertions = [
+      {
+        type: "text_match",
+        operator: "contains",
+        expected: "order confirmed",
+      },
+      {
+        type: "text_match",
+        operator: "not_contains",
+        expected: "error",
+      },
+      {
+        type: "text_match",
+        operator: "matches",
+        expected: "ID:\\s*#\\d+",
+      },
+    ];
+    const result = runDeterministicChecks(assertions, {
+      agentText: "Your order confirmed! Reference ID: #98765. Thank you.",
+      actualToolCalls: [],
+      metrics: BASE_METRICS,
+    });
+    expect(result.passRate).toBe(1.0);
+    expect(result.passedCount).toBe(3);
+    expect(result.assertionResults[0]?.ok).toBe(true);
+    expect(result.assertionResults[1]?.ok).toBe(true);
+    expect(result.assertionResults[2]?.ok).toBe(true);
+    expect(result.results[0]?.label).toContain('Text contains "order confirmed"');
+  });
 });
 
 describe("formatChecksForPrompt", () => {

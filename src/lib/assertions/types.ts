@@ -130,7 +130,21 @@ export const llmCustomAssertionSchema = z.object({
 
 export type LlmCustomAssertion = z.infer<typeof llmCustomAssertionSchema>;
 
-// ── 7. Discriminated Union & Array Schemas ───────────────────────────────────
+// ── 7. Text Match Assertion Schema ───────────────────────────────────────────
+
+export const textMatchOperatorSchema = z.enum(["contains", "not_contains", "matches"]);
+export type TextMatchOperator = z.infer<typeof textMatchOperatorSchema>;
+
+export const textMatchAssertionSchema = z.object({
+  type: z.literal("text_match"),
+  operator: textMatchOperatorSchema.describe("Text matching operator ('contains' | 'not_contains' | 'matches')"),
+  expected: z.string().min(1).describe("Expected substring or regular expression pattern"),
+  caseSensitive: z.boolean().optional().describe("Whether comparison is case-sensitive (default is false)"),
+});
+
+export type TextMatchAssertion = z.infer<typeof textMatchAssertionSchema>;
+
+// ── 8. Discriminated Union & Array Schemas ───────────────────────────────────
 
 export const assertionSpecSchema = z.discriminatedUnion("type", [
   jsonPathAssertionSchema,
@@ -138,6 +152,7 @@ export const assertionSpecSchema = z.discriminatedUnion("type", [
   jsExpressionAssertionSchema,
   toolCallAssertionSchema,
   metricAssertionSchema,
+  textMatchAssertionSchema,
   llmDimAssertionSchema,
   llmCustomAssertionSchema,
 ]);
@@ -266,6 +281,7 @@ export type AssertionTypeName =
   | "js_expression"
   | "tool_call"
   | "metric"
+  | "text_match"
   | "llm_dim"
   | "llm_custom";
 
@@ -284,8 +300,16 @@ export const CATEGORY_TYPE_MAPPING: Record<
   readonly AssertionTypeName[]
 > = {
   verification: ["jsonpath", "json_schema", "js_expression", "metric"],
-  evaluation: ["tool_call", "metric", "llm_dim", "llm_custom"],
-  "web-auto": ["js_expression", "jsonpath", "metric", "llm_custom"],
+  evaluation: [
+    "text_match",
+    "jsonpath",
+    "js_expression",
+    "tool_call",
+    "metric",
+    "llm_dim",
+    "llm_custom",
+  ],
+  "web-auto": ["text_match", "js_expression", "jsonpath", "metric", "llm_custom"],
 };
 
 /**

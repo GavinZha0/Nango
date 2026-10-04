@@ -196,9 +196,19 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
       return `Tool: ${spec.toolName}${targetStr} ${spec.operator} ${spec.expectedCalls ?? 1}`;
     }
     if (spec.type === "metric") return `${spec.metric} ${spec.operator} ${spec.threshold}`;
+    if (spec.type === "text_match") {
+      const caseSuffix = spec.caseSensitive ? " (case-sensitive)" : "";
+      return `Text ${spec.operator} "${spec.expected}"${caseSuffix}`;
+    }
   }
 
   // Fallbacks using verdict's self-contained snapshot fields when spec is omitted
+  if (verdict.type === "text_match") {
+    const op = (verdict as { operator?: string }).operator ?? "contains";
+    const expected = verdict.expected !== undefined ? formatValue(verdict.expected) : "";
+    return `Text ${op} ${expected}`;
+  }
+
   if (verdict.type === "tool_call" || (verdict as { toolName?: string }).toolName) {
     const toolName = (verdict as { toolName?: string }).toolName || "Tool";
     const op = (verdict as { operator?: string }).operator ?? "<";

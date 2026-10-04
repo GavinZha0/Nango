@@ -26,6 +26,7 @@ import type {
   LlmDimAssertion,
   MetricAssertion,
   ToolCallAssertion,
+  TextMatchAssertion,
   AssertionToolCallSummary,
 } from "./types";
 import { substituteInputTemplates } from "./variable-resolver";
@@ -155,6 +156,8 @@ function evaluateSingleDeterministic(
       return evaluateToolCall(spec as ToolCallAssertion, index, options);
     case "metric":
       return evaluateMetric(spec as MetricAssertion, index, options);
+    case "text_match":
+      return evaluateTextMatch(spec as TextMatchAssertion, payload, index, options);
     default: {
       return {
         index,
@@ -1053,6 +1056,105 @@ function evaluateMetric(
   };
 }
 
+// ── 6. Text Match Evaluation ──────────────────────────────────────────────────
+
+function extractTextFromPayload(payload: unknown): string {
+  if (typeof payload === "string") return payload;
+  if (payload === null || payload === undefined) return "";
+  if (typeof payload === "object") {
+    const obj = payload as Record<string, unknown>;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.result === "string") return obj.result;
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return "";
+    }
+  }
+  return String(payload);
+}
+
+function evaluateTextMatch(
+  spec: TextMatchAssertion,
+  payload: unknown,
+  index: number,
+  _options: EvaluateAssertionsOptions,
+): AssertionResult {
+  const rawText = extractTextFromPayload(payload);
+  const caseSensitive = Boolean(spec.caseSensitive);
+  const expected = spec.expected;
+
+  let ok = false;
+  let mismatchReason: string | undefined;
+
+  switch (spec.operator) {
+    case "contains": {
+      const haystack = caseSensitive ? rawText : rawText.toLowerCase();
+      const needle = caseSensitive ? expected : expected.toLowerCase();
+      ok = haystack.includes(needle);
+      if (!ok) {
+        mismatchReason = `Expected text to contain "${expected}"`;
+      }
+      break;
+    }
+    case "not_contains": {
+      const haystack = caseSensitive ? rawText : rawText.toLowerCase();
+      const needle = caseSensitive ? expected : expected.toLowerCase();
+      ok = !haystack.includes(needle);
+      if (!ok) {
+        mismatchReason = `Expected text NOT to contain "${expected}"`;
+      }
+      break;
+    }
+    case "matches": {
+      try {
+        const re = new RegExp(expected, caseSensitive ? undefined : "i");
+        ok = re.test(rawText);
+        if (!ok) {
+          mismatchReason = `Expected text to match pattern /${expected}/${caseSensitive ? "" : "i"}`;
+        }
+      } catch (err) {
+        return {
+          index,
+          type: "text_match",
+          ok: false,
+          errored: true,
+          errorSource: "config",
+          expected,
+          operator: spec.operator,
+          message: `Invalid regular expression: ${errMessage(err)}`,
+        };
+      }
+      break;
+    }
+    default:
+      return {
+        index,
+        type: "text_match",
+        ok: false,
+        errored: true,
+        errorSource: "config",
+        expected,
+        operator: spec.operator,
+        message: `Unsupported text_match operator: ${spec.operator}`,
+      };
+  }
+
+  const actualPreview =
+    rawText.length > 200 ? `${rawText.slice(0, 197)}...` : rawText;
+
+  return {
+    index,
+    type: "text_match",
+    ok,
+    operator: spec.operator,
+    expected,
+    actual: actualPreview,
+    message: ok ? undefined : mismatchReason,
+  };
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Deep-copy a value into plain, host-free JSON data before it enters the
@@ -1203,6 +1305,30 @@ export function validateAssertionSyntax(spec: unknown): SyntaxValidationResult {
     case "metric": {
       if (typeof obj.threshold !== "number" || !Number.isFinite(obj.threshold)) {
         return { ok: false, error: "Metric threshold must be a finite number" };
+      }
+      return { ok: true };
+    }
+
+    case "text_match": {
+      if (typeof obj.expected !== "string" || !obj.expected.trim()) {
+        return { ok: false, error: "Text match expected must be a non-empty string" };
+      }
+      const allowedOps = ["contains", "not_contains", "matches"];
+      if (!allowedOps.includes(obj.operator as string)) {
+        return {
+          ok: false,
+          error: `Invalid text_match operator: '${obj.operator}'. Allowed operators are 'contains', 'not_contains', 'matches'.`,
+        };
+      }
+      if (obj.operator === "matches") {
+        try {
+          new RegExp(obj.expected);
+        } catch (err) {
+          return {
+            ok: false,
+            error: `Invalid regular expression: ${errMessage(err)}`,
+          };
+        }
       }
       return { ok: true };
     }

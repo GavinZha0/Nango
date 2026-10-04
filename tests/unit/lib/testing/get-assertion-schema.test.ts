@@ -83,8 +83,27 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("evaluation");
-      expect(res.types).toEqual(["tool_call", "metric", "llm_dim", "llm_custom"]);
-      expect(res.schemas.length).toBe(4);
+      expect(res.types).toEqual([
+        "text_match",
+        "jsonpath",
+        "js_expression",
+        "tool_call",
+        "metric",
+        "llm_dim",
+        "llm_custom",
+      ]);
+      expect(res.schemas.length).toBe(7);
+
+      const textMatchItem = res.schemas.find((s) => s.type === "text_match");
+      expect(textMatchItem).toBeDefined();
+      expect(textMatchItem?.example).toHaveProperty("operator");
+      expect(textMatchItem?.example).toHaveProperty("expected");
+
+      const jsonpathItem = res.schemas.find((s) => s.type === "jsonpath");
+      expect(jsonpathItem).toBeDefined();
+
+      const jsExpressionItem = res.schemas.find((s) => s.type === "js_expression");
+      expect(jsExpressionItem).toBeDefined();
 
       const llmCustomItem = res.schemas.find((s) => s.type === "llm_custom");
       expect(llmCustomItem).toBeDefined();
@@ -107,8 +126,14 @@ describe("get_assertion_schema tool", () => {
       })) as GetAssertionSchemaResult;
 
       expect(res.category).toBe("web-auto");
-      expect(res.types).toEqual(["js_expression", "jsonpath", "metric", "llm_custom"]);
-      expect(res.schemas.length).toBe(4);
+      expect(res.types).toEqual([
+        "text_match",
+        "js_expression",
+        "jsonpath",
+        "metric",
+        "llm_custom",
+      ]);
+      expect(res.schemas.length).toBe(5);
     });
 
     it("returns filtered single schema when assertionType is specified", async () => {
@@ -176,14 +201,7 @@ describe("get_assertion_schema tool", () => {
       await expect(
         tool.execute!({
           category: "evaluation",
-          assertionType: "jsonpath",
-        }),
-      ).rejects.toThrow(/not supported for category 'evaluation'/i);
-
-      await expect(
-        tool.execute!({
-          category: "evaluation",
-          assertionType: "js_expression",
+          assertionType: "json_schema",
         }),
       ).rejects.toThrow(/not supported for category 'evaluation'/i);
     });

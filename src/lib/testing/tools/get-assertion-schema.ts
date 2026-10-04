@@ -8,6 +8,7 @@ import {
   jsExpressionAssertionSchema,
   toolCallAssertionSchema,
   metricAssertionSchema,
+  textMatchAssertionSchema,
   llmDimAssertionSchema,
   llmCustomAssertionSchema,
   CATEGORY_TYPE_MAPPING,
@@ -127,6 +128,21 @@ function buildSchemaItem(
           metric: "duration_s",
           operator: "<",
           threshold: 5.0,
+        },
+      };
+    }
+    case "text_match": {
+      const { $schema, ...cleanSchema } = z.toJSONSchema(textMatchAssertionSchema) as Record<string, unknown>;
+      return {
+        type: "text_match",
+        description:
+          "Performs deterministic string matching against execution output text without calling LLMs. Operators: 'contains', 'not_contains', 'matches' (regular expression).",
+        jsonSchema: cleanSchema,
+        example: {
+          type: "text_match",
+          operator: "contains",
+          expected: "https://",
+          caseSensitive: false,
         },
       };
     }

@@ -1155,4 +1155,80 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[0].actual).toBe(3);
     });
   });
+
+  describe("7. text_match deterministic assertions", () => {
+    const stringPayload = "Welcome to Nango! Check our docs at https://docs.nango.dev for details.";
+    const objectPayload = {
+      text: "The order #ORD-12345 has been confirmed successfully.",
+    };
+
+    it("evaluates 'contains' operator (case-insensitive by default and case-sensitive)", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "text_match", operator: "contains", expected: "welcome to nango" },
+        { type: "text_match", operator: "contains", expected: "WELCOME TO NANGO", caseSensitive: true },
+        { type: "text_match", operator: "contains", expected: "https://docs.nango.dev" },
+      ];
+
+      const outcome = evaluateAssertions(stringPayload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(false);
+      expect(outcome.deterministicResults[1].message).toContain('Expected text to contain "WELCOME TO NANGO"');
+      expect(outcome.deterministicResults[2].ok).toBe(true);
+    });
+
+    it("evaluates 'not_contains' operator", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "text_match", operator: "not_contains", expected: "error" },
+        { type: "text_match", operator: "not_contains", expected: "nango" },
+      ];
+
+      const outcome = evaluateAssertions(stringPayload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(false);
+      expect(outcome.deterministicResults[1].message).toContain('Expected text NOT to contain "nango"');
+    });
+
+    it("evaluates 'matches' regular expression operator", () => {
+      const assertions: AssertionSpec[] = [
+        { type: "text_match", operator: "matches", expected: "#ORD-\\d{5}" },
+        { type: "text_match", operator: "matches", expected: "^The order.*confirmed" },
+        { type: "text_match", operator: "matches", expected: "^The ORDER.*confirmed", caseSensitive: true },
+      ];
+
+      const outcome = evaluateAssertions(objectPayload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(false);
+    });
+
+    it("validates text_match syntax via validateAssertionSyntax", () => {
+      const valid = validateAssertionSyntax({
+        type: "text_match",
+        operator: "contains",
+        expected: "hello",
+      });
+      expect(valid.ok).toBe(true);
+
+      const empty = validateAssertionSyntax({
+        type: "text_match",
+        operator: "contains",
+        expected: "",
+      });
+      expect(empty.ok).toBe(false);
+
+      const invalidOp = validateAssertionSyntax({
+        type: "text_match",
+        operator: "starts_with",
+        expected: "hello",
+      });
+      expect(invalidOp.ok).toBe(false);
+
+      const invalidRegex = validateAssertionSyntax({
+        type: "text_match",
+        operator: "matches",
+        expected: "[unclosed-group",
+      });
+      expect(invalidRegex.ok).toBe(false);
+    });
+  });
 });

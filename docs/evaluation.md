@@ -42,10 +42,15 @@ Complementary to **Verification** (deterministic assert-on-output).
 Each dimension contains a tailored prompt template following DeepEval/RAGAS best practices (OBJECTIVE → STEPS → RULES → RUBRIC). Suite-level dimensions are selected on `eval_suite.dimensionIds` and merged into the evaluation checklist alongside case-level items.
 
 **Unified Assertions** — per-case `assertions: AssertionSpec[]` validated against `assertionSpecSchema` (`src/lib/assertions/types.ts`):
+- **`text_match`**: deterministic keyword, substring, and regex matching (`contains`, `not_contains`, `matches`) directly on response text with optional `caseSensitive` toggle (zero model invocation, instant evaluation).
+- **`jsonpath`**: evaluates JSONPath queries against structured outputs (`$.path`) or response text (`$.text contains "..."`).
+- **`js_expression`**: evaluates JavaScript expressions in a hardened VM context (`result.status === "ok"`, `text.includes("...")`).
 - **`tool_call`**: evaluates tool execution counts, arguments subset matching, or failure/blocked frequencies (`calls`, `failed`, `blocked`).
 - **`metric`**: checks multi-turn conversation and performance metrics (`duration_s`, `output_chars`, `total_tool_calls`, `tool_failures`, `tool_blocked`).
 - **`llm_dim`**: evaluates against one of the predefined dimension rubrics above.
 - **`llm_custom`**: natural language semantic criteria (`expectation`, `unexpectation`, `reference`, `context`).
+
+*Note on structured Agent output*: When an Agent outputs JSON (direct JSON payload or formatted in a markdown ` ```json ` code block), the runner automatically deserializes it so `jsonpath` and `js_expression` can inspect object properties directly alongside `text`.
 
 **Suite Variables (Literal Variables)** — defined on `eval_suite.variables`.
 Literal variables (e.g. `TARGET_PHRASE`, `THRESHOLD`, `ENVIRONMENT`) are resolved

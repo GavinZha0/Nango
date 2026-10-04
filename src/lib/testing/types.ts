@@ -222,6 +222,7 @@ export const ASSERTION_TYPES = [
   "js_expression",
   "tool_call",
   "metric",
+  "text_match",
   "llm_dim",
   "llm_custom",
 ] as const;

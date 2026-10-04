@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import type {
   AssertionSpec,
   JsonPathOperator,
+  TextMatchOperator,
   LlmCustomAssertion,
   LlmDimAssertion,
   MetricName,
@@ -62,6 +63,7 @@ export interface UniversalAssertionsEditorProps {
 type TabType =
   | "path_match"
   | "expression"
+  | "text_match"
   | "schema"
   | "tool_call"
   | "metric"
@@ -103,6 +105,15 @@ const SCHEMA_TEMPLATES = [
 ];
 
 function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMode): TabType {
+  const hasExpressions = assertions.some((a) => a.type === "js_expression");
+  if (hasExpressions) return "expression";
+
+  const hasPathMatches = assertions.some((a) => a.type === "jsonpath");
+  if (hasPathMatches) return "path_match";
+
+  const hasTextMatches = assertions.some((a) => a.type === "text_match");
+  if (hasTextMatches) return "text_match";
+
   if (mode === "evaluation") {
     const hasToolCalls = assertions.some((a) => a.type === "tool_call");
     if (hasToolCalls) return "tool_call";
@@ -116,14 +127,8 @@ function computeDefaultTab(assertions: AssertionSpec[], mode: UniversalEditorMod
     const hasLlmCustoms = assertions.some((a) => a.type === "llm_custom");
     if (hasLlmCustoms) return "llm_custom";
 
-    return "llm_dim";
+    return "expression";
   }
-
-  const hasExpressions = assertions.some((a) => a.type === "js_expression");
-  if (hasExpressions) return "expression";
-
-  const hasPathMatches = assertions.some((a) => a.type === "jsonpath");
-  if (hasPathMatches) return "path_match";
 
   if (mode === "verification") {
     const hasSchema = assertions.some((a) => a.type === "json_schema");
@@ -233,6 +238,10 @@ export function UniversalAssertionsEditor({
     () => currentAssertions.some((a) => a.type === "metric"),
     [currentAssertions],
   );
+  const hasTextMatches = useMemo(
+    () => currentAssertions.some((a) => a.type === "text_match"),
+    [currentAssertions],
+  );
   const hasLlmDims = useMemo(
     () => currentAssertions.some((a) => a.type === "llm_dim"),
     [currentAssertions],
@@ -269,23 +278,26 @@ export function UniversalAssertionsEditor({
   const setSchemaRawText = (val: string) => setSchemaTextState((prev) => ({ ...prev, text: val }));
   const [schemaError, setSchemaError] = useState<string | null>(null);
 
-  // Tab definitions: JS Expression FIRST -> JSONPath NEXT -> Domain-specific -> Dimensions & Custom -> JSON Last
+  // Tab definitions: JS Expression FIRST -> JSONPath NEXT -> Text Match -> Domain-specific -> Dimensions & Custom -> JSON Last
   const TABS = useMemo(() => {
     const list: Array<{ id: TabType; label: string; hasDot: boolean }> = [];
 
-    // 1. Verification and Web-Auto have JS Expression and JSONPath first (Evaluation does not evaluate structured JSON)
-    if (mode !== "evaluation") {
-      list.push({ id: "expression", label: "JS Expression", hasDot: hasExpressions });
-      list.push({ id: "path_match", label: "JSONPath", hasDot: hasPathMatches });
+    // 1. All modes have JS Expression and JSONPath first
+    list.push({ id: "expression", label: "JS Expression", hasDot: hasExpressions });
+    list.push({ id: "path_match", label: "JSONPath", hasDot: hasPathMatches });
+
+    // 2. Evaluation and Web Auto support Text Match
+    if (mode === "evaluation" || mode === "web-auto") {
+      list.push({ id: "text_match", label: "Text Match", hasDot: hasTextMatches });
     }
 
-    // 2. Verification has Schema and Metrics
+    // 3. Verification has Schema and Metrics
     if (mode === "verification") {
       list.push({ id: "schema", label: "Schema", hasDot: hasSchema });
       list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
     }
 
-    // 3. Evaluation has Tool Calls, Metrics, Dimensions, and Custom
+    // 4. Evaluation has Tool Calls, Metrics, Dimensions, and Custom
     if (mode === "evaluation") {
       list.push({ id: "tool_call", label: "Tool Calls", hasDot: hasToolCalls });
       list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
@@ -293,16 +305,16 @@ export function UniversalAssertionsEditor({
       list.push({ id: "llm_custom", label: "Custom", hasDot: hasLlmCustoms });
     }
 
-    // 4. Web Auto has Metrics and Custom Semantic
+    // 5. Web Auto has Metrics and Custom Semantic
     if (mode === "web-auto") {
       list.push({ id: "metric", label: "Metrics", hasDot: hasMetrics });
       list.push({ id: "llm_custom", label: "Custom", hasDot: hasLlmCustoms });
     }
 
-    // 5. All modes end with JSON
+    // 6. All modes end with JSON
     list.push({ id: "json", label: "JSON", hasDot: false });
     return list;
-  }, [mode, hasExpressions, hasPathMatches, hasSchema, hasToolCalls, hasMetrics, hasLlmDims, hasLlmCustoms]);
+  }, [mode, hasExpressions, hasPathMatches, hasTextMatches, hasSchema, hasToolCalls, hasMetrics, hasLlmDims, hasLlmCustoms]);
 
   const isHistoryView = overrideText !== null;
   const activeTab = isHistoryView ? "json" : subTab;
@@ -574,6 +586,117 @@ export function UniversalAssertionsEditor({
                       disabled={readOnly}
                       className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
                     />
+                    {!readOnly && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 shrink-0"
+                        onClick={() => removeAssertion(idx)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 3. Text Match Tab (Deterministic string & regex matching) */}
+        {activeTab === "text_match" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-[10px] font-semibold text-muted-foreground">
+                • Matches raw response text directly (0 token cost, deterministic)
+              </Label>
+              {!readOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-5 px-1.5 text-[9px] gap-1 hover:bg-muted font-semibold"
+                  onClick={() =>
+                    addAssertion({
+                      type: "text_match",
+                      operator: "contains",
+                      expected: "",
+                      caseSensitive: false,
+                    })
+                  }
+                >
+                  <Plus className="h-2.5 w-2.5" /> Add
+                </Button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {currentAssertions.map((spec, idx) => {
+                if (spec.type !== "text_match") return null;
+                const operator = spec.operator || "contains";
+                const expected = spec.expected || "";
+                const caseSensitive = Boolean(spec.caseSensitive);
+
+                return (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <Select
+                      value={operator}
+                      disabled={readOnly}
+                      onValueChange={(val: string | null) => {
+                        if (val) {
+                          updateAssertionAt(idx, {
+                            ...spec,
+                            operator: val as TextMatchOperator,
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-28 h-7 text-xs bg-muted/20 border-muted-foreground/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contains">contains</SelectItem>
+                        <SelectItem value="not_contains">not_contains</SelectItem>
+                        <SelectItem value="matches">matches (regex)</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Input
+                      value={expected}
+                      onChange={(e) =>
+                        updateAssertionAt(idx, { ...spec, expected: e.target.value })
+                      }
+                      placeholder={
+                        operator === "matches"
+                          ? "^(http|https)://"
+                          : "expected substring or keyword"
+                      }
+                      disabled={readOnly}
+                      className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30 font-mono"
+                    />
+
+                    <button
+                      type="button"
+                      disabled={readOnly}
+                      title={
+                        caseSensitive
+                          ? "Case-sensitive"
+                          : "Ignore case"
+                      }
+                      onClick={() =>
+                        updateAssertionAt(idx, { ...spec, caseSensitive: !caseSensitive })
+                      }
+                      className={cn(
+                        "h-7 px-2 text-[10px] font-mono rounded border transition-colors shrink-0",
+                        caseSensitive
+                          ? "bg-amber-500/15 text-amber-500 border-amber-500/40 font-semibold"
+                          : "bg-muted/20 text-muted-foreground border-muted-foreground/20 hover:text-foreground",
+                      )}
+                    >
+                      Aa
+                    </button>
+
                     {!readOnly && (
                       <Button
                         type="button"

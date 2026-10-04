@@ -65,24 +65,23 @@ describe("normalizeAndValidateAssertions", () => {
     );
   });
 
-  it("enforces category constraints and rejects jsonpath and js_expression in evaluation category", () => {
-    const jsonPathAssertion = [{ type: "jsonpath", path: "$.status", operator: "==", expected: "ok" }];
-    expect(() => normalizeAndValidateAssertions(jsonPathAssertion, "EvalCase", "evaluation")).toThrow(
-      /type 'jsonpath' is not supported for category 'evaluation'/,
+  it("enforces category constraints and permits jsonpath, js_expression, and rejects json_schema in evaluation category", () => {
+    // json_schema is NOT supported for evaluation
+    const jsonSchemaAssertion = [{ type: "json_schema", schema: { type: "object" } }];
+    expect(() => normalizeAndValidateAssertions(jsonSchemaAssertion, "EvalCase", "evaluation")).toThrow(
+      /type 'json_schema' is not supported for category 'evaluation'/,
     );
 
-    const jsAssertion = [{ type: "js_expression", expression: "result.count === 1" }];
-    expect(() => normalizeAndValidateAssertions(jsAssertion, "EvalCase", "evaluation")).toThrow(
-      /type 'js_expression' is not supported for category 'evaluation'/,
-    );
-
-    // tool_call, metric, llm_dim, llm_custom are allowed for evaluation
+    // text_match, jsonpath, js_expression, tool_call, metric, llm_dim, llm_custom are allowed for evaluation
     const validEval = [
+      { type: "text_match", operator: "contains", expected: "welcome" },
+      { type: "jsonpath", path: "$.status", operator: "==", expected: "ok" },
+      { type: "js_expression", expression: "result.count === 1" },
       { type: "tool_call", toolName: "calculator", operator: "==", target: "calls", expectedCalls: 1 },
       { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
       { type: "llm_dim", dim: "safety" },
       { type: "llm_custom", expectation: "clear answer" },
     ];
-    expect(normalizeAndValidateAssertions(validEval, "EvalCase", "evaluation")).toHaveLength(4);
+    expect(normalizeAndValidateAssertions(validEval, "EvalCase", "evaluation")).toHaveLength(7);
   });
 });

@@ -66,7 +66,7 @@ export function normalizeAndValidateAssertions(
     if (!parsed.success) {
       const issue = parsed.error.issues[0]?.message ?? "unsupported format";
       throw new Error(
-        `Invalid assertion at index #${i} in case '${caseName}': ${issue}. Supported assertion types are: 'js_expression' (expression), 'jsonpath' (path, operator, expected), 'json_schema' (schema), 'metric' (metric, operator, threshold), 'tool_call' (toolName), 'llm_dim' (dim), 'llm_custom' (expectation).`,
+        `Invalid assertion at index #${i} in case '${caseName}': ${issue}. Supported assertion types are: 'text_match' (operator, expected), 'js_expression' (expression), 'jsonpath' (path, operator, expected), 'json_schema' (schema), 'metric' (metric, operator, threshold), 'tool_call' (toolName), 'llm_dim' (dim), 'llm_custom' (expectation).`,
       );
     }
 

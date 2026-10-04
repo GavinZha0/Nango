@@ -78,6 +78,8 @@ function getAssertionDescription(spec: AssertionSpec): string {
     }
     case "metric":
       return `${spec.metric} ${spec.operator} ${spec.threshold}`;
+    case "text_match":
+      return `Text ${spec.operator} "${spec.expected}"${spec.caseSensitive ? " (case-sensitive)" : ""}`;
     case "llm_dim":
       return `Dim: ${spec.dim}`;
     case "llm_custom": {
@@ -94,6 +96,39 @@ function getAssertionDescription(spec: AssertionSpec): string {
 }
 
 /**
+ * Tries to parse structured JSON from raw agent response text.
+ * Supports direct JSON string and markdown code blocks (```json ... ```).
+ */
+export function tryExtractStructuredPayload(text: string): Record<string, unknown> | null {
+  if (!text || typeof text !== "string") return null;
+  const trimmed = text.trim();
+  // 1. Direct JSON object/array
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed !== null && typeof parsed === "object") {
+        return Array.isArray(parsed) ? { items: parsed, result: parsed } : { ...parsed, result: parsed };
+      }
+    } catch {
+      // not direct json
+    }
+  }
+  // 2. Markdown code block ```json ... ```
+  const match = trimmed.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+  if (match && match[1]) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      if (parsed !== null && typeof parsed === "object") {
+        return Array.isArray(parsed) ? { items: parsed, result: parsed } : { ...parsed, result: parsed };
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+/**
  * Run all deterministic checks against assertions or legacy criteria.
  */
 export function runDeterministicChecks(
@@ -107,7 +142,10 @@ export function runDeterministicChecks(
   // Case A: Unified AssertionSpec[] array
   if (Array.isArray(assertionsOrCriteria)) {
     const assertions = assertionsOrCriteria as AssertionSpec[];
-    const targetPayload = input.structuredPayload ?? { text: input.agentText };
+    const autoStructured = tryExtractStructuredPayload(input.agentText);
+    const targetPayload =
+      input.structuredPayload ??
+      (autoStructured ? { ...autoStructured, text: input.agentText } : { text: input.agentText });
     const outcome = evaluateAssertions(targetPayload, assertions, {
       actualToolCallNames: input.actualToolCalls,
       toolCalls: input.toolCalls,
