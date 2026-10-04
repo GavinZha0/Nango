@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { Play, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -54,6 +54,33 @@ export interface SingleCaseRunOutcome {
   };
   error: { source: string; message: string; details?: unknown } | null;
   durationMs: number;
+}
+
+function formatElapsedSec(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
+}
+
+function RunningTimer({ runningText }: { runningText: string }): ReactNode {
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      <span>{runningText}</span>
+      <span className="font-mono tabular-nums text-muted-foreground/80">({formatElapsedSec(elapsedSec)})</span>
+    </div>
+  );
 }
 
 export function WebAutoEditor({ suiteId }: { suiteId: string }) {
@@ -129,7 +156,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runPhase, setRunPhase] = useState<"idle" | "running_script" | "evaluating_verdicts">("idle");
   const [runOutcome, setRunOutcome] = useState<SingleCaseRunOutcome | null>(null);
+  const [playgroundExecutionOutput, setPlaygroundExecutionOutput] = useState<unknown>(null);
+  const [playgroundDurationMs, setPlaygroundDurationMs] = useState<number | null>(null);
   const [copiedOutput, setCopiedOutput] = useState(false);
 
   // Compute effective outcome (prioritizes historical snapshot when in history view)
@@ -195,23 +225,25 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     }
   };
 
+  const effectiveExecutionOutput = displayOutcome?.executionOutput ?? playgroundExecutionOutput;
+
   const extractedImages = useMemo(() => {
-    return extractWebAutoImages(displayOutcome?.executionOutput);
-  }, [displayOutcome?.executionOutput]);
+    return extractWebAutoImages(effectiveExecutionOutput);
+  }, [effectiveExecutionOutput]);
 
   const formattedOutputText = useMemo(() => {
-    return formatWebAutoOutputForDisplay(displayOutcome?.executionOutput);
-  }, [displayOutcome?.executionOutput]);
+    return formatWebAutoOutputForDisplay(effectiveExecutionOutput);
+  }, [effectiveExecutionOutput]);
 
   const outputChars = useMemo(() => {
     return formattedOutputText ? formattedOutputText.length : 0;
   }, [formattedOutputText]);
 
   const outputDurationStr = useMemo(() => {
-    const ms = displayOutcome?.durationMs;
+    const ms = displayOutcome?.durationMs ?? playgroundDurationMs;
     if (typeof ms !== "number" || isNaN(ms) || ms <= 0) return null;
     return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
-  }, [displayOutcome?.durationMs]);
+  }, [displayOutcome?.durationMs, playgroundDurationMs]);
 
   const handleCopyOutput = useCallback(async () => {
     if (!formattedOutputText) return;
@@ -432,7 +464,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
   const handleRunCase = async (caseIdToRun?: string) => {
     const targetId = caseIdToRun || selectedCaseId;
-    if (!targetId) return;
+    if (!targetId || running) return;
 
     // Exit history view to view live execution
     setSelectedRunId(null);
@@ -445,24 +477,83 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
 
     // Clear previous execution outcome and images before starting new run
     setRunOutcome(null);
+    setPlaygroundExecutionOutput(null);
+    setPlaygroundDurationMs(null);
+    setRunPhase("running_script");
     setRunning(true);
     try {
-      const res = await fetch(`/api/web-auto-cases/${targetId}/run`, {
+      const res = await fetch(`/api/web-auto-cases/${targetId}/run?stream=true`, {
         method: "POST",
+        headers: {
+          Accept: "application/x-ndjson",
+        },
+        signal: AbortSignal.timeout(600_000),
       });
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || "Execution failed");
+        const errData = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errData?.message || `Execution failed (${res.status})`);
       }
-      setRunOutcome(data);
-      const imgs = extractWebAutoImages(data.executionOutput);
-      if (imgs.length > 0) {
-        setOutputTab("images");
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (contentType.includes("application/x-ndjson") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const frame = JSON.parse(trimmed) as
+                | { type: "execution_complete"; executionOutput: unknown; durationMs: number }
+                | { type: "verdict_complete"; outcome: SingleCaseRunOutcome }
+                | { type: "error"; error: string };
+
+              if (frame.type === "execution_complete") {
+                setPlaygroundExecutionOutput(frame.executionOutput);
+                setPlaygroundDurationMs(frame.durationMs);
+                setRunPhase("evaluating_verdicts");
+                const imgs = extractWebAutoImages(frame.executionOutput);
+                if (imgs.length > 0) {
+                  setOutputTab("images");
+                }
+              } else if (frame.type === "verdict_complete") {
+                setRunOutcome(frame.outcome);
+                setRunPhase("idle");
+              } else if (frame.type === "error") {
+                throw new Error(frame.error);
+              }
+            } catch (frameErr) {
+              if (frameErr instanceof Error && frameErr.message !== trimmed) {
+                throw frameErr;
+              }
+            }
+          }
+        }
+      } else {
+        const data = await res.json();
+        setRunOutcome(data);
+        const imgs = extractWebAutoImages(data.executionOutput);
+        if (imgs.length > 0) {
+          setOutputTab("images");
+        }
       }
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      if (err instanceof Error && err.name === "TimeoutError") {
+        toast.error("Execution timed out on client side after 600s.");
+      } else {
+        toast.error(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setRunning(false);
+      setRunPhase("idle");
     }
   };
 
@@ -546,6 +637,9 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
           onSelectCase={(id) => {
             setSelectedCaseId(id);
             setRunOutcome(null);
+            setPlaygroundExecutionOutput(null);
+            setPlaygroundDurationMs(null);
+            setRunPhase("idle");
           }}
           onNewCase={() => {
             setCaseToEdit(null);
@@ -695,14 +789,14 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     }`}
                   >
                     Images
-                    {!running && extractedImages.length > 0 && (
+                    {runPhase !== "running_script" && extractedImages.length > 0 && (
                       <span className="rounded-full bg-primary/10 px-1.5 py-0.2 text-[10px] font-semibold text-primary">
                         {extractedImages.length}
                       </span>
                     )}
                   </button>
                 </div>
-                {displayOutcome && (
+                {Boolean(displayOutcome || playgroundExecutionOutput) && (
                   <div className="flex items-center gap-2">
                     {inHistoryView && selectedRunSeq !== null && (
                       <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
@@ -737,104 +831,101 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                 <div className="flex flex-col min-h-0 overflow-hidden">
                   <div className="flex-1 min-h-0 px-3 pb-2 pt-2">
                     {outputTab === "output" ? (
-                      <div className="h-full w-full overflow-auto rounded-md border bg-background/50 p-2 flex flex-col font-mono text-xs">
-                        {running ? (
-                          <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
-                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                            Executing case & evaluating assertions...
-                          </div>
-                        ) : displayOutcome ? (
+                      runPhase === "running_script" ? (
+                        <RunningTimer runningText="Runing script in browser..." />
+                      ) : effectiveExecutionOutput !== null && effectiveExecutionOutput !== undefined ? (
+                        <div className="h-full w-full overflow-auto rounded-md border bg-muted/30 p-2 flex flex-col font-mono text-xs">
                           <pre className="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed font-mono">
                             {formattedOutputText}
                           </pre>
-                        ) : (
-                          <div className="flex h-full items-center justify-center p-3 text-xs text-muted-foreground font-sans">
-                            Run a case to see the output.
-                          </div>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-3 text-xs text-muted-foreground font-sans">
+                          Run a case to see the output.
+                        </div>
+                      )
                     ) : (
-                      <div className="h-full w-full overflow-hidden rounded-md border bg-background/50 flex flex-col">
-                        {running ? (
-                          <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
-                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                            Executing case & capturing images...
-                          </div>
-                        ) : extractedImages.length === 0 ? (
-                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                            No image
-                          </div>
-                        ) : extractedImages.length === 1 ? (
-                          <div className="flex h-full w-full flex-col items-center justify-center p-2 relative group overflow-hidden">
-                            <div className="absolute top-2 right-2 z-10">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6 p-0 bg-background/80 hover:bg-background border text-muted-foreground hover:text-foreground rounded shadow-xs"
-                                onClick={(e) => handleCopyBase64(e, extractedImages[0])}
-                                title={extractedImages[0].rawBase64 ? "Copy Base64 string" : "Copy image URL"}
-                              >
-                                {copiedImageId === extractedImages[0].id ? (
-                                  <Check className="h-3 w-3 text-emerald-500" />
-                                ) : (
-                                  <Copy className="h-3 w-3" />
-                                )}
-                              </Button>
-                            </div>
-                            <div
-                              className="relative flex h-full w-full items-center justify-center cursor-pointer overflow-hidden rounded bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:12px_12px]"
-                              onClick={() => handleOpenPreview(extractedImages[0])}
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={extractedImages[0].src}
-                                alt={extractedImages[0].name}
-                                className="max-h-full max-w-full object-contain rounded transition-transform hover:scale-[1.01]"
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-2 p-2 overflow-y-auto h-full">
-                            {extractedImages.map((img) => (
-                              <div
-                                key={img.id}
-                                className="group relative flex flex-col rounded-md border bg-background/80 overflow-hidden hover:border-primary/50 transition-all cursor-pointer"
-                                onClick={() => handleOpenPreview(img)}
-                              >
-                                <div className="flex items-center justify-between px-2 py-1 bg-muted/40 border-b text-[10px] text-muted-foreground font-mono">
-                                  <span className="truncate max-w-[130px]" title={img.name}>{img.name}</span>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(e) => handleCopyBase64(e, img)}
-                                    title={img.rawBase64 ? "Copy Base64 string" : "Copy image URL"}
-                                  >
-                                    {copiedImageId === img.id ? (
-                                      <Check className="h-2.5 w-2.5 text-emerald-500" />
-                                    ) : (
-                                      <Copy className="h-2.5 w-2.5" />
-                                    )}
-                                  </Button>
-                                </div>
-                                <div className="relative aspect-video w-full flex items-center justify-center p-1 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:8px_8px] overflow-hidden">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={img.src}
-                                    alt={img.name}
-                                    className="max-h-full max-w-full object-contain"
-                                  />
-                                </div>
+                      runPhase === "running_script" ? (
+                        <RunningTimer runningText="Runing script in browser..." />
+                      ) : extractedImages.length === 0 ? (
+                        <div className="flex h-full items-center justify-center p-3 text-xs text-muted-foreground font-sans">
+                          No images captured.
+                        </div>
+                      ) : (
+                        <div className="h-full w-full overflow-hidden rounded-md border bg-muted/30 flex flex-col">
+                          {extractedImages.length === 1 ? (
+                            <div className="flex h-full w-full flex-col items-center justify-center p-2 relative group overflow-hidden">
+                              <div className="absolute top-2 right-2 z-10">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0 bg-background/80 hover:bg-background border text-muted-foreground hover:text-foreground rounded shadow-xs"
+                                  onClick={(e) => handleCopyBase64(e, extractedImages[0])}
+                                  title={extractedImages[0].rawBase64 ? "Copy Base64 string" : "Copy image URL"}
+                                >
+                                  {copiedImageId === extractedImages[0].id ? (
+                                    <Check className="h-3 w-3 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="h-3 w-3" />
+                                  )}
+                                </Button>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                              <div
+                                className="relative flex h-full w-full items-center justify-center cursor-pointer overflow-hidden rounded bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:12px_12px]"
+                                onClick={() => handleOpenPreview(extractedImages[0])}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={extractedImages[0].src}
+                                  alt={extractedImages[0].name}
+                                  className="max-h-full max-w-full object-contain rounded transition-transform hover:scale-[1.01]"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2 p-2 overflow-y-auto h-full">
+                              {extractedImages.map((img) => (
+                                <div
+                                  key={img.id}
+                                  className="group relative flex flex-col rounded-md border bg-background/80 overflow-hidden hover:border-primary/50 transition-all cursor-pointer"
+                                  onClick={() => handleOpenPreview(img)}
+                                >
+                                  <div className="flex items-center justify-between px-2 py-1 bg-muted/40 border-b text-[10px] text-muted-foreground font-mono">
+                                    <span className="truncate max-w-[130px]" title={img.name}>{img.name}</span>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                                      onClick={(e) => handleCopyBase64(e, img)}
+                                      title={img.rawBase64 ? "Copy Base64 string" : "Copy image URL"}
+                                    >
+                                      {copiedImageId === img.id ? (
+                                        <Check className="h-2.5 w-2.5 text-emerald-500" />
+                                      ) : (
+                                        <Copy className="h-2.5 w-2.5" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                  <div className="relative aspect-video w-full flex items-center justify-center p-1 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:8px_8px] overflow-hidden">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={img.src}
+                                      alt={img.name}
+                                      className="max-h-full max-w-full object-contain"
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
-                <div className="flex flex-col min-h-0 overflow-hidden">
+                <div className="flex flex-col min-h-0 h-full overflow-hidden">
                   <AssertionVerdictList
+                    className="h-full"
                     verdicts={
                       displayOutcome?.assertionResults ??
                       displayOutcome?.verdict?.deterministic?.results
@@ -842,7 +933,15 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     assertions={draftAssertions as unknown as readonly import("@/lib/assertions").AssertionSpec[]}
                     error={displayOutcome?.error as import("@/lib/assertions").ErrorEnvelope | null}
                     feedback={displayOutcome?.feedback}
-                    status={displayOutcome?.status}
+                    status={runPhase !== "idle" ? "running" : (displayOutcome?.status ?? "idle")}
+                    emptyText={
+                      runPhase === "evaluating_verdicts" ? (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                          Evaluating assertions...
+                        </div>
+                      ) : "No verdict yet."
+                    }
                     title="Verdicts"
                   />
                 </div>

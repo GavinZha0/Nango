@@ -68,11 +68,6 @@ editorTest.describe("Evaluation Page", () => {
       await expect(baseCaseRow).toBeVisible();
       await baseCaseRow.locator('[data-action="select-case"]').click();
 
-      // Inspector heading reflects the selected case
-      await expect(page.getByTestId("eval-case-name-heading")).toHaveText(
-        BASE_NAMES.evalCase,
-      );
-
       // Form values match seeded Base Case
       const turnTextarea = page.getByTestId("eval-turn-textarea");
       await expect(turnTextarea).toBeVisible();
@@ -136,10 +131,10 @@ editorTest.describe("Evaluation Page", () => {
       const saveCaseResp = await saveCasePromise;
       expect(saveCaseResp.status()).toBe(201);
 
-      // 8. Case appears in list and is active
+      // 8. Case appears in list and inspector is active
       const newCaseRow = page.getByTestId("case-row").filter({ hasText: caseName });
       await expect(newCaseRow).toBeVisible();
-      await expect(page.getByTestId("eval-case-name-heading")).toHaveText(caseName);
+      await expect(page.getByTestId("add-turn-button")).toBeVisible();
 
       // 9. Add conversation turn, edit user message, and save
       await page.getByTestId("add-turn-button").click();

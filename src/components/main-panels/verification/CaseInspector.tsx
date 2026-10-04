@@ -891,7 +891,7 @@ function OutputPane({ outcome, running, readOnly: _readOnly, runError, hideHeade
         {running ? (
           <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            Executing case & evaluating assertions...
+            Runing MCP tool...
           </div>
         ) : runError ? (
           <div className="h-full w-full overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive font-mono whitespace-pre-wrap">
@@ -927,16 +927,18 @@ interface VerdictsPaneProps {
  */
 function VerdictsPane({
   outcome,
-  running: _running,
+  running,
   readOnly: _readOnly,
   assertions = [],
 }: VerdictsPaneProps): ReactNode {
+  const status = running ? "running" : (outcome?.status ?? "idle");
   return (
     <AssertionVerdictList
+      className="h-full"
       verdicts={outcome?.assertionResults}
       assertions={assertions}
       error={outcome?.error}
-      status={outcome?.status}
+      status={status}
       title="Verdicts"
     />
   );

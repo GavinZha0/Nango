@@ -25,7 +25,7 @@ const idSchema = z.coerce.number().int().positive();
 
 export const POST = withEditor<{ id: string }>(
   ROUTE,
-  async ({ params, session }) => {
+  async ({ req, params, session }) => {
     const idParse = idSchema.safeParse(params.id);
     if (!idParse.success) {
       throw new ApiError("NOT_FOUND", 404, "Eval case not found.");
@@ -46,12 +46,33 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
+    const url = new URL(req.url);
+    const wantsStream =
+      req.headers.get("accept")?.includes("application/x-ndjson") ||
+      url.searchParams.get("stream") === "true";
+
     const { literalVariables, error: resolveError } = await resolveSuiteVariables(
       suite.variables,
       { allowCredentials: false },
     );
 
     if (resolveError) {
+      if (wantsStream) {
+        return new Response(
+          JSON.stringify({
+            type: "verdict_complete",
+            outcome: {
+              status: "errored",
+              score: null,
+              error: resolveError.message,
+              feedback: resolveError.message,
+            },
+          }) + "\n",
+          {
+            headers: { "Content-Type": "application/x-ndjson" },
+          },
+        );
+      }
       return NextResponse.json({
         status: "errored",
         score: null,
@@ -64,11 +85,11 @@ export const POST = withEditor<{ id: string }>(
     const turns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
     const assertions = sanitizeAssertions((Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as AssertionSpec[]);
 
-    const outcome = await runEvalCase({
+    const evalInput = {
       caseId: caseRow.id,
       targetAgentId: suite.agentId,
       targetCredentialId: suite.credentialId ?? undefined,
-      agentSource: suite.agentSource === "builtin" ? "builtin" : "backend",
+      agentSource: suite.agentSource === "builtin" ? ("builtin" as const) : ("backend" as const),
       evaluatorAgentId: suite.evaluatorAgentId ?? null,
       dimensionIds: [],
       threshold: suite.threshold ?? 3,
@@ -77,8 +98,46 @@ export const POST = withEditor<{ id: string }>(
       assertions,
       ownerId: session.user.id,
       variables: literalVariables,
-    });
+    };
 
+    if (wantsStream) {
+      const stream = new TransformStream();
+      const writer = stream.writable.getWriter();
+      const encoder = new TextEncoder();
+
+      void (async () => {
+        try {
+          const outcome = await runEvalCase({
+            ...evalInput,
+            onTargetComplete: async (targetData) => {
+              const frame =
+                JSON.stringify({ type: "target_complete", ...targetData }) + "\n";
+              await writer.write(encoder.encode(frame));
+            },
+          });
+          const frame =
+            JSON.stringify({ type: "verdict_complete", outcome }) + "\n";
+          await writer.write(encoder.encode(frame));
+        } catch (err) {
+          const errMessage = err instanceof Error ? err.message : String(err);
+          const frame =
+            JSON.stringify({ type: "error", error: errMessage }) + "\n";
+          await writer.write(encoder.encode(frame));
+        } finally {
+          await writer.close();
+        }
+      })();
+
+      return new Response(stream.readable, {
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    const outcome = await runEvalCase(evalInput);
     return NextResponse.json(outcome);
   },
 );

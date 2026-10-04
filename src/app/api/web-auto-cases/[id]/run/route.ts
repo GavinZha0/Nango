@@ -13,7 +13,7 @@ const ROUTE = "/api/web-auto-cases/[id]/run";
 
 export const POST = withEditor<{ id: string }>(
   ROUTE,
-  async ({ params, session }) => {
+  async ({ req, params, session }) => {
     const { id } = await params;
     const caseId = Number(id);
     if (!Number.isSafeInteger(caseId) || caseId <= 0) {
@@ -64,13 +64,57 @@ export const POST = withEditor<{ id: string }>(
       );
     }
 
-    const outcome = await runWebAutoCase({
+    const url = new URL(req.url);
+    const wantsStream =
+      req.headers.get("accept")?.includes("application/x-ndjson") ||
+      url.searchParams.get("stream") === "true";
+
+    const caseInput = {
       caseId: caseRow.id,
       suiteId: suite.id,
       suite,
       case: caseRow,
       ownerId: session.user.id,
-    });
+    };
+
+    if (wantsStream) {
+      const stream = new TransformStream();
+      const writer = stream.writable.getWriter();
+      const encoder = new TextEncoder();
+
+      void (async () => {
+        try {
+          const outcome = await runWebAutoCase({
+            ...caseInput,
+            onExecutionComplete: async (execData) => {
+              const frame =
+                JSON.stringify({ type: "execution_complete", ...execData }) + "\n";
+              await writer.write(encoder.encode(frame));
+            },
+          });
+          const frame =
+            JSON.stringify({ type: "verdict_complete", outcome }) + "\n";
+          await writer.write(encoder.encode(frame));
+        } catch (err) {
+          const errMessage = err instanceof Error ? err.message : String(err);
+          const frame =
+            JSON.stringify({ type: "error", error: errMessage }) + "\n";
+          await writer.write(encoder.encode(frame));
+        } finally {
+          await writer.close();
+        }
+      })();
+
+      return new Response(stream.readable, {
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    const outcome = await runWebAutoCase(caseInput);
 
     return NextResponse.json(outcome);
   },

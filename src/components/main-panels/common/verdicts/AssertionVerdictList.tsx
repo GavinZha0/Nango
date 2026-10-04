@@ -32,7 +32,7 @@ export interface AssertionVerdictListProps {
   subtitle?: ReactNode;
   toolCallSummary?: ToolCallSummary | null;
   title?: string;
-  emptyText?: string;
+  emptyText?: ReactNode;
   className?: string;
 }
 
@@ -41,7 +41,7 @@ export function AssertionVerdictList({
   assertions = [],
   error,
   feedback,
-  status,
+  status = "idle",
   subtitle,
   toolCallSummary,
   title = "Verdicts",
@@ -102,7 +102,7 @@ export function AssertionVerdictList({
     : llmItems;
 
   return (
-    <div className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
+    <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
       {/* Header */}
       <div className="flex h-8 shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-3">
         <div className="flex items-center gap-2 min-w-0">
@@ -112,11 +112,6 @@ export function AssertionVerdictList({
           {list.length > 0 && (
             <span className="text-[10px] text-muted-foreground font-mono shrink-0">
               ({list.length})
-            </span>
-          )}
-          {skippedCount > 0 && (
-            <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 shrink-0">
-              · {skippedCount} skipped
             </span>
           )}
         </div>
@@ -158,7 +153,7 @@ export function AssertionVerdictList({
       </div>
 
       {/* List content */}
-      <div className="min-h-0 flex-1 px-3 pb-2 pt-2 overflow-y-auto">
+      <div className="flex flex-col min-h-0 flex-1 px-3 pb-2 pt-2 overflow-y-auto">
         {hasContent ? (
           <div className="space-y-3">
             {/* Tool audit summary line (Evaluation) */}
@@ -279,8 +274,8 @@ export function AssertionVerdictList({
             )}
           </div>
         ) : (
-          <div className="flex h-full flex-col justify-between">
-            <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+          <div className="flex flex-1 h-full flex-col justify-between">
+            <div className="flex flex-1 items-center justify-center p-3 text-xs text-muted-foreground">
               {emptyText}
             </div>
             {feedback && (

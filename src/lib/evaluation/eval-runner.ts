@@ -85,6 +85,12 @@ export interface RunEvalCaseInput {
   ownerId: string;
   /** Suite-level literal variables for assertion evaluation */
   variables?: Record<string, unknown>;
+  /** Optional callback fired as soon as the target agent turns and tool calls complete. */
+  onTargetComplete?: (info: {
+    threadId: string;
+    executionStats: ExecutionStats;
+    toolCallSummary: ToolCallSummary;
+  }) => void | Promise<void>;
 }
 
 export interface RunEvalCaseResult {
@@ -475,6 +481,21 @@ export async function runEvalCase(
   };
   const toolCallSummary = analyzeToolCallEvents(allTargetEvents);
   const toolCallCount = toolCallSummary.totalCalls;
+
+  if (input.onTargetComplete) {
+    try {
+      await input.onTargetComplete({
+        threadId: currentThreadId,
+        executionStats,
+        toolCallSummary,
+      });
+    } catch (cbErr) {
+      log.warn(
+        { err: cbErr instanceof Error ? cbErr.message : String(cbErr), caseId: input.caseId },
+        "onTargetComplete callback failed",
+      );
+    }
+  }
 
   // ── ② Deterministic checks ───────────────────────────────────
 

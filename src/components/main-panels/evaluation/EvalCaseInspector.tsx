@@ -30,6 +30,7 @@ import { cn, isDeepEqual, formatCharCount } from "@/lib/utils";
 import {
   type EvalTurn,
   type ToolCallSummary,
+  type ExecutionStats,
 } from "@/lib/evaluation/types";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
 import { sanitizeAssertions, type AssertionSpec } from "@/lib/assertions/types";
@@ -131,6 +132,7 @@ interface ResponseViewerProps {
   messages: ResponseMessage[] | null;
   isLoading: boolean;
   running: boolean;
+  runningText?: string;
   hasRun: boolean;
   turnIndex: number;
   error?: string | null;
@@ -194,19 +196,66 @@ function ToolMessageRow({ msg }: { msg: ResponseMessage }): ReactNode {
   );
 }
 
-function ResponseViewer({ messages, isLoading, running, hasRun, turnIndex: _turnIndex }: ResponseViewerProps): ReactNode {
-  if (running || isLoading) {
+function formatElapsedSec(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
+}
+
+function RunningTimer({ runningText }: { runningText: string }): ReactNode {
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      <span>{runningText}</span>
+      <span className="font-mono tabular-nums text-muted-foreground/80">({formatElapsedSec(elapsedSec)})</span>
+    </div>
+  );
+}
+
+function ResponseViewer({
+  messages,
+  isLoading,
+  running,
+  runningText = "Running target agent...",
+  hasRun,
+  turnIndex: _turnIndex,
+  error,
+}: ResponseViewerProps): ReactNode {
+  if (running) {
+    return <RunningTimer runningText={runningText} />;
+  }
+
+  if (isLoading && (!messages || messages.length === 0)) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground font-sans">
         <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        Executing case & evaluating assertions...
+        Loading response...
+      </div>
+    );
+  }
+
+  if (error && (!messages || messages.length === 0)) {
+    return (
+      <div className="flex items-center justify-center h-full p-3 text-xs text-rose-500 font-sans">
+        Execution error: {error}
       </div>
     );
   }
 
   if (!hasRun) {
     return (
-      <div className="flex items-center justify-center h-full p-3 text-xs text-muted-foreground">
+      <div className="flex items-center justify-center h-full p-3 text-xs text-muted-foreground font-sans">
         Run a case to see the output.
       </div>
     );
@@ -214,7 +263,7 @@ function ResponseViewer({ messages, isLoading, running, hasRun, turnIndex: _turn
 
   if (!messages || messages.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full p-3 text-xs text-muted-foreground">
+      <div className="flex items-center justify-center h-full p-3 text-xs text-muted-foreground font-sans">
         No response data available for this turn.
       </div>
     );
@@ -376,6 +425,10 @@ export function EvalCaseInspector({
 
   const [runOutcome, setRunOutcome] = useState<RunEvalCaseResult | null>(null);
   const [running, setRunning] = useState<boolean>(false);
+  const [runPhase, setRunPhase] = useState<"idle" | "running_target" | "evaluating_verdicts">("idle");
+  const [playgroundThreadId, setPlaygroundThreadId] = useState<string | null>(null);
+  const [playgroundStats, setPlaygroundStats] = useState<ExecutionStats | null>(null);
+  const [playgroundToolCallSummary, setPlaygroundToolCallSummary] = useState<ToolCallSummary | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
   // Derive display results: prefer pinnedOutcome (history snapshot), then runOutcome (local run), then liveRun, then latest-result SWR
@@ -383,36 +436,53 @@ export function EvalCaseInspector({
   
   const displayFeedback = pinnedOutcome
     ? pinnedOutcome.feedback
-    : (runOutcome ? (runOutcome.feedback ?? null) : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null)));
+    : (runOutcome
+        ? (runOutcome.feedback ?? null)
+        : (running
+            ? null
+            : (liveCaseResult?.feedback ?? (historicalResult?.feedback ?? null))));
+
   const displayAssertionResults = useMemo(() => {
-    return pinnedOutcome
-      ? (pinnedOutcome.assertionResults ?? null)
-      : (runOutcome ? (runOutcome.assertionResults ?? null) : (liveCaseResult?.assertionResults ?? (historicalResult?.assertionResults ?? null)));
-  }, [pinnedOutcome, runOutcome, liveCaseResult?.assertionResults, historicalResult?.assertionResults]);
+    if (pinnedOutcome) return pinnedOutcome.assertionResults ?? null;
+    if (runOutcome) return runOutcome.assertionResults ?? null;
+    if (running) return null;
+    return liveCaseResult?.assertionResults ?? (historicalResult?.assertionResults ?? null);
+  }, [pinnedOutcome, runOutcome, running, liveCaseResult?.assertionResults, historicalResult?.assertionResults]);
+
   const displayDurationMs = pinnedOutcome
     ? pinnedOutcome.durationMs
     : (runOutcome
         ? (runOutcome.executionStats?.durationMs ?? null)
-        : (liveCaseResult?.durationMs ?? (historicalResult?.executionStats?.durationMs ?? null)));
+        : (playgroundStats
+            ? (playgroundStats.durationMs ?? null)
+            : (liveCaseResult?.durationMs ?? (historicalResult?.executionStats?.durationMs ?? null))));
+
   const displayOutputChars = pinnedOutcome
     ? pinnedOutcome.outputChars
     : (runOutcome
         ? (runOutcome.executionStats?.outputChars ?? null)
-        : (liveCaseResult?.outputChars ?? (historicalResult?.executionStats?.outputChars ?? null)));
+        : (playgroundStats
+            ? (playgroundStats.outputChars ?? null)
+            : (liveCaseResult?.outputChars ?? (historicalResult?.executionStats?.outputChars ?? null))));
+
+  const durationMs = displayDurationMs;
   const outputDurationStr = useMemo(() => {
-    if (typeof displayDurationMs !== "number" || isNaN(displayDurationMs) || displayDurationMs <= 0) return null;
-    return displayDurationMs >= 1000 ? `${(displayDurationMs / 1000).toFixed(1)}s` : `${displayDurationMs}ms`;
-  }, [displayDurationMs]);
+    if (typeof durationMs !== "number" || isNaN(durationMs) || durationMs <= 0) return null;
+    return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`;
+  }, [durationMs]);
+
   const displayToolCallSummary = pinnedOutcome
     ? (pinnedOutcome.toolCallSummary ?? null)
     : (runOutcome
         ? (runOutcome.toolCallSummary ?? null)
-        : ((liveCaseResult?.toolCallSummary as ToolCallSummary | undefined) ?? (historicalResult?.toolCallSummary ?? null)));
+        : (playgroundToolCallSummary
+            ? playgroundToolCallSummary
+            : ((liveCaseResult?.toolCallSummary as ToolCallSummary | undefined) ?? (historicalResult?.toolCallSummary ?? null))));
 
   const resolvedRunId = pinnedOutcome
     ? pinnedRunId
-    : (runOutcome ? "playground" : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId));
-  const resolvedThreadId = runOutcome?.threadId ?? null;
+    : (runOutcome || playgroundThreadId ? "playground" : (liveRun.phase === "idle" ? (historicalResult?.runId ?? null) : liveRun.runId));
+  const resolvedThreadId = playgroundThreadId ?? runOutcome?.threadId ?? null;
   const resolvedStatus = pinnedOutcome
     ? pinnedOutcome.status
     : (running
@@ -590,22 +660,83 @@ export function EvalCaseInspector({
     onExitHistoryView?.();
     setRunError(null);
     setRunOutcome(null);
+    setPlaygroundThreadId(null);
+    setPlaygroundStats(null);
+    setPlaygroundToolCallSummary(null);
+    setRunPhase("running_target");
     setRunning(true);
     try {
       if (canSave) {
         await handleSave();
       }
-      const res = await fetch(`/api/eval-cases/${evalCase.id}/run`, {
+      const res = await fetch(`/api/eval-cases/${evalCase.id}/run?stream=true`, {
         method: "POST",
+        headers: {
+          Accept: "application/x-ndjson",
+        },
         signal: AbortSignal.timeout(600_000),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
         throw new Error(body?.message ?? `${res.status} ${res.statusText}`);
       }
-      const outcome = (await res.json()) as RunEvalCaseResult;
-      setRunOutcome(outcome);
-      setResponseTurnIdx(Math.max(0, turns.length - 1));
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (contentType.includes("application/x-ndjson") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const frame = JSON.parse(trimmed) as
+                | {
+                    type: "target_complete";
+                    threadId: string;
+                    executionStats: ExecutionStats;
+                    toolCallSummary: ToolCallSummary;
+                  }
+                | { type: "verdict_complete"; outcome: RunEvalCaseResult }
+                | { type: "error"; error: string };
+
+              if (frame.type === "target_complete") {
+                setPlaygroundThreadId(frame.threadId);
+                setPlaygroundStats(frame.executionStats);
+                setPlaygroundToolCallSummary(frame.toolCallSummary);
+                setRunPhase("evaluating_verdicts");
+                setResponseTurnIdx(Math.max(0, turns.length - 1));
+              } else if (frame.type === "verdict_complete") {
+                setRunOutcome(frame.outcome);
+                if (frame.outcome.threadId) {
+                  setPlaygroundThreadId(frame.outcome.threadId);
+                }
+              } else if (frame.type === "error") {
+                throw new Error(frame.error);
+              }
+            } catch (frameErr) {
+              if (frameErr instanceof Error && frameErr.message !== trimmed) {
+                throw frameErr;
+              }
+            }
+          }
+        }
+      } else {
+        const outcome = (await res.json()) as RunEvalCaseResult;
+        setRunOutcome(outcome);
+        if (outcome.threadId) {
+          setPlaygroundThreadId(outcome.threadId);
+        }
+        setResponseTurnIdx(Math.max(0, turns.length - 1));
+      }
     } catch (err) {
       if (err instanceof Error && err.name === "TimeoutError") {
         setRunError("Evaluation timed out on client side after 600s. Consider reducing turns or testing with shorter prompts.");
@@ -614,6 +745,7 @@ export function EvalCaseInspector({
       }
     } finally {
       setRunning(false);
+      setRunPhase("idle");
     }
   };
 
@@ -641,17 +773,9 @@ export function EvalCaseInspector({
       <div className="flex h-full min-h-0 flex-col border-r min-w-0">
         {/* Top Header: Input */}
         <div className="flex h-8 shrink-0 items-center border-b bg-muted/40 px-3">
-          <div className="flex items-center gap-2 min-w-0 pr-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
-              Input:
-            </span>
-            <span
-              data-testid="eval-case-name-heading"
-              className="text-xs font-semibold truncate"
-            >
-              {evalCase.name}
-            </span>
-          </div>
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
+            Input
+          </span>
           <div className="ml-auto flex items-center gap-1">
             <Button
               size="sm"
@@ -748,27 +872,30 @@ export function EvalCaseInspector({
               Output
             </span>
           </div>
-          <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground shrink-0">
-            {(outputDurationStr || displayOutputChars !== null) && (
-              <span>
-                {outputDurationStr ? `${outputDurationStr} / ` : ""}{formatCharCount(displayOutputChars ?? 0)}
-              </span>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-              onClick={handleCopyResponse}
-              disabled={!hasResponse}
-              title="Copy response"
-            >
-              {copied ? (
-                <Check className="h-3.5 w-3.5 text-green-500" />
-              ) : (
-                <Copy className="h-3.5 w-3.5" />
+          {Boolean(hasResponse || outputDurationStr || displayOutputChars !== null) && (
+            <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground shrink-0">
+              {(outputDurationStr || displayOutputChars !== null) && (
+                <span>
+                  {outputDurationStr ? `${outputDurationStr} / ` : ""}{formatCharCount(displayOutputChars ?? 0)}
+                </span>
               )}
-            </Button>
-          </div>
+              {hasResponse && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={handleCopyResponse}
+                  title="Copy response"
+                >
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Output & Verdicts split — strictly 50%/50% matching Left Column */}
@@ -779,8 +906,9 @@ export function EvalCaseInspector({
               <ResponseViewer
                 messages={filteredMessages}
                 isLoading={messagesLoading}
-                running={running || liveRun.phase === "running"}
-                hasRun={!!resolvedRunId}
+                running={runPhase === "running_target" || liveRun.phase === "running"}
+                runningText="Running target agent..."
+                hasRun={Boolean(resolvedRunId || playgroundThreadId)}
                 turnIndex={responseTurnIdx}
                 error={displayError}
               />
@@ -788,7 +916,7 @@ export function EvalCaseInspector({
           </div>
 
           {/* Bottom: Verdicts (Scores, Checklist, and Feedback) */}
-          <div className="flex min-h-0 flex-col overflow-hidden border-t">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden border-t">
             <EvaluationPanel
               assertions={assertions}
               assertionResults={displayAssertionResults}
@@ -798,6 +926,7 @@ export function EvalCaseInspector({
               startedAt={pinnedOutcome?.startedAt}
               status={resolvedStatus}
               error={displayError}
+              evaluating={runPhase === "evaluating_verdicts"}
             />
           </div>
         </div>
@@ -817,6 +946,7 @@ interface EvaluationPanelProps {
   startedAt?: Date | string | null;
   status?: string | null;
   error?: string | null;
+  evaluating?: boolean;
 }
 
 function EvaluationPanel({
@@ -828,6 +958,7 @@ function EvaluationPanel({
   startedAt = null,
   status = null,
   error = null,
+  evaluating = false,
 }: EvaluationPanelProps): ReactNode {
   const tz = useDisplayTimezone();
   const formattedTime = startedAt ? formatTimestamp(startedAt, tz) : null;
@@ -839,6 +970,7 @@ function EvaluationPanel({
 
   return (
     <AssertionVerdictList
+      className="h-full"
       verdicts={assertionResults as import("@/lib/assertions").AssertionResult[] | null}
       assertions={assertions}
       error={error ? { source: "evaluator", message: error } : null}
@@ -846,6 +978,14 @@ function EvaluationPanel({
       status={status}
       subtitle={subtitle}
       toolCallSummary={toolCallSummary}
+      emptyText={
+        evaluating ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            Evaluating assertions...
+          </div>
+        ) : "No verdict yet."
+      }
       title="Verdicts"
     />
   );

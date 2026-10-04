@@ -213,6 +213,20 @@ export async function runWebAutoCase(
     sensitiveValues,
   );
 
+  if (input.onExecutionComplete) {
+    try {
+      await input.onExecutionComplete({
+        executionOutput: sanitizedOutput,
+        durationMs: mcpResult.durationMs,
+      });
+    } catch (cbErr) {
+      log.warn(
+        { err: cbErr instanceof Error ? cbErr.message : String(cbErr), caseId: input.caseId },
+        "onExecutionComplete callback failed",
+      );
+    }
+  }
+
   const assertions = (input.case.assertions ?? []) as readonly import("@/lib/assertions").AssertionSpec[];
 
   if (mcpResult.status === "errored") {
@@ -324,11 +338,20 @@ export async function runWebAutoCase(
   const evaluatorAgentId = input.suite.evaluatorAgentId;
   const evaluatorConfigured = evaluatorAgentId !== null;
 
-  // Step 5: LLM evaluation (if configured and expectations exist)
-  // Consumes sanitizedOutput to ensure secret values are never sent to external LLM providers
+  // Step 5: LLM evaluation (if configured, expectations exist, and deterministic checks passed)
+  // Fail-Fast: Short-circuit LLM evaluation if deterministic assertions failed
   let llmResult: import("./evaluator").WebAutoEvaluationResult | null = null;
 
-  if (evaluatorAgentId && llmRequired) {
+  if (evaluatorAgentId && llmRequired && !deterministicResult.passed) {
+    log.info(
+      {
+        event: "web_auto_deterministic_failed_short_circuit",
+        caseId: input.caseId,
+        suiteId: input.suiteId,
+      },
+      "short-circuiting LLM evaluation: deterministic assertions failed",
+    );
+  } else if (evaluatorAgentId && llmRequired && deterministicResult.passed) {
     const expectations = outcome.llmAssertions.map((item) => {
       const customSpec = item.spec.type === "llm_custom" ? item.spec : undefined;
       return {

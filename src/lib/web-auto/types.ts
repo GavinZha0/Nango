@@ -176,6 +176,14 @@ export interface RunWebAutoCaseInput {
   preResolved?: import("@/lib/testing/variable-resolver.server").ResolvedSuiteVariablesResult;
   /** Suite context containing prior executed case inputs and outputs */
   suiteContext?: Record<string, unknown>;
+  /**
+   * Optional callback fired when Playwright MCP execution finishes and
+   * output is sanitized, before assertion evaluations and LLM judge.
+   */
+  onExecutionComplete?: (info: {
+    executionOutput: unknown;
+    durationMs: number;
+  }) => void | Promise<void>;
 }
 
 export interface RunWebAutoSuiteInput {

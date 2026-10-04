@@ -233,4 +233,59 @@ describe("POST /api/eval-cases/[id]/run", () => {
     expect(data.error).toContain("Credential variables are not permitted in this suite type");
     expect(runEvalCaseMock).not.toHaveBeenCalled();
   });
+
+  it("8. streams NDJSON events when Accept: application/x-ndjson header is provided", async () => {
+    getSessionMock.mockResolvedValue({
+      user: editorUser,
+      session: { id: "sess-1", userId: editorUser.id },
+    });
+
+    loadCaseMock.mockResolvedValue({
+      caseRow: sampleCase,
+      suite: sampleSuite,
+    });
+
+    const expectedOutcome = {
+      score: 100,
+      status: "passed",
+      assertionResults: [],
+      feedback: "Great job",
+    };
+
+    runEvalCaseMock.mockImplementation(async (input: { onTargetComplete?: (info: { threadId: string; executionStats: unknown; toolCallSummary: unknown }) => Promise<void> }) => {
+      if (input.onTargetComplete) {
+        await input.onTargetComplete({
+          threadId: "test-thread-id-123",
+          executionStats: { durationMs: 500, outputChars: 50 },
+          toolCallSummary: { totalCalls: 1 },
+        });
+      }
+      return expectedOutcome;
+    });
+
+    const streamReq = createMockRequest("/api/eval-cases/42/run", {
+      method: "POST",
+      headers: {
+        Accept: "application/x-ndjson",
+      },
+    });
+
+    const res = await POST(streamReq, { params: Promise.resolve({ id: "42" }) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/x-ndjson");
+
+    const text = await res.text();
+    const lines = text.trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual(
+      expect.objectContaining({
+        type: "target_complete",
+        threadId: "test-thread-id-123",
+      }),
+    );
+    expect(lines[1]).toEqual({
+      type: "verdict_complete",
+      outcome: expectedOutcome,
+    });
+  });
 });

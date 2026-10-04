@@ -128,6 +128,37 @@ describe("runWebAutoCase", () => {
     expect(outcome.verdict.overall.passed).toBe(true);
   });
 
+  it("triggers onExecutionComplete callback before assertions evaluation", async () => {
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { pageLoaded: true } },
+      error: null,
+      durationMs: 320,
+    });
+
+    const onExecutionComplete = vi.fn();
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: dummySuite,
+      case: {
+        id: 1,
+        input: { script: "return { pageLoaded: true };" },
+        assertions: [{ type: "js_expression", expression: "result.pageLoaded === true" }],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+      onExecutionComplete,
+    });
+
+    expect(outcome.status).toBe("passed");
+    expect(onExecutionComplete).toHaveBeenCalledTimes(1);
+    expect(onExecutionComplete).toHaveBeenCalledWith({
+      executionOutput: { result: { pageLoaded: true } },
+      durationMs: 320,
+    });
+  });
+
   it("returns errored (never a silent pass) when evaluator is missing but llm_custom expectations exist and deterministic assertions pass", async () => {
     mockRunWebAutoMcp.mockResolvedValueOnce({
       status: "success",
@@ -201,6 +232,43 @@ describe("runWebAutoCase", () => {
     expect(llm?.ok).toBe(false);
     expect(llm?.skipped).toBe(true);
     expect(llm?.score).toBeUndefined();
+  });
+
+  it("short-circuits and does not invoke evaluator when deterministic assertions fail even if evaluator is configured", async () => {
+    const suiteWithEvaluator = { ...dummySuite, evaluatorAgentId: "eval-1" };
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { ok: false } },
+      error: null,
+      durationMs: 250,
+    });
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: suiteWithEvaluator,
+      case: {
+        id: 1,
+        input: { script: "return { ok: false };" },
+        assertions: [
+          { type: "js_expression", expression: "result.ok === true" },
+          { type: "llm_custom", expectation: "Success banner is visible" },
+        ],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+    });
+
+    expect(mockRunWebAutoEvaluation).not.toHaveBeenCalled();
+    expect(outcome.status).toBe("failed");
+    expect(outcome.verdict.overall.passed).toBe(false);
+    expect(outcome.verdict.overall.reason).toContain("Deterministic assertion checks failed");
+    expect(outcome.feedback).toBeUndefined();
+
+    const deterministic = outcome.assertionResults.find((r) => r.type === "js_expression");
+    const llm = outcome.assertionResults.find((r) => r.type === "llm_custom");
+    expect(deterministic?.ok).toBe(false);
+    expect(llm?.ok).toBe(false);
+    expect(llm?.skipped).toBe(true);
   });
 
   it("evaluates llm expectations normally (scored, not skipped) when an evaluator is configured", async () => {
