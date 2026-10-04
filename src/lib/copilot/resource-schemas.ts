@@ -109,14 +109,14 @@ export const WebAutoDraftSchema = z.object({
     script: z.string().optional().describe("Playwright automation script code"),
     steps: z.string().optional().describe("Natural language test steps"),
   }).passthrough().optional().describe("Test case input containing script and steps"),
-  assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("List of assertion specs: array of { type: 'js_expression' | 'jsonpath' | 'llm_custom', ... }"),
+  assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("List of assertion specs: array of { type: 'text_match' | 'js_expression' | 'jsonpath' | 'metric' | 'llm_custom', ... }"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     input: z.object({
       script: z.string().optional().describe("Script code"),
       steps: z.string().optional().describe("Test steps"),
     }).passthrough().optional().describe("Case input data"),
-    assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("Case assertion specs"),
+    assertions: z.array(z.record(z.string(), z.unknown())).optional().describe("Case assertion specs: array of { type: 'text_match' | 'js_expression' | 'jsonpath' | 'metric' | 'llm_custom', ... }"),
   }).optional().describe("Selected case data"),
 }).strict();
 
@@ -124,12 +124,12 @@ export const VerificationDraftSchema = z.object({
   name: z.string().max(120).optional().describe("Verification case display name"),
   description: z.string().optional().describe("Case goal and scenario"),
   input: z.record(z.string(), z.unknown()).optional().describe("Input arguments payload"),
-  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Output assertion specs: array of { type: 'jsonpath' | 'js_expression' | 'json_schema', ... } or JSON string"),
+  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Output assertion specs: array of { type: 'jsonpath' | 'js_expression' | 'json_schema' | 'metric', ... } or JSON string"),
   selectedCase: z.object({
     name: z.string().max(120).optional().describe("Case name"),
     description: z.string().optional().describe("Case description"),
     input: z.record(z.string(), z.unknown()).optional().describe("Case input payload"),
-    assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Case assertion specs"),
+    assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Case assertion specs: array of { type: 'jsonpath' | 'js_expression' | 'json_schema' | 'metric', ... } or JSON string"),
   }).optional().describe("Selected case data"),
 }).strict();
 
@@ -142,7 +142,7 @@ export const EvaluationDraftSchema = z.object({
       expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
     })).optional(),
   }).passthrough().optional().describe("Case input structure"),
-  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'llm_dim' | 'llm_custom' | 'tool_call' | 'metric', ... } or JSON string"),
+  assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Universal assertion specs: array of { type: 'text_match' | 'jsonpath' | 'js_expression' | 'tool_call' | 'metric' | 'llm_dim' | 'llm_custom', ... } or JSON string"),
   turns: z.array(z.object({
     userMessage: z.string().min(1).describe("User message input for this turn"),
     expectedOutput: z.string().optional().describe("Expected assistant response or outcome"),
@@ -151,7 +151,7 @@ export const EvaluationDraftSchema = z.object({
     name: z.string().max(120).optional().describe("Case name"),
     description: z.string().optional().describe("Case description"),
     input: z.record(z.string(), z.unknown()).optional(),
-    assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional(),
+    assertions: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).optional().describe("Case assertion specs: array of { type: 'text_match' | 'jsonpath' | 'js_expression' | 'tool_call' | 'metric' | 'llm_dim' | 'llm_custom', ... } or JSON string"),
     turns: z.array(z.object({
       userMessage: z.string().min(1),
       expectedOutput: z.string().optional(),

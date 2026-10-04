@@ -86,9 +86,15 @@ All schemas are defined in `src/lib/copilot/resource-schemas.ts` and registered 
 | **Data Source** | `/datasource` | `DataSourceDraftSchema` | `name` (max 63), `description`, `provider` (postgres/mysql/mariadb/vertica), `credentialId`, `host`, `port` (1-65535), `database`, `params`, `readOnly`, `tableAllowlist`, `tableDenylist` | Amber Save Button (`bg-amber-600`) |
 | **SSH Server** | `/ssh-server` | `SshServerDraftSchema` | `name` (max 63), `description`, `credentialId`, `host`, `port` (1-65535, def 22), `knownHostFingerprint`, `commandAllow`, `commandApprove`, `commandDeny`, `loginShell` | Amber Save Button (`bg-amber-600`) |
 | **MCP Tool Test** | `/mcp` | `McpDraftSchema` | `selectedToolName`, `args` (JSON parameters object) | Live parameter binding |
-| **Web Auto** | `/web-auto` | `WebAutoDraftSchema` | `name`, `input` (`script`, `steps`), `assertions` (`js_expression` / `jsonpath` / `llm_custom`), `selectedCase` (`name`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
-| **Verification** | `/verification` | `VerificationDraftSchema` | `name`, `description`, `input`, `assertions` (`jsonpath` / `js_expression` / `json_schema`; array or JSON string), `selectedCase` (`name`, `description`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
-| **Evaluation** | `/evaluation` | `EvaluationDraftSchema` | `name`, `description`, `input` (`turns`: `userMessage` / `expectedOutput`), `assertions` (`llm_dim` / `llm_custom` / `jsonpath` / `js_expression` / `metric` / `tool_call`), `turns`, `selectedCase` (`name`, `description`, `input`, `assertions`, `turns`) | Amber Save Icon (`text-amber-500`) |
+| **Web Auto** | `/web-auto` | `WebAutoDraftSchema` | `name`, `input` (`script`, `steps`), `assertions` (`text_match` / `js_expression` / `jsonpath` / `metric` / `llm_custom`), `selectedCase` (`name`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
+| **Verification** | `/verification` | `VerificationDraftSchema` | `name`, `description`, `input`, `assertions` (`jsonpath` / `js_expression` / `json_schema` / `metric`; array or JSON string), `selectedCase` (`name`, `description`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
+| **Evaluation** | `/evaluation` | `EvaluationDraftSchema` | `name`, `description`, `input` (`turns`: `userMessage` / `expectedOutput`), `assertions` (`text_match` / `jsonpath` / `js_expression` / `tool_call` / `metric` / `llm_dim` / `llm_custom`), `turns`, `selectedCase` (`name`, `description`, `input`, `assertions`, `turns`) | Amber Save Icon (`text-amber-500`) |
+
+### 3.1 Read-Only & Inspection Surfaces: Trace (`/trace/[id]`)
+
+Unlike the 9 editable draft resources, `/trace/[id]` is registered via `useCopilotDraft` with `isReadOnly: true` and `resourceType: "trace"`.
+- **`activeResourceData` (Progressive Disclosure L1)**: Exposes essential lightweight metrics (`traceId`, `status`, `runs`, `subRuns`, `toolFailures`, `durationMs`, `targetAgent`, `firstInputTask`, `turns`). Conversational questions about turn history can be resolved directly from `turns` with zero tool overhead.
+- **`get_trace_details` Tool (Progressive Disclosure L2)**: Mounted for any agent with `sharedStateEnabled = true`. Accepts `run` (1-based turn number or UUID) and `role` (`'user'` | `'assistant'` | `'tool'` | `'all'`) to filter output down to the requested slice, preventing token bloat. Defaults to compact output (omitting 500-char tool result snippets) when querying all runs in bulk.
 
 ---
 

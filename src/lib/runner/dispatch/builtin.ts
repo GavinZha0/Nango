@@ -361,6 +361,21 @@ export async function buildBuiltinAgents(
       );
     }
 
+    const isSharedStateEnabled: boolean = resolveSharedStateEnabled({
+      sharedStateEnabled: spec.sharedStateEnabled,
+      role: spec.role,
+    });
+    const sharedStateTools: ToolDefinition[] = [];
+    if (isSharedStateEnabled && ctx?.userId) {
+      const { buildTraceDetailsTool } = await import("@/lib/trace/trace-details-tool");
+      sharedStateTools.push(
+        buildTraceDetailsTool({
+          userId: ctx.userId,
+          isAdmin: ctx.isAdmin,
+        }),
+      );
+    }
+
     // User-selected built-in tools. Unknown names are dropped — a
     // junction row pointing at a retired tool name must not crash.
     // Binding-implied tools are built directly above, not here.
@@ -405,6 +420,7 @@ export async function buildBuiltinAgents(
       || supervisorTools.length > 0
       || evaluatorTools.length > 0
       || testerTools.length > 0
+      || sharedStateTools.length > 0
       || builtinTools.length > 0
       || hasRepeatTool
       || dataSourceTools.length > 0
@@ -522,6 +538,7 @@ export async function buildBuiltinAgents(
       // Ambient read-only
       "get_current_datetime",
       "list_ssh_hosts",
+      "get_trace_details",
       // Skill system tools (read-only metadata)
       "get_skill",
       "get_skill_file",
@@ -600,6 +617,7 @@ export async function buildBuiltinAgents(
       ...supervisorTools,
       ...evaluatorTools,
       ...testerTools,
+      ...sharedStateTools,
       ...builtinTools,
       ...(repeatTool ? [repeatTool] : []),
       ...dataSourceTools,

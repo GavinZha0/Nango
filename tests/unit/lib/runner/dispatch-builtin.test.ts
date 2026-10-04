@@ -88,6 +88,7 @@ vi.mock("@/lib/builtin-agents", () => ({
 
 vi.mock("@/lib/copilot/index.server", () => ({
   BuiltInAgent: BuiltInAgentCtorMock,
+  defineTool: vi.fn((opts: unknown) => opts),
 }));
 
 vi.mock("@/lib/builtin-tools", () => ({
@@ -1062,12 +1063,14 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
     });
 
     describe("prompt composition", () => {
-      it("includes SHARED_STATE_PROMPT_BLOCK when sharedStateEnabled is true", async () => {
+      it("includes SHARED_STATE_PROMPT_BLOCK and mounts get_trace_details when sharedStateEnabled is true", async () => {
         agentPoolGetMock.mockResolvedValue(makeSpec({ sharedStateEnabled: true }));
 
         await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
 
         expect(agentArgs().prompt).toEqual(expect.stringContaining(SHARED_STATE_PROMPT_BLOCK));
+        const tools = agentArgs().tools as unknown[];
+        expect(tools.some((t) => (t as { name: string }).name === "get_trace_details")).toBe(true);
       });
 
       it("excludes SHARED_STATE_PROMPT_BLOCK when sharedStateEnabled is false and role is not supervisor/tester", async () => {

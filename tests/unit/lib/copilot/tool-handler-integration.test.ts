@@ -188,4 +188,107 @@ describe("propose_page_edit & discard_page_edit Tool Handler Full Chain Integrat
     expect(res.status).toBe("success");
     expect(discardCalled).toBe(true);
   });
+
+  it("successfully proposes verification draft with metric and jsonpath assertions", async () => {
+    let appliedData: Record<string, unknown> | null = null;
+    useCopilotStateStore.getState().registerEditor({
+      instanceId: "editor-verification",
+      resourceType: "verification",
+      resourceId: "suite-verif-1",
+      isReadOnly: false,
+      getCurrentData: () => ({ suite: { id: "suite-verif-1" } }),
+      applyDraft: (draft) => {
+        appliedData = draft;
+        return ["assertions", "selectedCase"];
+      },
+      discardDraft: () => {},
+    });
+
+    const res = await executeProposePageEdit({
+      resourceType: "verification",
+      draftData: {
+        selectedCase: {
+          name: "Test Latency",
+          assertions: [
+            { type: "metric", metric: "duration_s", operator: "<", expected: 5 },
+            { type: "jsonpath", expression: "$.status", operator: "==", expected: "ok" },
+          ],
+        },
+      },
+    });
+
+    expect(res.status).toBe("success");
+    expect(res.appliedFields).toEqual(["assertions", "selectedCase"]);
+    expect(appliedData).toBeDefined();
+  });
+
+  it("successfully proposes evaluation draft with text_match, jsonpath, and metric assertions", async () => {
+    let appliedData: Record<string, unknown> | null = null;
+    useCopilotStateStore.getState().registerEditor({
+      instanceId: "editor-evaluation",
+      resourceType: "evaluation",
+      resourceId: "suite-eval-1",
+      isReadOnly: false,
+      getCurrentData: () => ({ suite: { id: "suite-eval-1" } }),
+      applyDraft: (draft) => {
+        appliedData = draft;
+        return ["assertions", "selectedCase"];
+      },
+      discardDraft: () => {},
+    });
+
+    const res = await executeProposePageEdit({
+      resourceType: "evaluation",
+      draftData: {
+        selectedCase: {
+          name: "Email response validation",
+          assertions: [
+            { type: "text_match", operator: "contains", expected: "support@example.com" },
+            { type: "jsonpath", expression: "$.data.userId", operator: "exists" },
+            { type: "metric", metric: "duration_s", operator: "<=", expected: 10 },
+          ],
+        },
+      },
+    });
+
+    expect(res.status).toBe("success");
+    expect(res.appliedFields).toEqual(["assertions", "selectedCase"]);
+    expect(appliedData).toBeDefined();
+  });
+
+  it("successfully proposes web-auto draft with text_match and metric assertions", async () => {
+    let appliedData: Record<string, unknown> | null = null;
+    useCopilotStateStore.getState().registerEditor({
+      instanceId: "editor-web-auto",
+      resourceType: "web-auto",
+      resourceId: "suite-web-1",
+      isReadOnly: false,
+      getCurrentData: () => ({ suite: { id: "suite-web-1" } }),
+      applyDraft: (draft) => {
+        appliedData = draft;
+        return ["assertions", "selectedCase"];
+      },
+      discardDraft: () => {},
+    });
+
+    const res = await executeProposePageEdit({
+      resourceType: "web-auto",
+      draftData: {
+        selectedCase: {
+          name: "Login automation",
+          input: {
+            script: "async (page) => { await page.goto('https://example.com'); }",
+          },
+          assertions: [
+            { type: "text_match", operator: "contains", expected: "Dashboard" },
+            { type: "metric", metric: "duration_s", operator: "<", expected: 15 },
+          ],
+        },
+      },
+    });
+
+    expect(res.status).toBe("success");
+    expect(res.appliedFields).toEqual(["assertions", "selectedCase"]);
+    expect(appliedData).toBeDefined();
+  });
 });

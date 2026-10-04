@@ -79,6 +79,8 @@ interface TraceSummary {
   avgTtftMs: number | null;
   failedCount: number;
   worstStatus: string;
+  totalToolCalls: number;
+  failedToolCalls: number;
 }
 
 interface TraceDetailResponse {
@@ -313,6 +315,12 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
 
   const owner = topLevelRuns[0] ?? runsWithMetrics[0];
 
+  const allToolCalls = runsWithMetrics.flatMap((r) => r.metrics.toolCalls);
+  const totalToolCalls = allToolCalls.length;
+  const failedToolCalls = allToolCalls.filter(
+    (tc) => tc.status === "failure",
+  ).length;
+
   const summary: TraceSummary = {
     threadId,
     ownerId: owner.ownerId,
@@ -326,6 +334,8 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
     avgTtftMs,
     failedCount,
     worstStatus,
+    totalToolCalls,
+    failedToolCalls,
   };
 
   const response: TraceDetailResponse = {

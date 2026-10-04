@@ -20,6 +20,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -109,6 +110,8 @@ interface TraceSummary {
   avgTtftMs: number | null;
   failedCount: number;
   worstStatus: string;
+  totalToolCalls?: number;
+  failedToolCalls?: number;
 }
 
 interface TraceDetailResponse {
@@ -336,9 +339,13 @@ function RunCard({
 function TraceSummaryCard({ summary }: { summary: TraceSummary }): ReactNode {
   return (
     <section className="rounded-md border bg-card py-2 px-4 shadow-sm">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3 lg:grid-cols-6">
         <Stat label="Runs" value={String(summary.topLevelRunCount)} />
         <Stat label="Sub-runs" value={String(summary.subRunCount)} />
+        <Stat
+          label="Tool failures"
+          value={`${summary.failedToolCalls ?? 0}/${summary.totalToolCalls ?? 0}`}
+        />
         <Stat
           label="Avg TTFT"
           value={summary.avgTtftMs !== null ? formatDurationMs(summary.avgTtftMs) : "—"}
@@ -456,6 +463,49 @@ export function TraceDetailView({ traceId }: { traceId: string }): ReactNode {
       : null;
     return { topLevel: top, childrenByParent: byParent, selectedRun: sel };
   }, [data, selectedRunId]);
+
+  const getCurrentData = useCallback(() => {
+    if (!data) return {};
+    const rootRun = topLevel[0];
+    const turns = topLevel.map((r, idx) => ({
+      turn: idx + 1,
+      input: r.inputTask && r.inputTask.length > 200
+        ? `${r.inputTask.slice(0, 200)}…`
+        : r.inputTask,
+      status: r.status,
+    }));
+    return {
+      traceId,
+      status: data.summary.worstStatus,
+      runs: data.summary.topLevelRunCount,
+      subRuns: data.summary.subRunCount,
+      toolFailures: `${data.summary.failedToolCalls ?? 0}/${data.summary.totalToolCalls ?? 0}`,
+      durationMs: data.summary.cumulativeDurationMs,
+      avgTtftMs: data.summary.avgTtftMs,
+      targetAgent: rootRun
+        ? {
+            id: rootRun.entityId,
+            name: rootRun.builtinName ?? rootRun.credentialName ?? rootRun.entityId,
+            source: rootRun.entitySource,
+          }
+        : null,
+      errorMessage: rootRun?.errorMessage ?? null,
+      firstInputTask: rootRun?.inputTask
+        ? rootRun.inputTask.length > 200
+          ? `${rootRun.inputTask.slice(0, 200)}…`
+          : rootRun.inputTask
+        : null,
+      turns,
+    };
+  }, [data, topLevel, traceId]);
+
+  useCopilotDraft({
+    resourceType: "trace",
+    resourceId: traceId,
+    isReadOnly: true,
+    getCurrentData,
+    applyDraft: () => [],
+  });
 
   if (loading) {
     return <p className="px-8 py-10 text-xs text-muted-foreground">Loading…</p>;

@@ -305,10 +305,15 @@ function CollapsibleReasoningMessage({
   message,
   messages,
   isRunning,
+  isLatest: isLatestProp,
   className,
+  header: _header,
+  contentView: _contentView,
+  toggle: _toggle,
+  children: _children,
   ...props
 }: CopilotChatReasoningMessageProps): ReactNode {
-  const isLatest = messages?.[messages.length - 1]?.id === message.id;
+  const isLatest = isLatestProp ?? (messages?.[messages.length - 1]?.id === message.id);
   const isStreaming = !!(isRunning && isLatest);
   const hasContent = !!(message.content && message.content.length > 0);
 
