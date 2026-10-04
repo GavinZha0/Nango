@@ -2,7 +2,7 @@ import type { APIRequestContext } from "@playwright/test";
 import { expect } from "@playwright/test";
 import pg from "pg";
 import { getPostgresUrl } from "@/lib/db/postgres-url";
-import { BASE_NAMES, E2E_PLACEHOLDER_KEY } from "../constants/base-resources";
+import { BASE_NAMES, E2E_PLACEHOLDER_KEY, REAL_LLM_CONFIG } from "../constants/base-resources";
 
 /**
  * Seed Layer 0 (LLM Credential) and Layer 1 (Supervisor, General, Evaluator Agents)
@@ -100,6 +100,38 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
     }
   }
 
+  // 1d. Base Real LLM Credential: check existing first to prevent duplicate rows (if API key configured)
+  let realLlmCredId: string | undefined;
+  if (REAL_LLM_CONFIG.apiKey) {
+    const foundReal = credList.find((c) => c.name === BASE_NAMES.realLlmCredential);
+    if (foundReal) realLlmCredId = foundReal.id;
+
+    if (!realLlmCredId) {
+      const realCredRes = await request.post("/api/admin/credentials", {
+        data: {
+          name: BASE_NAMES.realLlmCredential,
+          type: "api_key",
+          serviceType: "llm",
+          provider: REAL_LLM_CONFIG.provider,
+          ...(REAL_LLM_CONFIG.baseUrl ? { restUrl: REAL_LLM_CONFIG.baseUrl } : {}),
+          payload: { key: REAL_LLM_CONFIG.apiKey },
+        },
+      });
+
+      if (realCredRes.status() === 409) {
+        const listRes = await request.get("/api/admin/credentials");
+        const list = (await listRes.json()) as Array<{ id: string; name: string }>;
+        const found = list.find((c) => c.name === BASE_NAMES.realLlmCredential);
+        if (!found) throw new Error("Base Real LLM credential reported conflict but not found in list");
+        realLlmCredId = found.id;
+      } else {
+        expect(realCredRes.ok(), await realCredRes.text()).toBeTruthy();
+        const body = (await realCredRes.json()) as { id: string };
+        realLlmCredId = body.id;
+      }
+    }
+  }
+
   // Pre-fetch existing agents to prevent duplicate rows (only supervisor has DB uniqueness)
   const existingAgentsRes = await request.get("/api/builtin-agents");
   const existingAgents: Array<{ id: string; name: string; role: string | null; visibility?: string }> =
@@ -114,6 +146,7 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
     credentialId: string;
     enabled: boolean;
     visibility: "public";
+    prompt?: string;
   }) {
     // If a public agent with this name already exists, safe to reuse
     const alreadyExists = existingAgents.some(
@@ -172,7 +205,21 @@ export async function seedBaseResources(request: APIRequestContext): Promise<voi
     visibility: "public",
   });
 
-  // 5. Base Daily Schedule
+  // 5. Base Real LLM Agent (seeded when real LLM credential was created)
+  if (realLlmCredId) {
+    await seedAgent({
+      name: BASE_NAMES.realLlmAgent,
+      role: null,
+      model: REAL_LLM_CONFIG.model,
+      modelProvider: REAL_LLM_CONFIG.provider,
+      credentialId: realLlmCredId,
+      enabled: true,
+      visibility: "public",
+      prompt: "You are a helpful test assistant. When asked to repeat a phrase, repeat the phrase accurately.",
+    });
+  }
+
+  // 6. Base Daily Schedule
   await seedBaseSchedule(request);
 }
 
@@ -741,4 +788,149 @@ export async function seedBaseWebAutoSuite(adminEmail: string): Promise<void> {
     await client.end();
   }
 }
+
+/**
+ * Seed a read-only Base Trace with one top-level run and one sub-run.
+ * Top-level run (#1) has a successful delegate tool call.
+ * Sub-run (#1.a) has a failed regular tool call.
+ * Aggregate metrics produce 1 top-level run, 1 sub-run, Tool failures 1/2, worstStatus failed.
+ * Idempotent: checks for existing thread_id in entity_run first.
+ */
+export async function seedBaseTrace(editorEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Check if trace already exists
+    const existing = await client.query<{ id: string }>(
+      `SELECT id FROM entity_run WHERE thread_id = $1 LIMIT 1`,
+      [BASE_NAMES.traceThreadId],
+    );
+    if (existing.rows.length > 0) return;
+
+    // 2. Resolve editor user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [editorEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed trace: user ${editorEmail} not found`);
+    }
+    const editorId = userRes.rows[0].id;
+
+    // 3. Resolve agent ID (general or supervisor agent)
+    const agentRes = await client.query<{ id: string }>(
+      `SELECT id FROM builtin_agent WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.generalAgent],
+    );
+    const agentId = agentRes.rows[0]?.id ?? "00000000-0000-0000-0000-000000000001";
+
+    const topRunId = "0192a000-0000-7000-8000-000000000002";
+    const subRunId = "0192a000-0000-7000-8000-000000000003";
+
+    // 4. Insert Top-level Run (#1)
+    await client.query(
+      `INSERT INTO entity_run (
+        id, parent_run_id, thread_id, initiator, entity_id, entity_kind, entity_source,
+        mode, status, input_task, output_summary, owner_id, created_by,
+        started_at, finished_at, created_at
+      ) VALUES (
+        $1, NULL, $2, 'user', $3, 'builtin_agent', 'builtin',
+        'sync', 'succeeded', $4, 'Analysis completed with partial database errors', $5, $5,
+        '2026-10-04 12:00:00+00', '2026-10-04 12:00:05+00', '2026-10-04 12:00:00+00'
+      )`,
+      [topRunId, BASE_NAMES.traceThreadId, agentId, BASE_NAMES.traceTask, editorId],
+    );
+
+    // 5. Insert Sub-run (#1.a, child of top-level run)
+    await client.query(
+      `INSERT INTO entity_run (
+        id, parent_run_id, thread_id, initiator, entity_id, entity_kind, entity_source,
+        mode, status, input_task, error_message, owner_id, created_by,
+        started_at, finished_at, created_at
+      ) VALUES (
+        $1, $2, $3, 'agent', $4, 'builtin_agent', 'builtin',
+        'sync', 'failed', 'Execute sub-task: query financial tables', 'Database connection failed', $5, $5,
+        '2026-10-04 12:00:01+00', '2026-10-04 12:00:04+00', '2026-10-04 12:00:01+00'
+      )`,
+      [subRunId, topRunId, BASE_NAMES.traceThreadId, agentId, editorId],
+    );
+
+    // 6. Insert Events for Top-level Run
+    const topEvents = [
+      {
+        seq: 0,
+        type: "message",
+        payload: { role: "user", text: BASE_NAMES.traceTask },
+        ts: "2026-10-04 12:00:00.200+00",
+      },
+      {
+        seq: 1,
+        type: "tool_call_chunk",
+        payload: { toolCallId: "call-top-1", toolName: "delegate_to_agent", args: '{"agent":"specialist"}' },
+        ts: "2026-10-04 12:00:00.500+00",
+      },
+      {
+        seq: 2,
+        type: "tool_call_result",
+        payload: { toolCallId: "call-top-1", content: '{"ok":true}' },
+        ts: "2026-10-04 12:00:04.500+00",
+      },
+      {
+        seq: 3,
+        type: "message",
+        payload: { role: "assistant", text: "Analysis completed with partial database errors." },
+        ts: "2026-10-04 12:00:04.800+00",
+      },
+      {
+        seq: 4,
+        type: "finished",
+        payload: { summary: "Analysis completed" },
+        ts: "2026-10-04 12:00:05.000+00",
+      },
+    ];
+
+    for (const ev of topEvents) {
+      await client.query(
+        `INSERT INTO entity_run_event (run_id, seq, type, payload, ts)
+         VALUES ($1, $2, $3, $4::jsonb, $5)`,
+        [topRunId, ev.seq, ev.type, JSON.stringify(ev.payload), ev.ts],
+      );
+    }
+
+    // 7. Insert Events for Sub-run
+    const subEvents = [
+      {
+        seq: 0,
+        type: "tool_call_chunk",
+        payload: { toolCallId: "call-sub-1", toolName: "sql_query", args: '{"query":"SELECT * FROM quarterly_revenue"}' },
+        ts: "2026-10-04 12:00:01.500+00",
+      },
+      {
+        seq: 1,
+        type: "tool_call_result",
+        payload: { toolCallId: "call-sub-1", content: '{"isError":true,"message":"Connection refused: 5432"}' },
+        ts: "2026-10-04 12:00:03.500+00",
+      },
+      {
+        seq: 2,
+        type: "error",
+        payload: { message: "Database connection failed" },
+        ts: "2026-10-04 12:00:03.800+00",
+      },
+    ];
+
+    for (const ev of subEvents) {
+      await client.query(
+        `INSERT INTO entity_run_event (run_id, seq, type, payload, ts)
+         VALUES ($1, $2, $3, $4::jsonb, $5)`,
+        [subRunId, ev.seq, ev.type, JSON.stringify(ev.payload), ev.ts],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
 

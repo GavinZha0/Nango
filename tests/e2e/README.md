@@ -27,7 +27,7 @@ tests/e2e/
 │   ├── teardown.global.ts       # post-clean marked resources + test users
 │   └── sweep.ts                 # shared resource sweeper with per-table isolation
 ├── .auth/                       # gitignored storage-state (admin/editor/user)
-├── auth/  admin/  editor/  chat/  user/   # specs grouped by role / area
+├── auth/  admin/  editor/  chat/  user/  real-llm/   # specs grouped by role / area
 ```
 
 ## Running
@@ -35,11 +35,14 @@ tests/e2e/
 ```bash
 # Local (needs the DB; dev server is started/reused automatically)
 docker compose up -d nango-db
-pnpm test:e2e
+pnpm test:e2e              # Runs all projects (chromium + real-llm)
+pnpm test:e2e:core         # Runs core mock/offline specs only (project: chromium)
+pnpm test:e2e:real-llm     # Runs real LLM integration specs only (project: real-llm, tagged @real-llm)
 
 # One file / one test
 pnpm test:e2e tests/e2e/admin/credentials.spec.ts
 pnpm test:e2e --grep "credential"
+pnpm test:e2e --grep @real-llm
 ```
 
 CI (`pnpm test:e2e` in `.github/workflows/e2e-tests.yml`) spins up its own

@@ -35,12 +35,18 @@ export default defineConfig({
       name: "setup",
       testMatch: /.*\.setup\.ts/,
     },
-    // Main tests: depend on setup for auth state
+    // Core tests: depend on setup for auth state, excluding external real-LLM tests
     {
       name: "chromium",
       dependencies: ["setup"],
       testMatch: /.*\.spec\.ts/,
-      testIgnore: [/.*\.setup\.ts/],
+      testIgnore: [/.*\.setup\.ts/, /tests[\\/]e2e[\\/]real-llm[\\/].*/],
+    },
+    // Real LLM tests: exercises external live model providers (e.g. Groq)
+    {
+      name: "real-llm",
+      dependencies: ["setup"],
+      testMatch: /tests[\\/]e2e[\\/]real-llm[\\/].*\.spec\.ts/,
     },
   ],
 

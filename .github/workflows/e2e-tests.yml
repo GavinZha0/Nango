@@ -53,6 +53,9 @@ jobs:
       # ── Observability silenced in CI ─────────────────────────────────
       NANGO_LOG_ENABLED: "false"
 
+      # ── External AI models token (optional, for real LLM E2E tests) ─
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
     services:
       postgres:
         image: postgres:18-alpine
@@ -107,8 +110,15 @@ jobs:
         run: |
           timeout 90 bash -c 'until curl -sf http://localhost:9300 > /dev/null; do sleep 2; done'
 
-      - name: Run E2E tests
-        run: pnpm test:e2e
+      - name: Run Core E2E tests
+        run: pnpm test:e2e:core
+
+      # Temporarily disabled pending real LLM stability tuning
+      # - name: Run Real LLM E2E tests
+      #   if: env.GROQ_API_KEY != ''
+      #   env:
+      #     GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      #   run: pnpm test:e2e:real-llm
 
       - name: Stop application
         if: always()

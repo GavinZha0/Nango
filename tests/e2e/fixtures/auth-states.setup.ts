@@ -23,6 +23,7 @@ import {
   seedBaseVerificationSuite,
   seedBaseEvalSuite,
   seedBaseWebAutoSuite,
+  seedBaseTrace,
 } from "./base-seed";
 
 config();
@@ -165,6 +166,7 @@ setup("create editor user", async ({ page, browser }) => {
   await forceUserRole(TEST_USERS.editor.email, "editor");
   // Re-authenticate in an isolated context to ensure updated role in cookieCache
   await reAuthenticateInFreshContext(browser, TEST_USERS.editor, EDITOR_STATE_PATH, page.context());
+  await seedBaseTrace(TEST_USERS.editor.email);
 });
 
 setup("create regular user", async ({ page }) => {

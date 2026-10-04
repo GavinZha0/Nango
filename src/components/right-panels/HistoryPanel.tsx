@@ -155,6 +155,8 @@ function HistoryPanelContent(): ReactNode {
   const pinnedSessions = useWorkspaceStore((s) => s.pinnedSessions);
   const togglePin = useWorkspaceStore((s) => s.togglePin);
   const historyRevision = useSidebarStore((s) => s.historyRevision);
+  const rightTab = useSidebarStore((s) => s.rightTab);
+  const setRightTab = useSidebarStore((s) => s.setRightTab);
   const [sessions, setSessions] = useState<SessionDescriptor[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -186,11 +188,11 @@ function HistoryPanelContent(): ReactNode {
       }
     }
 
-    void load();
+    if (rightTab === "history") {
+      void load();
+    }
     return () => { cancelled = true; };
-  }, [activeAgentId, activeAgentType, historyRevision]);
-
-  const setRightTab = useSidebarStore((s) => s.setRightTab);
+  }, [activeAgentId, activeAgentType, historyRevision, rightTab]);
 
   function handleSelectSession(sid: string) {
     // Short-circuit ONLY when we're already in explicit mode for this
