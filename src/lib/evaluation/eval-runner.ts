@@ -43,7 +43,7 @@ import {
 } from "./deterministic-checks";
 import { buildEvaluationBrief } from "./prompt-builder";
 import type { SubmitEvaluationScoresSuccess } from "./runtime-tools";
-import type { ToolCallSummary, ToolCallAbnormalDetail } from "./types";
+import type { ToolCallSummary, ToolCallAbnormalDetail, ExecutionStats } from "./types";
 import { buildToolCallAggregates, type ToolEventRow } from "@/lib/runner/tool-call-aggregator";
 import { detectToolResultStatus, extractErrorMessage } from "@/lib/copilot/detect-tool-result-status";
 import * as storage from "./storage";
@@ -92,8 +92,7 @@ export interface RunEvalCaseResult {
   assertionResults?: AssertionResult[];
   feedback?: string | null;
   error?: string;
-  durationMs?: number;
-  outputTokens?: number;
+  executionStats?: ExecutionStats;
   threadId?: string;
   toolCallSummary?: ToolCallSummary;
 }
@@ -129,15 +128,27 @@ export function analyzeToolCallEvents(events: EntityRunEventEntity[]): ToolCallS
 
   const aggregates = buildToolCallAggregates(toolRows);
   const toolFrequency: Record<string, number> = {};
+  const toolDurations: Record<string, number> = {};
   const abnormalDetails: ToolCallAbnormalDetail[] = [];
   let totalCalls = 0;
   let failureCount = 0;
   let blockedCount = 0;
+  let totalDurationMs = 0;
 
   for (const agg of aggregates.values()) {
     const toolName = agg.toolName || "unknown_tool";
     totalCalls++;
     toolFrequency[toolName] = (toolFrequency[toolName] || 0) + 1;
+
+    let callDurationMs: number | undefined;
+    if (agg.startedAt && agg.endedAt) {
+      const dur = new Date(agg.endedAt).getTime() - new Date(agg.startedAt).getTime();
+      if (!isNaN(dur) && dur >= 0) {
+        callDurationMs = dur;
+        totalDurationMs += dur;
+        toolDurations[toolName] = (toolDurations[toolName] || 0) + dur;
+      }
+    }
 
     if (agg.resultContent) {
       let parsed: unknown = null;
@@ -176,6 +187,7 @@ export function analyzeToolCallEvents(events: EntityRunEventEntity[]): ToolCallS
         abnormalDetails.push({
           toolName,
           status: "blocked",
+          durationMs: callDurationMs,
           code,
           reason,
         });
@@ -193,6 +205,7 @@ export function analyzeToolCallEvents(events: EntityRunEventEntity[]): ToolCallS
           abnormalDetails.push({
             toolName,
             status: "failed",
+            durationMs: callDurationMs,
             code,
             reason,
           });
@@ -206,13 +219,10 @@ export function analyzeToolCallEvents(events: EntityRunEventEntity[]): ToolCallS
     failureCount,
     blockedCount,
     toolFrequency,
+    totalDurationMs,
+    toolDurations,
     abnormalDetails,
   };
-}
-
-/** Rough token estimate: ~4 chars per token for English text. */
-function estimateOutputTokens(text: string): number {
-  return Math.ceil(text.length / 4);
 }
 
 /** Format conversation history for prompt injection. */
@@ -367,6 +377,12 @@ export async function runEvalCase(
       threshold,
     });
 
+    const executionStats: ExecutionStats = {
+      durationMs: Date.now() - startMs,
+      outputChars: 0,
+      ttftMs: null,
+    };
+
     if (input.runId) {
       await storage.writeCaseResult({
         runId: input.runId,
@@ -376,8 +392,7 @@ export async function runEvalCase(
         feedback: verdict.feedback,
         threadId: null,
         evaluatorThreadId: null,
-        durationMs: Date.now() - startMs,
-        outputTokens: null,
+        executionStats,
         toolCallSummary: null,
         error: { message: "No evaluator agent configured on suite", source: "config" },
       });
@@ -388,7 +403,7 @@ export async function runEvalCase(
       assertionResults: verdict.assertionResults,
       feedback: verdict.feedback,
       error: "No evaluator agent configured on suite",
-      durationMs: Date.now() - startMs,
+      executionStats,
     };
   }
 
@@ -397,7 +412,7 @@ export async function runEvalCase(
   const currentThreadId = randomUUID();
   const history: { role: "user" | "assistant"; content: string }[] = [];
   let durationMs = 0;
-  let outputTokens = 0;
+  let outputChars = 0;
   const actualToolCalls: string[] = [];
   let finalTargetSummary = "";
   const allTargetEvents: EntityRunEventEntity[] = [];
@@ -446,13 +461,18 @@ export async function runEvalCase(
     const targetEvents = await readEvents(targetResult.runId);
     allTargetEvents.push(...targetEvents);
     actualToolCalls.push(...extractToolCallNames(targetEvents));
-    outputTokens += estimateOutputTokens(targetResult.summary);
+    outputChars += targetResult.summary.length;
 
     history.push({ role: "user", content: turn.userMessage });
     history.push({ role: "assistant", content: targetResult.summary });
   }
 
   durationMs = Date.now() - startMs;
+  const executionStats: ExecutionStats = {
+    durationMs,
+    outputChars,
+    ttftMs: null,
+  };
   const toolCallSummary = analyzeToolCallEvents(allTargetEvents);
   const toolCallCount = toolCallSummary.totalCalls;
 
@@ -461,7 +481,7 @@ export async function runEvalCase(
   const checkInput: DeterministicCheckInput = {
     agentText: finalTargetSummary,
     actualToolCalls,
-    metrics: { durationMs, outputTokens, toolCallCount },
+    metrics: { durationMs, outputChars, toolCallCount },
     variables: input.variables,
     toolCallSummary,
   };
@@ -487,8 +507,7 @@ export async function runEvalCase(
         feedback: verdict.feedback,
         threadId: currentThreadId,
         evaluatorThreadId: null,
-        durationMs,
-        outputTokens,
+        executionStats,
         toolCallSummary,
       });
     }
@@ -497,8 +516,7 @@ export async function runEvalCase(
       status: verdict.status,
       assertionResults: verdict.assertionResults,
       feedback: verdict.feedback,
-      durationMs,
-      outputTokens,
+      executionStats,
       threadId: currentThreadId,
       toolCallSummary,
     };
@@ -522,8 +540,7 @@ export async function runEvalCase(
         feedback: verdict.feedback,
         threadId: currentThreadId,
         evaluatorThreadId: null,
-        durationMs,
-        outputTokens,
+        executionStats,
         toolCallSummary,
       });
     }
@@ -532,8 +549,7 @@ export async function runEvalCase(
       status: verdict.status,
       assertionResults: verdict.assertionResults,
       feedback: verdict.feedback,
-      durationMs,
-      outputTokens,
+      executionStats,
       threadId: currentThreadId,
       toolCallSummary,
     };
@@ -556,8 +572,7 @@ export async function runEvalCase(
         feedback: verdict.feedback,
         threadId: currentThreadId,
         evaluatorThreadId: null,
-        durationMs,
-        outputTokens,
+        executionStats,
         toolCallSummary,
       });
     }
@@ -566,8 +581,7 @@ export async function runEvalCase(
       status: verdict.status,
       assertionResults: verdict.assertionResults,
       feedback: verdict.feedback,
-      durationMs,
-      outputTokens,
+      executionStats,
       threadId: currentThreadId,
       toolCallSummary,
     };
@@ -655,8 +669,7 @@ export async function runEvalCase(
       feedback: verdict.feedback,
       threadId: currentThreadId,
       evaluatorThreadId: evaluatorResult?.runId ?? null,
-      durationMs,
-      outputTokens,
+      executionStats,
       toolCallSummary,
     });
   }
@@ -665,8 +678,7 @@ export async function runEvalCase(
     status: verdict.status,
     assertionResults: verdict.assertionResults,
     feedback: verdict.feedback,
-    durationMs,
-    outputTokens,
+    executionStats,
     threadId: currentThreadId,
     toolCallSummary,
     error: !scores ? (lastError || "Evaluator did not call submit_evaluation_scores") : undefined,
@@ -683,8 +695,7 @@ async function writeErrorResult(
   evaluatorRunId?: string,
   deterministicDetails?: {
     assertionResults?: AssertionResult[];
-    durationMs?: number;
-    outputTokens?: number;
+    executionStats?: ExecutionStats;
     toolCallSummary?: ToolCallSummary;
   },
 ): Promise<void> {
@@ -700,6 +711,11 @@ async function writeErrorResult(
         errored: true,
       },
     ];
+    const executionStats: ExecutionStats = deterministicDetails?.executionStats ?? {
+      durationMs: Date.now() - startMs,
+      outputChars: 0,
+      ttftMs: null,
+    };
     await storage.writeCaseResult({
       runId: input.runId,
       caseId: input.caseId,
@@ -708,8 +724,7 @@ async function writeErrorResult(
       threadId: targetRunId ?? null,
       evaluatorThreadId: evaluatorRunId ?? null,
       assertionResults: errorAssertionResults,
-      durationMs: deterministicDetails?.durationMs ?? (Date.now() - startMs),
-      outputTokens: deterministicDetails?.outputTokens ?? null,
+      executionStats,
       toolCallSummary: deterministicDetails?.toolCallSummary ?? null,
     });
   } catch (err) {

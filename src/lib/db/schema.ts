@@ -27,7 +27,7 @@ function timestamp(name: string) {
 }
 
 import type { ArtifactKind, ArtifactType } from "@/lib/domain/artifact";
-import type { ToolCallSummary } from "@/lib/evaluation/types";
+import type { ToolCallSummary, ExecutionStats } from "@/lib/evaluation/types";
 
 /**
  * Postgres `bytea` column mapped to Node `Buffer`.
@@ -2043,13 +2043,9 @@ export const EvalCaseResultTable = pgTable(
     /** Thread ID linking to the evaluator agent's scoring session. */
     evaluatorThreadId: uuid("evaluator_thread_id"),
     error: jsonb("error"),
-    /** Observability — kept but not used as eval threshold. */
-    ttftMs: integer("ttft_ms"),
-    /** End-to-end duration in milliseconds. */
-    durationMs: integer("duration_ms"),
-    /** Output token count (renamed from `tokens` in migration eval-stage2). */
-    outputTokens: integer("output_tokens"),
-    /** Structured summary of tool calls, frequency, and abnormal events. */
+    /** Performance and execution statistics (durationMs, outputChars, ttftMs). */
+    executionStats: jsonb("execution_stats").$type<ExecutionStats>(),
+    /** Structured summary of tool calls, frequency, duration, and abnormal events. */
     toolCallSummary: jsonb("tool_call_summary").$type<ToolCallSummary>(),
     startedAt: timestamp("started_at")
       .notNull()

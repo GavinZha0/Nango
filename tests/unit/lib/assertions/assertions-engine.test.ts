@@ -7,6 +7,7 @@ import {
   normalizeCaseName,
   validateAssertionSyntax,
   toolCallAssertionSchema,
+  sanitizeAssertions,
   type AssertionSpec,
 } from "@/lib/assertions";
 
@@ -368,14 +369,17 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
 
       expect(results[0].ok).toBe(true);  // run_ssh_command calls < 4 (3 < 4)
       expect(results[1].ok).toBe(false); // run_ssh_command calls < 3 (3 < 3)
+      expect(results[1].actual).toBe(3);
       expect(results[2].ok).toBe(true);  // read_file calls == 2 (2 == 2)
       expect(results[3].ok).toBe(true);  // read_file calls > 1 (2 > 1)
       expect(results[4].ok).toBe(true);  // read_file failed == 1 (1 == 1)
       expect(results[5].ok).toBe(false); // read_file failed < 1 (1 < 1 is false)
+      expect(results[5].actual).toBe(1);
       expect(results[6].ok).toBe(true);  // run_ssh_command failed == 0 (0 == 0)
       expect(results[7].ok).toBe(true);  // run_ssh_command blocked == 2 (2 == 2)
       expect(results[8].ok).toBe(true);  // run_ssh_command blocked < 3 (2 < 3)
       expect(results[9].ok).toBe(false); // run_ssh_command blocked == 0 (2 == 0)
+      expect(results[9].actual).toBe(2);
     });
 
     it("handles toolCallSummary with missing or undefined toolFrequency safely without throwing", () => {
@@ -445,13 +449,56 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[1].errorSource).toBe("config");
       expect(outcome.deterministicResults[1].message).toContain("requires toolCallSummary");
     });
+
+    it("marks tool_call with empty toolName as errored config error", () => {
+      const assertions: AssertionSpec[] = [
+        {
+          type: "tool_call",
+          toolName: "",
+          operator: "<",
+          target: "calls",
+          expectedCalls: 3,
+        },
+        {
+          type: "tool_call",
+          toolName: "   ",
+          operator: ">",
+          target: "calls",
+          expectedCalls: 0,
+        },
+      ];
+
+      const outcome = evaluateAssertions({}, assertions, { actualToolCallNames: ["calculator"] });
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].errored).toBe(true);
+      expect(outcome.deterministicResults[0].errorSource).toBe("config");
+      expect(outcome.deterministicResults[0].message).toContain("missing required toolName");
+      expect(outcome.deterministicResults[1].errored).toBe(true);
+      expect(outcome.deterministicResults[1].errorSource).toBe("config");
+    });
+
+    it("sanitizeAssertions strips tool_call with empty or whitespace toolName while preserving valid assertions", () => {
+      const assertions = [
+        { type: "tool_call", toolName: "", target: "calls", operator: "<", expectedCalls: 3 },
+        { type: "tool_call", toolName: "   ", target: "calls", operator: "==", expectedCalls: 1 },
+        { type: "tool_call", toolName: "find", target: "calls", operator: ">", expectedCalls: 3 },
+        { type: "metric", metric: "duration_s", operator: "<", threshold: 10 },
+        { type: "js_expression", expression: "result.ok === true" },
+      ];
+
+      const sanitized = sanitizeAssertions(assertions as AssertionSpec[]);
+      expect(sanitized).toHaveLength(3);
+      expect(sanitized[0]).toMatchObject({ type: "tool_call", toolName: "find" });
+      expect(sanitized[1]).toMatchObject({ type: "metric", metric: "duration_s" });
+      expect(sanitized[2]).toMatchObject({ type: "js_expression", expression: "result.ok === true" });
+    });
   });
 
   describe("5. Metric assertions", () => {
     const options = {
       metrics: {
         durationMs: 3200,
-        outputTokens: 450,
+        outputChars: 450,
         toolCallCount: 2,
       },
     };
@@ -459,7 +506,7 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
     it("evaluates performance and resource metrics", () => {
       const assertions: AssertionSpec[] = [
         { type: "metric", metric: "duration_s", operator: "<", threshold: 5 },
-        { type: "metric", metric: "output_tokens", operator: "<", threshold: 1000 },
+        { type: "metric", metric: "output_chars", operator: "<", threshold: 1000 },
         { type: "metric", metric: "total_tool_calls", operator: "==", threshold: 2 },
         // Failed rule: 3.2s < 2s is false
         { type: "metric", metric: "duration_s", operator: "<", threshold: 2 },
@@ -1047,6 +1094,60 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.allDeterministicPassed).toBe(true);
       expect(outcome.deterministicResults).toHaveLength(4);
       expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
+    });
+  });
+
+  describe("js_expression actual value extraction on failure", () => {
+    it("extracts LHS actual value for failing comparison assertions (e.g. array length)", () => {
+      const payload = {
+        results: [1, 2, 3],
+        status: "pending",
+        count: 0,
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "js_expression", expression: "result.results.length > 10" },
+        { type: "js_expression", expression: "result.status === 'success'" },
+        { type: "js_expression", expression: "result.count >= 1" },
+        { type: "js_expression", expression: "10 < result.results.length" },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults).toHaveLength(4);
+
+      // result.results.length > 10 -> actual: 3
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      expect(outcome.deterministicResults[0].actual).toBe(3);
+      expect(outcome.deterministicResults[0].expected).toBe(10);
+
+      // result.status === 'success' -> actual: 'pending'
+      expect(outcome.deterministicResults[1].ok).toBe(false);
+      expect(outcome.deterministicResults[1].actual).toBe("pending");
+      expect(outcome.deterministicResults[1].expected).toBe("success");
+
+      // result.count >= 1 -> actual: 0
+      expect(outcome.deterministicResults[2].ok).toBe(false);
+      expect(outcome.deterministicResults[2].actual).toBe(0);
+      expect(outcome.deterministicResults[2].expected).toBe(1);
+
+      // Yoda condition 10 < result.results.length -> actual: 3
+      expect(outcome.deterministicResults[3].ok).toBe(false);
+      expect(outcome.deterministicResults[3].actual).toBe(3);
+    });
+
+    it("extracts failing sub-expression actual value in compound && expressions", () => {
+      const payload = {
+        results: [1, 2, 3],
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "js_expression", expression: "result.results && result.results.length > 10" },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      expect(outcome.deterministicResults[0].actual).toBe(3);
     });
   });
 });

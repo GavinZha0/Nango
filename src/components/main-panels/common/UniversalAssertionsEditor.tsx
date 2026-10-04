@@ -464,7 +464,7 @@ export function UniversalAssertionsEditor({
                           expected: expectedVal,
                         })
                       }
-                      placeholder="$.data.user.role or isError"
+                      placeholder="result.status || $.isError"
                       disabled={readOnly}
                       className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
                     />
@@ -570,7 +570,7 @@ export function UniversalAssertionsEditor({
                     <Input
                       value={spec.expression}
                       onChange={(e) => updateAssertionAt(idx, { ...spec, expression: e.target.value })}
-                      placeholder="result.status === 'success' || root.total > 0"
+                      placeholder="result.status === 'success' || root.isError == true"
                       disabled={readOnly}
                       className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"
                     />
@@ -787,9 +787,9 @@ export function UniversalAssertionsEditor({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="duration_s">duration_s</SelectItem>
+                        <SelectItem value="output_chars">output_chars</SelectItem>
                         {mode === "evaluation" && (
                           <>
-                            <SelectItem value="output_tokens">output_tokens</SelectItem>
                             <SelectItem value="total_tool_calls">total_tool_calls</SelectItem>
                             <SelectItem value="tool_failures">tool_failures</SelectItem>
                             <SelectItem value="tool_blocked">tool_blocked</SelectItem>

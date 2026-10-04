@@ -86,8 +86,7 @@ describe("POST /api/eval-cases/[id]/run", () => {
       feedback: "Agent response was clear, polite, and aligned with constraints.",
       assertionResults: [],
       status: "passed",
-      durationMs: 1450,
-      outputTokens: 86,
+      executionStats: { durationMs: 1450, outputChars: 86, ttftMs: null },
     };
 
     runEvalCaseMock.mockResolvedValue(expectedOutcome);

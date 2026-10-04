@@ -350,6 +350,12 @@ describe("analyzeToolCallEvents", () => {
     expect(summary.totalCalls).toBe(4);
     expect(summary.failureCount).toBe(1);
     expect(summary.blockedCount).toBe(2);
+    expect(summary.totalDurationMs).toBe(4000);
+    expect(summary.toolDurations).toEqual({
+      read_file: 1000,
+      extract_dataset_by_sql: 1000,
+      run_ssh_command: 2000,
+    });
     expect(summary.toolFrequency).toEqual({
       read_file: 1,
       extract_dataset_by_sql: 1,
@@ -361,6 +367,7 @@ describe("analyzeToolCallEvents", () => {
     expect(summary.abnormalDetails[0]).toEqual({
       toolName: "extract_dataset_by_sql",
       status: "failed",
+      durationMs: 1000,
       code: undefined,
       reason: "Database connection timed out",
     });
@@ -369,6 +376,7 @@ describe("analyzeToolCallEvents", () => {
     expect(summary.abnormalDetails[1]).toEqual({
       toolName: "run_ssh_command",
       status: "blocked",
+      durationMs: 1000,
       code: "POLICY_DENIED",
       reason: "Headless execution denied by policy",
     });
@@ -377,6 +385,7 @@ describe("analyzeToolCallEvents", () => {
     expect(summary.abnormalDetails[2]).toEqual({
       toolName: "run_ssh_command",
       status: "blocked",
+      durationMs: 1000,
       code: "POLICY_DENIED",
       reason: "Headless execution denied by policy",
     });
@@ -413,6 +422,7 @@ describe("analyzeToolCallEvents", () => {
     expect(summary.abnormalDetails[0]).toEqual({
       toolName: "run_shell_script",
       status: "blocked",
+      durationMs: 1000,
       code: "TOOL_HEADLESS_DENIED",
       reason: "Interactive confirmation denied in headless mode",
     });

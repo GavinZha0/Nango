@@ -110,6 +110,8 @@ export function EvaluationSuiteEditor({
     const row = runSnapshot.results.find((r) => r.caseId === selectedCaseId);
     if (!row) return undefined;
     const resultsList = (row.assertionResults ?? []) as unknown[];
+    const durationMs = row.executionStats?.durationMs ?? null;
+    const outputChars = row.executionStats?.outputChars ?? null;
     return {
       status: row.status as "passed" | "failed" | "errored",
       score: null,
@@ -117,8 +119,9 @@ export function EvaluationSuiteEditor({
       assertionScore: null,
       assertionResults: resultsList,
       feedback: row.feedback,
-      durationMs: row.durationMs,
-      outputTokens: row.outputTokens,
+      durationMs,
+      outputChars,
+      executionStats: row.executionStats,
       toolCallSummary: row.toolCallSummary,
       startedAt: row.startedAt,
     };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isDeepEqual } from "@/lib/utils";
+import { isDeepEqual, formatCharCount } from "@/lib/utils";
 
 describe("isDeepEqual", () => {
   it("compares primitive values", () => {
@@ -41,5 +41,20 @@ describe("isDeepEqual", () => {
     ];
     // Array element order matters
     expect(isDeepEqual(arrA, arrC)).toBe(false);
+  });
+});
+
+describe("formatCharCount", () => {
+  it("formats counts under 1000 with 'c' suffix", () => {
+    expect(formatCharCount(0)).toBe("0c");
+    expect(formatCharCount(640)).toBe("640c");
+    expect(formatCharCount(999)).toBe("999c");
+  });
+
+  it("formats counts 1000 and above with 'k' suffix rounded to 1 decimal place", () => {
+    expect(formatCharCount(1000)).toBe("1.0k");
+    expect(formatCharCount(1266)).toBe("1.3k");
+    expect(formatCharCount(10450)).toBe("10.5k");
+    expect(formatCharCount(1500)).toBe("1.5k");
   });
 });

@@ -29,10 +29,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { cn, isDeepEqual } from "@/lib/utils";
+import { cn, isDeepEqual, formatCharCount } from "@/lib/utils";
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
-import type { AssertionSpec } from "@/lib/assertions";
+import { sanitizeAssertions, type AssertionSpec } from "@/lib/assertions/types";
 import { AssertionVerdictList } from "@/components/main-panels/common/verdicts";
 
 const fetcher = async (url: string) => {
@@ -130,6 +130,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [runOutcome, setRunOutcome] = useState<SingleCaseRunOutcome | null>(null);
+  const [copiedOutput, setCopiedOutput] = useState(false);
 
   // Compute effective outcome (prioritizes historical snapshot when in history view)
   const displayOutcome = useMemo<SingleCaseRunOutcome | null>(() => {
@@ -202,6 +203,27 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     return formatWebAutoOutputForDisplay(displayOutcome?.executionOutput);
   }, [displayOutcome?.executionOutput]);
 
+  const outputChars = useMemo(() => {
+    return formattedOutputText ? formattedOutputText.length : 0;
+  }, [formattedOutputText]);
+
+  const outputDurationStr = useMemo(() => {
+    const ms = displayOutcome?.durationMs;
+    if (typeof ms !== "number" || isNaN(ms) || ms <= 0) return null;
+    return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+  }, [displayOutcome?.durationMs]);
+
+  const handleCopyOutput = useCallback(async () => {
+    if (!formattedOutputText) return;
+    try {
+      await navigator.clipboard.writeText(formattedOutputText);
+      setCopiedOutput(true);
+      setTimeout(() => setCopiedOutput(false), 2000);
+    } catch {
+      toast.error("Failed to copy output");
+    }
+  }, [formattedOutputText]);
+
   // Clean up selected case in store on unmount
   useEffect(() => {
     return () => {
@@ -257,7 +279,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
       setDraftScript(typeof caseInput.script === "string" ? caseInput.script : "");
       setDraftSteps(typeof caseInput.steps === "string" ? caseInput.steps : "");
       setDraftAssertions(
-        Array.isArray(selectedCase.assertions) ? selectedCase.assertions : []
+        Array.isArray(selectedCase.assertions) ? sanitizeAssertions(selectedCase.assertions) : []
       );
       setJsonError(null);
     } else {
@@ -377,6 +399,10 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     if (!selectedCase) return;
     setSaving(true);
     try {
+      const cleaned = sanitizeAssertions(draftAssertions as AssertionSpec[]);
+      if (cleaned.length !== draftAssertions.length) {
+        setDraftAssertions(cleaned as unknown as Record<string, unknown>[]);
+      }
       const res = await fetch(`/api/web-auto-cases/${selectedCase.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -385,7 +411,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
             script: draftScript,
             steps: draftSteps,
           },
-          assertions: draftAssertions,
+          assertions: cleaned,
         }),
       });
       if (!res.ok) {
@@ -683,24 +709,26 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                         (#{selectedRunSeq} - {runSnapshot?.run?.startedAt ? formatHistoricalTimestamp(runSnapshot.run.startedAt) : ""})
                       </span>
                     )}
-                    {typeof displayOutcome.durationMs === "number" && !isNaN(displayOutcome.durationMs) && displayOutcome.durationMs > 0 && (
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {displayOutcome.durationMs >= 1000
-                          ? `${(displayOutcome.durationMs / 1000).toFixed(1)}s`
-                          : `${displayOutcome.durationMs}ms`}
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground shrink-0">
+                      <span>
+                        {outputDurationStr ? `${outputDurationStr} / ` : ""}{formatCharCount(outputChars)}
                       </span>
-                    )}
-                    <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                        displayOutcome.status === "passed"
-                          ? "bg-green-500/10 text-green-500 border border-green-500/20"
-                          : displayOutcome.status === "failed"
-                          ? "bg-destructive/10 text-destructive border border-destructive/20"
-                          : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                      }`}
-                    >
-                      {displayOutcome.status.toUpperCase()}
-                    </span>
+                      {outputTab === "output" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                          onClick={handleCopyOutput}
+                          title="Copy output text"
+                        >
+                          {copiedOutput ? (
+                            <Check className="h-3 w-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -814,6 +842,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     assertions={draftAssertions as unknown as readonly import("@/lib/assertions").AssertionSpec[]}
                     error={displayOutcome?.error as import("@/lib/assertions").ErrorEnvelope | null}
                     feedback={displayOutcome?.feedback}
+                    status={displayOutcome?.status}
                     title="Verdicts"
                   />
                 </div>

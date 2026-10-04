@@ -314,12 +314,19 @@ export async function runMcpCase(
       || Boolean((raw as Record<string, unknown>)?.jsonRpcError);
     const variables =
       (runContext?.variables as Record<string, unknown> | undefined) ?? {};
+    const outputChars =
+      raw == null
+        ? 0
+        : typeof raw === "string"
+        ? raw.length
+        : JSON.stringify(raw).length;
     const outcome = evaluateAssertions(raw, input.assertions, {
       input: resolvedInput,
       variables,
       runContext,
       metrics: {
         durationMs: toolDurationMs,
+        outputChars,
       },
     });
     const assertionResults = outcome.deterministicResults;

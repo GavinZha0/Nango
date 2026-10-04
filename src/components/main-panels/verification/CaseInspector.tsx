@@ -31,7 +31,7 @@ import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react
 import { Loader2, Play, Check, Copy, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatCharCount } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 import { AssertionVerdictList } from "@/components/main-panels/common/verdicts";
 import { formatTimestamp } from "@/components/admin/format";
@@ -44,6 +44,7 @@ import type {
 } from "@/lib/verification/types";
 import { extractTargetCase } from "@/components/main-panels/common";
 import { UniversalAssertionsEditor } from "@/components/main-panels/common/UniversalAssertionsEditor";
+import { sanitizeAssertions } from "@/lib/assertions/types";
 
 const INPUT_PLACEHOLDER = `// example:
 {
@@ -372,10 +373,14 @@ export function CaseInspector({
 
   // Assertions pane — JSON array of AssertionSpec.
   const assertionsDraft = useJsonDraft<AssertionSpec[]>({
-    initial: caseRow.assertions ?? [],
+    initial: sanitizeAssertions(caseRow.assertions ?? []),
     validate: validateAssertionsArray,
     commit: async (value) => {
-      const row = await caseActions.patch(caseRow, { assertions: value });
+      const cleaned = sanitizeAssertions(value);
+      if (cleaned.length !== value.length) {
+        assertionsDraft.setText(JSON.stringify(cleaned, null, 2));
+      }
+      const row = await caseActions.patch(caseRow, { assertions: cleaned });
       if (!row) {
         throw new Error(
           useCasesStore.getState().errorFor[caseRow.suiteId] ||
@@ -584,17 +589,27 @@ export function CaseInspector({
     ? "// Assertion specs are not snapshotted per run.\n// The evaluated verdicts for this run appear in the Verdicts panel →"
     : null;
 
-  const resultSizeStr = useMemo(() => {
-    if (displayedOutcome?.resultPayload == null) return null;
-    try {
-      const str = JSON.stringify(displayedOutcome.resultPayload);
-      const bytes = new TextEncoder().encode(str).length;
-      if (bytes < 1024) return `${bytes} B`;
-      return `${(bytes / 1024).toFixed(1)} KB`;
-    } catch {
+  const resultPayload = displayedOutcome?.resultPayload;
+  const outputChars = useMemo(() => {
+    if (resultPayload == null) return 0;
+    return typeof resultPayload === "string"
+      ? resultPayload.length
+      : JSON.stringify(resultPayload).length;
+  }, [resultPayload]);
+
+  const durationMs = displayedOutcome?.durationMs;
+  const outputDurationStr = useMemo(() => {
+    if (
+      typeof durationMs !== "number" ||
+      isNaN(durationMs) ||
+      durationMs <= 0
+    ) {
       return null;
     }
-  }, [displayedOutcome]);
+    return durationMs >= 1000
+      ? `${(durationMs / 1000).toFixed(1)}s`
+      : `${durationMs}ms`;
+  }, [durationMs]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -678,63 +693,10 @@ export function CaseInspector({
         {/* --- Right column: Output (top, 2fr) ↔ Input,
                               Verdicts (bot, 3fr) ↔ Assertions --- */}
         <div className="flex min-h-0 flex-col min-w-0">
-          <div className="flex h-8 shrink-0 items-center border-b border-l bg-muted/40 px-3">
+          <div className="flex h-8 shrink-0 items-center justify-between border-b border-l bg-muted/40 px-3">
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Output
             </span>
-
-            {displayedOutcome?.effectiveToolName && (
-              <span
-                className="ml-2 inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground max-w-[200px] truncate"
-                title={
-                  displayedOutcome.originalToolName &&
-                  displayedOutcome.originalToolName !== displayedOutcome.effectiveToolName
-                    ? `Tool transformed: ${displayedOutcome.originalToolName} → ${displayedOutcome.effectiveToolName}`
-                    : `Tool: ${displayedOutcome.effectiveToolName}`
-                }
-              >
-                {displayedOutcome.originalToolName &&
-                displayedOutcome.originalToolName !== displayedOutcome.effectiveToolName ? (
-                  <>
-                    <span className="line-through opacity-70 truncate">{displayedOutcome.originalToolName}</span>
-                    <span>→</span>
-                    <span className="font-medium text-foreground truncate">{displayedOutcome.effectiveToolName}</span>
-                  </>
-                ) : (
-                  <span className="truncate">{displayedOutcome.effectiveToolName}</span>
-                )}
-              </span>
-            )}
-
-            {resultSizeStr && (
-              <div className="ml-3 flex items-center gap-2 border-l border-border/50 pl-3">
-                <span className="text-[10px] tabular-nums text-muted-foreground">
-                  {resultSizeStr}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  onClick={() => {
-                    if (displayedOutcome?.resultPayload == null) return;
-                    try {
-                      navigator.clipboard.writeText(
-                        JSON.stringify(displayedOutcome.resultPayload, null, 2)
-                      );
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    } catch {}
-                  }}
-                  title="Copy JSON"
-                >
-                  {copied ? (
-                    <Check className="h-3.5 w-3.5 text-green-500" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-                  )}
-                </Button>
-              </div>
-            )}
 
             <div className="ml-auto flex items-center gap-2">
               {showHistoryChrome && historyMeta && (
@@ -746,27 +708,35 @@ export function CaseInspector({
                 </span>
               )}
               {displayedOutcome && (
-                <>
-                  {typeof displayedOutcome.durationMs === "number" && !isNaN(displayedOutcome.durationMs) && displayedOutcome.durationMs > 0 && (
-                    <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                      {displayedOutcome.durationMs >= 1000
-                        ? `${(displayedOutcome.durationMs / 1000).toFixed(1)}s`
-                        : `${displayedOutcome.durationMs}ms`}
-                    </span>
-                  )}
-                  <span
-                    className={cn(
-                      "text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0",
-                      displayedOutcome.status === "passed"
-                        ? "bg-green-500/10 text-green-500 border border-green-500/20"
-                        : displayedOutcome.status === "failed"
-                        ? "bg-destructive/10 text-destructive border border-destructive/20"
-                        : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                    )}
-                  >
-                    {displayedOutcome.status.toUpperCase()}
+                <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground shrink-0">
+                  <span>
+                    {outputDurationStr ? `${outputDurationStr} / ` : ""}{formatCharCount(outputChars)}
                   </span>
-                </>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      if (displayedOutcome?.resultPayload == null) return;
+                      try {
+                        navigator.clipboard.writeText(
+                          typeof displayedOutcome.resultPayload === "string"
+                            ? displayedOutcome.resultPayload
+                            : JSON.stringify(displayedOutcome.resultPayload, null, 2)
+                        );
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      } catch {}
+                    }}
+                    title="Copy output"
+                  >
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -966,6 +936,7 @@ function VerdictsPane({
       verdicts={outcome?.assertionResults}
       assertions={assertions}
       error={outcome?.error}
+      status={outcome?.status}
       title="Verdicts"
     />
   );

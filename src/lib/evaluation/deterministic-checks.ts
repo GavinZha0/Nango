@@ -35,7 +35,7 @@ export interface DeterministicCheckInput {
   /** Runner-measured execution metrics. */
   metrics: {
     durationMs: number;
-    outputTokens: number;
+    outputChars: number;
     toolCallCount: number;
   };
   /** Suite-level literal variables for assertion evaluation */
@@ -79,7 +79,7 @@ function getAssertionDescription(spec: AssertionSpec): string {
     case "metric":
       return `${spec.metric} ${spec.operator} ${spec.threshold}`;
     case "llm_dim":
-      return `Dimension: ${spec.dim}`;
+      return `Dim: ${spec.dim}`;
     case "llm_custom": {
       const label =
         spec.expectation ? spec.expectation :
@@ -204,13 +204,13 @@ export function runDeterministicChecks(
     if (passed) passedCount++;
   }
 
-  if (criteria.max_output_tokens !== undefined) {
-    const passed = input.metrics.outputTokens <= criteria.max_output_tokens;
+  if (criteria.max_output_chars !== undefined) {
+    const passed = input.metrics.outputChars <= criteria.max_output_chars;
     results.push({
-      label: `output tokens \u2264 ${criteria.max_output_tokens}`,
+      label: `output chars \u2264 ${criteria.max_output_chars}`,
       kind: "metric",
       passed,
-      actual: `${input.metrics.outputTokens}`,
+      actual: `${input.metrics.outputChars}`,
     });
     totalCount++;
     if (passed) passedCount++;

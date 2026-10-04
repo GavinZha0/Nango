@@ -9,6 +9,7 @@ import { WebAutoCaseTable, WebAutoSuiteTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
 import { eq } from "drizzle-orm";
+import { sanitizeAssertions } from "@/lib/assertions/types";
 
 const ROUTE = "/api/web-auto-cases/[id]";
 
@@ -96,6 +97,9 @@ export const PATCH = withEditor<{ id: string }>(
       .update(WebAutoCaseTable)
       .set({
         ...body,
+        ...(body.assertions !== undefined
+          ? { assertions: sanitizeAssertions(body.assertions as Record<string, unknown>[]) }
+          : {}),
         updatedBy: session.user.id,
         updatedAt: new Date(),
       })

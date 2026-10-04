@@ -94,7 +94,7 @@ function buildSchemaItem(
         const singleToolMetricSchema = z
           .object({
             type: z.literal("metric"),
-            metric: z.literal("duration_s"),
+            metric: z.enum(["duration_s", "output_chars"]),
             operator: z.enum(["<", ">", "=="]),
             threshold: z.number(),
           })
@@ -104,8 +104,8 @@ function buildSchemaItem(
           type: "metric",
           description:
             category === "web-auto"
-              ? "Asserts Playwright execution duration in seconds (duration_s) using comparison operators (<, >, ==)."
-              : "Asserts tool execution duration in seconds (duration_s) using comparison operators (<, >, ==).",
+              ? "Asserts Playwright execution duration in seconds (duration_s) or output length in characters (output_chars) using comparison operators (<, >, ==)."
+              : "Asserts tool execution duration in seconds (duration_s) or output length in characters (output_chars) using comparison operators (<, >, ==).",
           jsonSchema: cleanSchema,
           example: {
             type: "metric",
@@ -120,7 +120,7 @@ function buildSchemaItem(
       return {
         type: "metric",
         description:
-          "Asserts numerical performance constraints including duration_s (execution seconds), output_tokens, total_tool_calls, tool_failures, or tool_blocked using comparison operators (<, >, ==).",
+          "Asserts numerical performance constraints including duration_s (execution seconds), output_chars, total_tool_calls, tool_failures, or tool_blocked using comparison operators (<, >, ==).",
         jsonSchema: cleanSchema,
         example: {
           type: "metric",

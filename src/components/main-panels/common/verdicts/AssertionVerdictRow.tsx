@@ -4,9 +4,9 @@
  * Reusable single assertion verdict row component.
  *
  * Renders:
- * - Deterministic assertion (JSONPath, Schema, JS, Tool Call, Metric) with clean status icon, title, and inline actual value on the right when failed.
- * - LLM Judge assertion with score badge (0-100), natural language expectation, and expandable model feedback reasoning.
- * - Error entry with amber alert icon, Error badge, and error details.
+ * - Deterministic assertion (JSONPath, Schema, JS, Tool Call, Metric) with clean status icon, title, and right-aligned actual value truncated to 20 chars when failed.
+ * - LLM Judge assertion with 5-point score badge (Score: x/5), title, and expandable reasoning/reference.
+ * - Error entry with alert icon, Error badge, and error details.
  *
  * Shared across Verification, Evaluation, and Web Auto modules.
  */
@@ -21,6 +21,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import type { AssertionResult, AssertionSpec } from "@/lib/assertions";
+import { BUILTIN_EVAL_DIMENSIONS } from "@/lib/evaluation/types";
 
 interface AssertionVerdictRowProps {
   verdict: AssertionResult;
@@ -39,9 +40,12 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
 
   const isOk = verdict.ok;
   const reasonText = verdict.reason || verdict.feedback;
+  const referenceText =
+    (verdict as { reference?: string }).reference ||
+    (spec && "reference" in spec ? spec.reference : undefined);
 
   const hasExpandableDetails =
-    Boolean(reasonText) || verdict.details !== undefined;
+    Boolean(reasonText) || Boolean(referenceText) || verdict.details !== undefined;
 
   const toggleExpand = (): void => {
     if (hasExpandableDetails) {
@@ -75,28 +79,31 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
           )}
 
           {/* Title description */}
-          <span className="font-mono text-[11px] truncate text-foreground/90 flex-1">
+          <span className="font-mono text-[11px] truncate text-foreground/90 flex-1 min-w-0">
             {titleText}
           </span>
 
           {/* Skipped marker */}
           {isSkipped && (
-            <span className="shrink-0 text-muted-foreground/70 font-mono text-[10px]">
+            <span className="ml-auto shrink-0 text-muted-foreground/70 font-mono text-[10px]">
               (Skipped)
             </span>
           )}
 
-          {/* Inline actual value on failure for deterministic assertions */}
+          {/* Inline actual value on failure for deterministic assertions (right-aligned, truncated to 20 chars) */}
           {!isOk && !isLlmJudge && verdict.actual !== undefined && (
-            <span className="shrink-0 text-red-500/90 dark:text-red-400/90 font-mono text-[10px]">
-              ({formatValue(verdict.actual)})
+            <span
+              className="ml-auto shrink-0 text-red-500/90 dark:text-red-400/90 font-mono text-[10px]"
+              title={typeof verdict.actual === "object" ? JSON.stringify(verdict.actual) : String(verdict.actual)}
+            >
+              ({formatActualValue(verdict.actual)})
             </span>
           )}
 
-          {/* Score for LLM Judge */}
+          {/* 5-point scale score badge for LLM checks */}
           {isLlmJudge && verdict.score !== undefined && verdict.score !== null && (
-            <span className="font-mono text-[10px] text-muted-foreground shrink-0 tabular-nums px-1 py-0.5 rounded bg-muted/30 border border-border/20">
-              {verdict.score}
+            <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums px-1.5 py-0.5 rounded bg-muted/40 border border-border/30">
+              Score: {verdict.score}/5
             </span>
           )}
 
@@ -115,16 +122,23 @@ export function AssertionVerdictRow({ verdict, spec }: AssertionVerdictRowProps)
         </div>
       </div>
 
-      {/* Expandable details: clean reason text */}
+      {/* Expandable details */}
       {expanded && hasExpandableDetails && (
-        <div className="border-t border-border/30 bg-muted/20 px-3 py-2 text-xs border-border/40">
+        <div className="border-t border-border/30 bg-muted/20 px-3 py-2 text-xs space-y-1.5">
+          {referenceText && (
+            <div className="text-[11px] font-sans">
+              <span className="font-semibold text-muted-foreground">Reference: </span>
+              <span className="text-foreground/85">{referenceText}</span>
+            </div>
+          )}
+
           {reasonText && (
             <p className="text-muted-foreground leading-relaxed whitespace-pre-wrap text-[11px] font-sans">
               {reasonText}
             </p>
           )}
 
-          {!reasonText && verdict.details !== undefined && (
+          {!reasonText && !referenceText && verdict.details !== undefined && (
             <div className="font-mono text-[10px]">
               <span className="text-muted-foreground">Details: </span>
               <pre className="mt-0.5 overflow-x-auto text-muted-foreground bg-background/50 p-1 rounded border border-border/20 text-[10px]">
@@ -153,8 +167,9 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
     verdict.type === "llm_expectation"
   ) {
     if (verdict.type === "llm_dim") {
-      const dimName = verdict.dim || (spec && "dim" in spec ? spec.dim : undefined);
-      return dimName ? `Dimension: ${dimName}` : "LLM Dimension";
+      const dimId = verdict.dim || (spec && "dim" in spec ? spec.dim : undefined);
+      const friendlyName = dimId ? (BUILTIN_EVAL_DIMENSIONS.find((d) => d.id === dimId)?.name ?? dimId) : undefined;
+      return friendlyName ? `Dim: ${friendlyName}` : "LLM Dimension";
     }
     const verdictText = verdict.expectation || verdict.unexpectation || verdict.reference;
     if (verdictText) return verdictText;
@@ -228,6 +243,33 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
   }
 
   return verdict.type;
+}
+
+function formatActualValue(v: unknown): string {
+  if (v === null) return "null";
+  if (v === undefined) return "undefined";
+  if (typeof v === "string") {
+    const countMatch = v.match(/^(\d+)\s+(calls|failed|blocked)$/);
+    if (countMatch) {
+      return countMatch[1];
+    }
+    const truncated = v.length > 20 ? v.slice(0, 17) + "..." : v;
+    return JSON.stringify(truncated);
+  }
+  let s: string;
+  if (typeof v === "object") {
+    try {
+      s = JSON.stringify(v);
+    } catch {
+      s = String(v);
+    }
+  } else {
+    s = String(v);
+  }
+  if (s.length > 20) {
+    return s.slice(0, 17) + "...";
+  }
+  return s;
 }
 
 function formatValue(v: unknown): string {

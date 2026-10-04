@@ -22,7 +22,8 @@ export interface EvalCaseLive {
   assertionResults?: unknown[];
   feedback?: string | null;
   durationMs?: number | null;
-  outputTokens?: number | null;
+  outputChars?: number | null;
+  executionStats?: { durationMs: number; outputChars: number; ttftMs?: number | null } | null;
   toolCallSummary?: unknown;
 }
 
@@ -111,7 +112,8 @@ export function useEvaluationRunStream(
             assertionResults: (frame.assertionResults ?? []) as unknown[],
             feedback: (frame.feedback as string) ?? null,
             durationMs: (frame.durationMs as number) ?? null,
-            outputTokens: (frame.outputTokens as number) ?? null,
+            outputChars: (frame.outputChars as number) ?? null,
+            executionStats: (frame.executionStats as EvalCaseLive["executionStats"]) ?? null,
             toolCallSummary: frame.toolCallSummary ?? null,
           });
           return { ...base, caseResults: next };

@@ -19,7 +19,7 @@ import { runEvalCase, type RunEvalCaseResult } from "./eval-runner";
 import { recordRunNotification } from "@/lib/runner/notifications";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import * as storage from "./storage";
-import type { AssertionSpec } from "@/lib/assertions";
+import { sanitizeAssertions, type AssertionSpec } from "@/lib/assertions/types";
 import type { EvalTurn } from "./types";
 
 const log = childLogger({ component: "eval-orchestrator" });
@@ -182,7 +182,7 @@ async function runAllCases(
         assertionResults: [],
         feedback: resolveError.message,
         error: resolveError.message,
-        durationMs: 0,
+        executionStats: { durationMs: 0, outputChars: 0, ttftMs: null },
       });
       counters.erroredCount++;
       publishEvalFrame(input.ownerId, {
@@ -194,6 +194,7 @@ async function runAllCases(
         status: "errored",
         score: null,
         durationMs: 0,
+        outputChars: 0,
       });
     }
     return;
@@ -202,7 +203,7 @@ async function runAllCases(
   for (const c of input.cases) {
     const caseInput = (c.input ?? {}) as Record<string, unknown>;
     const caseTurns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
-    const caseAssertions = (Array.isArray(c.assertions) ? c.assertions : []) as AssertionSpec[];
+    const caseAssertions = sanitizeAssertions((Array.isArray(c.assertions) ? c.assertions : []) as AssertionSpec[]);
 
     let result: RunEvalCaseResult;
     try {
@@ -235,6 +236,9 @@ async function runAllCases(
     else if (result.status === "failed") counters.failedCount++;
     else counters.erroredCount++;
 
+    const durationMs = result.executionStats?.durationMs ?? 0;
+    const outputChars = result.executionStats?.outputChars ?? 0;
+
     publishEvalFrame(input.ownerId, {
       topic: "evaluation_run",
       kind: "case_completed",
@@ -244,8 +248,9 @@ async function runAllCases(
       status: result.status,
       assertionResults: result.assertionResults,
       feedback: result.feedback,
-      durationMs: result.durationMs,
-      outputTokens: result.outputTokens,
+      executionStats: result.executionStats,
+      durationMs,
+      outputChars,
       toolCallSummary: result.toolCallSummary,
     });
   }

@@ -210,7 +210,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           caseId,
           caseName: caseRow.name,
           status,
-          durationMs: outcome.durationMs ?? 0,
+          durationMs: outcome.executionStats?.durationMs ?? 0,
           assertionResults,
           score: null,
           feedback: outcome.feedback ?? null,

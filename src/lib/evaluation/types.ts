@@ -295,8 +295,8 @@ export interface EvalCriteria {
   // ─── Execution metrics (measured by runner, compared by code) ───
   /** Max end-to-end duration in seconds. */
   max_duration_s?: number;
-  /** Max output tokens. */
-  max_output_tokens?: number;
+  /** Max output characters. */
+  max_output_chars?: number;
   /** Max tool call count. */
   max_tool_calls?: number;
 }
@@ -320,7 +320,7 @@ export const evalCriteriaSchema = z
     unexpected_keywords: z.array(z.string()).optional(),
     // Execution metrics
     max_duration_s: z.number().positive().optional(),
-    max_output_tokens: z.number().int().positive().optional(),
+    max_output_chars: z.number().int().positive().optional(),
     max_tool_calls: z.number().int().min(0).optional(),
   })
   .strict();
@@ -337,7 +337,7 @@ export const CRITERIA_KEYS = [
   "expected_keywords",
   "unexpected_keywords",
   "max_duration_s",
-  "max_output_tokens",
+  "max_output_chars",
   "max_tool_calls",
 ] as const;
 
@@ -377,6 +377,7 @@ export interface CriteriaCheckResult {
 export interface ToolCallAbnormalDetail {
   toolName: string;
   status: "failed" | "blocked";
+  durationMs?: number;
   code?: string;
   reason?: string;
 }
@@ -390,7 +391,17 @@ export interface ToolCallSummary {
   blockedCount: number;
   /** Invocation frequency mapped by tool name (e.g. { "run_ssh_command": 5 }) */
   toolFrequency: Record<string, number>;
+  /** Total duration in milliseconds spent across all tool executions */
+  totalDurationMs?: number;
+  /** Cumulative execution duration in milliseconds mapped by tool name */
+  toolDurations?: Record<string, number>;
   /** Details for abnormal invocations only (failed and blocked) */
   abnormalDetails: ToolCallAbnormalDetail[];
+}
+
+export interface ExecutionStats {
+  durationMs: number;
+  outputChars: number;
+  ttftMs?: number | null;
 }
 

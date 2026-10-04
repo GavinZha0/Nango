@@ -160,43 +160,57 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
     expect(cause.data).toEqual({ details: "missing field foo" });
   });
 
-  it("restricts CATEGORY_METRIC_MAPPING.verification strictly to duration_s", async () => {
+  it("allows duration_s and output_chars in CATEGORY_METRIC_MAPPING for verification and web-auto", async () => {
     const { CATEGORY_METRIC_MAPPING } = await import("@/lib/assertions/types");
-    expect(CATEGORY_METRIC_MAPPING.verification).toEqual(["duration_s"]);
-    expect(CATEGORY_METRIC_MAPPING["web-auto"]).toEqual(["duration_s"]);
-    expect(CATEGORY_METRIC_MAPPING.evaluation).toContain("output_tokens");
+    expect(CATEGORY_METRIC_MAPPING.verification).toEqual(["duration_s", "output_chars"]);
+    expect(CATEGORY_METRIC_MAPPING["web-auto"]).toEqual(["duration_s", "output_chars"]);
+    expect(CATEGORY_METRIC_MAPPING.evaluation).toContain("output_chars");
     expect(CATEGORY_METRIC_MAPPING.evaluation).toContain("total_tool_calls");
   });
 
-  it("rejects non-duration metrics (e.g. output_tokens) for verification category in normalizeAndValidateAssertions", () => {
-    const raw = [
+  it("accepts output_chars for verification and web-auto, but rejects evaluation-only metrics in normalizeAndValidateAssertions", () => {
+    const charAssertion = [
       {
         type: "metric",
-        metric: "output_tokens",
+        metric: "output_chars",
         operator: "<",
         threshold: 100,
       },
     ];
-    expect(() =>
-      normalizeAndValidateAssertions(raw, "case_tokens", "verification"),
-    ).toThrow(/metric 'output_tokens' is not supported for category 'verification'/);
+    // Valid for verification
+    const validForVerif = normalizeAndValidateAssertions(charAssertion, "case_chars", "verification");
+    expect(validForVerif).toHaveLength(1);
+    expect(validForVerif[0].metric).toBe("output_chars");
 
-    // Valid for evaluation
-    const validForEval = normalizeAndValidateAssertions(raw, "case_tokens", "evaluation");
-    expect(validForEval).toHaveLength(1);
-    expect(validForEval[0].metric).toBe("output_tokens");
+    // Valid for web-auto
+    const validForWebAuto = normalizeAndValidateAssertions(charAssertion, "case_chars", "web-auto");
+    expect(validForWebAuto).toHaveLength(1);
+    expect(validForWebAuto[0].metric).toBe("output_chars");
+
+    // Evaluation-only metric total_tool_calls rejected for verification
+    const toolCallAssertion = [
+      {
+        type: "metric",
+        metric: "total_tool_calls",
+        operator: "<",
+        threshold: 5,
+      },
+    ];
+    expect(() =>
+      normalizeAndValidateAssertions(toolCallAssertion, "case_tools", "verification"),
+    ).toThrow(/metric 'total_tool_calls' is not supported for category 'verification'/);
   });
 
   it("sets errored: true on unrecorded metrics in evaluateMetric to uphold three-state contract", () => {
     const assertions: AssertionSpec[] = [
       {
         type: "metric",
-        metric: "output_tokens",
+        metric: "output_chars",
         operator: "<",
         threshold: 100,
       },
     ];
-    // No outputTokens provided in metrics
+    // No outputChars provided in metrics
     const outcome = evaluateAssertions({ success: true }, assertions, {
       metrics: { durationMs: 500 },
     });
@@ -204,6 +218,30 @@ describe("Phase 2 — Assertions, Categories, and Errored State", () => {
     expect(outcome.deterministicResults[0].errored).toBe(true);
     expect(outcome.deterministicResults[0].errorSource).toBe("config");
     expect(outcome.deterministicResults[0].message).toContain("was not recorded for this execution");
+  });
+
+  it("evaluates output_chars metric assertion accurately when outputChars is provided", () => {
+    const assertions: AssertionSpec[] = [
+      {
+        type: "metric",
+        metric: "output_chars",
+        operator: "<",
+        threshold: 50,
+      },
+    ];
+    const passingOutcome = evaluateAssertions({ text: "hello" }, assertions, {
+      metrics: { durationMs: 100, outputChars: 30 },
+    });
+    expect(passingOutcome.allDeterministicPassed).toBe(true);
+    expect(passingOutcome.deterministicResults[0].ok).toBe(true);
+    expect(passingOutcome.deterministicResults[0].actual).toBe(30);
+
+    const failingOutcome = evaluateAssertions({ text: "hello" }, assertions, {
+      metrics: { durationMs: 100, outputChars: 150 },
+    });
+    expect(failingOutcome.allDeterministicPassed).toBe(false);
+    expect(failingOutcome.deterministicResults[0].ok).toBe(false);
+    expect(failingOutcome.deterministicResults[0].actual).toBe(150);
   });
 
   it("rejects assertions with syntax errors in assertionsArraySchema (save pre-check)", async () => {

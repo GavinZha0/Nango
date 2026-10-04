@@ -6,7 +6,7 @@ import type { AssertionSpec } from "@/lib/assertions";
 
 const dummyMetrics = {
   durationMs: 1200,
-  outputTokens: 45,
+  outputChars: 45,
   toolCallCount: 0,
 };
 

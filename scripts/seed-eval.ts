@@ -145,9 +145,9 @@ async function main(): Promise<void> {
         },
         {
           type: "metric",
-          metric: "output_tokens",
+          metric: "output_chars",
           operator: "<=",
-          threshold: 500,
+          threshold: 2000,
         },
       ],
     })

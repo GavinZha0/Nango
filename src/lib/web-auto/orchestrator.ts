@@ -25,6 +25,7 @@ import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
 import { redactSensitiveData, redactErrorEnvelope } from "@/lib/testing/redact";
 import { runWebAutoMcp } from "./runner-mcp";
 import { runWebAutoEvaluation } from "./evaluator";
+import { formatWebAutoOutputForDisplay } from "./image-extractor";
 import * as storage from "./storage";
 import type {
   WebAutoExecutionOutcome,
@@ -301,9 +302,13 @@ export async function runWebAutoCase(
 
   // Step 5: Evaluate assertions using universal engine
   // Pass literalVariables ONLY so credentials never leak into assertion error diffs or LLM evaluators
+  const outputChars = formatWebAutoOutputForDisplay(sanitizedOutput).length;
   const outcome = evaluateAssertions(sanitizedOutput, assertions, {
     variables: literalVariables,
-    metrics: { durationMs: mcpResult.durationMs },
+    metrics: {
+      durationMs: mcpResult.durationMs,
+      outputChars,
+    },
     runContext: {
       cases: input.suiteContext ?? {},
       isWebAuto: true,

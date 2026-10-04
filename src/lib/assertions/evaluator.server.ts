@@ -42,7 +42,7 @@ export interface EvaluateAssertionsOptions {
   actualToolCallNames?: string[];
   metrics?: {
     durationMs?: number;
-    outputTokens?: number;
+    outputChars?: number;
     toolCallCount?: number;
   };
   toolCallSummary?: AssertionToolCallSummary;
@@ -629,12 +629,31 @@ function evaluateJsExpression(
       contextObj,
       { timeout: JS_EXPRESSION_TIMEOUT_MS, displayErrors: false },
     );
+
+    if (ok) {
+      return {
+        index,
+        type: "js_expression",
+        ok: true,
+        expression: spec.expression,
+      };
+    }
+
+    const { actual, expected, operator } = extractJsExpressionActual(
+      spec.expression,
+      contextObj,
+      ok,
+    );
+
     return {
       index,
       type: "js_expression",
-      ok: Boolean(ok),
+      ok: false,
       expression: spec.expression,
-      message: ok ? undefined : "Expression returned falsy",
+      actual,
+      expected,
+      operator,
+      message: "Expression returned falsy",
     };
   } catch (err) {
     const errName = (err as { name?: string })?.name;
@@ -652,6 +671,7 @@ function evaluateJsExpression(
       type: "js_expression",
       ok: false,
       expression: spec.expression,
+      actual: isTypeError ? "undefined" : undefined,
       errored: isConfigError ? true : undefined,
       errorSource: isConfigError ? "config" : undefined,
       message: isTimeout
@@ -661,6 +681,208 @@ function evaluateJsExpression(
   }
 }
 
+interface ExtractedJsActual {
+  actual?: unknown;
+  expected?: unknown;
+  operator?: string;
+}
+
+function isJsLiteral(s: string): boolean {
+  const t = s.trim();
+  if (/^-?\d+(\.\d+)?$/.test(t)) return true;
+  if (/^(".*"|'.*'|`.*`)$/.test(t)) return true;
+  if (t === "true" || t === "false" || t === "null" || t === "undefined" || t === "NaN") return true;
+  return false;
+}
+
+function parseJsComparison(expr: string): { lhs: string; op: string; rhs: string } | null {
+  let s = expr.trim();
+  while (s.startsWith("(") && s.endsWith(")")) {
+    let depth = 0;
+    let matchesOuter = true;
+    for (let i = 0; i < s.length - 1; i++) {
+      if (s[i] === "(") depth++;
+      else if (s[i] === ")") depth--;
+      if (depth === 0) {
+        matchesOuter = false;
+        break;
+      }
+    }
+    if (matchesOuter) {
+      s = s.slice(1, -1).trim();
+    } else {
+      break;
+    }
+  }
+
+  let depth = 0;
+  let inQuote: string | null = null;
+  const ops = ["===", "!==", "==", "!=", "<=", ">=", "<", ">"];
+  let foundOp: string | null = null;
+  let opIdx = -1;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQuote) {
+      if (ch === "\\") {
+        i++;
+        continue;
+      }
+      if (ch === inQuote) {
+        inQuote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inQuote = ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+      continue;
+    }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      continue;
+    }
+    if (depth === 0) {
+      for (const op of ops) {
+        if (s.startsWith(op, i)) {
+          if (op === ">" && i > 0 && s[i - 1] === "=") continue;
+          if (op === "<" && s[i + 1] === "<") continue;
+          if (op === ">" && s[i + 1] === ">") continue;
+          foundOp = op;
+          opIdx = i;
+          break;
+        }
+      }
+      if (foundOp) break;
+    }
+  }
+
+  if (foundOp && opIdx !== -1) {
+    return {
+      lhs: s.slice(0, opIdx).trim(),
+      op: foundOp,
+      rhs: s.slice(opIdx + foundOp.length).trim(),
+    };
+  }
+  return null;
+}
+
+function splitLogicalAnd(expr: string): string[] {
+  const s = expr.trim();
+  const parts: string[] = [];
+  let depth = 0;
+  let inQuote: string | null = null;
+  let start = 0;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQuote) {
+      if (ch === "\\") {
+        i++;
+        continue;
+      }
+      if (ch === inQuote) {
+        inQuote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inQuote = ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+      continue;
+    }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      continue;
+    }
+    if (depth === 0 && s.startsWith("&&", i)) {
+      parts.push(s.slice(start, i).trim());
+      i++;
+      start = i + 1;
+    }
+  }
+  parts.push(s.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+function extractJsExpressionActual(
+  expression: string,
+  contextObj: Record<string, unknown>,
+  rawResult: unknown,
+): ExtractedJsActual {
+  const andParts = splitLogicalAnd(expression);
+  let targetExpr = expression;
+  if (andParts.length > 1) {
+    for (const part of andParts) {
+      try {
+        const partOk = runInNewContext(`(${part})`, contextObj, {
+          timeout: JS_EXPRESSION_TIMEOUT_MS,
+          displayErrors: false,
+        });
+        if (!partOk) {
+          targetExpr = part;
+          break;
+        }
+      } catch {
+        targetExpr = part;
+        break;
+      }
+    }
+  }
+
+  const parsedComp = parseJsComparison(targetExpr);
+  if (parsedComp) {
+    const isLhsLit = isJsLiteral(parsedComp.lhs);
+    const isRhsLit = isJsLiteral(parsedComp.rhs);
+    const dynamicExpr = isLhsLit && !isRhsLit ? parsedComp.rhs : parsedComp.lhs;
+    const staticExpr = dynamicExpr === parsedComp.lhs ? parsedComp.rhs : parsedComp.lhs;
+
+    let actual: unknown = undefined;
+    let expected: unknown = undefined;
+
+    try {
+      actual = runInNewContext(`(${dynamicExpr})`, contextObj, {
+        timeout: JS_EXPRESSION_TIMEOUT_MS,
+        displayErrors: false,
+      });
+    } catch {
+      actual = undefined;
+    }
+
+    try {
+      expected = runInNewContext(`(${staticExpr})`, contextObj, {
+        timeout: JS_EXPRESSION_TIMEOUT_MS,
+        displayErrors: false,
+      });
+    } catch {
+      expected = staticExpr;
+    }
+
+    return { actual, expected, operator: parsedComp.op };
+  }
+
+  if (targetExpr.trim().startsWith("!")) {
+    const negated = targetExpr.trim().slice(1).trim();
+    try {
+      const actual = runInNewContext(`(${negated})`, contextObj, {
+        timeout: JS_EXPRESSION_TIMEOUT_MS,
+        displayErrors: false,
+      });
+      return { actual };
+    } catch {
+      return { actual: rawResult };
+    }
+  }
+
+  return { actual: rawResult };
+}
+
 // ── 4. Tool Call Trajectory Evaluation ───────────────────────────────────────
 
 function evaluateToolCall(
@@ -668,6 +890,18 @@ function evaluateToolCall(
   index: number,
   options: EvaluateAssertionsOptions,
 ): AssertionResult {
+  if (!spec.toolName || !spec.toolName.trim()) {
+    return {
+      index,
+      type: "tool_call",
+      ok: false,
+      errored: true,
+      errorSource: "config",
+      toolName: spec.toolName,
+      message: "Tool call assertion is missing required toolName",
+    };
+  }
+
   const actualCalls: Array<{ name: string; args?: unknown }> =
     options.toolCalls ??
     (options.actualToolCallNames?.map((name) => ({ name, args: undefined })) || []);
@@ -752,7 +986,7 @@ function evaluateToolCall(
     operator: op,
     target,
     expected: spec.expectedArgs !== undefined && target === "calls" ? spec.expectedArgs : expectedDesc,
-    actual: actualDesc,
+    actual: actualCount,
     message: ok
       ? undefined
       : `Tool "${spec.toolName}" ${target} was ${actualCount}, which failed condition "${op} ${threshold}"`,
@@ -776,8 +1010,8 @@ function evaluateMetric(
           ? Math.round((metrics.durationMs / 1000) * 10) / 10
           : undefined;
       break;
-    case "output_tokens":
-      actualValue = metrics.outputTokens;
+    case "output_chars":
+      actualValue = metrics.outputChars;
       break;
     case "total_tool_calls":
       actualValue =

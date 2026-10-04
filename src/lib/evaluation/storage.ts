@@ -18,7 +18,8 @@ import {
   type EvalRunStatus,
   type EvalSuiteEntity,
 } from "@/lib/db/schema";
-import type { ToolCallSummary } from "./types";
+import type { ToolCallSummary, ExecutionStats } from "./types";
+import { sanitizeAssertions } from "@/lib/assertions/types";
 
 // --- Suites -----------------------------------------------------------------
 
@@ -171,7 +172,7 @@ export async function createCase(
       suiteId: input.suiteId,
       name: input.name,
       input: (input.input ?? { turns: [] }) as unknown,
-      assertions: (input.assertions ?? []) as unknown,
+      assertions: (input.assertions ? sanitizeAssertions(input.assertions as import("@/lib/assertions").AssertionSpec[]) : []) as unknown,
       enabled: input.enabled ?? true,
       createdBy: input.createdBy,
     })
@@ -228,7 +229,9 @@ export async function updateCase(
   if (input.name !== undefined) updates.name = input.name;
   if (input.suiteId !== undefined) updates.suiteId = input.suiteId;
   if (input.input !== undefined) updates.input = input.input as unknown;
-  if (input.assertions !== undefined) updates.assertions = input.assertions as unknown;
+  if (input.assertions !== undefined) {
+    updates.assertions = sanitizeAssertions((input.assertions ?? []) as import("@/lib/assertions").AssertionSpec[]) as unknown;
+  }
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   updates.updatedAt = sql`CURRENT_TIMESTAMP`;
 
@@ -372,8 +375,7 @@ export interface WriteCaseResultInput {
   threadId?: string | null;
   evaluatorThreadId?: string | null;
   error?: unknown;
-  durationMs?: number | null;
-  outputTokens?: number | null;
+  executionStats?: ExecutionStats | null;
   toolCallSummary?: ToolCallSummary | null;
 }
 
@@ -390,8 +392,7 @@ export async function writeCaseResult(
     threadId: input.threadId ?? null,
     evaluatorThreadId: input.evaluatorThreadId ?? null,
     error: input.error ?? null,
-    durationMs: input.durationMs ?? null,
-    outputTokens: input.outputTokens ?? null,
+    executionStats: input.executionStats ?? null,
     toolCallSummary: input.toolCallSummary ?? null,
   });
 }

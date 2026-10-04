@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { WebAutoSuiteTable, WebAutoCaseTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
+import { sanitizeAssertions } from "@/lib/assertions/types";
 
 const ROUTE = "/api/web-auto-suites/[id]/cases";
 
@@ -107,7 +108,7 @@ export const POST = withEditor<{ id: string }>(
           suiteId,
           name: body.name,
           input: body.input ?? {},
-          assertions: body.assertions ?? [],
+          assertions: sanitizeAssertions((body.assertions ?? []) as Record<string, unknown>[]),
           enabled: body.enabled ?? true,
           createdBy: session.user.id,
           updatedBy: session.user.id,

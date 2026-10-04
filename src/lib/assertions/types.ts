@@ -89,7 +89,7 @@ export interface AssertionToolCallSummary {
 
 export const metricNameSchema = z.enum([
   "duration_s",
-  "output_tokens",
+  "output_chars",
   "total_tool_calls",
   "tool_failures",
   "tool_blocked",
@@ -241,6 +241,22 @@ export function isLlmAssertionType(type: string): type is LlmAssertionType {
 
 export const isJudgeDependentType = isLlmAssertionType;
 
+/**
+ * Strips unexecutable or invalid assertions prior to persisting or running.
+ * Specifically, removes `tool_call` assertions whose `toolName` is missing or empty.
+ */
+export function sanitizeAssertions<T extends Record<string, unknown> | AssertionSpec>(
+  assertions: T[],
+): T[] {
+  return assertions.filter((a) => {
+    if (a && typeof a === "object" && (a as { type?: unknown }).type === "tool_call") {
+      const toolName = (a as { toolName?: unknown }).toolName;
+      return typeof toolName === "string" && toolName.trim().length > 0;
+    }
+    return true;
+  });
+}
+
 // ── 9. Category Assertion-Type Contract ─────────────────────────────────────
 
 /** Canonical assertion type names. */
@@ -274,20 +290,20 @@ export const CATEGORY_TYPE_MAPPING: Record<
 
 /**
  * Single source of truth for the metric names each test category supports.
- * Verification only evaluates duration_s for single MCP tool execution,
- * whereas Evaluation supports multi-turn dialogue metrics (tokens, tool calls).
+ * Verification and Web Auto evaluate duration_s and output_chars for tool execution,
+ * whereas Evaluation supports multi-turn dialogue metrics (duration, chars, tool calls).
  */
 export const CATEGORY_METRIC_MAPPING: Record<
   TestCategoryName,
   readonly MetricName[]
 > = {
-  verification: ["duration_s"],
+  verification: ["duration_s", "output_chars"],
   evaluation: [
     "duration_s",
-    "output_tokens",
+    "output_chars",
     "total_tool_calls",
     "tool_failures",
     "tool_blocked",
   ],
-  "web-auto": ["duration_s"],
+  "web-auto": ["duration_s", "output_chars"],
 };

@@ -14,7 +14,7 @@ import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { loadCase } from "@/lib/evaluation/access";
 import { runEvalCase } from "@/lib/evaluation/eval-runner";
 import { resolveSuiteVariables } from "@/lib/testing/variable-resolver.server";
-import type { AssertionSpec } from "@/lib/assertions";
+import { sanitizeAssertions, type AssertionSpec } from "@/lib/assertions/types";
 import type { EvalTurn } from "@/lib/evaluation/types";
 
 export const maxDuration = 300;
@@ -62,7 +62,7 @@ export const POST = withEditor<{ id: string }>(
 
     const caseInput = (caseRow.input ?? {}) as Record<string, unknown>;
     const turns = (Array.isArray(caseInput.turns) ? caseInput.turns : []) as EvalTurn[];
-    const assertions = (Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as AssertionSpec[];
+    const assertions = sanitizeAssertions((Array.isArray(caseRow.assertions) ? caseRow.assertions : []) as AssertionSpec[]);
 
     const outcome = await runEvalCase({
       caseId: caseRow.id,

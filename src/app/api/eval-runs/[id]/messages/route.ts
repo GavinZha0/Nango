@@ -35,6 +35,7 @@ interface SimpleMessage {
   content: string;
   toolName?: string;
   toolCallId?: string;
+  durationMs?: number;
 }
 
 export const GET = withSession<{ id: string }>(
@@ -119,9 +120,14 @@ interface MsgPayload { role?: string; text?: string }
 interface ToolChunkPayload { toolCallId?: string; toolName?: string; args?: string }
 interface ToolResultPayload { toolCallId?: string; content?: unknown }
 
+interface ToolResultEntry {
+  content: string;
+  ts?: Date;
+}
+
 function reconstructMessages(events: EntityRunEventEntity[]): SimpleMessage[] {
   const out: SimpleMessage[] = [];
-  const toolResults = new Map<string, string>();
+  const toolResults = new Map<string, ToolResultEntry>();
 
   // First pass: collect tool results
   for (const ev of events) {
@@ -131,7 +137,7 @@ function reconstructMessages(events: EntityRunEventEntity[]): SimpleMessage[] {
         const content = typeof p.content === "string"
           ? p.content
           : JSON.stringify(p.content ?? null);
-        toolResults.set(p.toolCallId, content);
+        toolResults.set(p.toolCallId, { content, ts: ev.ts });
       }
     }
   }
@@ -147,11 +153,21 @@ function reconstructMessages(events: EntityRunEventEntity[]): SimpleMessage[] {
     } else if (ev.type === "tool_call_chunk") {
       const p = (ev.payload ?? {}) as ToolChunkPayload;
       if (p.toolCallId && p.toolName) {
+        const resultEntry = toolResults.get(p.toolCallId);
+        let durationMs: number | undefined;
+        if (ev.ts && resultEntry?.ts) {
+          const start = new Date(ev.ts).getTime();
+          const end = new Date(resultEntry.ts).getTime();
+          if (!isNaN(start) && !isNaN(end) && end >= start) {
+            durationMs = end - start;
+          }
+        }
         out.push({
           role: "tool",
-          content: toolResults.get(p.toolCallId) ?? "",
+          content: resultEntry?.content ?? "",
           toolName: p.toolName,
           toolCallId: p.toolCallId,
+          durationMs,
         });
       }
     }

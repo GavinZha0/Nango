@@ -32,3 +32,13 @@ export function isDeepEqual(a: unknown, b: unknown): boolean {
   }
   return true;
 }
+
+/**
+ * Format character count for concise metrics display (e.g. 640c, 1.3k).
+ */
+export function formatCharCount(chars: number): string {
+  if (chars >= 1000) {
+    return `${(Math.round(chars / 100) / 10).toFixed(1)}k`;
+  }
+  return `${chars}c`;
+}

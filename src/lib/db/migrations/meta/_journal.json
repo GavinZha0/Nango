@@ -85,6 +85,13 @@
       "when": 1790985495955,
       "tag": "0011_update_agent_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791060835036,
+      "tag": "0012_consolidate_eval_execution_stats",
+      "breakpoints": true
     }
   ]
 }

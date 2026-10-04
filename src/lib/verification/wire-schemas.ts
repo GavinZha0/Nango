@@ -62,7 +62,7 @@ import { validateAssertionSyntax } from "@/lib/assertions";
 export const verificationMetricAssertionSchema = z
   .object({
     type: z.literal("metric"),
-    metric: z.literal("duration_s"),
+    metric: z.enum(["duration_s", "output_chars"]),
     operator: metricOperatorSchema,
     threshold: z.number(),
   })

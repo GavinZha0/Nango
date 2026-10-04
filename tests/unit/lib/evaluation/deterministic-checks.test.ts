@@ -5,7 +5,7 @@ const { runDeterministicChecks, formatChecksForPrompt } = await import(
 );
 type EvalCriteria = import("@/lib/evaluation/types").EvalCriteria;
 
-const BASE_METRICS = { durationMs: 5000, outputTokens: 200, toolCallCount: 2 };
+const BASE_METRICS = { durationMs: 5000, outputChars: 200, toolCallCount: 2 };
 
 describe("runDeterministicChecks", () => {
   it("passes when all expected keywords are found (case-insensitive)", () => {
@@ -67,13 +67,13 @@ describe("runDeterministicChecks", () => {
   it("passes execution metric thresholds", () => {
     const criteria: EvalCriteria = {
       max_duration_s: 10,
-      max_output_tokens: 500,
+      max_output_chars: 500,
       max_tool_calls: 5,
     };
     const result = runDeterministicChecks(criteria, {
       agentText: "",
       actualToolCalls: [],
-      metrics: { durationMs: 8000, outputTokens: 300, toolCallCount: 3 },
+      metrics: { durationMs: 8000, outputChars: 300, toolCallCount: 3 },
     });
     expect(result.passRate).toBe(1.0);
     expect(result.totalCount).toBe(3);
@@ -84,7 +84,7 @@ describe("runDeterministicChecks", () => {
     const result = runDeterministicChecks(criteria, {
       agentText: "",
       actualToolCalls: [],
-      metrics: { durationMs: 12000, outputTokens: 0, toolCallCount: 0 },
+      metrics: { durationMs: 12000, outputChars: 0, toolCallCount: 0 },
     });
     expect(result.passRate).toBe(0);
     expect(result.results[0].actual).toBe("12.0s");
