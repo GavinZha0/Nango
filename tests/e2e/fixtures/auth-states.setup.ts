@@ -27,6 +27,9 @@ import {
 
 config();
 
+// Enforce serial execution to prevent multi-worker races on DB state and role promotion
+setup.describe.configure({ mode: "serial" });
+
 const { Client } = pg;
 
 async function forceUserRole(email: string, role: string) {
@@ -98,22 +101,55 @@ async function signUpOrSignIn(
   await page.context().storageState({ path: statePath });
 }
 
-setup("create admin user", async ({ page }) => {
+/**
+ * Mint a fresh session cookie reflecting a just-promoted role using an isolated
+ * BrowserContext. Avoids in-flight request races (SSE/SWR) and stale cookie resurrection.
+ */
+async function reAuthenticateInFreshContext(
+  browser: import("@playwright/test").Browser,
+  user: { email: string; password: string },
+  statePath: string,
+  targetContext?: import("@playwright/test").BrowserContext,
+): Promise<void> {
+  const freshContext = await browser.newContext();
+  const page = await freshContext.newPage();
+  try {
+    await page.goto("/sign-in");
+    await page.getByLabel("Email").fill(user.email);
+    await page.getByLabel("Password").fill(user.password);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL(
+      (url) =>
+        !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"),
+      { timeout: 15000 },
+    );
+    const state = await freshContext.storageState({ path: statePath });
+    if (targetContext) {
+      await targetContext.clearCookies();
+      await targetContext.addCookies(state.cookies);
+    }
+  } finally {
+    await freshContext.close();
+  }
+}
+
+setup("create admin user", async ({ page, browser, playwright }) => {
   // Sign up
   await signUpOrSignIn(page, TEST_USERS.admin, ADMIN_STATE_PATH);
   // Force promote via DB
   await forceUserRole(TEST_USERS.admin.email, "admin");
-  // Log out and log back in to get a clean session cookie with the new role
-  await page.context().clearCookies();
-  await page.goto("/sign-in");
-  await page.getByLabel("Email").fill(TEST_USERS.admin.email);
-  await page.getByLabel("Password").fill(TEST_USERS.admin.password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
-  await page.context().storageState({ path: ADMIN_STATE_PATH });
+  // Re-authenticate in an isolated context to ensure updated role in cookieCache
+  await reAuthenticateInFreshContext(browser, TEST_USERS.admin, ADMIN_STATE_PATH, page.context());
 
   // ── Seed Base Resources (Layer 0, Layer 1, MCP, Data Source, SSH, Verification) ─────
-  await seedBaseResources(page.request);
+  const adminRequest = await playwright.request.newContext({
+    storageState: ADMIN_STATE_PATH,
+  });
+  try {
+    await seedBaseResources(adminRequest);
+  } finally {
+    await adminRequest.dispose();
+  }
   await seedBaseMcpServer(TEST_USERS.admin.email);
   await seedBaseDataSource(TEST_USERS.admin.email);
   await seedBaseSshServer(TEST_USERS.admin.email);
@@ -122,19 +158,13 @@ setup("create admin user", async ({ page }) => {
   await seedBaseWebAutoSuite(TEST_USERS.admin.email);
 });
 
-setup("create editor user", async ({ page, context }) => {
+setup("create editor user", async ({ page, browser }) => {
   // Sign up
   await signUpOrSignIn(page, TEST_USERS.editor, EDITOR_STATE_PATH);
   // Force promote via DB
   await forceUserRole(TEST_USERS.editor.email, "editor");
-  // Log out and log back in to get a clean session cookie with the new role
-  await page.context().clearCookies();
-  await page.goto("/sign-in");
-  await page.getByLabel("Email").fill(TEST_USERS.editor.email);
-  await page.getByLabel("Password").fill(TEST_USERS.editor.password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.includes("/sign-in") && !url.pathname.includes("/sign-up"), { timeout: 15000 });
-  await context.storageState({ path: EDITOR_STATE_PATH });
+  // Re-authenticate in an isolated context to ensure updated role in cookieCache
+  await reAuthenticateInFreshContext(browser, TEST_USERS.editor, EDITOR_STATE_PATH, page.context());
 });
 
 setup("create regular user", async ({ page }) => {

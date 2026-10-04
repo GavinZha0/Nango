@@ -3,12 +3,6 @@
 # As of pnpm 11, settings (other than auth/registry) live HERE rather than in
 # package.json#pnpm or .npmrc. See https://pnpm.io/11.x/migration.
 
-# Pin transitive versions that must stay aligned with our hand-tested
-# CopilotKit / AG-UI / rxjs combination. Moved from package.json#pnpm.overrides
-# in the v10 → v11 migration (pnpm 11 silently ignores package.json#pnpm).
-overrides:
-  rxjs: "7.8.1"
-
 # Build-script policy. With pnpm 11's `strictDepBuilds: true` default, any
 # package not listed here that wants to run a build / postinstall script will
 # fail `pnpm install`. Keep this list tight — every `true` is an explicit
