@@ -39,7 +39,7 @@ const updateSchema = z
     variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
     enabled: z.boolean().optional(),
-    timeoutSec: z.number().int().min(10).max(7200).optional(),
+    caseTimeoutSec: z.number().int().min(10).max(7200).optional(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     mcpServerId: z.string().uuid().optional().nullable(),
   })
@@ -71,7 +71,7 @@ export const PATCH = withEditor<{ id: string }>(
       || body.description !== undefined
       || body.parentId !== undefined
       || body.variables !== undefined
-      || body.timeoutSec !== undefined
+      || body.caseTimeoutSec !== undefined
       || body.evaluatorAgentId !== undefined
       || body.mcpServerId !== undefined;
     const flagEdit =

@@ -42,7 +42,7 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
       visibility: VerificationSuiteTable.visibility,
       variables: VerificationSuiteTable.variables,
       enabled: VerificationSuiteTable.enabled,
-      toolTimeoutSec: VerificationSuiteTable.toolTimeoutSec,
+      caseTimeoutSec: VerificationSuiteTable.caseTimeoutSec,
       createdBy: VerificationSuiteTable.createdBy,
       updatedBy: VerificationSuiteTable.updatedBy,
       createdAt: VerificationSuiteTable.createdAt,
@@ -84,7 +84,7 @@ const createSchema = z
       .nullable(),
     variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
-    toolTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
+    caseTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
   })
   .strict();
 
@@ -112,9 +112,9 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   }
 
   const defaultToolTimeout = getConfigNumber("mcp.execution_timeout", 60);
-  const resolvedToolTimeoutSec =
-    typeof body.toolTimeoutSec === "number" && body.toolTimeoutSec > 0
-      ? body.toolTimeoutSec
+  const resolvedCaseTimeoutSec =
+    typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
+      ? body.caseTimeoutSec
       : defaultToolTimeout;
 
   try {
@@ -129,7 +129,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         toolPrefixRule: body.toolPrefixRule ?? null,
         variables: body.variables ?? {},
         visibility: body.visibility ?? "private",
-        toolTimeoutSec: resolvedToolTimeoutSec,
+        caseTimeoutSec: resolvedCaseTimeoutSec,
         createdBy: session.user.id,
         updatedBy: session.user.id,
       })

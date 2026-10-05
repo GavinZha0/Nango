@@ -81,7 +81,7 @@ const updateSchema = z
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
-    toolTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
+    caseTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
   })
   .strict();
 
@@ -104,7 +104,7 @@ export const PATCH = withEditor<{ id: string }>(
       || body.mcpServerId !== undefined
       || body.toolPrefixRule !== undefined
       || body.variables !== undefined
-      || body.toolTimeoutSec !== undefined;
+      || body.caseTimeoutSec !== undefined;
     const flagEdit =
       body.enabled !== undefined || body.visibility !== undefined;
 
@@ -129,11 +129,11 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.variables !== undefined) updates.variables = body.variables;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
-    if (body.toolTimeoutSec !== undefined) {
+    if (body.caseTimeoutSec !== undefined) {
       const defaultToolTimeout = getConfigNumber("mcp.execution_timeout", 60);
-      updates.toolTimeoutSec =
-        typeof body.toolTimeoutSec === "number" && body.toolTimeoutSec > 0
-          ? body.toolTimeoutSec
+      updates.caseTimeoutSec =
+        typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
+          ? body.caseTimeoutSec
           : defaultToolTimeout;
     }
     if (body.toolPrefixRule !== undefined) {

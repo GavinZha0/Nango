@@ -43,7 +43,7 @@ const createSchema = z
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000).optional().nullable(),
     threshold: z.number().int().min(1).max(5).optional(),
-    targetTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
+    caseTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
@@ -75,15 +75,15 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     CONFIG_KEY_TARGET_TIMEOUT,
     DEFAULT_EVAL_TARGET_TIMEOUT_S,
   );
-  const resolvedTargetTimeoutSec =
-    typeof body.targetTimeoutSec === "number" && body.targetTimeoutSec > 0
-      ? body.targetTimeoutSec
+  const resolvedCaseTimeoutSec =
+    typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
+      ? body.caseTimeoutSec
       : defaultTargetTimeout;
 
   try {
     const row = await storage.createSuite({
       ...body,
-      targetTimeoutSec: resolvedTargetTimeoutSec,
+      caseTimeoutSec: resolvedCaseTimeoutSec,
       createdBy: session.user.id,
     });
     return NextResponse.json({ ...row, caseCount: 0 }, { status: 201 });

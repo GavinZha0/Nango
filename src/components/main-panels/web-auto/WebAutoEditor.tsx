@@ -358,7 +358,7 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         id: selectedSuite?.id ?? suiteId,
         name: selectedSuite?.name ?? "",
         description: selectedSuite?.description ?? null,
-        timeoutSec: selectedSuite?.timeoutSec ?? 60,
+        caseTimeoutSec: selectedSuite?.caseTimeoutSec ?? 60,
         caseCount: cases?.length ?? 0,
         variables: selectedSuite?.variables ?? {},
       },

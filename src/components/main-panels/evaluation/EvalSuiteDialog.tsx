@@ -48,7 +48,7 @@ export interface EvalSuiteDialogProps {
     description?: string | null;
     evaluatorAgentId?: string | null;
     threshold: number;
-    targetTimeoutSec?: number | null;
+    caseTimeoutSec?: number | null;
     variables?: Record<string, unknown>;
   }) => void;
 }
@@ -89,8 +89,8 @@ export function EvalSuiteDialog({
     suite?.evaluatorAgentId ?? "",
   );
   const [threshold, setThreshold] = useState<number>(suite?.threshold ?? 3);
-  const [targetTimeoutSec, setTargetTimeoutSec] = useState<number | string>(
-    suite?.targetTimeoutSec ?? 300,
+  const [caseTimeoutSec, setCaseTimeoutSec] = useState<number | string>(
+    suite?.caseTimeoutSec ?? 300,
   );
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +111,7 @@ export function EvalSuiteDialog({
       setSelectedAgentId(suite?.agentId ?? defaultAgentId ?? (candidateAgents[0]?.id ?? ""));
       setSelectedEvalId(suite?.evaluatorAgentId ?? (isEdit ? "" : (evaluators[0]?.id ?? "")));
       setThreshold(suite?.threshold ?? 3);
-      setTargetTimeoutSec(suite?.targetTimeoutSec ?? 300);
+      setCaseTimeoutSec(suite?.caseTimeoutSec ?? 300);
       setError(null);
     }
   }
@@ -124,9 +124,9 @@ export function EvalSuiteDialog({
     }
 
     const parsedTimeout =
-      typeof targetTimeoutSec === "string"
-        ? parseInt(targetTimeoutSec, 10)
-        : targetTimeoutSec;
+      typeof caseTimeoutSec === "string"
+        ? parseInt(caseTimeoutSec, 10)
+        : caseTimeoutSec;
     const resolvedTimeout =
       Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined;
 
@@ -136,7 +136,7 @@ export function EvalSuiteDialog({
         description: description.trim() || null,
         evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
         threshold,
-        targetTimeoutSec: resolvedTimeout ?? null,
+        caseTimeoutSec: resolvedTimeout ?? null,
         variables,
       });
       onOpenChange(false);
@@ -159,7 +159,7 @@ export function EvalSuiteDialog({
         description: description.trim() || null,
         evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
         threshold,
-        targetTimeoutSec: resolvedTimeout,
+        caseTimeoutSec: resolvedTimeout,
         variables,
       });
 
@@ -340,8 +340,8 @@ export function EvalSuiteDialog({
                   type="number"
                   min={1}
                   max={3600}
-                  value={targetTimeoutSec}
-                  onChange={(e) => setTargetTimeoutSec(e.target.value)}
+                  value={caseTimeoutSec}
+                  onChange={(e) => setCaseTimeoutSec(e.target.value)}
                   placeholder="300"
                   disabled={submitting}
                 />

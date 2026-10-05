@@ -207,7 +207,7 @@ export function EvaluationSuiteEditor({
             agentSource: suiteData.agentSource,
             evaluatorAgentId: suiteData.evaluatorAgentId,
             threshold: suiteData.threshold,
-            targetTimeoutSec: suiteData.targetTimeoutSec,
+            caseTimeoutSec: suiteData.caseTimeoutSec,
             caseCount: cases.length,
             variables: suiteData.variables ?? {},
           }

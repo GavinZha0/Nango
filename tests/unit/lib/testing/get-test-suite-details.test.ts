@@ -181,7 +181,7 @@ describe("get_test_suite_details tool", () => {
           name: "Checkout UI",
           description: "E2E checkout",
           mcpServerId: "playwright-service",
-          timeoutSec: 300,
+          caseTimeoutSec: 300,
           caseCount: 1,
           enabled: false,
           visibility: "private",

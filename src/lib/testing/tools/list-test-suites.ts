@@ -129,7 +129,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
             name: WebAutoSuiteTable.name,
             description: WebAutoSuiteTable.description,
             mcpServerId: WebAutoSuiteTable.mcpServerId,
-            timeoutSec: WebAutoSuiteTable.timeoutSec,
+            caseTimeoutSec: WebAutoSuiteTable.caseTimeoutSec,
             caseCount: sql<number>`(
               select count(*)::int from "web_auto_case"
               where "web_auto_case"."suite_id" = "web_auto_suite"."id"
@@ -152,7 +152,7 @@ export function buildListTestSuitesTool(ctx: TesterToolContext): ToolDefinition 
           name: r.name,
           description: r.description ?? null,
           mcpServerId: r.mcpServerId ?? null,
-          timeoutSec: r.timeoutSec ?? null,
+          caseTimeoutSec: r.caseTimeoutSec ?? null,
           caseCount: Number(r.caseCount ?? 0),
           enabled: Boolean(r.enabled),
           visibility: r.visibility as "private" | "public",

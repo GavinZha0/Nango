@@ -114,7 +114,7 @@ export async function startEvalSuiteRun(
     evaluatorAgentId: suite.evaluatorAgentId ?? null,
     dimensionIds: [],
     threshold: suite.threshold ?? 3,
-    targetTimeoutSec: suite.targetTimeoutSec,
+    caseTimeoutSec: suite.caseTimeoutSec,
     targetAgentId: suite.agentId,
     targetCredentialId: suite.credentialId ?? undefined,
     targetAgentSource: suite.agentSource,
@@ -135,7 +135,7 @@ interface SuiteLoopInput {
   evaluatorAgentId?: string | null;
   dimensionIds: string[];
   threshold?: number;
-  targetTimeoutSec?: number | null;
+  caseTimeoutSec?: number | null;
   targetAgentId: string;
   targetCredentialId?: string;
   targetAgentSource: string;
@@ -216,7 +216,7 @@ async function runAllCases(
         evaluatorAgentId: input.evaluatorAgentId,
         dimensionIds: input.dimensionIds,
         threshold: input.threshold,
-        targetTimeoutSec: input.targetTimeoutSec,
+        caseTimeoutSec: input.caseTimeoutSec,
         turns: caseTurns,
         assertions: caseAssertions,
         ownerId: input.ownerId,

@@ -90,8 +90,8 @@ export function VerificationSuiteDialog({
     suite?.toolPrefixRule?.mode ?? "none",
   );
   const [prefixText, setPrefixText] = useState<string>(suite?.toolPrefixRule?.prefix ?? "");
-  const [toolTimeoutSec, setToolTimeoutSec] = useState<number | string>(
-    suite?.toolTimeoutSec ?? 60,
+  const [caseTimeoutSec, setCaseTimeoutSec] = useState<number | string>(
+    suite?.caseTimeoutSec ?? 60,
   );
 
   const [servers, setServers] = useState<McpServerItem[]>([]);
@@ -117,7 +117,7 @@ export function VerificationSuiteDialog({
       setCustomGroupName("");
       setPrefixMode(suite?.toolPrefixRule?.mode ?? "none");
       setPrefixText(suite?.toolPrefixRule?.prefix ?? "");
-      setToolTimeoutSec(suite?.toolTimeoutSec ?? 60);
+      setCaseTimeoutSec(suite?.caseTimeoutSec ?? 60);
       setError(null);
     }
   }
@@ -182,8 +182,8 @@ export function VerificationSuiteDialog({
     const resolvedGroupName =
       selectedGroupId === "__new__" ? customGroupName.trim() : undefined;
 
-    const parsedTimeout = Number(toolTimeoutSec);
-    const resolvedToolTimeoutSec =
+    const parsedTimeout = Number(caseTimeoutSec);
+    const resolvedCaseTimeoutSec =
       !Number.isNaN(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined;
 
     if (isEdit) {
@@ -198,7 +198,7 @@ export function VerificationSuiteDialog({
           mcpServerId: serverId || null,
           toolPrefixRule,
           variables,
-          toolTimeoutSec: resolvedToolTimeoutSec ?? null,
+          caseTimeoutSec: resolvedCaseTimeoutSec ?? null,
         });
         onOpenChange(false);
       } catch (err) {
@@ -225,7 +225,7 @@ export function VerificationSuiteDialog({
         name: trimmedName,
         description: description.trim() || null,
         variables,
-        toolTimeoutSec: resolvedToolTimeoutSec,
+        caseTimeoutSec: resolvedCaseTimeoutSec,
       });
       if (created) {
         toast.success("Verification suite created");
@@ -446,8 +446,8 @@ export function VerificationSuiteDialog({
                     type="number"
                     min={1}
                     max={3600}
-                    value={toolTimeoutSec}
-                    onChange={(e) => setToolTimeoutSec(e.target.value)}
+                    value={caseTimeoutSec}
+                    onChange={(e) => setCaseTimeoutSec(e.target.value)}
                     placeholder="60"
                     disabled={submitting}
                     data-testid="suite-tool-timeout-input"

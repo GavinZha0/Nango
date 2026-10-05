@@ -50,7 +50,7 @@ describe("runWebAutoCase", () => {
     mcpServerId: "mcp-1",
     evaluatorAgentId: null,
     variables: null,
-    timeoutSec: 60,
+    caseTimeoutSec: 60,
   } as unknown as import("@/lib/db/schema").WebAutoSuiteEntity;
 
   it("returns errored when case has no script content", async () => {
@@ -109,7 +109,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { success: true } },
       error: null,
-      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
+      durationMs: 250, // Execution elapsed 250ms (not caseTimeoutSec)
     });
 
     const outcome = await runWebAutoCase({
@@ -164,7 +164,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: true } },
       error: null,
-      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
+      durationMs: 250, // Execution elapsed 250ms (not caseTimeoutSec)
     });
 
     const outcome = await runWebAutoCase({
@@ -203,7 +203,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: false } },
       error: null,
-      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
+      durationMs: 250, // Execution elapsed 250ms (not caseTimeoutSec)
     });
 
     const outcome = await runWebAutoCase({
@@ -277,7 +277,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: true } },
       error: null,
-      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
+      durationMs: 250, // Execution elapsed 250ms (not caseTimeoutSec)
     });
     mockRunWebAutoEvaluation.mockResolvedValueOnce({
       passed: true,
@@ -317,7 +317,7 @@ describe("runWebAutoCase", () => {
       status: "success",
       executionOutput: { result: { ok: true } },
       error: null,
-      durationMs: 250, // Execution elapsed 250ms (not timeoutSec)
+      durationMs: 250, // Execution elapsed 250ms (not caseTimeoutSec)
     });
     mockRunWebAutoEvaluation.mockResolvedValueOnce({
       passed: false,
@@ -394,7 +394,7 @@ describe("runWebAutoCase", () => {
     expect(omittedAssertion.ok).toBe(false);
   });
 
-  it("passes suite.timeoutSec to runWebAutoMcp and evaluates duration_s metric assertion successfully", async () => {
+  it("passes suite.caseTimeoutSec to runWebAutoMcp and evaluates duration_s metric assertion successfully", async () => {
     mockRunWebAutoMcp.mockResolvedValueOnce({
       status: "success",
       executionOutput: { result: { loaded: true } },
@@ -405,7 +405,7 @@ describe("runWebAutoCase", () => {
     const outcome = await runWebAutoCase({
       caseId: 1,
       suiteId: "suite-1",
-      suite: { ...dummySuite, timeoutSec: 45 },
+      suite: { ...dummySuite, caseTimeoutSec: 45 },
       case: {
         id: 1,
         input: { script: "return { loaded: true };" },
@@ -418,7 +418,7 @@ describe("runWebAutoCase", () => {
 
     expect(mockRunWebAutoMcp).toHaveBeenCalledWith(
       expect.objectContaining({
-        timeoutSec: 45,
+        caseTimeoutSec: 45,
       }),
     );
     expect(outcome.status).toBe("passed");
@@ -459,7 +459,7 @@ describe("runWebAutoCase", () => {
     expect(metricRes?.actual).toBe(4.2);
   });
 
-  it("reclassifies timeout errored to failed when duration_s SLA threshold is lower than timeoutSec", async () => {
+  it("reclassifies timeout errored to failed when duration_s SLA threshold is lower than caseTimeoutSec", async () => {
     mockRunWebAutoMcp.mockResolvedValueOnce({
       status: "errored",
       executionOutput: null,
@@ -473,7 +473,7 @@ describe("runWebAutoCase", () => {
     const outcome = await runWebAutoCase({
       caseId: 1,
       suiteId: "suite-1",
-      suite: { ...dummySuite, timeoutSec: 60 },
+      suite: { ...dummySuite, caseTimeoutSec: 60 },
       case: {
         id: 1,
         input: { script: "return { loaded: true };" },
@@ -501,7 +501,7 @@ describe("startWebAutoSuiteRun", () => {
       mcpServerId: "mcp-1",
       evaluatorAgentId: null,
       variables: null,
-      timeoutSec: 60,
+      caseTimeoutSec: 60,
     };
 
     const dummyCases = [
@@ -579,14 +579,14 @@ describe("startWebAutoSuiteRun", () => {
     expect(mockRecordRunNotification).toHaveBeenCalled();
   });
 
-  it("does not abort or error subsequent cases when cumulative suite duration exceeds timeoutSec", async () => {
+  it("does not abort or error subsequent cases when cumulative suite duration exceeds caseTimeoutSec", async () => {
     const dummySuite = {
       id: "suite-multi",
       name: "Multi-case Suite",
       mcpServerId: "mcp-1",
       evaluatorAgentId: null,
       variables: null,
-      timeoutSec: 1, // 1 second timeout (per case)
+      caseTimeoutSec: 1, // 1 second timeout (per case)
     };
 
     const dummyCases = [

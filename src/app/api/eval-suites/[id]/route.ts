@@ -40,7 +40,7 @@ const updateSchema = z
     description: z.string().max(1000).optional().nullable(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     threshold: z.number().int().min(1).max(5).optional(),
-    targetTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
+    caseTimeoutSec: z.number().int().min(1).max(3600).optional().nullable(),
     dimensionIds: z.array(z.string()).optional(),
     variables: suiteVariablesSchema.optional(),
     enabled: z.boolean().optional(),
@@ -64,7 +64,7 @@ export const PATCH = withEditor<{ id: string }>(
       body.description !== undefined ||
       body.evaluatorAgentId !== undefined ||
       body.threshold !== undefined ||
-      body.targetTimeoutSec !== undefined ||
+      body.caseTimeoutSec !== undefined ||
       body.dimensionIds !== undefined ||
       body.variables !== undefined;
 
@@ -88,15 +88,15 @@ export const PATCH = withEditor<{ id: string }>(
       }
     }
 
-    let targetTimeoutSecToSave: number | undefined;
-    if (body.targetTimeoutSec !== undefined) {
+    let caseTimeoutSecToSave: number | undefined;
+    if (body.caseTimeoutSec !== undefined) {
       const defaultTargetTimeout = getConfigNumber(
         CONFIG_KEY_TARGET_TIMEOUT,
         DEFAULT_EVAL_TARGET_TIMEOUT_S,
       );
-      targetTimeoutSecToSave =
-        typeof body.targetTimeoutSec === "number" && body.targetTimeoutSec > 0
-          ? body.targetTimeoutSec
+      caseTimeoutSecToSave =
+        typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
+          ? body.caseTimeoutSec
           : defaultTargetTimeout;
     }
 
@@ -105,8 +105,8 @@ export const PATCH = withEditor<{ id: string }>(
         suite.id,
         {
           ...body,
-          ...(targetTimeoutSecToSave !== undefined
-            ? { targetTimeoutSec: targetTimeoutSecToSave }
+          ...(caseTimeoutSecToSave !== undefined
+            ? { caseTimeoutSec: caseTimeoutSecToSave }
             : {}),
         },
         session.user.id,

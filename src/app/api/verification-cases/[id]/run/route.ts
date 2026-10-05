@@ -82,7 +82,7 @@ export const POST = withEditor<{ id: string }>(
         originalToolName: caseRow.toolName,
         serverName: suite.mcpServerName ?? undefined,
         rule: suite.toolPrefixRule ?? undefined,
-        toolTimeoutSec: suite.toolTimeoutSec ?? undefined,
+        caseTimeoutSec: suite.caseTimeoutSec ?? undefined,
         input: (caseRow.input ?? {}) as Record<string, unknown>,
         assertions: (caseRow.assertions ?? []) as readonly AssertionSpec[],
       },

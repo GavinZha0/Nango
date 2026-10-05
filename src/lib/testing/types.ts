@@ -24,8 +24,8 @@ export interface SuiteSummaryItem {
   agentId?: string | null;
   agentSource?: string | null;
   evaluatorAgentId?: string | null;
-  // Web Auto specific
-  timeoutSec?: number | null;
+  // Per-case execution timeout (seconds)
+  caseTimeoutSec?: number | null;
   // Suite variables
   variables?: unknown;
 }

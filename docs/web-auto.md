@@ -58,7 +58,7 @@ Web Auto is backed by 4 domain tables in PostgreSQL (`src/lib/db/schema.ts`):
 
 | Table | Purpose | Primary Key | Key Columns |
 |---|---|---|---|
-| `web_auto_suite` | Groups test cases and defines runtime configurations. | UUID v4 | `id`, `parent_id` (for groups, FK cascade), `name`, `description`, `variables`, `mcp_server_id` (FK **SET NULL**), `evaluator_agent_id` (FK **SET NULL**), `timeout_sec`, `visibility`, `created_by` |
+| `web_auto_suite` | Groups test cases and defines runtime configurations. | UUID v4 | `id`, `parent_id` (for groups, FK cascade), `name`, `description`, `variables`, `mcp_server_id` (FK **SET NULL**), `evaluator_agent_id` (FK **SET NULL**), `case_timeout_sec`, `visibility`, `created_by` |
 | `web_auto_case` | Individual test case definition. | BigInt Identity | `id`, `suite_id` (FK cascade), `name`, `input` (jsonb), `assertions`, `enabled`, `created_by` |
 | `web_auto_run` | Suite-level execution batch run record. | UUID v4 | `id`, `suite_id` (FK cascade), `status` (`running`, `passed`, `failed`, `errored`), `passed`, `failed`, `errored`, `started_at`, `finished_at`, `created_by` |
 | `web_auto_case_result` | Detailed outcome of an individual case within a run. | BigInt Identity | `id`, `run_id` (FK cascade), `case_id` (FK cascade), `status`, `execution_output`, `assertion_results`, `score`, `feedback`, `error`, `created_at` |

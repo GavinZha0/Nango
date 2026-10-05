@@ -31,7 +31,7 @@ export interface CreateSuiteInput {
   name: string;
   description?: string | null;
   threshold?: number;
-  targetTimeoutSec?: number | null;
+  caseTimeoutSec?: number | null;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
@@ -51,7 +51,7 @@ export async function createSuite(
       name: input.name,
       description: input.description ?? null,
       threshold: input.threshold ?? 3,
-      targetTimeoutSec: input.targetTimeoutSec ?? 300,
+      caseTimeoutSec: input.caseTimeoutSec ?? 300,
       variables: input.variables ?? {},
       enabled: input.enabled ?? true,
       visibility: input.visibility ?? "private",
@@ -108,7 +108,7 @@ export interface UpdateSuiteInput {
   description?: string | null;
   evaluatorAgentId?: string | null;
   threshold?: number;
-  targetTimeoutSec?: number | null;
+  caseTimeoutSec?: number | null;
   variables?: Record<string, unknown>;
   enabled?: boolean;
   visibility?: "public" | "private";
@@ -125,8 +125,8 @@ export async function updateSuite(
   if (input.evaluatorAgentId !== undefined)
     updates.evaluatorAgentId = input.evaluatorAgentId;
   if (input.threshold !== undefined) updates.threshold = input.threshold;
-  if (input.targetTimeoutSec !== undefined)
-    updates.targetTimeoutSec = input.targetTimeoutSec;
+  if (input.caseTimeoutSec !== undefined)
+    updates.caseTimeoutSec = input.caseTimeoutSec;
   if (input.variables !== undefined) updates.variables = input.variables;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.visibility !== undefined) updates.visibility = input.visibility;
@@ -295,7 +295,7 @@ export async function listSuitesByAgentWithCaseCount(
       name: EvalSuiteTable.name,
       description: EvalSuiteTable.description,
       threshold: EvalSuiteTable.threshold,
-      targetTimeoutSec: EvalSuiteTable.targetTimeoutSec,
+      caseTimeoutSec: EvalSuiteTable.caseTimeoutSec,
       variables: EvalSuiteTable.variables,
       enabled: EvalSuiteTable.enabled,
       visibility: EvalSuiteTable.visibility,

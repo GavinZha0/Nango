@@ -429,15 +429,15 @@ describe("analyzeToolCallEvents", () => {
   });
 });
 
-describe("runEvalCase — targetTimeoutSec override", () => {
-  it("times out target agent turn when custom targetTimeoutSec is exceeded", async () => {
+describe("runEvalCase — caseTimeoutSec override", () => {
+  it("times out target agent turn when custom caseTimeoutSec is exceeded", async () => {
     mockRunnerStart.mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve({ status: "succeeded" }), 100)),
     );
 
     const result = await runEvalCase({
       ...makeInput(),
-      targetTimeoutSec: 0.01, // 10ms timeout
+      caseTimeoutSec: 0.01, // 10ms timeout
     });
 
     expect(result.status).toBe("errored");
@@ -452,7 +452,7 @@ describe("runEvalCase — targetTimeoutSec override", () => {
     );
   });
 
-  it("completes normally when target agent finishes within targetTimeoutSec", async () => {
+  it("completes normally when target agent finishes within caseTimeoutSec", async () => {
     mockRunnerStart.mockResolvedValue({
       status: "succeeded",
       runId: "run-target",
@@ -461,13 +461,13 @@ describe("runEvalCase — targetTimeoutSec override", () => {
 
     const result = await runEvalCase({
       ...makeInput(),
-      targetTimeoutSec: 60,
+      caseTimeoutSec: 60,
     });
 
     expect(result.status).toBe("passed");
   });
 
-  it("defaults to 300s fallback when targetTimeoutSec is not provided", async () => {
+  it("defaults to 300s fallback when caseTimeoutSec is not provided", async () => {
     mockRunnerStart.mockResolvedValue({
       status: "succeeded",
       runId: "run-target",

@@ -190,7 +190,7 @@ describe("runWebAutoMcp", () => {
     expect(mockRelease).toHaveBeenCalledWith("server-1", mockProvider);
   });
 
-  it("passes configured timeoutSec as timeoutMs to tool.execute", async () => {
+  it("passes configured caseTimeoutSec as timeoutMs to tool.execute", async () => {
     const mockTool = {
       execute: vi.fn().mockResolvedValue({
         content: [{ type: "text", text: "### Result\n```json\n{\"ok\": true}\n```" }],
@@ -206,7 +206,7 @@ describe("runWebAutoMcp", () => {
     await runWebAutoMcp({
       mcpServerId: "server-1",
       scriptContent: "return { ok: true };",
-      timeoutSec: 120,
+      caseTimeoutSec: 120,
     });
 
     expect(mockTool.execute).toHaveBeenCalledWith(

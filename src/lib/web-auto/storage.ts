@@ -40,7 +40,7 @@ export interface CreateWebAutoSuiteInput {
   parentId?: string | null;
   variables?: Record<string, unknown>;
   visibility?: "private" | "public";
-  timeoutSec?: number;
+  caseTimeoutSec?: number;
   evaluatorAgentId?: string | null;
   mcpServerId?: string | null;
   createdBy: string;
@@ -57,7 +57,7 @@ export async function createWebAutoSuite(
       parentId: input.parentId ?? null,
       variables: input.variables ?? {},
       visibility: input.visibility ?? "private",
-      timeoutSec: input.timeoutSec ?? 60,
+      caseTimeoutSec: input.caseTimeoutSec ?? 60,
       evaluatorAgentId: input.evaluatorAgentId ?? null,
       mcpServerId: input.mcpServerId ?? null,
       createdBy: input.createdBy,

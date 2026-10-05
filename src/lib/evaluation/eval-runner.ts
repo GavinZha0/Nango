@@ -79,8 +79,8 @@ export interface RunEvalCaseInput {
   dimensionIds?: string[];
   /** Suite pass threshold (1-5, default 3). */
   threshold?: number;
-  /** Per-turn execution timeout for the target agent in seconds. Overrides global config. */
-  targetTimeoutSec?: number | null;
+  /** Per-case execution timeout for the target agent in seconds. Overrides global config. */
+  caseTimeoutSec?: number | null;
   /** Case conversation turns (user messages only). */
   turns: Array<{ userMessage: string }>;
   /** Case assertions (deterministic + llm_dim + llm_custom). */
@@ -362,11 +362,11 @@ export async function runEvalCase(
   const threshold = input.threshold ?? 3;
 
   // Target agent turn timeout is defined by the suite specification (defaulting to 300s code fallback)
-  const targetTimeoutSec =
-    typeof input.targetTimeoutSec === "number" && input.targetTimeoutSec > 0
-      ? input.targetTimeoutSec
+  const caseTimeoutSec =
+    typeof input.caseTimeoutSec === "number" && input.caseTimeoutSec > 0
+      ? input.caseTimeoutSec
       : DEFAULT_EVAL_TARGET_TIMEOUT_S;
-  const targetTimeoutMs = targetTimeoutSec * 1000;
+  const targetTimeoutMs = caseTimeoutSec * 1000;
 
   const evaluatorTimeoutSec = getConfigNumber(CONFIG_KEY_EVALUATOR_TIMEOUT, DEFAULT_EVAL_EVALUATOR_TIMEOUT_S);
   const evaluatorTimeoutMs = (evaluatorTimeoutSec > 0 ? evaluatorTimeoutSec : DEFAULT_EVAL_EVALUATOR_TIMEOUT_S) * 1000;

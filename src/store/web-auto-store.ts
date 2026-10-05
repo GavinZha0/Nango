@@ -8,7 +8,7 @@ export interface WebAutoSuiteRow {
   variables: Record<string, unknown>;
   enabled: boolean;
   visibility: "private" | "public";
-  timeoutSec: number;
+  caseTimeoutSec: number;
   evaluatorAgentId: string | null;
   mcpServerId: string | null;
   createdBy: string;

@@ -1714,7 +1714,7 @@ export const VerificationSuiteTable = pgTable(
     variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     enabled: boolean("enabled").notNull().default(true),
     visibility: text("visibility").notNull().default("private"),
-    toolTimeoutSec: integer("tool_timeout_sec").notNull().default(60),
+    caseTimeoutSec: integer("case_timeout_sec").notNull().default(60),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => UserTable.id, {
@@ -1927,7 +1927,7 @@ export const EvalSuiteTable = pgTable(
     description: text("description"),
     variables: jsonb("variables").notNull().default(sql`'{}'::jsonb`),
     threshold: integer("threshold").notNull().default(3),
-    targetTimeoutSec: integer("target_timeout_sec").notNull().default(300),
+    caseTimeoutSec: integer("case_timeout_sec").notNull().default(300),
     enabled: boolean("enabled").notNull().default(true),
     visibility: text("visibility").notNull().default("private"),
     createdBy: uuid("created_by")
@@ -2202,7 +2202,7 @@ export const WebAutoSuiteTable = pgTable("web_auto_suite", {
   variables: jsonb("variables").notNull().default({}),
   enabled: boolean("enabled").notNull().default(true),
   visibility: text("visibility").notNull().default("private"),
-  timeoutSec: integer("timeout_sec").notNull().default(60),
+  caseTimeoutSec: integer("case_timeout_sec").notNull().default(60),
   evaluatorAgentId: uuid("evaluator_agent_id").references(
     () => BuiltinAgentTable.id,
     { onDelete: "set null" }

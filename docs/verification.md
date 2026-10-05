@@ -80,7 +80,7 @@ erDiagram
         jsonb variables "Suite literal variables"
         boolean enabled "Active/Inactive flag"
         text visibility "private | public"
-        integer tool_timeout_sec "Per-case tool execution timeout (default 60s)"
+        integer case_timeout_sec "Per-case tool execution timeout (default 60s)"
         uuid created_by FK "references user(id), NOT NULL"
         uuid updated_by FK "references user(id), NOT NULL"
         timestamp created_at "CURRENT_TIMESTAMP"

@@ -197,11 +197,11 @@ export async function runWebAutoCase(
 })()`;
 
   // Step 4: MCP execution (Playwright script)
-  const effectiveTimeoutSec = input.suite.timeoutSec ?? 60;
+  const effectiveTimeoutSec = input.suite.caseTimeoutSec ?? 60;
   const mcpResult = await runWebAutoMcp({
     mcpServerId: input.suite.mcpServerId,
     scriptContent: scriptWithVariables,
-    timeoutSec: effectiveTimeoutSec,
+    caseTimeoutSec: effectiveTimeoutSec,
   });
 
   // ★ Earliest Sanitization ★

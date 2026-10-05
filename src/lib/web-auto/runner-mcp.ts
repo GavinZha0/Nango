@@ -28,8 +28,8 @@ export interface RunWebAutoMcpInput {
   mcpServerId: string;
   /** Playwright script content to execute */
   scriptContent: string;
-  /** Execution timeout in seconds (inherits suite timeoutSec, defaults to 60) */
-  timeoutSec?: number;
+  /** Execution timeout in seconds (inherits suite caseTimeoutSec, defaults to 60) */
+  caseTimeoutSec?: number;
 }
 
 /**
@@ -53,8 +53,8 @@ export async function runWebAutoMcp(
   durationMs: number;
 }> {
   const startedAt: number = Date.now();
-  const effectiveTimeoutSec = typeof input.timeoutSec === "number" && input.timeoutSec > 0
-    ? input.timeoutSec
+  const effectiveTimeoutSec = typeof input.caseTimeoutSec === "number" && input.caseTimeoutSec > 0
+    ? input.caseTimeoutSec
     : 60;
 
   // Build tool input for browser_run_code_unsafe

@@ -93,7 +93,7 @@ describe("runWebAutoCase - cross-case variable referencing", () => {
     mcpServerId: "mcp-server-1",
     evaluatorAgentId: null,
     variables: null,
-    timeoutSec: 60,
+    caseTimeoutSec: 60,
   } as unknown as import("@/lib/db/schema").WebAutoSuiteEntity;
 
   it("interpolates {{cases.010.output.token}} and {{$uuid}} into script content", async () => {
@@ -202,7 +202,7 @@ describe("Suite execution loop - sequential cross-case output propagation", () =
     mcpServerId: "mcp-server-1",
     evaluatorAgentId: null,
     variables: null,
-    timeoutSec: 60,
+    caseTimeoutSec: 60,
   } as unknown as import("@/lib/db/schema").WebAutoSuiteEntity;
 
   it("propagates output from 010_create to 020_consume across the suite run", async () => {

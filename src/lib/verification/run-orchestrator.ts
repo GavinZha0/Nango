@@ -367,7 +367,7 @@ async function runSuiteCases(
         originalToolName: c.toolName ?? "",
         serverName: c.mcpServerName ?? "",
         rule: c.toolPrefixRule ?? null,
-        toolTimeoutSec: c.toolTimeoutSec ?? null,
+        caseTimeoutSec: c.caseTimeoutSec ?? null,
       },
       { cases: suiteContext, variables: suiteLiteralVariables },
     );

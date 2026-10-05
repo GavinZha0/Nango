@@ -31,7 +31,7 @@ export function createMockVerificationSuite(
     toolPrefixRule: null,
     enabled: true,
     visibility: "private",
-    toolTimeoutSec: 60,
+    caseTimeoutSec: 60,
     createdBy: "user-editor-1",
     updatedBy: "user-editor-1",
     createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -53,7 +53,7 @@ export function createMockWebAutoSuite(
     variables: {},
     enabled: true,
     visibility: "private",
-    timeoutSec: 300, // Aligned with schema.ts default of 300 seconds
+    caseTimeoutSec: 300, // Aligned with schema.ts default of 300 seconds
     evaluatorAgentId: null,
     mcpServerId: makeSeqUuid("01918a3c", seq),
     createdBy: "user-editor-1",
@@ -78,7 +78,7 @@ export function createMockEvalSuite(
     agentSource: "builtin",
     evaluatorAgentId: null,
     threshold: 3,
-    targetTimeoutSec: 300,
+    caseTimeoutSec: 300,
     credentialId: null,
     visibility: "private",
     enabled: true,

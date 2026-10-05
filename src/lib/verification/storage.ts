@@ -176,7 +176,7 @@ export interface CreateSuiteInput {
   mcpServerName?: string | null;
   toolPrefixRule?: ToolPrefixRule | null;
   visibility?: "private" | "public";
-  toolTimeoutSec?: number;
+  caseTimeoutSec?: number;
   createdBy: string;
 }
 
@@ -193,7 +193,7 @@ export async function createSuite(
       mcpServerName: input.mcpServerName ?? null,
       toolPrefixRule: input.toolPrefixRule ?? null,
       visibility: input.visibility ?? "private",
-      toolTimeoutSec: input.toolTimeoutSec ?? 60,
+      caseTimeoutSec: input.caseTimeoutSec ?? 60,
       createdBy: input.createdBy,
       updatedBy: input.createdBy,
     })
@@ -256,7 +256,7 @@ export interface VerificationCaseRunItem {
   mcpServerName: string | null;
   toolName: string | null;
   toolPrefixRule: ToolPrefixRule | null;
-  toolTimeoutSec?: number | null;
+  caseTimeoutSec?: number | null;
   suiteVariables?: unknown;
 }
 
@@ -278,7 +278,7 @@ export async function listEnabledCasesForRun(
       mcpServerName: VerificationSuiteTable.mcpServerName,
       toolName: VerificationCaseTable.toolName,
       toolPrefixRule: VerificationSuiteTable.toolPrefixRule,
-      toolTimeoutSec: VerificationSuiteTable.toolTimeoutSec,
+      caseTimeoutSec: VerificationSuiteTable.caseTimeoutSec,
       suiteVariables: VerificationSuiteTable.variables,
     })
     .from(VerificationCaseTable)

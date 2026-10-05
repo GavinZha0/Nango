@@ -28,7 +28,7 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
       variables: WebAutoSuiteTable.variables,
       enabled: WebAutoSuiteTable.enabled,
       visibility: WebAutoSuiteTable.visibility,
-      timeoutSec: WebAutoSuiteTable.timeoutSec,
+      caseTimeoutSec: WebAutoSuiteTable.caseTimeoutSec,
       evaluatorAgentId: WebAutoSuiteTable.evaluatorAgentId,
       mcpServerId: WebAutoSuiteTable.mcpServerId,
       createdBy: WebAutoSuiteTable.createdBy,
@@ -64,7 +64,7 @@ const createSchema = z
     variables: suiteVariablesSchema.optional(),
     visibility: z.enum(["private", "public"]).optional(),
     enabled: z.boolean().optional(),
-    timeoutSec: z.number().int().min(10).max(7200).optional(),
+    caseTimeoutSec: z.number().int().min(10).max(7200).optional(),
     evaluatorAgentId: z.string().uuid().optional().nullable(),
     mcpServerId: z.string().uuid().optional().nullable(),
   })
@@ -101,7 +101,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   }
 
   try {
-    // Default to global MCP execution timeout (60s) if timeoutSec is not explicitly provided.
+    // Default to global MCP execution timeout (60s) if caseTimeoutSec is not explicitly provided.
     const defaultTimeout = getConfigNumber("mcp.execution_timeout", 60);
     const [row] = await db
       .insert(WebAutoSuiteTable)
@@ -112,7 +112,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         variables: body.variables ?? {},
         visibility: body.visibility ?? "private",
         enabled: body.enabled ?? true,
-        timeoutSec: body.timeoutSec ?? defaultTimeout,
+        caseTimeoutSec: body.caseTimeoutSec ?? defaultTimeout,
         evaluatorAgentId: body.evaluatorAgentId ?? null,
         mcpServerId: mcpServerId,
         createdBy: session.user.id,

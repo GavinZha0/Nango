@@ -89,8 +89,8 @@ export function WebAutoSuiteDialog({
   const [selectedEvalId, setSelectedEvalId] = useState<string>(
     suite?.evaluatorAgentId ?? "",
   );
-  const [timeoutSec, setTimeoutSec] = useState<number | string>(
-    suite?.timeoutSec ?? 60,
+  const [caseTimeoutSec, setCaseTimeoutSec] = useState<number | string>(
+    suite?.caseTimeoutSec ?? 60,
   );
   const [userSelectedMcpId, setUserSelectedMcpId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -112,7 +112,7 @@ export function WebAutoSuiteDialog({
       setName(suite?.name ?? "");
       setDescription(suite?.description ?? "");
       setVariables((suite?.variables as SuiteVariablesMap) ?? {});
-      setTimeoutSec(suite?.timeoutSec ?? 60);
+      setCaseTimeoutSec(suite?.caseTimeoutSec ?? 60);
       setNewTargetName("");
       setSelectedEvalId(suite?.evaluatorAgentId ?? "");
       setUserSelectedMcpId(suite?.mcpServerId ?? null);
@@ -134,7 +134,7 @@ export function WebAutoSuiteDialog({
       return;
     }
 
-    const parsedTimeout = typeof timeoutSec === "string" ? parseInt(timeoutSec, 10) : timeoutSec;
+    const parsedTimeout = typeof caseTimeoutSec === "string" ? parseInt(caseTimeoutSec, 10) : caseTimeoutSec;
     const resolvedTimeout = Number.isFinite(parsedTimeout) && parsedTimeout >= 10
       ? parsedTimeout
       : undefined;
@@ -150,7 +150,7 @@ export function WebAutoSuiteDialog({
             description: description.trim() || null,
             evaluatorAgentId: !isTarget && selectedEvalId ? selectedEvalId : null,
             mcpServerId: !isTarget && effectiveMcpId ? effectiveMcpId : null,
-            ...(!isTarget && resolvedTimeout ? { timeoutSec: resolvedTimeout } : {}),
+            ...(!isTarget && resolvedTimeout ? { caseTimeoutSec: resolvedTimeout } : {}),
             ...(!isTarget ? { variables } : {}),
           }),
         });
@@ -197,7 +197,7 @@ export function WebAutoSuiteDialog({
           parentId: targetId,
           mcpServerId: effectiveMcpId ? effectiveMcpId : null,
           evaluatorAgentId: selectedEvalId ? selectedEvalId : null,
-          ...(resolvedTimeout ? { timeoutSec: resolvedTimeout } : {}),
+          ...(resolvedTimeout ? { caseTimeoutSec: resolvedTimeout } : {}),
           variables,
         }),
       });
@@ -446,8 +446,8 @@ export function WebAutoSuiteDialog({
                     type="number"
                     min={10}
                     max={7200}
-                    value={timeoutSec}
-                    onChange={(e) => setTimeoutSec(e.target.value)}
+                    value={caseTimeoutSec}
+                    onChange={(e) => setCaseTimeoutSec(e.target.value)}
                     placeholder="60"
                     disabled={isSubmitting}
                   />

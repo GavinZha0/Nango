@@ -40,7 +40,7 @@ export interface RunMcpCaseInput {
   originalToolName?: string;
   serverName?: string;
   rule?: ToolPrefixRule | null;
-  toolTimeoutSec?: number | null;
+  caseTimeoutSec?: number | null;
 }
 
 /**
@@ -68,8 +68,8 @@ export async function runMcpCase(
   const resolvedInput: Record<string, unknown> = resolveInput(input.input, runContext);
 
   const effectiveTimeoutSec =
-    typeof input.toolTimeoutSec === "number" && input.toolTimeoutSec > 0
-      ? input.toolTimeoutSec
+    typeof input.caseTimeoutSec === "number" && input.caseTimeoutSec > 0
+      ? input.caseTimeoutSec
       : 60;
 
   // Borrow → tools → execute. All wrapped in try/finally so the

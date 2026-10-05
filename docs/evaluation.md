@@ -227,7 +227,8 @@ LLM-as-Judge evaluation is unified across **Evaluation** and **Web Auto** via th
 | Key / Constant | Default | Scope | Description |
 |---|---|---|---|
 | `CONFIG_KEY_EVALUATOR_TIMEOUT` (`evaluator_timeout_seconds`) | `300s` (5 min) | Process / System Config | Timeout for evaluator agent dispatch. Protects against slow or hanging judge models. |
-| `DEFAULT_EVAL_TARGET_TIMEOUT_S` | `180s` (3 min) | Process Constant | Per-turn timeout when executing the target agent. |
+| `eval_suite.case_timeout_sec` | `300s` | Suite column | Per-case limit for target agent execution. Unified across Verification / Evaluation / Web Auto; suites impose no total-duration limit. |
+| `DEFAULT_EVAL_TARGET_TIMEOUT_S` | `180s` (3 min) | Process Constant | Fallback when `case_timeout_sec` is unset. |
 | `DEFAULT_EVAL_MAX_RETRIES` | `2` | Kernel Option | Maximum dispatch attempts before marking evaluation as failed. When set to `0`, evaluation skips. |
 
 ### 6.2 Dispatch & Retry Mechanism

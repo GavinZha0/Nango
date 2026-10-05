@@ -91,7 +91,7 @@ export const POST = withEditor<{ id: string }>(
       evaluatorAgentId: suite.evaluatorAgentId ?? null,
       dimensionIds: [],
       threshold: suite.threshold ?? 3,
-      targetTimeoutSec: suite.targetTimeoutSec,
+      caseTimeoutSec: suite.caseTimeoutSec,
       turns,
       assertions,
       ownerId: session.user.id,

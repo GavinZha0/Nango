@@ -187,7 +187,7 @@ export function buildRunTestCaseTool(ctx: TesterToolContext): ToolDefinition {
           evaluatorAgentId: suite.evaluatorAgentId,
           dimensionIds: [],
           threshold: suite.threshold ?? 3,
-          targetTimeoutSec: suite.targetTimeoutSec,
+          caseTimeoutSec: suite.caseTimeoutSec,
           turns,
           assertions: specs,
           ownerId: ctx.userId,
