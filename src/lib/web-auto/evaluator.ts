@@ -16,7 +16,7 @@ import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventEntity } from "@/lib/db/schema";
 
 import type { ErrorEnvelope } from "@/lib/verification/types";
-import { type SubmitEvaluationScoresSuccess } from "@/lib/evaluation/runtime-tools";
+import { submitEvaluationScoresSchema, type SubmitEvaluationScoresSuccess } from "@/lib/evaluation/runtime-tools";
 
 const log = childLogger({ component: "web-auto-evaluator" });
 
@@ -66,7 +66,7 @@ export interface WebAutoEvaluationResult {
  * Build evaluation prompt for Web Auto expectation assessment.
  * Aligned with Evaluation module's atomic checklist structure.
  */
-function buildWebAutoEvaluationPrompt(
+export function buildWebAutoEvaluationPrompt(
   executionOutput: unknown,
   expectations: WebAutoExpectationItem[],
 ): string {
@@ -93,7 +93,7 @@ function buildWebAutoEvaluationPrompt(
     const itemHeader = `[CHECK ITEM ${i}]`;
 
     if (item.expectation) {
-      let block = `${itemHeader} [EXPECTATION]:\n  Target: "${item.expectation}"\n  Rule: PASS (score >= 60) if the UI output affirmatively delivers this requirement; FAIL (score 0-20) if missing, contradicted, or failed.`;
+      let block = `${itemHeader} [EXPECTATION]:\n  Target: "${item.expectation}"\n  Rule: PASS (score 3-5) if the UI output affirmatively delivers this requirement; FAIL (score 1-2) if missing, contradicted, or failed.`;
       if (item.referenceImage) {
         block += `\n  Visual reference: [reference screenshot attached: ${item.referenceImage}]`;
       }
@@ -102,13 +102,13 @@ function buildWebAutoEvaluationPrompt(
       }
       checklistBlocks.push(block);
     } else if (item.unexpectation) {
-      let block = `${itemHeader} [UNEXPECTATION / FORBIDDEN]:\n  Target: "${item.unexpectation}"\n  Rule: PASS (score 90-100) if the UI strictly AVOIDED this prohibited content/behavior; FAIL (score 0-15) if it appeared in the output.`;
+      let block = `${itemHeader} [UNEXPECTATION / FORBIDDEN]:\n  Target: "${item.unexpectation}"\n  Rule: PASS (score 4-5) if the UI strictly AVOIDED this prohibited content/behavior; FAIL (score 1-2) if it appeared in the output.`;
       if (item.context && item.context.length > 0) {
         block += `\n  Context notes: ${item.context.join("; ")}`;
       }
       checklistBlocks.push(block);
     } else if (item.reference) {
-      let block = `${itemHeader} [REFERENCE CONTEXT]:\n  Ground Truth: "${item.reference}"\n  Rule: PASS (score 70-100) if the UI state matches or faithfully aligns with this ground truth; FAIL (score 0-15) if it factually contradicts or replaces it.`;
+      let block = `${itemHeader} [REFERENCE CONTEXT]:\n  Ground Truth: "${item.reference}"\n  Rule: PASS (score 3-5) if the UI state matches or faithfully aligns with this ground truth; FAIL (score 1-2) if it factually contradicts or replaces it.`;
       if (item.context && item.context.length > 0) {
         block += `\n  Context notes: ${item.context.join("; ")}`;
       }
@@ -118,7 +118,7 @@ function buildWebAutoEvaluationPrompt(
 
   sections.push(
     "LLM AS JUDGE ATOMIC CHECKLIST\n" +
-    "Evaluate each check item below independently against the execution output. For each item, decide whether it passes (score >= 60) or fails (score < 60) and provide a concise reason:\n\n" +
+    "Evaluate each check item below independently against the execution output. For each item, decide whether it passes (score >= 3) or fails (score < 3) on a 1-5 Likert scale and provide a concise reason:\n\n" +
     checklistBlocks.join("\n\n"),
   );
 
@@ -129,6 +129,7 @@ function buildWebAutoEvaluationPrompt(
     "EXACTLY ONCE in a single tool call with:\n" +
     `  - item_scores: Array with one entry for each of the ${expectations.length} check items above: ` +
     `[{ index: 0, score: 1-5, reason: "..." }, ...]\n` +
+    "    Scores MUST be integers between 1 and 5 (1 = Complete Failure / Prohibited behavior occurred, 2 = Poor / Partial, 3 = Acceptable, 4 = Good, 5 = Flawless). Scores outside 1-5 are strictly invalid.\n" +
     "  - feedback: 2-5 sentence overall summary\n\n" +
     "CRITICAL: You MUST use the `submit_evaluation_scores` tool to return all your scores together. Do not output normal text.",
   );
@@ -142,7 +143,9 @@ function buildWebAutoEvaluationPrompt(
 function extractEvaluatorScores(
   events: EntityRunEventEntity[],
 ): SubmitEvaluationScoresSuccess | null {
-  for (const evt of events) {
+  // Traverse in reverse order to inspect the latest tool call first
+  for (let i = events.length - 1; i >= 0; i--) {
+    const evt = events[i];
     if (evt.type !== "tool_call_chunk") continue;
     const payload = evt.payload as {
       toolName?: string;
@@ -152,33 +155,20 @@ function extractEvaluatorScores(
     if (!payload.args) continue;
 
     try {
-      const args = JSON.parse(payload.args) as Record<string, unknown>;
-      if (typeof args.feedback !== "string") continue;
-
-      const itemScores: Array<{ index: number; score: number; reason: string }> = [];
-      if (Array.isArray(args.item_scores)) {
-        for (const item of args.item_scores) {
-          if (
-            typeof item === "object" && item !== null &&
-            typeof (item as { index?: unknown }).index === "number" &&
-            typeof (item as { score?: unknown }).score === "number"
-          ) {
-            itemScores.push({
-              index: (item as { index: number }).index,
-              score: (item as { score: number }).score,
-              reason:
-                typeof (item as { reason?: unknown }).reason === "string"
-                  ? (item as { reason: string }).reason
-                  : "",
-            });
-          }
-        }
+      const parsedArgs = JSON.parse(payload.args);
+      const validation = submitEvaluationScoresSchema.safeParse(parsedArgs);
+      if (!validation.success) {
+        log.warn(
+          { event: "web_auto_evaluator_scores_schema_validation_failed", error: validation.error.format() },
+          "web auto evaluator submit_evaluation_scores payload failed schema validation",
+        );
+        continue;
       }
 
       return {
         ok: true,
-        item_scores: itemScores,
-        feedback: args.feedback as string,
+        item_scores: validation.data.item_scores,
+        feedback: validation.data.feedback,
       };
     } catch {
       continue;
@@ -292,20 +282,48 @@ export async function runWebAutoEvaluation(
     };
   }
 
-  // Extract individual check items with dual-insurance fallback
+  // Extract individual check items
   const expectationResults: WebAutoExpectationResult[] = [];
   const individualScores: number[] = [];
+  let evaluatorError: string | null = null;
 
   for (let i = 0; i < input.expectations.length; i++) {
     const exp = input.expectations[i];
-    const itemResult =
-      scores.item_scores?.find((r) => r.index === i) ??
-      scores.item_scores?.[i];
+    const itemResult = scores.item_scores?.find((r) => r.index === i);
 
-    const itemScore = itemResult?.score ?? 1;
-    const itemReason = itemResult?.reason || scores.feedback;
+    if (!itemResult) {
+      if (!evaluatorError) {
+        evaluatorError = `Evaluator omitted score for check item ${i}`;
+      }
+      expectationResults.push({
+        index: i,
+        score: 0,
+        reason: "Evaluator failed to submit score for this item",
+        feedback: "Evaluator failed to submit score for this item",
+        expectation: exp.expectation,
+        unexpectation: exp.unexpectation,
+        reference: exp.reference,
+      });
+      continue;
+    }
 
-    individualScores.push(itemScore);
+    const rawScore = itemResult.score;
+    const isScoreValid =
+      typeof rawScore === "number" &&
+      !Number.isNaN(rawScore) &&
+      rawScore >= 1 &&
+      rawScore <= 5;
+
+    if (!isScoreValid && !evaluatorError) {
+      evaluatorError = `Evaluator score ${rawScore} is invalid (expected integer between 1 and 5)`;
+    }
+
+    const itemScore = isScoreValid ? Math.round(rawScore) : 0;
+    const itemReason = itemResult.reason || scores.feedback;
+
+    if (itemScore >= 1) {
+      individualScores.push(itemScore);
+    }
     expectationResults.push({
       index: i,
       score: itemScore,
@@ -317,14 +335,23 @@ export async function runWebAutoEvaluation(
     });
   }
 
-  const minScore = individualScores.length > 0 ? Math.min(...individualScores) : 1;
-  const passed = minScore >= 3; // 3 on 1-5 scale
+  const allItemsScored =
+    expectationResults.length === input.expectations.length &&
+    expectationResults.every((r) => r.score >= 1);
+  const minScore = individualScores.length > 0 ? Math.min(...individualScores) : 0;
+  const passed = !evaluatorError && allItemsScored && minScore >= 3; // 3 on 1-5 scale
 
   return {
     passed,
-    score: minScore,
+    score: allItemsScored ? minScore : undefined,
     feedback: scores.feedback,
     expectationResults,
+    error: evaluatorError
+      ? {
+          source: "internal",
+          message: evaluatorError,
+        }
+      : undefined,
     durationMs: Date.now() - startMs,
   };
 }

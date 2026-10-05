@@ -348,6 +348,52 @@ describe("runWebAutoCase", () => {
     expect(llm?.skipped).toBeUndefined();
   });
 
+  it("marks case as errored when evaluator omits a score for an expectation item", async () => {
+    const suiteWithEvaluator = { ...dummySuite, evaluatorAgentId: "eval-1" };
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { ok: true } },
+      error: null,
+      durationMs: 250,
+    });
+    mockRunWebAutoEvaluation.mockResolvedValueOnce({
+      passed: false,
+      score: undefined,
+      feedback: "Partial submission",
+      error: {
+        source: "internal",
+        message: "Evaluator omitted score for check item 1",
+      },
+      expectationResults: [
+        { index: 0, score: 5, reason: "Header ok" },
+        { index: 1, score: 0, reason: "Evaluator failed to submit score for this item" },
+      ],
+    });
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: suiteWithEvaluator,
+      case: {
+        id: 1,
+        input: { script: "return { ok: true };" },
+        assertions: [
+          { type: "llm_custom", expectation: "Header is visible" },
+          { type: "llm_custom", expectation: "Footer is visible" },
+        ],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+    });
+
+    expect(outcome.status).toBe("errored");
+    expect(outcome.error).toBeDefined();
+    expect(outcome.error?.message).toContain("Evaluator omitted score for check item 1");
+
+    const omittedAssertion = outcome.assertionResults[1];
+    expect(omittedAssertion.errored).toBe(true);
+    expect(omittedAssertion.ok).toBe(false);
+  });
+
   it("passes suite.timeoutSec to runWebAutoMcp and evaluates duration_s metric assertion successfully", async () => {
     mockRunWebAutoMcp.mockResolvedValueOnce({
       status: "success",
@@ -531,5 +577,69 @@ describe("startWebAutoSuiteRun", () => {
 
     // 3. Should record notification
     expect(mockRecordRunNotification).toHaveBeenCalled();
+  });
+
+  it("does not abort or error subsequent cases when cumulative suite duration exceeds timeoutSec", async () => {
+    const dummySuite = {
+      id: "suite-multi",
+      name: "Multi-case Suite",
+      mcpServerId: "mcp-1",
+      evaluatorAgentId: null,
+      variables: null,
+      timeoutSec: 1, // 1 second timeout (per case)
+    };
+
+    const dummyCases = [
+      {
+        id: 1,
+        name: "Case 1",
+        input: { script: "return { step: 1 };" },
+        assertions: [],
+        enabled: true,
+      },
+      {
+        id: 2,
+        name: "Case 2",
+        input: { script: "return { step: 2 };" },
+        assertions: [],
+        enabled: true,
+      },
+    ];
+
+    mockGetWebAutoSuiteById.mockResolvedValueOnce(dummySuite);
+    mockListEnabledWebAutoCasesForRun.mockResolvedValueOnce(dummyCases);
+    mockCreateWebAutoRun.mockResolvedValueOnce({ id: "run-multi" });
+
+    // Mock MCP execution for both cases with success
+    mockRunWebAutoMcp
+      .mockResolvedValueOnce({
+        status: "success",
+        executionOutput: { result: { step: 1 } },
+        error: null,
+        durationMs: 600,
+      })
+      .mockResolvedValueOnce({
+        status: "success",
+        executionOutput: { result: { step: 2 } },
+        error: null,
+        durationMs: 600,
+      });
+
+    await startWebAutoSuiteRun({
+      suiteId: "suite-multi",
+      ownerId: "user-1",
+    });
+
+    // Wait for suite execution loop
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    // Both cases should run and pass, not be skipped with 'Suite timeout exceeded'
+    expect(mockFinalizeWebAutoRun).toHaveBeenCalledWith({
+      runId: "run-multi",
+      status: "passed",
+      passedCount: 2,
+      failedCount: 0,
+      erroredCount: 0,
+    });
   });
 });

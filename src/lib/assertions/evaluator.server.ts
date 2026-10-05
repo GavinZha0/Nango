@@ -82,6 +82,8 @@ export function evaluateAssertions(
     if (norm._page && !runContext._page) {
       runContext._page = norm._page;
     }
+    // Prevent double unwrapping in downstream extractStructuredData
+    runContext.isWebAuto = false;
   }
 
   const mergedOptions: EvaluateAssertionsOptions = {
@@ -470,7 +472,7 @@ function resolveJsonPathScope(
 
 export function extractStructuredData(
   payload: unknown,
-  options?: { isWebAuto?: boolean },
+  _options?: { isWebAuto?: boolean },
 ): unknown {
   if (typeof payload !== "object" || payload === null) return payload;
 
@@ -529,11 +531,11 @@ export function extractStructuredData(
     return attachMeta(env.content);
   }
 
-  // 3. Web-Auto envelope: has `result` and either `_page` or explicitly marked as isWebAuto
+  // 3. Web-Auto envelope: has `result` and `_page`
   if (
     env.result !== undefined &&
     env.result !== null &&
-    ("_page" in env || Boolean(options?.isWebAuto))
+    "_page" in env
   ) {
     return attachMeta(env.result);
   }
@@ -544,6 +546,29 @@ export function extractStructuredData(
 
 // ── 2. JSON Schema Evaluation ────────────────────────────────────────────────
 
+// QUIRK: Ajv registers any schema with an $id into its shared internal registry.
+// When another schema instance with the same $id is compiled (e.g. repeated
+// syntax checks on save or repeat test case runs), Ajv throws "already exists".
+// We purge the root $id if present and fall back to an isolated Ajv instance if
+// nested definitions still collide.
+function compileJsonSchemaSafely(schema: object): ValidateFunction {
+  const rawId =
+    (schema as { $id?: unknown; id?: unknown })["$id"] ??
+    (schema as { id?: unknown })["id"];
+  if (typeof rawId === "string" && rawId) {
+    ajv.removeSchema(rawId);
+  }
+  try {
+    return ajv.compile(schema);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("already exists")) {
+      const isolatedAjv = new Ajv2020({ allErrors: true, strict: false });
+      return isolatedAjv.compile(schema);
+    }
+    throw err;
+  }
+}
+
 function evaluateJsonSchema(
   spec: JsonSchemaAssertion,
   payload: unknown,
@@ -552,7 +577,7 @@ function evaluateJsonSchema(
 ): AssertionResult {
   let validate: ValidateFunction;
   try {
-    validate = ajv.compile(spec.schema as object);
+    validate = compileJsonSchemaSafely(spec.schema as object);
   } catch (err) {
     return {
       index,
@@ -1254,7 +1279,13 @@ export function validateAssertionSyntax(spec: unknown): SyntaxValidationResult {
         return { ok: false, error: "Schema must be a JSON object" };
       }
       try {
-        ajv.compile(schema as object);
+        compileJsonSchemaSafely(schema as object);
+        const rawId =
+          (schema as { $id?: unknown; id?: unknown })["$id"] ??
+          (schema as { id?: unknown })["id"];
+        if (typeof rawId === "string" && rawId) {
+          ajv.removeSchema(rawId);
+        }
         return { ok: true };
       } catch (err) {
         return {

@@ -146,7 +146,21 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
         continue;
       }
 
-      const score = Math.max(1, Math.min(5, Math.round(scoreEntry.score)));
+      if (
+        typeof scoreEntry.score !== "number" ||
+        Number.isNaN(scoreEntry.score) ||
+        scoreEntry.score < 1 ||
+        scoreEntry.score > 5
+      ) {
+        baseResult.skipped = true;
+        baseResult.errored = true;
+        baseResult.reason = `Evaluator score ${scoreEntry.score} is invalid (expected integer between 1 and 5)`;
+        baseResult.message = `Evaluator score ${scoreEntry.score} out of valid range (1-5)`;
+        assertionResults.push(baseResult);
+        continue;
+      }
+
+      const score = Math.round(scoreEntry.score);
       const passed = score >= threshold;
 
       baseResult.score = score;
@@ -234,6 +248,8 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
       feedback = "One or more deterministic assertions errored during execution.";
     } else if (!evaluatorConfigured && assertions.some((s) => s.type === "llm_dim" || s.type === "llm_custom")) {
       feedback = "Case contains LLM assertions but no evaluator agent is configured.";
+    } else if (finalStatus === "errored") {
+      feedback = "One or more assertions errored during evaluation.";
     } else if (finalStatus === "passed") {
       feedback = "All assertion criteria satisfied.";
     } else if (finalStatus === "failed") {

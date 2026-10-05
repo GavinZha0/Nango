@@ -42,7 +42,7 @@ import {
   type DeterministicCheckInput,
 } from "./deterministic-checks";
 import { buildEvaluationBrief } from "./prompt-builder";
-import type { SubmitEvaluationScoresSuccess } from "./runtime-tools";
+import { submitEvaluationScoresSchema, type SubmitEvaluationScoresSuccess } from "./runtime-tools";
 import type { ToolCallSummary, ToolCallAbnormalDetail, ExecutionStats } from "./types";
 import { buildToolCallAggregates, type ToolEventRow } from "@/lib/runner/tool-call-aggregator";
 import { detectToolResultStatus, extractErrorMessage } from "@/lib/copilot/detect-tool-result-status";
@@ -119,6 +119,57 @@ function extractToolCallNames(events: EntityRunEventEntity[]): string[] {
     if (payload?.toolName) names.add(payload.toolName);
   }
   return [...names];
+}
+
+/** Extract detailed tool calls (with parsed arguments) from entity_run_event rows. */
+export function extractDetailedToolCalls(
+  events: EntityRunEventEntity[],
+): Array<{ name: string; args?: unknown }> {
+  // CONTRACT: Preserves invocation ordering and coalesces streamed tool_call_chunk args per toolCallId.
+  const buckets = new Map<string, { toolName: string; argsParts: string[]; parsedArgs?: unknown }>();
+  let anonymousCounter = 0;
+
+  for (const evt of events) {
+    if (evt.type !== "tool_call_chunk") continue;
+    const payload = evt.payload as {
+      toolCallId?: string;
+      toolName?: string;
+      args?: unknown;
+    } | null;
+
+    if (!payload?.toolName) continue;
+    const callId = payload.toolCallId || `anonymous_${anonymousCounter++}`;
+    let bucket = buckets.get(callId);
+    if (!bucket) {
+      bucket = { toolName: payload.toolName, argsParts: [] };
+      buckets.set(callId, bucket);
+    }
+
+    if (typeof payload.args === "string") {
+      bucket.argsParts.push(payload.args);
+    } else if (payload.args !== undefined && payload.args !== null) {
+      bucket.parsedArgs = payload.args;
+    }
+  }
+
+  const calls: Array<{ name: string; args?: unknown }> = [];
+  for (const bucket of buckets.values()) {
+    let args: unknown = bucket.parsedArgs;
+    if (args === undefined && bucket.argsParts.length > 0) {
+      const concatenated = bucket.argsParts.join("");
+      try {
+        args = JSON.parse(concatenated);
+      } catch {
+        args = concatenated;
+      }
+    }
+    calls.push({
+      name: bucket.toolName,
+      args,
+    });
+  }
+
+  return calls;
 }
 
 /**
@@ -292,7 +343,9 @@ function judgeAssertionsFromSpecs(
 function extractEvaluatorScores(
   events: EntityRunEventEntity[],
 ): SubmitEvaluationScoresSuccess | null {
-  for (const evt of events) {
+  // Traverse in reverse order to inspect the latest tool call first
+  for (let i = events.length - 1; i >= 0; i--) {
+    const evt = events[i];
     if (evt.type !== "tool_call_chunk") continue;
     const payload = evt.payload as {
       toolName?: string;
@@ -302,30 +355,20 @@ function extractEvaluatorScores(
     if (!payload.args) continue;
 
     try {
-      const args = JSON.parse(payload.args) as Record<string, unknown>;
-      if (typeof args.feedback !== "string") continue;
-
-      const itemScores: Array<{ index: number; score: number; reason: string }> = [];
-      if (Array.isArray(args.item_scores)) {
-        for (const item of args.item_scores) {
-          if (
-            typeof item === "object" && item !== null &&
-            typeof (item as { index?: unknown }).index === "number" &&
-            typeof (item as { score?: unknown }).score === "number"
-          ) {
-            itemScores.push({
-              index: (item as { index: number }).index,
-              score: (item as { score: number }).score,
-              reason: typeof (item as { reason?: unknown }).reason === "string" ? (item as { reason: string }).reason : "",
-            });
-          }
-        }
+      const parsedArgs = JSON.parse(payload.args);
+      const validation = submitEvaluationScoresSchema.safeParse(parsedArgs);
+      if (!validation.success) {
+        log.warn(
+          { event: "evaluator_scores_schema_validation_failed", error: validation.error.format() },
+          "evaluator submit_evaluation_scores payload failed schema validation",
+        );
+        continue;
       }
 
       return {
         ok: true,
-        item_scores: itemScores,
-        feedback: args.feedback,
+        item_scores: validation.data.item_scores,
+        feedback: validation.data.feedback,
       };
     } catch {
       continue;
@@ -517,6 +560,7 @@ export async function runEvalCase(
   const checkInput: DeterministicCheckInput = {
     agentText: finalTargetSummary,
     actualToolCalls,
+    toolCalls: extractDetailedToolCalls(allTargetEvents),
     metrics: { durationMs, outputChars, toolCallCount },
     variables: input.variables,
     toolCallSummary,

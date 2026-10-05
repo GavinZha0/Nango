@@ -163,4 +163,45 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
     expect(verdict.assertionResults[1].ok).toBe(false);
     expect(verdict.assertionResults[1].skipped).toBe(true);
   });
+
+  it("marks verdict and assertion as errored when LLM score exceeds 5 (e.g. 15)", () => {
+    const assertions: AssertionSpec[] = [
+      {
+        type: "llm_custom",
+        unexpectation: "Prohibited content",
+      },
+    ];
+
+    const verdict = determineCaseVerdict({
+      assertions,
+      deterministicResults: [],
+      llmScores: [{ index: 0, score: 15, reason: "Prohibited content appeared" }],
+      threshold: 3,
+    });
+
+    expect(verdict.status).toBe("errored");
+    expect(verdict.assertionResults).toHaveLength(1);
+    expect(verdict.assertionResults[0].ok).toBe(false);
+    expect(verdict.assertionResults[0].errored).toBe(true);
+    expect(verdict.assertionResults[0].reason).toContain("invalid");
+  });
+
+  it("marks verdict and assertion as errored when LLM score is below 1", () => {
+    const assertions: AssertionSpec[] = [
+      {
+        type: "llm_custom",
+        expectation: "Header exists",
+      },
+    ];
+
+    const verdict = determineCaseVerdict({
+      assertions,
+      deterministicResults: [],
+      llmScores: [{ index: 0, score: 0, reason: "Zero score" }],
+      threshold: 3,
+    });
+
+    expect(verdict.status).toBe("errored");
+    expect(verdict.assertionResults[0].errored).toBe(true);
+  });
 });

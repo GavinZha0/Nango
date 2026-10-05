@@ -191,6 +191,60 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[1].ok).toBe(false);
       expect(outcome.deterministicResults[1].message).toContain("missing_field");
     });
+
+    it("handles schemas with $id repeatedly without global Ajv collision", () => {
+      const payload = { code: 200, status: "ok" };
+      const schemaWithId = (id: string): AssertionSpec => ({
+        type: "json_schema",
+        schema: {
+          $id: id,
+          type: "object",
+          required: ["code", "status"],
+          properties: {
+            code: { type: "number" },
+            status: { type: "string" },
+          },
+        },
+      });
+
+      // Repeat evaluation with newly deserialized schema objects having the same $id
+      const schemaA = JSON.parse(
+        JSON.stringify(schemaWithId("https://example.com/status-schema.json")),
+      );
+      const schemaB = JSON.parse(
+        JSON.stringify(schemaWithId("https://example.com/status-schema.json")),
+      );
+
+      const outcome1 = evaluateAssertions(payload, [schemaA]);
+      expect(outcome1.allDeterministicPassed).toBe(true);
+
+      const outcome2 = evaluateAssertions(payload, [schemaB]);
+      expect(outcome2.allDeterministicPassed).toBe(true);
+      expect(outcome2.deterministicResults[0].errored).toBeUndefined();
+
+      // Schemas with nested definitions having $id
+      const nestedSchema: AssertionSpec = {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          $defs: {
+            item: {
+              $id: "https://example.com/nested-item.json",
+              type: "number",
+            },
+          },
+          properties: {
+            code: { $ref: "https://example.com/nested-item.json" },
+          },
+        },
+      };
+      const nestedA = JSON.parse(JSON.stringify(nestedSchema));
+      const nestedB = JSON.parse(JSON.stringify(nestedSchema));
+      const resNested1 = evaluateAssertions(payload, [nestedA]);
+      expect(resNested1.allDeterministicPassed).toBe(true);
+      const resNested2 = evaluateAssertions(payload, [nestedB]);
+      expect(resNested2.allDeterministicPassed).toBe(true);
+    });
   });
 
   describe("3. JS Expression assertions", () => {
@@ -730,6 +784,35 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       });
       expect(invalid.ok).toBe(false);
       expect(invalid.error).toContain("Invalid JSON Schema");
+    });
+
+    it("validates json_schema syntax with $id repeatedly without collision", () => {
+      const makeSchema = () => ({
+        type: "json_schema" as const,
+        schema: {
+          $id: "https://example.com/user-spec.json",
+          type: "object",
+          properties: { id: { type: "number" } },
+        },
+      });
+
+      // Call validateAssertionSyntax twice with separate object instances
+      const firstCheck = validateAssertionSyntax(makeSchema());
+      expect(firstCheck.ok).toBe(true);
+
+      const secondCheck = validateAssertionSyntax(makeSchema());
+      expect(secondCheck.ok).toBe(true);
+
+      // Verify that genuine errors with $id are still caught
+      const invalidWithId = validateAssertionSyntax({
+        type: "json_schema",
+        schema: {
+          $id: "https://example.com/invalid-spec.json",
+          type: "invalid_type_name",
+        },
+      });
+      expect(invalidWithId.ok).toBe(false);
+      expect(invalidWithId.error).toContain("Invalid JSON Schema");
     });
 
     it("validates jsonpath syntax", () => {

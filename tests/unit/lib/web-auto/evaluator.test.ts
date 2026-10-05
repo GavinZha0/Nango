@@ -143,4 +143,91 @@ describe("runWebAutoEvaluation", () => {
     expect(res.expectationResults[2].score).toBe(4);
     expect(res.expectationResults[2].reason).toBe("Matches reference text.");
   });
+
+  it("rejects score > 5 via schema validation and reports evaluator error", async () => {
+    mockRunnerStart.mockResolvedValue({ status: "succeeded", runId: "run-eval-invalid-score" });
+    mockReadEvents.mockResolvedValue([
+      {
+        type: "tool_call_chunk",
+        payload: {
+          toolName: "submit_evaluation_scores",
+          args: JSON.stringify({
+            item_scores: [{ index: 0, score: 15, reason: "Prohibited content appeared" }],
+            feedback: "Evaluation found forbidden elements",
+          }),
+        },
+      },
+    ]);
+
+    const res = await runWebAutoEvaluation({
+      evaluatorAgentId: "agent-1",
+      executionOutput: { ok: false },
+      expectations: [{ unexpectation: "Error toast" }],
+      ownerId: "user-1",
+    });
+
+    expect(res.passed).toBe(false);
+    expect(res.error).toBeDefined();
+    expect(res.error?.message).toContain("submit_evaluation_scores");
+  });
+
+  it("marks omitted check items with score 0 and flags evaluator error without guessing positions or defaulting to score 1", async () => {
+    mockRunnerStart.mockResolvedValueOnce({ status: "succeeded", runId: "run-eval-omitted" });
+    mockReadEvents.mockResolvedValueOnce([
+      {
+        type: "tool_call_chunk",
+        payload: {
+          toolName: "submit_evaluation_scores",
+          args: JSON.stringify({
+            item_scores: [{ index: 0, score: 5, reason: "Header is visible" }],
+            feedback: "Partial evaluation",
+          }),
+        },
+      },
+    ]);
+
+    const res = await runWebAutoEvaluation({
+      evaluatorAgentId: "agent-1",
+      executionOutput: { ok: true },
+      expectations: [
+        { expectation: "Header is visible" },
+        { expectation: "Footer is visible" },
+      ],
+      ownerId: "user-1",
+    });
+
+    expect(res.passed).toBe(false);
+    expect(res.error).toBeDefined();
+    expect(res.error?.message).toContain("Evaluator omitted score for check item 1");
+    expect(res.expectationResults).toHaveLength(2);
+    expect(res.expectationResults[0].score).toBe(5);
+    expect(res.expectationResults[1].score).toBe(0);
+  });
+});
+
+describe("buildWebAutoEvaluationPrompt", () => {
+  it("uses 1-5 Likert scale rubric and avoids legacy 0-100 scale thresholds", async () => {
+    const { buildWebAutoEvaluationPrompt } = await import("@/lib/web-auto/evaluator");
+    const prompt = buildWebAutoEvaluationPrompt(
+      { text: "sample output" },
+      [
+        { expectation: "Submit button is enabled" },
+        { unexpectation: "Error modal appeared" },
+        { reference: "Expected headline" },
+      ],
+    );
+
+    // Verify 1-5 Likert scale instructions
+    expect(prompt).toContain("score >= 3");
+    expect(prompt).toContain("score 1-2");
+    expect(prompt).toContain("score 4-5");
+    expect(prompt).toContain("1-5 Likert scale");
+
+    // Strictly ensure no legacy 0-100 scores exist
+    expect(prompt).not.toContain("score >= 60");
+    expect(prompt).not.toContain("score 0-15");
+    expect(prompt).not.toContain("score 0-20");
+    expect(prompt).not.toContain("score 90-100");
+    expect(prompt).not.toContain("score 70-100");
+  });
 });

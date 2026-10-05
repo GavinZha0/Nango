@@ -31,7 +31,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
   };
 });
 
-const { runEvalCase, analyzeToolCallEvents } = await import("@/lib/evaluation/eval-runner");
+const { runEvalCase, analyzeToolCallEvents, extractDetailedToolCalls } = await import("@/lib/evaluation/eval-runner");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -476,5 +476,177 @@ describe("runEvalCase — targetTimeoutSec override", () => {
 
     const result = await runEvalCase(makeInput());
     expect(result.status).toBe("passed");
+  });
+
+  it("extracts latest schema-valid evaluator scores and ignores invalid earlier calls", async () => {
+    mockRunnerStart.mockImplementation(async (opts: { entityId?: string }) => {
+      if (opts.entityId === "evaluator-1") {
+        return { status: "succeeded", runId: "run-evaluator-latest" };
+      }
+      return { status: "succeeded", runId: "run-target", summary: "Target response" };
+    });
+
+    // Provide two events: first has invalid score (15), second has corrected score (4)
+    mockReadEvents.mockImplementation(async (runId: string) => {
+      if (runId === "run-evaluator-latest") {
+        return [
+          {
+            type: "tool_call_chunk",
+            payload: {
+              toolName: "submit_evaluation_scores",
+              args: JSON.stringify({
+                item_scores: [{ index: 0, score: 15, reason: "Invalid score" }],
+                feedback: "Failed early",
+              }),
+            },
+          },
+          {
+            type: "tool_call_chunk",
+            payload: {
+              toolName: "submit_evaluation_scores",
+              args: JSON.stringify({
+                item_scores: [{ index: 0, score: 4, reason: "Valid Likert score" }],
+                feedback: "Corrected final evaluation",
+              }),
+            },
+          },
+        ];
+      }
+      return [];
+    });
+
+    const result = await runEvalCase({
+      ...makeInput({ evaluatorAgentId: "evaluator-1" }),
+      assertions: [{ type: "llm_dim", dim: "helpfulness" }],
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.feedback).toBe("Corrected final evaluation");
+    expect(result.assertionResults?.[0]?.score).toBe(4);
+  });
+
+  describe("extractDetailedToolCalls and tool_call.expectedArgs", () => {
+    it("extracts and parses tool calls with stringified or object args and coalesces chunks", () => {
+      const events: EntityRunEventEntity[] = [
+        {
+          runId: "run-target",
+          seq: 1,
+          type: "tool_call_chunk",
+          ts: new Date(),
+          payload: {
+            toolCallId: "call-1",
+            toolName: "search_knowledge_base",
+            args: '{"query": "re',
+          },
+        },
+        {
+          runId: "run-target",
+          seq: 2,
+          type: "tool_call_chunk",
+          ts: new Date(),
+          payload: {
+            toolCallId: "call-1",
+            toolName: "search_knowledge_base",
+            args: 'fund policy", "limit": 5}',
+          },
+        },
+        {
+          runId: "run-target",
+          seq: 3,
+          type: "tool_call_chunk",
+          ts: new Date(),
+          payload: {
+            toolCallId: "call-2",
+            toolName: "send_email",
+            args: { to: "user@example.com" },
+          },
+        },
+      ];
+
+      const calls = extractDetailedToolCalls(events);
+      expect(calls).toEqual([
+        {
+          name: "search_knowledge_base",
+          args: { query: "refund policy", limit: 5 },
+        },
+        {
+          name: "send_email",
+          args: { to: "user@example.com" },
+        },
+      ]);
+    });
+
+    it("passes tool_call assertion with expectedArgs when target agent emits matching arguments", async () => {
+      mockReadEvents.mockImplementation(async (runId: string) => {
+        if (runId === "run-target") {
+          return [
+            {
+              type: "tool_call_chunk",
+              ts: new Date(),
+              payload: {
+                toolCallId: "call-1",
+                toolName: "search_knowledge_base",
+                args: JSON.stringify({ query: "refund policy", limit: 10 }),
+              },
+            },
+          ];
+        }
+        return [];
+      });
+
+      const result = await runEvalCase({
+        ...makeInput(),
+        assertions: [
+          {
+            type: "tool_call",
+            toolName: "search_knowledge_base",
+            operator: "==",
+            expectedCalls: 1,
+            expectedArgs: { query: "refund policy" },
+          },
+        ],
+      });
+
+      expect(result.status).toBe("passed");
+      expect(result.assertionResults?.[0]?.ok).toBe(true);
+    });
+
+    it("fails tool_call assertion with expectedArgs when target agent emits mismatched arguments", async () => {
+      mockReadEvents.mockImplementation(async (runId: string) => {
+        if (runId === "run-target") {
+          return [
+            {
+              type: "tool_call_chunk",
+              ts: new Date(),
+              payload: {
+                toolCallId: "call-1",
+                toolName: "search_knowledge_base",
+                args: JSON.stringify({ query: "billing issue" }),
+              },
+            },
+          ];
+        }
+        return [];
+      });
+
+      const result = await runEvalCase({
+        ...makeInput(),
+        assertions: [
+          {
+            type: "tool_call",
+            toolName: "search_knowledge_base",
+            operator: "==",
+            expectedCalls: 1,
+            expectedArgs: { query: "refund policy" },
+          },
+        ],
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.assertionResults?.[0]?.ok).toBe(false);
+      expect(result.assertionResults?.[0]?.message).toContain(
+        "none of the invocations matched the expected arguments",
+      );
+    });
   });
 });

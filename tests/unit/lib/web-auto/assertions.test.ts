@@ -113,4 +113,67 @@ describe("evaluateAssertions for Web Auto payloads", () => {
     expect(outcome.deterministicResults).toHaveLength(7);
     expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
   });
+
+  it("never unwraps twice when script returns { success, result: {...} } under isWebAuto context", () => {
+    const output = {
+      result: {
+        success: true,
+        result: { token: "secret-token-123", expiresIn: 3600 },
+      },
+      _page: { url: "https://example.com/login", title: "Login Page" },
+    };
+
+    const assertions: AssertionSpec[] = [
+      // Top-level business properties must not be stripped
+      { type: "js_expression", expression: "result.success === true" },
+      { type: "js_expression", expression: "success === true" },
+      { type: "js_expression", expression: "result.result.token === 'secret-token-123'" },
+      { type: "js_expression", expression: "root._page.url === 'https://example.com/login'" },
+      // JSONPath assertions
+      { type: "jsonpath", path: "result.success", expected: true },
+      { type: "jsonpath", path: "success", expected: true },
+      { type: "jsonpath", path: "result.result.token", expected: "secret-token-123" },
+      { type: "jsonpath", path: "$._page.url", expected: "https://example.com/login" },
+    ];
+
+    const outcome = evaluateAssertions(output, assertions, {
+      runContext: { isWebAuto: true },
+    });
+
+    expect(outcome.allDeterministicPassed).toBe(true);
+    expect(outcome.deterministicResults).toHaveLength(8);
+    expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
+  });
+
+  it("evaluates assertions accurately on standard news extraction payload", () => {
+    const output = {
+      result: {
+        newsTitle: "飞机在百慕大失事 美停止搜救",
+        fullTitle: "美停止搜救坠毁医疗飞机，机上6人据推定已全部遇难",
+        newsUrl: "https://www.163.com/dy/article/L8FJLCOB0534A4SC.html",
+        screenshot: "aviation_news_screenshot.png",
+      },
+      _page: {
+        url: "https://www.163.com/dy/article/L8FJLCOB0534A4SC.html",
+        title: "美停止搜救坠毁医疗飞机，机上6人据推定已全部遇难|海岸警卫队|越南籍船舶_网易订阅",
+        console: "0 errors, 7 warnings",
+      },
+    };
+
+    const assertions: AssertionSpec[] = [
+      { type: "js_expression", expression: "result.newsTitle.includes('飞机')" },
+      { type: "js_expression", expression: "newsTitle.includes('飞机')" },
+      { type: "js_expression", expression: "root._page.url.includes('163.com')" },
+      { type: "jsonpath", path: "newsTitle", expected: "飞机在百慕大失事 美停止搜救" },
+      { type: "jsonpath", path: "$._page.console", expected: "0 errors, 7 warnings" },
+    ];
+
+    const outcome = evaluateAssertions(output, assertions, {
+      runContext: { isWebAuto: true },
+    });
+
+    expect(outcome.allDeterministicPassed).toBe(true);
+    expect(outcome.deterministicResults).toHaveLength(5);
+    expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
+  });
 });

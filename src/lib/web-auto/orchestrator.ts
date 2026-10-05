@@ -426,14 +426,20 @@ export async function runWebAutoCase(
     sensitiveValues,
   );
 
-  const llmScoresForVerdict = llmResult?.expectationResults?.map((r, i) => {
-    const originalIndex = outcome.llmAssertions[i]?.index ?? r.index;
-    return {
-      index: originalIndex,
-      score: r.score,
-      reason: r.reason ? redactSensitiveData(r.reason, sensitiveValues) : undefined,
-    };
-  });
+  const llmScoresForVerdict: Array<{ index: number; score: number; reason?: string }> = [];
+  if (llmResult?.expectationResults) {
+    for (let i = 0; i < llmResult.expectationResults.length; i++) {
+      const r = llmResult.expectationResults[i];
+      if (r.score >= 1) {
+        const originalIndex = outcome.llmAssertions[i]?.index ?? r.index;
+        llmScoresForVerdict.push({
+          index: originalIndex,
+          score: r.score,
+          reason: r.reason ? redactSensitiveData(r.reason, sensitiveValues) : undefined,
+        });
+      }
+    }
+  }
 
   const caseVerdict = determineCaseVerdict({
     assertions,
@@ -448,11 +454,15 @@ export async function runWebAutoCase(
   const unifiedAssertionResults = caseVerdict.assertionResults;
   const status = caseVerdict.status;
   const statusReason = caseVerdict.feedback ?? "Execution completed";
-  const statusError: ErrorEnvelope | null = status === "errored" ? {
-    source: "config",
-    message: statusReason,
-    details: { missing: "evaluatorAgentId", suiteId: input.suiteId },
-  } : null;
+  const statusError: ErrorEnvelope | null = status === "errored"
+    ? (llmResult?.error ?? {
+        source: !evaluatorConfigured ? "config" : "internal",
+        message: statusReason,
+        details: !evaluatorConfigured
+          ? { missing: "evaluatorAgentId", suiteId: input.suiteId }
+          : undefined,
+      })
+    : null;
 
   const verdict: WebAutoVerdict = {
     deterministic: {
@@ -617,8 +627,6 @@ async function runWebAutoSuiteCases(
   input: ExecuteWebAutoSuiteLoopInput,
   counters: LoopCounters,
 ): Promise<void> {
-  const suiteStartedAt: number = Date.now();
-  const timeoutMs: number = input.suite.timeoutSec * 1000;
   const suiteContext: Record<string, unknown> = {};
 
   // Resolve suite variables once for the entire suite run (aligns with
@@ -643,24 +651,6 @@ async function runWebAutoSuiteCases(
   }
 
   for (const c of input.cases) {
-    // Wall-clock timeout check
-    const elapsed: number = Date.now() - suiteStartedAt;
-    if (elapsed > timeoutMs) {
-      // Skip remaining cases due to timeout
-      await persistAndPublishError({
-        ownerId: input.ownerId,
-        runId: input.runId,
-        caseId: c.id,
-        error: {
-          source: "timeout",
-          message: "Suite timeout exceeded",
-          details: { elapsedMs: elapsed },
-        },
-      });
-      counters.erroredCount += 1;
-      continue;
-    }
-
     // Execute case with pre-resolved variables and suite context
     const outcome = await runWebAutoCase({
       caseId: c.id,
