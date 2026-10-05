@@ -42,7 +42,11 @@ import {
   type DeterministicCheckInput,
 } from "./deterministic-checks";
 import { buildEvaluationBrief } from "./prompt-builder";
-import { submitEvaluationScoresSchema, type SubmitEvaluationScoresSuccess } from "./runtime-tools";
+import {
+  executeJudge,
+  withStepTimeout,
+} from "./judge.server";
+export { extractEvaluatorScores } from "./judge.server";
 import type { ToolCallSummary, ToolCallAbnormalDetail, ExecutionStats } from "./types";
 import { buildToolCallAggregates, type ToolEventRow } from "@/lib/runner/tool-call-aggregator";
 import { detectToolResultStatus, extractErrorMessage } from "@/lib/copilot/detect-tool-result-status";
@@ -305,26 +309,6 @@ function cancelledResult(
   return { status: "errored", error: EVAL_CANCELLED_MESSAGE, ...extra };
 }
 
-/** Timeout wrapper for runner.start dispatches. */
-async function withStepTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  stepName: string,
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${stepName} timed out after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 /** Scan raw specs for judge-dependent items. */
 function judgeAssertionsFromSpecs(
   assertions: readonly AssertionSpec[],
@@ -337,44 +321,6 @@ function judgeAssertionsFromSpecs(
     }
   }
   return out;
-}
-
-/** Parse the evaluator's submit_evaluation_scores tool call from entity_run_event. */
-function extractEvaluatorScores(
-  events: EntityRunEventEntity[],
-): SubmitEvaluationScoresSuccess | null {
-  // Traverse in reverse order to inspect the latest tool call first
-  for (let i = events.length - 1; i >= 0; i--) {
-    const evt = events[i];
-    if (evt.type !== "tool_call_chunk") continue;
-    const payload = evt.payload as {
-      toolName?: string;
-      args?: string;
-    } | null;
-    if (payload?.toolName !== "submit_evaluation_scores") continue;
-    if (!payload.args) continue;
-
-    try {
-      const parsedArgs = JSON.parse(payload.args);
-      const validation = submitEvaluationScoresSchema.safeParse(parsedArgs);
-      if (!validation.success) {
-        log.warn(
-          { event: "evaluator_scores_schema_validation_failed", error: validation.error.format() },
-          "evaluator submit_evaluation_scores payload failed schema validation",
-        );
-        continue;
-      }
-
-      return {
-        ok: true,
-        item_scores: validation.data.item_scores,
-        feedback: validation.data.feedback,
-      };
-    } catch {
-      continue;
-    }
-  }
-  return null;
 }
 
 /**
@@ -682,58 +628,23 @@ export async function runEvalCase(
     toolCallSummary,
   });
 
-  // ── ④ Dispatch evaluator agent (with retry) ──────────────────
+  // ── ④ Dispatch evaluator agent via unified judge runner ─────
 
-  let evaluatorResult;
-  let scores: SubmitEvaluationScoresSuccess | null = null;
-  let retries = 0;
-  let lastError = "";
+  const judgeResult = await executeJudge({
+    evaluatorAgentId: input.evaluatorAgentId,
+    taskPrompt: brief,
+    ownerId: input.ownerId,
+    timeoutMs: evaluatorTimeoutMs,
+    signal: input.signal,
+    logMeta: { runId: input.runId, caseId: input.caseId },
+  });
 
-  while (retries < 2) {
-    if (retries > 0 && input.signal?.aborted) {
-      return cancelledResult({ threadId: currentThreadId, executionStats, toolCallSummary });
-    }
-    let currentTask = brief;
-    if (retries > 0) {
-      currentTask += "\n\nSYSTEM WARNING: In your previous attempt, you failed to use the `submit_evaluation_scores` tool. You MUST use the tool to submit your scores. Do NOT output plain text.";
-    }
-
-    try {
-      evaluatorResult = await withStepTimeout(
-        runner.start({
-          entityId: input.evaluatorAgentId,
-          task: currentTask,
-          mode: "sync",
-          initiator: "evaluator",
-          ownerId: input.ownerId,
-          createdBy: input.ownerId,
-        }),
-        evaluatorTimeoutMs,
-        "Evaluator agent",
-      );
-
-      const evaluatorEvents = await readEvents(evaluatorResult.runId);
-      scores = extractEvaluatorScores(evaluatorEvents);
-
-      if (scores) {
-        break; // Success!
-      } else {
-        lastError = "Evaluator did not call submit_evaluation_scores";
-        log.warn(
-          { event: "evaluator_retry", runId: input.runId, caseId: input.caseId, attempt: retries + 1 },
-          lastError,
-        );
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      log.error(
-        { event: "evaluator_dispatch_failed", runId: input.runId, caseId: input.caseId, err: lastError, attempt: retries + 1 },
-        "evaluator agent dispatch failed",
-      );
-    }
-
-    retries++;
+  if (judgeResult.cancelled) {
+    return cancelledResult({ threadId: currentThreadId, executionStats, toolCallSummary });
   }
+
+  const scores = judgeResult.scores;
+  const lastError = judgeResult.error;
 
   // ── ⑤ Compute final verdict via unified verdict engine ────────
 
@@ -755,7 +666,7 @@ export async function runEvalCase(
       assertionResults: verdict.assertionResults,
       feedback: verdict.feedback,
       threadId: currentThreadId,
-      evaluatorThreadId: evaluatorResult?.runId ?? null,
+      evaluatorThreadId: judgeResult.evaluatorRunId ?? null,
       executionStats,
       toolCallSummary,
     });

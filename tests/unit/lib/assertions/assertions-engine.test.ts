@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   evaluateAssertions,
+  normalizeTargetEnvelope,
   resolveInput,
   substituteInputTemplates,
   normalizeCaseName,
@@ -1087,6 +1088,68 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults).toHaveLength(6);
     });
 
+    it("evaluates assertions with caller-supplied explicit { target, root, page } envelope", () => {
+      const explicitEnvelope = {
+        target: {
+          orderId: "ORD-999",
+          status: "confirmed",
+          success: true,
+          result: { innerToken: "tok-abc" },
+        },
+        root: {
+          result: { orderId: "ORD-999", status: "confirmed", success: true, result: { innerToken: "tok-abc" } },
+          _page: { url: "https://shop.example.com/checkout", title: "Order Confirmed" },
+        },
+        page: { url: "https://shop.example.com/checkout", title: "Order Confirmed" },
+      };
+
+      const assertions: AssertionSpec[] = [
+        // Target business fields (direct and via result.)
+        { type: "jsonpath", path: "orderId", expected: "ORD-999" },
+        { type: "jsonpath", path: "result.orderId", expected: "ORD-999" },
+        { type: "jsonpath", path: "result.result.innerToken", expected: "tok-abc" },
+        // Outer envelope fields via root and $
+        { type: "jsonpath", path: "root._page.url", expected: "https://shop.example.com/checkout" },
+        { type: "jsonpath", path: "$._page.title", expected: "Order Confirmed" },
+        // JS expressions
+        {
+          type: "js_expression",
+          expression: "orderId === 'ORD-999' && result.success === true && result.result.innerToken === 'tok-abc'",
+        },
+        {
+          type: "js_expression",
+          expression: "root._page.url === 'https://shop.example.com/checkout' && $._page.title === 'Order Confirmed'",
+        },
+      ];
+
+      const outcome = evaluateAssertions(explicitEnvelope, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(7);
+      expect(outcome.deterministicResults.every((r) => r.ok)).toBe(true);
+    });
+
+    it("evaluates assertions with options.root and options.page", () => {
+      const target = { count: 123, ready: true };
+      const root = {
+        result: target,
+        _page: { url: "https://example.com/status" },
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "count", expected: 123 },
+        { type: "jsonpath", path: "root._page.url", expected: "https://example.com/status" },
+        { type: "js_expression", expression: "count === 123 && $._page.url === 'https://example.com/status'" },
+      ];
+
+      const outcome = evaluateAssertions(target, assertions, {
+        root,
+        page: root._page,
+      });
+
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults).toHaveLength(3);
+    });
+
     it("does not demangle non-envelope objects containing result property", () => {
       // Direct business JSON without _page or content: should NOT be unwrapped!
       const plainBusinessPayload = {
@@ -1312,6 +1375,96 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
         expected: "[unclosed-group",
       });
       expect(invalidRegex.ok).toBe(false);
+    });
+  });
+
+  describe("8. normalizeTargetEnvelope fallback paths and explicit target/page addressing", () => {
+    it("handles explicit { target, root, page } envelope directly", () => {
+      const envelope = {
+        target: { orderId: "123", status: "completed" },
+        root: { result: { orderId: "123" }, _page: { url: "https://test.com" } },
+        page: { url: "https://test.com" },
+      };
+      const normalized = normalizeTargetEnvelope(envelope);
+      expect(normalized.target).toEqual({ orderId: "123", status: "completed" });
+      expect(normalized.root).toBe(envelope.root);
+      expect(normalized.page).toEqual({ url: "https://test.com" });
+    });
+
+    it("extracts root and page from options when target is passed directly", () => {
+      const target = { orderId: "123" };
+      const options = {
+        root: { result: target, _page: { url: "https://example.com" } },
+        page: { url: "https://example.com" },
+      };
+      const normalized = normalizeTargetEnvelope(target, options);
+      expect(normalized.target).toBe(target);
+      expect(normalized.root).toBe(options.root);
+      expect(normalized.page).toEqual({ url: "https://example.com" });
+    });
+
+    it("falls back to runContext.root and runContext._page when options root/page are absent", () => {
+      const target = { orderId: "456" };
+      const options = {
+        runContext: {
+          root: { result: target, _page: { title: "Checkout" } },
+          _page: { title: "Checkout" },
+        },
+      };
+      const normalized = normalizeTargetEnvelope(target, options);
+      expect(normalized.target).toBe(target);
+      expect(normalized.root).toEqual({ result: target, _page: { title: "Checkout" } });
+      expect(normalized.page).toEqual({ title: "Checkout" });
+    });
+
+    it("unwraps legacy Web Auto envelope { result, _page } seamlessly", () => {
+      const legacyPayload = {
+        result: { newsTitle: "Breaking News", count: 42 },
+        _page: { url: "https://news.example.com", title: "News Portal" },
+      };
+      const normalized = normalizeTargetEnvelope(legacyPayload);
+      expect(normalized.target).toEqual({ newsTitle: "Breaking News", count: 42 });
+      expect(normalized.root).toBe(legacyPayload);
+      expect(normalized.page).toEqual({ url: "https://news.example.com", title: "News Portal" });
+    });
+
+    it("falls back to payload as both target and root for primitives or plain objects", () => {
+      const plain = { name: "Alice", age: 30 };
+      const normalized = normalizeTargetEnvelope(plain);
+      expect(normalized.target).toBe(plain);
+      expect(normalized.root).toBe(plain);
+      expect(normalized.page).toBeUndefined();
+
+      const primitive = "string-result";
+      const normPrim = normalizeTargetEnvelope(primitive);
+      expect(normPrim.target).toBe("string-result");
+      expect(normPrim.root).toBe("string-result");
+      expect(normPrim.page).toBeUndefined();
+    });
+
+    it("resolves target.*, result.*, page.*, and _page.* correctly in JSONPath assertions", () => {
+      const payload = {
+        target: { orderId: "ORD-999", amount: 150 },
+        root: {
+          result: { orderId: "ORD-999", amount: 150 },
+          _page: { url: "https://shop.example.com/order/999", title: "Order Confirmation" },
+        },
+        page: { url: "https://shop.example.com/order/999", title: "Order Confirmation" },
+      };
+
+      const assertions: AssertionSpec[] = [
+        { type: "jsonpath", path: "target.orderId", operator: "==", expected: "ORD-999" },
+        { type: "jsonpath", path: "result.amount", operator: "==", expected: 150 },
+        { type: "jsonpath", path: "page.title", operator: "==", expected: "Order Confirmation" },
+        { type: "jsonpath", path: "_page.url", operator: "==", expected: "https://shop.example.com/order/999" },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[2].ok).toBe(true);
+      expect(outcome.deterministicResults[3].ok).toBe(true);
     });
   });
 });

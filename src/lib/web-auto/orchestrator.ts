@@ -320,17 +320,38 @@ export async function runWebAutoCase(
   // Step 5: Evaluate assertions using universal engine
   // Pass literalVariables ONLY so credentials never leak into assertion error diffs or LLM evaluators
   const outputChars = formatWebAutoOutputForDisplay(sanitizedOutput).length;
-  const outcome = evaluateAssertions(sanitizedOutput, assertions, {
-    variables: literalVariables,
-    metrics: {
-      durationMs: mcpResult.durationMs,
-      outputChars,
+  const isEnveloped =
+    typeof sanitizedOutput === "object" &&
+    sanitizedOutput !== null &&
+    "result" in sanitizedOutput;
+  const target = isEnveloped
+    ? (sanitizedOutput as { result: unknown }).result
+    : sanitizedOutput;
+  const page =
+    typeof sanitizedOutput === "object" &&
+    sanitizedOutput !== null &&
+    "_page" in sanitizedOutput
+      ? (sanitizedOutput as { _page?: unknown })._page
+      : undefined;
+
+  const outcome = evaluateAssertions(
+    {
+      target,
+      root: sanitizedOutput,
+      page,
     },
-    runContext: {
-      cases: input.suiteContext ?? {},
-      isWebAuto: true,
+    assertions,
+    {
+      variables: literalVariables,
+      metrics: {
+        durationMs: mcpResult.durationMs,
+        outputChars,
+      },
+      runContext: {
+        cases: input.suiteContext ?? {},
+      },
     },
-  });
+  );
 
   const deterministicResult = {
     passed: outcome.allDeterministicPassed,

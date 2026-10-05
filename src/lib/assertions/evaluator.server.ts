@@ -35,10 +35,24 @@ const ajv: Ajv2020 = new Ajv2020({ allErrors: true, strict: false });
 
 const JS_EXPRESSION_TIMEOUT_MS = 250;
 
+/**
+ * Explicit target envelope structure. Callers may pass this directly as
+ * the first argument to `evaluateAssertions`, cleanly distinguishing the
+ * business output (`target`), the full envelope (`root` / `$`), and
+ * optional environment/browser metadata (`page`).
+ */
+export interface AssertionTargetEnvelope {
+  target: unknown;
+  root?: unknown;
+  page?: unknown;
+}
+
 export interface EvaluateAssertionsOptions {
   input?: unknown;
   variables?: Record<string, unknown>;
   runContext?: Record<string, unknown>;
+  root?: unknown;
+  page?: unknown;
   toolCalls?: Array<{ name: string; args?: unknown }>;
   actualToolCallNames?: string[];
   metrics?: {
@@ -56,6 +70,77 @@ export interface EvaluationOutcome {
 }
 
 /**
+ * Normalizes input payload and options into explicit `{ target, root, page }` bindings.
+ *
+ * CONTRACT:
+ * - `target`: The inner business data payload targeted by default field queries, `result`, and `json_schema`.
+ * - `root`: The full outer envelope accessible via `$` and `root`.
+ * - `page`: Page execution metadata (e.g. url, title, console) accessible via `root._page` or `$._page`.
+ *
+ * Eliminates heuristic guessing of caller frameworks (such as Web Auto).
+ */
+export function normalizeTargetEnvelope(
+  payload: unknown,
+  options?: EvaluateAssertionsOptions,
+): { target: unknown; root: unknown; page?: unknown } {
+  // 1. Explicit target envelope: { target, root?, page? }
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "target" in payload &&
+    ("root" in payload || "page" in payload)
+  ) {
+    const env = payload as { target: unknown; root?: unknown; page?: unknown };
+    const target = env.target !== undefined ? env.target : env.root;
+    return {
+      target,
+      root: env.root ?? target,
+      page: env.page,
+    };
+  }
+
+  // 2. Explicit root / page in options
+  if (options?.root !== undefined || options?.page !== undefined) {
+    return {
+      target: payload,
+      root: options.root ?? payload,
+      page: options.page,
+    };
+  }
+
+  // 3. Fallback for runContext.root / runContext._page
+  if (options?.runContext?.root !== undefined || options?.runContext?._page !== undefined) {
+    return {
+      target: payload,
+      root: options.runContext.root ?? payload,
+      page: options.runContext._page,
+    };
+  }
+
+  // 4. Legacy envelope shape with `result` and `_page` (for backwards compatibility)
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "result" in payload &&
+    "_page" in payload
+  ) {
+    const norm = payload as { result: unknown; _page?: unknown };
+    return {
+      target: norm.result,
+      root: payload,
+      page: norm._page,
+    };
+  }
+
+  // 5. Default: payload is both target and root
+  return {
+    target: payload,
+    root: payload,
+    page: undefined,
+  };
+}
+
+/**
  * Execute all assertions against the given target payload and execution context.
  */
 export function evaluateAssertions(
@@ -63,28 +148,14 @@ export function evaluateAssertions(
   assertions: readonly AssertionSpec[],
   options: EvaluateAssertionsOptions = {},
 ): EvaluationOutcome {
-  let targetPayload = payload;
-  const runContext: Record<string, unknown> = { ...(options.runContext ?? {}) };
-  if (!runContext.root) {
-    runContext.root = payload;
-  }
+  const { target: targetPayload, root: rootEnvelope, page: pageData } =
+    normalizeTargetEnvelope(payload, options);
 
-  const isWebAutoEnvelope =
-    typeof payload === "object" &&
-    payload !== null &&
-    "result" in payload &&
-    !("content" in payload) &&
-    ("_page" in payload || Boolean(options.runContext?.isWebAuto));
-
-  if (isWebAutoEnvelope) {
-    const norm = payload as { result?: unknown; _page?: unknown };
-    targetPayload = norm.result;
-    if (norm._page && !runContext._page) {
-      runContext._page = norm._page;
-    }
-    // Prevent double unwrapping in downstream extractStructuredData
-    runContext.isWebAuto = false;
-  }
+  const runContext: Record<string, unknown> = {
+    root: rootEnvelope,
+    ...(pageData ? { _page: pageData } : {}),
+    ...(options.runContext ?? {}),
+  };
 
   const mergedOptions: EvaluateAssertionsOptions = {
     ...options,
@@ -151,7 +222,7 @@ function evaluateSingleDeterministic(
     case "jsonpath":
       return evaluateJsonPath(spec as JsonPathAssertion, payload, index, options);
     case "json_schema":
-      return evaluateJsonSchema(spec as JsonSchemaAssertion, payload, index, options);
+      return evaluateJsonSchema(spec as JsonSchemaAssertion, payload, index);
     case "js_expression":
       return evaluateJsExpression(spec as JsExpressionAssertion, payload, index, options);
     case "tool_call":
@@ -188,8 +259,7 @@ function evaluateJsonPath(
   };
   const expected = substituteInputTemplates(spec.expected, options.input, mergedContext);
   const rootEnvelope = options.runContext?.root ?? payload;
-  const isWebAuto = Boolean(options.runContext?.isWebAuto || (payload && typeof payload === "object" && "_page" in payload));
-  const { json, absolutePath } = resolveJsonPathScope(spec.path, payload, rootEnvelope, { isWebAuto });
+  const { json, absolutePath } = resolveJsonPathScope(spec.path, payload, rootEnvelope);
 
   // If path contains [*], evaluate wildcard "every" semantics preserving original array indices
   if (absolutePath.includes("[*]")) {
@@ -431,7 +501,6 @@ function resolveJsonPathScope(
   rawPath: string,
   payload: unknown,
   rootEnvelope?: unknown,
-  options?: { isWebAuto?: boolean },
 ): { json: unknown; absolutePath: string } {
   const root = rootEnvelope ?? payload;
   const trimmed = rawPath.trim();
@@ -448,15 +517,41 @@ function resolveJsonPathScope(
     return { json: root, absolutePath };
   }
 
-  // 2. Extract structured business data
-  const structured = extractStructuredData(payload, options);
+  // Page metadata addressing: starts with 'page.' or '_page.'
+  if (trimmed.startsWith("page.") || trimmed.startsWith("page[")) {
+    const subPath = trimmed.startsWith("page.")
+      ? trimmed.slice(5)
+      : trimmed.slice(4);
+    const hasPageProp =
+      typeof root === "object" && root !== null && "page" in root;
+    const prefix = hasPageProp ? "$.page" : "$._page";
+    const absolutePath = subPath.startsWith("[") ? `${prefix}${subPath}` : `${prefix}.${subPath}`;
+    return { json: root, absolutePath };
+  }
+  if (trimmed.startsWith("_page.") || trimmed.startsWith("_page[")) {
+    const subPath = trimmed.startsWith("_page.")
+      ? trimmed.slice(6)
+      : trimmed.slice(5);
+    const absolutePath = subPath.startsWith("[") ? `$._page${subPath}` : `$._page.${subPath}`;
+    return { json: root, absolutePath };
+  }
 
-  // 3. Whole structured result matching: exact 'result'
-  if (trimmed === "result") {
+  // 2. Extract structured business data
+  const structured = extractStructuredData(payload);
+
+  // 3. Whole structured result matching: exact 'result' or 'target'
+  if (trimmed === "result" || trimmed === "target") {
     return { json: structured, absolutePath: "$" };
   }
 
-  // 4. Structured business data child property: starts with 'result.' or 'result['
+  // 4. Structured business data child property: starts with 'target.', 'target[', 'result.', or 'result['
+  if (trimmed.startsWith("target.") || trimmed.startsWith("target[")) {
+    const subPath = trimmed.startsWith("target.")
+      ? trimmed.slice(7)
+      : trimmed.slice(6);
+    const absolutePath = subPath.startsWith("[") ? `$${subPath}` : `$.${subPath}`;
+    return { json: structured, absolutePath };
+  }
   if (trimmed.startsWith("result.") || trimmed.startsWith("result[")) {
     const subPath = trimmed.startsWith("result.")
       ? trimmed.slice(7)
@@ -470,17 +565,17 @@ function resolveJsonPathScope(
   return { json: structured, absolutePath };
 }
 
-export function extractStructuredData(
-  payload: unknown,
-  _options?: { isWebAuto?: boolean },
-): unknown {
+/**
+ * Unwraps MCP CallToolResult structured outputs (structuredContent or text content block).
+ * Non-MCP payloads are returned as-is (with _meta preserved).
+ * Note: Envelope normalization (target / root / page) is handled up-front by normalizeTargetEnvelope.
+ */
+export function extractStructuredData(payload: unknown): unknown {
   if (typeof payload !== "object" || payload === null) return payload;
 
   const env = payload as {
     content?: unknown;
     structuredContent?: unknown;
-    result?: unknown;
-    _page?: unknown;
     _meta?: unknown;
   };
 
@@ -531,16 +626,7 @@ export function extractStructuredData(
     return attachMeta(env.content);
   }
 
-  // 3. Web-Auto envelope: has `result` and `_page`
-  if (
-    env.result !== undefined &&
-    env.result !== null &&
-    "_page" in env
-  ) {
-    return attachMeta(env.result);
-  }
-
-  // 4. Otherwise, payload is already structured business data (never unwrap a standalone `result` field!)
+  // 3. Otherwise, payload is already structured business data (never unwrap a standalone `result` field!)
   return attachMeta(payload);
 }
 
@@ -573,7 +659,6 @@ function evaluateJsonSchema(
   spec: JsonSchemaAssertion,
   payload: unknown,
   index: number,
-  options?: EvaluateAssertionsOptions,
 ): AssertionResult {
   let validate: ValidateFunction;
   try {
@@ -589,11 +674,7 @@ function evaluateJsonSchema(
     };
   }
 
-  const isWebAuto = Boolean(
-    options?.runContext?.isWebAuto ||
-      (payload && typeof payload === "object" && "_page" in payload),
-  );
-  const target = extractStructuredData(payload, { isWebAuto });
+  const target = extractStructuredData(payload);
   const ok = validate(target);
   if (ok) {
     return { index, type: "json_schema", ok: true };
@@ -625,11 +706,7 @@ function evaluateJsExpression(
   options: EvaluateAssertionsOptions,
 ): AssertionResult {
   try {
-    const isWebAuto = Boolean(
-      options.runContext?.isWebAuto ||
-        (payload && typeof payload === "object" && "_page" in payload),
-    );
-    const structured = extractStructuredData(payload, { isWebAuto });
+    const structured = extractStructuredData(payload);
     const flat = sanitizeForSandbox(structured) as Record<string, unknown> | null;
     const input =
       (sanitizeForSandbox(options.input ?? {}) as Record<string, unknown>) ?? {};

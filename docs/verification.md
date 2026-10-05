@@ -256,6 +256,29 @@ Assertions are pre-checked for semantic syntax at save time (`POST /api/verifica
 
 Any syntax errors trigger an immediate HTTP 400 Bad Request at save time, surfacing instant feedback in the UI editor before test execution.
 
+### 5.2 Universal Assertion Envelope (`AssertionTargetEnvelope`)
+
+The assertion engine (`src/lib/assertions/evaluator.server.ts`) operates on a unified target envelope to eliminate output shape guessing and cross-subsystem drift:
+
+```typescript
+export interface AssertionTargetEnvelope {
+  target: unknown;       // Default assertion target: inner business payload (e.g. MCP tool structuredContent or script return)
+  root?: unknown;        // Complete outer envelope: contains full output, _page metadata, etc.
+  page?: Record<string, unknown> | null; // Web page metadata (url, title, console logs) for browser test suites
+}
+```
+
+**Caller & Scope Binding Contract**:
+1. **Direct Unwrapped Target**: Callers (such as Web Auto orchestrator) unwrap script output and pass `{ target, root, page }` explicitly to `evaluateAssertions`.
+2. **Backward Compatibility**: `normalizeTargetEnvelope(payload, options)` automatically normalizes legacy `{ result, _page }` structures, `options.root`, and `options.page` without mutating inputs or setting global flags.
+3. **JSONPath Addressing**:
+   - `target.prop` or `result.prop` (or direct `prop`): evaluates against `target` business data.
+   - `page.prop` or `_page.prop`: evaluates against `page` metadata.
+   - `root.prop` or `$.prop`: evaluates against the outer envelope `root`.
+4. **JS Expression Sandbox**:
+   - The VM context exposes `target`, `result` (alias to `target`), `root`, `page`, and `_page`.
+   - Host functions and circular handles (e.g. Playwright page handles) are stripped before entering `node:vm` via `sanitizeForSandbox`.
+
 ---
 
 ## 6. Execution Modes & Orchestration

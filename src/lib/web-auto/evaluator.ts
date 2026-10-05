@@ -10,15 +10,8 @@
 
 import "server-only";
 
-import { runner } from "@/lib/runner";
-import { readEvents } from "@/lib/runner/event-store";
-import { childLogger } from "@/lib/observability/logger";
-import type { EntityRunEventEntity } from "@/lib/db/schema";
-
 import type { ErrorEnvelope } from "@/lib/verification/types";
-import { submitEvaluationScoresSchema, type SubmitEvaluationScoresSuccess } from "@/lib/evaluation/runtime-tools";
-
-const log = childLogger({ component: "web-auto-evaluator" });
+import { executeJudge, isLikertScoreValid } from "@/lib/evaluation/judge.server";
 
 // ─── Input / Output ─────────────────────────────────────────────────
 
@@ -39,6 +32,10 @@ export interface RunWebAutoEvaluationInput {
   expectations: WebAutoExpectationItem[];
   /** Session user ID for runner dispatch */
   ownerId: string;
+  /** Optional cancellation signal */
+  signal?: AbortSignal;
+  /** Optional evaluator turn timeout in milliseconds */
+  timeoutMs?: number;
 }
 
 export interface WebAutoExpectationResult {
@@ -137,46 +134,6 @@ export function buildWebAutoEvaluationPrompt(
   return sections.join("\n\n---\n\n");
 }
 
-/**
- * Extract evaluator scores from entity_run_event.
- */
-function extractEvaluatorScores(
-  events: EntityRunEventEntity[],
-): SubmitEvaluationScoresSuccess | null {
-  // Traverse in reverse order to inspect the latest tool call first
-  for (let i = events.length - 1; i >= 0; i--) {
-    const evt = events[i];
-    if (evt.type !== "tool_call_chunk") continue;
-    const payload = evt.payload as {
-      toolName?: string;
-      args?: string;
-    } | null;
-    if (payload?.toolName !== "submit_evaluation_scores") continue;
-    if (!payload.args) continue;
-
-    try {
-      const parsedArgs = JSON.parse(payload.args);
-      const validation = submitEvaluationScoresSchema.safeParse(parsedArgs);
-      if (!validation.success) {
-        log.warn(
-          { event: "web_auto_evaluator_scores_schema_validation_failed", error: validation.error.format() },
-          "web auto evaluator submit_evaluation_scores payload failed schema validation",
-        );
-        continue;
-      }
-
-      return {
-        ok: true,
-        item_scores: validation.data.item_scores,
-        feedback: validation.data.feedback,
-      };
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
 // ─── Main ───────────────────────────────────────────────────────────
 
 /**
@@ -202,85 +159,41 @@ export async function runWebAutoEvaluation(
     input.expectations,
   );
 
-  // Dispatch evaluator agent (with retry)
-  let targetResult;
-  let scores: SubmitEvaluationScoresSuccess | null = null;
-  let retries = 0;
-  let lastError = "";
+  // Dispatch evaluator agent via unified judge runner
+  const judgeResult = await executeJudge({
+    evaluatorAgentId: input.evaluatorAgentId,
+    taskPrompt: evaluationPrompt,
+    ownerId: input.ownerId,
+    timeoutMs: input.timeoutMs,
+    signal: input.signal,
+    context: { expectedDimensionIds: [] },
+    logMeta: { expectationsCount: input.expectations.length },
+  });
 
-  while (retries < 2) {
-    let currentTask = evaluationPrompt;
-    if (retries > 0) {
-      currentTask +=
-        "\n\nSYSTEM WARNING: In your previous attempt, you failed to use the `submit_evaluation_scores` tool. You MUST use the tool to submit your scores. Do NOT output plain text.";
-    }
-
-    try {
-      targetResult = await runner.start({
-        entityId: input.evaluatorAgentId,
-        task: currentTask,
-        mode: "sync",
-        initiator: "evaluator",
-        ownerId: input.ownerId,
-        createdBy: input.ownerId,
-        context: { expectedDimensionIds: [] },
-      });
-
-      if (targetResult.status === "failed") {
-        lastError = targetResult.errorMessage ?? "Evaluator run failed";
-        log.warn(
-          {
-            event: "web_auto_evaluator_run_failed",
-            runId: targetResult.runId,
-            attempt: retries + 1,
-          },
-          lastError,
-        );
-      } else {
-        const events = await readEvents(targetResult.runId);
-        scores = extractEvaluatorScores(events);
-        if (scores) {
-          break; // Successfully got scores!
-        }
-        lastError =
-          "Evaluator did not submit scores via submit_evaluation_scores tool";
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      log.error(
-        {
-          event: "web_auto_evaluator_dispatch_failed",
-          err: lastError,
-          attempt: retries + 1,
-        },
-        "evaluator agent dispatch failed",
-      );
-    }
-
-    retries++;
-  }
-
-  if (!scores) {
+  if (!judgeResult.success || !judgeResult.scores) {
+    const errorMsg =
+      judgeResult.error ||
+      "Evaluator did not submit scores via submit_evaluation_scores tool";
     return {
       passed: false,
       score: 0,
       expectationResults: input.expectations.map((exp, idx) => ({
         index: idx,
         score: 0,
-        reason: lastError || "Evaluator did not submit scores via required tool",
+        reason: errorMsg,
         expectation: exp.expectation,
         unexpectation: exp.unexpectation,
         reference: exp.reference,
       })),
       error: {
         source: "internal",
-        message:
-          lastError ||
-          "Evaluator did not submit scores via submit_evaluation_scores tool",
+        message: errorMsg,
       },
       durationMs: Date.now() - startMs,
     };
   }
+
+  const scores = judgeResult.scores;
 
   // Extract individual check items
   const expectationResults: WebAutoExpectationResult[] = [];
@@ -308,11 +221,7 @@ export async function runWebAutoEvaluation(
     }
 
     const rawScore = itemResult.score;
-    const isScoreValid =
-      typeof rawScore === "number" &&
-      !Number.isNaN(rawScore) &&
-      rawScore >= 1 &&
-      rawScore <= 5;
+    const isScoreValid = isLikertScoreValid(rawScore);
 
     if (!isScoreValid && !evaluatorError) {
       evaluatorError = `Evaluator score ${rawScore} is invalid (expected integer between 1 and 5)`;

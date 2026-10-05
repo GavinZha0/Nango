@@ -216,12 +216,41 @@ All routes wrapped by `withEditor` and protected by `canEditResource` / `canView
 
 ---
 
-## 8. Key Files
+---
+
+## 6. Unified Judge Engine & Configuration (`judge.server.ts`)
+
+LLM-as-Judge evaluation is unified across **Evaluation** and **Web Auto** via the shared kernel module [`src/lib/evaluation/judge.server.ts`](file:///d:/AI/nango/src/lib/evaluation/judge.server.ts):
+
+### 6.1 Configuration Keys & Defaults
+
+| Key / Constant | Default | Scope | Description |
+|---|---|---|---|
+| `CONFIG_KEY_EVALUATOR_TIMEOUT` (`evaluator_timeout_seconds`) | `300s` (5 min) | Process / System Config | Timeout for evaluator agent dispatch. Protects against slow or hanging judge models. |
+| `DEFAULT_EVAL_TARGET_TIMEOUT_S` | `180s` (3 min) | Process Constant | Per-turn timeout when executing the target agent. |
+| `DEFAULT_EVAL_MAX_RETRIES` | `2` | Kernel Option | Maximum dispatch attempts before marking evaluation as failed. When set to `0`, evaluation skips. |
+
+### 6.2 Dispatch & Retry Mechanism
+
+- **Unified Timeout Wrapping**: All synchronous agent runs (`runner.start({ mode: "sync" })`) are wrapped by `withStepTimeout<T>(promise, timeoutMs, stepName)` exported from `judge.server.ts` and shared between `eval-runner.ts` and `judge.server.ts`.
+- **System Warning on Retry**: If an evaluator run completes without successfully calling `submit_evaluation_scores`, or encounters a transient failure, subsequent retries automatically append `EVALUATOR_RETRY_SYSTEM_WARNING` to the prompt instructing the model to invoke the tool.
+- **Reverse Traversal & Schema Validation**: `extractEvaluatorScoresDetailed` inspects `entity_run_event` in reverse chronological order to read the latest tool call, strictly enforcing Zod schema validation against `submitEvaluationScoresSchema`.
+- **Differentiated Error Diagnostics**: Failures distinguish between:
+  1. `step timed out after Xs` (execution SLA exceeded)
+  2. `Evaluator agent run failed: <errorMessage>` (model error or quota exhaustion)
+  3. `Evaluator did not call submit_evaluation_scores` (missing tool invocation)
+  4. `Evaluator called submit_evaluation_scores but arguments were not valid JSON` (malformed payload)
+  5. `Evaluator called submit_evaluation_scores but arguments failed schema validation: <field error>` (Zod violation)
+
+---
+
+## 7. Key Files
 
 | File | Purpose |
 |---|---|
 | `lib/evaluation/types.ts` | Dimensions, criteria schema, level config, shared types |
 | `lib/evaluation/config.ts` | Scoring thresholds, level system |
+| `lib/evaluation/judge.server.ts` | Unified LLM-as-Judge dispatcher, timeout guard, score extraction |
 | `lib/evaluation/runtime-tools.ts` | `submit_evaluation_scores` tool |
 | `lib/evaluation/deterministic-checks.ts` | Code-verifiable criteria checks |
 | `lib/evaluation/prompt-builder.ts` | Evaluator prompt assembler |
