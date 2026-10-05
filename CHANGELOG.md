@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/GavinZha0/Nango/compare/v0.26.0...v0.26.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* resolve multiple evaluation and verification subsystem bugs ([8a9d240](https://github.com/GavinZha0/Nango/commit/8a9d240149ecbe8f08ba73f878908782ef007774))
+
 ## [0.26.0](https://github.com/GavinZha0/Nango/compare/v0.25.1...v0.26.0) (2026-10-04)
 
 
