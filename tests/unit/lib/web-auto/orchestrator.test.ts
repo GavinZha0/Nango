@@ -222,7 +222,7 @@ describe("runWebAutoCase", () => {
     });
 
     expect(outcome.status).toBe("failed");
-    expect(outcome.score).toBe(0);
+    expect(outcome.score).toBeUndefined();
     expect(outcome.verdict.overall.passed).toBe(false);
     expect(outcome.verdict.overall.reason).toContain("Deterministic assertion checks failed");
 
@@ -392,6 +392,52 @@ describe("runWebAutoCase", () => {
     const omittedAssertion = outcome.assertionResults[1];
     expect(omittedAssertion.errored).toBe(true);
     expect(omittedAssertion.ok).toBe(false);
+  });
+
+  it("marks case as errored and retains deterministic results without fake score when evaluator throws exception (W5)", async () => {
+    const suiteWithEvaluator = { ...dummySuite, evaluatorAgentId: "eval-1" };
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { pageLoaded: true } },
+      error: null,
+      durationMs: 200,
+    });
+    mockRunWebAutoEvaluation.mockRejectedValueOnce(
+      new Error("Agent execution timeout or network failure"),
+    );
+
+    const outcome = await runWebAutoCase({
+      caseId: 1,
+      suiteId: "suite-1",
+      suite: suiteWithEvaluator,
+      case: {
+        id: 1,
+        input: { script: "return { pageLoaded: true };" },
+        assertions: [
+          { type: "js_expression", expression: "result.pageLoaded === true" },
+          { type: "llm_custom", expectation: "Dashboard widget renders correctly" },
+        ],
+      } as unknown as import("@/lib/db/schema").WebAutoCaseEntity,
+      ownerId: "user-1",
+    });
+
+    // W5: Must be errored, NOT failed with score 1
+    expect(outcome.status).toBe("errored");
+    expect(outcome.score).toBeUndefined();
+    expect(outcome.error).toBeDefined();
+    expect(outcome.error?.message).toContain("Agent execution timeout or network failure");
+
+    // Deterministic assertion succeeded
+    const deterministic = outcome.assertionResults.find((r) => r.type === "js_expression");
+    expect(deterministic?.ok).toBe(true);
+    expect(deterministic?.errored).toBeFalsy();
+
+    // LLM assertion is skipped & errored (unreviewed), NOT scored 1
+    const llm = outcome.assertionResults.find((r) => r.type === "llm_custom");
+    expect(llm?.ok).toBe(false);
+    expect(llm?.skipped).toBe(true);
+    expect(llm?.errored).toBe(true);
+    expect(llm?.score).toBeUndefined();
   });
 
   it("passes suite.caseTimeoutSec to runWebAutoMcp and evaluates duration_s metric assertion successfully", async () => {
@@ -640,6 +686,93 @@ describe("startWebAutoSuiteRun", () => {
       passedCount: 2,
       failedCount: 0,
       erroredCount: 0,
+    });
+  });
+
+  it("does not fail the run when recordRunNotification throws during finaliseAndAnnounce", async () => {
+    const dummySuite = {
+      id: "suite-notif-fail",
+      name: "Notif Fail Suite",
+      mcpServerId: "mcp-1",
+      evaluatorAgentId: null,
+      variables: null,
+      caseTimeoutSec: 60,
+    };
+    const dummyCases = [
+      {
+        id: 1,
+        name: "Case 1",
+        input: { script: "return { ok: true };" },
+        assertions: [],
+        enabled: true,
+      },
+    ];
+
+    mockGetWebAutoSuiteById.mockResolvedValueOnce(dummySuite);
+    mockListEnabledWebAutoCasesForRun.mockResolvedValueOnce(dummyCases);
+    mockCreateWebAutoRun.mockResolvedValueOnce({ id: "run-notif-fail" });
+    mockRunWebAutoMcp.mockResolvedValueOnce({
+      status: "success",
+      executionOutput: { result: { ok: true } },
+      error: null,
+      durationMs: 100,
+    });
+    mockRecordRunNotification.mockRejectedValueOnce(new Error("Notification DB deadlock"));
+
+    await startWebAutoSuiteRun({
+      suiteId: "suite-notif-fail",
+      ownerId: "user-1",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(mockFinalizeWebAutoRun).toHaveBeenCalledWith({
+      runId: "run-notif-fail",
+      status: "passed",
+      passedCount: 1,
+      failedCount: 0,
+      erroredCount: 0,
+    });
+  });
+
+  it("handles crash gracefully even when recordRunNotification throws during handleSuiteLoopCrash", async () => {
+    const dummySuite = {
+      id: "suite-crash-notif-fail",
+      name: "Crash Notif Fail Suite",
+      mcpServerId: "mcp-1",
+      evaluatorAgentId: null,
+      variables: null,
+      caseTimeoutSec: 60,
+    };
+    const dummyCases = [
+      {
+        id: 1,
+        name: "Case 1",
+        input: { script: "return { ok: true };" },
+        assertions: [],
+        enabled: true,
+      },
+    ];
+
+    mockGetWebAutoSuiteById.mockResolvedValueOnce(dummySuite);
+    mockListEnabledWebAutoCasesForRun.mockResolvedValueOnce(dummyCases);
+    mockCreateWebAutoRun.mockResolvedValueOnce({ id: "run-crash-notif-fail" });
+    mockRunWebAutoMcp.mockRejectedValueOnce(new Error("Fatal Playwright container exit"));
+    mockRecordRunNotification.mockRejectedValueOnce(new Error("Notification table locked"));
+
+    await startWebAutoSuiteRun({
+      suiteId: "suite-crash-notif-fail",
+      ownerId: "user-1",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(mockFinalizeWebAutoRun).toHaveBeenCalledWith({
+      runId: "run-crash-notif-fail",
+      status: "errored",
+      passedCount: 0,
+      failedCount: 0,
+      erroredCount: 1,
     });
   });
 });

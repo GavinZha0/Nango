@@ -42,6 +42,10 @@ export interface DeterministicCheckInput {
   variables?: Record<string, unknown>;
   /** Structured tool invocation and audit summary */
   toolCallSummary?: ToolCallSummary;
+  /** Individual turn assistant responses for scoped text matching */
+  allAgentResponses?: string[];
+  /** Total number of turns in the evaluation case */
+  turnsCount?: number;
 }
 
 // ─── Output ─────────────────────────────────────────────────────────
@@ -152,6 +156,8 @@ export function runDeterministicChecks(
       metrics: input.metrics,
       variables: input.variables,
       toolCallSummary: input.toolCallSummary,
+      turnResponses: input.allAgentResponses,
+      turnsCount: input.turnsCount ?? input.allAgentResponses?.length,
     });
 
     const assertionResults = outcome.deterministicResults;

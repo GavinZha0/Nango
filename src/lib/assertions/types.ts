@@ -48,7 +48,7 @@ export type JsonSchemaAssertion = z.infer<typeof jsonSchemaAssertionSchema>;
 
 export const jsExpressionAssertionSchema = z.object({
   type: z.literal("js_expression"),
-  expression: z.string().min(1).describe("JavaScript expression evaluated against sanitized `result`/`$`/`root`/`input`/`variables` (truthy = pass). Hardened, not a true isolate."),
+  expression: z.string().min(1).describe("JavaScript expression evaluated against sanitized `result`/`$`/`root`/`input`/`variables` (truthy = pass). Hardened with null-prototype sandbox and disabled eval/Function/WebAssembly. Not a true process isolate."),
 });
 
 export type JsExpressionAssertion = z.infer<typeof jsExpressionAssertionSchema>;
@@ -135,11 +135,16 @@ export type LlmCustomAssertion = z.infer<typeof llmCustomAssertionSchema>;
 export const textMatchOperatorSchema = z.enum(["contains", "not_contains", "matches"]);
 export type TextMatchOperator = z.infer<typeof textMatchOperatorSchema>;
 
+export const textMatchScopeSchema = z.enum(["final_response", "all_responses", "turn"]);
+export type TextMatchScope = z.infer<typeof textMatchScopeSchema>;
+
 export const textMatchAssertionSchema = z.object({
   type: z.literal("text_match"),
   operator: textMatchOperatorSchema.describe("Text matching operator ('contains' | 'not_contains' | 'matches')"),
   expected: z.string().min(1).describe("Expected substring or regular expression pattern"),
   caseSensitive: z.boolean().optional().describe("Whether comparison is case-sensitive (default is false)"),
+  scope: textMatchScopeSchema.optional().describe("Scope for text matching: 'final_response' | 'all_responses' | 'turn'"),
+  turn: z.number().int().min(1).optional().describe("1-based turn index when scope is 'turn'"),
 });
 
 export type TextMatchAssertion = z.infer<typeof textMatchAssertionSchema>;

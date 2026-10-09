@@ -414,19 +414,24 @@ export async function runWebAutoCase(
         });
         llmResult = evalResult;
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         log.error(
           { event: "web_auto_llm_evaluation_failed", err },
           "LLM evaluation failed",
         );
         llmResult = {
           passed: false,
-          score: 1,
-          feedback: "LLM evaluation failed",
+          score: undefined,
+          feedback: `LLM evaluation failed: ${errorMsg}`,
+          error: {
+            source: "internal",
+            message: `LLM evaluation failed: ${errorMsg}`,
+          },
           expectationResults: expectations.map((exp, idx) => ({
             index: idx,
-            score: 1,
-            reason: "LLM evaluation failed",
-            feedback: "LLM evaluation failed",
+            score: 0,
+            reason: `LLM evaluation failed: ${errorMsg}`,
+            feedback: `LLM evaluation failed: ${errorMsg}`,
             expectation: exp.expectation,
             unexpectation: exp.unexpectation,
             reference: exp.reference,
@@ -493,7 +498,12 @@ export async function runWebAutoCase(
     llm: llmResult
       ? {
           passed: llmResult.passed,
-          score: llmResult.score,
+          score:
+            typeof llmResult.score === "number" &&
+            llmResult.score >= 1 &&
+            llmResult.score <= 5
+              ? llmResult.score
+              : undefined,
           feedback: sanitizedFeedback,
           expectationResults: llmResult.expectationResults.map((r) => ({
             ...r,
@@ -510,16 +520,18 @@ export async function runWebAutoCase(
     },
   };
 
-  // An errored (incomplete) outcome never carries a numeric score: `null` is
-  // the honest signal for "no judge result", while 0 would read as a graded
-  // failure of the target. Deterministic failures keep the existing 0-score
-  // override (they ARE graded failures of the target).
+  // CONTRACT: An errored outcome or pure deterministic failure never carries a
+  // numeric judge score (errored means review incomplete, deterministic failure
+  // is not graded on the 1-5 judge scale). Only completed LLM evaluations
+  // with a valid Likert score (1-5) provide a finalScore.
   const finalScore: number | undefined =
-    status === "errored"
+    status === "errored" || !deterministicResult.passed
       ? undefined
-      : deterministicResult.passed
-        ? (llmResult?.score ?? undefined)
-        : 0;
+      : typeof llmResult?.score === "number" &&
+          llmResult.score >= 1 &&
+          llmResult.score <= 5
+        ? llmResult.score
+        : undefined;
 
   return {
     status,
@@ -601,13 +613,48 @@ export async function startWebAutoSuiteRun(
     return { runId: run.id, totalCount: 0 };
   }
 
-  // Fire-and-forget background loop
+  // Fire-and-forget background loop with terminal catch guard against unhandled rejection
   void executeWebAutoSuiteLoop({
     runId: run.id,
     suiteId: input.suiteId,
     suite,
     cases,
     ownerId: input.ownerId,
+  }).catch(async (fatalErr) => {
+    // CONTRACT: Detached background promise must never escape as an unhandled rejection.
+    // If even handleSuiteLoopCrash throws, log fatal and attempt emergency DB finalization.
+    log.error(
+      {
+        event: "web_auto_suite_fatal_unhandled_rejection",
+        runId: run.id,
+        suiteId: input.suiteId,
+        err: fatalErr instanceof Error ? fatalErr.message : String(fatalErr),
+        stack: fatalErr instanceof Error ? fatalErr.stack : undefined,
+      },
+      "FATAL: Unhandled rejection in web auto suite loop",
+    );
+
+    try {
+      await storage.finalizeWebAutoRun({
+        runId: run.id,
+        status: "errored",
+        passedCount: 0,
+        failedCount: 0,
+        erroredCount: cases.length,
+      });
+    } catch (emergencyDbErr) {
+      log.error(
+        {
+          event: "web_auto_emergency_db_finalization_failed",
+          runId: run.id,
+          err:
+            emergencyDbErr instanceof Error
+              ? emergencyDbErr.message
+              : String(emergencyDbErr),
+        },
+        "FATAL: Emergency DB finalization failed for web auto run",
+      );
+    }
   });
 
   return { runId: run.id, totalCount: cases.length };
@@ -732,6 +779,7 @@ async function finaliseAndAnnounce(
       ? "failed"
       : "passed";
 
+  // 1. Primary DB finalization
   await storage.finalizeWebAutoRun({
     runId: input.runId,
     status: overallStatus,
@@ -740,29 +788,52 @@ async function finaliseAndAnnounce(
     erroredCount: counters.erroredCount,
   });
 
-  publishWebAutoFrame(input.ownerId, {
-    topic: "web_auto_run",
-    kind: "run_finished",
-    runId: input.runId,
-    suiteId: input.suiteId,
-    status: overallStatus,
-    totalCount: input.cases.length,
-    passedCount: counters.passedCount,
-    failedCount: counters.failedCount,
-    erroredCount: counters.erroredCount,
-  });
+  // 2. Publish finish event frame to SSE stream
+  try {
+    publishWebAutoFrame(input.ownerId, {
+      topic: "web_auto_run",
+      kind: "run_finished",
+      runId: input.runId,
+      suiteId: input.suiteId,
+      status: overallStatus,
+      totalCount: input.cases.length,
+      passedCount: counters.passedCount,
+      failedCount: counters.failedCount,
+      erroredCount: counters.erroredCount,
+    });
+  } catch (sseErr) {
+    log.warn(
+      {
+        event: "web_auto_sse_publish_failed",
+        runId: input.runId,
+        err: sseErr instanceof Error ? sseErr.message : String(sseErr),
+      },
+      "Failed to publish web auto run_finished SSE frame",
+    );
+  }
 
-  // Record notification
-  await recordRunNotification({
-    ownerId: input.ownerId,
-    runId: input.runId,
-    kind: overallStatus === "passed" ? "run_completed" : "run_failed",
-    title: `Web Auto: ${input.suite.name}`,
-    body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored`,
-    sourceLabel: "Web Automation",
-    task: `Run web auto suite '${input.suite.name}'`,
-    initiator: "web_auto",
-  });
+  // 3. Best-effort run notification (isolated so notification failures never invalidate run verdict)
+  try {
+    await recordRunNotification({
+      ownerId: input.ownerId,
+      runId: input.runId,
+      kind: overallStatus === "passed" ? "run_completed" : "run_failed",
+      title: `Web Auto: ${input.suite.name}`,
+      body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored`,
+      sourceLabel: "Web Automation",
+      task: `Run web auto suite '${input.suite.name}'`,
+      initiator: "web_auto",
+    });
+  } catch (notifErr) {
+    log.error(
+      {
+        event: "web_auto_notification_failed",
+        runId: input.runId,
+        err: notifErr instanceof Error ? notifErr.message : String(notifErr),
+      },
+      "Failed to record web auto run completion notification",
+    );
+  }
 }
 
 async function handleSuiteLoopCrash(
@@ -772,40 +843,81 @@ async function handleSuiteLoopCrash(
 ): Promise<void> {
   const message = err instanceof Error ? err.message : String(err);
   log.error(
-    { event: "web_auto_suite_loop_crash", runId: input.runId, err: message },
-    "Web Auto suite loop crashed",
+    {
+      event: "web_auto_suite_loop_crash",
+      runId: input.runId,
+      err: message,
+      stack: err instanceof Error ? err.stack : undefined,
+    },
+    "Web Auto suite loop crashed — handling graceful termination",
   );
 
-  await storage.finalizeWebAutoRun({
-    runId: input.runId,
-    status: "errored",
-    passedCount: counters.passedCount,
-    failedCount: counters.failedCount,
-    erroredCount: counters.erroredCount + 1, // Count the crash as an error
-  });
+  // 1. Attempt DB finalization
+  try {
+    await storage.finalizeWebAutoRun({
+      runId: input.runId,
+      status: "errored",
+      passedCount: counters.passedCount,
+      failedCount: counters.failedCount,
+      erroredCount: counters.erroredCount + 1, // Count the crash as an error
+    });
+  } catch (finErr) {
+    log.error(
+      {
+        event: "web_auto_crash_finalize_failed",
+        runId: input.runId,
+        err: finErr instanceof Error ? finErr.message : String(finErr),
+      },
+      "Failed to persist errored state during suite loop crash handling",
+    );
+  }
 
-  publishWebAutoFrame(input.ownerId, {
-    topic: "web_auto_run",
-    kind: "run_finished",
-    runId: input.runId,
-    suiteId: input.suiteId,
-    status: "errored",
-    totalCount: input.cases.length,
-    passedCount: counters.passedCount,
-    failedCount: counters.failedCount,
-    erroredCount: counters.erroredCount + 1,
-  });
+  // 2. Attempt SSE frame broadcast to unblock client UI
+  try {
+    publishWebAutoFrame(input.ownerId, {
+      topic: "web_auto_run",
+      kind: "run_finished",
+      runId: input.runId,
+      suiteId: input.suiteId,
+      status: "errored",
+      totalCount: input.cases.length,
+      passedCount: counters.passedCount,
+      failedCount: counters.failedCount,
+      erroredCount: counters.erroredCount + 1,
+    });
+  } catch (sseErr) {
+    log.warn(
+      {
+        event: "web_auto_crash_sse_publish_failed",
+        runId: input.runId,
+        err: sseErr instanceof Error ? sseErr.message : String(sseErr),
+      },
+      "Failed to broadcast crash finish frame",
+    );
+  }
 
-  await recordRunNotification({
-    ownerId: input.ownerId,
-    runId: input.runId,
-    kind: "run_failed",
-    title: `Web Auto: ${input.suite.name}`,
-    body: `Crashed: ${message}`,
-    sourceLabel: "Web Automation",
-    task: `Run web auto suite '${input.suite.name}'`,
-    initiator: "web_auto",
-  });
+  // 3. Best-effort crash notification recording
+  try {
+    await recordRunNotification({
+      ownerId: input.ownerId,
+      runId: input.runId,
+      kind: "run_failed",
+      title: `Web Auto: ${input.suite.name}`,
+      body: `Crashed: ${message}`,
+      sourceLabel: "Web Automation",
+      task: `Run web auto suite '${input.suite.name}'`,
+      initiator: "web_auto",
+    });
+  } catch (notifErr) {
+    log.error(
+      {
+        event: "web_auto_crash_notification_failed",
+        runId: input.runId,
+        err: notifErr instanceof Error ? notifErr.message : String(notifErr),
+      },
+      "Failed to record crash notification",
+    );
+  }
 }
 
 async function persistAndPublishError(args: {

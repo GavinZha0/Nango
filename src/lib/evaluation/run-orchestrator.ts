@@ -13,6 +13,7 @@
 
 import "server-only";
 
+import { ApiError } from "@/lib/http/route-handlers";
 import { childLogger } from "@/lib/observability/logger";
 import { publish } from "@/lib/runner/event-bus";
 import { runEvalCase, type RunEvalCaseResult } from "./eval-runner";
@@ -67,6 +68,17 @@ export async function startEvalSuiteRun(
       ? await storage.listCasesByIds(input.caseIds)
       : await storage.listEnabledCasesForRun(input.suiteId);
 
+  // CONTRACT: A suite execution requires at least one executable test case.
+  // Empty suites or suites with all cases disabled must be rejected before creating
+  // a run, rather than recording a phantom 0/0 passed run.
+  if (cases.length === 0) {
+    throw new ApiError(
+      "BAD_REQUEST",
+      400,
+      `Evaluation suite '${suite.name}' has no enabled cases to run.`,
+    );
+  }
+
   const run = await storage.createRun({
     suiteId: input.suiteId,
     totalCount: cases.length,
@@ -82,28 +94,6 @@ export async function startEvalSuiteRun(
     suiteName: suite.name,
     totalCount: cases.length,
   });
-
-  // Empty suite: finalise immediately.
-  if (cases.length === 0) {
-    await storage.finalizeRun({
-      runId: run.id,
-      status: "passed",
-      passedCount: 0,
-      failedCount: 0,
-      erroredCount: 0,
-    });
-    publishEvalFrame(input.ownerId, {
-      topic: "evaluation_run",
-      kind: "run_finished",
-      runId: run.id,
-      status: "passed",
-      totalCount: 0,
-      passedCount: 0,
-      failedCount: 0,
-      erroredCount: 0,
-    });
-    return { runId: run.id, totalCount: 0 };
-  }
 
   // Fire-and-forget background loop.
   void executeSuiteLoop({
@@ -135,7 +125,7 @@ interface SuiteLoopInput {
   evaluatorAgentId?: string | null;
   dimensionIds: string[];
   threshold?: number;
-  caseTimeoutSec?: number | null;
+  caseTimeoutSec: number;
   targetAgentId: string;
   targetCredentialId?: string;
   targetAgentSource: string;
@@ -430,6 +420,7 @@ export async function startEvalAgentAllRuns(
           evaluatorAgentId: suite.evaluatorAgentId ?? null,
           dimensionIds: [],
           threshold: suite.threshold ?? 3,
+          caseTimeoutSec: suite.caseTimeoutSec,
           targetAgentId: suite.agentId,
           targetCredentialId: suite.credentialId ?? undefined,
           targetAgentSource: suite.agentSource,

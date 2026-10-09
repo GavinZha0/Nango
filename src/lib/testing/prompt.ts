@@ -134,7 +134,7 @@ Dedicated guidance for the \`evaluation\` category — stochastic LLM-as-Judge q
 4. **Assert with the mixed surface**: Use \`llm_custom\` for semantic criteria (with expectations/unexpectations/references), \`llm_dim\` for standard evaluation dimensions, \`tool_call\` to verify intended tool invocations, and \`metric\` for quantitative walls (e.g. \`duration_s < 10\`).
 5. **Bind an evaluator**: Judge-dependent assertions require an \`evaluatorAgentId\` (see §1 shared contract). Warn the user if a suite lacks one.
 6. **Mind the cost/time**: A single evaluation case is synchronous and expensive (it dispatches the target agent and a separate evaluator). For multiple cases, prefer a full \`run_test_suite\` over repeated \`run_test_case\` calls.
-7. **Read scores correctly**: Evaluator scores are graded in four default bands (≥80 Excellent, ≥60 Pass, ≥40 Poor, <40 Fail); thresholds are configurable via \`eval.threshold.*\`. Report band + score, do not reduce to a bare number.
+7. **Read scores correctly**: Evaluator scores are graded on a 1-5 Likert scale (5 Excellent, 4 Good, 3 Acceptable/Pass, 2 Marginal, 1 Failure) with configurable pass threshold (default 3). Item-level scores are displayed directly; suite-level pass/fail status is computed based on case pass rates. Report both item-level scores (1-5) and suite-level pass/fail status when summarizing results.
 
 ### 8. Web Auto Workflow (Playwright Browser Automation)
 

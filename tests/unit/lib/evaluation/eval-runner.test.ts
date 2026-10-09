@@ -62,6 +62,7 @@ function makeInput(overrides: RunCaseOverrides = {}) {
     turns: overrides.turns ?? [{ userMessage: "hello" }],
     assertions: (overrides.assertions ?? []) as never[],
     ownerId: "user-1",
+    caseTimeoutSec: 300,
   };
 }
 
@@ -647,6 +648,177 @@ describe("runEvalCase — caseTimeoutSec override", () => {
       expect(result.assertionResults?.[0]?.message).toContain(
         "none of the invocations matched the expected arguments",
       );
+    });
+  });
+
+  describe("E13: zero/blank turns rejection", () => {
+    it("returns errored when case has 0 turns", async () => {
+      const result = await runEvalCase({
+        ...makeInput(),
+        turns: [],
+      });
+
+      expect(result.status).toBe("errored");
+      expect(result.error).toContain("Evaluation case requires at least one turn with non-empty user input");
+      expect(mockRunnerStart).not.toHaveBeenCalled();
+    });
+
+    it("returns errored when all turns have empty or whitespace-only messages", async () => {
+      const result = await runEvalCase({
+        ...makeInput(),
+        turns: [{ userMessage: "   " }, { userMessage: "" }],
+      });
+
+      expect(result.status).toBe("errored");
+      expect(result.error).toContain("Evaluation case requires at least one turn with non-empty user input");
+      expect(mockRunnerStart).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("E5: multi-turn text match scope", () => {
+    it("fails not_contains on all_responses scope when turn 1 contains forbidden text even if turn 2 is clean", async () => {
+      mockRunnerStart
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-1",
+          summary: "Here is your temporary password: 123456",
+        })
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-2",
+          summary: "Can I help you with anything else?",
+        });
+
+      const result = await runEvalCase({
+        ...makeInput(),
+        turns: [
+          { userMessage: "Give me the credentials" },
+          { userMessage: "Thanks" },
+        ],
+        assertions: [
+          {
+            type: "text_match",
+            operator: "not_contains",
+            expected: "password",
+            scope: "all_responses",
+          },
+        ],
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.assertionResults?.[0]?.ok).toBe(false);
+      expect(result.assertionResults?.[0]?.message).toContain("Expected all responses NOT to contain \"password\", but found in turn 1");
+    });
+
+    it("passes not_contains on final_response scope when forbidden text only appeared in turn 1", async () => {
+      mockRunnerStart
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-1",
+          summary: "Here is your temporary password: 123456",
+        })
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-2",
+          summary: "Can I help you with anything else?",
+        });
+
+      const result = await runEvalCase({
+        ...makeInput(),
+        turns: [
+          { userMessage: "Give me the credentials" },
+          { userMessage: "Thanks" },
+        ],
+        assertions: [
+          {
+            type: "text_match",
+            operator: "not_contains",
+            expected: "password",
+            scope: "final_response",
+          },
+        ],
+      });
+
+      expect(result.status).toBe("passed");
+      expect(result.assertionResults?.[0]?.ok).toBe(true);
+    });
+
+    it("rejects multi-turn text assertion without scope as configuration error", async () => {
+      mockRunnerStart
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-1",
+          summary: "Hello",
+        })
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-2",
+          summary: "Goodbye",
+        });
+
+      const result = await runEvalCase({
+        ...makeInput(),
+        turns: [
+          { userMessage: "Hi" },
+          { userMessage: "Bye" },
+        ],
+        assertions: [
+          {
+            type: "text_match",
+            operator: "contains",
+            expected: "Hello",
+          },
+        ],
+      });
+
+      expect(result.status).toBe("errored");
+      expect(result.assertionResults?.[0]?.errored).toBe(true);
+      expect(result.assertionResults?.[0]?.errorSource).toBe("config");
+      expect(result.assertionResults?.[0]?.message).toContain(
+        "In multi-turn evaluation, text_match assertion must explicitly specify 'scope'",
+      );
+    });
+
+    it("checks specific turn when scope is turn", async () => {
+      mockRunnerStart
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-1",
+          summary: "Step 1: Initiation",
+        })
+        .mockResolvedValueOnce({
+          status: "succeeded",
+          runId: "run-turn-2",
+          summary: "Step 2: Execution",
+        });
+
+      const result = await runEvalCase({
+        ...makeInput(),
+        turns: [
+          { userMessage: "First step" },
+          { userMessage: "Second step" },
+        ],
+        assertions: [
+          {
+            type: "text_match",
+            operator: "contains",
+            expected: "Initiation",
+            scope: "turn",
+            turn: 1,
+          },
+          {
+            type: "text_match",
+            operator: "contains",
+            expected: "Execution",
+            scope: "turn",
+            turn: 2,
+          },
+        ],
+      });
+
+      expect(result.status).toBe("passed");
+      expect(result.assertionResults?.[0]?.ok).toBe(true);
+      expect(result.assertionResults?.[1]?.ok).toBe(true);
     });
   });
 });

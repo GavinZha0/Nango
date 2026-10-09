@@ -403,7 +403,7 @@ async function finaliseAndAnnounce(
   input: ExecuteSuiteLoopInput,
   counters: LoopCounters,
 ): Promise<void> {
-  const finalStatus: VerificationRunStatus = computeFinalStatus({
+  let finalStatus: VerificationRunStatus = computeFinalStatus({
     passedCount: counters.passedCount,
     failedCount: counters.failedCount,
     erroredCount: counters.erroredCount,
@@ -413,6 +413,7 @@ async function finaliseAndAnnounce(
   const sourceLabel = "Verification Suite";
   const task = `Run verification suite '${input.targetName}'`;
 
+  let finalizedInDb = false;
   try {
     await storage.finalizeRun({
       runId: input.runId,
@@ -422,21 +423,49 @@ async function finaliseAndAnnounce(
       erroredCount: counters.erroredCount,
       skippedCount: counters.skippedCount,
     });
+    finalizedInDb = true;
+  } catch (err) {
+    log.error(
+      {
+        event: "verification_finalize_failed",
+        runId: input.runId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "failed to finalise verification run; will be swept on next boot",
+    );
+    // CONTRACT: If DB finalize fails, the run is not persisted as completed.
+    // Downgrade status so clients never observe a phantom passed run.
+    finalStatus = "errored";
+  }
 
-    if (!input.suppressNotification) {
+  if (!input.suppressNotification) {
+    try {
       await recordRunNotification({
         ownerId: input.ownerId,
         runId: input.runId,
         kind: finalStatus === "passed" ? "run_completed" : "run_failed",
         title,
-        body: `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored, ${counters.skippedCount} Skipped`,
+        body: finalizedInDb
+          ? `✓ ${counters.passedCount} Passed, ✗ ${counters.failedCount} Failed, ${counters.erroredCount} Errored, ${counters.skippedCount} Skipped`
+          : `Storage error: failed to finalize verification run in database`,
         sourceLabel,
         task,
         initiator: "verification",
       });
+    } catch (notifErr) {
+      log.error(
+        {
+          event: "verification_notification_failed",
+          runId: input.runId,
+          err: notifErr instanceof Error ? notifErr.message : String(notifErr),
+        },
+        "failed to record verification notification",
+      );
     }
+  }
 
-    if (input.onFinish) {
+  if (input.onFinish) {
+    try {
       await input.onFinish({
         status: finalStatus,
         passedCount: counters.passedCount,
@@ -447,16 +476,16 @@ async function finaliseAndAnnounce(
         suiteId: input.suiteId,
         groupId: input.groupId,
       });
+    } catch (finishErr) {
+      log.error(
+        {
+          event: "verification_onfinish_failed",
+          runId: input.runId,
+          err: finishErr instanceof Error ? finishErr.message : String(finishErr),
+        },
+        "failed in verification onFinish callback",
+      );
     }
-  } catch (err) {
-    log.error(
-      {
-        event: "verification_finalize_failed",
-        runId: input.runId,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      "failed to finalise verification run; will be swept on next boot",
-    );
   }
 
   publishVerificationFrame(input.ownerId, {
@@ -500,8 +529,19 @@ async function handleSuiteLoopCrash(
       erroredCount: counters.erroredCount + 1,
       skippedCount: counters.skippedCount,
     });
+  } catch (dbErr) {
+    log.error(
+      {
+        event: "verification_finalize_on_crash_failed",
+        runId: input.runId,
+        err: dbErr instanceof Error ? dbErr.message : String(dbErr),
+      },
+      "failed to finalize verification run on crash",
+    );
+  }
 
-    if (!input.suppressNotification) {
+  if (!input.suppressNotification) {
+    try {
       await recordRunNotification({
         ownerId: input.ownerId,
         runId: input.runId,
@@ -512,9 +552,20 @@ async function handleSuiteLoopCrash(
         task,
         initiator: "verification",
       });
+    } catch (notifErr) {
+      log.error(
+        {
+          event: "verification_notification_on_crash_failed",
+          runId: input.runId,
+          err: notifErr instanceof Error ? notifErr.message : String(notifErr),
+        },
+        "failed to record notification on crash",
+      );
     }
+  }
 
-    if (input.onFinish) {
+  if (input.onFinish) {
+    try {
       await input.onFinish({
         status: "errored",
         passedCount: counters.passedCount,
@@ -525,10 +576,18 @@ async function handleSuiteLoopCrash(
         suiteId: input.suiteId,
         groupId: input.groupId,
       });
+    } catch (finishErr) {
+      log.error(
+        {
+          event: "verification_onfinish_on_crash_failed",
+          runId: input.runId,
+          err: finishErr instanceof Error ? finishErr.message : String(finishErr),
+        },
+        "failed in onFinish on crash",
+      );
     }
-  } catch {
-    // swallow
   }
+
   publishVerificationFrame(input.ownerId, {
     topic: "verification_run",
     kind: "run_finished",
@@ -561,26 +620,49 @@ interface PersistAndPublishInput {
   effectiveToolName?: string | null;
 }
 
+const WRITE_RESULT_MAX_ATTEMPTS = 3;
+const WRITE_RESULT_RETRY_BASE_MS = 50;
+
+// CONTRACT: Persisting case result must succeed before case_finished event is emitted
+// or counter incremented. Storage failure stops execution and marks the run as errored.
 async function persistAndPublish(input: PersistAndPublishInput): Promise<void> {
-  try {
-    await storage.writeCaseResult({
-      runId: input.runId,
-      caseId: input.caseId,
-      outcome: input.outcome,
-      inputSnapshot: input.outcome.resolvedInput,
-      originalToolName: input.originalToolName,
-      effectiveToolName: input.effectiveToolName,
-    });
-  } catch (err) {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= WRITE_RESULT_MAX_ATTEMPTS; attempt++) {
+    try {
+      await storage.writeCaseResult({
+        runId: input.runId,
+        caseId: input.caseId,
+        outcome: input.outcome,
+        inputSnapshot: input.outcome.resolvedInput,
+        originalToolName: input.originalToolName,
+        effectiveToolName: input.effectiveToolName,
+      });
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (attempt < WRITE_RESULT_MAX_ATTEMPTS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, WRITE_RESULT_RETRY_BASE_MS * attempt),
+        );
+      }
+    }
+  }
+
+  if (lastError) {
     log.error(
       {
         event: "verification_case_persist_failed",
         runId: input.runId,
         caseId: input.caseId,
-        err: err instanceof Error ? err.message : String(err),
+        err: lastError instanceof Error ? lastError.message : String(lastError),
       },
-      "failed to persist verification_case_result",
+      "failed to persist verification_case_result after retries",
     );
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(String(lastError));
   }
 
   publishVerificationFrame(input.ownerId, {

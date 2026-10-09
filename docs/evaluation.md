@@ -129,7 +129,7 @@ verdict when the suite binds no Evaluator Agent (`evaluatorAgentId` is null):
   assertions are evaluated and can expose real defects. Deterministic failure →
   `failed` (score `0`, fail-fast); deterministic pass → `errored` (score `null`).
 - **Pure deterministic cases** (no judge assertions, no dimensions): run
-  normally and pass/fail on deterministic checks (score `100` / `0`). This
+  normally and pass/fail on deterministic checks (score `5` / `0`). This
   deterministic-only mode does not require an evaluator.
 
 Result rows: judge assertions that were not evaluated are persisted with
@@ -156,7 +156,7 @@ never a silent green pass with unjudged assertions.**
 
 **Case-level** — overall score combines deterministic checks and judge scores. A case passes if all deterministic assertions succeed and all evaluated judge items achieve `score >= threshold` (default threshold is 3).
 
-**Suite-level & Run Aggregates** — percentage-based scoring (0–100) mapped to 4 evaluation levels with configurable thresholds (DB keys `eval.threshold.*`):
+**Suite-level & Run Aggregates** — item-level scores (1-5 Likert scale) are displayed directly. Suite-level pass/fail status is computed based on case pass rates, with configurable thresholds (DB keys `eval.threshold.*`):
 
 | Level | Default | Color |
 |---|---|---|
@@ -227,8 +227,7 @@ LLM-as-Judge evaluation is unified across **Evaluation** and **Web Auto** via th
 | Key / Constant | Default | Scope | Description |
 |---|---|---|---|
 | `CONFIG_KEY_EVALUATOR_TIMEOUT` (`evaluator_timeout_seconds`) | `300s` (5 min) | Process / System Config | Timeout for evaluator agent dispatch. Protects against slow or hanging judge models. |
-| `eval_suite.case_timeout_sec` | `300s` | Suite column | Per-case limit for target agent execution. Unified across Verification / Evaluation / Web Auto; suites impose no total-duration limit. |
-| `DEFAULT_EVAL_TARGET_TIMEOUT_S` | `180s` (3 min) | Process Constant | Fallback when `case_timeout_sec` is unset. |
+| `eval_suite.case_timeout_sec` | `300s` | Suite column | Per-case limit for target agent execution. Required field; unified across Verification / Evaluation / Web Auto; suites impose no total-duration limit. |
 | `DEFAULT_EVAL_MAX_RETRIES` | `2` | Kernel Option | Maximum dispatch attempts before marking evaluation as failed. When set to `0`, evaluation skips. |
 
 ### 6.2 Dispatch & Retry Mechanism

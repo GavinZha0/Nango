@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "path";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "fs";
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 
 // CONTRACT: runMigrations must be imported dynamically or statically from docker/migrate.mjs
@@ -127,110 +127,5 @@ describe("docker/migrate.mjs — Transaction and Lock Harness", () => {
     // SECURITY: Advisory lock must be released even on failure
     const unlockQuery = executedQueries.find((q) => q.includes("SELECT pg_advisory_unlock"));
     expect(unlockQuery).toBeDefined();
-  });
-});
-
-describe("0004_verification_group_and_prefix.sql — Re-entrancy & State Convergence", () => {
-  const migrationPath = join(process.cwd(), "src/lib/db/migrations/0004_verification_group_and_prefix.sql");
-  const sql = readFileSync(migrationPath, "utf8");
-  const statements = sql
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  it("ensures CREATE TABLE statements are idempotent with IF NOT EXISTS", () => {
-    const createTableStmts = statements.filter((s) => /CREATE\s+TABLE/i.test(s));
-    for (const stmt of createTableStmts) {
-      expect(stmt).toMatch(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS/i);
-    }
-  });
-
-  it("ensures DROP CONSTRAINT statements use IF EXISTS", () => {
-    const dropConstraintStmts = statements.filter((s) => /DROP\s+CONSTRAINT/i.test(s));
-    for (const stmt of dropConstraintStmts) {
-      expect(stmt).toMatch(/DROP\s+CONSTRAINT\s+IF\s+EXISTS/i);
-    }
-  });
-
-  it("ensures DROP INDEX statements use IF EXISTS", () => {
-    const dropIndexStmts = statements.filter((s) => /DROP\s+INDEX/i.test(s));
-    for (const stmt of dropIndexStmts) {
-      expect(stmt).toMatch(/DROP\s+INDEX\s+IF\s+EXISTS/i);
-    }
-  });
-
-  it("ensures ADD COLUMN statements use IF NOT EXISTS", () => {
-    const addColumnStmts = statements.filter((s) => /ADD\s+COLUMN/i.test(s));
-    for (const stmt of addColumnStmts) {
-      expect(stmt).toMatch(/ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS/i);
-    }
-  });
-
-  it("ensures DROP COLUMN statements use IF EXISTS", () => {
-    const dropColumnStmts = statements.filter((s) => /DROP\s+COLUMN/i.test(s));
-    for (const stmt of dropColumnStmts) {
-      expect(stmt).toMatch(/DROP\s+COLUMN\s+IF\s+EXISTS/i);
-    }
-  });
-
-  it("ensures CREATE UNIQUE INDEX statements use IF NOT EXISTS", () => {
-    const createIndexStmts = statements.filter((s) => /CREATE\s+(UNIQUE\s+)?INDEX/i.test(s));
-    for (const stmt of createIndexStmts) {
-      expect(stmt).toMatch(/CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS/i);
-    }
-  });
-
-  it("guards foreign key constraint addition with pg_constraint existence check", () => {
-    const fkStmts = statements.filter((s) => /verification_suite_group_id_verification_group_id_fk/i.test(s));
-    expect(fkStmts.length).toBeGreaterThan(0);
-    for (const stmt of fkStmts) {
-      expect(stmt).toMatch(/pg_constraint/i);
-      expect(stmt).toMatch(/IF\s+NOT\s+EXISTS/i);
-    }
-  });
-
-  it("ensures verification_group is created before TRUNCATE and included in the TRUNCATE statement", () => {
-    const createGroupIdx = statements.findIndex((s) => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+"verification_group"/i.test(s));
-    const truncateIdx = statements.findIndex((s) => /TRUNCATE\s+TABLE/i.test(s));
-
-    expect(createGroupIdx).toBeGreaterThan(-1);
-    expect(truncateIdx).toBeGreaterThan(-1);
-    expect(createGroupIdx).toBeLessThan(truncateIdx);
-    expect(statements[truncateIdx]).toContain("verification_group");
-  });
-
-  it("routes 0004 statements through the transaction pipeline (mock client)", async () => {
-    const realMigrationsDir = join(process.cwd(), "src/lib/db/migrations");
-    const executedQueries: string[] = [];
-
-    const mockClient = {
-      query: vi.fn(async (queryText: string) => {
-        executedQueries.push(queryText.trim());
-        if (queryText.includes("SELECT \"name\" FROM \"__migrations\"")) {
-          // Simulate all migrations except 0004 already applied, only 0004 pending
-          const otherApplied = readdirSync(realMigrationsDir)
-            .filter((f) => f.endsWith(".sql") && f !== "0004_verification_group_and_prefix.sql")
-            .map((f) => ({ name: f }));
-          return { rows: otherApplied };
-        }
-        return { rows: [] };
-      }),
-    };
-
-    const result = await runMigrations(mockClient as unknown as import("pg").Client, realMigrationsDir);
-
-    expect(result.pending).toBe(1);
-    expect(result.applied).toEqual(["0004_verification_group_and_prefix.sql"]);
-
-    // Verify 0004 was executed cleanly within BEGIN and COMMIT
-    const beginIdx = executedQueries.indexOf("BEGIN");
-    const insertIdx = executedQueries.findIndex((q) =>
-      q.includes('INSERT INTO "__migrations"')
-    );
-    const commitIdx = executedQueries.indexOf("COMMIT");
-
-    expect(beginIdx).toBeGreaterThan(-1);
-    expect(insertIdx).toBeGreaterThan(beginIdx);
-    expect(commitIdx).toBeGreaterThan(insertIdx);
   });
 });

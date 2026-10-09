@@ -322,6 +322,9 @@ export function UniversalAssertionsEditor({
 
   const handleRawJsonChange = (val: string) => {
     setRawJsonText(val);
+    if (draft) {
+      draft.setText(val);
+    }
     if (!val.trim()) {
       commitAssertions([]);
       return;

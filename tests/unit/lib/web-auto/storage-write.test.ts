@@ -45,3 +45,98 @@ describe("writeErroredCaseResults — F17 column fix", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 });
+
+describe("writeWebAutoCaseResult — score normalization and fallback prevention (W8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("persists score as null for errored status even if verdict.llm has score", async () => {
+    const returningFn = vi.fn().mockResolvedValue([{ id: 1 }]);
+    const valuesFn = vi.fn().mockReturnValue({ returning: returningFn });
+    vi.mocked(db.insert).mockReturnValue({
+      values: valuesFn,
+    } as unknown as ReturnType<typeof db.insert>);
+
+    const { writeWebAutoCaseResult } = await import("@/lib/web-auto/storage");
+
+    await writeWebAutoCaseResult({
+      runId: "11111111-1111-4111-8111-111111111111",
+      caseId: 101,
+      status: "errored",
+      executionOutput: null,
+      score: undefined,
+      verdict: {
+        deterministic: { passed: true, results: [] },
+        overall: { passed: false, reason: "Evaluator failed" },
+        llm: {
+          passed: false,
+          score: 0,
+          expectationResults: [],
+        },
+      },
+      error: { source: "internal", message: "Judge crashed" },
+      startedAt: Date.now(),
+      durationMs: 100,
+    });
+
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    const row = valuesFn.mock.calls[0][0] as Record<string, unknown>;
+    expect(row.status).toBe("errored");
+    // W8: Must be null, never fallback to verdict.llm.score (0)
+    expect(row.score).toBeNull();
+  });
+
+  it("persists score as null for deterministic failure without judge evaluation", async () => {
+    const returningFn = vi.fn().mockResolvedValue([{ id: 2 }]);
+    const valuesFn = vi.fn().mockReturnValue({ returning: returningFn });
+    vi.mocked(db.insert).mockReturnValue({
+      values: valuesFn,
+    } as unknown as ReturnType<typeof db.insert>);
+
+    const { writeWebAutoCaseResult } = await import("@/lib/web-auto/storage");
+
+    await writeWebAutoCaseResult({
+      runId: "11111111-1111-4111-8111-111111111111",
+      caseId: 102,
+      status: "failed",
+      executionOutput: null,
+      score: undefined,
+      error: null,
+      startedAt: Date.now(),
+      durationMs: 150,
+    });
+
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    const row = valuesFn.mock.calls[0][0] as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    // W8: Pure deterministic failure has no 1-5 score, must be null
+    expect(row.score).toBeNull();
+  });
+
+  it("persists valid Likert score (1-5) when evaluation succeeded", async () => {
+    const returningFn = vi.fn().mockResolvedValue([{ id: 3 }]);
+    const valuesFn = vi.fn().mockReturnValue({ returning: returningFn });
+    vi.mocked(db.insert).mockReturnValue({
+      values: valuesFn,
+    } as unknown as ReturnType<typeof db.insert>);
+
+    const { writeWebAutoCaseResult } = await import("@/lib/web-auto/storage");
+
+    await writeWebAutoCaseResult({
+      runId: "11111111-1111-4111-8111-111111111111",
+      caseId: 103,
+      status: "passed",
+      executionOutput: null,
+      score: 4,
+      error: null,
+      startedAt: Date.now(),
+      durationMs: 300,
+    });
+
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    const row = valuesFn.mock.calls[0][0] as Record<string, unknown>;
+    expect(row.status).toBe("passed");
+    expect(row.score).toBe(4);
+  });
+});

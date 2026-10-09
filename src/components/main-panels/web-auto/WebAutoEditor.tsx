@@ -440,8 +440,12 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     applyDraft,
   });
 
-  const handleSave = async () => {
-    if (!selectedCase) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!selectedCase) return false;
+    if (jsonError) {
+      toast.error("Fix JSON errors before saving");
+      return false;
+    }
     setSaving(true);
     try {
       const cleaned = sanitizeAssertions(draftAssertions as AssertionSpec[]);
@@ -460,16 +464,18 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
         }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Failed to save case");
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || `Failed to save case (${res.status})`);
       }
       
       // Trigger SWR revalidation
       await mutate(`/api/web-auto-suites/${suiteId}/cases`);
       clearDraftState();
       toast.success("Saved successfully");
+      return true;
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -483,9 +489,17 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
     setSelectedRunId(null);
     setSelectedRunSeq(null);
 
-    // If dirty and targeting current selected case, save first
+    // If draft has parse errors, block running
+    if (jsonError && targetId === selectedCaseId) {
+      toast.error("Fix JSON errors before running");
+      return;
+    }
+
+    // If dirty and targeting current selected case, save first.
+    // CONTRACT: Running depends strictly on confirmed persistence. Never run on failed save.
     if (isDirty && targetId === selectedCaseId) {
-      await handleSave();
+      const saved = await handleSave();
+      if (!saved) return;
     }
 
     // Clear previous execution outcome and images before starting new run

@@ -299,8 +299,16 @@ export async function writeWebAutoCaseResult(
     input.assertionResults ??
     input.verdict?.deterministic?.results ??
     [];
-  const score = input.score ?? input.verdict?.llm?.score ?? null;
-  const feedback = input.feedback ?? input.verdict?.llm?.feedback ?? null;
+  // CONTRACT: Only save normalized final score from runner. Errored outcomes
+  // and pure deterministic failures never carry a score (saved as null). Do not
+  // fallback to inner unverified fields.
+  const score =
+    input.status === "errored"
+      ? null
+      : typeof input.score === "number" && input.score >= 1 && input.score <= 5
+        ? input.score
+        : null;
+  const feedback = input.feedback ?? null;
 
   const [row] = await db
     .insert(WebAutoCaseResultTable)

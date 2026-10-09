@@ -63,33 +63,75 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
     evaluatorFeedback,
   } = options;
 
+  // 1. Validate indices and detect duplicates/unknowns in deterministicResults
   const detMap = new Map<number, AssertionResult>();
+  const duplicateDetIndices = new Set<number>();
+  const unknownDetIndices: number[] = [];
+
   for (const res of deterministicResults) {
+    if (typeof res.index !== "number" || res.index < 0 || res.index >= assertions.length) {
+      unknownDetIndices.push(res.index);
+      continue;
+    }
+    const spec = assertions[res.index];
+    if (spec && (spec.type === "llm_dim" || spec.type === "llm_custom")) {
+      unknownDetIndices.push(res.index);
+      continue;
+    }
+    if (detMap.has(res.index)) {
+      duplicateDetIndices.add(res.index);
+    }
     detMap.set(res.index, res);
   }
 
+  // 2. Validate indices and detect duplicates/unknowns in llmScores
   const llmScoreMap = new Map<number, { score: number; reason?: string }>();
+  const duplicateLlmIndices = new Set<number>();
+  const unknownLlmIndices: number[] = [];
+
   for (const item of llmScores) {
+    if (typeof item.index !== "number" || item.index < 0 || item.index >= assertions.length) {
+      unknownLlmIndices.push(item.index);
+      continue;
+    }
+    const spec = assertions[item.index];
+    if (spec && spec.type !== "llm_dim" && spec.type !== "llm_custom") {
+      unknownLlmIndices.push(item.index);
+      continue;
+    }
+    if (llmScoreMap.has(item.index)) {
+      duplicateLlmIndices.add(item.index);
+    }
     llmScoreMap.set(item.index, item);
   }
 
-  // 1. Check deterministic assertions for errors or failures
-  let anyDeterministicError = false;
+  // Pre-screen deterministic assertions to determine whether LLM items should be short-circuited
+  let anyDeterministicError = unknownDetIndices.length > 0;
   let anyDeterministicFailed = false;
 
-  for (const res of deterministicResults) {
-    if (res.errored) {
-      anyDeterministicError = true;
-    } else if (!res.ok) {
-      anyDeterministicFailed = true;
+  for (let i = 0; i < assertions.length; i++) {
+    const spec = assertions[i];
+    if (spec.type !== "llm_dim" && spec.type !== "llm_custom") {
+      if (duplicateDetIndices.has(i)) {
+        anyDeterministicError = true;
+      } else if (!detMap.has(i)) {
+        anyDeterministicError = true;
+      } else {
+        const res = detMap.get(i)!;
+        if (res.errored) {
+          anyDeterministicError = true;
+        } else if (!res.ok) {
+          anyDeterministicFailed = true;
+        }
+      }
     }
   }
 
+  const deterministicFailedOrErrored = anyDeterministicError || anyDeterministicFailed;
+
+  // 3. Build 1:1 aligned, self-contained AssertionResult[] array for all declared assertions
   const assertionResults: AssertionResult[] = [];
   const recordedLlmScores: number[] = [];
-
-  // Short-circuit condition: deterministic failed or errored
-  const deterministicFailedOrErrored = anyDeterministicError || anyDeterministicFailed;
 
   for (let i = 0; i < assertions.length; i++) {
     const spec = assertions[i];
@@ -110,10 +152,22 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
       };
 
       if (deterministicFailedOrErrored) {
-        // Deterministic failed -> short-circuit LLM assertions
         baseResult.skipped = true;
-        baseResult.reason = "Skipped: deterministic assertion failed";
-        baseResult.message = "Skipped due to deterministic assertion failure";
+        baseResult.reason = anyDeterministicError
+          ? "Skipped: deterministic assertion errored"
+          : "Skipped: deterministic assertion failed";
+        baseResult.message = anyDeterministicError
+          ? "Skipped due to deterministic assertion error"
+          : "Skipped due to deterministic assertion failure";
+        assertionResults.push(baseResult);
+        continue;
+      }
+
+      if (duplicateLlmIndices.has(i)) {
+        baseResult.skipped = true;
+        baseResult.errored = true;
+        baseResult.reason = `Duplicate LLM evaluation score for index ${i}`;
+        baseResult.message = `Duplicate LLM evaluation score for index ${i}`;
         assertionResults.push(baseResult);
         continue;
       }
@@ -173,16 +227,26 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
     }
 
     // Deterministic item
-    const rawDetRes = detMap.get(i);
-    const detRes: AssertionResult = rawDetRes
-      ? { ...rawDetRes }
-      : {
-          index: i,
-          type: spec.type,
-          ok: false,
-          errored: true,
-          message: "Missing deterministic evaluation result",
-        };
+    let detRes: AssertionResult;
+    if (duplicateDetIndices.has(i)) {
+      detRes = {
+        index: i,
+        type: spec.type,
+        ok: false,
+        errored: true,
+        message: `Duplicate deterministic evaluation result for index ${i}`,
+      };
+    } else if (detMap.has(i)) {
+      detRes = { ...detMap.get(i)! };
+    } else {
+      detRes = {
+        index: i,
+        type: spec.type,
+        ok: false,
+        errored: true,
+        message: "Missing deterministic evaluation result",
+      };
+    }
 
     // Guarantee self-contained snapshot readability without external spec
     if (spec.type === "tool_call") {
@@ -214,27 +278,35 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
     assertionResults.push(detRes);
   }
 
-  // Determine overall status
+  // 4. Determine overall status SOLELY from the complete assertionResults set
   let finalStatus: "passed" | "failed" | "errored";
 
-  if (anyDeterministicError) {
-    finalStatus = "errored";
-  } else if (anyDeterministicFailed) {
-    finalStatus = "failed";
-  } else {
-    // Deterministic passed! Now check LLM items
-    const anyLlmError = assertionResults.some(
-      (r) => (r.type === "llm_dim" || r.type === "llm_custom") && r.errored,
-    );
-
-    if (anyLlmError) {
+  if (assertions.length === 0) {
+    // CONTRACT: Valid empty assertions represent smoke tests (e.g. tool execution verification).
+    // If unknown indices were passed into a smoke test case, treat as errored.
+    if (unknownDetIndices.length > 0 || unknownLlmIndices.length > 0) {
       finalStatus = "errored";
-    } else if (recordedLlmScores.length > 0) {
-      const minScore = Math.min(...recordedLlmScores);
-      finalStatus = minScore >= threshold ? "passed" : "failed";
     } else {
-      // Pure deterministic test suite, and all passed
       finalStatus = "passed";
+    }
+  } else {
+    const hasUnknown = unknownDetIndices.length > 0 || unknownLlmIndices.length > 0;
+    const hasErrored = hasUnknown || assertionResults.some((r) => r.errored);
+    const hasFailed = assertionResults.some((r) => !r.ok && !r.skipped && !r.errored);
+
+    if (hasErrored) {
+      finalStatus = "errored";
+    } else if (hasFailed) {
+      finalStatus = "failed";
+    } else {
+      // All executed non-skipped assertions passed
+      if (recordedLlmScores.length > 0) {
+        const minScore = Math.min(...recordedLlmScores);
+        finalStatus = minScore >= threshold ? "passed" : "failed";
+      } else {
+        // Pure deterministic test suite, and all passed
+        finalStatus = "passed";
+      }
     }
   }
 
@@ -242,7 +314,10 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
 
   let feedback = evaluatorFeedback;
   if (!feedback) {
-    if (anyDeterministicFailed) {
+    const hasUnknown = unknownDetIndices.length > 0 || unknownLlmIndices.length > 0;
+    if (hasUnknown) {
+      feedback = "Received results for unknown or invalid assertion indices.";
+    } else if (anyDeterministicFailed) {
       feedback = "Deterministic assertion checks failed. LLM evaluation skipped.";
     } else if (anyDeterministicError) {
       feedback = "One or more deterministic assertions errored during execution.";
@@ -251,9 +326,13 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
     } else if (finalStatus === "errored") {
       feedback = "One or more assertions errored during evaluation.";
     } else if (finalStatus === "passed") {
-      feedback = "All assertion criteria satisfied.";
+      feedback = assertions.length === 0
+        ? "Smoke test passed (no assertions declared)."
+        : "All assertion criteria satisfied.";
     } else if (finalStatus === "failed") {
-      feedback = `Evaluation failed to meet threshold of ${threshold}. Min score: ${minLlmScore}.`;
+      feedback = minLlmScore !== undefined
+        ? `Evaluation failed to meet threshold of ${threshold}. Min score: ${minLlmScore}.`
+        : "One or more assertions failed.";
     }
   }
 

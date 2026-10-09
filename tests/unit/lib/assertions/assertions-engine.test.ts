@@ -281,6 +281,8 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[0].ok).toBe(true);
       expect(outcome.deterministicResults[1].ok).toBe(false);
     });
+
+
   });
 
   describe("4. Tool Call Trajectory assertions", () => {
@@ -1467,4 +1469,167 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
       expect(outcome.deterministicResults[3].ok).toBe(true);
     });
   });
+
+  describe("A4 / A10 / A11 Deterministic Assertion Fixes", () => {
+    it("A4: prevents variables from overwriting real business evidence like result", () => {
+      const payload = { ok: false };
+      const options = {
+        variables: {
+          result: { ok: true },
+        },
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "js_expression",
+          expression: "result.ok === true",
+        },
+        {
+          type: "js_expression",
+          expression: "variables.result.ok === true && result.ok === false",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions, options);
+      // First assertion: result.ok === true must fail because real result.ok is false
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      // Second assertion: variables.result is explicitly accessible under variables namespace
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+    });
+
+    it("A10: checks all inner elements in nested wildcards and identifies failed element paths", () => {
+      const payload = {
+        groups: [
+          {
+            items: [{ ok: true }, { ok: false }],
+          },
+        ],
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "groups[*].items[*].ok",
+          operator: "==",
+          expected: true,
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      expect(outcome.deterministicResults[0].actual).toEqual(["groups[0].items[1]"]);
+      expect(outcome.deterministicResults[0].message).toBe("unsatisfied item(s): [groups[0].items[1]]");
+    });
+
+    it("A10: catches missing leaf fields in nested wildcards without dropping them", () => {
+      const payload = {
+        groups: [
+          {
+            items: [{ ok: true }, {}],
+          },
+        ],
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "groups[*].items[*].ok",
+          operator: "==",
+          expected: true,
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      expect(outcome.deterministicResults[0].actual).toEqual(["groups[0].items[1]"]);
+    });
+
+    it("A10: passes when all items across all groups satisfy the nested condition", () => {
+      const payload = {
+        groups: [
+          {
+            items: [{ ok: true }, { ok: true }],
+          },
+          {
+            items: [{ ok: true }],
+          },
+        ],
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "groups[*].items[*].ok",
+          operator: "==",
+          expected: true,
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+    });
+
+    it("A11: rejects missing field comparing to empty array, but accepts real empty array", () => {
+      const missingPayload = {};
+      const emptyArrayPayload = { missing: [] };
+
+      const assertion: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "missing",
+          operator: "==",
+          expected: [],
+        },
+      ];
+
+      // Missing field must fail
+      const outcomeMissing = evaluateAssertions(missingPayload, assertion);
+      expect(outcomeMissing.allDeterministicPassed).toBe(false);
+      expect(outcomeMissing.deterministicResults[0].ok).toBe(false);
+      expect(outcomeMissing.deterministicResults[0].message).toContain("does not exist");
+
+      // Actual empty array must pass
+      const outcomeEmptyArray = evaluateAssertions(emptyArrayPayload, assertion);
+      expect(outcomeEmptyArray.allDeterministicPassed).toBe(true);
+      expect(outcomeEmptyArray.deterministicResults[0].ok).toBe(true);
+    });
+
+    it("Preserves single-layer wildcard behavior and exists operator semantics", () => {
+      const payload = {
+        items: [{ val: 10 }, { val: 0 }],
+        active: "yes",
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "items[*].val",
+          operator: ">",
+          expected: 0,
+        },
+        {
+          type: "jsonpath",
+          path: "active",
+          operator: "exists",
+        },
+        {
+          type: "jsonpath",
+          path: "nonexistent",
+          operator: "exists",
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      expect(outcome.deterministicResults[0].actual).toEqual([1]);
+      expect(outcome.deterministicResults[1].ok).toBe(true);
+      expect(outcome.deterministicResults[1].actual).toBe("exists");
+      expect(outcome.deterministicResults[2].ok).toBe(false);
+      expect(outcome.deterministicResults[2].actual).toBe("missing");
+    });
+  });
 });
+

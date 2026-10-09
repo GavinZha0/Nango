@@ -53,7 +53,6 @@ import { detectToolResultStatus, extractErrorMessage } from "@/lib/copilot/detec
 import * as storage from "./storage";
 import { getConfigNumber } from "@/lib/config";
 import {
-  DEFAULT_EVAL_TARGET_TIMEOUT_S,
   DEFAULT_EVAL_EVALUATOR_TIMEOUT_S,
   CONFIG_KEY_EVALUATOR_TIMEOUT,
 } from "./config";
@@ -79,8 +78,8 @@ export interface RunEvalCaseInput {
   dimensionIds?: string[];
   /** Suite pass threshold (1-5, default 3). */
   threshold?: number;
-  /** Per-case execution timeout for the target agent in seconds. Overrides global config. */
-  caseTimeoutSec?: number | null;
+  /** Per-case execution timeout for the target agent in seconds. Required field. */
+  caseTimeoutSec: number;
   /** Case conversation turns (user messages only). */
   turns: Array<{ userMessage: string }>;
   /** Case assertions (deterministic + llm_dim + llm_custom). */
@@ -361,12 +360,8 @@ export async function runEvalCase(
   const startMs = Date.now();
   const threshold = input.threshold ?? 3;
 
-  // Target agent turn timeout is defined by the suite specification (defaulting to 300s code fallback)
-  const caseTimeoutSec =
-    typeof input.caseTimeoutSec === "number" && input.caseTimeoutSec > 0
-      ? input.caseTimeoutSec
-      : DEFAULT_EVAL_TARGET_TIMEOUT_S;
-  const targetTimeoutMs = caseTimeoutSec * 1000;
+  // Target agent turn timeout is defined by the suite specification (required field)
+  const targetTimeoutMs = input.caseTimeoutSec * 1000;
 
   const evaluatorTimeoutSec = getConfigNumber(CONFIG_KEY_EVALUATOR_TIMEOUT, DEFAULT_EVAL_EVALUATOR_TIMEOUT_S);
   const evaluatorTimeoutMs = (evaluatorTimeoutSec > 0 ? evaluatorTimeoutSec : DEFAULT_EVAL_EVALUATOR_TIMEOUT_S) * 1000;
@@ -418,12 +413,47 @@ export async function runEvalCase(
 
   // ── ① Dispatch target agent ───────────────────────────────────
 
+  const hasValidTurns =
+    input.turns &&
+    input.turns.length > 0 &&
+    input.turns.some((t) => t.userMessage && t.userMessage.trim().length > 0);
+
+  if (!hasValidTurns) {
+    const errorMsg =
+      "Evaluation case requires at least one turn with non-empty user input";
+    log.warn(
+      { event: "eval_case_empty_turns", caseId: input.caseId, runId: input.runId },
+      errorMsg,
+    );
+    const emptyThreadId = randomUUID();
+    if (input.runId) {
+      await storage.writeCaseResult({
+        runId: input.runId,
+        caseId: input.caseId,
+        status: "errored",
+        assertionResults: [],
+        feedback: errorMsg,
+        threadId: emptyThreadId,
+        evaluatorThreadId: null,
+        executionStats: { durationMs: 0, outputChars: 0, ttftMs: null },
+      });
+    }
+    return {
+      status: "errored",
+      error: errorMsg,
+      assertionResults: [],
+      feedback: errorMsg,
+      threadId: emptyThreadId,
+    };
+  }
+
   const currentThreadId = randomUUID();
   const history: { role: "user" | "assistant"; content: string }[] = [];
   let durationMs = 0;
   let outputChars = 0;
   const actualToolCalls: string[] = [];
   let finalTargetSummary = "";
+  const assistantResponses: string[] = [];
   const allTargetEvents: EntityRunEventEntity[] = [];
 
   for (const turn of input.turns) {
@@ -467,6 +497,7 @@ export async function runEvalCase(
     }
 
     finalTargetSummary = targetResult.summary;
+    assistantResponses.push(targetResult.summary);
 
     const targetEvents = await readEvents(targetResult.runId);
     allTargetEvents.push(...targetEvents);
@@ -505,6 +536,8 @@ export async function runEvalCase(
 
   const checkInput: DeterministicCheckInput = {
     agentText: finalTargetSummary,
+    allAgentResponses: assistantResponses,
+    turnsCount: input.turns.length,
     actualToolCalls,
     toolCalls: extractDetailedToolCalls(allTargetEvents),
     metrics: { durationMs, outputChars, toolCallCount },

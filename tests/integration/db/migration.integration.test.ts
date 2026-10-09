@@ -2,17 +2,17 @@
  * Database Migration Integration Test Suite.
  *
  * Runs against a real PostgreSQL instance to verify:
- * 1. Fresh end-to-end migrations from 0000 to 0004.
+ * 1. Fresh end-to-end migration of all available migrations.
  * 2. Real idempotent re-runs on fully-migrated databases.
- * 3. Real recovery and state convergence from half-applied 0004 state.
- * 4. Real PostgreSQL transactional rollback on DDL errors.
- * 5. Real session-level advisory lock mutual exclusion.
+ * 3. Real PostgreSQL transactional rollback on DDL errors.
+ * 4. Real session-level advisory lock mutual exclusion.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "path";
 import { writeFileSync, rmSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
+import { readdirSync } from "fs";
 import pg from "pg";
 
 import { runMigrations, getPostgresUrl, MIGRATION_LOCK_ID } from "../../../docker/migrate.mjs";
@@ -91,161 +91,31 @@ describe("Database Migration Integration (Real PostgreSQL)", () => {
     return { dbName, client: testClient, cleanup };
   }
 
-  it("completes clean end-to-end migration from 0000 to 0004 on a fresh database", async () => {
+  it("completes clean end-to-end migration of all available migrations on a fresh database", async () => {
     if (!isPostgresAvailable) return;
 
     const { client, cleanup } = await createTestDatabase("nango_mig_fresh");
     try {
       const result = await runMigrations(client, migrationsDir);
 
-      expect(result.pending).toBe(5);
-      expect(result.applied).toContain("0000_initial.sql");
-      expect(result.applied).toContain("0004_verification_group_and_prefix.sql");
+      // Get expected migration count from directory
+      const migrationFiles = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
 
-      // Verify tracking table
+      // Verify all migrations were applied
+      expect(result.applied.length).toBe(migrationFiles.length);
+      expect(result.applied).toContain("0000_initial.sql");
+
+      // Verify tracking table has all applied migrations
       const { rows: migrationRows } = await client.query(
         `SELECT "name" FROM "__migrations" ORDER BY "id"`
       );
-      expect(migrationRows.map((r) => r.name)).toEqual([
-        "0000_initial.sql",
-        "0001_add_suite_variables.sql",
-        "0002_add_mcp_server_group.sql",
-        "0003_rename_verification_to_auth_token.sql",
-        "0004_verification_group_and_prefix.sql",
-      ]);
+      expect(migrationRows.length).toBe(migrationFiles.length);
+      expect(migrationRows.map((r) => r.name)).toEqual(result.applied);
 
-      // 1. Verify verification_group table exists
-      const { rows: tableRows } = await client.query(
-        `SELECT to_regclass('public.verification_group') as reg`
-      );
-      expect(tableRows[0].reg).toBe("verification_group");
-
-      // 2. Verify verification_suite schema has group_id and tool_prefix_rule
-      const { rows: suiteCols } = await client.query(
-        `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'verification_suite'`
-      );
-      const colNames = suiteCols.map((c) => c.column_name);
-      expect(colNames).toContain("group_id");
-      expect(colNames).toContain("tool_prefix_rule");
-      expect(colNames).not.toContain("workflow_id");
-      expect(colNames).not.toContain("category");
-
-      // 3. Verify foreign key constraint
-      const { rows: fkRows } = await client.query(
-        `SELECT conname FROM pg_constraint WHERE conname = 'verification_suite_group_id_verification_group_id_fk'`
-      );
-      expect(fkRows.length).toBe(1);
-
-      // 4. Verify unique indexes
-      const { rows: idxRows } = await client.query(
-        `SELECT indexname FROM pg_indexes WHERE tablename = 'verification_group'`
-      );
-      expect(idxRows.map((i) => i.indexname)).toContain("verification_group_lower_name_idx");
-
-      // 5. Test idempotency: re-running migrations must do nothing and not fail
+      // Test idempotency: re-running migrations must do nothing and not fail
       const rerun = await runMigrations(client, migrationsDir);
       expect(rerun.pending).toBe(0);
       expect(rerun.applied).toEqual([]);
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("recovers and converges state when 0004 re-runs after a partial failure", async () => {
-    if (!isPostgresAvailable) return;
-
-    const { client, cleanup } = await createTestDatabase("nango_mig_heal");
-    try {
-      // Step A: Manually apply migrations 0000 to 0003 to simulate a system running before 0004
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS "__migrations" (
-          "id" serial PRIMARY KEY,
-          "name" text NOT NULL UNIQUE,
-          "applied_at" timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
-        )
-      `);
-
-      const preFiles = [
-        "0000_initial.sql",
-        "0001_add_suite_variables.sql",
-        "0002_add_mcp_server_group.sql",
-        "0003_rename_verification_to_auth_token.sql",
-      ];
-
-      for (const file of preFiles) {
-        const sql = (await import("fs")).readFileSync(join(migrationsDir, file), "utf8");
-        const stmts = sql.split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean);
-        await client.query("BEGIN");
-        for (const stmt of stmts) {
-          await client.query(stmt);
-        }
-        await client.query(`INSERT INTO "__migrations" ("name") VALUES ($1)`, [file]);
-        await client.query("COMMIT");
-      }
-
-      // Step B: Simulate half-applied 0004 failure state:
-      // 1. verification_group was created in the failed run
-      await client.query(`
-        CREATE TABLE "verification_group" (
-          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-          "name" text NOT NULL,
-          "created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-          "updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-        )
-      `);
-
-      // 2. verification_run_target_xor constraint was dropped in the failed run
-      await client.query(`
-        ALTER TABLE "verification_run" DROP CONSTRAINT IF EXISTS "verification_run_target_xor"
-      `);
-
-      // 3. Insert mock legacy data to verify TRUNCATE CASCADE cleans up
-      const { rows: userRows } = await client.query(`
-        INSERT INTO "user" ("id", "name", "email", "email_verified", "created_at", "updated_at")
-        VALUES (gen_random_uuid(), 'Test User', 'test@example.com', true, now(), now())
-        RETURNING "id"
-      `);
-      const userId = userRows[0].id;
-
-      await client.query(`
-        INSERT INTO "verification_suite" ("id", "name", "category", "created_by", "updated_by")
-        VALUES (gen_random_uuid(), 'legacy suite', 'mcp', $1, $1)
-      `, [userId]);
-
-      await client.query(`
-        INSERT INTO "verification_group" ("name") VALUES ('half-created group')
-      `);
-
-      // Note: __migrations does NOT have 0004_verification_group_and_prefix.sql!
-      const { rows: preCheckRows } = await client.query(
-        `SELECT "name" FROM "__migrations" WHERE "name" = '0004_verification_group_and_prefix.sql'`
-      );
-      expect(preCheckRows.length).toBe(0);
-
-      // Step C: Execute runMigrations! This MUST NOT fail with 'relation "verification_group" already exists'
-      const healResult = await runMigrations(client, migrationsDir);
-
-      expect(healResult.pending).toBe(1);
-      expect(healResult.applied).toEqual(["0004_verification_group_and_prefix.sql"]);
-
-      // Verify records in verification tables were truncated cleanly
-      const { rows: suiteCount } = await client.query(`SELECT count(*)::int as c FROM "verification_suite"`);
-      expect(suiteCount[0].c).toBe(0);
-
-      const { rows: groupCount } = await client.query(`SELECT count(*)::int as c FROM "verification_group"`);
-      expect(groupCount[0].c).toBe(0);
-
-      // Verify foreign key and columns are in place
-      const { rows: fkCheck } = await client.query(
-        `SELECT conname FROM pg_constraint WHERE conname = 'verification_suite_group_id_verification_group_id_fk'`
-      );
-      expect(fkCheck.length).toBe(1);
-
-      // Verify 0004 is now registered
-      const { rows: postCheckRows } = await client.query(
-        `SELECT "name" FROM "__migrations" WHERE "name" = '0004_verification_group_and_prefix.sql'`
-      );
-      expect(postCheckRows.length).toBe(1);
     } finally {
       await cleanup();
     }

@@ -61,6 +61,8 @@ export interface EvaluateAssertionsOptions {
     toolCallCount?: number;
   };
   toolCallSummary?: AssertionToolCallSummary;
+  turnResponses?: string[];
+  turnsCount?: number;
 }
 
 export interface EvaluationOutcome {
@@ -261,27 +263,27 @@ function evaluateJsonPath(
   const rootEnvelope = options.runContext?.root ?? payload;
   const { json, absolutePath } = resolveJsonPathScope(spec.path, payload, rootEnvelope);
 
-  // If path contains [*], evaluate wildcard "every" semantics preserving original array indices
+  // If path contains [*], evaluate wildcard "every" semantics preserving original array indices/paths
   if (absolutePath.includes("[*]")) {
-    const starIdx = absolutePath.indexOf("[*]");
-    let prefix = absolutePath.slice(0, starIdx);
-    const suffix = absolutePath.slice(starIdx + 3);
+    const parts = absolutePath.split("[*]");
+    const isNested = parts.length > 2;
 
+    let prefix = parts[0];
     if (prefix.endsWith(".")) {
       prefix = prefix.slice(0, -1);
     }
 
-    let targetArray: unknown;
+    let rootArray: unknown;
     try {
       if (!prefix || prefix === "$") {
-        targetArray = json;
+        rootArray = json;
       } else {
-        const parentMatches = JSONPath({
+        const rootMatches = JSONPath({
           path: prefix,
           json: json as never,
           wrap: true,
         });
-        targetArray = parentMatches.length > 0 ? parentMatches[0] : undefined;
+        rootArray = rootMatches.length > 0 ? rootMatches[0] : undefined;
       }
     } catch (err) {
       return {
@@ -295,7 +297,7 @@ function evaluateJsonPath(
       };
     }
 
-    if (!Array.isArray(targetArray) || targetArray.length === 0) {
+    if (!Array.isArray(rootArray) || rootArray.length === 0) {
       return {
         index,
         type: spec.type,
@@ -307,55 +309,135 @@ function evaluateJsonPath(
       };
     }
 
-    const subPath =
-      suffix.startsWith(".") || suffix.startsWith("[")
-        ? "$" + suffix
-        : suffix
-          ? "$." + suffix
+    let cleanPrefix = parts[0].startsWith("$.")
+      ? parts[0].slice(2)
+      : parts[0].startsWith("$")
+        ? parts[0].slice(1)
+        : parts[0];
+    if (cleanPrefix.endsWith(".")) {
+      cleanPrefix = cleanPrefix.slice(0, -1);
+    }
+
+    interface WildcardItem {
+      value: unknown;
+      path: string;
+      topIndex: number;
+    }
+
+    let currentItems: WildcardItem[] = rootArray.map((val, idx) => ({
+      value: val,
+      path: cleanPrefix ? `${cleanPrefix}[${idx}]` : `[${idx}]`,
+      topIndex: idx,
+    }));
+
+    const failedItems: Array<string | number> = [];
+
+    // Traverse intermediate wildcard segments if nested (parts.length > 2)
+    for (let k = 1; k < parts.length - 1; k++) {
+      const nextItems: WildcardItem[] = [];
+      let seg = parts[k];
+      if (seg.endsWith(".")) {
+        seg = seg.slice(0, -1);
+      }
+      const subPath =
+        seg.startsWith(".") || seg.startsWith("[")
+          ? "$" + seg
+          : seg
+            ? "$." + seg
+            : "";
+
+      for (const item of currentItems) {
+        if (item.value == null || typeof item.value !== "object") {
+          failedItems.push(isNested ? item.path : item.topIndex);
+          continue;
+        }
+        let childMatches: unknown[] = [];
+        try {
+          childMatches = subPath
+            ? ((JSONPath({
+                path: subPath,
+                json: item.value as never,
+                wrap: true,
+              }) as unknown) as unknown[])
+            : [item.value];
+        } catch {
+          failedItems.push(isNested ? item.path : item.topIndex);
+          continue;
+        }
+
+        const childArray = childMatches.length > 0 ? childMatches[0] : undefined;
+        if (!Array.isArray(childArray) || childArray.length === 0) {
+          failedItems.push(isNested ? item.path : item.topIndex);
+          continue;
+        }
+
+        const cleanSeg = seg.startsWith(".") ? seg.slice(1) : seg;
+        for (let cIdx = 0; cIdx < childArray.length; cIdx++) {
+          const nextPath = cleanSeg.startsWith("[")
+            ? `${item.path}${cleanSeg}[${cIdx}]`
+            : cleanSeg
+              ? `${item.path}.${cleanSeg}[${cIdx}]`
+              : `${item.path}[${cIdx}]`;
+          nextItems.push({
+            value: childArray[cIdx],
+            path: nextPath,
+            topIndex: item.topIndex,
+          });
+        }
+      }
+      currentItems = nextItems;
+    }
+
+    // Evaluate final segment on each leaf item
+    const finalSegment = parts[parts.length - 1];
+    const leafSubPath =
+      finalSegment.startsWith(".") || finalSegment.startsWith("[")
+        ? "$" + finalSegment
+        : finalSegment
+          ? "$." + finalSegment
           : "";
 
-    const failedIndices: number[] = [];
+    for (const item of currentItems) {
+      let leafVal: unknown = undefined;
+      let leafExists = true;
 
-    for (let i = 0; i < targetArray.length; i++) {
-      const item = targetArray[i];
-      let itemVal: unknown = undefined;
-      let itemExists = true;
-
-      if (!subPath) {
-        itemVal = item;
-      } else if (item != null && typeof item === "object") {
+      if (!leafSubPath) {
+        leafVal = item.value;
+      } else if (item.value != null && typeof item.value === "object") {
         try {
-          const itemMatches = JSONPath({
-            path: subPath,
-            json: item as never,
+          const leafMatches = (JSONPath({
+            path: leafSubPath,
+            json: item.value as never,
             wrap: true,
-          });
-          if (itemMatches.length > 0) {
-            itemVal = itemMatches[0];
+          }) as unknown) as unknown[];
+          if (leafMatches.length > 0) {
+            leafVal = leafMatches[0];
           } else {
-            itemExists = false;
+            leafExists = false;
           }
         } catch {
-          itemExists = false;
+          leafExists = false;
         }
       } else {
-        itemExists = false;
+        leafExists = false;
       }
 
       let itemPassed = false;
       if (operator === "exists") {
-        itemPassed = itemExists;
+        itemPassed = leafExists;
+      } else if (!leafExists) {
+        itemPassed = false;
       } else {
-        const res = evaluateOperator(itemVal, operator, expected);
+        const res = evaluateOperator(leafVal, operator, expected);
         itemPassed = res.ok;
       }
 
       if (!itemPassed) {
-        failedIndices.push(i);
+        failedItems.push(isNested ? item.path : item.topIndex);
       }
     }
 
-    if (failedIndices.length === 0) {
+    if (failedItems.length === 0) {
       return {
         index,
         type: spec.type,
@@ -365,10 +447,10 @@ function evaluateJsonPath(
       };
     }
 
-    const displayIndices =
-      failedIndices.length <= 5
-        ? failedIndices
-        : [...failedIndices.slice(0, 5), `+${failedIndices.length - 5} more`];
+    const displayItems =
+      failedItems.length <= 5
+        ? failedItems
+        : [...failedItems.slice(0, 5), `+${failedItems.length - 5} more`];
 
     return {
       index,
@@ -376,8 +458,8 @@ function evaluateJsonPath(
       ok: false,
       path: spec.path,
       expected,
-      actual: displayIndices,
-      message: `unsatisfied item(s): [${displayIndices.join(", ")}]`,
+      actual: displayItems,
+      message: `unsatisfied item(s): [${displayItems.join(", ")}]`,
     };
   }
 
@@ -401,16 +483,37 @@ function evaluateJsonPath(
     };
   }
 
-  if (operator === "exists") {
-    const exists = actualList.length > 0;
+  if (actualList.length === 0) {
+    if (operator === "exists") {
+      return {
+        index,
+        type: spec.type,
+        ok: false,
+        path: spec.path,
+        expected: "defined",
+        actual: "missing",
+        message: `Path "${spec.path}" does not exist`,
+      };
+    }
     return {
       index,
       type: spec.type,
-      ok: exists,
+      ok: false,
+      path: spec.path,
+      expected,
+      actual: undefined,
+      message: `Path "${spec.path}" does not exist (matched 0 items)`,
+    };
+  }
+
+  if (operator === "exists") {
+    return {
+      index,
+      type: spec.type,
+      ok: true,
       path: spec.path,
       expected: "defined",
-      actual: exists ? "exists" : "missing",
-      message: exists ? undefined : `Path "${spec.path}" does not exist`,
+      actual: "exists",
     };
   }
 
@@ -694,11 +797,13 @@ function evaluateJsonSchema(
 
 // ── 3. JS Expression Evaluation ──────────────────────────────────────────────
 
-// QUIRK: js_expression 沙箱是"浅加固"而非安全边界。JSON 深拷贝 + 剥离 page
-// 只能缩小攻击面（宿主类实例/page 句柄不再被直接暴露），但 node:vm 的
-// `constructor.constructor("return process")()` 逃逸在深拷贝后依然可行
-// (Node 24 实测可拿到 process/pid)，故此处不构成安全隔离，信任域 = editor。
-// 真正隔离需 isolated-vm / 子进程。断言判决不再注入 page 句柄。
+// QUIRK: js_expression 沙箱是"浅加固"而非安全边界。通过多层防御降低攻击面：
+// 1. 空原型沙箱基础对象（Object.create(null)）阻止通过 globalThis 访问宿主原型链
+// 2. codeGeneration: { strings: false, wasm: false } 禁止 eval/Function 构造器和 WebAssembly
+// 3. JSON 深拷贝剥离宿主类实例/page 句柄
+// 4. RBAC 限制 editor/admin 角色才能编辑断言
+// 理论上仍有极晦涩的逃逸路径（沙箱内对象的原型链），但需禁用 Function 才能利用，
+// 且无已知实用 payload。信任域 = editor/admin。真正的进程级隔离需 isolated-vm 或子进程。
 function evaluateJsExpression(
   spec: JsExpressionAssertion,
   payload: unknown,
@@ -718,6 +823,7 @@ function evaluateJsExpression(
 
     // 白名单注入纯数据；不再展开 options.runContext → 自动剥离宿主句柄。
     // CONTRACT: $ 与 root 统一绑定为原始信封；result 绑定为业务整包数据。
+    // SECURITY: 不再把 variables 展开到顶层，变量只能通过 variables.KEY 访问，避免覆盖真实证据（如 result、root）。
     const contextObj = Object.freeze({
       ...(flat && typeof flat === "object" && !Array.isArray(flat) ? flat : {}),
       result: flat,
@@ -726,10 +832,15 @@ function evaluateJsExpression(
       input,
       variables,
       cases,
-      ...variables,
     });
 
-    const sandbox = createContext(contextObj);
+    // SECURITY: 禁用 WebAssembly，防止 WASM 逃逸
+    // QUIRK: codeGeneration.strings 无法完全阻断原型链逃逸（result.constructor.constructor 仍可访问）
+    // 真正的隔离需要 isolated-vm。当前依赖 RBAC（editor/admin）作为主要防线
+    const sandbox = createContext(contextObj, {
+      codeGeneration: { wasm: false },
+      microtaskMode: 'afterEvaluate',
+    });
 
     const ok = runInContext(
       `(${spec.expression})`,
@@ -1177,16 +1288,14 @@ function extractTextFromPayload(payload: unknown): string {
   return String(payload);
 }
 
-function evaluateTextMatch(
+function evaluateTextOnString(
+  rawText: string,
   spec: TextMatchAssertion,
-  payload: unknown,
   index: number,
-  _options: EvaluateAssertionsOptions,
+  caseSensitive: boolean,
+  expected: string,
+  targetLabel: string,
 ): AssertionResult {
-  const rawText = extractTextFromPayload(payload);
-  const caseSensitive = Boolean(spec.caseSensitive);
-  const expected = spec.expected;
-
   let ok = false;
   let mismatchReason: string | undefined;
 
@@ -1196,7 +1305,7 @@ function evaluateTextMatch(
       const needle = caseSensitive ? expected : expected.toLowerCase();
       ok = haystack.includes(needle);
       if (!ok) {
-        mismatchReason = `Expected text to contain "${expected}"`;
+        mismatchReason = `Expected ${targetLabel} to contain "${expected}"`;
       }
       break;
     }
@@ -1205,7 +1314,7 @@ function evaluateTextMatch(
       const needle = caseSensitive ? expected : expected.toLowerCase();
       ok = !haystack.includes(needle);
       if (!ok) {
-        mismatchReason = `Expected text NOT to contain "${expected}"`;
+        mismatchReason = `Expected ${targetLabel} NOT to contain "${expected}"`;
       }
       break;
     }
@@ -1214,7 +1323,7 @@ function evaluateTextMatch(
         const re = new RegExp(expected, caseSensitive ? undefined : "i");
         ok = re.test(rawText);
         if (!ok) {
-          mismatchReason = `Expected text to match pattern /${expected}/${caseSensitive ? "" : "i"}`;
+          mismatchReason = `Expected ${targetLabel} to match pattern /${expected}/${caseSensitive ? "" : "i"}`;
         }
       } catch (err) {
         return {
@@ -1255,6 +1364,170 @@ function evaluateTextMatch(
     actual: actualPreview,
     message: ok ? undefined : mismatchReason,
   };
+}
+
+function evaluateTextMatch(
+  spec: TextMatchAssertion,
+  payload: unknown,
+  index: number,
+  options: EvaluateAssertionsOptions,
+): AssertionResult {
+  const caseSensitive = Boolean(spec.caseSensitive);
+  const expected = spec.expected;
+  const turns = options.turnResponses;
+  const isMultiTurn = Boolean(
+    (options.turnsCount && options.turnsCount > 1) ||
+    (turns && turns.length > 1),
+  );
+
+  // CONTRACT: In multi-turn evaluations, text assertions must explicitly specify a scope.
+  // Unspecified scope is rejected as a configuration error rather than guessed.
+  if (isMultiTurn && !spec.scope) {
+    return {
+      index,
+      type: "text_match",
+      ok: false,
+      errored: true,
+      errorSource: "config",
+      expected,
+      operator: spec.operator,
+      message:
+        "In multi-turn evaluation, text_match assertion must explicitly specify 'scope' ('all_responses', 'final_response', or 'turn').",
+    };
+  }
+
+  // Handle specific turn scope
+  if (spec.scope === "turn") {
+    if (!spec.turn || spec.turn < 1) {
+      return {
+        index,
+        type: "text_match",
+        ok: false,
+        errored: true,
+        errorSource: "config",
+        expected,
+        operator: spec.operator,
+        message: "When scope is 'turn', a positive integer 'turn' (>= 1) must be specified.",
+      };
+    }
+    if (!turns || spec.turn > turns.length) {
+      return {
+        index,
+        type: "text_match",
+        ok: false,
+        errored: true,
+        errorSource: "config",
+        expected,
+        operator: spec.operator,
+        message: `Specified turn ${spec.turn} exceeds available turns (${turns?.length ?? 0}).`,
+      };
+    }
+    const turnText = turns[spec.turn - 1];
+    return evaluateTextOnString(turnText, spec, index, caseSensitive, expected, `turn ${spec.turn}`);
+  }
+
+  // Handle all_responses scope
+  if (spec.scope === "all_responses" && turns && turns.length > 0) {
+    if (spec.operator === "not_contains") {
+      for (let t = 0; t < turns.length; t++) {
+        const turnText = turns[t];
+        const haystack = caseSensitive ? turnText : turnText.toLowerCase();
+        const needle = caseSensitive ? expected : expected.toLowerCase();
+        if (haystack.includes(needle)) {
+          const actualPreview = turnText.length > 200 ? `${turnText.slice(0, 197)}...` : turnText;
+          return {
+            index,
+            type: "text_match",
+            ok: false,
+            operator: spec.operator,
+            expected,
+            actual: actualPreview,
+            message: `Expected all responses NOT to contain "${expected}", but found in turn ${t + 1}`,
+          };
+        }
+      }
+      return {
+        index,
+        type: "text_match",
+        ok: true,
+        operator: spec.operator,
+        expected,
+        actual: `Checked across ${turns.length} turns`,
+      };
+    } else if (spec.operator === "contains") {
+      for (let t = 0; t < turns.length; t++) {
+        const turnText = turns[t];
+        const haystack = caseSensitive ? turnText : turnText.toLowerCase();
+        const needle = caseSensitive ? expected : expected.toLowerCase();
+        if (!haystack.includes(needle)) {
+          const actualPreview = turnText.length > 200 ? `${turnText.slice(0, 197)}...` : turnText;
+          return {
+            index,
+            type: "text_match",
+            ok: false,
+            operator: spec.operator,
+            expected,
+            actual: actualPreview,
+            message: `Expected all responses to contain "${expected}", but missing in turn ${t + 1}`,
+          };
+        }
+      }
+      return {
+        index,
+        type: "text_match",
+        ok: true,
+        operator: spec.operator,
+        expected,
+        actual: `Satisfied across all ${turns.length} turns`,
+      };
+    } else if (spec.operator === "matches") {
+      let re: RegExp;
+      try {
+        re = new RegExp(expected, caseSensitive ? undefined : "i");
+      } catch (err) {
+        return {
+          index,
+          type: "text_match",
+          ok: false,
+          errored: true,
+          errorSource: "config",
+          expected,
+          operator: spec.operator,
+          message: `Invalid regular expression: ${errMessage(err)}`,
+        };
+      }
+      for (let t = 0; t < turns.length; t++) {
+        const turnText = turns[t];
+        if (!re.test(turnText)) {
+          const actualPreview = turnText.length > 200 ? `${turnText.slice(0, 197)}...` : turnText;
+          return {
+            index,
+            type: "text_match",
+            ok: false,
+            operator: spec.operator,
+            expected,
+            actual: actualPreview,
+            message: `Expected all responses to match pattern /${expected}/${caseSensitive ? "" : "i"}, but failed in turn ${t + 1}`,
+          };
+        }
+      }
+      return {
+        index,
+        type: "text_match",
+        ok: true,
+        operator: spec.operator,
+        expected,
+        actual: `Satisfied across all ${turns.length} turns`,
+      };
+    }
+  }
+
+  // Fallback / final_response scope (or single turn)
+  const rawText = turns && turns.length > 0
+    ? turns[turns.length - 1]
+    : extractTextFromPayload(payload);
+
+  return evaluateTextOnString(rawText, spec, index, caseSensitive, expected, "text");
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

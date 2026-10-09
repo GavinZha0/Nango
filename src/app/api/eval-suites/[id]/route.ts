@@ -2,11 +2,6 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getConfigNumber } from "@/lib/config";
-import {
-  CONFIG_KEY_TARGET_TIMEOUT,
-  DEFAULT_EVAL_TARGET_TIMEOUT_S,
-} from "@/lib/evaluation/config";
 import {
   canChangeVisibility,
   canDeleteResource,
@@ -88,27 +83,10 @@ export const PATCH = withEditor<{ id: string }>(
       }
     }
 
-    let caseTimeoutSecToSave: number | undefined;
-    if (body.caseTimeoutSec !== undefined) {
-      const defaultTargetTimeout = getConfigNumber(
-        CONFIG_KEY_TARGET_TIMEOUT,
-        DEFAULT_EVAL_TARGET_TIMEOUT_S,
-      );
-      caseTimeoutSecToSave =
-        typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
-          ? body.caseTimeoutSec
-          : defaultTargetTimeout;
-    }
-
     try {
       const updated = await storage.updateSuite(
         suite.id,
-        {
-          ...body,
-          ...(caseTimeoutSecToSave !== undefined
-            ? { caseTimeoutSec: caseTimeoutSecToSave }
-            : {}),
-        },
+        body,
         session.user.id,
       );
       const caseCount = await storage.getCaseCount(suite.id);

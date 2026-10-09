@@ -392,6 +392,7 @@ export function CaseInspector({
   });
 
   const [copied, setCopied] = useState(false);
+  const [assertionsEditorError, setAssertionsEditorError] = useState<string | null>(null);
 
   // Run state
   const [running, setRunning] = useState<boolean>(false);
@@ -506,22 +507,35 @@ export function CaseInspector({
     assertionsDraft.isDirty,
   ]);
 
+  // Check if any draft has unsaved changes and whether any editor error exists
+  const hasUnsavedChanges = inputDraft.isDirty || assertionsDraft.isDirty;
+  const hasAnyErrors = Boolean(inputDraft.parseError || assertionsDraft.parseError || assertionsEditorError);
+  const canSave = hasUnsavedChanges && !hasAnyErrors && !inputDraft.saving && !assertionsDraft.saving;
+
   // Manual save handler
-  const handleSave = useCallback(async (): Promise<void> => {
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (inputDraft.parseError || assertionsDraft.parseError || assertionsEditorError) {
+      setRunError("Fix the JSON errors before saving.");
+      return false;
+    }
     const [inputOk, assertionsOk] = await Promise.all([
       inputDraft.flushAwait(),
       assertionsDraft.flushAwait(),
     ]);
     if (!inputOk || !assertionsOk) {
-      setRunError("Fix the JSON errors before saving.");
+      if (inputOk && !assertionsOk) {
+        setRunError("Partially saved: Input was saved, but assertions failed to save. Please fix assertion errors.");
+      } else if (!inputOk && assertionsOk) {
+        setRunError("Partially saved: Assertions were saved, but input failed to save. Please fix input errors.");
+      } else {
+        setRunError("Fix the JSON errors before saving.");
+      }
+      return false;
     } else {
       onSaveSuccess?.();
+      return true;
     }
-  }, [inputDraft, assertionsDraft, onSaveSuccess]);
-
-  // Check if any draft has unsaved changes
-  const hasUnsavedChanges = inputDraft.isDirty || assertionsDraft.isDirty;
-  const canSave = hasUnsavedChanges && !inputDraft.parseError && !assertionsDraft.parseError && !inputDraft.saving && !assertionsDraft.saving;
+  }, [inputDraft, assertionsDraft, assertionsEditorError, onSaveSuccess]);
 
   // Re-sync drafts if row changes underneath us (e.g., from DB polling).
 
@@ -537,14 +551,23 @@ export function CaseInspector({
     setRunOutcome(null);
     setRunning(true);
     try {
-      // Flush both panes BEFORE issuing the run — the runner reads
-      // input + assertions from DB, not from the draft.
+      if (inputDraft.parseError || assertionsDraft.parseError || assertionsEditorError) {
+        setRunError("Fix the JSON errors above before running.");
+        return;
+      }
+      // CONTRACT: Running depends strictly on confirmed persistence. Never run on failed or partial save.
       const [inputOk, assertionsOk] = await Promise.all([
         inputDraft.flushAwait(),
         assertionsDraft.flushAwait(),
       ]);
       if (!inputOk || !assertionsOk) {
-        setRunError("Fix the JSON errors above before running.");
+        if (inputOk && !assertionsOk) {
+          setRunError("Partially saved: Input was saved, but assertions failed to save. Fix assertion errors before running.");
+        } else if (!inputOk && assertionsOk) {
+          setRunError("Partially saved: Assertions were saved, but input failed to save. Fix input errors before running.");
+        } else {
+          setRunError("Fix the JSON errors above before running.");
+        }
         return;
       }
       const res = await fetch(`/api/verification-cases/${caseRow.id}/run`, {
@@ -684,6 +707,7 @@ export function CaseInspector({
             <UniversalAssertionsEditor
               mode="verification"
               draft={assertionsDraft}
+              onErrorChange={setAssertionsEditorError}
               readOnly={readOnly}
               overrideText={assertionsHistoryNotice}
             />

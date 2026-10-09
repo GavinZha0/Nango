@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn, isDeepEqual, formatCharCount } from "@/lib/utils";
@@ -590,8 +591,12 @@ export function EvalCaseInspector({
     displayFeedback,
   ]);
 
-  const handleSave = useCallback(async (): Promise<void> => {
-    if (!canSave) return;
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (assertionsHasError) {
+      toast.error("Fix assertion errors before saving");
+      return false;
+    }
+    if (!isDirty) return true;
     setSaving(true);
     try {
       const stripped = stripKeys(turns);
@@ -606,21 +611,27 @@ export function EvalCaseInspector({
           assertions: cleanedAssertions,
         },
       );
-      if (savedRow) {
-        if (Array.isArray(savedRow.assertions)) {
-          setAssertions(sanitizeAssertions(savedRow.assertions as AssertionSpec[]));
-        }
-        const savedInput = (savedRow.input ?? {}) as Record<string, unknown>;
-        const rawTurns = Array.isArray(savedInput.turns)
-          ? (savedInput.turns as EvalTurn[])
-          : (Array.isArray(savedRow.turns) ? (savedRow.turns as EvalTurn[]) : []);
-        setTurns(rawTurns.map((t) => ({ ...t, _key: mintKey() })));
+      if (!savedRow) {
+        toast.error("Failed to save evaluation case");
+        return false;
       }
+      if (Array.isArray(savedRow.assertions)) {
+        setAssertions(sanitizeAssertions(savedRow.assertions as AssertionSpec[]));
+      }
+      const savedInput = (savedRow.input ?? {}) as Record<string, unknown>;
+      const rawTurns = Array.isArray(savedInput.turns)
+        ? (savedInput.turns as EvalTurn[])
+        : (Array.isArray(savedRow.turns) ? (savedRow.turns as EvalTurn[]) : []);
+      setTurns(rawTurns.map((t) => ({ ...t, _key: mintKey() })));
       onSaveSuccess?.();
+      return true;
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSaving(false);
     }
-  }, [canSave, evalCase.id, evalCase.suiteId, turns, assertions, onSaveSuccess]);
+  }, [assertionsHasError, isDirty, evalCase.id, evalCase.suiteId, turns, assertions, onSaveSuccess]);
 
   const messagesUrl = resolvedRunId === "playground" && resolvedThreadId
     ? `/api/eval-runs/playground/messages?caseId=${evalCase.id}&threadId=${resolvedThreadId}`
@@ -676,8 +687,17 @@ export function EvalCaseInspector({
     runAbortRef.current = controller;
     const isCurrent = (): boolean => runAbortRef.current === controller;
     try {
-      if (canSave) {
-        await handleSave();
+      if (assertionsHasError) {
+        setRunError("Fix assertion errors before running.");
+        return;
+      }
+      // CONTRACT: Running depends strictly on confirmed persistence. Never run on failed save.
+      if (isDirty) {
+        const saved = await handleSave();
+        if (!saved) {
+          setRunError("Failed to save changes before running.");
+          return;
+        }
       }
       const res = await fetch(`/api/eval-cases/${evalCase.id}/run?stream=true`, {
         method: "POST",

@@ -3,11 +3,6 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getConfigNumber } from "@/lib/config";
-import {
-  CONFIG_KEY_TARGET_TIMEOUT,
-  DEFAULT_EVAL_TARGET_TIMEOUT_S,
-} from "@/lib/evaluation/config";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
@@ -71,19 +66,9 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
-  const defaultTargetTimeout = getConfigNumber(
-    CONFIG_KEY_TARGET_TIMEOUT,
-    DEFAULT_EVAL_TARGET_TIMEOUT_S,
-  );
-  const resolvedCaseTimeoutSec =
-    typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
-      ? body.caseTimeoutSec
-      : defaultTargetTimeout;
-
   try {
     const row = await storage.createSuite({
       ...body,
-      caseTimeoutSec: resolvedCaseTimeoutSec,
       createdBy: session.user.id,
     });
     return NextResponse.json({ ...row, caseCount: 0 }, { status: 201 });
