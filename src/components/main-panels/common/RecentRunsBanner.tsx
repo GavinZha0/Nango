@@ -318,6 +318,8 @@ function RunChip({ run, label, selected, onClick }: RunChipProps): ReactNode {
   return (
     <button
       type="button"
+      data-testid="run-chip"
+      data-run-status={run.status}
       onClick={onClick}
       className={cn(
         "flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ring-[1.5px] ring-inset transition-colors",

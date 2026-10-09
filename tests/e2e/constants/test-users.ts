@@ -23,4 +23,9 @@ export const TEST_USERS = {
     email: "user@test-e2e.local",
     password: "TestUser123!",
   },
+  signinTestUser: {
+    name: "Test Signin User",
+    email: "signin-test@test-e2e.local",
+    password: "TestSignin123!",
+  },
 } as const;

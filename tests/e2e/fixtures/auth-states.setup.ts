@@ -24,6 +24,7 @@ import {
   seedBaseEvalSuite,
   seedBaseWebAutoSuite,
   seedBaseTrace,
+  seedRealNoAuthMcpServers,
 } from "./base-seed";
 
 config();
@@ -152,6 +153,7 @@ setup("create admin user", async ({ page, browser, playwright }) => {
     await adminRequest.dispose();
   }
   await seedBaseMcpServer(TEST_USERS.admin.email);
+  await seedRealNoAuthMcpServers(TEST_USERS.admin.email);
   await seedBaseDataSource(TEST_USERS.admin.email);
   await seedBaseSshServer(TEST_USERS.admin.email);
   await seedBaseVerificationSuite(TEST_USERS.admin.email);
@@ -173,4 +175,9 @@ setup("create regular user", async ({ page }) => {
   await signUpOrSignIn(page, TEST_USERS.regular, USER_STATE_PATH);
   await seedBaseSchedule(page.request);
   await seedBaseNotifications(TEST_USERS.regular.email);
+});
+
+setup("create dedicated sign-in test user", async ({ page }) => {
+  // Sign up a standalone user for signin.spec so sign-in tests do not compete with admin/editor sessions
+  await signUpOrSignIn(page, TEST_USERS.signinTestUser, "tests/e2e/.auth/signin-test.json");
 });

@@ -68,9 +68,12 @@ const options = {
   rateLimit: {
     // Production default is 3 per 10s for auth-sensitive paths; E2E needs
     // room for setup sign-ups, role-promotion re-logins and the sign-in spec.
+    // Also relax get-session so parallel test suites do not get 429'd.
+    max: E2E_TEST ? 10_000 : 100,
     customRules: {
       "/sign-in/email": { window: E2E_TEST ? 60 : 10, max: E2E_TEST ? 30 : 3 },
       "/sign-up/email": { window: E2E_TEST ? 60 : 10, max: E2E_TEST ? 30 : 3 },
+      "/get-session": { window: 10, max: E2E_TEST ? 10_000 : 100 },
     },
   },
 

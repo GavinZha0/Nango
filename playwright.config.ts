@@ -35,18 +35,28 @@ export default defineConfig({
       name: "setup",
       testMatch: /.*\.setup\.ts/,
     },
-    // Core tests: depend on setup for auth state, excluding external real-LLM tests
+    // Core tests: depend on setup for auth state, excluding external real-LLM and real-MCP tests
     {
       name: "chromium",
       dependencies: ["setup"],
       testMatch: /.*\.spec\.ts/,
-      testIgnore: [/.*\.setup\.ts/, /tests[\\/]e2e[\\/]real-llm[\\/].*/],
+      testIgnore: [
+        /.*\.setup\.ts/,
+        /tests[\\/]e2e[\\/]real-llm[\\/].*/,
+        /tests[\\/]e2e[\\/]real-mcp[\\/].*/,
+      ],
     },
     // Real LLM tests: exercises external live model providers (e.g. Groq)
     {
       name: "real-llm",
       dependencies: ["setup"],
       testMatch: /tests[\\/]e2e[\\/]real-llm[\\/].*\.spec\.ts/,
+    },
+    // Real MCP tests: exercises external public MCP servers (e.g. Microsoft Learn, Playground)
+    {
+      name: "real-mcp",
+      dependencies: ["setup"],
+      testMatch: /tests[\\/]e2e[\\/]real-mcp[\\/].*\.spec\.ts/,
     },
   ],
 

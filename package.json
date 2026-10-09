@@ -24,6 +24,7 @@
     "test:e2e": "playwright test",
     "test:e2e:core": "playwright test --project=chromium",
     "test:e2e:real-llm": "playwright test --project=real-llm",
+    "test:e2e:real-mcp": "playwright test --project=real-mcp",
     "test:e2e:ui": "playwright test --ui",
     "check-types": "tsc --noEmit",
     "comments:check": "node scripts/check-comment-rules.mjs",

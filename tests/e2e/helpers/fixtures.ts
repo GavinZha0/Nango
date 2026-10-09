@@ -10,7 +10,13 @@ async function suppressCopilotInspector(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const style = document.createElement("style");
     style.setAttribute("data-e2e", "cpk-inspector-guard");
-    style.textContent = "cpk-web-inspector { display: none !important; pointer-events: none !important; }";
+    style.textContent = `
+      cpk-web-inspector { display: none !important; pointer-events: none !important; }
+      [data-sonner-toaster], [data-sonner-toaster] * { pointer-events: none !important; }
+      [data-sonner-toast], [data-sonner-toast] * { pointer-events: none !important; }
+      section[aria-label*="Notifications"], section[aria-label*="Notifications"] * { pointer-events: none !important; }
+      [data-slot="dialog-overlay"][data-closed] { display: none !important; pointer-events: none !important; }
+    `;
     (document.head || document.documentElement).appendChild(style);
   });
 }

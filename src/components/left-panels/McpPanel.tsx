@@ -761,6 +761,7 @@ function ServerHeader({
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground disabled:opacity-50"
             aria-label={`Refresh tools for ${server.name}`}
             data-action="refresh-tools"
+            data-testid="refresh-tools-button"
           >
             <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
           </button>
@@ -774,6 +775,7 @@ function ServerHeader({
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground"
             aria-label={`Edit server ${server.name}`}
             data-action="edit-server"
+            data-testid="edit-server-button"
           >
             <SquarePen className="h-3 w-3" />
           </button>
@@ -787,6 +789,7 @@ function ServerHeader({
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-destructive"
             aria-label={`Delete server ${server.name}`}
             data-action="delete-server"
+            data-testid="delete-server-button"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -800,6 +803,7 @@ function ServerHeader({
             className="cursor-pointer rounded p-0.5 text-muted-foreground/40 hover:text-foreground"
             aria-label={isPublic ? `Set ${server.name} to private` : `Set ${server.name} to public`}
             data-action="toggle-visibility"
+            data-testid="toggle-visibility-button"
           >
             {isPublic
               ? <Globe className="h-3 w-3 text-foreground/60" />
@@ -820,6 +824,7 @@ function ServerHeader({
             className="cursor-pointer rounded p-0.5 hover:text-foreground"
             aria-label={server.enabled ? `Disable server ${server.name}` : `Enable server ${server.name}`}
             data-action="toggle-enabled"
+            data-testid="toggle-enabled-button"
           >
             {!server.enabled
               ? <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground/40" />

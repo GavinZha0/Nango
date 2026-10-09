@@ -396,12 +396,13 @@ export function UniversalAssertionsEditor({
   return (
     <div className="flex h-full min-h-0 flex-col bg-muted/5 border-l border-t">
       {/* Sub-tabs header with capsule tabs and emerald indicator dots */}
-      <div className="flex h-8 shrink-0 items-center justify-between border-b bg-muted/20 px-3 py-1">
-        <div className="flex items-center gap-1">
+      <div className="flex h-8 shrink-0 items-center justify-between border-b bg-muted/20 px-2 py-1 min-w-0">
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0 flex-1">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
+              data-testid={`assertion-tab-${t.id}`}
               onClick={() => setSubTab(t.id)}
               disabled={isHistoryView || (activeTab === "json" && rawJsonError !== null && t.id !== "json")}
               className={cn(
@@ -1176,6 +1177,7 @@ export function UniversalAssertionsEditor({
               disabled={readOnly || isHistoryView}
               onChange={(e) => handleRawJsonChange(e.target.value)}
               placeholder="[]"
+              data-testid="assertions-json-textarea"
             />
             {rawJsonError && !isHistoryView && (
               <span className="text-[10px] text-destructive">{rawJsonError}</span>

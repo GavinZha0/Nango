@@ -2,7 +2,12 @@ import type { APIRequestContext } from "@playwright/test";
 import { expect } from "@playwright/test";
 import pg from "pg";
 import { getPostgresUrl } from "@/lib/db/postgres-url";
-import { BASE_NAMES, E2E_PLACEHOLDER_KEY, REAL_LLM_CONFIG } from "../constants/base-resources";
+import {
+  BASE_NAMES,
+  E2E_PLACEHOLDER_KEY,
+  REAL_LLM_CONFIG,
+  REAL_MCP_CONFIG,
+} from "../constants/base-resources";
 
 /**
  * Seed Layer 0 (LLM Credential) and Layer 1 (Supervisor, General, Evaluator Agents)
@@ -926,6 +931,70 @@ export async function seedBaseTrace(editorEmail: string): Promise<void> {
         `INSERT INTO entity_run_event (run_id, seq, type, payload, ts)
          VALUES ($1, $2, $3, $4::jsonb, $5)`,
         [subRunId, ev.seq, ev.type, JSON.stringify(ev.payload), ev.ts],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Seed read-only public Mock MCP servers (from playground) directly into DB without tool schemas.
+ * CONTRACT: Tools schema is intentionally null so UI tests can verify manual single-server
+ * tool refresh (discovery) functionality on /mcp.
+ */
+export async function seedRealNoAuthMcpServers(adminEmail: string): Promise<void> {
+  const { Client } = pg;
+  const client = new Client({ connectionString: getPostgresUrl() });
+  try {
+    await client.connect();
+
+    // 1. Resolve admin user ID
+    const userRes = await client.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+      [adminEmail],
+    );
+    if (userRes.rows.length === 0) {
+      throw new Error(`Cannot seed real MCP servers: user ${adminEmail} not found`);
+    }
+    const adminId = userRes.rows[0].id;
+
+    // 2. Seed Complex Schema MCP Server without tool schema (tools = null, enabled = false)
+    const checkComplex = await client.query(
+      `SELECT id FROM mcp_server WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.realComplexMcpServer],
+    );
+    if (checkComplex.rows.length === 0) {
+      await client.query(
+        `INSERT INTO mcp_server (name, type, url, enabled, visibility, tools, server_name, server_version, server_description, created_by)
+         VALUES ($1, 'http', $2, false, 'public', NULL, 'mcp-playground-complex-server', '2.0.0', 'Complex Schema MCP Server for parameter testing', $3)`,
+        [BASE_NAMES.realComplexMcpServer, REAL_MCP_CONFIG.complexServerUrl, adminId],
+      );
+    }
+
+    // 3. Seed Error MCP Server without tool schema (tools = null, enabled = false)
+    const checkError = await client.query(
+      `SELECT id FROM mcp_server WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.realErrorMcpServer],
+    );
+    if (checkError.rows.length === 0) {
+      await client.query(
+        `INSERT INTO mcp_server (name, type, url, enabled, visibility, tools, server_name, server_version, server_description, created_by)
+         VALUES ($1, 'http', $2, false, 'public', NULL, 'mcp-playground-error-server', '1.0.0', 'Error MCP Server for testing failure handling', $3)`,
+        [BASE_NAMES.realErrorMcpServer, REAL_MCP_CONFIG.errorServerUrl, adminId],
+      );
+    }
+
+    // 4. Seed MsLearn MCP Server (enabled = true, for verification suite tests)
+    const checkMsLearn = await client.query(
+      `SELECT id FROM mcp_server WHERE name = $1 LIMIT 1`,
+      [BASE_NAMES.realMsLearnMcpServer],
+    );
+    if (checkMsLearn.rows.length === 0) {
+      await client.query(
+        `INSERT INTO mcp_server (name, type, url, enabled, visibility, tools, server_name, server_version, server_description, created_by)
+         VALUES ($1, 'http', $2, true, 'public', NULL, 'Microsoft Learn MCP Server', '1.0.0', 'Microsoft Learn Documentation Server', $3)`,
+        [BASE_NAMES.realMsLearnMcpServer, REAL_MCP_CONFIG.msLearnUrl, adminId],
       );
     }
   } finally {

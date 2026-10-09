@@ -29,6 +29,11 @@ export const BASE_NAMES = {
   webAutoCase: "010_base_webauto_case",
   traceThreadId: "0192a000-0000-7000-8000-000000000001",
   traceTask: "Base-e2e-Trace: Analyze quarterly financial data",
+  realMsLearnMcpServer: "Base-Real-MsLearn-e2e-Mcp",
+  realComplexMcpServer: "Base-Real-Complex-e2e-Mcp",
+  realErrorMcpServer: "Base-Real-Error-e2e-Mcp",
+  realVerificationSuite: "Base-Real-Verification-e2e-Suite",
+  realVerificationCase: "010_mslearn_search_case",
 } as const;
 
 export const E2E_PLACEHOLDER_KEY = "sk-test-e2e-placeholder-key";
@@ -42,4 +47,15 @@ export const REAL_LLM_CONFIG = {
   model: process.env.REAL_LLM_MODEL || "openai/gpt-oss-20b",
   apiKey: process.env.REAL_LLM_API_KEY || process.env.GROQ_API_KEY || "",
   baseUrl: process.env.REAL_LLM_BASE_URL,
+} as const;
+
+/**
+ * Public, no-auth MCP server endpoints for live integration testing.
+ */
+export const REAL_MCP_CONFIG = {
+  msLearnUrl: "https://learn.microsoft.com/api/mcp",
+  context7Url: "https://mcp.context7.com/mcp",
+  complexServerUrl: "https://mcpplaygroundonline.com/mcp-complex-server",
+  errorServerUrl: "https://mcpplaygroundonline.com/mcp-error-server",
+  statelessServerUrl: "https://mcpplaygroundonline.com/mcp-stateless-server",
 } as const;

@@ -2,11 +2,11 @@ import { test, expect } from "@playwright/test";
 import { TEST_USERS } from "../constants/test-users";
 
 test.describe("Sign In", () => {
-  test("should sign in with valid admin credentials", async ({ page }) => {
+  test("should sign in with valid credentials", async ({ page }) => {
     await page.goto("/sign-in");
 
-    await page.getByLabel("Email").fill(TEST_USERS.admin.email);
-    await page.getByLabel("Password").fill(TEST_USERS.admin.password);
+    await page.getByLabel("Email").fill(TEST_USERS.signinTestUser.email);
+    await page.getByLabel("Password").fill(TEST_USERS.signinTestUser.password);
     await page.getByRole("button", { name: /sign in/i }).click();
 
     // Wait for redirect after successful login
@@ -57,8 +57,8 @@ test.describe("Sign In", () => {
   test("should sign in with regular user credentials", async ({ page }) => {
     await page.goto("/sign-in");
 
-    await page.getByLabel("Email").fill(TEST_USERS.regular.email);
-    await page.getByLabel("Password").fill(TEST_USERS.regular.password);
+    await page.getByLabel("Email").fill(TEST_USERS.signinTestUser.email);
+    await page.getByLabel("Password").fill(TEST_USERS.signinTestUser.password);
     await page.getByRole("button", { name: /sign in/i }).click();
 
     await page.waitForURL(

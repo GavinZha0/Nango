@@ -696,12 +696,13 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
             >
               Schema
             </button>
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex items-center gap-1 relative z-10">
               <Button
                 size="sm"
                 className="h-6 gap-1.5 px-2.5 text-xs"
                 onClick={handleExecute}
                 disabled={exec.executing || executeDisabled}
+                data-testid="mcp-run-button"
               >
                 {exec.executing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

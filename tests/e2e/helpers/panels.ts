@@ -20,8 +20,8 @@ import { expect, type Locator, type Page } from "@playwright/test";
  */
 export function panelRow(page: Page, name: string): Locator {
   return page
-    .getByTestId("panel-row")
-    .filter({ hasText: name })
+    .locator(`[data-testid="panel-row"][data-name="${name}"]`)
+    .or(page.getByTestId("panel-row").filter({ hasText: name }))
     .first();
 }
 
