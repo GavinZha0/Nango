@@ -1,1 +1,0 @@
-ALTER TABLE "eval_suite" ADD COLUMN "target_timeout_sec" integer DEFAULT 300 NOT NULL;

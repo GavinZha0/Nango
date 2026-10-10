@@ -1,5 +1,5 @@
 {
-  "id": "cd3cc936-fab7-4230-b592-d86efa250563",
+  "id": "361cd3c2-9565-4a17-9e47-d42abfcfa3f5",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -374,6 +374,58 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.auth_token": {
+      "name": "auth_token",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.backend_thread_state": {
       "name": "backend_thread_state",
       "schema": "",
@@ -526,14 +578,14 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 5
+          "default": 20
         },
         "tool_approval_mode": {
           "name": "tool_approval_mode",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'never'"
+          "default": "'auto'"
         },
         "memory_enabled": {
           "name": "memory_enabled",
@@ -2109,132 +2161,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.eval_agent_run": {
-      "name": "eval_agent_run",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "score": {
-          "name": "score",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "total_count": {
-          "name": "total_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "passed_count": {
-          "name": "passed_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "failed_count": {
-          "name": "failed_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "errored_count": {
-          "name": "errored_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "triggered_by": {
-          "name": "triggered_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "eval_agent_run_agent_idx": {
-          "name": "eval_agent_run_agent_idx",
-          "columns": [
-            {
-              "expression": "agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "eval_agent_run_created_by_user_id_fk": {
-          "name": "eval_agent_run_created_by_user_id_fk",
-          "tableFrom": "eval_agent_run",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.eval_case_result": {
       "name": "eval_case_result",
       "schema": "",
@@ -2256,24 +2182,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "score": {
-          "name": "score",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dimension_scores": {
-          "name": "dimension_scores",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "criteria_score": {
-          "name": "criteria_score",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         },
         "assertion_results": {
           "name": "assertion_results",
@@ -2306,27 +2214,15 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ttft_ms": {
-          "name": "ttft_ms",
-          "type": "integer",
+        "execution_stats": {
+          "name": "execution_stats",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "duration_ms": {
-          "name": "duration_ms",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "output_tokens": {
-          "name": "output_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tool_call_count": {
-          "name": "tool_call_count",
-          "type": "integer",
+        "tool_call_summary": {
+          "name": "tool_call_summary",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -2573,23 +2469,18 @@
           "primaryKey": false,
           "notNull": true
         },
-        "agent_run_id": {
-          "name": "agent_run_id",
-          "type": "uuid",
+        "threshold": {
+          "name": "threshold",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": 3
         },
         "status": {
           "name": "status",
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "score": {
-          "name": "score",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         },
         "total_count": {
           "name": "total_count",
@@ -2660,21 +2551,6 @@
           "method": "btree",
           "with": {}
         },
-        "eval_run_agent_run_idx": {
-          "name": "eval_run_agent_run_idx",
-          "columns": [
-            {
-              "expression": "agent_run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "eval_run_recovery_idx": {
           "name": "eval_run_recovery_idx",
           "columns": [
@@ -2699,19 +2575,6 @@
           "tableTo": "eval_suite",
           "columnsFrom": [
             "suite_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "eval_run_agent_run_id_eval_agent_run_id_fk": {
-          "name": "eval_run_agent_run_id_eval_agent_run_id_fk",
-          "tableFrom": "eval_run",
-          "tableTo": "eval_agent_run",
-          "columnsFrom": [
-            "agent_run_id"
           ],
           "columnsTo": [
             "id"
@@ -2774,12 +2637,26 @@
           "primaryKey": false,
           "notNull": false
         },
-        "dimension_ids": {
-          "name": "dimension_ids",
+        "variables": {
+          "name": "variables",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::jsonb"
+          "default": "'{}'::jsonb"
+        },
+        "threshold": {
+          "name": "threshold",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3
+        },
+        "case_timeout_sec": {
+          "name": "case_timeout_sec",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 300
         },
         "enabled": {
           "name": "enabled",
@@ -3146,6 +3023,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "group": {
+          "name": "group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "visibility": {
           "name": "visibility",
           "type": "text",
@@ -3180,7 +3063,23 @@
           "default": "CURRENT_TIMESTAMP"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "mcp_server_group_idx": {
+          "name": "mcp_server_group_idx",
+          "columns": [
+            {
+              "expression": "group",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "mcp_server_credential_id_credential_id_fk": {
           "name": "mcp_server_credential_id_credential_id_fk",
@@ -4900,17 +4799,23 @@
           "primaryKey": false,
           "notNull": true
         },
+        "original_tool_name": {
+          "name": "original_tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "effective_tool_name": {
+          "name": "effective_tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "entity_run_id": {
-          "name": "entity_run_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "input_snapshot": {
           "name": "input_snapshot",
@@ -5049,19 +4954,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "verification_case_result_entity_run_id_entity_run_id_fk": {
-          "name": "verification_case_result_entity_run_id_entity_run_id_fk",
-          "tableFrom": "verification_case_result",
-          "tableTo": "entity_run",
-          "columnsFrom": [
-            "entity_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5101,7 +4993,7 @@
           "name": "created_by",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "name": {
           "name": "name",
@@ -5223,6 +5115,62 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.verification_group": {
+      "name": "verification_group",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "verification_group_lower_name_idx": {
+          "name": "verification_group_lower_name_idx",
+          "columns": [
+            {
+              "expression": "lower(\"name\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.verification_run": {
       "name": "verification_run",
       "schema": "",
@@ -5238,13 +5186,7 @@
           "name": "suite_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
-        },
-        "mcp_server_id": {
-          "name": "mcp_server_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "status": {
           "name": "status",
@@ -5328,27 +5270,6 @@
           "method": "btree",
           "with": {}
         },
-        "verification_run_server_started_idx": {
-          "name": "verification_run_server_started_idx",
-          "columns": [
-            {
-              "expression": "mcp_server_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "verification_run_recovery_idx": {
           "name": "verification_run_recovery_idx",
           "columns": [
@@ -5379,30 +5300,12 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "verification_run_mcp_server_id_mcp_server_id_fk": {
-          "name": "verification_run_mcp_server_id_mcp_server_id_fk",
-          "tableFrom": "verification_run",
-          "tableTo": "mcp_server",
-          "columnsFrom": [
-            "mcp_server_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "verification_run_target_xor": {
-          "name": "verification_run_target_xor",
-          "value": "(\n        (\"verification_run\".\"suite_id\" IS NOT NULL AND \"verification_run\".\"mcp_server_id\" IS NULL)\n        OR\n        (\"verification_run\".\"suite_id\" IS NULL AND \"verification_run\".\"mcp_server_id\" IS NOT NULL)\n      )"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.verification_suite": {
@@ -5416,23 +5319,11 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
+        "group_id": {
+          "name": "group_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
         },
         "mcp_server_id": {
           "name": "mcp_server_id",
@@ -5446,11 +5337,30 @@
           "primaryKey": false,
           "notNull": false
         },
-        "workflow_id": {
-          "name": "workflow_id",
-          "type": "uuid",
+        "tool_prefix_rule": {
+          "name": "tool_prefix_rule",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "variables": {
+          "name": "variables",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
         },
         "enabled": {
           "name": "enabled",
@@ -5466,24 +5376,24 @@
           "notNull": true,
           "default": "'private'"
         },
-        "timeout_sec": {
-          "name": "timeout_sec",
+        "case_timeout_sec": {
+          "name": "case_timeout_sec",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 300
+          "default": 60
         },
         "created_by": {
           "name": "created_by",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "updated_by": {
           "name": "updated_by",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -5501,38 +5411,11 @@
         }
       },
       "indexes": {
-        "verification_suite_mcp_user_name_idx": {
-          "name": "verification_suite_mcp_user_name_idx",
+        "verification_suite_user_name_idx": {
+          "name": "verification_suite_user_name_idx",
           "columns": [
-            {
-              "expression": "mcp_server_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
             {
               "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_by",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "verification_suite_workflow_user_idx": {
-          "name": "verification_suite_workflow_user_idx",
-          "columns": [
-            {
-              "expression": "workflow_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5551,6 +5434,19 @@
         }
       },
       "foreignKeys": {
+        "verification_suite_group_id_verification_group_id_fk": {
+          "name": "verification_suite_group_id_verification_group_id_fk",
+          "tableFrom": "verification_suite",
+          "tableTo": "verification_group",
+          "columnsFrom": [
+            "group_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "verification_suite_mcp_server_id_mcp_server_id_fk": {
           "name": "verification_suite_mcp_server_id_mcp_server_id_fk",
           "tableFrom": "verification_suite",
@@ -5591,63 +5487,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "verification_suite_target_xor": {
-          "name": "verification_suite_target_xor",
-          "value": "NOT (\n        \"verification_suite\".\"mcp_server_id\" IS NOT NULL AND \"verification_suite\".\"workflow_id\" IS NOT NULL\n      )"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.verification": {
-      "name": "verification",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "identifier": {
-          "name": "identifier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "value": {
-          "name": "value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -6064,12 +5903,12 @@
           "notNull": true,
           "default": "'private'"
         },
-        "timeout_sec": {
-          "name": "timeout_sec",
+        "case_timeout_sec": {
+          "name": "case_timeout_sec",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 300
+          "default": 60
         },
         "evaluator_agent_id": {
           "name": "evaluator_agent_id",

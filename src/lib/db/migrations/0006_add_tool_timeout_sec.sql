@@ -1,1 +1,0 @@
-ALTER TABLE "verification_suite" ADD COLUMN "tool_timeout_sec" integer DEFAULT 60 NOT NULL;
