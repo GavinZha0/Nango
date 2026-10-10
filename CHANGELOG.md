@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.2](https://github.com/GavinZha0/Nango/compare/v0.26.1...v0.26.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **testing:** harden test execution, assertion engines, and persistence integrity ([5068b9e](https://github.com/GavinZha0/Nango/commit/5068b9eababe4bf25deaa552e15f2352601b7a95))
+* **testing:** resolve nested wildcard truncation and eval scope controls ([60c405e](https://github.com/GavinZha0/Nango/commit/60c405ea5486e53b04a1bb4fcbf62d6d26b42535))
+
 ## [0.26.1](https://github.com/GavinZha0/Nango/compare/v0.26.0...v0.26.1) (2026-10-05)
 
 
