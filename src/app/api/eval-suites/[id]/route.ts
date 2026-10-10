@@ -11,6 +11,11 @@ import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody, isUniqueViolation } from "@/lib/http/validation";
 import { isAgentVisibleTo } from "@/lib/access/agent-visibility";
 import { suiteVariablesSchema } from "@/lib/testing/variables-schema";
+import { getConfigNumber } from "@/lib/config";
+import {
+  CONFIG_KEY_CASE_TIMEOUT,
+  DEFAULT_EVAL_CASE_TIMEOUT_S,
+} from "@/lib/evaluation/config";
 import { loadSuite } from "@/lib/evaluation/access";
 import * as storage from "@/lib/evaluation/storage";
 
@@ -83,10 +88,27 @@ export const PATCH = withEditor<{ id: string }>(
       }
     }
 
+    let caseTimeoutSecToSave: number | undefined;
+    if (body.caseTimeoutSec !== undefined) {
+      const defaultCaseTimeout = getConfigNumber(
+        CONFIG_KEY_CASE_TIMEOUT,
+        DEFAULT_EVAL_CASE_TIMEOUT_S,
+      );
+      caseTimeoutSecToSave =
+        typeof body.caseTimeoutSec === "number" && body.caseTimeoutSec > 0
+          ? body.caseTimeoutSec
+          : defaultCaseTimeout;
+    }
+
     try {
       const updated = await storage.updateSuite(
         suite.id,
-        body,
+        {
+          ...body,
+          ...(caseTimeoutSecToSave !== undefined
+            ? { caseTimeoutSec: caseTimeoutSecToSave }
+            : {}),
+        },
         session.user.id,
       );
       const caseCount = await storage.getCaseCount(suite.id);

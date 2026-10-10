@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/schema";
 import type { ToolCallSummary, ExecutionStats } from "./types";
 import { sanitizeAssertions } from "@/lib/assertions/types";
+import { DEFAULT_EVAL_CASE_TIMEOUT_S } from "./config";
 
 // --- Suites -----------------------------------------------------------------
 
@@ -51,7 +52,10 @@ export async function createSuite(
       name: input.name,
       description: input.description ?? null,
       threshold: input.threshold ?? 3,
-      caseTimeoutSec: input.caseTimeoutSec ?? 300,
+      caseTimeoutSec:
+        typeof input.caseTimeoutSec === "number" && input.caseTimeoutSec > 0
+          ? input.caseTimeoutSec
+          : DEFAULT_EVAL_CASE_TIMEOUT_S,
       variables: input.variables ?? {},
       enabled: input.enabled ?? true,
       visibility: input.visibility ?? "private",
@@ -125,8 +129,12 @@ export async function updateSuite(
   if (input.evaluatorAgentId !== undefined)
     updates.evaluatorAgentId = input.evaluatorAgentId;
   if (input.threshold !== undefined) updates.threshold = input.threshold;
-  if (input.caseTimeoutSec !== undefined)
-    updates.caseTimeoutSec = input.caseTimeoutSec;
+  if (input.caseTimeoutSec !== undefined) {
+    updates.caseTimeoutSec =
+      typeof input.caseTimeoutSec === "number" && input.caseTimeoutSec > 0
+        ? input.caseTimeoutSec
+        : DEFAULT_EVAL_CASE_TIMEOUT_S;
+  }
   if (input.variables !== undefined) updates.variables = input.variables;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.visibility !== undefined) updates.visibility = input.visibility;

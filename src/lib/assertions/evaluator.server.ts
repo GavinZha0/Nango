@@ -246,7 +246,19 @@ function evaluateSingleDeterministic(
   }
 }
 
-// ── 1. JSONPath Evaluation ───────────────────────────────────────────────────
+function formatJsonPath(rawPath: string): string {
+  const segs = JSONPath.toPathArray(rawPath);
+  let res = "";
+  for (let i = 1; i < segs.length; i++) {
+    const s = segs[i];
+    if (/^\d+$/.test(s)) {
+      res += `[${s}]`;
+    } else {
+      res = res ? `${res}.${s}` : s;
+    }
+  }
+  return res || "$";
+}
 
 function evaluateJsonPath(
   spec: JsonPathAssertion,
@@ -273,17 +285,18 @@ function evaluateJsonPath(
       prefix = prefix.slice(0, -1);
     }
 
-    let rootArray: unknown;
+    let rootEntries: Array<{ value: unknown; path: string }> = [];
     try {
       if (!prefix || prefix === "$") {
-        rootArray = json;
+        if (Array.isArray(json)) {
+          rootEntries = [{ value: json, path: "$" }];
+        }
       } else {
-        const rootMatches = JSONPath({
+        rootEntries = (JSONPath({
           path: prefix,
           json: json as never,
-          wrap: true,
-        });
-        rootArray = rootMatches.length > 0 ? rootMatches[0] : undefined;
+          resultType: "all",
+        }) as unknown) as Array<{ value: unknown; path: string }>;
       }
     } catch (err) {
       return {
@@ -297,7 +310,8 @@ function evaluateJsonPath(
       };
     }
 
-    if (!Array.isArray(rootArray) || rootArray.length === 0) {
+    const arrayEntries = rootEntries.filter((e) => Array.isArray(e.value));
+    if (arrayEntries.length === 0) {
       return {
         index,
         type: spec.type,
@@ -309,27 +323,39 @@ function evaluateJsonPath(
       };
     }
 
-    let cleanPrefix = parts[0].startsWith("$.")
-      ? parts[0].slice(2)
-      : parts[0].startsWith("$")
-        ? parts[0].slice(1)
-        : parts[0];
-    if (cleanPrefix.endsWith(".")) {
-      cleanPrefix = cleanPrefix.slice(0, -1);
-    }
-
     interface WildcardItem {
       value: unknown;
       path: string;
       topIndex: number;
     }
 
-    let currentItems: WildcardItem[] = rootArray.map((val, idx) => ({
-      value: val,
-      path: cleanPrefix ? `${cleanPrefix}[${idx}]` : `[${idx}]`,
-      topIndex: idx,
-    }));
+    let currentItems: WildcardItem[] = [];
+    let globalTopIndex = 0;
+    for (const entry of arrayEntries) {
+      const basePath = formatJsonPath(entry.path);
+      const arr = entry.value as unknown[];
+      for (let i = 0; i < arr.length; i++) {
+        currentItems.push({
+          value: arr[i],
+          path: basePath === "$" ? `[${i}]` : `${basePath}[${i}]`,
+          topIndex: globalTopIndex++,
+        });
+      }
+    }
 
+    if (currentItems.length === 0) {
+      return {
+        index,
+        type: spec.type,
+        ok: false,
+        path: spec.path,
+        expected,
+        actual: "0 items",
+        message: `Path "${spec.path}" matched 0 items`,
+      };
+    }
+
+    const usePathInFailed = isNested || arrayEntries.length > 1;
     const failedItems: Array<string | number> = [];
 
     // Traverse intermediate wildcard segments if nested (parts.length > 2)
@@ -348,41 +374,52 @@ function evaluateJsonPath(
 
       for (const item of currentItems) {
         if (item.value == null || typeof item.value !== "object") {
-          failedItems.push(isNested ? item.path : item.topIndex);
+          failedItems.push(usePathInFailed ? item.path : item.topIndex);
           continue;
         }
-        let childMatches: unknown[] = [];
+
+        let childEntries: Array<{ value: unknown; path: string }> = [];
         try {
-          childMatches = subPath
-            ? ((JSONPath({
-                path: subPath,
-                json: item.value as never,
-                wrap: true,
-              }) as unknown) as unknown[])
-            : [item.value];
+          if (!subPath) {
+            if (Array.isArray(item.value)) {
+              childEntries = [{ value: item.value, path: "$" }];
+            }
+          } else {
+            childEntries = (JSONPath({
+              path: subPath,
+              json: item.value as never,
+              resultType: "all",
+            }) as unknown) as Array<{ value: unknown; path: string }>;
+          }
         } catch {
-          failedItems.push(isNested ? item.path : item.topIndex);
+          failedItems.push(usePathInFailed ? item.path : item.topIndex);
           continue;
         }
 
-        const childArray = childMatches.length > 0 ? childMatches[0] : undefined;
-        if (!Array.isArray(childArray) || childArray.length === 0) {
-          failedItems.push(isNested ? item.path : item.topIndex);
+        const validChildArrays = childEntries.filter((e) => Array.isArray(e.value));
+        if (validChildArrays.length === 0) {
+          failedItems.push(usePathInFailed ? item.path : item.topIndex);
           continue;
         }
 
-        const cleanSeg = seg.startsWith(".") ? seg.slice(1) : seg;
-        for (let cIdx = 0; cIdx < childArray.length; cIdx++) {
-          const nextPath = cleanSeg.startsWith("[")
-            ? `${item.path}${cleanSeg}[${cIdx}]`
-            : cleanSeg
-              ? `${item.path}.${cleanSeg}[${cIdx}]`
-              : `${item.path}[${cIdx}]`;
-          nextItems.push({
-            value: childArray[cIdx],
-            path: nextPath,
-            topIndex: item.topIndex,
-          });
+        for (const childEntry of validChildArrays) {
+          const childArr = childEntry.value as unknown[];
+          const childRelPath =
+            childEntry.path === "$" ? "" : formatJsonPath(childEntry.path);
+          for (let cIdx = 0; cIdx < childArr.length; cIdx++) {
+            let nextItemPath = item.path;
+            if (childRelPath) {
+              nextItemPath += childRelPath.startsWith("[")
+                ? childRelPath
+                : `.${childRelPath}`;
+            }
+            nextItemPath += `[${cIdx}]`;
+            nextItems.push({
+              value: childArr[cIdx],
+              path: nextItemPath,
+              topIndex: item.topIndex,
+            });
+          }
         }
       }
       currentItems = nextItems;
@@ -398,21 +435,19 @@ function evaluateJsonPath(
           : "";
 
     for (const item of currentItems) {
-      let leafVal: unknown = undefined;
+      let leafMatches: Array<{ value: unknown; path: string }> = [];
       let leafExists = true;
 
       if (!leafSubPath) {
-        leafVal = item.value;
+        leafMatches = [{ value: item.value, path: "$" }];
       } else if (item.value != null && typeof item.value === "object") {
         try {
-          const leafMatches = (JSONPath({
+          leafMatches = (JSONPath({
             path: leafSubPath,
             json: item.value as never,
-            wrap: true,
-          }) as unknown) as unknown[];
-          if (leafMatches.length > 0) {
-            leafVal = leafMatches[0];
-          } else {
+            resultType: "all",
+          }) as unknown) as Array<{ value: unknown; path: string }>;
+          if (leafMatches.length === 0) {
             leafExists = false;
           }
         } catch {
@@ -428,12 +463,19 @@ function evaluateJsonPath(
       } else if (!leafExists) {
         itemPassed = false;
       } else {
-        const res = evaluateOperator(leafVal, operator, expected);
-        itemPassed = res.ok;
+        let allLeafsPassed = true;
+        for (const leaf of leafMatches) {
+          const res = evaluateOperator(leaf.value, operator, expected);
+          if (!res.ok) {
+            allLeafsPassed = false;
+            break;
+          }
+        }
+        itemPassed = allLeafsPassed;
       }
 
       if (!itemPassed) {
-        failedItems.push(isNested ? item.path : item.topIndex);
+        failedItems.push(usePathInFailed ? item.path : item.topIndex);
       }
     }
 
@@ -1700,6 +1742,21 @@ export function validateAssertionSyntax(spec: unknown): SyntaxValidationResult {
           ok: false,
           error: `Invalid text_match operator: '${obj.operator}'. Allowed operators are 'contains', 'not_contains', 'matches'.`,
         };
+      }
+      if (obj.scope !== undefined && obj.scope !== null) {
+        const allowedScopes = ["final_response", "all_responses", "turn"];
+        if (!allowedScopes.includes(obj.scope as string)) {
+          return {
+            ok: false,
+            error: `Invalid text_match scope: '${obj.scope}'. Allowed scopes are 'final_response', 'all_responses', 'turn'.`,
+          };
+        }
+        if (obj.scope === "turn" && (typeof obj.turn !== "number" || obj.turn < 1 || !Number.isInteger(obj.turn))) {
+          return {
+            ok: false,
+            error: "Text match assertion with 'turn' scope must specify a positive integer 'turn' (>= 1).",
+          };
+        }
       }
       if (obj.operator === "matches") {
         try {

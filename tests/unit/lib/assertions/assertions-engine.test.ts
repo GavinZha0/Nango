@@ -1377,6 +1377,40 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
         expected: "[unclosed-group",
       });
       expect(invalidRegex.ok).toBe(false);
+
+      const validWithScope = validateAssertionSyntax({
+        type: "text_match",
+        operator: "contains",
+        expected: "hello",
+        scope: "final_response",
+      });
+      expect(validWithScope.ok).toBe(true);
+
+      const validWithTurn = validateAssertionSyntax({
+        type: "text_match",
+        operator: "contains",
+        expected: "hello",
+        scope: "turn",
+        turn: 2,
+      });
+      expect(validWithTurn.ok).toBe(true);
+
+      const invalidScope = validateAssertionSyntax({
+        type: "text_match",
+        operator: "contains",
+        expected: "hello",
+        scope: "invalid_scope",
+      });
+      expect(invalidScope.ok).toBe(false);
+
+      const invalidTurn = validateAssertionSyntax({
+        type: "text_match",
+        operator: "contains",
+        expected: "hello",
+        scope: "turn",
+        turn: 0,
+      });
+      expect(invalidTurn.ok).toBe(false);
     });
   });
 
@@ -1562,6 +1596,73 @@ describe("Universal Assertion Subsystem — evaluator engine", () => {
         {
           type: "jsonpath",
           path: "groups[*].items[*].ok",
+          operator: "==",
+          expected: true,
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      expect(outcome.allDeterministicPassed).toBe(true);
+      expect(outcome.deterministicResults[0].ok).toBe(true);
+    });
+
+    it("A10: traverses multi-root prefix wildcards ($..groups[*].items[*].ok) without truncating non-first branches", () => {
+      const payload = {
+        left: {
+          groups: [
+            {
+              items: [{ ok: true }],
+            },
+          ],
+        },
+        right: {
+          groups: [
+            {
+              items: [{ ok: false }],
+            },
+          ],
+        },
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "$..groups[*].items[*].ok",
+          operator: "==",
+          expected: true,
+        },
+      ];
+
+      const outcome = evaluateAssertions(payload, assertions);
+      // Right branch item is false, must fail and identify exact path
+      expect(outcome.allDeterministicPassed).toBe(false);
+      expect(outcome.deterministicResults[0].ok).toBe(false);
+      expect(outcome.deterministicResults[0].actual).toEqual(["right.groups[0].items[0]"]);
+      expect(outcome.deterministicResults[0].message).toBe("unsatisfied item(s): [right.groups[0].items[0]]");
+    });
+
+    it("A10: passes multi-root prefix wildcards when all branches across the entire tree satisfy condition", () => {
+      const payload = {
+        left: {
+          groups: [
+            {
+              items: [{ ok: true }],
+            },
+          ],
+        },
+        right: {
+          groups: [
+            {
+              items: [{ ok: true }, { ok: true }],
+            },
+          ],
+        },
+      };
+
+      const assertions: AssertionSpec[] = [
+        {
+          type: "jsonpath",
+          path: "$..groups[*].items[*].ok",
           operator: "==",
           expected: true,
         },

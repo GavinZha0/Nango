@@ -64,3 +64,8 @@ export const CONFIG_KEY_POOR      = "eval.threshold.poor";
 export const DEFAULT_EVAL_EVALUATOR_TIMEOUT_S = 300;
 
 export const CONFIG_KEY_EVALUATOR_TIMEOUT = "eval.step_timeout.evaluator";
+
+/** Default target case execution timeout in seconds (5 minutes). */
+export const DEFAULT_EVAL_CASE_TIMEOUT_S = 300;
+
+export const CONFIG_KEY_CASE_TIMEOUT = "eval.step_timeout.target";

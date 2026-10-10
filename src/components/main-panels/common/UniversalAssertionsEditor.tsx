@@ -14,7 +14,7 @@
  * See docs/verification.md and docs/evaluation.md.
  */
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { Plus, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -32,6 +32,7 @@ import type {
   AssertionSpec,
   JsonPathOperator,
   TextMatchOperator,
+  TextMatchScope,
   LlmCustomAssertion,
   LlmDimAssertion,
   MetricName,
@@ -58,6 +59,26 @@ export interface UniversalAssertionsEditorProps {
   readOnly?: boolean;
   saving?: boolean;
   overrideText?: string | null;
+}
+
+export function validateUniversalAssertionsConfig(
+  mode: UniversalEditorMode,
+  assertions: AssertionSpec[],
+): string | null {
+  if (mode === "evaluation") {
+    for (let i = 0; i < assertions.length; i++) {
+      const a = assertions[i];
+      if (a.type === "text_match") {
+        if (!a.scope) {
+          return `Text match assertion #${i + 1} requires scope ('final_response', 'all_responses', or 'turn').`;
+        }
+        if (a.scope === "turn" && (!a.turn || a.turn < 1)) {
+          return `Text match assertion #${i + 1} with 'turn' scope requires a valid turn number (>= 1).`;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 type TabType =
@@ -207,15 +228,23 @@ export function UniversalAssertionsEditor({
       draft.setText(nextStr);
       setRawJsonState({ text: nextStr, prevCanonical: nextStr });
       setRawJsonError(null);
-      onErrorChange?.(null);
     } else if (propOnChange) {
       propOnChange(nextList);
       const nextStr = JSON.stringify(nextList, null, 2);
       setRawJsonState({ text: nextStr, prevCanonical: nextStr });
       setRawJsonError(null);
-      onErrorChange?.(null);
     }
   };
+
+  const configValidationError = useMemo(() => {
+    return validateUniversalAssertionsConfig(mode, currentAssertions);
+  }, [mode, currentAssertions]);
+
+  const activeError = draft?.parseError || rawJsonError || configValidationError;
+
+  useEffect(() => {
+    onErrorChange?.(activeError);
+  }, [activeError, onErrorChange]);
 
   // Grouped assertions indicators
   const hasExpressions = useMemo(
@@ -424,12 +453,12 @@ export function UniversalAssertionsEditor({
           ))}
         </div>
         <div className="flex items-center gap-1.5 min-w-0">
-          {(draft?.parseError || rawJsonError) && (
+          {activeError && (
             <span
               className="max-w-[280px] truncate font-mono text-[10px] font-medium text-destructive"
-              title={draft?.parseError || rawJsonError || ""}
+              title={activeError}
             >
-              {draft?.parseError || rawJsonError}
+              {activeError}
             </span>
           )}
           {isSaving && (
@@ -627,6 +656,7 @@ export function UniversalAssertionsEditor({
                       operator: "contains",
                       expected: "",
                       caseSensitive: false,
+                      ...(mode === "evaluation" ? { scope: "final_response" } : {}),
                     })
                   }
                 >
@@ -656,7 +686,7 @@ export function UniversalAssertionsEditor({
                         }
                       }}
                     >
-                      <SelectTrigger className="w-28 h-7 text-xs bg-muted/20 border-muted-foreground/20">
+                      <SelectTrigger className="w-28 h-7 text-xs bg-muted/20 border-muted-foreground/20 shrink-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -665,6 +695,67 @@ export function UniversalAssertionsEditor({
                         <SelectItem value="matches">matches (regex)</SelectItem>
                       </SelectContent>
                     </Select>
+
+                    {mode === "evaluation" && (
+                      <>
+                        <Select
+                          value={spec.scope || "final_response"}
+                          disabled={readOnly}
+                          onValueChange={(val: string | null) => {
+                            if (val) {
+                              const nextScope = val as TextMatchScope;
+                              updateAssertionAt(idx, {
+                                ...spec,
+                                scope: nextScope,
+                                turn:
+                                  nextScope === "turn"
+                                    ? spec.turn && spec.turn >= 1
+                                      ? spec.turn
+                                      : 1
+                                    : undefined,
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger
+                            className={cn(
+                              "w-32 h-7 text-xs bg-muted/20 border-muted-foreground/20 shrink-0",
+                              !spec.scope && "border-destructive/60 text-destructive",
+                            )}
+                            title={!spec.scope ? "Scope is required in Evaluation" : undefined}
+                          >
+                            <SelectValue placeholder="Scope" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="final_response">Final Response</SelectItem>
+                            <SelectItem value="all_responses">All Responses</SelectItem>
+                            <SelectItem value="turn">Specific Turn</SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        {spec.scope === "turn" && (
+                          <Input
+                            type="number"
+                            min={1}
+                            value={spec.turn ?? 1}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              updateAssertionAt(idx, {
+                                ...spec,
+                                turn: isNaN(val) ? 1 : Math.max(1, val),
+                              });
+                            }}
+                            placeholder="Turn #"
+                            disabled={readOnly}
+                            className={cn(
+                              "h-7 w-16 text-xs bg-muted/20 border-muted-foreground/20 text-center font-mono shrink-0",
+                              (!spec.turn || spec.turn < 1) && "border-destructive/60",
+                            )}
+                            title="1-based turn number to evaluate"
+                          />
+                        )}
+                      </>
+                    )}
 
                     <Input
                       value={expected}
@@ -1179,8 +1270,8 @@ export function UniversalAssertionsEditor({
               placeholder="[]"
               data-testid="assertions-json-textarea"
             />
-            {rawJsonError && !isHistoryView && (
-              <span className="text-[10px] text-destructive">{rawJsonError}</span>
+            {activeError && !isHistoryView && (
+              <span className="text-[10px] text-destructive">{activeError}</span>
             )}
           </div>
         )}

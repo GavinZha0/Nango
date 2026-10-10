@@ -121,6 +121,23 @@ describe("Evaluation Suites API - Visibility Controls", () => {
       expect(res.status).toBe(201);
       expect(createSuiteMock).toHaveBeenCalled();
     });
+
+    it("normalizes caseTimeoutSec: null to default timeout (300s) on POST", async () => {
+      const req = createMockRequest("/api/eval-suites", {
+        method: "POST",
+        body: {
+          name: "Test Suite With Default Timeout",
+          agentId: "agent-target-1",
+          caseTimeoutSec: null,
+        },
+      });
+
+      const res = await POST(req, { params: Promise.resolve({}) });
+      expect(res.status).toBe(201);
+      expect(createSuiteMock).toHaveBeenCalledWith(
+        expect.objectContaining({ caseTimeoutSec: 300 }),
+      );
+    });
   });
 
   describe("PATCH /api/eval-suites/[id]", () => {
@@ -139,6 +156,40 @@ describe("Evaluation Suites API - Visibility Controls", () => {
       const json = await res.json();
       expect(json.message).toContain("Evaluator agent not found.");
       expect(updateSuiteMock).not.toHaveBeenCalled();
+    });
+
+    it("normalizes caseTimeoutSec: null to default timeout (300s) on PATCH", async () => {
+      const req = createMockRequest(`/api/eval-suites/${sampleSuite.id}`, {
+        method: "PATCH",
+        body: {
+          caseTimeoutSec: null,
+        },
+      });
+
+      const res = await PATCH(req, { params: Promise.resolve({ id: sampleSuite.id }) });
+      expect(res.status).toBe(200);
+      expect(updateSuiteMock).toHaveBeenCalledWith(
+        sampleSuite.id,
+        expect.objectContaining({ caseTimeoutSec: 300 }),
+        editorUser.id,
+      );
+    });
+
+    it("preserves explicit positive caseTimeoutSec on PATCH", async () => {
+      const req = createMockRequest(`/api/eval-suites/${sampleSuite.id}`, {
+        method: "PATCH",
+        body: {
+          caseTimeoutSec: 120,
+        },
+      });
+
+      const res = await PATCH(req, { params: Promise.resolve({ id: sampleSuite.id }) });
+      expect(res.status).toBe(200);
+      expect(updateSuiteMock).toHaveBeenCalledWith(
+        sampleSuite.id,
+        expect.objectContaining({ caseTimeoutSec: 120 }),
+        editorUser.id,
+      );
     });
   });
 });
