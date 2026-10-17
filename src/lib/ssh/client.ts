@@ -155,9 +155,7 @@ export async function execOnServer(
     const stdoutCap = makeCappedSink(limits.maxOutputBytes);
     const stderrCap = makeCappedSink(limits.maxOutputBytes);
 
-    const finalCommand = server.loginShell
-      ? buildLoginShellCommand(command)
-      : command;
+    const finalCommand = composeWireCommand(command, server.loginShell);
     const result = await ssh.execCommand(finalCommand, {
       onStdout: (chunk) => stdoutCap.push(chunk),
       onStderr: (chunk) => stderrCap.push(chunk),
@@ -437,6 +435,22 @@ export function shellSingleQuote(s: string): string {
  */
 export function buildLoginShellCommand(command: string): string {
   return `bash -lc ${shellSingleQuote(command)}`;
+}
+
+/**
+ * The exact string handed to `sshd` for a given request.
+ *
+ * CONTRACT: single definition — `execOnServer` sends this, and
+ * `runOnBoundServer` measures it before connecting. Quote-heavy commands grow
+ * here (`shellSingleQuote` turns every `'` into four characters), so any cap
+ * that is meant to bound the wire payload has to be evaluated on the output of
+ * this function, not on the caller's raw command.
+ */
+export function composeWireCommand(
+  command: string,
+  loginShell: boolean | undefined,
+): string {
+  return loginShell ? buildLoginShellCommand(command) : command;
 }
 
 // Suppress the unused-log warning (we keep `log` for future telemetry).

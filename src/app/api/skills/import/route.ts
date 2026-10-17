@@ -20,8 +20,17 @@ import { db } from "@/lib/db";
 import { SkillTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
-import { parseSkillMd, SkillParseError } from "@/lib/skills/parser";
+import {
+  parseSkillMd,
+  SkillParseError,
+  findMissingSshScripts,
+  describeMissingSshScripts,
+} from "@/lib/skills/parser";
 import { getDbSkillStorage } from "@/lib/skills/storage";
+import {
+  describeUnusableSshScript,
+  readSshScriptSource,
+} from "@/lib/skills/ssh-script-source";
 import {
   validateSkillFilePath,
   InvalidSkillPathError,
@@ -173,6 +182,42 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       throw new ApiError("VALIDATION_FAILED", 400, err.message);
     }
     throw err;
+  }
+
+  // 5b. scripts-on-ssh entries must be backed by a file in this same bundle.
+  // The bundle is fully in memory here, so this is decidable before any write
+  // — rejecting later would leave a dangling declaration that only blows up at
+  // run time as SCRIPT_NOT_FOUND.
+  if (parsed.frontmatter.scriptsOnSsh?.length) {
+    const available = filesToWrite.map((f) => f.path);
+    const missing = findMissingSshScripts(
+      parsed.frontmatter.scriptsOnSsh,
+      available,
+    );
+    if (missing.length > 0) {
+      throw new ApiError(
+        "VALIDATION_FAILED",
+        400,
+        describeMissingSshScripts(missing, available),
+      );
+    }
+  }
+
+  // 5c. Declared scripts must be strict UTF-8 text. Their source is embedded
+  // in a command string shipped to a remote host, where a mangled byte
+  // executes as mojibake; rejecting here is the last point where the author
+  // can still re-save the file.
+  const declaredSshScripts = new Set(parsed.frontmatter.scriptsOnSsh ?? []);
+  for (const file of filesToWrite) {
+    if (!declaredSshScripts.has(file.path)) continue;
+    const decoded = readSshScriptSource(file.content);
+    if (!decoded.ok) {
+      throw new ApiError(
+        "VALIDATION_FAILED",
+        400,
+        describeUnusableSshScript(file.path, decoded.reason),
+      );
+    }
   }
 
   // 6. Name collision check (per-creator uniqueness for local skills).

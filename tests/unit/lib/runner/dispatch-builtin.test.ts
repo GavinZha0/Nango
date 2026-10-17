@@ -15,6 +15,7 @@ const {
   agentPoolGetMock,
   skillPoolGetManyMock,
   buildSkillsRuntimeMock,
+  buildRunSkillScriptOnSshToolMock,
   buildBuiltinToolsMock,
   buildDataSourcesPromptBlockMock,
   buildExtractDatasetToolMock,
@@ -43,6 +44,7 @@ const {
   agentPoolGetMock: vi.fn(),
   skillPoolGetManyMock: vi.fn().mockResolvedValue([]),
   buildSkillsRuntimeMock: vi.fn().mockReturnValue({ tools: [], promptBlock: "" }),
+  buildRunSkillScriptOnSshToolMock: vi.fn().mockReturnValue({ name: "run_skill_script_on_ssh" }),
   buildBuiltinToolsMock: vi.fn().mockReturnValue([]),
   buildDataSourcesPromptBlockMock: vi.fn().mockResolvedValue({ promptBlock: "" }),
   buildExtractDatasetToolMock: vi.fn().mockReturnValue({ name: "extract_dataset_by_sql" }),
@@ -103,6 +105,7 @@ vi.mock("@/lib/skills", () => ({
 
 vi.mock("@/lib/skills/runtime-tools", () => ({
   buildSkillsRuntime: buildSkillsRuntimeMock,
+  buildRunSkillScriptOnSshTool: buildRunSkillScriptOnSshToolMock,
 }));
 
 vi.mock("@/lib/data-sources/prompt-block.server", () => ({
@@ -665,7 +668,9 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         agentPoolGetMock.mockResolvedValue(
           makeSpec({ tools: [{ kind: "skill", skillId: "skill-1" }] }),
         );
-        const skillSpecs = [{ skillId: "skill-1", name: "Py" }];
+        const skillSpecs = [
+          { skillId: "skill-1", name: "Py", scriptsOnSsh: new Set<string>() },
+        ];
         skillPoolGetManyMock.mockResolvedValue(skillSpecs);
         buildSkillsRuntimeMock.mockReturnValue({
           tools: [{ name: "run_skill_script" }],
@@ -675,7 +680,10 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
 
         expect(skillPoolGetManyMock).toHaveBeenCalledWith(["skill-1"]);
-        expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({ specs: skillSpecs });
+        expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          hasSshBindings: false,
+        });
         const args = agentArgs();
         expect(args.prompt).toEqual(expect.stringContaining("## Skills"));
         // ambient + skill tool
@@ -734,6 +742,105 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(args.prompt).toEqual(expect.stringContaining("## SSH Hosts"));
         // ambient + run_ssh + list_ssh
         expect((args.tools as unknown[]).length).toBe(3);
+      });
+
+      it("mounts run_skill_script_on_ssh when both skill has scriptsOnSsh and ssh_server is bound", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({
+            tools: [
+              { kind: "skill", skillId: "skill-1" },
+              { kind: "ssh_server", sshServerId: "ssh-1" },
+            ],
+          }),
+        );
+        const skillSpecs = [
+          {
+            skillId: "skill-1",
+            name: "k8s_ops",
+            scriptsOnSsh: new Set(["scripts/probe.sh"]),
+          },
+        ];
+        skillPoolGetManyMock.mockResolvedValue(skillSpecs);
+        buildSkillsRuntimeMock.mockReturnValue({
+          tools: [{ name: "run_skill_script" }],
+          promptBlock: "## Skills\n- k8s_ops",
+        });
+        buildRunSkillScriptOnSshToolMock.mockReturnValue({
+          name: "run_skill_script_on_ssh",
+        });
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildRunSkillScriptOnSshToolMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          agentSshServerIds: ["ssh-1"],
+        });
+        expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          hasSshBindings: true,
+        });
+        const args = agentArgs();
+        const toolNames = (args.tools as Array<{ name: string }>).map((t) => t.name);
+        expect(toolNames).toContain("run_skill_script_on_ssh");
+      });
+
+      it("omits run_skill_script_on_ssh when skill has empty scriptsOnSsh even if ssh_server is bound", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({
+            tools: [
+              { kind: "skill", skillId: "skill-1" },
+              { kind: "ssh_server", sshServerId: "ssh-1" },
+            ],
+          }),
+        );
+        const skillSpecs = [
+          {
+            skillId: "skill-1",
+            name: "k8s_ops",
+            scriptsOnSsh: new Set(),
+          },
+        ];
+        skillPoolGetManyMock.mockResolvedValue(skillSpecs);
+        buildRunSkillScriptOnSshToolMock.mockClear();
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildRunSkillScriptOnSshToolMock).not.toHaveBeenCalled();
+      });
+
+      // CONTRACT: a skill that declares scripts-on-ssh but an agent with no
+      // ssh_server binding must NOT get the tool mounted, and buildSkillsRuntime
+      // must learn that so it can refuse with SSH_NOT_AVAILABLE instead of
+      // pointing the model at a tool that does not exist.
+      it("omits run_skill_script_on_ssh when scriptsOnSsh is declared but no ssh_server is bound", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "skill", skillId: "skill-1" }] }),
+        );
+        const skillSpecs = [
+          {
+            skillId: "skill-1",
+            name: "k8s_ops",
+            scriptsOnSsh: new Set(["scripts/probe.sh"]),
+          },
+        ];
+        skillPoolGetManyMock.mockResolvedValue(skillSpecs);
+        buildSkillsRuntimeMock.mockReturnValue({
+          tools: [{ name: "run_skill_script" }],
+          promptBlock: "## Skills\n- k8s_ops",
+        });
+        buildRunSkillScriptOnSshToolMock.mockClear();
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildRunSkillScriptOnSshToolMock).not.toHaveBeenCalled();
+        expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          hasSshBindings: false,
+        });
+        const toolNames = (agentArgs().tools as Array<{ name: string }>).map(
+          (t) => t.name,
+        );
+        expect(toolNames).not.toContain("run_skill_script_on_ssh");
       });
 
       it("mounts fetch_calendar_events and calendar prompt when calendar binding present", async () => {

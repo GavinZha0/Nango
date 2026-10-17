@@ -13,7 +13,16 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { parseSkillMd, SkillParseError } from "@/lib/skills/parser";
+import {
+  describeMissingSshScripts,
+  findMissingSshScripts,
+  parseSkillMd,
+  SkillParseError,
+} from "@/lib/skills/parser";
+import {
+  describeUnusableSshScript,
+  readSshScriptSource,
+} from "@/lib/skills/ssh-script-source";
 import {
   InvalidSkillPathError,
   MAX_FILE_BYTES,
@@ -142,6 +151,30 @@ async function buildSkill(
 
   const files: BundleFile[] = await collectFiles(dirAbs, dirName);
   enforceTotals(dirName, files);
+
+  // Fail the build when a scripts-on-ssh entry has no matching file. Same
+  // check the skill API applies on write; shipped builtins must never carry a
+  // dangling declaration into the boot-time seed.
+  if (parsed.frontmatter.scriptsOnSsh?.length) {
+    const paths = files.map((f) => f.path);
+    const missing = findMissingSshScripts(parsed.frontmatter.scriptsOnSsh, paths);
+    if (missing.length > 0) {
+      throw new Error(
+        describeMissingSshScripts(missing, paths),
+      );
+    }
+  }
+
+  // Bake-time UTF-8 gate. `collectFiles` below decodes with
+  // Buffer.toString("utf-8"), which replaces ill-formed bytes with U+FFFD; a
+  // declared script must be re-read strictly or the bundle ships mojibake.
+  for (const scriptPath of parsed.frontmatter.scriptsOnSsh ?? []) {
+    const buf: Buffer = await fs.readFile(path.join(dirAbs, scriptPath));
+    const decoded = readSshScriptSource(buf);
+    if (!decoded.ok) {
+      throw new Error(describeUnusableSshScript(scriptPath, decoded.reason));
+    }
+  }
 
   const checksum: string = computeChecksum(skillMd, files);
   return {

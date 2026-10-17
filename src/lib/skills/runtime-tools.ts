@@ -1,12 +1,14 @@
 /**
  * Per-agent server-side skill tools: `get_skill`, `get_skill_file`,
- * `run_skill_script`.
+ * `run_skill_script`, and `run_skill_script_on_ssh` (SSH-targeted scripts
+ * declared in a skill's `scripts-on-ssh` frontmatter).
  *
- * See docs/skills.md.
+ * See docs/skills.md and docs/ssh.md.
  */
 
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { z } from "zod";
@@ -17,8 +19,17 @@ import {
   type SkillFileRecord,
 } from "./storage";
 import type { SkillSpec } from "./skill-pool";
+import {
+  describeUnusableSshScript,
+  readSshScriptSource,
+} from "./ssh-script-source";
 import { getActiveAdapter } from "@/lib/sandbox/registry.server";
 import { assembleCodeOutput } from "@/lib/sandbox/code-output";
+import { shellSingleQuote } from "@/lib/ssh/client";
+import {
+  runOnBoundServer,
+  SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
+} from "@/lib/ssh/runtime-tools";
 
 /** Subdirectory whitelist (matches `validateSkillFilePath`). */
 const ALLOWED_PREFIXES = ["references", "scripts", "assets", "evals"] as const;
@@ -41,6 +52,13 @@ function pickInterpreter(filename: string): string | null {
 
 export interface BuildSkillsRuntimeArgs {
   specs: SkillSpec[];
+  /**
+   * True when the calling agent has at least one `ssh_server` bound, i.e. when
+   * `run_skill_script_on_ssh` is mounted next to these tools. Drives routing
+   * messages and the prompt annotation only — a `scripts-on-ssh` script is
+   * never silently downgraded to the sandbox.
+   */
+  hasSshBindings?: boolean;
 }
 
 export interface SkillsRuntime {
@@ -51,7 +69,7 @@ export interface SkillsRuntime {
 }
 
 export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime {
-  const { specs } = args;
+  const { specs, hasSshBindings = false } = args;
   if (specs.length === 0) {
     return { tools: [], promptBlock: "" };
   }
@@ -64,7 +82,14 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
     if (!byName.has(spec.name)) byName.set(spec.name, spec);
   }
 
-  const promptBlock: string = renderPromptBlock(specs);
+  // Mirrors the mount condition in `runner/dispatch/builtin.ts`: the SSH
+  // script tool exists only when a skill declares scripts AND a host is
+  // bound. Prompt text and error hints must not advertise a tool that is
+  // absent, or the model loops between two refusing tools.
+  const sshToolAvailable: boolean =
+    hasSshBindings && specs.some((spec) => spec.scriptsOnSsh.size > 0);
+
+  const promptBlock: string = renderPromptBlock(specs, sshToolAvailable);
   const storage = getDbSkillStorage();
 
   const getSkill = defineTool({
@@ -159,7 +184,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const runSkillScript = defineTool({
     name: "run_skill_script",
     description:
-      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend.",
+      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend. Scripts listed in the skill's scripts-on-ssh frontmatter run on a remote host with run_skill_script_on_ssh and are refused here.",
     parameters: z.object({
       name: z.string().describe("Skill name."),
       filename: z
@@ -185,7 +210,36 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         };
       }
 
-      // 2. Pick interpreter from extension before we touch the DB.
+      // 2. Normalize script path. Restricted to scripts/ on purpose —
+      //    running a markdown reference or asset doesn't make sense
+      //    and broadens the surface for no benefit.
+      const scriptPath: string = filename.startsWith("scripts/")
+        ? filename
+        : `scripts/${filename}`;
+
+      // Routing check: scripts listed in scripts-on-ssh target remote hosts,
+      // so the sandbox never runs them — executing e.g. a probe script locally
+      // would report the sandbox instead of the intended host and hand back
+      // confidently wrong data. When no host is bound the SSH tool itself is
+      // absent, so the message has to name the unblock action instead.
+      if (spec.scriptsOnSsh.has(scriptPath)) {
+        return sshToolAvailable
+          ? {
+              ok: false,
+              error: "SSH_SCRIPT",
+              message: `'${scriptPath}' is declared in scripts-on-ssh; use run_skill_script_on_ssh instead.`,
+            }
+          : {
+              ok: false,
+              error: "SSH_NOT_AVAILABLE",
+              message:
+                `'${scriptPath}' is declared in scripts-on-ssh, but this agent has no ssh_server bound, ` +
+                "so run_skill_script_on_ssh is unavailable. Bind an SSH host to this agent and retry — " +
+                "the script is not executed in the sandbox because it targets remote hosts.",
+            };
+      }
+
+      // 3. Pick interpreter from extension before we touch the DB.
       const interpreter: string | null = pickInterpreter(filename);
       if (!interpreter) {
         return {
@@ -197,12 +251,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         };
       }
 
-      // 3. Resolve script bytes. Restricted to scripts/ on purpose —
-      //    running a markdown reference or asset doesn't make sense
-      //    and broadens the surface for no benefit.
-      const scriptPath: string = filename.startsWith("scripts/")
-        ? filename
-        : `scripts/${filename}`;
+      // 4. Resolve script bytes from DB.
       let found: SkillFileRecord | null = null;
       try {
         found = await storage.readFile(spec.skillId, scriptPath);
@@ -216,7 +265,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         return { ok: false, error: `Script not found: ${scriptPath}` };
       }
 
-      // 4. Delegate to the active sandbox adapter. Same enforcement
+      // 5. Delegate to the active sandbox adapter. Same enforcement
       //    envelope as run_code_in_sandbox.
       const adapter = await getActiveAdapter();
       const out = await adapter.run({
@@ -237,18 +286,219 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   };
 }
 
+const RunSkillScriptOnSshArgs = z.object({
+  name: z.string().min(1).describe("Skill name."),
+  filename: z
+    .string()
+    .min(1)
+    .describe(
+      "Script listed in the skill's scripts-on-ssh, e.g. 'probe.sh' or 'scripts/probe.sh'.",
+    ),
+  serverName: z
+    .string()
+    .min(1)
+    .describe("Slug of a bound SSH server (see list_ssh_hosts)."),
+  args: z
+    .array(z.string().max(4096))
+    .max(64)
+    .optional()
+    .describe(
+      "Positional arguments: $1, $2, ... for .sh; sys.argv[1:] for .py.",
+    ),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(300)
+    .optional()
+    .describe(
+      "Wall-clock timeout in SECONDS (1-300). NOT milliseconds. Default 30.",
+    ),
+});
+
+export interface BuildRunSkillScriptOnSshToolOpts {
+  specs: SkillSpec[];
+  agentSshServerIds: readonly string[];
+}
+
+/**
+ * Build the `run_skill_script_on_ssh` tool definition.
+ *
+ * Executes reviewed script bytes from a skill on a bound SSH server.
+ * Both the skill and the SSH server must be bound to the caller agent.
+ * The script must be explicitly declared in the skill's `scripts-on-ssh`
+ * frontmatter.
+ */
+export function buildRunSkillScriptOnSshTool(
+  opts: BuildRunSkillScriptOnSshToolOpts,
+): ToolDefinition {
+  const byName: Map<string, SkillSpec> = new Map();
+  for (const spec of opts.specs) {
+    if (!byName.has(spec.name)) byName.set(spec.name, spec);
+  }
+  const storage = getDbSkillStorage();
+
+  return defineTool({
+    name: "run_skill_script_on_ssh",
+    description:
+      "Execute a reviewed skill script on a bound SSH host. The script must be " +
+      "declared in the skill's scripts-on-ssh frontmatter. Pass `name` (skill name), " +
+      "`filename` (e.g. 'probe.sh'), `serverName` (SSH server slug from list_ssh_hosts), " +
+      "and optional `args` (positional arguments: $1, $2, ... for .sh; sys.argv[1:] for .py) " +
+      "and `timeoutSeconds` (1-300 seconds, default 30). Returns { ok, serverName, host, " +
+      "skill, script, scriptSha256, stdout, stderr, exitCode, signal, durationMs, truncated }.",
+    parameters: RunSkillScriptOnSshArgs,
+    execute: async (rawArgs, ctx?: { abortSignal?: AbortSignal }) => {
+      const args = RunSkillScriptOnSshArgs.parse(rawArgs);
+
+      // Step 1: Resolve skill (must be bound to this agent).
+      const spec: SkillSpec | undefined = byName.get(args.name);
+      if (!spec) {
+        return {
+          ok: false,
+          error: "SKILL_NOT_FOUND",
+          message: `No skill named "${args.name}" is available to this agent.`,
+          available: [...byName.keys()],
+        };
+      }
+
+      // Step 2: Normalize script path.
+      const scriptPath: string = args.filename.startsWith("scripts/")
+        ? args.filename
+        : `scripts/${args.filename}`;
+
+      // Step 3: Check membership in scripts-on-ssh.
+      if (!spec.scriptsOnSsh.has(scriptPath)) {
+        return {
+          ok: false,
+          error: "NOT_AN_SSH_SCRIPT",
+          message:
+            `'${scriptPath}' is not declared in scripts-on-ssh for skill '${args.name}'. ` +
+            `Use run_skill_script for sandbox scripts.`,
+        };
+      }
+
+      // Step 4: Pick interpreter.
+      const interpreter: string | null = pickInterpreter(scriptPath);
+      if (!interpreter) {
+        return {
+          ok: false,
+          error: "UNSUPPORTED_INTERPRETER",
+          message: `Unsupported script extension on '${scriptPath}'. Supported: .py, .sh.`,
+        };
+      }
+
+      // Step 5: Resolve script bytes from DB.
+      let found: SkillFileRecord | null = null;
+      try {
+        found = await storage.readFile(spec.skillId, scriptPath);
+      } catch (err) {
+        if (err instanceof InvalidSkillPathError) {
+          return {
+            ok: false,
+            error: "SCRIPT_NOT_FOUND",
+            message: `Invalid script path: ${args.filename}`,
+          };
+        }
+        throw err;
+      }
+      if (!found) {
+        return {
+          ok: false,
+          error: "SCRIPT_NOT_FOUND",
+          message: `Script '${scriptPath}' not found in skill '${args.name}'.`,
+        };
+      }
+
+      // Step 6: Strict UTF-8 decode + NUL check.
+      const decoded = readSshScriptSource(found.content);
+      if (!decoded.ok) {
+        return {
+          ok: false,
+          error: "INVALID_SCRIPT_BYTES",
+          message: describeUnusableSshScript(scriptPath, decoded.reason),
+        };
+      }
+      const scriptText: string = decoded.text;
+
+      // Step 7: Command assembly.
+      // bash: bash -c '<script>' '<skillName>' '<arg1>' '<arg2>' ...
+      // python: python3 -c '<script>' '<arg1>' '<arg2>' ...
+      const quotedScript = shellSingleQuote(scriptText);
+      const quotedArgs = (args.args ?? []).map(shellSingleQuote).join(" ");
+      const command =
+        interpreter === "bash"
+          ? `bash -c ${quotedScript} ${shellSingleQuote(spec.name)}${quotedArgs ? " " + quotedArgs : ""}`
+          : `python3 -c ${quotedScript}${quotedArgs ? " " + quotedArgs : ""}`;
+
+      // Step 8: Delegate to runOnBoundServer, which owns the length gate on
+      // the composed wire command (a login-shell host re-quotes `command`,
+      // so measuring it here would under-report).
+      const execResult = await runOnBoundServer({
+        serverName: args.serverName,
+        command,
+        timeoutSeconds: args.timeoutSeconds,
+        maxCommandChars: SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
+        agentSshServerIds: opts.agentSshServerIds,
+        signal: ctx?.abortSignal,
+      });
+
+      if (!execResult.ok) {
+        return execResult;
+      }
+
+      const scriptSha256 = createHash("sha256")
+        .update(found.content)
+        .digest("hex");
+
+      return {
+        ok: true,
+        skill: spec.name,
+        script: scriptPath,
+        scriptSha256,
+        serverName: execResult.serverName,
+        host: execResult.host,
+        stdout: execResult.stdout,
+        stderr: execResult.stderr,
+        exitCode: execResult.exitCode,
+        signal: execResult.signal,
+        durationMs: execResult.durationMs,
+        truncated: execResult.truncated,
+      };
+    },
+  });
+}
+
 // "Available Skills" block format mirrors Anthropic's published examples.
-function renderPromptBlock(specs: SkillSpec[]): string {
+function renderPromptBlock(
+  specs: SkillSpec[],
+  sshToolAvailable: boolean,
+): string {
   if (specs.length === 0) return "";
   const lines: string[] = [];
   lines.push("## Available Skills");
   lines.push(
-    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill (references/, scripts/, assets/, evals/) are reachable via `get_skill_file(name, filename)`.  Scripts under `scripts/` can be executed with `run_skill_script(name, filename)` (V1: .py and .sh) — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd.",
+    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill (references/, scripts/, assets/, evals/) are reachable via `get_skill_file(name, filename)`.  Scripts under `scripts/` can be executed with `run_skill_script(name, filename)` (V1: .py and .sh) — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd." +
+      // Only name the SSH tool when it is actually mounted; otherwise the
+      // model would be instructed to call a tool that does not exist.
+      (sshToolAvailable
+        ? " Scripts listed in `scripts-on-ssh` must use `run_skill_script_on_ssh(name, filename, serverName)` instead."
+        : ""),
   );
   lines.push("");
   for (const spec of specs) {
     const description: string = spec.description ?? "";
-    lines.push(`- **${spec.name}**: ${description}`);
+    const sshNote =
+      spec.scriptsOnSsh.size > 0
+        ? ` (SSH scripts: ${[...spec.scriptsOnSsh]
+            .map((p) => p.replace(/^scripts\//, ""))
+            .join(", ")}${
+            sshToolAvailable
+              ? ""
+              : " — require an SSH host bound to this agent; not runnable"
+          })`
+        : "";
+    lines.push(`- **${spec.name}**${sshNote}: ${description}`);
   }
   return lines.join("\n");
 }

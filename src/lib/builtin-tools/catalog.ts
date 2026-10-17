@@ -344,21 +344,54 @@ export const WORKFLOW_AMBIENT_TOOLS: readonly BuiltinToolDescriptor[] = [
     input_schema: {
       type: "object",
       properties: {
-        skillName: {
+        name: {
           type: "string",
-          description: "Name of the skill.",
+          description: "Skill name.",
         },
-        scriptName: {
+        filename: {
           type: "string",
-          description: "Filename of the script under scripts/.",
+          description: "Script filename under scripts/.",
+        },
+        datasets: {
+          type: "array",
+          items: { type: "string" },
+          description: "Cached dataset names to mount at ./tmp/data/<name>/ in the sandbox cwd.",
+        },
+      },
+      required: ["name", "filename"],
+    },
+  },
+  {
+    name: "run_skill_script_on_ssh",
+    displayName: "run_skill_script_on_ssh",
+    description: "Execute a reviewed skill script on a bound SSH host",
+    category: "outcomes",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Skill name.",
+        },
+        filename: {
+          type: "string",
+          description: "Script filename listed in scripts-on-ssh.",
+        },
+        serverName: {
+          type: "string",
+          description: "Slug of a bound SSH server.",
         },
         args: {
           type: "array",
           items: { type: "string" },
-          description: "Arguments passed to the script.",
+          description: "Positional arguments: $1, $2, ... for .sh; sys.argv[1:] for .py.",
+        },
+        timeoutSeconds: {
+          type: "number",
+          description: "Wall-clock timeout in SECONDS (1-300). Default 30.",
         },
       },
-      required: ["skillName", "scriptName"],
+      required: ["name", "filename", "serverName"],
     },
   },
   {

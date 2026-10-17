@@ -34,6 +34,14 @@ export interface SkillSpec {
   /** UUID of the user that originally created the row.
    *  Null when the creator was hard-purged (FK SET NULL); see docs/rbac.md. */
   createdBy: string | null;
+  /**
+   * Normalized set of script paths (e.g. `"scripts/probe.sh"`) that must run
+   * on a bound SSH host via `run_skill_script_on_ssh` instead of the sandbox.
+   * Empty set = all scripts run in the sandbox (default, unchanged behavior).
+   * Derived from frontmatter `scripts-on-ssh` at load time; pre-computed here
+   * so tools do not re-parse on every call.
+   */
+  scriptsOnSsh: ReadonlySet<string>;
 }
 
 export type SkillSpecLoader = (skillId: string) => Promise<SkillSpec | null>;
@@ -157,6 +165,7 @@ export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
     enabled: row.enabled,
     visibility: row.visibility,
     createdBy: row.createdBy,
+    scriptsOnSsh: new Set(parsed.frontmatter.scriptsOnSsh ?? []),
   };
 };
 

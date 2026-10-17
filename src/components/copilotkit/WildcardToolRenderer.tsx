@@ -5,7 +5,8 @@
  * tool call that doesn't have a name-specific `useRenderTool`
  * registration (MCP tools, sandbox `run_code_in_sandbox`,
  * `extract_dataset_by_sql`, `run_ssh_command`, `list_ssh_hosts`,
- * `get_skill`, `get_skill_file`, `run_skill_script`, all the
+ * `get_skill`, `get_skill_file`, `run_skill_script`,
+ * `run_skill_script_on_ssh`, all the
  * supervisor schedule tools, and anything new added later).
  *
  * Replaces CopilotKit's built-in `DefaultToolCallRenderer` (registered

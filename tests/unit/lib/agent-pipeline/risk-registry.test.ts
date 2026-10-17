@@ -177,3 +177,45 @@ describe("G20 Headless Deny in toolApprovalMiddleware", () => {
     expect(result).toBe("search-results");
   });
 });
+
+describe("evaluateToolRisk — run_skill_script_on_ssh", () => {
+  const base = { name: "k8s_ops", filename: "probe.sh", serverName: "prod-01" };
+
+  it("registers as high / write but stays headless-allowed", () => {
+    const res = evaluateToolRisk("run_skill_script_on_ssh", base);
+    expect(res.riskLevel).toBe("high");
+    expect(res.sideEffects).toBe("write");
+    expect(res.headlessAllowed).toBe(true);
+  });
+
+  it("escalates to critical when a caller argument matches a dangerous SSH pattern", () => {
+    for (const args of [["rm -rf /"], ["hello; shutdown -h now"], ["-f", "kill 9"]]) {
+      const res = evaluateToolRisk("run_skill_script_on_ssh", { ...base, args });
+      expect(res.riskLevel).toBe("critical");
+      expect(res.sideEffects).toBe("destructive");
+      expect(res.requiresApproval).toBe(true);
+      expect(res.headlessAllowed).toBe(false);
+      expect(res.reason).toContain("dangerous operation");
+    }
+  });
+
+  // CONTRACT: the reviewed script bytes are never pattern-scanned — legitimate
+  // operational scripts contain verbs like `rm`. Only `args` is LLM-authored.
+  it("ignores dangerous text outside the args array", () => {
+    const res = evaluateToolRisk("run_skill_script_on_ssh", {
+      ...base,
+      command: "rm -rf /",
+      scriptText: "rm -rf /",
+      args: ["--verbose"],
+    });
+    expect(res.riskLevel).toBe("high");
+    expect(res.headlessAllowed).toBe(true);
+  });
+
+  it("tolerates missing or malformed args arrays", () => {
+    for (const args of [undefined, "rm -rf /", [null, 42], []]) {
+      const res = evaluateToolRisk("run_skill_script_on_ssh", { ...base, args });
+      expect(res.riskLevel).toBe("high");
+    }
+  });
+});

@@ -45,7 +45,8 @@ server-side tools to load the actual content:
 |---|---|
 | `get_skill(name)` | The full SKILL.md text (frontmatter + body) |
 | `get_skill_file(name, path)` | A helper file under `references/`, `scripts/`, `assets/`, or `evals/` |
-| `run_skill_script(name, filename, datasets?)` | Execute a script from the skill's `scripts/` tree in the same sandbox as `run_code_in_sandbox`. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. |
+| `run_skill_script(name, filename, datasets?)` | Execute a script from the skill's `scripts/` tree in the same sandbox as `run_code_in_sandbox`. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
+| `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
 
 Token cost is bounded by the description list, not by the full skill
 bodies.
@@ -179,6 +180,7 @@ Procedure ...
 | `version` | no | Free-form string; default `'1.0.0'` |
 | `context` | no | Skills 2.0 spec field; parsed but unused in v1 |
 | `allowed-tools` | no | Skills 2.0 spec field; parsed but unused in v1 |
+| `scripts-on-ssh` | no | String or array of script filenames under `scripts/` (e.g. `['probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<file>`. Requires `.py` or `.sh`. Sub-directories forbidden. Build and import both fail if the declared file is missing or is not valid UTF-8. |
 | Other fields | no | Captured into `extras`, not consumed |
 
 ### 3.3 Build script (`scripts/build-skills.ts`)
@@ -299,13 +301,36 @@ Key invariants:
 
 | Action | Endpoint | RBAC |
 |---|---|---|
-| Create | `POST /api/skills` body `{ skillMd, visibility?, files? }` | `withEditor` |
-| Read | `GET /api/skills/:id` returns row + files metadata | `withSession` (visibility-filtered) |
-| Update content | `PATCH /api/skills/:id` body `{ skillMd?, files?, ... }` | `withEditor` + `canEditResource` |
-| Update flag | `PATCH /api/skills/:id` body `{ enabled?, visibility? }` | `withEditor` + `canChangeVisibility` |
+| Create | `POST /api/skills` body `{ skillMd, visibility? }` | `withEditor` |
+| Read | `GET /api/skills/:id` returns row + `missingSshScripts` | `withSession` (visibility-filtered) |
+| Update content | `PATCH /api/skills/:id` body `{ skillMd?, enabled?, visibility? }` | `withEditor` + `canEditResource` |
 | Delete | `DELETE /api/skills/:id` | `withEditor` + `canDeleteResource` |
 | List | `GET /api/skills` | `withSession` (visibility-filtered) |
 | File read | `GET /api/skills/:id/files/[...path]` | `withSession` (parent skill visibility-filtered) |
+
+`POST /api/skills` writes only the `skill` row. **`POST /api/skills/import` is
+the sole writer of `skill_file`** — the file endpoint is read-only, so a
+hand-created skill can never acquire helper scripts after the fact. Editing a
+script means re-importing under a new name (import never updates in place).
+
+The write boundaries validate `scripts-on-ssh` against the files that actually
+exist, because a dangling declaration is invisible until
+`run_skill_script_on_ssh` fails on a remote host:
+
+| Boundary | Judged against | Outcome |
+|---|---|---|
+| `pnpm build:skills` | Bundle file list | Build fails |
+| `POST /api/skills/import` | In-memory ZIP entries | 400 before any write |
+| `POST /api/skills` | Nothing — a created row has no files | 400 |
+| `PATCH /api/skills/:id` | `storage.listFiles(id)` | 400, body untouched |
+| `GET /api/skills/:id` | `storage.listFiles(id)` | `missingSshScripts: string[]` for pre-existing rows |
+
+Declared scripts must additionally be valid UTF-8 text, because their source is
+embedded in a command string and executed on a remote host. The same pure
+helper (`src/lib/skills/ssh-script-source.ts`) gates the build (fails), the
+import (400), and dispatch (`INVALID_SCRIPT_BYTES`). `PATCH` checks existence
+only — re-reading every stored script on each save is not worth it when the
+bytes were already gated at import.
 
 The editor lets the user edit `SKILL.md` directly; helper files
 (references / scripts / assets) get a separate upload widget — file
@@ -414,6 +439,11 @@ Skills are the **wrong** tool when:
   platform (agno / Mastra) instead.
 - The capability needs a fresh runtime sandbox → wait for the
   forked-context / sandboxed-execution version.
+- The capability needs ad-hoc interactive remote commands → use
+  `run_ssh_command`. However, when structured diagnostic or operational
+  scripts are versioned as part of a skill, declare them in
+  `scripts-on-ssh` and execute them via `run_skill_script_on_ssh` on a
+  bound SSH host.
 
 ---
 

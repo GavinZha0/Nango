@@ -100,6 +100,16 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     "run_ssh_command",
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],
+  [
+    "run_skill_script_on_ssh",
+    {
+      riskLevel: "high",
+      sideEffects: "write",
+      headlessAllowed: true,
+      // CONTRACT: headlessAllowed=true because the script bytes are reviewed
+      // skill content (not LLM-authored), unlike run_ssh_command (false).
+    },
+  ],
 ]);
 
 const DANGEROUS_SSH_PATTERNS = [
@@ -190,6 +200,22 @@ export function evaluateToolRisk(
       sideEffects = "destructive";
       headlessAllowed = false;
       reason = "SSH command contains dangerous operation";
+    }
+  } else if (toolName === "run_skill_script_on_ssh" && args && typeof args === "object") {
+    // SECURITY: Only scan the LLM-supplied `args` array, never the reviewed
+    // script text. Reviewed scripts legitimately contain words like `rm`
+    // (e.g. removing scratch containers) that DANGEROUS_SSH_PATTERNS would match.
+    const argsArr = (args as { args?: unknown }).args;
+    if (
+      Array.isArray(argsArr) &&
+      argsArr.some(
+        (a) => typeof a === "string" && DANGEROUS_SSH_PATTERNS.some((p) => p.test(a)),
+      )
+    ) {
+      riskLevel = "critical";
+      sideEffects = "destructive";
+      headlessAllowed = false;
+      reason = "SSH skill script argument contains dangerous operation";
     }
   } else if (toolName === "extract_dataset_by_sql" && args && typeof args === "object") {
     const sql = (args as { sql_text?: unknown }).sql_text;

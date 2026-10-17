@@ -15,7 +15,12 @@ import {
 } from "@/lib/auth/permissions";
 import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
-import { parseSkillMd, SkillParseError } from "@/lib/skills/parser";
+import {
+  describeMissingSshScripts,
+  findMissingSshScripts,
+  parseSkillMd,
+  SkillParseError,
+} from "@/lib/skills/parser";
 import { getDbSkillStorage } from "@/lib/skills/storage";
 
 const ROUTE = "/api/skills/[id]";
@@ -53,7 +58,27 @@ export const GET = withSession<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const row = await loadVisibleSkill(params.id, session);
-    return NextResponse.json(row);
+    // Diagnostic for rows that predate write-time validation: the editor can
+    // show which declarations are unbacked instead of letting the agent
+    // discover it mid-run.
+    let missingSshScripts: string[] = [];
+    try {
+      const parsed = parseSkillMd(row.skillMd);
+      if (parsed.frontmatter.scriptsOnSsh?.length) {
+        const available = (await getDbSkillStorage().listFiles(row.id)).map(
+          (f) => f.path,
+        );
+        missingSshScripts = findMissingSshScripts(
+          parsed.frontmatter.scriptsOnSsh,
+          available,
+        );
+      }
+    } catch (err) {
+      // A malformed stored body must not turn a read into a 500; the editor
+      // surfaces it through the body itself.
+      if (!(err instanceof SkillParseError)) throw err;
+    }
+    return NextResponse.json({ ...row, missingSshScripts });
   },
 );
 
@@ -126,6 +151,25 @@ export const PATCH = withEditor<{ id: string }>(
           `Renaming a skill via PATCH is not supported.  Skill is named "${row.name}".`,
         );
       }
+      // scripts-on-ssh is validated against the files that already exist: an
+      // editor can freely rewrite frontmatter, but a declaration with no
+      // backing skill_file can only fail later as SCRIPT_NOT_FOUND on a
+      // remote host.
+      if (parsed.frontmatter.scriptsOnSsh?.length) {
+        const available = (await storage.listFiles(row.id)).map((f) => f.path);
+        const missing = findMissingSshScripts(
+          parsed.frontmatter.scriptsOnSsh,
+          available,
+        );
+        if (missing.length > 0) {
+          throw new ApiError(
+            "VALIDATION_FAILED",
+            400,
+            describeMissingSshScripts(missing, available),
+          );
+        }
+      }
+
       await storage.updateContent({
         skillId: row.id,
         skillMd: body.skillMd,

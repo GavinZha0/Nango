@@ -11,7 +11,7 @@ import { z } from "zod";
 import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 
-import { execOnServer, SshError } from "./client";
+import { composeWireCommand, execOnServer, SshError } from "./client";
 import { listSshServersByIds, resolveSshServerByName } from "./lookup";
 import { evaluateCommandPolicy } from "./policy";
 
@@ -47,6 +47,157 @@ const RunSshArgs = z.object({
     ),
 });
 
+// CONTRACT: Only applies to run_skill_script_on_ssh (reviewed script bytes),
+// NOT to run_ssh_command (LLM-authored commands, capped at 8000 at the input).
+// Measured against the *composed* wire command — see
+// `RunOnBoundServerOpts.maxCommandChars`.
+export const SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS = 16_000;
+
+export interface RunOnBoundServerOpts {
+  serverName: string;
+  command: string;
+  timeoutSeconds?: number;
+  agentSshServerIds: readonly string[];
+  /**
+   * Hard cap on the string that actually reaches `sshd`. Login-shell hosts
+   * re-quote the whole command (`'` → `'\''`), so a caller that measures its
+   * own pre-wrapped string under-reports. Left unset when the caller's cap is
+   * about input size rather than wire size.
+   */
+  maxCommandChars?: number;
+  signal?: AbortSignal;
+}
+
+export type RunOnBoundServerResult =
+  | {
+      ok: true;
+      serverName: string;
+      host: string;
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      signal: string | null;
+      durationMs: number;
+      truncated: boolean;
+    }
+  | {
+      ok: false;
+      error: string;
+      message: string;
+      matchedPattern?: string;
+    };
+
+/**
+ * Execute a command on an SSH server after resolving by name, checking
+ * agent binding, and evaluating command allow/deny policies.
+ * Shared by `run_ssh_command` and `run_skill_script_on_ssh`.
+ */
+export async function runOnBoundServer(
+  opts: RunOnBoundServerOpts,
+): Promise<RunOnBoundServerResult> {
+  const allowedIds = new Set(opts.agentSshServerIds);
+
+  const lookup = await resolveSshServerByName(opts.serverName);
+  if (!lookup.ok) {
+    return { ok: false, error: lookup.error, message: lookup.message };
+  }
+  const server = lookup.resolved;
+
+  // SECURITY: only servers EXPLICITLY bound to this agent can be
+  // targeted. Without this check, knowledge of any server slug
+  // would let one agent reach into another's hosts.
+  if (!allowedIds.has(server.id)) {
+    return {
+      ok: false,
+      error: "NOT_BOUND",
+      message:
+        `SSH server '${opts.serverName}' exists but is not bound to ` +
+        "this agent. Bind it via the agent editor, then retry.",
+    };
+  }
+
+  // Policy gate — checked BEFORE we reach out to the host so a
+  // denied command never opens an SSH channel. `commandAllow` is
+  // null when unconstrained; non-null arrays are evaluated per
+  // `lib/ssh/policy.ts`. `commandDeny` always wins on a match.
+  const decision = evaluateCommandPolicy(
+    opts.command,
+    server.commandAllow,
+    server.commandDeny,
+  );
+  if (!decision.allowed) {
+    return {
+      ok: false,
+      error: "POLICY_DENIED",
+      message: decision.reason ?? "Command rejected by ssh_server policy.",
+      ...(decision.matchedPattern
+        ? { matchedPattern: decision.matchedPattern }
+        : {}),
+    };
+  }
+
+  // Length gate on the string that actually reaches sshd. Measured here, not
+  // by the caller, because a login-shell host re-quotes the whole command and
+  // a caller that measures its own pre-wrapped string under-reports.
+  if (opts.maxCommandChars !== undefined) {
+    const wireLength = composeWireCommand(opts.command, server.loginShell).length;
+    if (wireLength > opts.maxCommandChars) {
+      return {
+        ok: false,
+        error: "COMMAND_TOO_LONG",
+        message:
+          `Assembled SSH command is ${wireLength} characters` +
+          (server.loginShell
+            ? " after login-shell wrapping"
+            : "") +
+          `, exceeding the maximum of ${opts.maxCommandChars}. ` +
+          "Shorten the script or split the run.",
+      };
+    }
+  }
+
+  try {
+    const result = await execOnServer(
+      {
+        host: server.host,
+        port: server.port,
+        knownHostFingerprint: server.knownHostFingerprint,
+        loginShell: server.loginShell,
+      },
+      server.auth,
+      opts.command,
+      {
+        // Convert seconds → ms at the boundary; internals stay
+        // millisecond-typed throughout (project convention).
+        timeoutMs:
+          opts.timeoutSeconds != null
+            ? opts.timeoutSeconds * 1000
+            : undefined,
+        signal: opts.signal,
+      },
+    );
+    return {
+      ok: true,
+      serverName: server.name,
+      host: server.host,
+      // SECURITY: no `username` field on purpose. The OS user is
+      // part of the credential payload, which must not reach the
+      // LLM. If the agent needs to know who it ran as, `whoami`
+      // returns it via the same exec channel.
+      ...result,
+    };
+  } catch (err) {
+    if (err instanceof SshError) {
+      return {
+        ok: false,
+        error: err.code,
+        message: err.message,
+      };
+    }
+    throw err;
+  }
+}
+
 /**
  * Build the `run_ssh_command` tool definition. Bound agent ids are
  * passed in so the tool can refuse calls against a server the agent
@@ -55,7 +206,6 @@ const RunSshArgs = z.object({
 export function buildRunSshCommandTool(opts: {
   agentSshServerIds: readonly string[];
 }): ToolDefinition {
-  const allowedIds = new Set(opts.agentSshServerIds);
   return defineTool({
     name: "run_ssh_command",
     description:
@@ -76,86 +226,13 @@ export function buildRunSshCommandTool(opts: {
     parameters: RunSshArgs,
     execute: async (rawArgs, ctx?: { abortSignal?: AbortSignal }) => {
       const args = RunSshArgs.parse(rawArgs);
-
-      const lookup = await resolveSshServerByName(args.serverName);
-      if (!lookup.ok) {
-        return { ok: false, error: lookup.error, message: lookup.message };
-      }
-      const server = lookup.resolved;
-
-      // SECURITY: only servers EXPLICITLY bound to this agent can be
-      // targeted. Without this check, knowledge of any server slug
-      // would let one agent reach into another's hosts.
-      if (!allowedIds.has(server.id)) {
-        return {
-          ok: false,
-          error: "NOT_BOUND",
-          message:
-            `SSH server '${args.serverName}' exists but is not bound to ` +
-            "this agent. Bind it via the agent editor, then retry.",
-        };
-      }
-
-      // Policy gate — checked BEFORE we reach out to the host so a
-      // denied command never opens an SSH channel. `commandAllow` is
-      // null when unconstrained; non-null arrays are evaluated per
-      // `lib/ssh/policy.ts`. `commandDeny` always wins on a match.
-      const decision = evaluateCommandPolicy(
-        args.command,
-        server.commandAllow,
-        server.commandDeny,
-      );
-      if (!decision.allowed) {
-        return {
-          ok: false,
-          error: "POLICY_DENIED",
-          message: decision.reason ?? "Command rejected by ssh_server policy.",
-          ...(decision.matchedPattern
-            ? { matchedPattern: decision.matchedPattern }
-            : {}),
-        };
-      }
-
-      try {
-        const result = await execOnServer(
-          {
-            host: server.host,
-            port: server.port,
-            knownHostFingerprint: server.knownHostFingerprint,
-            loginShell: server.loginShell,
-          },
-          server.auth,
-          args.command,
-          {
-            // Convert seconds → ms at the boundary; internals stay
-            // millisecond-typed throughout (project convention).
-            timeoutMs:
-              args.timeoutSeconds != null
-                ? args.timeoutSeconds * 1000
-                : undefined,
-            signal: ctx?.abortSignal,
-          },
-        );
-        return {
-          ok: true,
-          serverName: server.name,
-          host: server.host,
-          // SECURITY: no `username` field on purpose. The OS user is
-          // part of the credential payload, which must not reach the
-          // LLM. If the agent needs to know who it ran as, `whoami`
-          // returns it via the same exec channel.
-          ...result,
-        };
-      } catch (err) {
-        if (err instanceof SshError) {
-          return {
-            ok: false,
-            error: err.code,
-            message: err.message,
-          };
-        }
-        throw err;
-      }
+      return runOnBoundServer({
+        serverName: args.serverName,
+        command: args.command,
+        timeoutSeconds: args.timeoutSeconds,
+        agentSshServerIds: opts.agentSshServerIds,
+        signal: ctx?.abortSignal,
+      });
     },
   });
 }

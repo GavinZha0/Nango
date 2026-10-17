@@ -30,6 +30,16 @@ export interface SkillFrontmatter {
    * advisory until promoted to builtin.
    */
   dependenciesPython?: string[];
+  /**
+   * Scripts (normalized to `scripts/<file>`) that must run on a bound SSH
+   * host via `run_skill_script_on_ssh` instead of the sandbox.
+   * Accepted key spellings: `scripts-on-ssh` (canonical), `scripts_on_ssh`,
+   * `scriptsOnSsh`. Absent key = every script runs in the sandbox (default,
+   * unchanged behavior).
+   *
+   * See docs/skills.md and the run_skill_script_on_ssh design doc.
+   */
+  scriptsOnSsh?: string[];
   /** Any other frontmatter key the author included, kept verbatim. */
   extras: Record<string, string | string[]>;
 }
@@ -168,6 +178,27 @@ export function parseSkillMd(text: string): ParsedSkillMd {
     delete raw["dependencies-python"];
   }
 
+  // Scripts that must run on an SSH host rather than in the sandbox.
+  // Three canonical alias spellings — same precedence pattern as allowedTools.
+  let scriptsOnSsh: string[] | undefined;
+  const SSH_KEY_CANONICAL = "scripts-on-ssh";
+  const SSH_KEY_SNAKE = "scripts_on_ssh";
+  const SSH_KEY_CAMEL = "scriptsOnSsh";
+  const sshRawKey = SSH_KEY_CANONICAL in raw
+    ? SSH_KEY_CANONICAL
+    : SSH_KEY_SNAKE in raw
+      ? SSH_KEY_SNAKE
+      : SSH_KEY_CAMEL in raw
+        ? SSH_KEY_CAMEL
+        : null;
+  if (sshRawKey !== null) {
+    const v: string | string[] = raw[sshRawKey];
+    // Single bare value or empty string → coerce to array.
+    const entries: string[] = v === "" ? [] : Array.isArray(v) ? v : [v];
+    scriptsOnSsh = normalizeScriptsOnSsh(entries);
+    delete raw[sshRawKey];
+  }
+
   return {
     frontmatter: {
       name,
@@ -176,6 +207,7 @@ export function parseSkillMd(text: string): ParsedSkillMd {
       ...(context !== undefined ? { context } : {}),
       ...(allowedTools !== undefined ? { allowedTools } : {}),
       ...(dependenciesPython !== undefined ? { dependenciesPython } : {}),
+      ...(scriptsOnSsh !== undefined ? { scriptsOnSsh } : {}),
       extras: raw,
     },
     body,
@@ -207,4 +239,127 @@ function parseValue(raw: string): string | string[] {
   }
 
   return raw;
+}
+
+/**
+ * Interpreter extensions accepted in scripts-on-ssh (must stay in sync with
+ * INTERPRETER_BY_EXTENSION in skills/runtime-tools.ts).
+ */
+const ALLOWED_SSH_SCRIPT_EXTENSIONS = new Set(["py", "sh"]);
+
+/**
+ * Validate and normalize a list of raw `scripts-on-ssh` entries.
+ *
+ * Each entry is accepted as either a bare filename (`probe.sh`) or a
+ * `scripts/`-prefixed path (`scripts/probe.sh`).  Both normalize to
+ * `scripts/<file>`.  Only one level under `scripts/` is allowed (the
+ * design deliberately forbids sub-directories to keep the lookup trivial).
+ *
+ * Throws {@link SkillParseError} on:
+ *   - unsupported file extension (only .py / .sh)
+ *   - path traversal (`..`, leading `/`, backslash)
+ *   - hidden segments (segment starting with `.`)
+ *   - sub-directory below `scripts/` (e.g. `scripts/sub/file.sh`)
+ *   - duplicate entries
+ */
+function normalizeScriptsOnSsh(entries: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of entries) {
+    const entry = raw.trim();
+    if (entry.length === 0) continue;
+
+    // Reject path traversal / absolute paths.
+    if (entry.includes("\\") || entry.startsWith("/") || entry.includes("..")) {
+      throw new SkillParseError(
+        `scripts-on-ssh entry "${entry}" must be a relative path without \\\ or .. segments.`,
+      );
+    }
+
+    // Normalize: strip optional leading `scripts/` prefix, then re-add.
+    const bare = entry.startsWith("scripts/") ? entry.slice("scripts/".length) : entry;
+
+    // Reject sub-directories (only `scripts/<file>` is allowed, not `scripts/sub/file`).
+    if (bare.includes("/")) {
+      throw new SkillParseError(
+        `scripts-on-ssh entry "${entry}" must be a direct child of scripts/ (no sub-directories).`,
+      );
+    }
+
+    // Reject hidden files (segment starts with `.`).
+    if (bare.startsWith(".")) {
+      throw new SkillParseError(
+        `scripts-on-ssh entry "${entry}" must not be a hidden file (starts with '.').`,
+      );
+    }
+
+    // Check extension.
+    const dotIdx = bare.lastIndexOf(".");
+    const ext = dotIdx >= 0 ? bare.slice(dotIdx + 1).toLowerCase() : "";
+    if (!ALLOWED_SSH_SCRIPT_EXTENSIONS.has(ext)) {
+      throw new SkillParseError(
+        `scripts-on-ssh entry "${entry}" has unsupported extension ".${ext}". ` +
+          `Allowed: ${[...ALLOWED_SSH_SCRIPT_EXTENSIONS].map((e) => "." + e).join(", ")}.`,
+      );
+    }
+
+    const normalized = `scripts/${bare}`;
+
+    // Reject duplicates.
+    if (seen.has(normalized)) {
+      throw new SkillParseError(
+        `scripts-on-ssh contains duplicate entry "${normalized}".`,
+      );
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+/**
+ * Diff a parsed `scripts-on-ssh` declaration against the set of script paths
+ * that actually exist (or are about to be written).
+ *
+ * Pure by design: callers supply the path set from wherever it is known —
+ * the bundle in `scripts/build-skills.ts`, the in-memory ZIP entries, or
+ * `SkillStorage.listFiles()` — instead of this module poking storage. That
+ * keeps the check usable before a skill row has any files at all.
+ *
+ * @param entries        `frontmatter.scriptsOnSsh` (already normalized to
+ *                       `scripts/<file>` by {@link parseSkillMd}).
+ * @param availablePaths Paths to compare against, in the same normalized form.
+ * @returns The declared entries with no backing file, in declaration order.
+ */
+export function findMissingSshScripts(
+  entries: readonly string[],
+  availablePaths: Iterable<string>,
+): string[] {
+  const available = new Set(availablePaths);
+  return entries.filter((entry) => !available.has(entry));
+}
+
+/**
+ * Editor-facing explanation for a dangling `scripts-on-ssh` entry.
+ *
+ * Lists the usable `scripts/` files because the usual cause is a filename
+ * typo, and the author is the only one who can pick the right one.
+ */
+export function describeMissingSshScripts(
+  missing: readonly string[],
+  availablePaths: Iterable<string>,
+): string {
+  const availableScripts = [...availablePaths].filter((p) =>
+    p.startsWith("scripts/"),
+  );
+  const found =
+    availableScripts.length > 0
+      ? `Present under scripts/: ${availableScripts.join(", ")}.`
+      : "This skill has no files under scripts/.";
+  return (
+    `scripts-on-ssh declares missing file(s): ${missing.join(", ")}. ` +
+    `Drop them from the declaration, or supply them under scripts/. ${found}`
+  );
 }

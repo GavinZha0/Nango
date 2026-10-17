@@ -32,7 +32,10 @@ import {
 import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
 import { skillPool, type SkillSpec } from "@/lib/skills";
-import { buildSkillsRuntime } from "@/lib/skills/runtime-tools";
+import {
+  buildSkillsRuntime,
+  buildRunSkillScriptOnSshTool,
+} from "@/lib/skills/runtime-tools";
 import type { childLogger } from "@/lib/observability/logger";
 import { recordEvent } from "../event-store";
 import {
@@ -259,7 +262,12 @@ export async function buildBuiltinAgents(
     }
 
     const skillSpecs: SkillSpec[] = await skillPool.getMany(skillIds);
-    const skillsRuntime = buildSkillsRuntime({ specs: skillSpecs });
+    const hasSshScripts = skillSpecs.some((s) => s.scriptsOnSsh.size > 0);
+    const hasSshBindings = sshServerIds.length > 0;
+    const skillsRuntime = buildSkillsRuntime({
+      specs: skillSpecs,
+      hasSshBindings,
+    });
     const dataSourcesRuntime =
       await buildDataSourcesPromptBlock(dataSourceIds);
     const sshHostsRuntime =
@@ -280,6 +288,20 @@ export async function buildBuiltinAgents(
           buildListSshHostsTool({ agentSshServerIds: sshServerIds }),
         ]
       : [];
+
+    // Mounting run_skill_script_on_ssh requires BOTH at least one bound skill
+    // declaring scripts-on-ssh AND at least one bound ssh_server. The same
+    // condition is fed back into buildSkillsRuntime so its routing errors and
+    // prompt notes never point at a tool that is not mounted.
+    const skillSshTools: ToolDefinition[] =
+      hasSshScripts && hasSshBindings
+        ? [
+            buildRunSkillScriptOnSshTool({
+              specs: skillSpecs,
+              agentSshServerIds: sshServerIds,
+            }),
+          ]
+        : [];
 
     // Binding any calendar credential auto-mounts fetch_calendar_events.
     const calendarRuntime =
@@ -539,10 +561,11 @@ export async function buildBuiltinAgents(
       "get_current_datetime",
       "list_ssh_hosts",
       "get_trace_details",
-      // Skill system tools (read-only metadata)
+      // Skill system tools (read-only metadata or reviewed code)
       "get_skill",
       "get_skill_file",
       "run_skill_script",
+      "run_skill_script_on_ssh",
       // Repeater coordinator tool
       "repeat_tool",
     ]);
@@ -614,6 +637,7 @@ export async function buildBuiltinAgents(
 
     const serverTools: ToolDefinition[] = [
       ...skillsRuntime.tools,
+      ...skillSshTools,
       ...supervisorTools,
       ...evaluatorTools,
       ...testerTools,

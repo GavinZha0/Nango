@@ -26,7 +26,7 @@ split connection metadata (on the resource row) from authentication
 | Concern | Data source | SSH |
 |---|---|---|
 | Adapter strategy | One adapter per DB engine (`adapters/postgres.ts`, `adapters/mysql.ts`, `adapters/mariadb.ts`, `adapters/vertica.ts`) | A single library (`node-ssh`) handles every host |
-| Tool surface | One tool: `extract_dataset_by_sql` | Two tools: `run_ssh_command`, `list_ssh_hosts` |
+| Tool surface | One tool: `extract_dataset_by_sql` | Three tools: `run_ssh_command`, `list_ssh_hosts`, and `run_skill_script_on_ssh` (mounted when bound skills declare `scripts-on-ssh`) |
 | Output shape | Materialised dataset (Parquet sidecar in cache) | Captured stdout / stderr / exit code |
 | Policy gate | `data-sources/policy.ts` parses SQL, rejects writes / disallowed tables | `lib/ssh/policy.ts` regex-matches the command before opening the channel |
 
@@ -223,7 +223,34 @@ defineTool({
   parameters: z.object({}),
   ...
 });
+
+defineTool({
+  name: "run_skill_script_on_ssh",
+  description: "Execute a reviewed skill script on a bound SSH host. " +
+    "The script must be declared in the skill's scripts-on-ssh frontmatter. " +
+    "Pass `name` (skill name), `filename`, `serverName`, and optional `args` " +
+    "and `timeoutSeconds` (1-300, default 30). Returns { ok, serverName, " +
+    "host, skill, script, scriptSha256, stdout, stderr, exitCode, signal, " +
+    "durationMs, truncated }.",
+  parameters: RunSkillScriptOnSshArgs,
+  ...
+});
 ```
+
+> **Policy consideration for skill scripts on SSH:**
+> `run_skill_script_on_ssh` wraps reviewed script bytes in `bash -c '<script>' '<skillName>' ...` or `python3 -c '<script>' ...` and passes the full string to `runOnBoundServer`. Because the assembled command is multi-line / composite, target SSH hosts with granular `commandAllow` line-level regexes may reject the invocation. For hosts intended to run skill scripts, consider using a deny-only policy (`commandDeny`) or include interpreter patterns like `^bash -c` / `^python3 -c` in `commandAllow`.
+> Unlike `run_ssh_command` (capped at 8,000 characters for LLM-authored commands), `run_skill_script_on_ssh` permits up to 16,000 characters (`SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS`) to accommodate realistic production diagnostic scripts.
+>
+> **The 16,000 cap bounds the string that reaches `sshd`, not the assembled command.** `runOnBoundServer` measures `composeWireCommand(command, server.loginShell)` — the same function `execOnServer` sends — so a login-shell host's extra re-quoting (`'` → `'\''`, four characters per quote) counts against it. `run_ssh_command`'s 8,000 is deliberately an *input* cap: it limits what the model may write, and its login-shell wrapping is allowed to exceed it.
+>
+> Script bytes are decoded with a fatal `TextDecoder` before assembly. `Buffer.toString("utf-8")` never throws — it replaces ill-formed sequences with U+FFFD, which would execute as mojibake on the host — so invalid UTF-8 and NUL bytes are refused with `INVALID_SCRIPT_BYTES`, and a leading BOM (which `bash` and `python3 -c` both reject) is stripped. Import and `pnpm build:skills` apply the same check, so dispatch normally never sees the refusal.
+
+> **Mounting rule.** The tool exists only when the agent binds BOTH at least one
+> skill declaring `scripts-on-ssh` AND at least one `ssh_server` (see
+> `runner/dispatch/builtin.ts`). `buildSkillsRuntime` is handed the same
+> `hasSshBindings` flag so its prompt block and the `run_skill_script` refusal
+> never advertise a tool that is absent — an unbound agent gets
+> `SSH_NOT_AVAILABLE`, not a pointer to a non-existent tool.
 
 ### 4.1 Resolution flow for `run_ssh_command`
 

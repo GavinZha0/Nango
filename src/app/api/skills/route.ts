@@ -10,7 +10,11 @@ import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
 import { visibilitySql } from "@/lib/auth/permissions";
 import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
-import { parseSkillMd, SkillParseError } from "@/lib/skills/parser";
+import {
+  describeMissingSshScripts,
+  parseSkillMd,
+  SkillParseError,
+} from "@/lib/skills/parser";
 import { getDbSkillStorage } from "@/lib/skills/storage";
 
 const ROUTE = "/api/skills";
@@ -64,6 +68,20 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       throw new ApiError("VALIDATION_FAILED", 400, err.message);
     }
     throw err;
+  }
+
+  // SECURITY: A created row owns no skill_file rows, and the file route only
+  // serves GET — `POST /api/skills/import` is the sole writer. So a
+  // scripts-on-ssh declaration here could never be satisfied: it would sit
+  // dangling until run_skill_script_on_ssh returned SCRIPT_NOT_FOUND.
+  if (parsed.frontmatter.scriptsOnSsh?.length) {
+    throw new ApiError(
+      "VALIDATION_FAILED",
+      400,
+      describeMissingSshScripts(parsed.frontmatter.scriptsOnSsh, []) +
+        " Skills created here cannot gain script files; upload the folder with" +
+        " POST /api/skills/import instead.",
+    );
   }
 
   // Per-creator name uniqueness (local skills): keep names predictable
