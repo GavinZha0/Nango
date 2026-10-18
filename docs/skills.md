@@ -41,8 +41,8 @@ server-side tools to load the actual content:
 |---|---|
 | `get_skill(name)` | The full SKILL.md text (frontmatter + body) |
 | `get_skill_file(name, path)` | A helper file from the skill's tree, in any folder |
-| `run_skill_script(name, filename, datasets?)` | Execute a script bundled with the skill in the same sandbox as `run_code_in_sandbox`. A bare filename resolves under `scripts/`; a relative path (e.g. `bin/analyze.py`) resolves as-is. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
-| `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
+| `run_skill_script(name, filename, datasets?)` | Execute a script bundled with the skill in the same sandbox as `run_code_in_sandbox`. A bare filename resolves under `scripts/`; any relative path must also be under `scripts/` (e.g. `scripts/lib/analyze.py`). Executable scripts outside `scripts/` are refused with `SCRIPT_OUTSIDE_SCRIPTS`. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
+| `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Declared paths may be nested under `scripts/` (e.g. `scripts/lib/probe.sh`). Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
 
 Token cost is bounded by the description list, not by the full skill
 bodies. `run_skill_script_on_ssh` is mounted only when **both** at least
@@ -88,22 +88,21 @@ creator returns 409.
 | `content_type` | text | MIME type |
 | `updated_at` | timestamp | Last modified |
 
-**Path semantics**: `path` is a **relative POSIX path** with at least two
-segments — a top-level folder plus a filename. Folder names are
-free-form because skill authors do not agree on them (`references/`,
-`lib/`, `rules/`, `templates/`, …); a ZIP import keeps whatever layout
-the archive ships:
+**Path semantics**: `path` is a **relative POSIX path** with one or more
+segments. Root-level files such as `LICENSE` are valid; other files usually
+live in author-defined folders (`references/`, `scripts/`, `lib/`, `rules/`,
+`templates/`, …), and a ZIP import keeps whatever layout the archive ships:
 
 ```
 <any-folder>/...
+LICENSE
 ```
 
 Validated by regex on every write. Parent-directory traversal (`..`),
-absolute paths, back-slashes, dotfiles, and root-level files are
-rejected — the last two are skipped silently at import time as archive
-noise rather than failing the upload. There is no actual filesystem to
-traverse — `path` is only a string used as a logical locator for
-`get_skill_file(name, path)`.
+absolute paths, back-slashes, and dotfiles are rejected. The synthetic root
+`SKILL.md` is reserved. Folders are implicit: they exist only while at least
+one file lives under them. There is no actual filesystem to traverse — `path`
+is only a string used as a logical locator for `get_skill_file(name, path)`.
 
 **Content storage**: `bytea`. Postgres TOASTs and compresses
 automatically. The 256 KB per-file cap is enforced at write time
@@ -164,7 +163,7 @@ Procedure ...
 | `version` | no | Free-form string; default `'1.0.0'` |
 | `context` | no | Skills 2.0 spec field; parsed but unused in v1 |
 | `allowed-tools` | no | Skills 2.0 spec field; parsed but unused in v1 |
-| `scripts-on-ssh` | no | String or array of script filenames under `scripts/` (e.g. `['probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<file>`. Requires `.py` or `.sh`. Sub-directories forbidden. Import fails if the declared file is missing or is not valid UTF-8; PATCH checks existence only (the bytes were already gated at import). |
+| `scripts-on-ssh` | no | String or array of file paths under `scripts/` (e.g. `['probe.sh']` or `['lib/probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<path>`; sub-directories are allowed. Extensions are not restricted: only `.py` / `.sh` are executable, and other declared files return `UNSUPPORTED_INTERPRETER` at runtime. Import fails if the declared file is missing or is not valid UTF-8; PATCH checks existence only (the bytes were already gated at import). |
 | Other fields | no | Captured into `extras`, not consumed |
 
 `dependencies-python` is no longer parsed. Sandbox packages are
@@ -187,11 +186,19 @@ frontmatter declarations are advisory only.
 | Delete | `DELETE /api/skills/:id` | `withEditor` + `canDeleteResource` |
 | List | `GET /api/skills` | `withSession` (visibility-filtered) |
 | File read | `GET /api/skills/:id/files/[...path]` | `withSession` (parent skill visibility-filtered) |
+| File create | `POST /api/skills/:id/files` body `{ parentFolder, name, content? }` | `withEditor` + `canEditResource` |
+| File rename / text edit | `PATCH /api/skills/:id/files/[...path]?kind=file\|folder` body `{ name?, content? }` | `withEditor` + `canEditResource` |
+| File delete | `DELETE /api/skills/:id/files/[...path]?kind=file\|folder` | `withEditor` + `canEditResource` |
 
-`POST /api/skills` writes only the `skill` row. **`POST /api/skills/import` is
-the sole writer of `skill_file`** — the file endpoint is read-only, so a
-hand-created skill can never acquire helper scripts after the fact. Editing a
-script means re-importing under a new name (import never updates in place).
+`POST /api/skills` writes only the `skill` row. Helper files can be created,
+edited, renamed, and deleted through the file endpoints; **`POST
+/api/skills/import` remains the only way to add binary assets**. Text helper
+files are edited in the main pane; binary files are rename/delete-only.
+
+Parent folders are derived from file paths. The Add dialog offers the root,
+every existing folder, and a "+ Create new folder..." option; choosing the
+latter creates the folder implicitly with the new file. No empty folders are
+stored, so deleting the last file under a folder removes the folder node.
 
 The write boundaries validate `scripts-on-ssh` against the files that actually
 exist, because a dangling declaration is invisible until
@@ -203,6 +210,8 @@ exist, because a dangling declaration is invisible until
 | `POST /api/skills` | Nothing — a created row has no files | 400 |
 | `PATCH /api/skills/:id` | `storage.listFiles(id)` | 400, body untouched |
 | `GET /api/skills/:id` | `storage.listFiles(id)` | `missingSshScripts: string[]` for pre-existing rows |
+| File rename/delete under `scripts/` | Parsed `scripts-on-ssh` | Declaration rewritten in the same transaction |
+| Rename top-level `scripts/` | — | 400; the folder is reserved |
 
 Declared scripts must additionally be valid UTF-8 text, because their source is
 embedded in a command string and executed on a remote host. The same pure
@@ -211,18 +220,41 @@ dispatch (`INVALID_SCRIPT_BYTES`). `PATCH` checks existence only — re-reading
 every stored script on each save is not worth it when the bytes were already
 gated at import.
 
-The editor lets the user edit `SKILL.md` directly, edit the free-form
-`Source` label, and preview helper files in any folder. File upload is not a
-write surface: helper files arrive only through ZIP import.
+The editor lets the user edit `SKILL.md` and text helper files in the main
+pane, edit the free-form `Source` label, and preview binary files read-only.
+Switching files while the current file is dirty opens a Save / Ignore dialog,
+so at most one file is edited at a time. The tree exposes hover rename/delete
+actions for files and folders; the synthetic `SKILL.md` node has none. Deleting
+a folder removes every descendant file after confirmation.
 
 ### 4.2 Renaming
 
-PATCH allows the frontmatter `name:` to change. The route re-parses the new
-SKILL.md and checks for a clash on `(name, createdBy)` excluding the row
-itself; a clash returns 409. `updateContent` writes the new name into the
-`skill.name` column in the same statement as the body, so list queries and
-name-based lookups stay consistent. Agent bindings use `skillId`, so renaming
-does not orphan `builtin_agent_tool` rows.
+**Skill name**: PATCH allows the frontmatter `name:` to change. The route
+re-parses the new SKILL.md and checks for a clash on `(name, createdBy)`
+excluding the row itself; a clash returns 409. `updateContent` writes the new
+name into the `skill.name` column in the same statement as the body, so list
+queries and name-based lookups stay consistent. Agent bindings use `skillId`,
+so renaming does not orphan `builtin_agent_tool` rows.
+
+**Files and folders**: the tree's Edit action opens a rename-only dialog. File
+renames change the basename; folder renames update every descendant path in a
+transaction. A rename that would collide with an existing file/folder returns
+409. Deleting the last file under a folder removes the folder node.
+
+**`scripts-on-ssh` sync**: renaming a file or a folder under `scripts/`
+rewrites every affected declaration to the new path in the same transaction
+as the file-path update. Renaming a file outside `scripts/` does not touch
+declarations. Non-executable targets are allowed and keep the declaration;
+`run_skill_script_on_ssh` reports `UNSUPPORTED_INTERPRETER` if invoked.
+Deleting a declared file or a folder under `scripts/` removes the affected
+declarations; deleting the top-level `scripts/` folder removes every
+declaration under it. The top-level `scripts/` folder itself cannot be
+renamed because declarations must stay under `scripts/`.
+
+Executable scripts created or renamed through the editor must live under
+`scripts/` (subfolders are allowed); `.py` / `.sh` files elsewhere are
+rejected. Imported archives may still contain `.py` / `.sh` reference files
+outside `scripts/`, but they are not executable.
 
 ### 4.3 ZIP import
 
@@ -239,8 +271,7 @@ POST /api/skills/import    multipart/form-data file=<archive.skill>
 3. For each entry:
      - reject absolute paths, '..' segments, back-slashes
      - reject symlinks (zip external_attr stat)
-     - skip archive noise (root-level files, dotfiles) — folder names
-       themselves are free-form
+     - keep root-level files such as LICENSE; skip dotfiles and SKILL.md
      - track total size; bail if > 10 MB
 4. Locate SKILL.md (root or single nested folder).
 5. Parse + validate frontmatter.
@@ -372,6 +403,5 @@ bookkeeping.
   and bash only; adding e.g. `.js` / `.ts` requires a row in
   `INTERPRETER_BY_EXTENSION` AND the binary present in the sandbox
   rootfs.
-- **Editing helper files in place** — helper files are still immutable
-  after import; a future file-write endpoint would need the same caps
-  and path validation as the ZIP importer.
+- **Binary editing** — binary assets are still import-only; the editor
+  intentionally offers no binary upload or download.

@@ -3,6 +3,7 @@ import {
   describeMissingSshScripts,
   findMissingSshScripts,
   parseSkillMd,
+  rewriteScriptsOnSshInSkillMd,
   SkillParseError,
 } from "@/lib/skills/parser";
 
@@ -61,13 +62,15 @@ describe("parseSkillMd: scripts-on-ssh", () => {
     ).toThrow(SkillParseError);
   });
 
-  it("rejects unsupported extensions", () => {
-    expect(() =>
-      parseSkillMd(HEADER('scripts-on-ssh: ["probe.js"]')),
-    ).toThrow(SkillParseError);
-    expect(() =>
-      parseSkillMd(HEADER('scripts-on-ssh: ["probe.txt"]')),
-    ).toThrow(SkillParseError);
+  it("accepts any extension under scripts/ (runtime rejects non-.py/.sh)", () => {
+    const { frontmatter } = parseSkillMd(
+      HEADER('scripts-on-ssh: ["probe.js", "probe.txt", "Makefile"]'),
+    );
+    expect(frontmatter.scriptsOnSsh).toEqual([
+      "scripts/probe.js",
+      "scripts/probe.txt",
+      "scripts/Makefile",
+    ]);
   });
 
   it("rejects path traversal attempts", () => {
@@ -82,21 +85,37 @@ describe("parseSkillMd: scripts-on-ssh", () => {
     ).toThrow(SkillParseError);
   });
 
-  it("rejects sub-directories under scripts/", () => {
-    expect(() =>
-      parseSkillMd(HEADER('scripts-on-ssh: ["sub/probe.sh"]')),
-    ).toThrow(SkillParseError);
-    expect(() =>
-      parseSkillMd(HEADER('scripts-on-ssh: ["scripts/sub/probe.sh"]')),
-    ).toThrow(SkillParseError);
+  it("allows sub-directories under scripts/", () => {
+    const { frontmatter } = parseSkillMd(
+      HEADER(
+        'scripts-on-ssh: ["sub/probe.sh", "scripts/lib/check.py", "scripts/a/b/run.sh"]',
+      ),
+    );
+    expect(frontmatter.scriptsOnSsh).toEqual([
+      "scripts/sub/probe.sh",
+      "scripts/lib/check.py",
+      "scripts/a/b/run.sh",
+    ]);
   });
 
-  it("rejects hidden files", () => {
+  it("rejects hidden segments at any depth", () => {
     expect(() =>
       parseSkillMd(HEADER('scripts-on-ssh: [".probe.sh"]')),
     ).toThrow(SkillParseError);
     expect(() =>
       parseSkillMd(HEADER('scripts-on-ssh: ["scripts/.probe.sh"]')),
+    ).toThrow(SkillParseError);
+    expect(() =>
+      parseSkillMd(HEADER('scripts-on-ssh: ["scripts/lib/.probe.sh"]')),
+    ).toThrow(SkillParseError);
+  });
+
+  it("rejects empty path segments", () => {
+    expect(() =>
+      parseSkillMd(HEADER('scripts-on-ssh: ["scripts//probe.sh"]')),
+    ).toThrow(SkillParseError);
+    expect(() =>
+      parseSkillMd(HEADER('scripts-on-ssh: ["scripts/lib/"]')),
     ).toThrow(SkillParseError);
   });
 
@@ -108,15 +127,12 @@ describe("parseSkillMd: scripts-on-ssh", () => {
   // The parse error is surfaced to skill authors in the editor, so the
   // wording is part of the contract — assert it, not just the class.
   it("reports which rule each rejection broke", () => {
-    expect(() => parseSkillMd(HEADER('scripts-on-ssh: ["probe.txt"]'))).toThrow(
-      'unsupported extension ".txt"',
-    );
     expect(() =>
       parseSkillMd(HEADER('scripts-on-ssh: ["probe.sh", "scripts/probe.sh"]')),
     ).toThrow('duplicate entry "scripts/probe.sh"');
     expect(() =>
-      parseSkillMd(HEADER('scripts-on-ssh: ["sub/probe.sh"]')),
-    ).toThrow("must be a direct child of scripts/");
+      parseSkillMd(HEADER('scripts-on-ssh: ["scripts/lib/"]')),
+    ).toThrow("must not contain empty");
     expect(() =>
       parseSkillMd(HEADER('scripts-on-ssh: ["../probe.sh"]')),
     ).toThrow("must be a relative path");
@@ -124,13 +140,88 @@ describe("parseSkillMd: scripts-on-ssh", () => {
 
   it("normalizes multiple mixed-form entries in declaration order", () => {
     const { frontmatter } = parseSkillMd(
-      HEADER('scripts-on-ssh: [probe.sh, scripts/run.py, Check.PY]'),
+      HEADER(
+        'scripts-on-ssh: [probe.sh, scripts/run.py, lib/check.sh, Check.PY]',
+      ),
     );
     expect(frontmatter.scriptsOnSsh).toEqual([
       "scripts/probe.sh",
       "scripts/run.py",
+      "scripts/lib/check.sh",
       "scripts/Check.PY",
     ]);
+  });
+});
+
+describe("rewriteScriptsOnSshInSkillMd", () => {
+  it("renames a scalar declaration and keeps the rest of the document intact", () => {
+    const before = HEADER("scripts-on-ssh: probe.sh");
+    const { skillMd, changed } = rewriteScriptsOnSshInSkillMd(
+      before,
+      new Map([["scripts/probe.sh", "scripts/renamed.sh"]]),
+    );
+
+    expect(changed).toBe(true);
+    expect(skillMd).toContain("body content");
+    expect(parseSkillMd(skillMd).frontmatter.scriptsOnSsh).toEqual([
+      "scripts/renamed.sh",
+    ]);
+  });
+
+  it("rewrites inline arrays and preserves unrelated entries", () => {
+    const before = HEADER('scripts-on-ssh: ["probe.sh", "other.py"]');
+    const { skillMd } = rewriteScriptsOnSshInSkillMd(
+      before,
+      new Map([["scripts/probe.sh", "scripts/renamed.sh"]]),
+    );
+
+    expect(parseSkillMd(skillMd).frontmatter.scriptsOnSsh).toEqual([
+      "scripts/renamed.sh",
+      "scripts/other.py",
+    ]);
+  });
+
+  it("removes an entry and drops the key line when the list becomes empty", () => {
+    const before = HEADER('scripts-on-ssh: ["probe.sh"]');
+    const { skillMd } = rewriteScriptsOnSshInSkillMd(
+      before,
+      new Map([["scripts/probe.sh", null]]),
+    );
+
+    expect(skillMd).not.toMatch(/^scripts-on-ssh:/m);
+    expect(parseSkillMd(skillMd).frontmatter.scriptsOnSsh).toBeUndefined();
+  });
+
+  it("keeps the alias key spelling", () => {
+    const before = HEADER('scriptsOnSsh: ["probe.sh"]');
+    const { skillMd } = rewriteScriptsOnSshInSkillMd(
+      before,
+      new Map([["scripts/probe.sh", "scripts/renamed.sh"]]),
+    );
+
+    expect(skillMd).toContain('scriptsOnSsh: ["scripts/renamed.sh"]');
+  });
+
+  it("synchronizes a rename to a non-executable extension", () => {
+    const before = HEADER("scripts-on-ssh: probe.sh");
+    const { skillMd } = rewriteScriptsOnSshInSkillMd(
+      before,
+      new Map([["scripts/probe.sh", "scripts/probe.txt"]]),
+    );
+
+    expect(parseSkillMd(skillMd).frontmatter.scriptsOnSsh).toEqual([
+      "scripts/probe.txt",
+    ]);
+  });
+
+  it("is a no-op when the declared path is absent", () => {
+    const before = HEADER("scripts-on-ssh: probe.sh");
+    const result = rewriteScriptsOnSshInSkillMd(
+      before,
+      new Map([["scripts/other.sh", "scripts/renamed.sh"]]),
+    );
+
+    expect(result).toEqual({ skillMd: before, changed: false });
   });
 });
 

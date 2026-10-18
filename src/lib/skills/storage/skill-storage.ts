@@ -83,6 +83,35 @@ export interface PutSkillFileInput {
   contentType?: string;
 }
 
+export interface UpdateFileInput {
+  skillId: string;
+  oldPath: string;
+  newPath: string;
+  /** New bytes; omit to leave the file content untouched. */
+  content?: Buffer;
+  contentType?: string | null;
+  /** Rewritten SKILL.md to persist in the same transaction. */
+  skillMd?: string;
+  updatedBy: string;
+}
+
+export interface RenameFolderInput {
+  skillId: string;
+  oldPath: string;
+  newPath: string;
+  /** Rewritten SKILL.md (declaration sync) to persist atomically. */
+  skillMd?: string;
+  updatedBy: string;
+}
+
+export interface DeleteFolderInput {
+  skillId: string;
+  path: string;
+  /** Rewritten SKILL.md (declaration removals) to persist atomically. */
+  skillMd?: string;
+  updatedBy: string;
+}
+
 // Storage interface
 
 export interface SkillStorage {
@@ -100,14 +129,24 @@ export interface SkillStorage {
   updateFlags(input: UpdateSkillFlagsInput): Promise<void>;
   delete(skillId: string): Promise<void>;
   putFile(input: PutSkillFileInput): Promise<void>;
-  deleteFile(skillId: string, path: string): Promise<void>;
+  /** Rename and/or replace one file's bytes; optionally sync SKILL.md. */
+  updateFile(input: UpdateFileInput): Promise<void>;
+  /** Rename every file under a folder prefix. */
+  renameFolder(input: RenameFolderInput): Promise<void>;
+  deleteFile(
+    skillId: string,
+    path: string,
+    sync?: { skillMd: string; updatedBy: string },
+  ): Promise<void>;
+  /** Delete every file under a folder prefix. */
+  deleteFolder(input: DeleteFolderInput): Promise<void>;
 }
 
 // Path validation (shared helper)
 
 /** path-segment chars: alnum, dot, underscore, hyphen — and no leading dot. */
 const PATH_REGEX =
-  /^[A-Za-z0-9_\-][A-Za-z0-9._\-]*(?:\/[A-Za-z0-9_\-][A-Za-z0-9._\-]*)+$/;
+  /^[A-Za-z0-9_\-][A-Za-z0-9._\-]*(?:\/[A-Za-z0-9_\-][A-Za-z0-9._\-]*)*$/;
 const MAX_PATH_LEN = 256;
 
 export class InvalidSkillPathError extends Error {
@@ -121,12 +160,12 @@ export class InvalidSkillPathError extends Error {
  * Validate a `skill_file.path` string.
  *
  * Path is a logical relative POSIX path; there is no actual filesystem
- * to traverse, so this is a pure string check. Any top-level folder name
- * is accepted — skill authors use `references/`, `lib/`, `rules/`, … and
- * the archive is the source of truth. Rejects:
+ * to traverse, so this is a pure string check. Any folder name is accepted
+ * — skill authors use `references/`, `lib/`, `rules/`, … — and root-level
+ * files such as `LICENSE` are valid. Rejects:
  *   - empty / oversize paths
  *   - back-slashes, absolute paths, `..` segments
- *   - root-level files (every helper file lives under a folder)
+ *   - the synthetic root `SKILL.md` (it lives in its own column)
  *   - dotfiles at any segment
  */
 export function validateSkillFilePath(path: string): void {
@@ -141,9 +180,14 @@ export function validateSkillFilePath(path: string): void {
       "Path must be a relative POSIX path without back-slashes or '..' segments.",
     );
   }
+  if (path.toLowerCase() === "skill.md") {
+    throw new InvalidSkillPathError(
+      "SKILL.md is edited as the skill's main document and cannot be stored as a helper file.",
+    );
+  }
   if (!PATH_REGEX.test(path)) {
     throw new InvalidSkillPathError(
-      "Path must live under a top-level folder (e.g. references/ or lib/); root-level files are not stored.",
+      "Path must be a relative file path such as references/guide.md or LICENSE.",
     );
   }
 }

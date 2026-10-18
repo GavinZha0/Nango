@@ -214,24 +214,21 @@ function parseValue(raw: string): string | string[] {
 }
 
 /**
- * Interpreter extensions accepted in scripts-on-ssh (must stay in sync with
- * INTERPRETER_BY_EXTENSION in skills/runtime-tools.ts).
- */
-const ALLOWED_SSH_SCRIPT_EXTENSIONS = new Set(["py", "sh"]);
-
-/**
  * Validate and normalize a list of raw `scripts-on-ssh` entries.
  *
- * Each entry is accepted as either a bare filename (`probe.sh`) or a
- * `scripts/`-prefixed path (`scripts/probe.sh`).  Both normalize to
- * `scripts/<file>`.  Only one level under `scripts/` is allowed (the
- * design deliberately forbids sub-directories to keep the lookup trivial).
+ * Each entry is accepted as either a bare path (`probe.sh`,
+ * `lib/probe.sh`) or a `scripts/`-prefixed path. Both normalize to
+ * `scripts/<path>`. Sub-directories under `scripts/` are allowed so the
+ * declaration can target the same scripts `run_skill_script` can execute.
+ *
+ * Extensions are not restricted here: renaming a declared script to a
+ * non-executable name is a legitimate authoring action, and
+ * `run_skill_script_on_ssh` reports `UNSUPPORTED_INTERPRETER` at runtime.
  *
  * Throws {@link SkillParseError} on:
- *   - unsupported file extension (only .py / .sh)
  *   - path traversal (`..`, leading `/`, backslash)
+ *   - empty segments (including a trailing `/`)
  *   - hidden segments (segment starting with `.`)
- *   - sub-directory below `scripts/` (e.g. `scripts/sub/file.sh`)
  *   - duplicate entries
  */
 function normalizeScriptsOnSsh(entries: string[]): string[] {
@@ -251,29 +248,18 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
 
     // Normalize: strip optional leading `scripts/` prefix, then re-add.
     const bare = entry.startsWith("scripts/") ? entry.slice("scripts/".length) : entry;
-
-    // Reject sub-directories (only `scripts/<file>` is allowed, not `scripts/sub/file`).
-    if (bare.includes("/")) {
-      throw new SkillParseError(
-        `scripts-on-ssh entry "${entry}" must be a direct child of scripts/ (no sub-directories).`,
-      );
-    }
-
-    // Reject hidden files (segment starts with `.`).
-    if (bare.startsWith(".")) {
-      throw new SkillParseError(
-        `scripts-on-ssh entry "${entry}" must not be a hidden file (starts with '.').`,
-      );
-    }
-
-    // Check extension.
-    const dotIdx = bare.lastIndexOf(".");
-    const ext = dotIdx >= 0 ? bare.slice(dotIdx + 1).toLowerCase() : "";
-    if (!ALLOWED_SSH_SCRIPT_EXTENSIONS.has(ext)) {
-      throw new SkillParseError(
-        `scripts-on-ssh entry "${entry}" has unsupported extension ".${ext}". ` +
-          `Allowed: ${[...ALLOWED_SSH_SCRIPT_EXTENSIONS].map((e) => "." + e).join(", ")}.`,
-      );
+    const segments = bare.split("/");
+    for (const segment of segments) {
+      if (segment.length === 0 || segment === ".") {
+        throw new SkillParseError(
+          `scripts-on-ssh entry "${entry}" must not contain empty or '.' segments.`,
+        );
+      }
+      if (segment.startsWith(".")) {
+        throw new SkillParseError(
+          `scripts-on-ssh entry "${entry}" must not contain hidden segments (starting with '.').`,
+        );
+      }
     }
 
     const normalized = `scripts/${bare}`;
@@ -289,6 +275,115 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
   }
 
   return result;
+}
+
+export interface RewriteScriptsOnSshResult {
+  skillMd: string;
+  changed: boolean;
+}
+
+/** Frontmatter key spellings in the order parseSkillMd resolves them. */
+const SSH_KEY_PRECEDENCE = [
+  "scripts-on-ssh",
+  "scripts_on_ssh",
+  "scriptsOnSsh",
+] as const;
+
+/**
+ * Rewrite `scripts-on-ssh` entries in a SKILL.md frontmatter without touching
+ * the rest of the document.
+ *
+ * Keys are normalized `scripts/<file>` paths; a value of `null` removes the
+ * entry. The original key spelling, indentation, and inline scalar/array style
+ * are preserved. Removing the last entry removes the whole key line.
+ *
+ * CONTRACT: the caller must parse `text` successfully first. This helper only
+ * understands the inline forms parseSkillMd accepts.
+ */
+export function rewriteScriptsOnSshInSkillMd(
+  text: string,
+  updates: ReadonlyMap<string, string | null>,
+): RewriteScriptsOnSshResult {
+  if (updates.size === 0) return { skillMd: text, changed: false };
+
+  const lines = text.split("\n");
+  if (lines[0]?.trimEnd() !== "---") return { skillMd: text, changed: false };
+
+  let closeIdx = -1;
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i].trimEnd() === "---") {
+      closeIdx = i;
+      break;
+    }
+  }
+  if (closeIdx === -1) return { skillMd: text, changed: false };
+
+  let key: (typeof SSH_KEY_PRECEDENCE)[number] | null = null;
+  for (const candidate of SSH_KEY_PRECEDENCE) {
+    if (lines.slice(1, closeIdx).some((line) => frontmatterLineKey(line) === candidate)) {
+      key = candidate;
+      break;
+    }
+  }
+  if (!key) return { skillMd: text, changed: false };
+
+  // parseSkillMd lets later duplicate keys win, so update the last one.
+  let targetIdx = -1;
+  for (let i = 1; i < closeIdx; i += 1) {
+    if (frontmatterLineKey(lines[i]) === key) targetIdx = i;
+  }
+  if (targetIdx === -1) return { skillMd: text, changed: false };
+
+  const originalLine = lines[targetIdx];
+  const carriageReturn = originalLine.endsWith("\r") ? "\r" : "";
+  const line = carriageReturn
+    ? originalLine.slice(0, -carriageReturn.length)
+    : originalLine;
+  const leading = line.match(/^[ \t]*/)?.[0] ?? "";
+  const colon = line.indexOf(":");
+  if (colon === -1) return { skillMd: text, changed: false };
+
+  const rawValue = line.slice(colon + 1).trim();
+  const parsedValue = parseValue(rawValue);
+  const entries: string[] = Array.isArray(parsedValue)
+    ? parsedValue
+    : parsedValue.length === 0
+      ? []
+      : [parsedValue];
+
+  const next: string[] = [];
+  let changed = false;
+  for (const entry of entries) {
+    const normalized = entry.startsWith("scripts/")
+      ? entry
+      : `scripts/${entry}`;
+    if (!updates.has(normalized)) {
+      next.push(entry);
+      continue;
+    }
+    changed = true;
+    const replacement = updates.get(normalized);
+    if (replacement !== null && replacement !== undefined) next.push(replacement);
+  }
+  if (!changed) return { skillMd: text, changed: false };
+
+  if (next.length === 0) {
+    lines.splice(targetIdx, 1);
+  } else {
+    const serialized = rawValue.startsWith("[")
+      ? `[${next.map((entry) => JSON.stringify(entry)).join(", ")}]`
+      : JSON.stringify(next[0]);
+    lines[targetIdx] = `${leading}${key}: ${serialized}${carriageReturn}`;
+  }
+
+  return { skillMd: lines.join("\n"), changed: true };
+}
+
+function frontmatterLineKey(line: string): string | null {
+  const content = line.endsWith("\r") ? line.slice(0, -1) : line;
+  const colon = content.indexOf(":");
+  if (colon === -1) return null;
+  return content.slice(0, colon).trim();
 }
 
 /**

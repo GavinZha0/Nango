@@ -152,7 +152,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     );
   });
 
-  it("imports files under any folder name and skips archive noise", async () => {
+  it("imports files under any folder name plus root-level files, skipping dotfiles", async () => {
     dbMock.$enqueue([], [
       { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
     ]);
@@ -161,7 +161,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
       [
         { path: "lib/helper.py", content: "print('hi')\n" },
         { path: "rules/style.md", content: "# Style\n" },
-        // Root-level files and dotfiles are archive noise, not skill content.
+        // Root-level files are kept; dotfiles remain archive noise.
         { path: "LICENSE", content: "MIT\n" },
         { path: ".gitignore", content: "*.pyc\n" },
       ],
@@ -173,8 +173,22 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
       storageMock.putFile.mock.calls
         .map((args: unknown[]) => (args[0] as { path: string }).path)
         .sort(),
-    ).toEqual(["lib/helper.py", "rules/style.md"]);
-    expect((await res.json()).filesImported).toBe(2);
+    ).toEqual(["LICENSE", "lib/helper.py", "rules/style.md"]);
+    expect((await res.json()).filesImported).toBe(3);
+  });
+
+  it("rejects an archive where one path is both a file and a folder", async () => {
+    const res = await upload(
+      [
+        { path: "foo", content: "root file\n" },
+        { path: "foo/bar.md", content: "# nested\n" },
+      ],
+      null,
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(/both a file and a folder/);
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
   });
 
   it("leaves undeclared scripts alone", async () => {

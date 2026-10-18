@@ -136,8 +136,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     const relativePath = rawPath.slice(prefix.length);
     if (!relativePath || relativePath === "SKILL.md") continue;
 
-    // Any folder name is legal; what gets skipped here is archive noise —
-    // root-level files and dotfiles, which are not skill content.
+    // Any folder name is legal, and root-level files such as LICENSE are
+    // kept. Dotfiles and the synthetic SKILL.md are skipped as noise.
     try {
       validateSkillFilePath(relativePath);
     } catch (err) {
@@ -172,6 +172,25 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
 
     filesToWrite.push({ path: relativePath, content });
+  }
+
+  // 4b. A single path cannot be both a file and a folder. Root-level files
+  // are allowed, so this collision is now representable and must be rejected
+  // before any row is written.
+  const pathSet = new Set(filesToWrite.map((f) => f.path));
+  for (const file of filesToWrite) {
+    const segments = file.path.split("/");
+    let prefix = "";
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      prefix = prefix ? `${prefix}/${segments[i]}` : segments[i];
+      if (pathSet.has(prefix)) {
+        throw new ApiError(
+          "BAD_REQUEST",
+          400,
+          `Archive contains both a file and a folder named "${prefix}".`,
+        );
+      }
+    }
   }
 
   // 5. Parse and validate SKILL.md.

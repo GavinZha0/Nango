@@ -35,6 +35,10 @@ describe("validateSkillFilePath", () => {
       "config/settings.json",
       "src/file.md",
       "My-Templates/deck.md",
+      // Root-level helper files (e.g. LICENSE) are valid.
+      "LICENSE",
+      "notes.md",
+      "README",
     ])("valid path: %s", (p) => {
       expect(() => validateSkillFilePath(p)).not.toThrow();
     });
@@ -50,10 +54,9 @@ describe("validateSkillFilePath", () => {
       "references/.hidden.md",
       "references/sub/..parent.md",
       "references\\back.md",
-      // Root-level files: SKILL.md lives in its own column, everything else
-      // belongs in a folder.
-      "notes.md",
-      "LICENSE",
+      // The synthetic root SKILL.md lives in its own column.
+      "SKILL.md",
+      "skill.md",
       // Empty filename after subdir
       "references/",
       "references/sub/",

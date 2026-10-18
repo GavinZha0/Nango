@@ -186,7 +186,7 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const runSkillScript = defineTool({
     name: "run_skill_script",
     description:
-      "Execute a script bundled with a skill in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. A bare filename is looked up under scripts/; pass a relative path (e.g. 'bin/analyze.py') to run a script kept in another folder. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend. Scripts listed in the skill's scripts-on-ssh frontmatter run on a remote host with run_skill_script_on_ssh and are refused here.",
+      "Execute a script bundled with a skill in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. A bare filename is looked up under scripts/; a relative path must also live under scripts/ (subfolders such as 'scripts/lib/analyze.py' are allowed). Executable scripts outside scripts/ are refused. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend. Scripts listed in the skill's scripts-on-ssh frontmatter run on a remote host with run_skill_script_on_ssh and are refused here.",
     parameters: z.object({
       name: z.string().describe("Skill name."),
       filename: z
@@ -219,6 +219,16 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
       const scriptPath: string = filename.includes("/")
         ? filename
         : `scripts/${filename}`;
+
+      if (!scriptPath.startsWith("scripts/")) {
+        return {
+          ok: false,
+          error: "SCRIPT_OUTSIDE_SCRIPTS",
+          message:
+            `'${filename}' must live under scripts/. Executable scripts are ` +
+            "restricted to the scripts/ folder (subfolders are allowed).",
+        };
+      }
 
       // Routing check: scripts listed in scripts-on-ssh target remote hosts,
       // so the sandbox never runs them — executing e.g. a probe script locally
@@ -295,7 +305,7 @@ const RunSkillScriptOnSshArgs = z.object({
     .string()
     .min(1)
     .describe(
-      "Script listed in the skill's scripts-on-ssh, e.g. 'probe.sh' or 'scripts/probe.sh'.",
+      "Script listed in the skill's scripts-on-ssh, e.g. 'probe.sh', 'scripts/probe.sh', or 'scripts/lib/probe.sh'.",
     ),
   serverName: z
     .string()

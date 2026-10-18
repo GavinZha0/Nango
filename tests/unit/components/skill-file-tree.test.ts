@@ -32,6 +32,14 @@ describe("buildTree", () => {
     ]);
   });
 
+  it("keeps root-level files as top-level leaves alongside folders", () => {
+    expect(outline(buildTree([f("LICENSE"), f("references/guide.md")]))).toEqual([
+      "references/",
+      "  guide.md",
+      "LICENSE",
+    ]);
+  });
+
   it("merges siblings into one directory node", () => {
     const tree = buildTree([
       f("scripts/probe.sh"),

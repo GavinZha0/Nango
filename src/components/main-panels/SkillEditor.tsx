@@ -3,10 +3,12 @@
 /**
  * SkillEditor — full-area form for creating / editing one Skill.
  *
- * Two columns: a read-only file tree on the left, the editable document on the
- * right. The writable surfaces are the `SKILL.md` draft and the free-form
- * Source label; helper files are fetched on demand and rendered read-only,
- * because importing a `.skill` archive is the sole way to add or remove them.
+ * Two columns: a file tree on the left, the editable document on the right.
+ * `SKILL.md` and text helper files are edited in the main pane; binary files
+ * are preview-only. The tree's Edit action only renames. Switching files or
+ * opening a file action while the current file is dirty goes through a
+ * Save / Ignore gate, so at most one file is ever dirty.
+ *
  * See docs/skills.md.
  */
 
@@ -19,14 +21,7 @@ import {
   startTransition,
   type ReactNode,
 } from "react";
-import {
-  ArrowLeft,
-  Download,
-  FileText,
-  Loader2,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, FileText, Loader2, Save, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +34,11 @@ import {
   SkillFileTree,
   SKILL_MD_PATH,
   type SkillFileMeta,
+  type SkillFileTarget,
 } from "@/components/main-panels/skills/SkillFileTree";
+import { SkillFileDialog } from "@/components/main-panels/skills/SkillFileDialog";
+import { UnsavedChangesDialog } from "@/components/main-panels/skills/UnsavedChangesDialog";
+import { getParentPath } from "@/lib/skills/file-rules";
 import { cn, formatBytes } from "@/lib/utils";
 
 export interface SkillRow {
@@ -112,6 +111,10 @@ function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
+function encodePath(path: string): string {
+  return encodeURI(path);
+}
+
 export interface SkillEditorProps {
   /** Existing id when editing; null when creating. */
   skillId: string | null;
@@ -137,24 +140,19 @@ export function SkillEditor({
   const isCreating = skillId === null;
 
   // Delete state — destructive action, gated by a confirm dialog.
-  // Mirrors BuiltinAgentEditor's pattern: shown for every existing skill,
-  // click opens an AlertDialog, the dialog action fires the DELETE and
-  // waits for it before closing.
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
 
   // Form state — single object for all editable fields.
-  // `savedForm` is the snapshot taken at load time; comparing the two
-  // gives us a free `isDirty` flag for the Save button.
   const [form, setForm] = useState<FormState>(() => ({
     source: initialDetail?.source ?? "",
     skillMd: initialDetail?.skillMd ?? buildTemplate(),
   }));
-  const [savedForm] = useState<FormState>(() => ({
+  const [savedForm, setSavedForm] = useState<FormState>(() => ({
     source: initialDetail?.source ?? "",
     skillMd: initialDetail?.skillMd ?? buildTemplate(),
   }));
-  const isDirty = useMemo(
+  const isSkillMdDirty = useMemo(
     () => form.source !== savedForm.source || form.skillMd !== savedForm.skillMd,
     [form, savedForm],
   );
@@ -167,12 +165,22 @@ export function SkillEditor({
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ── File viewing ────────────────────────────────────────────────
-  const files: SkillFileMeta[] = initialDetail?.files ?? [];
+  // ── Files ───────────────────────────────────────────────────────
+  const [files, setFiles] = useState<SkillFileMeta[]>(
+    () => initialDetail?.files ?? [],
+  );
+  const [scriptsOnSsh, setScriptsOnSsh] = useState<string[]>(
+    () => initialDetail?.scriptsOnSsh ?? [],
+  );
+  const [missingSshScripts, setMissingSshScripts] = useState<string[]>(
+    () => initialDetail?.missingSshScripts ?? [],
+  );
   const [selected, setSelected] = useState<string>(SKILL_MD_PATH);
   const [fileCache, setFileCache] = useState<Map<string, FilePayload>>(
     () => new Map(),
   );
+  const [fileDraft, setFileDraft] = useState<string | null>(null);
+  const [savedFileContent, setSavedFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -184,27 +192,73 @@ export function SkillEditor({
     selected === SKILL_MD_PATH
       ? null
       : (files.find((f) => f.path === selected) ?? null);
+  const isTextFile: boolean =
+    selected !== SKILL_MD_PATH && payload?.encoding === "utf8";
+  const isFileDirty: boolean =
+    isTextFile &&
+    fileDraft !== null &&
+    savedFileContent !== null &&
+    fileDraft !== savedFileContent;
+  // Source is skill-level metadata, not a helper file; editing it while a
+  // helper is selected still counts as an unsaved change.
+  const currentDirty: boolean = isSkillMdDirty || isFileDirty;
 
-  /**
-   * Switch the right-hand pane. Helper files are fetched once and cached;
-   * a failed fetch restores the previous selection so the pane never shows
-   * an empty box that reads as "this file is empty".
-   */
-  async function selectPath(path: string): Promise<void> {
-    if (path === selected) return;
+  // ── Dialogs ─────────────────────────────────────────────────────
+  const [addOpen, setAddOpen] = useState<boolean>(false);
+  const [renameTarget, setRenameTarget] = useState<SkillFileTarget | null>(null);
+  const [fileDeleteTarget, setFileDeleteTarget] = useState<SkillFileTarget | null>(null);
+  const [fileDeleting, setFileDeleting] = useState<boolean>(false);
+  const [unsavedOpen, setUnsavedOpen] = useState<boolean>(false);
+  const [pendingAction, setPendingAction] = useState<{ run: () => void } | null>(null);
+
+  // ── File loading ─────────────────────────────────────────────────
+  const applyCachedPayload = useCallback(
+    (path: string): void => {
+      if (path === SKILL_MD_PATH) {
+        setFileDraft(null);
+        setSavedFileContent(null);
+        return;
+      }
+      const cached = fileCache.get(path);
+      const text = cached?.encoding === "utf8" ? cached.content : null;
+      setFileDraft(text);
+      setSavedFileContent(text);
+    },
+    [fileCache],
+  );
+
+  async function loadPath(path: string, force = false): Promise<void> {
+    abortRef.current?.abort();
+
+    if (path === SKILL_MD_PATH) {
+      setSelected(path);
+      setError(null);
+      setFileLoading(false);
+      setFileDraft(null);
+      setSavedFileContent(null);
+      return;
+    }
+
     const previous = selected;
     setSelected(path);
     setError(null);
-    if (path === SKILL_MD_PATH || fileCache.has(path)) return;
 
-    abortRef.current?.abort();
+    const cached = force ? undefined : fileCache.get(path);
+    if (cached) {
+      setFileLoading(false);
+      setFileDraft(cached.encoding === "utf8" ? cached.content : null);
+      setSavedFileContent(cached.encoding === "utf8" ? cached.content : null);
+      return;
+    }
+
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setFileLoading(true);
     try {
-      const res = await fetch(`/api/skills/${skillId}/files/${encodeURI(path)}`, {
-        signal: ctrl.signal,
-      });
+      const res = await fetch(
+        `/api/skills/${skillId}/files/${encodePath(path)}`,
+        { signal: ctrl.signal },
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as
           | { message?: string; error?: string }
@@ -213,29 +267,261 @@ export function SkillEditor({
       }
       const data = (await res.json()) as FilePayload;
       setFileCache((prev) => new Map(prev).set(path, data));
+      setFileDraft(data.encoding === "utf8" ? data.content : null);
+      setSavedFileContent(data.encoding === "utf8" ? data.content : null);
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
-      setError(err instanceof Error ? err.message : String(err));
       setSelected(previous);
+      applyCachedPayload(previous);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (abortRef.current === ctrl) setFileLoading(false);
     }
   }
 
-  // SECURITY: the octet-stream fallback keeps Download working for rows stored
-  // before contentType was populated. It is safe precisely because it is inert
-  // — the browser can never render it as markup. Image *preview* stays gated on
-  // a real `image/*` type so an unknown blob is never fed to an <img>.
-  const dataUrl: string | null =
-    payload?.encoding === "base64"
-      ? `data:${selectedMeta?.contentType ?? "application/octet-stream"};base64,${payload.content}`
-      : null;
-  const isImage: boolean =
-    payload?.encoding === "base64" &&
-    (selectedMeta?.contentType?.startsWith("image/") ?? false);
+  function guardUnsaved(action: () => void): void {
+    if (!currentDirty) {
+      action();
+      return;
+    }
+    setError(null);
+    setPendingAction({ run: action });
+    setUnsavedOpen(true);
+  }
 
-  // Header identity comes from the draft SKILL.md frontmatter, so a rename
-  // updates immediately. An unparseable draft falls back to the saved row.
+  function requestSelectPath(path: string): void {
+    if (path === selected) return;
+    guardUnsaved(() => void loadPath(path));
+  }
+
+  // ── Saving ───────────────────────────────────────────────────────
+  async function saveSkillMd(navigate: boolean): Promise<boolean> {
+    if (!form.skillMd.trim()) {
+      setError("SKILL.md cannot be empty.");
+      return false;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const url = isCreating ? "/api/skills" : `/api/skills/${skillId}`;
+      const method = isCreating ? "POST" : "PATCH";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skillMd: form.skillMd, source: form.source }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { message?: string; error?: string }
+          | null;
+        throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
+      }
+      setSavedForm(form);
+      clearDraftState();
+      if (navigate) startTransition(() => onSaved());
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveHelperFile(): Promise<boolean> {
+    if (selected === SKILL_MD_PATH || fileDraft === null) return true;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/skills/${skillId}/files/${encodePath(selected)}?kind=file`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: fileDraft }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { message?: string; error?: string }
+          | null;
+        throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        size?: number;
+        contentType?: string | null;
+        warning?: string;
+      };
+      setSavedFileContent(fileDraft);
+      setFileCache((prev) => {
+        const existing = prev.get(selected);
+        if (!existing) return prev;
+        return new Map(prev).set(selected, {
+          ...existing,
+          content: fileDraft,
+          size: data.size ?? existing.size,
+        });
+      });
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.path === selected
+            ? {
+                ...f,
+                size: data.size ?? f.size,
+                contentType: data.contentType ?? f.contentType,
+              }
+            : f,
+        ),
+      );
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCurrent(navigate: boolean): Promise<boolean> {
+    if (selected === SKILL_MD_PATH) return saveSkillMd(navigate);
+    // A Source edit can be pending while a helper file is selected.
+    if (isSkillMdDirty) {
+      const ok = await saveSkillMd(false);
+      if (!ok) return false;
+    }
+    return isFileDirty ? saveHelperFile() : true;
+  }
+
+  function discardCurrent(): void {
+    if (selected === SKILL_MD_PATH) {
+      setForm(savedForm);
+      return;
+    }
+    setFileDraft(savedFileContent);
+    if (isSkillMdDirty) setForm(savedForm);
+  }
+
+  async function handleUnsavedSave(): Promise<void> {
+    const action = pendingAction;
+    if (!action) return;
+    const ok = await saveCurrent(false);
+    if (!ok) return;
+    setUnsavedOpen(false);
+    setPendingAction(null);
+    action.run();
+  }
+
+  function handleUnsavedIgnore(): void {
+    discardCurrent();
+    const action = pendingAction;
+    setUnsavedOpen(false);
+    setPendingAction(null);
+    action?.run();
+  }
+
+  function handleUnsavedCancel(): void {
+    setUnsavedOpen(false);
+    setPendingAction(null);
+  }
+
+  // ── File mutations ───────────────────────────────────────────────
+  async function reloadDetail(): Promise<SkillDetail> {
+    if (skillId === null) throw new Error("Skill has not been saved yet.");
+    const res = await fetch(`/api/skills/${skillId}`);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as
+        | { message?: string; error?: string }
+        | null;
+      throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
+    }
+    const detail = (await res.json()) as SkillDetail;
+    setFiles(detail.files ?? []);
+    setScriptsOnSsh(detail.scriptsOnSsh ?? []);
+    setMissingSshScripts(detail.missingSshScripts ?? []);
+    setForm({ source: detail.source ?? "", skillMd: detail.skillMd });
+    setSavedForm({ source: detail.source ?? "", skillMd: detail.skillMd });
+    return detail;
+  }
+
+  async function handleFileAdded(path: string): Promise<void> {
+    setAddOpen(false);
+    setError(null);
+    try {
+      await reloadDetail();
+      setFileCache(new Map());
+      await loadPath(path, true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleFileRenamed(
+    newPath: string,
+    oldTarget: SkillFileTarget,
+  ): Promise<void> {
+    setRenameTarget(null);
+    setError(null);
+    try {
+      let nextSelected = selected;
+      if (oldTarget.kind === "file") {
+        if (selected === oldTarget.path) nextSelected = newPath;
+      } else if (selected.startsWith(`${oldTarget.path}/`)) {
+        nextSelected = newPath + selected.slice(oldTarget.path.length);
+      }
+
+      const detail = await reloadDetail();
+      setFileCache(new Map());
+      const stillExists =
+        nextSelected === SKILL_MD_PATH ||
+        detail.files.some((f) => f.path === nextSelected);
+      if (stillExists) {
+        await loadPath(nextSelected, true);
+      } else {
+        setSelected(SKILL_MD_PATH);
+        setFileDraft(null);
+        setSavedFileContent(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleFileDeleteConfirm(): Promise<void> {
+    if (!fileDeleteTarget) return;
+    setFileDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/skills/${skillId}/files/${encodePath(fileDeleteTarget.path)}?kind=${fileDeleteTarget.kind}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = (await res.json().catch(() => null)) as
+          | { message?: string; error?: string }
+          | null;
+        throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
+      }
+      setFileDeleteTarget(null);
+      const detail = await reloadDetail();
+      setFileCache(new Map());
+      const stillExists =
+        selected !== SKILL_MD_PATH &&
+        detail.files.some((f) => f.path === selected);
+      if (stillExists) {
+        await loadPath(selected, true);
+      } else {
+        setSelected(SKILL_MD_PATH);
+        setFileDraft(null);
+        setSavedFileContent(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFileDeleting(false);
+    }
+  }
+
+  // ── Header identity / Copilot ────────────────────────────────────
   const draftMeta = useMemo(() => {
     try {
       const parsed = parseSkillMd(form.skillMd);
@@ -259,21 +545,28 @@ export function SkillEditor({
     } as Record<string, unknown>),
     [form],
   );
-  const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
-    const modified: string[] = [];
-    if (typeof draft.source === "string" && draft.source !== form.source) {
-      setForm((prev) => ({ ...prev, source: draft.source as string }));
-      modified.push("source");
-    }
-    if (typeof draft.skillMd === "string" && draft.skillMd !== form.skillMd) {
-      setForm((prev) => ({ ...prev, skillMd: draft.skillMd as string }));
-      modified.push("skillMd");
-      // A draft lands in the SKILL.md draft buffer; show it, otherwise the
-      // change is invisible while a helper file is on screen.
-      setSelected(SKILL_MD_PATH);
-    }
-    return modified;
-  }, [form.source, form.skillMd]);
+  const applyDraft = useCallback(
+    (draft: Partial<Record<string, unknown>>) => {
+      if (selected !== SKILL_MD_PATH && currentDirty) {
+        setError("Save or discard the current helper file before applying an AI draft.");
+        return [];
+      }
+      const modified: string[] = [];
+      if (typeof draft.source === "string" && draft.source !== form.source) {
+        setForm((prev) => ({ ...prev, source: draft.source as string }));
+        modified.push("source");
+      }
+      if (typeof draft.skillMd === "string" && draft.skillMd !== form.skillMd) {
+        setForm((prev) => ({ ...prev, skillMd: draft.skillMd as string }));
+        modified.push("skillMd");
+        setSelected(SKILL_MD_PATH);
+        setFileDraft(null);
+        setSavedFileContent(null);
+      }
+      return modified;
+    },
+    [form.source, form.skillMd, selected, currentDirty],
+  );
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "skills",
@@ -283,44 +576,7 @@ export function SkillEditor({
     applyDraft,
   });
 
-  const submit = async (): Promise<void> => {
-    if (!form.skillMd.trim()) {
-      setError("SKILL.md cannot be empty.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const url = isCreating ? "/api/skills" : `/api/skills/${skillId}`;
-      const method = isCreating ? "POST" : "PATCH";
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skillMd: form.skillMd, source: form.source }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
-          | { message?: string; error?: string }
-          | null;
-        throw new Error(
-          body?.message ?? body?.error ?? `HTTP ${res.status}`,
-        );
-      }
-      clearDraftState();
-      startTransition(() => onSaved());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /**
-   * Delete the current skill. Confirmation has happened in the
-   * dialog, so this just fires the DELETE and routes the user back.
-   * Errors surface in the existing `error` banner so the user can
-   * retry or back out without losing context.
-   */
+  // ── Skill delete ─────────────────────────────────────────────────
   const handleDeleteConfirm = async (): Promise<void> => {
     if (isCreating || skillId === null) return;
     setDeleting(true);
@@ -336,9 +592,7 @@ export function SkillEditor({
       const body = (await res.json().catch(() => null)) as
         | { message?: string; error?: string }
         | null;
-      throw new Error(
-        body?.message ?? body?.error ?? `HTTP ${res.status}`,
-      );
+      throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -346,29 +600,29 @@ export function SkillEditor({
     }
   };
 
-  // Creation has nothing to delete; every existing skill exposes the action
-  // and the API enforces the actual permission.
-  const canDelete: boolean = !isCreating;
-  // Save writes the SKILL.md column only. Gating it on the selection keeps a
-  // click made while a helper file is on screen from saving a document the
-  // user is not looking at.
   const canSave: boolean =
-    selected === SKILL_MD_PATH && (isCreating || isDirty);
+    selected === SKILL_MD_PATH
+      ? isCreating || isSkillMdDirty
+      : isFileDirty || isSkillMdDirty;
+  const dirtyPath: string | null = isFileDirty
+    ? selected
+    : isSkillMdDirty
+      ? SKILL_MD_PATH
+      : null;
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <header className="flex items-center gap-2 border-b px-4 py-3">
+      <header className="flex h-9 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-6 w-6"
           onClick={onBack}
           aria-label="Back"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-3.5 w-3.5" />
         </Button>
-        <h1 className="flex items-baseline gap-1.5 text-sm font-semibold">
+        <h1 className="flex items-baseline gap-1.5 text-sm font-semibold leading-none">
           {isCreating ? "New skill" : draftMeta.name}
           {!isCreating && draftMeta.version && (
             <span className="font-normal text-muted-foreground">
@@ -376,22 +630,15 @@ export function SkillEditor({
             </span>
           )}
         </h1>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5">
           <Button
             size="sm"
-            onClick={() => void submit()}
+            onClick={() => void saveCurrent(selected === SKILL_MD_PATH)}
             disabled={saving || deleting || !canSave}
-            title={
-              selected !== SKILL_MD_PATH
-                ? "Save applies to SKILL.md only"
-                : undefined
-            }
             className={cn(
-              "h-8 gap-1.5",
-              // Only advertise unsaved changes when the click would land.
-              // Highlighting a disabled Save reads as a broken button.
+              "h-6 gap-1 px-2 text-xs",
               canSave &&
-                (draftApplied || isDirty) &&
+                (draftApplied || currentDirty) &&
                 "bg-amber-600 hover:bg-amber-700 text-white",
             )}
           >
@@ -402,14 +649,10 @@ export function SkillEditor({
             )}
             Save
           </Button>
-          {canDelete && (
+          {!isCreating && (
             <Button
               size="sm"
-              // Same background as Save (default variant uses
-              // `bg-primary`), only the text colour switches to
-              // destructive red — mirrors BuiltinAgentEditor's
-              // Delete button so the two editor pages match.
-              className="h-8 shrink-0 gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
+              className="h-6 shrink-0 gap-1 bg-primary px-2 text-xs text-destructive hover:bg-primary/80 hover:text-destructive"
               onClick={() => setDeleteOpen(true)}
               disabled={saving || deleting}
               title="Delete this skill (cannot be undone)"
@@ -427,11 +670,49 @@ export function SkillEditor({
 
       <DeleteConfirmDialog
         title="Delete skill"
-        description={<>This permanently removes <strong>{initialDetail?.name ?? "this skill"}</strong> and its {files.length} helper file{files.length === 1 ? "" : "s"}. Agents bound to it lose the binding. This cannot be undone.</>}
+        description={
+          <>
+            This permanently removes{" "}
+            <strong>{initialDetail?.name ?? "this skill"}</strong> and its{" "}
+            {files.length} helper file{files.length === 1 ? "" : "s"}. Agents
+            bound to it lose the binding. This cannot be undone.
+          </>
+        }
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         onConfirm={() => void handleDeleteConfirm()}
         deleting={deleting}
+      />
+
+      <DeleteConfirmDialog
+        title={
+          fileDeleteTarget?.kind === "folder" ? "Delete folder" : "Delete file"
+        }
+        description={
+          fileDeleteTarget?.kind === "folder" ? (
+            <>
+              Permanently delete folder{" "}
+              <strong>{fileDeleteTarget.path}</strong> and all{" "}
+              {
+                files.filter((f) =>
+                  f.path.startsWith(`${fileDeleteTarget.path}/`),
+                ).length
+              }{" "}
+              file(s) inside it? This cannot be undone.
+            </>
+          ) : (
+            <>
+              Permanently delete file{" "}
+              <strong>{fileDeleteTarget?.path}</strong>? This cannot be undone.
+            </>
+          )
+        }
+        open={fileDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !fileDeleting) setFileDeleteTarget(null);
+        }}
+        onConfirm={() => void handleFileDeleteConfirm()}
+        deleting={fileDeleting}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -439,10 +720,15 @@ export function SkillEditor({
           <SkillFileTree
             files={files}
             selected={selected}
-            onSelect={(path) => void selectPath(path)}
-            scriptsOnSsh={initialDetail.scriptsOnSsh ?? []}
-            missingSshScripts={initialDetail.missingSshScripts ?? []}
-            skillMdDirty={form.skillMd !== savedForm.skillMd}
+            onSelect={(path) => requestSelectPath(path)}
+            onAdd={() => guardUnsaved(() => setAddOpen(true))}
+            onRename={(target) => guardUnsaved(() => setRenameTarget(target))}
+            onDelete={(target) =>
+              guardUnsaved(() => setFileDeleteTarget(target))
+            }
+            scriptsOnSsh={scriptsOnSsh}
+            missingSshScripts={missingSshScripts}
+            dirtyPath={dirtyPath}
           />
         )}
 
@@ -469,8 +755,6 @@ export function SkillEditor({
               />
             </div>
 
-            {/* Content — no filename caption: the tree's selection already
-                says which document is on screen. */}
             {selected === SKILL_MD_PATH ? (
               <div className="flex min-h-0 flex-1 flex-col">
                 <Textarea
@@ -495,38 +779,32 @@ export function SkillEditor({
                     Select a file to view its content.
                   </div>
                 ) : payload.encoding === "utf8" ? (
-                  <pre className="min-h-0 flex-1 overflow-auto rounded-md border bg-muted/20 p-3 font-mono text-xs leading-relaxed whitespace-pre">
-                    {payload.content}
-                  </pre>
-                ) : isImage && dataUrl ? (
-                  <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-md border bg-muted/20 p-4">
-                    {/* eslint-disable-next-line @next/next/no-img-element -- bytes come from the DB, not a remote origin */}
-                    <img
-                      src={dataUrl}
-                      alt={basename(selected)}
-                      className="h-auto max-w-full"
-                    />
-                  </div>
+                  <Textarea
+                    aria-label={selected}
+                    value={fileDraft ?? payload.content}
+                    onChange={(e) => setFileDraft(e.target.value)}
+                    className="min-h-0 flex-1 resize-none font-mono text-xs [field-sizing:fixed]"
+                  />
                 ) : (
                   <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed p-10 text-center">
                     <FileText className="h-6 w-6 text-muted-foreground" />
                     <p className="text-xs text-muted-foreground">
                       Binary file · {formatBytes(payload.size)}
-                      {selectedMeta?.contentType && ` · ${selectedMeta.contentType}`}
+                      {selectedMeta?.contentType &&
+                        ` · ${selectedMeta.contentType}`}
                     </p>
                     <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
                       Raw bytes are not rendered in the browser.
                     </p>
-                    {dataUrl && (
-                      <a
-                        href={dataUrl}
-                        download={basename(selected)}
-                        className="mt-1 inline-flex h-7 items-center gap-1.5 rounded-md border px-3 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        Download
-                      </a>
-                    )}
+                    {payload.encoding === "base64" &&
+                      selectedMeta?.contentType?.startsWith("image/") && (
+                        // eslint-disable-next-line @next/next/no-img-element -- bytes come from the DB, not a remote origin
+                        <img
+                          src={`data:${selectedMeta.contentType};base64,${payload.content}`}
+                          alt={basename(selected)}
+                          className="mt-2 h-auto max-w-full"
+                        />
+                      )}
                   </div>
                 )}
               </div>
@@ -534,6 +812,40 @@ export function SkillEditor({
           </div>
         </div>
       </div>
+
+      {addOpen && (
+        <SkillFileDialog
+          skillId={skillId as string}
+          mode="add"
+          files={files}
+          defaultParentFolder={
+            selected === SKILL_MD_PATH ? "" : getParentPath(selected)
+          }
+          onClose={() => setAddOpen(false)}
+          onSaved={(path) => void handleFileAdded(path)}
+        />
+      )}
+
+      {renameTarget && (
+        <SkillFileDialog
+          skillId={skillId as string}
+          mode="rename"
+          files={files}
+          target={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSaved={(path) => void handleFileRenamed(path, renameTarget)}
+        />
+      )}
+
+      <UnsavedChangesDialog
+        open={unsavedOpen}
+        fileName={selected === SKILL_MD_PATH ? "SKILL.md" : selected}
+        saving={saving}
+        error={error}
+        onSave={() => void handleUnsavedSave()}
+        onIgnore={handleUnsavedIgnore}
+        onCancel={handleUnsavedCancel}
+      />
     </div>
   );
 }

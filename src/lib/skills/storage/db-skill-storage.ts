@@ -6,7 +6,7 @@
 
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { SkillTable, SkillFileTable } from "@/lib/db/schema";
@@ -20,12 +20,15 @@ import {
   MAX_TOTAL_BYTES_PER_SKILL,
   validateSkillFilePath,
   type CreateCustomSkillInput,
+  type DeleteFolderInput,
   type PutSkillFileInput,
+  type RenameFolderInput,
   type SkillFileMeta,
   type SkillFileRecord,
   type SkillRecord,
   type SkillStorage,
   type SkillVisibility,
+  type UpdateFileInput,
   type UpdateSkillContentInput,
   type UpdateSkillFlagsInput,
 } from "./skill-storage";
@@ -34,6 +37,31 @@ import {
 
 type SkillRow = typeof SkillTable.$inferSelect;
 type SkillFileRow = typeof SkillFileTable.$inferSelect;
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Persist a rewritten SKILL.md inside an existing transaction, keeping the
+ * cached frontmatter columns (`name` / `description` / `version`) in sync.
+ */
+async function persistSkillMd(
+  tx: DbTransaction,
+  skillId: string,
+  skillMd: string,
+  updatedBy: string,
+): Promise<void> {
+  const parsed = parseSkillMd(skillMd);
+  await tx
+    .update(SkillTable)
+    .set({
+      name: parsed.frontmatter.name,
+      description: parsed.frontmatter.description,
+      version: parsed.frontmatter.version,
+      skillMd,
+      updatedBy,
+      updatedAt: new Date(),
+    })
+    .where(eq(SkillTable.id, skillId));
+}
 
 function toRecord(row: SkillRow): SkillRecord {
   return {
@@ -214,13 +242,143 @@ export class DbSkillStorage implements SkillStorage {
       });
   }
 
-  async deleteFile(skillId: string, path: string): Promise<void> {
+  async updateFile(input: UpdateFileInput): Promise<void> {
+    validateSkillFilePath(input.oldPath);
+    validateSkillFilePath(input.newPath);
+
+    if (input.content !== undefined) {
+      if (input.content.length > MAX_FILE_BYTES()) {
+        throw new InvalidSkillPathError(
+          `File exceeds ${Math.round(MAX_FILE_BYTES() / 1024)} KB cap.`,
+        );
+      }
+      const existing = await db
+        .select({ path: SkillFileTable.path, size: SkillFileTable.size })
+        .from(SkillFileTable)
+        .where(eq(SkillFileTable.skillId, input.skillId));
+      const previous = existing.find((f) => f.path === input.oldPath);
+      if (!previous) {
+        throw new InvalidSkillPathError(`File not found: ${input.oldPath}`);
+      }
+      const projectedTotal =
+        existing.reduce((acc, f) => acc + f.size, 0) -
+        previous.size +
+        input.content.length;
+      if (projectedTotal > MAX_TOTAL_BYTES_PER_SKILL()) {
+        throw new InvalidSkillPathError(
+          `Skill total size exceeds ${Math.round(MAX_TOTAL_BYTES_PER_SKILL() / 1024 / 1024)} MB cap.`,
+        );
+      }
+    }
+
+    await db.transaction(async (tx) => {
+      const updates: Partial<typeof SkillFileTable.$inferInsert> = {
+        path: input.newPath,
+        updatedAt: new Date(),
+      };
+      if (input.content !== undefined) {
+        updates.content = input.content;
+        updates.size = input.content.length;
+        updates.contentType = input.contentType ?? null;
+      }
+      await tx
+        .update(SkillFileTable)
+        .set(updates)
+        .where(
+          and(
+            eq(SkillFileTable.skillId, input.skillId),
+            eq(SkillFileTable.path, input.oldPath),
+          ),
+        );
+      if (input.skillMd !== undefined) {
+        await persistSkillMd(tx, input.skillId, input.skillMd, input.updatedBy);
+      }
+    });
+  }
+
+  async renameFolder(input: RenameFolderInput): Promise<void> {
+    validateSkillFilePath(input.oldPath);
+    validateSkillFilePath(input.newPath);
+
+    const rows = await db
+      .select({ path: SkillFileTable.path })
+      .from(SkillFileTable)
+      .where(eq(SkillFileTable.skillId, input.skillId));
+    const prefix = `${input.oldPath}/`;
+    const affected = rows
+      .map((r) => r.path)
+      .filter((p) => p.startsWith(prefix));
+    if (affected.length === 0) return;
+
+    await db.transaction(async (tx) => {
+      for (const oldPath of affected) {
+        const suffix = oldPath.slice(input.oldPath.length);
+        await tx
+          .update(SkillFileTable)
+          .set({ path: `${input.newPath}${suffix}`, updatedAt: new Date() })
+          .where(
+            and(
+              eq(SkillFileTable.skillId, input.skillId),
+              eq(SkillFileTable.path, oldPath),
+            ),
+          );
+      }
+      if (input.skillMd !== undefined) {
+        await persistSkillMd(tx, input.skillId, input.skillMd, input.updatedBy);
+      }
+    });
+  }
+
+  async deleteFile(
+    skillId: string,
+    path: string,
+    sync?: { skillMd: string; updatedBy: string },
+  ): Promise<void> {
     validateSkillFilePath(path);
-    await db
-      .delete(SkillFileTable)
-      .where(
-        and(eq(SkillFileTable.skillId, skillId), eq(SkillFileTable.path, path)),
-      );
+    if (!sync) {
+      await db
+        .delete(SkillFileTable)
+        .where(
+          and(eq(SkillFileTable.skillId, skillId), eq(SkillFileTable.path, path)),
+        );
+      return;
+    }
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(SkillFileTable)
+        .where(
+          and(eq(SkillFileTable.skillId, skillId), eq(SkillFileTable.path, path)),
+        );
+      await persistSkillMd(tx, skillId, sync.skillMd, sync.updatedBy);
+    });
+  }
+
+  async deleteFolder(input: DeleteFolderInput): Promise<void> {
+    validateSkillFilePath(input.path);
+
+    const rows = await db
+      .select({ path: SkillFileTable.path })
+      .from(SkillFileTable)
+      .where(eq(SkillFileTable.skillId, input.skillId));
+    const prefix = `${input.path}/`;
+    const affected = rows
+      .map((r) => r.path)
+      .filter((p) => p.startsWith(prefix));
+    if (affected.length === 0) return;
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(SkillFileTable)
+        .where(
+          and(
+            eq(SkillFileTable.skillId, input.skillId),
+            inArray(SkillFileTable.path, affected),
+          ),
+        );
+      if (input.skillMd !== undefined) {
+        await persistSkillMd(tx, input.skillId, input.skillMd, input.updatedBy);
+      }
+    });
   }
 }
 

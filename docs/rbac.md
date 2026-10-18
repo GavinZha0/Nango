@@ -281,7 +281,9 @@ has been soft-deleted.
 | `/api/skills` GET | `withSession` | filters by visibility |
 | `/api/skills` POST/PATCH/DELETE | `withEditor` | + permission check (own private OR public) |
 | `/api/skills/:id` GET | `withSession` | 404 if not visible |
+| `/api/skills/:id/files` POST | `withEditor` | + `canEditResource` |
 | `/api/skills/:id/files/[...path]` GET | `withSession` | 404 if not visible |
+| `/api/skills/:id/files/[...path]` PATCH/DELETE | `withEditor` | + `canEditResource` |
 | `/api/mcp-servers` GET | `withSession` | filters by visibility |
 | `/api/mcp-servers` POST/PATCH/DELETE | `withEditor` | + permission check |
 | `/api/builtin-agents` GET | `withSession` | filters by visibility |

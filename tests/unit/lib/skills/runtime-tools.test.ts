@@ -160,6 +160,17 @@ describe("run_skill_script — scripts-on-ssh routing", () => {
     expect(result.error).toContain("Script not found");
   });
 
+  it("refuses scripts outside scripts/ before touching storage", async () => {
+    const result = await withHost.runSkillScript.execute({
+      name: "sandbox-skill",
+      filename: "bin/analyze.py",
+    });
+
+    expect(result.error).toBe("SCRIPT_OUTSIDE_SCRIPTS");
+    expect(result.message).toContain("must live under scripts/");
+    expect(mockStorage.readFile).not.toHaveBeenCalled();
+  });
+
   it("rejects unsupported extensions before touching storage", async () => {
     const result = await withHost.runSkillScript.execute({
       name: "sandbox-skill",
@@ -228,6 +239,34 @@ describe("buildRunSkillScriptOnSshTool", () => {
     expect(result.error).toBe("NOT_AN_SSH_SCRIPT");
     expect(result.message).toContain("Use run_skill_script for sandbox scripts");
     expect(mockStorage.readFile).not.toHaveBeenCalled();
+  });
+
+  it("resolves a sub-directory path under scripts/", async () => {
+    const nestedSpec = makeSpec({
+      skillId: "nested-skill-id",
+      name: "nested-skill",
+      scriptsOnSsh: new Set(["scripts/lib/probe.sh"]),
+    });
+    const nestedTool = buildRunSkillScriptOnSshTool({
+      specs: [nestedSpec],
+      agentSshServerIds: ["server-1"],
+    }) as unknown as ToolLike;
+    mockStorage.readFile.mockResolvedValue({
+      content: Buffer.from("echo nested"),
+    });
+    mockRunOnBoundServer.mockResolvedValue({ ok: true } as never);
+
+    const result = await nestedTool.execute({
+      name: "nested-skill",
+      filename: "lib/probe.sh",
+      serverName: "server-1",
+    });
+
+    expect(mockStorage.readFile).toHaveBeenCalledWith(
+      "nested-skill-id",
+      "scripts/lib/probe.sh",
+    );
+    expect(result.ok).toBe(true);
   });
 
   it("returns SCRIPT_NOT_FOUND when the script row is missing", async () => {
