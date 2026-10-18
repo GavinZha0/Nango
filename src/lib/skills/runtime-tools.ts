@@ -31,9 +31,6 @@ import {
   SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
 } from "@/lib/ssh/runtime-tools";
 
-/** Subdirectory whitelist (matches `validateSkillFilePath`). */
-const ALLOWED_PREFIXES = ["references", "scripts", "assets", "evals"] as const;
-
 /**
  * Interpreter dispatch by file extension. Adding a language requires both a
  * row here AND the binary in the sandbox rootfs (see `docker/sandbox/Dockerfile`).
@@ -117,13 +114,13 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const getSkillFile = defineTool({
     name: "get_skill_file",
     description:
-      "Read a helper file from a skill's tree (references/, scripts/, assets/, evals/).  Pass a bare filename to search those subdirectories in order, or a relative path like 'references/output-format.md' to target one directly.",
+      "Read a helper file from a skill's tree.  Pass a bare filename to search the skill's folders by name, or a relative path like 'references/output-format.md' to target one directly.",
     parameters: z.object({
       name: z.string().describe("Skill name."),
       filename: z
         .string()
         .describe(
-          "Bare filename (searched in references/, scripts/, assets/, evals/) or a relative path under one of those subdirectories.",
+          "Bare filename (searched across the skill's folders by name) or a relative path such as 'lib/helper.py'.",
         ),
     }),
     execute: async ({ name, filename }) => {
@@ -136,13 +133,18 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
       }
 
       // Build the candidate-path list. With a separator, the path is
-      // taken as-is (must already be under one of the four prefixes).
-      // Without a separator, try each prefix in order. Validation
-      // rejects oversized / traversal / dotfile paths up front so
-      // we never poke the DB with garbage.
+      // taken as-is. Without one, match by basename against the skill's
+      // actual listing — folder names are author-defined, so there is no
+      // fixed prefix list to enumerate. Sorted because listFiles has no
+      // ORDER BY, so a duplicate basename would otherwise resolve by row
+      // order. Validation rejects oversized / traversal / dotfile paths
+      // up front so we never poke the DB with garbage.
       const candidates: string[] = filename.includes("/")
         ? [filename]
-        : ALLOWED_PREFIXES.map((p) => `${p}/${filename}`);
+        : (await storage.listFiles(spec.skillId))
+            .map((f) => f.path)
+            .filter((p) => p.slice(p.lastIndexOf("/") + 1) === filename)
+            .sort();
 
       let found: SkillFileRecord | null = null;
       for (const candidate of candidates) {
@@ -184,13 +186,13 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const runSkillScript = defineTool({
     name: "run_skill_script",
     description:
-      "Execute a script bundled with a skill (scripts/<filename>) in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend. Scripts listed in the skill's scripts-on-ssh frontmatter run on a remote host with run_skill_script_on_ssh and are refused here.",
+      "Execute a script bundled with a skill in the same sandbox as run_code_in_sandbox (no network, read-only rootfs, memory/CPU/timeout limits). Interpreter is picked from the file extension: .py → python3, .sh → bash. A bare filename is looked up under scripts/; pass a relative path (e.g. 'bin/analyze.py') to run a script kept in another folder. Pass `datasets` to expose cached Parquet datasets read-only at ./tmp/data/<name>/ in the sandbox cwd — same convention as run_code_in_sandbox. Returns CodeOutputEnvelope { ok, duration_ms, rows, row_count, row_schema, message, files, error } plus backend. Scripts listed in the skill's scripts-on-ssh frontmatter run on a remote host with run_skill_script_on_ssh and are refused here.",
     parameters: z.object({
       name: z.string().describe("Skill name."),
       filename: z
         .string()
         .describe(
-          "Script filename, e.g. 'analyze.py'. Looked up under the skill's scripts/ directory; pass either 'analyze.py' or 'scripts/analyze.py'.",
+          "Script filename, e.g. 'analyze.py' (looked up under scripts/) or a relative path such as 'bin/analyze.py'.",
         ),
       datasets: z
         .array(z.string())
@@ -210,10 +212,11 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         };
       }
 
-      // 2. Normalize script path. Restricted to scripts/ on purpose —
-      //    running a markdown reference or asset doesn't make sense
-      //    and broadens the surface for no benefit.
-      const scriptPath: string = filename.startsWith("scripts/")
+      // 2. Normalize script path. A path with a separator is taken as-is so
+      //    authors who keep executables in `bin/`, `lib/`, … can run them;
+      //    a bare name still defaults to scripts/. The extension gate below
+      //    (not the folder) is what keeps non-executables out of the sandbox.
+      const scriptPath: string = filename.includes("/")
         ? filename
         : `scripts/${filename}`;
 
@@ -478,7 +481,7 @@ function renderPromptBlock(
   const lines: string[] = [];
   lines.push("## Available Skills");
   lines.push(
-    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill (references/, scripts/, assets/, evals/) are reachable via `get_skill_file(name, filename)`.  Scripts under `scripts/` can be executed with `run_skill_script(name, filename)` (V1: .py and .sh) — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd." +
+    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill live in author-defined folders (commonly references/, scripts/, assets/, evals/) and are reachable via `get_skill_file(name, filename)`.  Scripts (.py and .sh) can be executed with `run_skill_script(name, filename)` — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd." +
       // Only name the SSH tool when it is actually mounted; otherwise the
       // model would be instructed to call a tool that does not exist.
       (sshToolAvailable

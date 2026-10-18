@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isDeepEqual, formatCharCount } from "@/lib/utils";
+import { isDeepEqual, formatCharCount, formatBytes } from "@/lib/utils";
 
 describe("isDeepEqual", () => {
   it("compares primitive values", () => {
@@ -56,5 +56,26 @@ describe("formatCharCount", () => {
     expect(formatCharCount(1266)).toBe("1.3k");
     expect(formatCharCount(10450)).toBe("10.5k");
     expect(formatCharCount(1500)).toBe("1.5k");
+  });
+});
+
+describe("formatBytes", () => {
+  it("formats counts under 1 KiB in whole bytes", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(842)).toBe("842 B");
+    expect(formatBytes(1023)).toBe("1023 B");
+  });
+
+  it("formats KiB with 1 decimal place", () => {
+    expect(formatBytes(1024)).toBe("1.0 KB");
+    expect(formatBytes(12697)).toBe("12.4 KB");
+    expect(formatBytes(262144)).toBe("256.0 KB");
+  });
+
+  it("formats MiB with 1 decimal place and stops there", () => {
+    expect(formatBytes(1048576)).toBe("1.0 MB");
+    expect(formatBytes(10485760)).toBe("10.0 MB");
+    // The per-skill cap is 10 MB, so anything above is out of range for the UI.
+    expect(formatBytes(1073741824)).toBe("1024.0 MB");
   });
 });

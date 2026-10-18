@@ -42,3 +42,13 @@ export function formatCharCount(chars: number): string {
   }
   return `${chars}c`;
 }
+
+/**
+ * Format a byte count for concise metrics display (e.g. 842 B, 12.4 KB).
+ * Stops at MB because the skill caps are 256 KB per file and 10 MB per skill.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

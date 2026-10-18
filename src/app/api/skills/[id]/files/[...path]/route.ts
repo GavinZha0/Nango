@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { SkillTable } from "@/lib/db/schema";
+import { canViewResource } from "@/lib/auth/permissions";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
 import {
   getDbSkillStorage,
@@ -13,7 +14,6 @@ import {
 } from "@/lib/skills/storage";
 
 const ROUTE = "/api/skills/[id]/files/[...path]";
-const ALLOWED_PREFIXES = ["references", "scripts", "assets", "evals"] as const;
 
 /**
  * GET /api/skills/[id]/files/[...path]
@@ -24,6 +24,7 @@ export const GET = withSession<{ id: string; path: string[] }>(
     const [row] = await db
       .select({
         id: SkillTable.id,
+        source: SkillTable.source,
         visibility: SkillTable.visibility,
         createdBy: SkillTable.createdBy,
       })
@@ -31,7 +32,20 @@ export const GET = withSession<{ id: string; path: string[] }>(
       .where(eq(SkillTable.id, params.id))
       .limit(1);
     if (!row) throw new ApiError("NOT_FOUND", 404, "Skill not found.");
-    if (row.visibility !== "public" && row.createdBy !== session.user.id) {
+    // SECURITY: same predicate the skill-detail route uses. A hand-rolled
+    // `visibility === 'public' || createdBy === me` check omits the admin
+    // exception, which would let an admin list a private skill's files and
+    // then 404 on every one of them.
+    if (
+      !canViewResource(
+        {
+          source: row.source as "builtin" | "local",
+          visibility: row.visibility as "private" | "public",
+          createdBy: row.createdBy,
+        },
+        session,
+      )
+    ) {
       throw new ApiError("NOT_FOUND", 404, "Skill not found.");
     }
 
@@ -41,9 +55,18 @@ export const GET = withSession<{ id: string; path: string[] }>(
     }
 
     const storage = getDbSkillStorage();
+    // A bare filename is resolved against the skill's actual listing rather
+    // than a fixed prefix list: authors name their folders freely, so the
+    // archive layout is the only source of truth. Sorted so a duplicate
+    // basename resolves deterministically instead of by DB row order.
     const candidates: string[] = filename.includes("/")
       ? [filename]
-      : ALLOWED_PREFIXES.map((p) => `${p}/${filename}`);
+      : (await storage.listFiles(row.id))
+          .map((f) => f.path)
+          .filter((p) => p.slice(p.lastIndexOf("/") + 1) === filename)
+          .sort((a, b) =>
+            a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+          );
 
     let found: SkillFileRecord | null = null;
     for (const candidate of candidates) {

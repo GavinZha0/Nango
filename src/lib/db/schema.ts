@@ -773,12 +773,11 @@ export const McpServerTable = pgTable("mcp_server", {
 /**
  * Skill — a reusable prompt / scripted capability stored as a file-system resource.
  *
- * Each skill lives in a directory that follows the standard layout:
+ * Each skill lives in a directory with a SKILL.md plus any helper folders
+ * the author chooses — `scripts/`, `references/`, `lib/`, `rules/`, … are all
+ * seen in the wild, so folder names are not constrained:
  *   <path>/SKILL.md          — frontmatter + body (required)
- *   <path>/scripts/          — helper scripts (optional)
- *   <path>/references/       — reference material (optional)
- *   <path>/assets/           — static assets (optional)
- *   <path>/evals/            — structured evaluation cases (optional, Skills 2.0)
+ *   <path>/<folder>/…        — helper files (optional, any folder name)
  *
  * SKILL.md must start with a YAML frontmatter block declaring at least
  * `name` and `description`, e.g.:
@@ -845,8 +844,8 @@ export const SkillTable = pgTable("skill", {
 });
 
 /**
- * SkillFile — helper file (references / scripts / assets / evals) bound
- * to a skill. Stored as a bytea blob in PG. See docs/skills.md.
+ * SkillFile — helper file bound to a skill, from any author-defined folder.
+ * Stored as a bytea blob in PG. See docs/skills.md.
  *
  * `path` is a logical relative POSIX path (e.g. `references/output.md`),
  * NOT a filesystem path. There is no actual filesystem at runtime, so
@@ -866,7 +865,7 @@ export const SkillFileTable = pgTable(
     skillId: uuid("skill_id")
       .notNull()
       .references(() => SkillTable.id, { onDelete: "cascade" }),
-    /** Logical relative path; one of references/, scripts/, assets/, evals/ subdirs. */
+    /** Logical relative path under a top-level folder; folder names are free-form. */
     path: text("path").notNull(),
     /** Raw bytes of the helper file. PG TOAST handles compression. */
     content: customBytea("content").notNull(),

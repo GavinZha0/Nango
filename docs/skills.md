@@ -44,8 +44,8 @@ server-side tools to load the actual content:
 | Tool | What it returns |
 |---|---|
 | `get_skill(name)` | The full SKILL.md text (frontmatter + body) |
-| `get_skill_file(name, path)` | A helper file under `references/`, `scripts/`, `assets/`, or `evals/` |
-| `run_skill_script(name, filename, datasets?)` | Execute a script from the skill's `scripts/` tree in the same sandbox as `run_code_in_sandbox`. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
+| `get_skill_file(name, path)` | A helper file from the skill's tree, in any folder |
+| `run_skill_script(name, filename, datasets?)` | Execute a script bundled with the skill in the same sandbox as `run_code_in_sandbox`. A bare filename resolves under `scripts/`; a relative path (e.g. `bin/analyze.py`) resolves as-is. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
 | `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
 
 Token cost is bounded by the description list, not by the full skill
@@ -78,24 +78,26 @@ bodies.
 |---|---|---|
 | `id` | bigint | Primary key |
 | `skill_id` | uuid | FK to `skill(id)` ON DELETE CASCADE |
-| `path` | text | Relative POSIX path (e.g. `references/output.md`). Validated prefixes: `references/`, `scripts/`, `assets/`, `evals/`. |
+| `path` | text | Relative POSIX path (e.g. `references/output.md`). Must live under a top-level folder; the folder name itself is free-form. |
 | `content` | bytea | Raw bytes (≤ 256 KB) |
 | `size` | integer | File size |
 | `content_type` | text | MIME type |
 | `updated_at` | timestamp | Last modified |
 
-**Path semantics**: `path` is a **relative POSIX path** matching one of
-the four allowed prefixes:
+**Path semantics**: `path` is a **relative POSIX path** with at least two
+segments — a top-level folder plus a filename. Folder names are
+free-form because skill authors do not agree on them (`references/`,
+`lib/`, `rules/`, `templates/`, …); a ZIP import keeps whatever layout
+the archive ships:
 
 ```
-references/...
-scripts/...
-assets/...
-evals/...
+<any-folder>/...
 ```
 
 Validated by regex on every write. Parent-directory traversal (`..`),
-absolute paths, and back-slashes are rejected. There is no actual
+absolute paths, back-slashes, dotfiles, and root-level files are
+rejected — the last two are skipped silently at import time as archive
+noise rather than failing the upload. There is no actual
 filesystem to traverse — `path` is only a string used as a logical
 locator for `get_skill_file(name, path)`.
 
@@ -332,8 +334,8 @@ import (400), and dispatch (`INVALID_SCRIPT_BYTES`). `PATCH` checks existence
 only — re-reading every stored script on each save is not worth it when the
 bytes were already gated at import.
 
-The editor lets the user edit `SKILL.md` directly; helper files
-(references / scripts / assets) get a separate upload widget — file
+The editor lets the user edit `SKILL.md` directly; helper files in any
+folder get a separate upload widget — file
 upload lands as a write to `skill_file`. Built-in rows render
 **read-only** (`source = 'builtin'` makes every write API return 400 /
 403); the editor's "Save" button is hidden.
@@ -353,13 +355,15 @@ POST /api/skills/import    multipart/form-data file=<archive.skill>
 3. For each entry:
      - reject absolute paths, '..' segments, back-slashes
      - reject symlinks (zip external_attr stat)
+     - skip archive noise (root-level files, dotfiles) — folder names
+       themselves are free-form
      - track total size; bail if > 10 MB
 4. Locate SKILL.md (root or single nested folder).
 5. Parse + validate frontmatter.
 6. Reject if name collides with an existing skill (404 / 409 path).
 7. In a single transaction:
      - INSERT skill row (source='local', visibility='private', createdBy=session.user.id)
-     - INSERT skill_file rows for every allowed-subdir entry
+     - INSERT skill_file rows for every surviving entry, at its archive path
 8. Return the new row's id.
 ```
 

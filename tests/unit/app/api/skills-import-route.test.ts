@@ -115,6 +115,68 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     );
   });
 
+  it("persists a content type so the editor can preview binary files", async () => {
+    dbMock.$enqueue([], [
+      { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },
+    ]);
+
+    // 1x1 transparent PNG — real binary bytes, so it takes the base64 branch.
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const res = await upload(
+      [
+        { path: "assets/logo.png", content: png },
+        { path: "references/guide.md", content: "# Guide\n" },
+        { path: "assets/mystery.bin", content: Buffer.from([0x00, 0x01, 0x02]) },
+      ],
+      null,
+    );
+
+    expect(res.status).toBe(201);
+    // The editor keys its image preview off this column; when it was left null
+    // every binary file degraded to a card that could not be previewed.
+    expect(storageMock.putFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "assets/logo.png", contentType: "image/png" }),
+    );
+    expect(storageMock.putFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "references/guide.md",
+        contentType: "text/markdown",
+      }),
+    );
+    // Unknown extensions stay unset rather than being guessed at.
+    expect(storageMock.putFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "assets/mystery.bin", contentType: undefined }),
+    );
+  });
+
+  it("imports files under any folder name and skips archive noise", async () => {
+    dbMock.$enqueue([], [
+      { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },
+    ]);
+
+    const res = await upload(
+      [
+        { path: "lib/helper.py", content: "print('hi')\n" },
+        { path: "rules/style.md", content: "# Style\n" },
+        // Root-level files and dotfiles are archive noise, not skill content.
+        { path: "LICENSE", content: "MIT\n" },
+        { path: ".gitignore", content: "*.pyc\n" },
+      ],
+      null,
+    );
+
+    expect(res.status).toBe(201);
+    expect(
+      storageMock.putFile.mock.calls
+        .map((args: unknown[]) => (args[0] as { path: string }).path)
+        .sort(),
+    ).toEqual(["lib/helper.py", "rules/style.md"]);
+    expect((await res.json()).filesImported).toBe(2);
+  });
+
   it("leaves undeclared scripts alone", async () => {
     dbMock.$enqueue([], [
       { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },

@@ -103,10 +103,9 @@ export interface SkillStorage {
 
 // Path validation (shared helper)
 
-const ALLOWED_PREFIXES = ["references", "scripts", "assets", "evals"] as const;
 /** path-segment chars: alnum, dot, underscore, hyphen — and no leading dot. */
 const PATH_REGEX =
-  /^(references|scripts|assets|evals)\/(?:[A-Za-z0-9_\-][A-Za-z0-9._\-]*)(?:\/[A-Za-z0-9_\-][A-Za-z0-9._\-]*)*$/;
+  /^[A-Za-z0-9_\-][A-Za-z0-9._\-]*(?:\/[A-Za-z0-9_\-][A-Za-z0-9._\-]*)+$/;
 const MAX_PATH_LEN = 256;
 
 export class InvalidSkillPathError extends Error {
@@ -120,10 +119,12 @@ export class InvalidSkillPathError extends Error {
  * Validate a `skill_file.path` string.
  *
  * Path is a logical relative POSIX path; there is no actual filesystem
- * to traverse, so this is a pure string check. Rejects:
+ * to traverse, so this is a pure string check. Any top-level folder name
+ * is accepted — skill authors use `references/`, `lib/`, `rules/`, … and
+ * the archive is the source of truth. Rejects:
  *   - empty / oversize paths
  *   - back-slashes, absolute paths, `..` segments
- *   - top-level segment outside {references, scripts, assets, evals}
+ *   - root-level files (every helper file lives under a folder)
  *   - dotfiles at any segment
  */
 export function validateSkillFilePath(path: string): void {
@@ -140,7 +141,7 @@ export function validateSkillFilePath(path: string): void {
   }
   if (!PATH_REGEX.test(path)) {
     throw new InvalidSkillPathError(
-      `Path must start with one of ${ALLOWED_PREFIXES.join("/, ")}/.`,
+      "Path must live under a top-level folder (e.g. references/ or lib/); root-level files are not stored.",
     );
   }
 }
@@ -152,3 +153,60 @@ import { getConfigNumber } from "@/lib/config";
 export const MAX_FILE_BYTES = (): number => getConfigNumber("skill.max_file_bytes", 256 * 1024);
 export const MAX_FILES_PER_SKILL = (): number => getConfigNumber("skill.max_files", 100);
 export const MAX_TOTAL_BYTES_PER_SKILL = (): number => getConfigNumber("skill.max_total_bytes", 10 * 1024 * 1024);
+
+// Content type (shared helper)
+
+/**
+ * Extension → MIME for the types a skill archive plausibly carries.
+ *
+ * SECURITY: deliberately no `text/html` and no `image/svg+xml`. The editor
+ * builds a `data:` URL from this value and offers it both as an `<img src>`
+ * and as a download `href`; an author-controlled archive could otherwise
+ * smuggle a markup document into a link the UI invites the user to click.
+ * Unknown extensions fall through to null, which renders as an inert
+ * binary card rather than a guessed type.
+ */
+const CONTENT_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  ico: "image/x-icon",
+  bmp: "image/bmp",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+  yaml: "text/yaml",
+  yml: "text/yaml",
+  toml: "text/plain",
+  xml: "text/xml",
+  sql: "text/plain",
+  py: "text/x-python",
+  sh: "text/x-shellscript",
+  js: "text/javascript",
+  mjs: "text/javascript",
+  ts: "text/plain",
+  pdf: "application/pdf",
+  zip: "application/zip",
+  woff: "font/woff",
+  woff2: "font/woff2",
+};
+
+/**
+ * Guess a `skill_file.contentType` from the file extension. Returns null when
+ * the extension is absent or unknown.
+ *
+ * CONTRACT: advisory only. The text-vs-binary decision is made by a NUL-byte
+ * scan of the actual content (`isLikelyText`), never by this value, so a wrong
+ * guess can only mislabel a file — it cannot make binary bytes render as text.
+ */
+export function guessContentType(path: string): string | null {
+  const slash: number = path.lastIndexOf("/");
+  const base: string = slash === -1 ? path : path.slice(slash + 1);
+  const dot: number = base.lastIndexOf(".");
+  if (dot <= 0 || dot === base.length - 1) return null;
+  return CONTENT_TYPES[base.slice(dot + 1).toLowerCase()] ?? null;
+}

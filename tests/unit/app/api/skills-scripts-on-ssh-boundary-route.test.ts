@@ -167,12 +167,54 @@ describe("skills routes — scripts-on-ssh write boundaries", () => {
 
     it("survives a stored body that no longer parses", async () => {
       dbMock.$enqueue([{ ...LOCAL_ROW, skillMd: "no frontmatter at all" }]);
+      storageMock.listFiles.mockResolvedValue([{ path: "scripts/probe.sh" }]);
 
       const res = await GET(createMockRequest("/api/skills/skill-1"), idCtx);
 
       expect(res.status).toBe(200);
-      expect((await res.json()).missingSshScripts).toEqual([]);
-      expect(storageMock.listFiles).not.toHaveBeenCalled();
+      const json = await res.json();
+      expect(json.missingSshScripts).toEqual([]);
+      // The listing still ships: the file tree does not depend on the body
+      // parsing, only the scripts-on-ssh diagnostic does.
+      expect(json.files).toEqual([{ path: "scripts/probe.sh" }]);
+    });
+
+    it("returns the file listing sorted by path", async () => {
+      dbMock.$enqueue([{ ...LOCAL_ROW, skillMd: skillMd(null) }]);
+      storageMock.listFiles.mockResolvedValue([
+        { path: "scripts/zebra.py", size: 30, contentType: "text/x-python" },
+        { path: "references/output.md", size: 10, contentType: "text/markdown" },
+        { path: "scripts/alpha.sh", size: 20, contentType: "text/x-shellscript" },
+      ]);
+
+      const res = await GET(createMockRequest("/api/skills/skill-1"), idCtx);
+
+      const { files, scriptsOnSsh } = await res.json();
+      expect(files.map((f: { path: string }) => f.path)).toEqual([
+        "references/output.md",
+        "scripts/alpha.sh",
+        "scripts/zebra.py",
+      ]);
+      expect(scriptsOnSsh).toEqual([]);
+    });
+
+    it("returns an empty listing for a skill with no helper files", async () => {
+      dbMock.$enqueue([{ ...LOCAL_ROW, skillMd: skillMd(null) }]);
+
+      const res = await GET(createMockRequest("/api/skills/skill-1"), idCtx);
+
+      const json = await res.json();
+      expect(json.files).toEqual([]);
+      expect(json.missingSshScripts).toEqual([]);
+    });
+
+    it("echoes the declared scripts so the tree can flag them", async () => {
+      dbMock.$enqueue([LOCAL_ROW]);
+      storageMock.listFiles.mockResolvedValue([{ path: "scripts/probe.sh" }]);
+
+      const res = await GET(createMockRequest("/api/skills/skill-1"), idCtx);
+
+      expect((await res.json()).scriptsOnSsh).toEqual(["scripts/probe.sh"]);
     });
   });
 

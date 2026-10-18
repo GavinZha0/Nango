@@ -34,6 +34,7 @@ import {
 import {
   validateSkillFilePath,
   InvalidSkillPathError,
+  guessContentType,
   MAX_FILE_BYTES,
   MAX_FILES_PER_SKILL,
   MAX_TOTAL_BYTES_PER_SKILL,
@@ -135,11 +136,12 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     const relativePath = rawPath.slice(prefix.length);
     if (!relativePath || relativePath === "SKILL.md") continue;
 
-    // Validate against allowed prefixes.
+    // Any folder name is legal; what gets skipped here is archive noise —
+    // root-level files and dotfiles, which are not skill content.
     try {
       validateSkillFilePath(relativePath);
     } catch (err) {
-      if (err instanceof InvalidSkillPathError) continue; // skip unknown dirs
+      if (err instanceof InvalidSkillPathError) continue;
       throw err;
     }
 
@@ -253,6 +255,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       skillId: id,
       path: f.path,
       content: f.content,
+      contentType: guessContentType(f.path) ?? undefined,
     });
   }
 

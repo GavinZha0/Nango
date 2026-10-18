@@ -52,25 +52,37 @@ async function loadVisibleSkill(skillId: string, session: Session) {
 }
 
 // GET /api/skills/[id]
-// Full row including the SKILL.md text, used by the editor / preview UI.
+// Full row including the SKILL.md text, the helper-file listing (path / size /
+// contentType — no content) and the scripts-on-ssh diagnostic.
 
 export const GET = withSession<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const row = await loadVisibleSkill(params.id, session);
+
+    // One listing feeds both the editor's file tree and the scripts-on-ssh
+    // diagnostic. Sorted here so every consumer sees the same order instead
+    // of re-sorting client-side.
+    const stored = await getDbSkillStorage().listFiles(row.id);
+    const files = [...stored].sort((a, b) =>
+      a.path.localeCompare(b.path, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      }),
+    );
+
     // Diagnostic for rows that predate write-time validation: the editor can
     // show which declarations are unbacked instead of letting the agent
     // discover it mid-run.
     let missingSshScripts: string[] = [];
+    let scriptsOnSsh: string[] = [];
     try {
       const parsed = parseSkillMd(row.skillMd);
       if (parsed.frontmatter.scriptsOnSsh?.length) {
-        const available = (await getDbSkillStorage().listFiles(row.id)).map(
-          (f) => f.path,
-        );
+        scriptsOnSsh = parsed.frontmatter.scriptsOnSsh;
         missingSshScripts = findMissingSshScripts(
-          parsed.frontmatter.scriptsOnSsh,
-          available,
+          scriptsOnSsh,
+          files.map((f) => f.path),
         );
       }
     } catch (err) {
@@ -78,7 +90,12 @@ export const GET = withSession<{ id: string }>(
       // surfaces it through the body itself.
       if (!(err instanceof SkillParseError)) throw err;
     }
-    return NextResponse.json({ ...row, missingSshScripts });
+    return NextResponse.json({
+      ...row,
+      files,
+      scriptsOnSsh,
+      missingSshScripts,
+    });
   },
 );
 
