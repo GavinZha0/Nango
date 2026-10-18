@@ -65,24 +65,24 @@ describe("propose_page_edit & discard_page_edit Tool Handler Full Chain Integrat
     expect(res.message).toContain("Mismatch: current editor is viewing 'schedule', but draft targets 'agent'");
   });
 
-  it("rejects propose_page_edit on read-only (builtin) resources", async () => {
+  it("rejects propose_page_edit on read-only resources", async () => {
     useCopilotStateStore.getState().registerEditor({
-      instanceId: "editor-builtin",
+      instanceId: "editor-readonly",
       resourceType: "skills",
-      resourceId: "builtin-1",
+      resourceId: "skill-1",
       isReadOnly: true,
-      getCurrentData: () => ({ name: "Builtin Skill" }),
+      getCurrentData: () => ({ source: "anthropic" }),
       applyDraft: () => [],
       discardDraft: () => {},
     });
 
     const res = await executeProposePageEdit({
       resourceType: "skills",
-      draftData: { name: "Modified Builtin" },
+      draftData: { source: "modified" },
     });
 
     expect(res.isError).toBe(true);
-    expect(res.message).toContain("Permission Denied: This skills is read-only (builtin)");
+    expect(res.message).toContain("Permission Denied: This skills is read-only");
   });
 
   it("strictly rejects unknown rogue fields via Zod schema boundary", async () => {

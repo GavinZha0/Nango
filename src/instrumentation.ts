@@ -97,17 +97,6 @@ export async function register(): Promise<void> {
     console.error("[nango] dataset cache sweep failed:", err);
   }
 
-  // Built-in skills: seed `dist/builtin-skills.json` into the DB. Cheap on
-  // warm starts (per-skill checksum compare), tolerant of a missing bundle
-  // (logs and skips, so first-run dev without `pnpm build:skills` still boots).
-  // See docs/skills.md.
-  const { seedBuiltinSkills } = await import("@/lib/skills/builtin-reconcile");
-  try {
-    await seedBuiltinSkills();
-  } catch (err) {
-    console.error("[nango] builtin skills reconcile failed:", err);
-  }
-
   // Built-in infrastructure: seed default credentials (Dify Sandbox, SenseVoice)
   // and default MCP servers (Playwright) into DB if not present.
   const { seedBuiltinInfrastructure } = await import(

@@ -36,11 +36,11 @@ export async function executeProposePageEdit({
     };
   }
 
-  // Guard: reject read-only/builtin resources (#1)
+  // Guard: reject read-only resources (e.g. a historical run view)
   if (editor.isReadOnly) {
     return {
       isError: true,
-      message: `Permission Denied: This ${editor.resourceType} is read-only (builtin) and cannot be edited.`,
+      message: `Permission Denied: This ${editor.resourceType} is read-only and cannot be edited.`,
     };
   }
 

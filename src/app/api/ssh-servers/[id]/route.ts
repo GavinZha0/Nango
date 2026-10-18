@@ -35,7 +35,6 @@ export const GET = withSession<{ id: string }>(
     if (
       !canViewResource(
         {
-          source: undefined,
           visibility: row.visibility as "private" | "public",
           createdBy: row.createdBy,
         },

@@ -46,11 +46,6 @@ yarn-error.log*
 next-env.d.ts
 .idea/
 
-# skills/ is now an authoring view only (consumed by `pnpm build:skills`
-# at build time, materialised into dist/builtin-skills.json). Every
-# subdirectory with a valid SKILL.md is a builtin candidate; track them
-# all in git.
-
 # screenshots / reference images placed at the project root
 # during design iteration — not source
 /Screenshot-*.png

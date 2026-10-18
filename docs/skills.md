@@ -1,28 +1,24 @@
 # Skills
 
-> Audience: backend / frontend engineers, contributors authoring built-in skills
-> See also: `docs/rbac.md`, `docs/architecture.md`, `docs/builtin-runtime.md`
+> Audience: backend / frontend engineers, contributors authoring skills
+> See also: `docs/rbac.md`, `docs/architecture.md`, `docs/builtin-runtime.md`,
+> `docs/ssh.md`
 
 Skills are reusable, **DB-resident** capabilities a built-in agent can load
-on demand via [progressive disclosure](#progressive-disclosure). Each
+on demand via [progressive disclosure](#1-progressive-disclosure). Each
 skill is one row in the `skill` table plus zero-or-more rows in
 `skill_file`.
 
-There are **two kinds** of skills:
-
-| Kind | `source` | Origin | Mutability | Visibility default |
-|---|---|---|---|---|
-| **Built-in** | `'builtin'` | Authored in `<repo>/skills/`, baked into `dist/builtin-skills.json` at build time, reconciled into DB at boot | Read-only via API (any role); changes go through code review + redeploy | `'public'` |
-| **Custom** | `'local'` | Created by admin / editor through the UI editor or by uploading a `.skill` archive | Subject to RBAC × visibility × ownership rules (see `docs/rbac.md`) | `'private'` |
-
-The two kinds share the same table. The `source` column is the
-write-protection switch — `source = 'builtin'` rows can never be
-mutated through the API, regardless of role.
+There is **one kind of skill**: user-authored or imported. Every row is
+created through the UI / API or a `.skill` ZIP import, and is subject to
+RBAC × visibility × ownership rules (see `docs/rbac.md`). `source` is a
+free-form origin label (e.g. `"anthropic"`, `"skills.sh"`), not a
+built-in/custom switch; empty string means unlabeled.
 
 There is **no filesystem storage** at runtime. No `$NANGO_SKILLS_HOME`,
-no `fs.watch`, no path-traversal defenses. The on-disk
-`<repo>/skills/` tree is purely a developer-authoring view; the
-runtime never reads it.
+no `fs.watch`, no path-traversal defenses. The on-disk `<repo>/skills/`
+tree was an authoring view for a built-in pipeline that no longer exists;
+the runtime never reads it.
 
 ---
 
@@ -49,7 +45,9 @@ server-side tools to load the actual content:
 | `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
 
 Token cost is bounded by the description list, not by the full skill
-bodies.
+bodies. `run_skill_script_on_ssh` is mounted only when **both** at least
+one bound skill declares `scripts-on-ssh` **and** the agent has at least
+one bound `ssh_server`.
 
 ---
 
@@ -60,17 +58,23 @@ bodies.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid v4 | URL-exposed; FK target for `builtin_agent_tool.skill_id` |
-| `name` | text | Kebab-case slug, must equal the SKILL.md `name:` frontmatter field |
+| `name` | text | Kebab-case slug, mirrors the SKILL.md `name:` frontmatter field. Synced on every content write. |
 | `description` | text | Parsed from frontmatter |
 | `version` | text | Parsed from frontmatter; default `1.0.0`; informational |
 | `skill_md` | text | Full SKILL.md text (frontmatter + body) |
-| `checksum` | text | sha256 of the canonical bundle content; used by reconcile to skip no-op updates |
-| `source` | `'builtin' \| 'local'` | Hard write-protection for `'builtin'` |
+| `source` | text | Free-form user-set origin label (≤ 200 chars at the API edge); `""` = unlabeled. Carries no semantics. |
 | `enabled` | boolean | UI on/off toggle |
 | `visibility` | `'private' \| 'public'` | RBAC scope |
 | `created_by` | uuid → user | FK SET NULL on user purge |
 | `updated_by` | uuid → user | RBAC audit field, refreshed on every write |
 | `created_at` / `updated_at` | timestamp | Standard |
+
+The frontmatter `name:` is the single source of truth for a skill's
+name. The `Name` input was removed from the editor; renaming happens by
+editing the frontmatter. On write the server re-parses SKILL.md and
+syncs `skill.name`, `skill.description`, and `skill.version`. Renaming is
+supported; a rename colliding with another skill owned by the same
+creator returns 409.
 
 ### 2.2 `skill_file` table
 
@@ -97,9 +101,9 @@ the archive ships:
 Validated by regex on every write. Parent-directory traversal (`..`),
 absolute paths, back-slashes, dotfiles, and root-level files are
 rejected — the last two are skipped silently at import time as archive
-noise rather than failing the upload. There is no actual
-filesystem to traverse — `path` is only a string used as a logical
-locator for `get_skill_file(name, path)`.
+noise rather than failing the upload. There is no actual filesystem to
+traverse — `path` is only a string used as a logical locator for
+`get_skill_file(name, path)`.
 
 **Content storage**: `bytea`. Postgres TOASTs and compresses
 automatically. The 256 KB per-file cap is enforced at write time
@@ -110,40 +114,23 @@ automatically. The 256 KB per-file cap is enforced at write time
 | Limit | Value | Where checked |
 |---|---|---|
 | `path` length | 256 chars | API validation |
-| File count per skill | 100 | API validation + bundle build |
-| Single file size | 256 KB | API validation + bundle build |
-| Total skill size | 10 MB | API validation + bundle build |
+| File count per skill | 100 | API validation |
+| Single file size | 256 KB | API validation |
+| Total skill size | 10 MB | API validation |
+
+Caps are config-backed (`skill.max_file_bytes`, `skill.max_files`,
+`skill.max_total_bytes`) and shared with the import pipeline.
 
 ---
 
-## 3. Built-in skill publishing pipeline
+## 3. Authoring a skill
+
+Skills are authored as directory trees, identical to the Anthropic
+Claude Skills convention, then uploaded as a `.skill` (ZIP) archive or
+created as a single SKILL.md through the editor:
 
 ```
-<repo>/skills/                                ← source view (developer)
-  csv-data-summary/
-    SKILL.md
-    references/output-format.md
-    scripts/summarize.py
-    assets/template.html
-
-      │  pnpm build:skills  (prebuild hook)
-      ▼
-
-dist/builtin-skills.json                      ← build artifact (in image)
-
-      │  on container start: seedBuiltinSkills()
-      ▼
-
-skill rows (source='builtin') + skill_file rows   ← runtime SOT
-```
-
-### 3.1 Authoring built-in skills
-
-Developers write skills as directory trees, identical to the Anthropic
-Claude Skills convention:
-
-```
-<repo>/skills/csv-data-summary/
+my-skill/
 ├── SKILL.md                          # required
 ├── references/
 │   └── output-format.md
@@ -151,15 +138,10 @@ Claude Skills convention:
 │   └── summarize.py
 ├── assets/
 │   └── template.html
-└── evals/                            # optional, parsed only
+└── evals/                            # optional, stored as-is
 ```
 
-PR review sees the directory tree as one would for any code change.
-There is **no `.builtin-manifest.json`** — every directory under
-`<repo>/skills/` that has a valid `SKILL.md` is automatically a
-built-in candidate.
-
-### 3.2 SKILL.md format
+### 3.1 SKILL.md format
 
 ```markdown
 ---
@@ -177,125 +159,21 @@ Procedure ...
 
 | Frontmatter field | Required | Validation |
 |---|---|---|
-| `name` | yes | Kebab-case `[a-z0-9][a-z0-9_-]{0,63}`; must equal directory name (built-in) or unique within source (custom) |
+| `name` | yes | Kebab-case `[a-z0-9][a-z0-9_-]{0,63}`; unique per creator |
 | `description` | yes | 10–1000 chars |
 | `version` | no | Free-form string; default `'1.0.0'` |
 | `context` | no | Skills 2.0 spec field; parsed but unused in v1 |
 | `allowed-tools` | no | Skills 2.0 spec field; parsed but unused in v1 |
-| `scripts-on-ssh` | no | String or array of script filenames under `scripts/` (e.g. `['probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<file>`. Requires `.py` or `.sh`. Sub-directories forbidden. Build and import both fail if the declared file is missing or is not valid UTF-8. |
+| `scripts-on-ssh` | no | String or array of script filenames under `scripts/` (e.g. `['probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<file>`. Requires `.py` or `.sh`. Sub-directories forbidden. Import fails if the declared file is missing or is not valid UTF-8; PATCH checks existence only (the bytes were already gated at import). |
 | Other fields | no | Captured into `extras`, not consumed |
 
-### 3.3 Build script (`scripts/build-skills.ts`)
-
-Run as `pnpm build:skills`, hooked to `prebuild`:
-
-1. Walk `<repo>/skills/`. Each subdirectory with a `SKILL.md` is a
-   candidate.
-2. Parse and validate `SKILL.md` frontmatter. **Fail the build** on any
-   error (broken frontmatter must be fixed in PR, never escape into
-   prod).
-3. Read every file under `references/` `scripts/` `assets/` `evals/`.
-   Skip `.DS_Store`, `__MACOSX`, dotfiles, `node_modules`, anything not
-   in those four subdirectories.
-4. Enforce: file size ≤ 256 KB, count ≤ 100, total ≤ 10 MB. Detect
-   text vs binary by NUL-byte heuristic (matching runtime `isLikelyText`).
-5. Sort files by path for canonical output, then compute
-   `sha256(skillMd + canonical(files))`.
-6. Emit `dist/builtin-skills.json`.
-
-#### Bundle JSON format
-
-```jsonc
-{
-  "$schema": "nango/builtin-skills@1",
-  "generatedAt": "2026-05-04T12:34:56.000Z",
-  "skills": [
-    {
-      "name": "csv-data-summary",
-      "version": "1.2.0",
-      "description": "Summarize a CSV file with per-column statistics ...",
-      "checksum": "sha256:abc123...",
-      "skillMd": "---\nname: csv-data-summary\n...",
-      "files": [
-        {
-          "path": "references/output-format.md",
-          "size": 1234,
-          "contentType": "text/markdown",
-          "encoding": "utf8",
-          "content": "# Output format\n..."
-        },
-        {
-          "path": "scripts/summarize.py",
-          "size": 567,
-          "contentType": "text/x-python",
-          "encoding": "utf8",
-          "content": "import csv\n..."
-        },
-        {
-          "path": "assets/template.html",
-          "size": 8910,
-          "contentType": "text/html",
-          "encoding": "utf8",
-          "content": "<html>..."
-        }
-        // Binary assets use base64:
-        // {
-        //   "path": "assets/logo.png",
-        //   "size": 4096,
-        //   "contentType": "image/png",
-        //   "encoding": "base64",
-        //   "content": "iVBORw0KGgo..."
-        // }
-      ]
-    }
-  ]
-}
-```
-
-### 3.4 Boot-time reconcile (`seedBuiltinSkills`)
-
-Called once per Node process from `instrumentation.ts` (lazy on first
-use is also acceptable). Runs in a single transaction:
-
-```ts
-async function seedBuiltinSkills() {
-  const bundle = JSON.parse(await fs.readFile("dist/builtin-skills.json"));
-  const inDb  = await db.select(...).from(skill).where(eq(skill.source, "builtin"));
-  const inDbByName = new Map(inDb.map(r => [r.name, r]));
-  const inBundle   = new Set(bundle.skills.map(s => s.name));
-
-  await db.transaction(async tx => {
-    for (const s of bundle.skills) {
-      const row = inDbByName.get(s.name);
-      if (row && row.checksum === s.checksum) continue;          // unchanged
-      if (row) await updateBuiltinRow(tx, row.id, s);            // checksum changed → upsert
-      else     await insertBuiltinRow(tx, s);                    // new builtin
-    }
-    // Builtin removed from bundle → soft-disable, do NOT delete the row
-    // (preserve agent bindings; admin can revisit).
-    for (const row of inDb) {
-      if (!inBundle.has(row.name) && row.enabled) {
-        await tx.update(skill).set({ enabled: false }).where(eq(skill.id, row.id));
-      }
-    }
-  });
-}
-```
-
-Key invariants:
-
-1. **Built-in row IDs are stable**. Reconcile finds existing rows by
-   `(source='builtin', name)`. The UUID never regenerates, so
-   `builtin_agent_tool.skill_id` references survive every redeploy.
-2. **Removed built-ins are not deleted** — they're disabled. Agents
-   that used to bind them keep their config; admin can repoint.
-3. **Custom rows (`source='local'`) are never touched** by reconcile.
-4. **Cheap on warm starts**: 99% of skills have unchanged checksum, so
-   the transaction is a small sequence of no-op SELECTs.
+`dependencies-python` is no longer parsed. Sandbox packages are
+hand-maintained in `docker/dify-sandbox/requirements.txt`; a skill's
+frontmatter declarations are advisory only.
 
 ---
 
-## 4. Custom skill lifecycle
+## 4. Skill lifecycle
 
 ### 4.1 Editor flow (UI)
 
@@ -303,9 +181,9 @@ Key invariants:
 
 | Action | Endpoint | RBAC |
 |---|---|---|
-| Create | `POST /api/skills` body `{ skillMd, visibility? }` | `withEditor` |
-| Read | `GET /api/skills/:id` returns row + `missingSshScripts` | `withSession` (visibility-filtered) |
-| Update content | `PATCH /api/skills/:id` body `{ skillMd?, enabled?, visibility? }` | `withEditor` + `canEditResource` |
+| Create | `POST /api/skills` body `{ skillMd, visibility?, source? }` | `withEditor` |
+| Read | `GET /api/skills/:id` returns row + `files` + `scriptsOnSsh` + `missingSshScripts` | `withSession` (visibility-filtered) |
+| Update content / source | `PATCH /api/skills/:id` body `{ skillMd?, source?, enabled?, visibility? }` | `withEditor` + `canEditResource` |
 | Delete | `DELETE /api/skills/:id` | `withEditor` + `canDeleteResource` |
 | List | `GET /api/skills` | `withSession` (visibility-filtered) |
 | File read | `GET /api/skills/:id/files/[...path]` | `withSession` (parent skill visibility-filtered) |
@@ -321,7 +199,6 @@ exist, because a dangling declaration is invisible until
 
 | Boundary | Judged against | Outcome |
 |---|---|---|
-| `pnpm build:skills` | Bundle file list | Build fails |
 | `POST /api/skills/import` | In-memory ZIP entries | 400 before any write |
 | `POST /api/skills` | Nothing — a created row has no files | 400 |
 | `PATCH /api/skills/:id` | `storage.listFiles(id)` | 400, body untouched |
@@ -329,18 +206,25 @@ exist, because a dangling declaration is invisible until
 
 Declared scripts must additionally be valid UTF-8 text, because their source is
 embedded in a command string and executed on a remote host. The same pure
-helper (`src/lib/skills/ssh-script-source.ts`) gates the build (fails), the
-import (400), and dispatch (`INVALID_SCRIPT_BYTES`). `PATCH` checks existence
-only — re-reading every stored script on each save is not worth it when the
-bytes were already gated at import.
+helper (`src/lib/skills/ssh-script-source.ts`) gates the import (400) and
+dispatch (`INVALID_SCRIPT_BYTES`). `PATCH` checks existence only — re-reading
+every stored script on each save is not worth it when the bytes were already
+gated at import.
 
-The editor lets the user edit `SKILL.md` directly; helper files in any
-folder get a separate upload widget — file
-upload lands as a write to `skill_file`. Built-in rows render
-**read-only** (`source = 'builtin'` makes every write API return 400 /
-403); the editor's "Save" button is hidden.
+The editor lets the user edit `SKILL.md` directly, edit the free-form
+`Source` label, and preview helper files in any folder. File upload is not a
+write surface: helper files arrive only through ZIP import.
 
-### 4.2 ZIP import
+### 4.2 Renaming
+
+PATCH allows the frontmatter `name:` to change. The route re-parses the new
+SKILL.md and checks for a clash on `(name, createdBy)` excluding the row
+itself; a clash returns 409. `updateContent` writes the new name into the
+`skill.name` column in the same statement as the body, so list queries and
+name-based lookups stay consistent. Agent bindings use `skillId`, so renaming
+does not orphan `builtin_agent_tool` rows.
+
+### 4.3 ZIP import
 
 ```
 POST /api/skills/import    multipart/form-data file=<archive.skill>
@@ -360,26 +244,25 @@ POST /api/skills/import    multipart/form-data file=<archive.skill>
      - track total size; bail if > 10 MB
 4. Locate SKILL.md (root or single nested folder).
 5. Parse + validate frontmatter.
-6. Reject if name collides with an existing skill (404 / 409 path).
-7. In a single transaction:
-     - INSERT skill row (source='local', visibility='private', createdBy=session.user.id)
-     - INSERT skill_file rows for every surviving entry, at its archive path
+6. Reject if the creator already owns a skill with the same name (409).
+7. Persist the skill row, then helper-file rows at their archive paths.
 8. Return the new row's id.
 ```
 
-**Lifecycle after import is identical to a `POST /api/skills` custom skill** — the row lives in the `skill` + `skill_file` tables, the user sees it in `/skills` list, can edit it, and can `DELETE /api/skills/:id` exactly like any other `source='local'` skill. The `invalidateForSkillChange(skillId)` hook fires the same way. Nothing about import creates a "transient" skill.
+Import does not auto-fill `source`; the new row starts unlabeled and the
+user can set a label in the editor. The resulting row is a normal skill:
+listed in `/skills`, editable, and deletable like any other row.
 
-What's "in-memory only" is the **ZIP processing pipeline**, not the resulting skill: the upload is parsed entirely as Buffers + strings without ever writing temp files to the host filesystem. This is a security property (zero attack surface for path traversal — there is no fs target to traverse to), not a persistence claim. Memory bounds: `Content-Length` ≤ 10 MB hard cap on the upload, plus per-entry uncompressed size accounting during decode to defeat zip-bomb amplification.
+What's "in-memory only" is the **ZIP processing pipeline**, not the resulting
+skill: the upload is parsed entirely as Buffers + strings without ever writing
+temp files to the host filesystem. This is a security property (zero attack
+surface for path traversal — there is no fs target to traverse to), not a
+persistence claim. Memory bounds: `Content-Length` ≤ 10 MB hard cap on the
+upload, plus per-entry uncompressed size accounting during decode to defeat
+zip-bomb amplification.
 
 The `.skill` format is the same ZIP layout DeerFlow uses, so packs
 created elsewhere can be imported directly.
-
-### 4.3 Custom-skill ID stability
-
-Custom skills get a fresh UUID at create time. Renames are **not
-supported** via PATCH (would require updating frontmatter `name:` and
-all incoming `builtin_agent_tool.skill_name` resolutions). To rename:
-delete + recreate.
 
 ---
 
@@ -388,16 +271,13 @@ delete + recreate.
 The full rules live in `docs/rbac.md` §2.2. For skills specifically:
 
 ```
-canViewSkill = visibility=='public' OR createdBy==self OR isAdmin
-canEdit      = source!='builtin' AND isEditorOrAdmin AND
-               (visibility=='public' OR createdBy==self)
-canDelete    = source!='builtin' AND (createdBy==self OR isAdmin)
-canChange    = canDelete   // visibility / enabled gate
+canView = visibility=='public' OR createdBy==self OR isAdmin
+canEdit = isEditorOrAdmin AND (visibility=='public' OR createdBy==self)
+canDelete = createdBy==self OR isAdmin
+canChange = canDelete   // visibility / enabled gate
 ```
 
-**Built-in is the absolute write barrier**. No role can mutate a
-`source='builtin'` row through the API.
-
+`source` is not part of any permission decision — it is a display label.
 `updatedBy` is set automatically on every PATCH. Listing uses
 `visibilitySql()` from `lib/auth/permissions.ts`.
 
@@ -409,12 +289,12 @@ Two caches participate in the skills hot path:
 
 | Pool | Keyed by | Module | Purpose |
 |---|---|---|---|
-| `agentPool` | agentId | `lib/agent/agent-pool.ts` | Per-agent decoded `AgentSpec`, includes `[skillId, ...]` references |
+| `agentPool` | agentId | `lib/builtin-agents/agent-pool.ts` | Per-agent decoded `AgentSpec`, includes `[skillId, ...]` references |
 | `skillPool` | skillId | `lib/skills/skill-pool.ts` | Per-skill `SkillSpec` (skillMd + parsed frontmatter + metadata) |
 
-Both are LRU + 10-min TTL. After every skill mutation
-(`POST` / `PATCH` / `DELETE` / boot reconcile / ZIP import), the
-write path calls `invalidateForSkillChange(skillId)` which:
+Both are LRU + 10-min TTL (configurable via `cache.skill_pool.*`). After every
+skill mutation (`POST` / `PATCH` / `DELETE` / ZIP import), the write path calls
+`invalidateForSkillChange(skillId)` which:
 
 1. Drops the cached `SkillSpec` from `skillPool`.
 2. Reverse-queries `builtin_agent_tool` for every agent binding this
@@ -462,19 +342,11 @@ in PG is not the anti-pattern it's reputed to be at this scale.
 
 ### 8.2 Skill identity
 
-Skills are identified by `(id)` (URL-stable) or `(source, name)` (the
-uniqueness key boot reconcile uses to find existing built-in rows).
-There is no filesystem locator on the row.
+Skills are identified by `(id)` (URL-stable). Names are unique per
+creator and are expected to match the SKILL.md frontmatter, but the id
+is what agent bindings and caches use.
 
-### 8.3 Why preserve disabled built-ins instead of deleting
-
-A built-in removed in a redeploy may still be referenced by user
-`builtin_agent_tool` rows. Hard delete with FK SET NULL would silently
-break those agent configs. Soft-disable (`enabled=false`) keeps the
-configuration visible: the admin sees "disabled built-in", chooses to
-unbind or replace, then can manually delete if desired.
-
-### 8.4 ZIP import isn't path traversal
+### 8.3 ZIP import isn't path traversal
 
 `skill_file.path` is a **string column**, not a filesystem path. A
 hostile ZIP entry named `../../etc/passwd` would simply fail the regex
@@ -483,7 +355,7 @@ to disk ever happens. `.skill` packs are *processed* entirely in
 memory and *persisted* into `skill` + `skill_file` rows like any
 other custom skill — no fs side effect at any stage.
 
-### 8.5 Caching `get_skill_file` is unnecessary
+### 8.4 Caching `get_skill_file` is unnecessary
 
 A single `SELECT content FROM skill_file WHERE skill_id = ? AND path = ?`
 on a 4-byte-keyed unique index is sub-millisecond on a warm
@@ -492,46 +364,14 @@ connection. Cache hit ratio for helper files is intrinsically low
 here would optimize ~5% of calls at the cost of cache-coherence
 bookkeeping.
 
-### 8.6 Reconcile is not a hot path
-
-`seedBuiltinSkills` runs **once per Node process**. Even with 100
-built-in skills × 50 files each, the worst-case warm-start cost is
-~100 SELECT existence checks (most return checksum-match → skip). On
-a cold start (new DB), it's ~5 000 INSERTs in one transaction —
-seconds, not minutes.
-
 ---
 
 ## 9. Future work
 
-- **Renaming via PATCH** — currently rejected by the API; would need to
-  rewrite `builtin_agent_tool` references and frontmatter `name:` in
-  one transaction. Workaround today is delete + recreate.
 - **Languages beyond .py / .sh** — V1 dispatch table covers python3
   and bash only; adding e.g. `.js` / `.ts` requires a row in
   `INTERPRETER_BY_EXTENSION` AND the binary present in the sandbox
-  rootfs. Out of scope until a real use case lands.
-
-### 9.x Skill-declared Python dependencies
-
-**Status:** Built-in skills only. User skills inherit the image's dependencies.
-
-#### Author quick reference
-
-Declare dependencies in `SKILL.md` frontmatter:
-```yaml
----
-name: my-skill
-description: ...
-dependencies-python: ["scikit-learn>=1.3", "scipy"]
----
-```
-
-**Commands:**
-- `pnpm sandbox:build`: Regenerate `docker/dify-sandbox/requirements.txt`.
-- `pnpm sandbox:check`: CI drift check.
-
-The build pipeline aggregates `dependencies-python` from all built-in `SKILL.md` files, merges them with core packages, detects version conflicts (hard-failing the build), and writes a unified `requirements.txt`.
-
-#### Future ecosystems
-The flat-key naming (`dependencies-python`) leaves room for future extensions like `dependencies-node` or `dependencies-system`.
+  rootfs.
+- **Editing helper files in place** — helper files are still immutable
+  after import; a future file-write endpoint would need the same caps
+  and path validation as the ZIP importer.

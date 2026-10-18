@@ -3,7 +3,6 @@ export {
   type SkillRecord,
   type SkillFileRecord,
   type SkillFileMeta,
-  type SkillSource,
   type SkillVisibility,
   type CreateCustomSkillInput,
   type UpdateSkillContentInput,

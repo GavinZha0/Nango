@@ -25,8 +25,6 @@ export interface SkillSpec {
   skillMd: string;
   /** Parsed view of SKILL.md.  Frontmatter `extras` is preserved. */
   parsed: ParsedSkillMd;
-  /** Where the skill comes from. */
-  source: "builtin" | "local";
   /** True iff the skill row is enabled in DB. */
   enabled: boolean;
   /** "private" | "public" — visibility scope. */
@@ -128,7 +126,6 @@ export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
       name: SkillTable.name,
       description: SkillTable.description,
       skillMd: SkillTable.skillMd,
-      source: SkillTable.source,
       enabled: SkillTable.enabled,
       visibility: SkillTable.visibility,
       createdBy: SkillTable.createdBy,
@@ -140,9 +137,6 @@ export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
   const row = rows[0];
   if (!row) return null;
   if (!row.enabled) return null;
-
-  const source: "builtin" | "local" =
-    row.source === "builtin" ? "builtin" : "local";
 
   // Re-parse the cached skillMd so callers can introspect frontmatter
   // (allowed-tools, context mode) without a second DB read.
@@ -161,7 +155,6 @@ export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
     description: row.description,
     skillMd: row.skillMd,
     parsed,
-    source,
     enabled: row.enabled,
     visibility: row.visibility,
     createdBy: row.createdBy,

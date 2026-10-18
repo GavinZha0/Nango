@@ -57,7 +57,6 @@ export const GET = withSession<{ id: string }>(
       !agent
       || !canViewResource(
         {
-          source: "local",
           visibility: agent.visibility as "private" | "public",
           createdBy: agent.createdBy,
         },
@@ -219,7 +218,6 @@ export const PATCH = withEditor<{ id: string }>(
     }
 
     const rbac = {
-      source: "local" as const,
       visibility: existing.visibility as "private" | "public",
       createdBy: existing.createdBy,
     };
@@ -407,7 +405,6 @@ export const DELETE = withEditor<{ id: string }>(
     if (
       !canDeleteResource(
         {
-          source: "local",
           visibility: existing.visibility as "private" | "public",
           createdBy: existing.createdBy,
         },

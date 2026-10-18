@@ -18,19 +18,6 @@ export interface SkillFrontmatter {
   /** Skills 2.0: tool whitelist. Parsed but unused at runtime. */
   allowedTools?: string[];
   /**
-   * PyPI packages required by `scripts/*.py` in this skill.
-   * `scripts/collect-skill-deps.ts` aggregates these into
-   * `docker/sandbox/requirements.txt` at sandbox image build time.
-   * Entries are full pip specs with optional version specifier
-   * (e.g. `["scikit-learn>=1.3", "scipy"]`). The sandbox image
-   * always ships `duckdb / pandas / numpy / pyarrow` regardless.
-   *
-   * NOTE: enforced only at image build time. Custom (local) skills
-   * inherit whatever the running image has — their declarations are
-   * advisory until promoted to builtin.
-   */
-  dependenciesPython?: string[];
-  /**
    * Scripts (normalized to `scripts/<file>`) that must run on a bound SSH
    * host via `run_skill_script_on_ssh` instead of the sandbox.
    * Accepted key spellings: `scripts-on-ssh` (canonical), `scripts_on_ssh`,
@@ -164,20 +151,6 @@ export function parseSkillMd(text: string): ParsedSkillMd {
     delete raw.allowedTools;
   }
 
-  // PyPI deps for sandbox image build aggregation.
-  // Inline-array syntax only (matches `parseValue`'s capability).
-  let dependenciesPython: string[] | undefined;
-  if ("dependencies-python" in raw) {
-    const v: string | string[] = raw["dependencies-python"];
-    if (typeof v === "string") {
-      // Single bare value or empty string. Empty == no deps.
-      dependenciesPython = v.length === 0 ? [] : [v];
-    } else {
-      dependenciesPython = v;
-    }
-    delete raw["dependencies-python"];
-  }
-
   // Scripts that must run on an SSH host rather than in the sandbox.
   // Three canonical alias spellings — same precedence pattern as allowedTools.
   let scriptsOnSsh: string[] | undefined;
@@ -206,7 +179,6 @@ export function parseSkillMd(text: string): ParsedSkillMd {
       version,
       ...(context !== undefined ? { context } : {}),
       ...(allowedTools !== undefined ? { allowedTools } : {}),
-      ...(dependenciesPython !== undefined ? { dependenciesPython } : {}),
       ...(scriptsOnSsh !== undefined ? { scriptsOnSsh } : {}),
       extras: raw,
     },
@@ -324,9 +296,9 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
  * that actually exist (or are about to be written).
  *
  * Pure by design: callers supply the path set from wherever it is known —
- * the bundle in `scripts/build-skills.ts`, the in-memory ZIP entries, or
- * `SkillStorage.listFiles()` — instead of this module poking storage. That
- * keeps the check usable before a skill row has any files at all.
+ * the in-memory ZIP entries or `SkillStorage.listFiles()` — instead of this
+ * module poking storage. That keeps the check usable before a skill row has
+ * any files at all.
  *
  * @param entries        `frontmatter.scriptsOnSsh` (already normalized to
  *                       `scripts/<file>` by {@link parseSkillMd}).

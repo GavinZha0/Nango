@@ -243,7 +243,7 @@ defineTool({
 >
 > **The 16,000 cap bounds the string that reaches `sshd`, not the assembled command.** `runOnBoundServer` measures `composeWireCommand(command, server.loginShell)` — the same function `execOnServer` sends — so a login-shell host's extra re-quoting (`'` → `'\''`, four characters per quote) counts against it. `run_ssh_command`'s 8,000 is deliberately an *input* cap: it limits what the model may write, and its login-shell wrapping is allowed to exceed it.
 >
-> Script bytes are decoded with a fatal `TextDecoder` before assembly. `Buffer.toString("utf-8")` never throws — it replaces ill-formed sequences with U+FFFD, which would execute as mojibake on the host — so invalid UTF-8 and NUL bytes are refused with `INVALID_SCRIPT_BYTES`, and a leading BOM (which `bash` and `python3 -c` both reject) is stripped. Import and `pnpm build:skills` apply the same check, so dispatch normally never sees the refusal.
+> Script bytes are decoded with a fatal `TextDecoder` before assembly. `Buffer.toString("utf-8")` never throws — it replaces ill-formed sequences with U+FFFD, which would execute as mojibake on the host — so invalid UTF-8 and NUL bytes are refused with `INVALID_SCRIPT_BYTES`, and a leading BOM (which `bash` and `python3 -c` both reject) is stripped. Import applies the same check, so dispatch normally never sees the refusal.
 
 > **Mounting rule.** The tool exists only when the agent binds BOTH at least one
 > skill declaring `scripts-on-ssh` AND at least one `ssh_server` (see

@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
@@ -89,7 +88,6 @@ export interface SkillFileTreeProps {
   /** `SKILL_MD_PATH` or a `skill_file.path`. */
   selected: string;
   onSelect: (path: string) => void;
-  source: string;
   /** Normalized `scripts/<file>` entries from the frontmatter. */
   scriptsOnSsh: string[];
   missingSshScripts: string[];
@@ -101,7 +99,6 @@ export function SkillFileTree({
   files,
   selected,
   onSelect,
-  source,
   scriptsOnSsh,
   missingSshScripts,
   skillMdDirty,
@@ -180,17 +177,6 @@ export function SkillFileTree({
 
   return (
     <div className="flex h-full w-80 shrink-0 flex-col border-r">
-      {source === "builtin" && (
-        <div className="border-b px-3 py-2">
-          <Badge
-            variant="outline"
-            className="h-4 px-1 text-[10px] leading-none text-muted-foreground"
-          >
-            builtin · read-only
-          </Badge>
-        </div>
-      )}
-
       {missingSshScripts.length > 0 && (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
           <code className="font-mono">scripts-on-ssh</code> declares missing

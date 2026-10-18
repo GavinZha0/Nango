@@ -68,23 +68,18 @@ canView    = (visibility == 'public')
           OR (createdBy == self)
           OR isAdmin
 
-canEdit    = source != 'builtin'
-          AND isEditorOrAdmin
+canEdit    = isEditorOrAdmin
           AND ((visibility == 'public') OR (createdBy == self))
 
-canDelete  = source != 'builtin'
-          AND ((createdBy == self) OR isAdmin)
+canDelete  = (createdBy == self) OR isAdmin
 
 canChangeVisibility = canDelete    // same gate as delete
 
 canToggleEnabled    = canChangeVisibility   // owner / admin only
 ```
 
-`source != 'builtin'` is an **absolute write barrier**: built-in
-resources (shipped via image / build artefact) are never editable
-through the UI, regardless of role. Want to customise a builtin?
-Wait until v2 introduces `Duplicate`; for now, contribute the change
-to the codebase.
+`source` is a free-form origin label and is **not** consulted by any
+permission decision.
 
 ### 2.3 `credential` rules
 
@@ -301,26 +296,22 @@ has been soft-deleted.
 
 These are properties the system relies on; violating them is a bug.
 
-1. **`source = 'builtin'` is immutable**: no UI write path may change a
-   builtin row's content, visibility, or enabled state. Only the
-   reconcile job may UPSERT them.
-
-2. **`createdBy` never changes**: it's set once at INSERT and is the
+1. **`createdBy` never changes**: it's set once at INSERT and is the
    stable identity of the original author.
 
-3. **`updatedBy` always points to a real user (or NULL)**: soft-deleted
+2. **`updatedBy` always points to a real user (or NULL)**: soft-deleted
    users still have rows, so the FK never breaks.
 
-4. **Soft-deleted users cannot have active sessions**: deletion clears
+3. **Soft-deleted users cannot have active sessions**: deletion clears
    the `session` table for that user atomically.
 
-5. **At least one admin always exists**: the demote / soft-delete API
+4. **At least one admin always exists**: the demote / soft-delete API
    refuses if it would empty the admin set.
 
-6. **`visibility = 'public'` does not imply `enabled = true`**: a public
+5. **`visibility = 'public'` does not imply `enabled = true`**: a public
    resource can be temporarily disabled without changing its visibility.
 
-7. **Owner-only tables (`schedule`, `artifact`, `thread`,
+6. **Owner-only tables (`schedule`, `artifact`, `thread`,
    `notification`) ignore `visibility` entirely**: the owner is the
    sole reader / writer, plus admin for forensics.
 

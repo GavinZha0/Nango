@@ -24,7 +24,6 @@ export const GET = withSession<{ id: string; path: string[] }>(
     const [row] = await db
       .select({
         id: SkillTable.id,
-        source: SkillTable.source,
         visibility: SkillTable.visibility,
         createdBy: SkillTable.createdBy,
       })
@@ -39,7 +38,6 @@ export const GET = withSession<{ id: string; path: string[] }>(
     if (
       !canViewResource(
         {
-          source: row.source as "builtin" | "local",
           visibility: row.visibility as "private" | "public",
           createdBy: row.createdBy,
         },

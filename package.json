@@ -8,13 +8,7 @@
   },
   "scripts": {
     "dev": "next dev -p 9300",
-    "predev": "pnpm build:skills",
-    "build:skills": "tsx scripts/build-skills.ts",
-    "sandbox:deps": "tsx scripts/collect-skill-deps.ts",
-    "sandbox:check": "tsx scripts/collect-skill-deps.ts --check",
-    "prebuild": "pnpm build:skills",
     "build": "next build",
-    "prestart": "pnpm build:skills",
     "start": "next start -p 9300",
     "lint": "eslint",
     "test": "vitest run",

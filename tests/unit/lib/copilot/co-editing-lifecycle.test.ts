@@ -93,35 +93,6 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
     });
   });
 
-  describe("Scenario 2: Read-Only Builtin Barrier (#1)", () => {
-    it("rejects draft applications on builtin / immutable resources", () => {
-      let skillData = { name: "python-runner", source: "builtin", skillMd: "original code" };
-      const builtinSkillEditor: EditorRegistration = {
-        instanceId: "editor-builtin-skill",
-        resourceType: "skills",
-        resourceId: "builtin-1",
-        isReadOnly: true, // Locked builtin resource
-        applyDraft: (draft) => {
-          if (builtinSkillEditor.isReadOnly) return [];
-          skillData = { ...skillData, ...draft };
-          return Object.keys(draft);
-        },
-        getCurrentData: () => skillData,
-        discardDraft: () => {},
-      };
-
-      useCopilotStateStore.getState().registerEditor(builtinSkillEditor);
-
-      const activeEditor = useCopilotStateStore.getState().activeEditor;
-      expect(activeEditor?.isReadOnly).toBe(true);
-
-      // Attempting to apply draft should be rejected
-      const applied = activeEditor?.applyDraft({ skillMd: "malicious replacement" });
-      expect(applied).toEqual([]);
-      expect(skillData.skillMd).toBe("original code");
-    });
-  });
-
   describe("Scenario 3: Empty Draft Defense (#6)", () => {
     it("detects and rejects empty draft objects without state corruption", () => {
       let scheduleData = { name: "Audit Job", task: "Audit" };

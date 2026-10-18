@@ -44,7 +44,7 @@ export const ScheduleDraftSchema = z.object({
 }).strict();
 
 export const SkillDraftSchema = z.object({
-  name: z.string().optional().describe("Skill display name (editable on creation)"),
+  source: z.string().max(200).optional().describe("Free-form origin label (e.g. anthropic, skills.sh); empty = unlabeled"),
   skillMd: z.string().optional().describe("Full SKILL.md contents including YAML frontmatter and procedure instructions"),
 }).strict();
 

@@ -34,9 +34,6 @@ pnpm test         # Vitest unit tests
 pnpm test:e2e     # Playwright E2E
 pnpm db:generate  # Drizzle migration from schema diff (commit BOTH .sql + meta/*.json)
 pnpm db:migrate   # Apply pending migrations
-pnpm build:skills # Bake builtin skills directory tree → dist/builtin-skills.json
-pnpm sandbox:build  # Aggregate per-skill python deps → docker/dify-sandbox/requirements.txt
-pnpm sandbox:check  # Guard CI against drift between SKILL.md deps and requirements.txt
 pnpm comments:check:all   # Run comment guard sweep on src/ and scripts/
 ```
 
@@ -44,14 +41,14 @@ pnpm comments:check:all   # Run comment guard sweep on src/ and scripts/
 
 1. **Route groups**: `(auth)` for sign-in/sign-up; `(workspace)` for authenticated pages.
 2. **API routes**: Wrap every handler under `src/app/api/` with `withSession`, `withEditor`, or `withAdmin` from `src/lib/http/route-handlers.ts`. Handlers throw `ApiError` to render standard envelopes; `parseBody(req, schema)` handles Zod validation errors automatically.
-3. **Role-based access** (`docs/rbac.md`): `admin` (everything), `editor` (AI resource builder), `user` (consumer). Page-level guards: `requireSession/Editor/Admin`. Resource permissions evaluated by `canEditResource` / `canDeleteResource` / `canChangeVisibility`. `source = 'builtin'` is a write barrier no role can pass.
+3. **Role-based access** (`docs/rbac.md`): `admin` (everything), `editor` (AI resource builder), `user` (consumer). Page-level guards: `requireSession/Editor/Admin`. Resource permissions evaluated by `canEditResource` / `canDeleteResource` / `canChangeVisibility`.
 4. **Credentials**: Managed only by admin. All secrets encrypted with AES-256-GCM.
 5. **Built-in agents**: Use bound `credentialId` for model auth (no env API key fallback).
 6. **Backend agents**: Each platform lives under `src/lib/backends/<slug>/`. Handlers bridge upstream REST/SSE into AG-UI events on the fly using `bridge-runtime-kit.server.ts`. Secrets stay server-side; browser only sees AG-UI. See `docs/backend-integration.md`.
 7. **Schema**: Domain tables live in `src/lib/db/schema.ts`. Migrations in `src/lib/db/migrations/`. ALWAYS run `pnpm db:generate --name=<name>` to produce migrations. Commit BOTH the SQL and `meta/` snapshot. Never edit or delete the Drizzle snapshots.
 8. **Server-only imports**: Use `import "server-only"` for modules that must never reach the client bundle.
 9. **Caching**: Six process-wide caches live in the Node process (credentials, agent specs, MCP providers, skills, entity catalog, thread-state). Call appropriate hooks from `credentials/invalidation.ts` or `skills/invalidation.ts` on writes to invalidate.
-10. **Skills**: DB-resident reusable capabilities. Builtin skills (`source='builtin'`) seeded from `dist/builtin-skills.json` at boot. Runtime injects prompt blocks and mounts server-side tools `get_skill`, `get_skill_file`, `run_skill_script`, and `run_skill_script_on_ssh` (when `scripts-on-ssh` and SSH bindings are present). See `docs/skills.md` and `docs/ssh.md`.
+10. **Skills**: DB-resident reusable capabilities (`skill` + `skill_file`), authored through the editor or imported as a `.skill` ZIP. `source` is a free-form origin label, not a builtin switch. The frontmatter `name:` is the single source of truth; PATCH re-syncs it and allows renames. Runtime injects prompt blocks and mounts server-side tools `get_skill`, `get_skill_file`, `run_skill_script`, and `run_skill_script_on_ssh` (when `scripts-on-ssh` and SSH bindings are present). See `docs/skills.md` and `docs/ssh.md`.
 11. **Runner / orchestration kernel**: Every dispatch creates an `entity_run` row and timeline event. Programmatic runs use `runner.start({ mode: "sync" | "async" })`. See `docs/orchestrator.md`.
 12. **Supervisor (Nango) + agent `role` enum**: `builtin_agent.role` can be `'supervisor' | 'secretary' | 'evaluator' | null`. Uniqueness enforced (1 supervisor & 1 secretary per user). Supervisor identity is server-managed and read-only (defined in `lib/constants/supervisor.ts`). `evaluator` roles are programmatically scheduled for quality assessment (see `docs/evaluation.md`); their runtime execution calls the `submit_evaluation_scores` tool. `secretary` roles are reserved.
 13. **Notifications & async**: `mode: "async"` runs return a `runId` and notify via the bell dropdown. SSE updates multiplexed over `/api/runs/stream`. Process boots sweep prior zombie runs using `process_boot` startedAt.

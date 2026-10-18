@@ -8,6 +8,13 @@
       "when": 1791595568779,
       "tag": "0000_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792332001713,
+      "tag": "0001_drop-skill-checksum-relabel-source",
+      "breakpoints": true
     }
   ]
 }

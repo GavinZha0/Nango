@@ -788,19 +788,13 @@ export const McpServerTable = pgTable("mcp_server", {
  *     ---
  *     # Body markdown ...
  *
- * source:
- *   "builtin" — shipped with the application.  Authored under
- *               `<repo>/skills/<dirname>/`, baked into
- *               `dist/builtin-skills.json` at build time, reconciled
- *               into the DB at boot.
- *   "local"   — user-created skill.  Created via `POST /api/skills`
- *               (or future `POST /api/skills/install` ZIP upload);
- *               purely DB-resident.
+ * name + description + version are parsed from the SKILL.md frontmatter
+ * and cached here for list queries; skillMd holds the full text. The
+ * frontmatter `name:` is the single source of truth — PATCH syncs this
+ * column whenever skillMd changes.
  *
- * name + description are parsed from the SKILL.md frontmatter and
- * cached here for list queries; skillMd holds the full text.
- * checksum is the sha256 over (skillMd ‖ canonical helper files) used
- * by boot reconcile to skip no-op updates on built-ins.
+ * source is a free-form, user-set origin label (e.g. "anthropic",
+ * "skills.sh"); empty string = unlabeled. It carries no semantics.
  *
  * visibility: "private" — visible to the creator only;
  *             "public"  — available to all users.
@@ -822,11 +816,8 @@ export const SkillTable = pgTable("skill", {
   /** Full content of SKILL.md (frontmatter + body), stored verbatim for UI. */
   skillMd: text("skill_md").notNull(),
 
-  /** SHA-256 hex digest of skillMd; null = pre-checksum legacy row. */
-  checksum: text("checksum"),
-
-  /** Where the skill comes from. */
-  source: text("source").notNull().default("local"), // "builtin" | "local"
+  /** User-set free-form origin label (e.g. "anthropic"); "" = unlabeled. */
+  source: text("source").notNull().default(""),
 
   enabled: boolean("enabled").notNull().default(true),
 
@@ -1134,7 +1125,6 @@ export interface McpToolSnapshot {
 
 export type McpServerEntity = typeof McpServerTable.$inferSelect;
 export type SkillEntity = typeof SkillTable.$inferSelect;
-export type SkillSource = "builtin" | "local";
 export type BuiltinAgentEntity = typeof BuiltinAgentTable.$inferSelect;
 export type BuiltinAgentToolEntity = typeof BuiltinAgentToolTable.$inferSelect;
 export type AgentToolType =

@@ -67,9 +67,8 @@ instrumentation.ts (Next.js register hook)
   ├─ 2. seedDefaults()             — inserts missing keys (see §4)
   ├─ 3. loadAllConfigs()           — populates in-memory cache
   │
-  ├─ 4. seedBuiltinSkills()        — may read config
-  ├─ 5. bootstrapScheduler()       — may read config
-  └─ 6. getActiveAdapter()         — reads sandbox service configuration
+  ├─ 4. bootstrapScheduler()       — may read config
+  └─ 5. getActiveAdapter()         — reads sandbox service configuration
 ```
 
 Steps 2–3 run before any module that reads config values.

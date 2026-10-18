@@ -6,7 +6,6 @@ import type { Session } from "@/lib/http/route-handlers";
 
 // Domain types
 
-export type SkillSource = "builtin" | "local";
 export type SkillVisibility = "private" | "public";
 
 /**
@@ -22,7 +21,6 @@ export interface SkillRecord {
   version: string;
   /** Full SKILL.md text (frontmatter + body). */
   skillMd: string;
-  source: SkillSource;
   enabled: boolean;
   visibility: SkillVisibility;
   /** Original creator; null after hard-purge of that user (FK SET NULL). */
@@ -56,6 +54,8 @@ export interface CreateCustomSkillInput {
   /** Verbatim SKILL.md text. Frontmatter `name` becomes the row's name. */
   skillMd: string;
   visibility?: SkillVisibility;
+  /** Free-form origin label ("" = unlabeled). */
+  source?: string;
   /** Caller's user id; persisted as `createdBy`. */
   createdBy: string;
 }
@@ -63,6 +63,8 @@ export interface CreateCustomSkillInput {
 export interface UpdateSkillContentInput {
   skillId: string;
   skillMd: string;
+  /** Free-form origin label; omit to leave unchanged. */
+  source?: string;
   /** Caller's user id; persisted as `updatedBy`. */
   updatedBy: string;
 }
@@ -92,7 +94,7 @@ export interface SkillStorage {
   readFile(skillId: string, path: string): Promise<SkillFileRecord | null>;
   listFiles(skillId: string): Promise<SkillFileMeta[]>;
 
-  // Write (custom skills only — `source = 'builtin'` is rejected at the API edge)
+  // Write (RBAC and path/caps validation are enforced at the API edge)
   createCustom(input: CreateCustomSkillInput): Promise<{ id: string }>;
   updateContent(input: UpdateSkillContentInput): Promise<void>;
   updateFlags(input: UpdateSkillFlagsInput): Promise<void>;

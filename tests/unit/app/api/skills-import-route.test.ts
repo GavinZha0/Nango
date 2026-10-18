@@ -102,7 +102,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
 
   it("imports a skill whose declared script is clean UTF-8", async () => {
     dbMock.$enqueue([], [
-      { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
     ]);
 
     const res = await upload([
@@ -117,7 +117,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
 
   it("persists a content type so the editor can preview binary files", async () => {
     dbMock.$enqueue([], [
-      { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
     ]);
 
     // 1x1 transparent PNG — real binary bytes, so it takes the base64 branch.
@@ -154,7 +154,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
 
   it("imports files under any folder name and skips archive noise", async () => {
     dbMock.$enqueue([], [
-      { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
     ]);
 
     const res = await upload(
@@ -179,7 +179,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
 
   it("leaves undeclared scripts alone", async () => {
     dbMock.$enqueue([], [
-      { id: "skill-1", name: "probe-skill", source: "local", createdBy: "user-1" },
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
     ]);
 
     const res = await upload(

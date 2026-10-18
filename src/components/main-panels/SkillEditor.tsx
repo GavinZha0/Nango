@@ -4,9 +4,10 @@
  * SkillEditor — full-area form for creating / editing one Skill.
  *
  * Two columns: a read-only file tree on the left, the editable document on the
- * right. `SKILL.md` is the only writable surface — helper files are fetched on
- * demand and rendered read-only, because importing a `.skill` archive is the
- * sole way to add or remove them. See docs/skills.md.
+ * right. The writable surfaces are the `SKILL.md` draft and the free-form
+ * Source label; helper files are fetched on demand and rendered read-only,
+ * because importing a `.skill` archive is the sole way to add or remove them.
+ * See docs/skills.md.
  */
 
 import {
@@ -32,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { parseSkillMd } from "@/lib/skills/parser";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import {
   SkillFileTree,
@@ -45,7 +47,8 @@ export interface SkillRow {
   path: string;
   name: string;
   description: string | null;
-  source: "builtin" | "local";
+  /** Free-form origin label (e.g. "anthropic", "skills.sh"); "" = unlabeled. */
+  source: string;
   enabled: boolean;
   visibility: "private" | "public" | string;
   createdBy: string;
@@ -75,13 +78,13 @@ interface FilePayload {
 
 /** Form-level state for the skill editor. */
 interface FormState {
-  name: string;
+  source: string;
   skillMd: string;
 }
 
 /** Default SKILL.md template seeded on create. Mirrors Claude Skills convention. */
-function buildTemplate(name: string): string {
-  const slug = name.trim() || "my-skill";
+function buildTemplate(): string {
+  const slug = "my-skill";
   return `---
 name: ${slug}
 description: One-sentence description of what this skill does AND when to invoke it. Mention the keywords / phrasings the user is likely to use, since this is what drives auto-loading.
@@ -132,13 +135,11 @@ export function SkillEditor({
   onDeleted,
 }: SkillEditorProps): ReactNode {
   const isCreating = skillId === null;
-  const isBuiltin = initialDetail?.source === "builtin";
-  const readOnly = !isCreating && isBuiltin;
 
   // Delete state — destructive action, gated by a confirm dialog.
-  // Mirrors BuiltinAgentEditor's pattern: only shown for an existing
-  // non-builtin skill, click opens an AlertDialog, the dialog action
-  // fires the DELETE and waits for it before closing.
+  // Mirrors BuiltinAgentEditor's pattern: shown for every existing skill,
+  // click opens an AlertDialog, the dialog action fires the DELETE and
+  // waits for it before closing.
   const [deleteOpen, setDeleteOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
 
@@ -146,15 +147,15 @@ export function SkillEditor({
   // `savedForm` is the snapshot taken at load time; comparing the two
   // gives us a free `isDirty` flag for the Save button.
   const [form, setForm] = useState<FormState>(() => ({
-    name: initialDetail?.name ?? "",
-    skillMd: initialDetail?.skillMd ?? buildTemplate(""),
+    source: initialDetail?.source ?? "",
+    skillMd: initialDetail?.skillMd ?? buildTemplate(),
   }));
   const [savedForm] = useState<FormState>(() => ({
-    name: initialDetail?.name ?? "",
-    skillMd: initialDetail?.skillMd ?? buildTemplate(""),
+    source: initialDetail?.source ?? "",
+    skillMd: initialDetail?.skillMd ?? buildTemplate(),
   }));
   const isDirty = useMemo(
-    () => form.name !== savedForm.name || form.skillMd !== savedForm.skillMd,
+    () => form.source !== savedForm.source || form.skillMd !== savedForm.skillMd,
     [form, savedForm],
   );
   const update = useCallback(
@@ -233,35 +234,37 @@ export function SkillEditor({
     payload?.encoding === "base64" &&
     (selectedMeta?.contentType?.startsWith("image/") ?? false);
 
-  /** Auto-rewrite the template's `name:` line as the user types in
-   *  the Name input — but only on initial create, before the user
-   *  has touched the textarea. A "user has touched" flag would be
-   *  more robust; the cheap proxy is "still equal to a template we
-   *  could have built". Keeps the auto-fill helpful without
-   *  fighting the user. */
-  const onNameChange = useCallback((next: string): void => {
-    setForm((prev) => {
-      const md =
-        isCreating &&
-        (prev.skillMd === buildTemplate(prev.name) || prev.skillMd === buildTemplate(""))
-          ? buildTemplate(next)
-          : prev.skillMd;
-      return { name: next, skillMd: md };
-    });
-  }, [isCreating]);
+  // Header identity comes from the draft SKILL.md frontmatter, so a rename
+  // updates immediately. An unparseable draft falls back to the saved row.
+  const draftMeta = useMemo(() => {
+    try {
+      const parsed = parseSkillMd(form.skillMd);
+      return {
+        name: parsed.frontmatter.name,
+        version: parsed.frontmatter.version,
+      };
+    } catch {
+      return {
+        name: initialDetail?.name ?? "",
+        version: initialDetail?.version ?? "",
+      };
+    }
+  }, [form.skillMd, initialDetail?.name, initialDetail?.version]);
 
   const getCurrentData = useCallback(
     () => ({
-      name: form.name,
-      source: initialDetail?.source ?? "local",
-      isReadOnly: Boolean(readOnly),
+      source: form.source,
       skillMd: form.skillMd,
+      isReadOnly: false,
     } as Record<string, unknown>),
-    [form, initialDetail?.source, readOnly],
+    [form],
   );
   const applyDraft = useCallback((draft: Partial<Record<string, unknown>>) => {
-    if (readOnly) return [];
     const modified: string[] = [];
+    if (typeof draft.source === "string" && draft.source !== form.source) {
+      setForm((prev) => ({ ...prev, source: draft.source as string }));
+      modified.push("source");
+    }
     if (typeof draft.skillMd === "string" && draft.skillMd !== form.skillMd) {
       setForm((prev) => ({ ...prev, skillMd: draft.skillMd as string }));
       modified.push("skillMd");
@@ -269,29 +272,20 @@ export function SkillEditor({
       // change is invisible while a helper file is on screen.
       setSelected(SKILL_MD_PATH);
     }
-    if (isCreating && typeof draft.name === "string" && draft.name !== form.name) {
-      onNameChange(draft.name);
-      modified.push("name");
-    }
     return modified;
-  }, [readOnly, isCreating, form.skillMd, form.name, onNameChange]);
+  }, [form.source, form.skillMd]);
 
   const { draftApplied, clearDraftState } = useCopilotDraft({
     resourceType: "skills",
     resourceId: skillId ?? null,
-    isReadOnly: Boolean(readOnly),
+    isReadOnly: false,
     getCurrentData,
     applyDraft,
   });
 
   const submit = async (): Promise<void> => {
-    if (readOnly) return;
     if (!form.skillMd.trim()) {
       setError("SKILL.md cannot be empty.");
-      return;
-    }
-    if (isCreating && !form.name.trim()) {
-      setError("Please enter a name for the skill.");
       return;
     }
     setSaving(true);
@@ -302,7 +296,7 @@ export function SkillEditor({
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skillMd: form.skillMd }),
+        body: JSON.stringify({ skillMd: form.skillMd, source: form.source }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as
@@ -352,9 +346,9 @@ export function SkillEditor({
     }
   };
 
-  // Show Delete only when editing a non-builtin skill (creation has
-  // nothing to delete; built-in skills are immutable).
-  const canDelete: boolean = !isCreating && !isBuiltin;
+  // Creation has nothing to delete; every existing skill exposes the action
+  // and the API enforces the actual permission.
+  const canDelete: boolean = !isCreating;
   // Save writes the SKILL.md column only. Gating it on the selection keeps a
   // click made while a helper file is on screen from saving a document the
   // user is not looking at.
@@ -375,64 +369,60 @@ export function SkillEditor({
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <h1 className="flex items-baseline gap-1.5 text-sm font-semibold">
-          {isCreating ? "New skill" : form.name}
-          {!isCreating && initialDetail?.version && (
+          {isCreating ? "New skill" : draftMeta.name}
+          {!isCreating && draftMeta.version && (
             <span className="font-normal text-muted-foreground">
-              ({initialDetail.version})
+              ({draftMeta.version})
             </span>
           )}
         </h1>
-        {(!readOnly || canDelete) && (
-          <div className="ml-auto flex items-center gap-2">
-            {!readOnly && (
-              <Button
-                size="sm"
-                onClick={() => void submit()}
-                disabled={saving || deleting || !canSave}
-                title={
-                  selected !== SKILL_MD_PATH
-                    ? "Save applies to SKILL.md only"
-                    : undefined
-                }
-                className={cn(
-                  "h-8 gap-1.5",
-                  // Only advertise unsaved changes when the click would land.
-                  // Highlighting a disabled Save reads as a broken button.
-                  canSave &&
-                    (draftApplied || isDirty) &&
-                    "bg-amber-600 hover:bg-amber-700 text-white",
-                )}
-              >
-                {saving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Save className="h-3.5 w-3.5" />
-                )}
-                Save
-              </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => void submit()}
+            disabled={saving || deleting || !canSave}
+            title={
+              selected !== SKILL_MD_PATH
+                ? "Save applies to SKILL.md only"
+                : undefined
+            }
+            className={cn(
+              "h-8 gap-1.5",
+              // Only advertise unsaved changes when the click would land.
+              // Highlighting a disabled Save reads as a broken button.
+              canSave &&
+                (draftApplied || isDirty) &&
+                "bg-amber-600 hover:bg-amber-700 text-white",
             )}
-            {canDelete && (
-              <Button
-                size="sm"
-                // Same background as Save (default variant uses
-                // `bg-primary`), only the text colour switches to
-                // destructive red — mirrors BuiltinAgentEditor's
-                // Delete button so the two editor pages match.
-                className="h-8 shrink-0 gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
-                onClick={() => setDeleteOpen(true)}
-                disabled={saving || deleting}
-                title="Delete this skill (cannot be undone)"
-              >
-                {deleting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Trash2 className="h-3.5 w-3.5" />
-                )}
-                Delete
-              </Button>
+          >
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
             )}
-          </div>
-        )}
+            Save
+          </Button>
+          {canDelete && (
+            <Button
+              size="sm"
+              // Same background as Save (default variant uses
+              // `bg-primary`), only the text colour switches to
+              // destructive red — mirrors BuiltinAgentEditor's
+              // Delete button so the two editor pages match.
+              className="h-8 shrink-0 gap-1.5 bg-primary text-destructive hover:bg-primary/80 hover:text-destructive"
+              onClick={() => setDeleteOpen(true)}
+              disabled={saving || deleting}
+              title="Delete this skill (cannot be undone)"
+            >
+              {deleting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              Delete
+            </Button>
+          )}
+        </div>
       </header>
 
       <DeleteConfirmDialog
@@ -450,7 +440,6 @@ export function SkillEditor({
             files={files}
             selected={selected}
             onSelect={(path) => void selectPath(path)}
-            source={initialDetail.source}
             scriptsOnSsh={initialDetail.scriptsOnSsh ?? []}
             missingSshScripts={initialDetail.missingSshScripts ?? []}
             skillMdDirty={form.skillMd !== savedForm.skillMd}
@@ -465,24 +454,18 @@ export function SkillEditor({
               </p>
             )}
 
-            {/* Name — always on screen, independent of the selected file.
-                Renaming is not supported (it would orphan agent bindings),
-                so this is editable only while creating. */}
+            {/* Source — free-form origin label, independent of the selected
+                file. The skill's name is owned by the SKILL.md frontmatter. */}
             <div className="flex shrink-0 items-center gap-3">
-              <Label htmlFor="skill-name" className="w-12">
-                Name
+              <Label htmlFor="skill-source" className="w-12">
+                Source
               </Label>
               <Input
-                id="skill-name"
-                placeholder="my-skill"
-                value={form.name}
-                onChange={(e) => onNameChange(e.target.value)}
-                readOnly={!isCreating || readOnly}
-                className={cn(
-                  "flex-1",
-                  (!isCreating || readOnly) &&
-                    "bg-muted/30 focus-visible:ring-0 cursor-default",
-                )}
+                id="skill-source"
+                placeholder="e.g. anthropic, skills.sh"
+                value={form.source}
+                onChange={(e) => update("source", e.target.value)}
+                className="flex-1"
               />
             </div>
 
@@ -496,11 +479,7 @@ export function SkillEditor({
                   rows={24}
                   value={form.skillMd}
                   onChange={(e) => update("skillMd", e.target.value)}
-                  readOnly={readOnly}
-                  className={cn(
-                    "flex-1 resize-none font-mono text-xs [field-sizing:fixed]",
-                    readOnly && "bg-muted/30 focus-visible:ring-0",
-                  )}
+                  className="flex-1 resize-none font-mono text-xs [field-sizing:fixed]"
                   placeholder="--- name: ..."
                 />
               </div>

@@ -68,7 +68,6 @@ function SshServerRowItem({
   const isPublic = row.visibility === "public";
 
   const { canEdit: hasEdit, canChangeVisibility } = useResourcePermissions({
-    source: "local" as const,
     visibility: row.visibility as "private" | "public",
     createdBy: row.createdBy,
   });

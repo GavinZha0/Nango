@@ -70,8 +70,6 @@ export const PATCH = withEditor<{ id: string }>(
     const body = await parseBody(req, updateSchema);
 
     const rbac = {
-      // mcp_server has no `source` column today (always treated as local).
-      source: "local" as const,
       visibility: existing.visibility as "private" | "public",
       createdBy: existing.createdBy,
     };
@@ -161,7 +159,6 @@ export const DELETE = withEditor<{ id: string }>(
     if (
       !canDeleteResource(
         {
-          source: "local",
           visibility: existing.visibility as "private" | "public",
           createdBy: existing.createdBy,
         },

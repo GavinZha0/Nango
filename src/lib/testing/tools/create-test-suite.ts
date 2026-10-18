@@ -167,7 +167,6 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
           .limit(1);
 
         const serverRBAC = {
-          source: "local" as const,
           visibility: serverRow?.visibility as "private" | "public",
           createdBy: serverRow?.createdBy ?? null,
         };
@@ -298,7 +297,6 @@ export function buildCreateTestSuiteTool(ctx: TesterToolContext): ToolDefinition
             .limit(1);
 
           const serverRBAC = {
-            source: "local" as const,
             visibility: serverRow?.visibility as "private" | "public",
             createdBy: serverRow?.createdBy ?? null,
           };

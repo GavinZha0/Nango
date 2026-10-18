@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
@@ -39,7 +39,6 @@ async function loadVisibleSkill(skillId: string, session: Session) {
   if (
     !canViewResource(
       {
-        source: row.source as "builtin" | "local",
         visibility: row.visibility as "private" | "public",
         createdBy: row.createdBy,
       },
@@ -100,13 +99,14 @@ export const GET = withSession<{ id: string }>(
 );
 
 // PATCH /api/skills/[id]
-// Editors can rewrite SKILL.md or toggle enabled / visibility on local
-// skills. Builtin skills are read-only via the API; their content
-// changes only via redeploy.
+// Editors can rewrite SKILL.md (including its frontmatter `name`), update the
+// free-form source label, or toggle enabled / visibility.
 
 const updateSchema = z
   .object({
     skillMd: z.string().min(1).optional(),
+    /** Free-form origin label (e.g. "anthropic", "skills.sh"); "" = unlabeled. */
+    source: z.string().max(200).optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
   })
@@ -119,21 +119,12 @@ export const PATCH = withEditor<{ id: string }>(
     const row = await loadVisibleSkill(params.id, session);
 
     const rbac = {
-      source: row.source as "builtin" | "local",
       visibility: row.visibility as "private" | "public",
       createdBy: row.createdBy,
     };
 
-    // Builtin is an absolute write barrier (see docs/rbac.md).
-    if (rbac.source === "builtin") {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        "Builtin skills are read-only; edit the source in the codebase and redeploy.",
-      );
-    }
-
-    if (body.skillMd !== undefined && !canEditResource(rbac, session)) {
+    const editsContent = body.skillMd !== undefined || body.source !== undefined;
+    if (editsContent && !canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this skill.");
     }
     if (
@@ -149,30 +140,47 @@ export const PATCH = withEditor<{ id: string }>(
 
     const storage = getDbSkillStorage();
 
-    if (body.skillMd !== undefined) {
+    if (editsContent) {
+      const nextSkillMd = body.skillMd ?? row.skillMd;
       let parsed;
       try {
-        parsed = parseSkillMd(body.skillMd);
+        parsed = parseSkillMd(nextSkillMd);
       } catch (err) {
         if (err instanceof SkillParseError) {
           throw new ApiError("VALIDATION_FAILED", 400, err.message);
         }
         throw err;
       }
-      // Renaming via PATCH would orphan agent_tool references; require
-      // delete + recreate instead.
-      if (parsed.frontmatter.name !== row.name) {
-        throw new ApiError(
-          "BAD_REQUEST",
-          400,
-          `Renaming a skill via PATCH is not supported.  Skill is named "${row.name}".`,
-        );
+      // Frontmatter owns the name. Renaming is allowed, but the new name must
+      // be unique per creator so agent-binding lookups stay deterministic.
+      // Frontmatter is the source of truth. Any content edit re-syncs `name`,
+      // so a drifted row is checked as a rename too — a source-only update must
+      // not slip a rename past the uniqueness gate.
+      if (parsed.frontmatter.name !== row.name && row.createdBy) {
+        const [duplicate] = await db
+          .select({ id: SkillTable.id })
+          .from(SkillTable)
+          .where(
+            and(
+              eq(SkillTable.name, parsed.frontmatter.name),
+              eq(SkillTable.createdBy, row.createdBy),
+              ne(SkillTable.id, row.id),
+            ),
+          )
+          .limit(1);
+        if (duplicate) {
+          throw new ApiError(
+            "CONFLICT",
+            409,
+            `A skill named "${parsed.frontmatter.name}" already exists for this creator.`,
+          );
+        }
       }
       // scripts-on-ssh is validated against the files that already exist: an
       // editor can freely rewrite frontmatter, but a declaration with no
       // backing skill_file can only fail later as SCRIPT_NOT_FOUND on a
       // remote host.
-      if (parsed.frontmatter.scriptsOnSsh?.length) {
+      if (body.skillMd !== undefined && parsed.frontmatter.scriptsOnSsh?.length) {
         const available = (await storage.listFiles(row.id)).map((f) => f.path);
         const missing = findMissingSshScripts(
           parsed.frontmatter.scriptsOnSsh,
@@ -189,7 +197,8 @@ export const PATCH = withEditor<{ id: string }>(
 
       await storage.updateContent({
         skillId: row.id,
-        skillMd: body.skillMd,
+        skillMd: nextSkillMd,
+        source: body.source,
         updatedBy: session.user.id,
       });
     }
@@ -203,7 +212,7 @@ export const PATCH = withEditor<{ id: string }>(
       });
     }
 
-    if (body.skillMd !== undefined || body.enabled !== undefined || body.visibility !== undefined) {
+    if (editsContent || body.enabled !== undefined || body.visibility !== undefined) {
       await invalidateForSkillChange(row.id);
     }
 
@@ -217,26 +226,17 @@ export const PATCH = withEditor<{ id: string }>(
 );
 
 // DELETE /api/skills/[id]
-// Local: removes the row (skill_file rows cascade). Builtin: never
-// deleted — the next boot reconcile would re-seed it from the bundle.
+// Removes the row; skill_file rows cascade via the FK.
 
 export const DELETE = withEditor<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const row = await loadVisibleSkill(params.id, session);
     const rbac = {
-      source: row.source as "builtin" | "local",
       visibility: row.visibility as "private" | "public",
       createdBy: row.createdBy,
     };
 
-    if (rbac.source === "builtin") {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        "Builtin skills cannot be deleted; toggle `enabled=false` instead.",
-      );
-    }
     if (!canDeleteResource(rbac, session)) {
       throw new ApiError(
         "FORBIDDEN",

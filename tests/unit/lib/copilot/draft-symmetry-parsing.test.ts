@@ -160,21 +160,4 @@ describe("Draft Symmetry and Normalization Logic", () => {
     });
   });
 
-  describe("Skills Builtin Write Barrier", () => {
-    function canApplySkillDraft(isReadOnly: boolean, source: string): boolean {
-      if (isReadOnly || source === "builtin") {
-        return false;
-      }
-      return true;
-    }
-
-    it("blocks modifications to builtin immutable skills", () => {
-      expect(canApplySkillDraft(true, "builtin")).toBe(false);
-      expect(canApplySkillDraft(false, "builtin")).toBe(false);
-    });
-
-    it("permits modifications to local custom skills", () => {
-      expect(canApplySkillDraft(false, "local")).toBe(true);
-    });
-  });
 });

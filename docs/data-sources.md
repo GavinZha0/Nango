@@ -218,7 +218,7 @@ Two agents may trigger an extraction for the same `datasetName` simultaneously. 
 4. Both agents proceed reading the winner's output.
 ```
 
-No locking; no in-process coordination. The same idiom we use in the skill builtin reconcile (`docs/skills.md` §3.4).
+No locking; no in-process coordination.
 
 ### 4.6 Multi-tenancy and sharing
 

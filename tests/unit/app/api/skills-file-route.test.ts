@@ -38,7 +38,6 @@ const admin = { ...ADMIN_USER, id: "user-admin-1" };
 
 const PRIVATE_ROW = {
   id: "skill-1",
-  source: "local",
   visibility: "private",
   createdBy: "user-1",
 };

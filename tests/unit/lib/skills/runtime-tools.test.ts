@@ -31,7 +31,6 @@ function makeSpec(overrides: Partial<SkillSpec> = {}): SkillSpec {
     description: "A skill with SSH scripts",
     skillMd: "---\nname: ssh-skill\ndescription: ...\nscripts-on-ssh: [probe.sh]\n---",
     parsed: {} as SkillSpec["parsed"],
-    source: "local",
     enabled: true,
     visibility: "public",
     createdBy: "user-1",

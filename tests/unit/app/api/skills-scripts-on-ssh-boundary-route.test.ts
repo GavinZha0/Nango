@@ -51,7 +51,6 @@ function skillMd(sshDecl: string | null): string {
 const LOCAL_ROW = {
   id: "skill-1",
   name: "test-skill",
-  source: "local",
   visibility: "private",
   createdBy: "user-1",
   skillMd: skillMd('scripts-on-ssh: ["probe.sh"]'),

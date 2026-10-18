@@ -24,7 +24,6 @@ import {
   type SkillFileMeta,
   type SkillFileRecord,
   type SkillRecord,
-  type SkillSource,
   type SkillStorage,
   type SkillVisibility,
   type UpdateSkillContentInput,
@@ -43,7 +42,6 @@ function toRecord(row: SkillRow): SkillRecord {
     description: row.description,
     version: row.version,
     skillMd: row.skillMd,
-    source: row.source as SkillSource,
     enabled: row.enabled,
     visibility: row.visibility as SkillVisibility,
     createdBy: row.createdBy,
@@ -123,7 +121,7 @@ export class DbSkillStorage implements SkillStorage {
         description: parsed.frontmatter.description,
         version: parsed.frontmatter.version,
         skillMd: input.skillMd,
-        source: "local",
+        source: input.source ?? "",
         enabled: true,
         visibility: input.visibility ?? "private",
         createdBy: input.createdBy,
@@ -137,10 +135,13 @@ export class DbSkillStorage implements SkillStorage {
     await db
       .update(SkillTable)
       .set({
-        // Note: `name` is not allowed to change via PATCH (caller enforces).
+        // Frontmatter is the single source of truth for `name`; the caller
+        // performs the uniqueness check before we get here.
+        name: parsed.frontmatter.name,
         description: parsed.frontmatter.description,
         version: parsed.frontmatter.version,
         skillMd: input.skillMd,
+        ...(input.source !== undefined ? { source: input.source } : {}),
         updatedBy: input.updatedBy,
         updatedAt: new Date(),
       })

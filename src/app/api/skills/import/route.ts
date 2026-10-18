@@ -222,13 +222,12 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
-  // 6. Name collision check (per-creator uniqueness for local skills).
+  // 6. Name collision check (per-creator uniqueness).
   const existing = await db
     .select({ id: SkillTable.id })
     .from(SkillTable)
     .where(
       and(
-        eq(SkillTable.source, "local"),
         eq(SkillTable.name, parsed.frontmatter.name),
         eq(SkillTable.createdBy, session.user.id),
       ),

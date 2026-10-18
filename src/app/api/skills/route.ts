@@ -45,14 +45,16 @@ export const GET = withSession(ROUTE, async ({ session }) => {
 });
 
 // POST /api/skills
-// Create a new local skill. Pure DB write via the storage layer; no
-// filesystem touched.
+// Create a new skill. Pure DB write via the storage layer; no filesystem
+// touched.
 
 const createSchema = z
   .object({
     /** Verbatim SKILL.md including frontmatter. Name + description parsed from it. */
     skillMd: z.string().min(1, "must not be empty"),
     visibility: z.enum(["private", "public"]).optional(),
+    /** Free-form origin label (e.g. "anthropic", "skills.sh"); "" = unlabeled. */
+    source: z.string().max(200).optional(),
   })
   .strict();
 
@@ -84,14 +86,13 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     );
   }
 
-  // Per-creator name uniqueness (local skills): keep names predictable
-  // for the same author. Cross-user duplicates are allowed.
+  // Per-creator name uniqueness: keep names predictable for the same author.
+  // Cross-user duplicates are allowed.
   const existing = await db
     .select({ id: SkillTable.id })
     .from(SkillTable)
     .where(
       and(
-        eq(SkillTable.source, "local"),
         eq(SkillTable.name, parsed.frontmatter.name),
         eq(SkillTable.createdBy, session.user.id),
       ),
@@ -109,6 +110,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const { id } = await storage.createCustom({
     skillMd: body.skillMd,
     visibility: body.visibility,
+    source: body.source,
     createdBy: session.user.id,
   });
 

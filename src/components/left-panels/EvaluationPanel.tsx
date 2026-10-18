@@ -80,7 +80,6 @@ function SuiteRowItem({
 }: SuiteRowItemProps): ReactNode {
   const isPublic = suite.visibility === "public";
   const { canChangeVisibility, canDelete } = useResourcePermissions({
-    source: "local" as const,
     visibility: suite.visibility,
     createdBy: suite.createdBy,
   });

@@ -39,7 +39,6 @@ function session(role: string, userId = "user-1"): Session {
 
 function resource(overrides: Partial<ResourceWithRBAC> = {}): ResourceWithRBAC {
   return {
-    source: "local",
     visibility: "private",
     createdBy: "user-1",
     ...overrides,
@@ -95,50 +94,41 @@ describe("canViewResource", () => {
 // ── canEditResource ─────────────────────────────────────────────────
 
 describe("canEditResource", () => {
-  it("builtin resources cannot be edited by any role", () => {
-    expect(canEditResource(resource({ source: "builtin" }), session("admin"))).toBe(false);
-    expect(canEditResource(resource({ source: "builtin" }), session("editor"))).toBe(false);
-  });
-
   it("plain user cannot edit anything", () => {
-    expect(canEditResource(resource({ source: "local" }), session("user"))).toBe(false);
+    expect(canEditResource(resource(), session("user"))).toBe(false);
   });
 
-  it("admin can edit any local resource", () => {
-    expect(canEditResource(resource({ source: "local", createdBy: "other" }), session("admin"))).toBe(true);
+  it("admin can edit any resource", () => {
+    expect(canEditResource(resource({ createdBy: "other" }), session("admin"))).toBe(true);
   });
 
   it("editor can edit own private resource", () => {
-    expect(canEditResource(resource({ source: "local", visibility: "private", createdBy: "user-1" }), session("editor", "user-1"))).toBe(true);
+    expect(canEditResource(resource({ visibility: "private", createdBy: "user-1" }), session("editor", "user-1"))).toBe(true);
   });
 
   it("editor can edit public resource they don't own", () => {
-    expect(canEditResource(resource({ source: "local", visibility: "public", createdBy: "other" }), session("editor", "user-1"))).toBe(true);
+    expect(canEditResource(resource({ visibility: "public", createdBy: "other" }), session("editor", "user-1"))).toBe(true);
   });
 
   it("editor cannot edit private resource they don't own", () => {
-    expect(canEditResource(resource({ source: "local", visibility: "private", createdBy: "other" }), session("editor", "user-1"))).toBe(false);
+    expect(canEditResource(resource({ visibility: "private", createdBy: "other" }), session("editor", "user-1"))).toBe(false);
   });
 });
 
 // ── canDeleteResource ───────────────────────────────────────────────
 
 describe("canDeleteResource", () => {
-  it("builtin resources cannot be deleted by any role", () => {
-    expect(canDeleteResource(resource({ source: "builtin" }), session("admin"))).toBe(false);
-  });
-
-  it("admin can delete any local resource", () => {
-    expect(canDeleteResource(resource({ source: "local", createdBy: "other" }), session("admin"))).toBe(true);
+  it("admin can delete any resource", () => {
+    expect(canDeleteResource(resource({ createdBy: "other" }), session("admin"))).toBe(true);
   });
 
   it("editor can delete only own resources", () => {
-    expect(canDeleteResource(resource({ source: "local", createdBy: "user-1" }), session("editor", "user-1"))).toBe(true);
-    expect(canDeleteResource(resource({ source: "local", createdBy: "other" }), session("editor", "user-1"))).toBe(false);
+    expect(canDeleteResource(resource({ createdBy: "user-1" }), session("editor", "user-1"))).toBe(true);
+    expect(canDeleteResource(resource({ createdBy: "other" }), session("editor", "user-1"))).toBe(false);
   });
 
   it("plain user cannot delete anything", () => {
-    expect(canDeleteResource(resource({ source: "local", createdBy: "user-1" }), session("user", "user-1"))).toBe(false);
+    expect(canDeleteResource(resource({ createdBy: "user-1" }), session("user", "user-1"))).toBe(false);
   });
 });
 
@@ -146,13 +136,9 @@ describe("canDeleteResource", () => {
 
 describe("canChangeVisibility", () => {
   it("follows the same rules as canDeleteResource", () => {
-    const r = resource({ source: "local", createdBy: "user-1" });
+    const r = resource({ createdBy: "user-1" });
     const s = session("editor", "user-1");
     expect(canChangeVisibility(r, s)).toBe(canDeleteResource(r, s));
-  });
-
-  it("rejects builtin resources", () => {
-    expect(canChangeVisibility(resource({ source: "builtin" }), session("admin"))).toBe(false);
   });
 });
 

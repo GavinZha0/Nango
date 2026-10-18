@@ -115,13 +115,12 @@ instead.
 | Cardinality | One `SkillSpec` per `skillId`, shared across users |
 | Eviction | LRU with `maxSize = 500` |
 | Idle TTL | 10 minutes (in-progress refresh on hit) |
-| Cost to build | 1 round-trip to disk (parse SKILL.md frontmatter), no upstream IO |
-| Mutation triggers | API write, watcher upsert, manual sync — all funnel through `invalidateForSkillChange(skillId)` (`src/lib/skills/invalidation.ts`), which evicts the skill from this pool **and** invalidates every `agentPool` entry binding it (reverse-lookup via `builtin_agent_tool`) |
+| Cost to build | 1 DB round-trip (parse SKILL.md frontmatter), no upstream IO |
+| Mutation triggers | API write / ZIP import — all funnel through `invalidateForSkillChange(skillId)` (`src/lib/skills/invalidation.ts`), which evicts the skill from this pool **and** invalidates every `agentPool` entry binding it (reverse-lookup via `builtin_agent_tool`) |
 
 A `SkillSpec` is a parsed `SKILL.md` (frontmatter +
-body) plus computed metadata (file checksum, runtime tools created
-via `defineTool`). The pool is read-mostly and disk-bound; the LRU
-cap is a memory ceiling rather than a contention strategy.
+body) plus runtime metadata. The pool is read-mostly and DB-bound; the
+LRU cap is a memory ceiling rather than a contention strategy.
 
 The pool is on the same lifecycle hooks as `agentPool` and
 `mcpProviderPool` — see §4 below for the cross-pool invalidation

@@ -681,7 +681,6 @@ function ServerHeader({
   onDelete,
 }: ServerHeaderProps) {
   const { canEdit, canDelete, canChangeVisibility } = useResourcePermissions({
-    source: "local" as const,
     visibility: server.visibility as "private" | "public",
     createdBy: server.createdBy,
   });

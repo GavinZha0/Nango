@@ -84,7 +84,6 @@ export async function resolveAuthContext(
 // Resource shape (subset of skill / mcp_server / builtin_agent rows)
 
 export interface ResourceWithRBAC {
-  source?: "builtin" | "local";
   visibility: "private" | "public";
   createdBy: string | null;
 }
@@ -104,14 +103,12 @@ export function canViewResource(
 
 /**
  * Can the session edit the row's content?
- * `source = 'builtin'` is an absolute write barrier — no role can pass it.
  */
 export function canEditResource(
   resource: ResourceWithRBAC,
   session: SessionOrAuth,
 ): boolean {
   const auth = resolveAuth(session);
-  if (resource.source === "builtin") return false;
   if (!auth.isEditor) return false;
   if (auth.isAdmin) return true;
   if (resource.visibility === "public") return true;
@@ -120,14 +117,13 @@ export function canEditResource(
 
 /**
  * Can the session delete the row?
- * Stricter than edit: only original author or admin, and never builtin.
+ * Stricter than edit: only original author or admin.
  */
 export function canDeleteResource(
   resource: ResourceWithRBAC,
   session: SessionOrAuth,
 ): boolean {
   const auth = resolveAuth(session);
-  if (resource.source === "builtin") return false;
   if (auth.isAdmin) return true;
   if (!auth.isEditor) return false;
   return resource.createdBy === auth.userId;

@@ -385,7 +385,6 @@ function BuiltinRow({
   const isPublic = row.visibility === "public";
 
   const { canChangeVisibility } = useResourcePermissions({
-    source: "local" as const,
     visibility: row.visibility as "private" | "public",
     createdBy: row.createdBy,
   });

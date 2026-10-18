@@ -91,7 +91,7 @@ Service mode connects to an external REST-based code execution sandbox (`dify-sa
 
 - **Endpoint**: `POST /v1/sandbox/run` with `X-Api-Key` authentication header.
 - **Credentials**: Automatically looked up from `CredentialTable` (provider: `dify-sandbox`, serviceType: `integration`).
-- **Python deps are skill-driven**: `docker/dify-sandbox/requirements.txt` is generated from builtin skills' frontmatter `dependencies-python: [...]` declarations by `pnpm sandbox:build` (which runs `scripts/collect-skill-deps.ts`). Authors who need a new package add it to the relevant `skills/<name>/SKILL.md`, run `pnpm sandbox:build`, and commit the regenerated `requirements.txt` together with the skill change. CI guards against drift via `pnpm sandbox:check`.
+- **Python deps are hand-maintained**: `docker/dify-sandbox/requirements.txt` lists every package baked into the sandbox image. There is no network at runtime, so adding a package means editing the file, rebuilding/recreating the container, and committing the change. A skill's frontmatter `dependencies-python` declaration is advisory only and is not parsed by the application.
 
 ### 3.2 Backend selection
 
