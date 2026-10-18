@@ -16,7 +16,9 @@ import {
 import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
 import {
+  describeMissingDeclaredScripts,
   describeMissingSshScripts,
+  findMissingDeclaredScripts,
   findMissingSshScripts,
   parseSkillMd,
   SkillParseError,
@@ -75,14 +77,18 @@ export const GET = withSession<{ id: string }>(
     // discover it mid-run.
     let missingSshScripts: string[] = [];
     let scriptsOnSsh: string[] = [];
+    let missingDbScripts: string[] = [];
+    let scriptsOnDb: string[] = [];
     try {
       const parsed = parseSkillMd(row.skillMd);
+      const paths = files.map((f) => f.path);
       if (parsed.frontmatter.scriptsOnSsh?.length) {
         scriptsOnSsh = parsed.frontmatter.scriptsOnSsh;
-        missingSshScripts = findMissingSshScripts(
-          scriptsOnSsh,
-          files.map((f) => f.path),
-        );
+        missingSshScripts = findMissingSshScripts(scriptsOnSsh, paths);
+      }
+      if (parsed.frontmatter.scriptsOnDb?.length) {
+        scriptsOnDb = parsed.frontmatter.scriptsOnDb;
+        missingDbScripts = findMissingDeclaredScripts(scriptsOnDb, paths);
       }
     } catch (err) {
       // A malformed stored body must not turn a read into a 500; the editor
@@ -94,6 +100,8 @@ export const GET = withSession<{ id: string }>(
       files,
       scriptsOnSsh,
       missingSshScripts,
+      scriptsOnDb,
+      missingDbScripts,
     });
   },
 );
@@ -176,22 +184,42 @@ export const PATCH = withEditor<{ id: string }>(
           );
         }
       }
-      // scripts-on-ssh is validated against the files that already exist: an
-      // editor can freely rewrite frontmatter, but a declaration with no
-      // backing skill_file can only fail later as SCRIPT_NOT_FOUND on a
-      // remote host.
-      if (body.skillMd !== undefined && parsed.frontmatter.scriptsOnSsh?.length) {
+      // scripts-on-ssh and scripts-on-db are validated against the files that
+      // already exist: an editor can freely rewrite frontmatter, but a
+      // declaration with no backing skill_file can only fail later at runtime.
+      const declaredSsh = parsed.frontmatter.scriptsOnSsh?.length ?? 0;
+      const declaredDb = parsed.frontmatter.scriptsOnDb?.length ?? 0;
+      if (body.skillMd !== undefined && (declaredSsh > 0 || declaredDb > 0)) {
         const available = (await storage.listFiles(row.id)).map((f) => f.path);
-        const missing = findMissingSshScripts(
-          parsed.frontmatter.scriptsOnSsh,
-          available,
-        );
-        if (missing.length > 0) {
-          throw new ApiError(
-            "VALIDATION_FAILED",
-            400,
-            describeMissingSshScripts(missing, available),
+        if (declaredSsh > 0) {
+          const missing = findMissingSshScripts(
+            parsed.frontmatter.scriptsOnSsh ?? [],
+            available,
           );
+          if (missing.length > 0) {
+            throw new ApiError(
+              "VALIDATION_FAILED",
+              400,
+              describeMissingSshScripts(missing, available),
+            );
+          }
+        }
+        if (declaredDb > 0) {
+          const missing = findMissingDeclaredScripts(
+            parsed.frontmatter.scriptsOnDb ?? [],
+            available,
+          );
+          if (missing.length > 0) {
+            throw new ApiError(
+              "VALIDATION_FAILED",
+              400,
+              describeMissingDeclaredScripts(
+                missing,
+                available,
+                "scripts-on-db",
+              ),
+            );
+          }
         }
       }
 

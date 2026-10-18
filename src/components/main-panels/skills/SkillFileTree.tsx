@@ -13,6 +13,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  Database,
   FileText,
   Folder,
   FolderOpen,
@@ -106,6 +107,9 @@ export interface SkillFileTreeProps {
   /** Normalized `scripts/<file>` entries from the frontmatter. */
   scriptsOnSsh: string[];
   missingSshScripts: string[];
+  /** Normalized `scripts/<path>.sql` entries from the frontmatter. */
+  scriptsOnDb: string[];
+  missingDbScripts: string[];
   /** Path with unsaved edits — rendered with a dot. */
   dirtyPath: string | null;
 }
@@ -119,10 +123,13 @@ export function SkillFileTree({
   onDelete,
   scriptsOnSsh,
   missingSshScripts,
+  scriptsOnDb,
+  missingDbScripts,
   dirtyPath,
 }: SkillFileTreeProps): ReactNode {
   const tree = useMemo(() => buildTree(files), [files]);
   const sshSet = useMemo(() => new Set(scriptsOnSsh), [scriptsOnSsh]);
+  const dbSet = useMemo(() => new Set(scriptsOnDb), [scriptsOnDb]);
   // Folders start collapsed: imported archives carry author-chosen layouts of
   // arbitrary depth, so the top level is the only thing worth scanning on open.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -225,6 +232,12 @@ export function SkillFileTree({
                 aria-label="Runs on a bound SSH host"
               />
             )}
+            {dbSet.has(node.path) && (
+              <Database
+                className="h-3 w-3 shrink-0 text-emerald-500"
+                aria-label="Runs against a bound data source"
+              />
+            )}
             {dirtyPath === node.path && (
               <span
                 className="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
@@ -259,6 +272,15 @@ export function SkillFileTree({
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
           <code className="font-mono">scripts-on-ssh</code> declares missing
           file(s): {missingSshScripts.join(", ")}. Drop them from the
+          declaration, add the missing file under scripts/, or delete the
+          declaration.
+        </div>
+      )}
+
+      {missingDbScripts.length > 0 && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+          <code className="font-mono">scripts-on-db</code> declares missing SQL
+          file(s): {missingDbScripts.join(", ")}. Drop them from the
           declaration, add the missing file under scripts/, or delete the
           declaration.
         </div>

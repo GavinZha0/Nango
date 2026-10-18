@@ -96,6 +96,18 @@ describe("evaluateToolRisk — Dynamic assessArgs", () => {
     expect(res.requiresApproval).toBe(false);
   });
 
+  it("treats a reviewed skill SQL script as a low-risk read", () => {
+    const res = evaluateToolRisk("run_skill_sql_script", {
+      name: "sales-report",
+      filename: "reports/sales.sql",
+      dataSourceName: "prod_pg",
+      datasetName: "sales",
+    });
+    expect(res.riskLevel).toBe("low");
+    expect(res.sideEffects).toBe("read");
+    expect(res.requiresApproval).toBe(false);
+  });
+
   it("escalates edit_bento_slides with action=delete to high risk and requiresApproval", () => {
     const res = evaluateToolRisk("edit_bento_slides", {
       outcome_id: "deck-1",

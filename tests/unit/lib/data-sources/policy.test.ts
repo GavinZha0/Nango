@@ -186,6 +186,28 @@ describe("validateSqlAgainstPolicy — dialects", () => {
   });
 });
 
+describe("validateSqlAgainstPolicy — singleStatement", () => {
+  it("rejects multiple statements when singleStatement is requested", () => {
+    const r = validateSqlAgainstPolicy(
+      "SELECT 1; SELECT 2",
+      "postgres",
+      readOnly,
+      { singleStatement: true },
+    );
+    expect(r).toMatchObject({ ok: false, code: "MULTIPLE_STATEMENTS" });
+  });
+
+  it("permits one statement with a trailing semicolon", () => {
+    const r = validateSqlAgainstPolicy(
+      "SELECT 1;",
+      "postgres",
+      readOnly,
+      { singleStatement: true },
+    );
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe("validateSqlAgainstPolicy — bad input", () => {
   it("garbage SQL surfaces PARSE_ERROR (fail closed)", () => {
     const r = validateSqlAgainstPolicy(

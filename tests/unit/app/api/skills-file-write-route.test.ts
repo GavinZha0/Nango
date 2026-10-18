@@ -287,6 +287,77 @@ describe("PATCH /api/skills/[id]/files/[...path]", () => {
     expect(storageMock.updateFile).not.toHaveBeenCalled();
   });
 
+  it("renames a declared SQL file and syncs scripts-on-db", async () => {
+    const sqlFile = {
+      skillId: "skill-1",
+      path: "scripts/reports/sales.sql",
+      content: Buffer.from("SELECT 1;\n"),
+      size: 10,
+      contentType: "text/plain",
+    };
+    loadEditableSkillMock.mockResolvedValue({
+      ...SKILL,
+      skillMd: skillMd('scripts-on-db: ["reports/sales.sql"]'),
+    });
+    storageMock.readFile.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(path === sqlFile.path ? sqlFile : null),
+    );
+
+    const res = await PATCH(
+      createMockRequest(
+        "/api/skills/skill-1/files/scripts/reports/sales.sql?kind=file",
+        { method: "PATCH", body: { name: "monthly.sql" } },
+      ),
+      fileCtx("scripts", "reports", "sales.sql"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(storageMock.updateFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oldPath: "scripts/reports/sales.sql",
+        newPath: "scripts/reports/monthly.sql",
+        skillMd: expect.stringContaining(
+          'scripts-on-db: ["scripts/reports/monthly.sql"]',
+        ),
+      }),
+    );
+    expect(invalidateForSkillChange).toHaveBeenCalledWith("skill-1");
+  });
+
+  it("removes a scripts-on-db declaration when renamed to non-.sql", async () => {
+    const sqlFile = {
+      skillId: "skill-1",
+      path: "scripts/reports/sales.sql",
+      content: Buffer.from("SELECT 1;\n"),
+      size: 10,
+      contentType: "text/plain",
+    };
+    loadEditableSkillMock.mockResolvedValue({
+      ...SKILL,
+      skillMd: skillMd('scripts-on-db: ["reports/sales.sql"]'),
+    });
+    storageMock.readFile.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(path === sqlFile.path ? sqlFile : null),
+    );
+
+    const res = await PATCH(
+      createMockRequest(
+        "/api/skills/skill-1/files/scripts/reports/sales.sql?kind=file",
+        { method: "PATCH", body: { name: "sales.txt" } },
+      ),
+      fileCtx("scripts", "reports", "sales.sql"),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.warning).toMatch(/no longer a \.sql file/);
+    expect(storageMock.updateFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillMd: expect.not.stringContaining("scripts-on-db"),
+      }),
+    );
+  });
+
   it("renames an implicit folder", async () => {
     storageMock.listFiles.mockResolvedValue([
       { path: "assets/logo.png" },
@@ -429,6 +500,38 @@ describe("DELETE /api/skills/[id]/files/[...path]", () => {
       }),
     );
     expect(invalidateForSkillChange).toHaveBeenCalledWith("skill-1");
+  });
+
+  it("deletes a declared SQL file and removes its scripts-on-db entry", async () => {
+    const sqlFile = {
+      skillId: "skill-1",
+      path: "scripts/reports/sales.sql",
+      content: Buffer.from("SELECT 1;\n"),
+      size: 10,
+      contentType: "text/plain",
+    };
+    loadEditableSkillMock.mockResolvedValue({
+      ...SKILL,
+      skillMd: skillMd('scripts-on-db: ["reports/sales.sql"]'),
+    });
+    storageMock.readFile.mockResolvedValue(sqlFile);
+
+    const res = await DELETE(
+      createMockRequest(
+        "/api/skills/skill-1/files/scripts/reports/sales.sql?kind=file",
+        { method: "DELETE" },
+      ),
+      fileCtx("scripts", "reports", "sales.sql"),
+    );
+
+    expect(res.status).toBe(204);
+    expect(storageMock.deleteFile).toHaveBeenCalledWith(
+      "skill-1",
+      "scripts/reports/sales.sql",
+      expect.objectContaining({
+        skillMd: expect.not.stringContaining("scripts-on-db"),
+      }),
+    );
   });
 
   it("deletes a folder and all descendants", async () => {

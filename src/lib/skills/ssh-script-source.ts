@@ -42,6 +42,9 @@ export function readSshScriptSource(bytes: Uint8Array): SshScriptSource {
   return { ok: true, text };
 }
 
+/** Generic strict UTF-8/NUL gate for any text script (SSH or SQL). */
+export const readTextScriptSource = readSshScriptSource;
+
 /** Author-facing remediation for a rejected script. */
 export function describeUnusableSshScript(
   scriptPath: string,

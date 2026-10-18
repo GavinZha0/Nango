@@ -27,7 +27,8 @@ export type PolicyViolationCode =
   | "PARSE_ERROR"
   | "WRITE_NOT_ALLOWED"
   | "TABLE_NOT_ALLOWED"
-  | "TABLE_DENIED";
+  | "TABLE_DENIED"
+  | "MULTIPLE_STATEMENTS";
 
 export interface PolicyOk {
   ok: true;
@@ -43,6 +44,7 @@ export function validateSqlAgainstPolicy(
   sql: string,
   provider: DataSourceId,
   policy: DataSourcePolicy,
+  opts: { singleStatement?: boolean } = {},
 ): PolicyResult {
   const dialect = dialectFor(provider);
 
@@ -59,6 +61,18 @@ export function validateSqlAgainstPolicy(
       message:
         `[Syntax Error]: Failed to parse SQL query (${err instanceof Error ? err.message : String(err)})`,
     };
+  }
+
+  if (opts.singleStatement) {
+    const statements = Array.isArray(astResult) ? astResult : [astResult];
+    if (statements.length > 1) {
+      return {
+        ok: false,
+        code: "MULTIPLE_STATEMENTS",
+        message:
+          "Only a single SQL statement is supported; split the script into separate queries.",
+      };
+    }
   }
 
   const cteNames = collectCteNames(astResult);

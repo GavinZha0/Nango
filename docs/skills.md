@@ -43,11 +43,14 @@ server-side tools to load the actual content:
 | `get_skill_file(name, path)` | A helper file from the skill's tree, in any folder |
 | `run_skill_script(name, filename, datasets?)` | Execute a script bundled with the skill in the same sandbox as `run_code_in_sandbox`. A bare filename resolves under `scripts/`; any relative path must also be under `scripts/` (e.g. `scripts/lib/analyze.py`). Executable scripts outside `scripts/` are refused with `SCRIPT_OUTSIDE_SCRIPTS`. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
 | `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Declared paths may be nested under `scripts/` (e.g. `scripts/lib/probe.sh`). Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
+| `run_skill_sql_script(name, filename, dataSourceName, datasetName, rowLimit?, forceRefresh?)` | Execute a reviewed `.sql` file declared in `scripts-on-db` against a bound data source. Reads the file server-side (never accepts raw SQL), validates single-statement SQL and the data-source policy, then reuses `extract_dataset_by_sql`'s DuckDB + Parquet cache path. Returns the extract result plus `skill`, `script`, `scriptSha256`, `dataSourceName`. For ad-hoc or modified SQL, use `extract_dataset_by_sql` instead. |
 
 Token cost is bounded by the description list, not by the full skill
 bodies. `run_skill_script_on_ssh` is mounted only when **both** at least
 one bound skill declares `scripts-on-ssh` **and** the agent has at least
-one bound `ssh_server`.
+one bound `ssh_server`. `run_skill_sql_script` is mounted only when
+**both** at least one bound skill declares `scripts-on-db` **and** the
+agent has at least one bound data source.
 
 ---
 
@@ -164,11 +167,42 @@ Procedure ...
 | `context` | no | Skills 2.0 spec field; parsed but unused in v1 |
 | `allowed-tools` | no | Skills 2.0 spec field; parsed but unused in v1 |
 | `scripts-on-ssh` | no | String or array of file paths under `scripts/` (e.g. `['probe.sh']` or `['lib/probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<path>`; sub-directories are allowed. Extensions are not restricted: only `.py` / `.sh` are executable, and other declared files return `UNSUPPORTED_INTERPRETER` at runtime. Import fails if the declared file is missing or is not valid UTF-8; PATCH checks existence only (the bytes were already gated at import). |
+| `scripts-on-db` | no | String or array of `.sql` file paths under `scripts/` (e.g. `['reports/sales.sql']`). Aliases: `scripts_on_db`, `scriptsOnDb`. Normalized to `scripts/<path>.sql`; sub-directories are allowed. Declared files are executed by `run_skill_sql_script` against a bound data source. Import/PATCH reject missing files; the editor shows `missingDbScripts` for legacy rows. |
 | Other fields | no | Captured into `extras`, not consumed |
 
 `dependencies-python` is no longer parsed. Sandbox packages are
 hand-maintained in `docker/dify-sandbox/requirements.txt`; a skill's
 frontmatter declarations are advisory only.
+
+### 3.2 SQL scripts (`scripts-on-db`)
+
+SQL files are reviewed queries, not arbitrary model-authored SQL:
+
+```yaml
+---
+name: sales-report
+description: ...
+scripts-on-db: ["reports/quarterly.sql"]
+---
+```
+
+Constraints:
+
+- `.sql` only, under `scripts/` (subdirectories allowed).
+- Single `SELECT` / `WITH` statement. `extractViaDuckdb` wraps the query in
+  `COPY (<sql>) TO '<parquet>'`, so multi-statement scripts, DDL/DML, and
+  procedure bodies are rejected.
+- No bound parameters in V1; bake values into the query or use
+  `get_skill_file` + `extract_dataset_by_sql` for a modified query.
+- The file must be UTF-8 without NUL bytes.
+- A declared file must exist; rename/delete keeps `scripts-on-db` in sync
+  (renaming to a non-`.sql` extension removes the entry with a warning).
+
+Tool routing with a data source bound:
+
+1. A declared SQL file → `run_skill_sql_script(name, filename, dataSourceName, datasetName)`.
+2. Ad-hoc or modified SQL → `extract_dataset_by_sql`.
+3. Both share the data-source policy and the Parquet cache slot semantics.
 
 ---
 
@@ -251,6 +285,14 @@ declarations; deleting the top-level `scripts/` folder removes every
 declaration under it. The top-level `scripts/` folder itself cannot be
 renamed because declarations must stay under `scripts/`.
 
+**`scripts-on-db` sync**: renaming a declared `.sql` file or a folder that
+contains one rewrites the affected `scripts-on-db` entries in the same
+transaction. Renaming a declared SQL file to a non-`.sql` extension removes
+the declaration with a warning (keeping it would make SKILL.md unparseable).
+Deleting a declared SQL file or folder removes the affected entries. The
+same file rename/delete path updates `scripts-on-ssh` and `scripts-on-db`
+together.
+
 Executable scripts created or renamed through the editor must live under
 `scripts/` (subfolders are allowed); `.py` / `.sh` files elsewhere are
 rejected. Imported archives may still contain `.py` / `.sh` reference files
@@ -279,7 +321,8 @@ POST /api/skills/import    multipart/form-data file=<archive.skill>
      - verify image magic bytes match the extension
      - track total size; bail if > 10 MB
 4. Locate SKILL.md (root or single nested folder).
-5. Parse + validate frontmatter.
+5. Parse + validate frontmatter, including scripts-on-ssh / scripts-on-db
+   declarations backed by files in the same bundle.
 6. Reject if the creator already owns a skill with the same name (409).
 7. Persist the skill row, then helper-file rows at their archive paths.
 8. Return the new row's id plus `filesImported` and `skipped`.

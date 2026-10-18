@@ -135,6 +135,23 @@ parquet handle via `run_code_in_sandbox.datasets[]`.
 
 The tool is implemented in the data-sources layer; it consults the cache (§4), invokes the adapter on cache miss, and returns the **virtual** mount path (`./tmp/data/...`) so the agent's next call to `run_in_sandbox` can mount it without leaking the host path.
 
+#### Skill-declared SQL (`run_skill_sql_script`)
+
+When a bound skill declares `scripts-on-db` **and** the agent has at least one
+data-source binding, the skills runtime also mounts `run_skill_sql_script`.
+It reads a reviewed `.sql` file from `skill_file` and calls the same
+`extractDatasetForAgent` path as `extract_dataset_by_sql`:
+
+- no raw `sql_text` parameter; the model cannot substitute the SQL;
+- single-statement queries only;
+- data-source policy, allowed binding set, cache slots, and Parquet output are
+  identical to `extract_dataset_by_sql`;
+- `datasetName` is required.
+
+Routing: prefer `run_skill_sql_script` for declared skill scripts; use
+`extract_dataset_by_sql` for ad-hoc, modified, or parameterised SQL. Both
+tools can be mounted together and share the same dataset cache.
+
 ---
 
 ## 4. Parquet cache

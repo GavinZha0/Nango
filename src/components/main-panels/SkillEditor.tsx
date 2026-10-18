@@ -64,6 +64,10 @@ export interface SkillDetail extends SkillRow {
   scriptsOnSsh: string[];
   /** Declared SSH scripts with no backing `skill_file` row. */
   missingSshScripts: string[];
+  /** Normalized `scripts/<path>.sql` entries declared in the frontmatter. */
+  scriptsOnDb: string[];
+  /** Declared SQL scripts with no backing `skill_file` row. */
+  missingDbScripts: string[];
 }
 
 /** Payload of `GET /api/skills/[id]/files/[...path]`. */
@@ -174,6 +178,12 @@ export function SkillEditor({
   );
   const [missingSshScripts, setMissingSshScripts] = useState<string[]>(
     () => initialDetail?.missingSshScripts ?? [],
+  );
+  const [scriptsOnDb, setScriptsOnDb] = useState<string[]>(
+    () => initialDetail?.scriptsOnDb ?? [],
+  );
+  const [missingDbScripts, setMissingDbScripts] = useState<string[]>(
+    () => initialDetail?.missingDbScripts ?? [],
   );
   const [selected, setSelected] = useState<string>(SKILL_MD_PATH);
   const [fileCache, setFileCache] = useState<Map<string, FilePayload>>(
@@ -438,6 +448,8 @@ export function SkillEditor({
     setFiles(detail.files ?? []);
     setScriptsOnSsh(detail.scriptsOnSsh ?? []);
     setMissingSshScripts(detail.missingSshScripts ?? []);
+    setScriptsOnDb(detail.scriptsOnDb ?? []);
+    setMissingDbScripts(detail.missingDbScripts ?? []);
     setForm({ source: detail.source ?? "", skillMd: detail.skillMd });
     setSavedForm({ source: detail.source ?? "", skillMd: detail.skillMd });
     return detail;
@@ -728,6 +740,8 @@ export function SkillEditor({
             }
             scriptsOnSsh={scriptsOnSsh}
             missingSshScripts={missingSshScripts}
+            scriptsOnDb={scriptsOnDb}
+            missingDbScripts={missingDbScripts}
             dirtyPath={dirtyPath}
           />
         )}

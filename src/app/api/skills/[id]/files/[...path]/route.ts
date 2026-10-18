@@ -22,6 +22,9 @@ import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
 import { loadEditableSkill } from "@/lib/skills/api-access";
 import {
+  syncDbDeclarationForRename,
+  syncDbDeclarationsForDelete,
+  syncDbDeclarationsForFolderRename,
   syncDeclarationForRename,
   syncDeclarationsForDelete,
   syncDeclarationsForFolderRename,
@@ -55,6 +58,107 @@ function filenameFrom(params: { path?: string[] }): string {
 
 function requestedKind(req: Request): "file" | "folder" {
   return new URL(req.url).searchParams.get("kind") === "folder" ? "folder" : "file";
+}
+
+/** Apply both scripts-on-ssh and scripts-on-db rewrites in order. */
+function syncRenameDeclarations(
+  skillMd: string,
+  oldPath: string,
+  newPath: string,
+): { skillMd?: string; warning?: string } {
+  let next = skillMd;
+  let changed = false;
+  let warning: string | undefined;
+
+  const ssh = syncDeclarationForRename(next, oldPath, newPath);
+  if (ssh.conflict) {
+    throw new ApiError(
+      "CONFLICT",
+      409,
+      `"${newPath}" is already declared in scripts-on-ssh.`,
+    );
+  }
+  if (ssh.changed) {
+    next = ssh.skillMd;
+    changed = true;
+  }
+  if (ssh.warning) warning = ssh.warning;
+
+  const db = syncDbDeclarationForRename(next, oldPath, newPath);
+  if (db.conflict) {
+    throw new ApiError(
+      "CONFLICT",
+      409,
+      `"${newPath}" is already declared in scripts-on-db.`,
+    );
+  }
+  if (db.changed) {
+    next = db.skillMd;
+    changed = true;
+  }
+  if (db.warning) {
+    warning = warning ? `${warning} ${db.warning}` : db.warning;
+  }
+
+  return { skillMd: changed ? next : undefined, warning };
+}
+
+function syncFolderRenameDeclarations(
+  skillMd: string,
+  oldPath: string,
+  newPath: string,
+): string | undefined {
+  let next = skillMd;
+  let changed = false;
+
+  const ssh = syncDeclarationsForFolderRename(next, oldPath, newPath);
+  if (ssh.conflict) {
+    throw new ApiError(
+      "CONFLICT",
+      409,
+      "Renaming would duplicate an entry in scripts-on-ssh.",
+    );
+  }
+  if (ssh.changed) {
+    next = ssh.skillMd;
+    changed = true;
+  }
+
+  const db = syncDbDeclarationsForFolderRename(next, oldPath, newPath);
+  if (db.conflict) {
+    throw new ApiError(
+      "CONFLICT",
+      409,
+      "Renaming would duplicate an entry in scripts-on-db.",
+    );
+  }
+  if (db.changed) {
+    next = db.skillMd;
+    changed = true;
+  }
+
+  return changed ? next : undefined;
+}
+
+function syncDeleteDeclarations(
+  skillMd: string,
+  paths: readonly string[],
+): string | undefined {
+  let next = skillMd;
+  let changed = false;
+
+  const ssh = syncDeclarationsForDelete(next, paths);
+  if (ssh.changed) {
+    next = ssh.skillMd;
+    changed = true;
+  }
+  const db = syncDbDeclarationsForDelete(next, paths);
+  if (db.changed) {
+    next = db.skillMd;
+    changed = true;
+  }
+
+  return changed ? next : undefined;
 }
 
 // GET /api/skills/[id]/files/[...path]
@@ -210,25 +314,17 @@ export const PATCH = withEditor<{ id: string; path: string[] }>(
         newPath.startsWith("scripts/")
       ) {
         try {
-          const sync = syncDeclarationsForFolderRename(
+          skillMd = syncFolderRenameDeclarations(
             skill.skillMd,
             oldPath,
             newPath,
           );
-          if (sync.conflict) {
-            throw new ApiError(
-              "CONFLICT",
-              409,
-              `Renaming would duplicate an entry in scripts-on-ssh.`,
-            );
-          }
-          if (sync.changed) skillMd = sync.skillMd;
         } catch (err) {
           if (err instanceof SkillParseError) {
             throw new ApiError(
               "VALIDATION_FAILED",
               400,
-              `Cannot sync scripts-on-ssh: ${err.message}`,
+              `Cannot sync script declarations: ${err.message}`,
             );
           }
           throw err;
@@ -325,22 +421,15 @@ export const PATCH = withEditor<{ id: string; path: string[] }>(
     let warning: string | undefined;
     if (oldPath.startsWith("scripts/") || newPath.startsWith("scripts/")) {
       try {
-        const sync = syncDeclarationForRename(skill.skillMd, oldPath, newPath);
-        if (sync.conflict) {
-          throw new ApiError(
-            "CONFLICT",
-            409,
-            `"${newPath}" is already declared in scripts-on-ssh.`,
-          );
-        }
-        if (sync.changed) skillMd = sync.skillMd;
+        const sync = syncRenameDeclarations(skill.skillMd, oldPath, newPath);
+        skillMd = sync.skillMd;
         warning = sync.warning;
       } catch (err) {
         if (err instanceof SkillParseError) {
           throw new ApiError(
             "VALIDATION_FAILED",
             400,
-            `Cannot sync scripts-on-ssh: ${err.message}`,
+            `Cannot sync script declarations: ${err.message}`,
           );
         }
         throw err;
@@ -404,14 +493,13 @@ export const DELETE = withEditor<{ id: string; path: string[] }>(
       let skillMd: string | undefined;
       if (path.startsWith("scripts/")) {
         try {
-          const sync = syncDeclarationsForDelete(skill.skillMd, [path]);
-          if (sync.changed) skillMd = sync.skillMd;
+          skillMd = syncDeleteDeclarations(skill.skillMd, [path]);
         } catch (err) {
           if (err instanceof SkillParseError) {
             throw new ApiError(
               "VALIDATION_FAILED",
               400,
-              `Cannot sync scripts-on-ssh: ${err.message}`,
+              `Cannot sync script declarations: ${err.message}`,
             );
           }
           throw err;
@@ -440,14 +528,13 @@ export const DELETE = withEditor<{ id: string; path: string[] }>(
     // Declarations may live in any sub-directory under scripts/.
     if (path === "scripts" || path.startsWith("scripts/")) {
       try {
-        const sync = syncDeclarationsForDelete(skill.skillMd, affected);
-        if (sync.changed) skillMd = sync.skillMd;
+        skillMd = syncDeleteDeclarations(skill.skillMd, affected);
       } catch (err) {
         if (err instanceof SkillParseError) {
           throw new ApiError(
             "VALIDATION_FAILED",
             400,
-            `Cannot sync scripts-on-ssh: ${err.message}`,
+            `Cannot sync script declarations: ${err.message}`,
           );
         }
         throw err;

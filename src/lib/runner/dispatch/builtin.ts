@@ -36,6 +36,7 @@ import {
   buildSkillsRuntime,
   buildRunSkillScriptOnSshTool,
 } from "@/lib/skills/runtime-tools";
+import { buildRunSkillSqlScriptTool } from "@/lib/skills/db-script-tools";
 import type { childLogger } from "@/lib/observability/logger";
 import { recordEvent } from "../event-store";
 import {
@@ -264,9 +265,12 @@ export async function buildBuiltinAgents(
     const skillSpecs: SkillSpec[] = await skillPool.getMany(skillIds);
     const hasSshScripts = skillSpecs.some((s) => s.scriptsOnSsh.size > 0);
     const hasSshBindings = sshServerIds.length > 0;
+    const hasDbScripts = skillSpecs.some((s) => s.scriptsOnDb.size > 0);
+    const hasDbBindings = dataSourceIds.length > 0;
     const skillsRuntime = buildSkillsRuntime({
       specs: skillSpecs,
       hasSshBindings,
+      hasDbBindings,
     });
     const dataSourcesRuntime =
       await buildDataSourcesPromptBlock(dataSourceIds);
@@ -299,6 +303,19 @@ export async function buildBuiltinAgents(
             buildRunSkillScriptOnSshTool({
               specs: skillSpecs,
               agentSshServerIds: sshServerIds,
+            }),
+          ]
+        : [];
+
+    // Mounting run_skill_sql_script requires BOTH a skill declaring
+    // scripts-on-db AND a bound data source. The same condition is fed into
+    // buildSkillsRuntime so its prompt never advertises an absent tool.
+    const skillDbTools: ToolDefinition[] =
+      hasDbScripts && hasDbBindings
+        ? [
+            buildRunSkillSqlScriptTool({
+              specs: skillSpecs,
+              agentDataSourceIds: dataSourceIds,
             }),
           ]
         : [];
@@ -638,6 +655,7 @@ export async function buildBuiltinAgents(
     const serverTools: ToolDefinition[] = [
       ...skillsRuntime.tools,
       ...skillSshTools,
+      ...skillDbTools,
       ...supervisorTools,
       ...evaluatorTools,
       ...testerTools,

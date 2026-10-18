@@ -11,6 +11,7 @@ import { visibilitySql } from "@/lib/auth/permissions";
 import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
 import {
+  describeMissingDeclaredScripts,
   describeMissingSshScripts,
   parseSkillMd,
   SkillParseError,
@@ -82,6 +83,19 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       400,
       describeMissingSshScripts(parsed.frontmatter.scriptsOnSsh, []) +
         " Skills created here cannot gain script files; upload the folder with" +
+        " POST /api/skills/import instead.",
+    );
+  }
+  if (parsed.frontmatter.scriptsOnDb?.length) {
+    throw new ApiError(
+      "VALIDATION_FAILED",
+      400,
+      describeMissingDeclaredScripts(
+        parsed.frontmatter.scriptsOnDb,
+        [],
+        "scripts-on-db",
+      ) +
+        " Skills created here cannot gain SQL files; upload the folder with" +
         " POST /api/skills/import instead.",
     );
   }

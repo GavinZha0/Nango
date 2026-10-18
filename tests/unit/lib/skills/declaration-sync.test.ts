@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  syncDbDeclarationForRename,
+  syncDbDeclarationsForDelete,
+  syncDbDeclarationsForFolderRename,
   syncDeclarationForRename,
   syncDeclarationsForDelete,
   syncDeclarationsForFolderRename,
@@ -98,6 +101,68 @@ describe("syncDeclarationsForFolderRename", () => {
     );
 
     expect(result).toEqual({ skillMd: before, changed: false });
+  });
+});
+
+describe("scripts-on-db declaration sync", () => {
+  it("rewrites a declared SQL path on rename", () => {
+    const result = syncDbDeclarationForRename(
+      skillMd("scripts-on-db: reports/sales.sql"),
+      "scripts/reports/sales.sql",
+      "scripts/reports/monthly.sql",
+    );
+
+    expect(result.changed).toBe(true);
+    expect(parseSkillMd(result.skillMd).frontmatter.scriptsOnDb).toEqual([
+      "scripts/reports/monthly.sql",
+    ]);
+  });
+
+  it("removes the declaration when renamed to a non-.sql file", () => {
+    const result = syncDbDeclarationForRename(
+      skillMd("scripts-on-db: reports/sales.sql"),
+      "scripts/reports/sales.sql",
+      "scripts/reports/sales.txt",
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.warning).toMatch(/no longer a \.sql file/);
+    expect(result.skillMd).not.toMatch(/^scripts-on-db:/m);
+  });
+
+  it("reports a conflict when the target is already declared", () => {
+    const result = syncDbDeclarationForRename(
+      skillMd('scripts-on-db: ["a.sql", "b.sql"]'),
+      "scripts/a.sql",
+      "scripts/b.sql",
+    );
+
+    expect(result.conflict).toBe(true);
+    expect(result.changed).toBe(false);
+  });
+
+  it("rewrites declarations under a renamed folder", () => {
+    const result = syncDbDeclarationsForFolderRename(
+      skillMd('scripts-on-db: ["reports/a.sql", "reports/b.sql"]'),
+      "scripts/reports",
+      "scripts/archive",
+    );
+
+    expect(parseSkillMd(result.skillMd).frontmatter.scriptsOnDb).toEqual([
+      "scripts/archive/a.sql",
+      "scripts/archive/b.sql",
+    ]);
+  });
+
+  it("removes declarations for deleted SQL files", () => {
+    const result = syncDbDeclarationsForDelete(
+      skillMd('scripts-on-db: ["a.sql", "b.sql"]'),
+      ["scripts/a.sql"],
+    );
+
+    expect(parseSkillMd(result.skillMd).frontmatter.scriptsOnDb).toEqual([
+      "scripts/b.sql",
+    ]);
   });
 });
 

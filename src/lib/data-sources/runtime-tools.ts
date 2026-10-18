@@ -117,10 +117,231 @@ export interface ExtractDatasetResult {
  *   `dataSourceIds`; workflow path passes the owner-visible ids. Mirrors
  *   the SSH `allowedIds` pattern.
  */
+export interface ExtractDatasetForAgentArgs {
+  dataSourceName: string;
+  datasetName: string;
+  sqlText: string;
+  rowLimit?: number;
+  forceRefresh?: boolean;
+}
+
+export interface ExtractDatasetErrorResult {
+  ok: false;
+  error: { code: string; message: string };
+}
+
+export type ExtractDatasetForAgentResult =
+  | ExtractDatasetResult
+  | ExtractDatasetErrorResult;
+
+/**
+ * Shared extraction path used by `extract_dataset_by_sql` and the
+ * `run_skill_sql_script` skill tool.
+ *
+ * CONTRACT: the caller already authorized the data source binding; this
+ * function enforces the allowed-ID set, SQL policy, cache, and extraction.
+ */
+export async function extractDatasetForAgent(
+  args: ExtractDatasetForAgentArgs,
+  allowedDataSourceIds: readonly string[],
+): Promise<ExtractDatasetForAgentResult> {
+  const allowed = new Set(allowedDataSourceIds);
+  // The adapter wraps the query in `COPY (...)`; a trailing semicolon would
+  // make that invalid, and a multi-statement file is rejected by the policy.
+  const sqlText = args.sqlText.trim().replace(/;\s*$/, "");
+  if (sqlText.length === 0) {
+    return {
+      ok: false,
+      error: { code: "EMPTY_SQL", message: "SQL is empty." },
+    };
+  }
+
+  try {
+    validateDatasetName(args.datasetName);
+  } catch (err) {
+    if (err instanceof InvalidCacheKeyError) {
+      return {
+        ok: false,
+        error: { code: "INVALID_NAME", message: err.message },
+      };
+    }
+    throw err;
+  }
+
+  const lookup = await resolveDataSourceByName(args.dataSourceName);
+  if (!lookup.ok) {
+    return {
+      ok: false,
+      error: { code: lookup.error, message: lookup.message },
+    };
+  }
+  const resolved = lookup.resolved;
+
+  // SECURITY (BUG-1): the editor/admin-approved binding is the
+  // authorization boundary. The name lookup is global, so reject any
+  // source outside the caller's allowed set. Return NOT_FOUND (not
+  // "forbidden") so we don't leak the existence of unbound sources.
+  if (!allowed.has(resolved.id)) {
+    return {
+      ok: false,
+      error: {
+        code: "NOT_FOUND",
+        message: `Data source "${args.dataSourceName}" not found.`,
+      },
+    };
+  }
+
+  // Policy gate: parse the SQL and reject before touching the cache so
+  // writes / disallowed tables / multi-statement scripts fail fast. The
+  // adapter ALSO wraps in a read-only transaction when policy.readOnly
+  // — defence in depth.
+  const policyCheck = validateSqlAgainstPolicy(
+    sqlText,
+    resolved.provider,
+    resolved.policy,
+    { singleStatement: true },
+  );
+  if (!policyCheck.ok) {
+    return {
+      ok: false,
+      error: { code: policyCheck.code, message: policyCheck.message },
+    };
+  }
+
+  const limits = getExtractLimits();
+  const ttlHours = limits.defaultTtlHours;
+  const queryHash = hashQuery(sqlText);
+  const rowLimit = Math.min(
+    args.rowLimit ?? PREVIEW_ROWS_DEFAULT(),
+    PREVIEW_HARD_CAP_ROWS(),
+  );
+  const forceRefresh = args.forceRefresh ?? false;
+
+  // We DO NOT re-validate policy on cache hits: the Parquet
+  // snapshot is a historical artefact, and re-checking would
+  // force a re-extract every time the policy tightens. The next
+  // miss naturally re-applies the new policy.
+  // CONTRACT: A cache hit requires the query hash AND data source ID to match.
+  // Reusing the same dataset name with a different source or different query
+  // is a slot reassignment and must re-extract.
+  const status = await getCacheStatus(args.datasetName);
+  if (
+    !forceRefresh &&
+    status.exists &&
+    status.isFresh &&
+    status.meta &&
+    status.meta.queryHash === queryHash &&
+    status.meta.dataSourceId === resolved.id
+  ) {
+    const preview =
+      rowLimit > 0 && status.meta.rowCount > 0
+        ? await readPreview(args.datasetName, rowLimit)
+        : [];
+    return {
+      cache_hit: true,
+      dataset_name: args.datasetName,
+      total_rows: status.meta.rowCount,
+      returned_rows: preview.length,
+      rows: preview,
+      // Sidecar persists totals only; columns are not preserved
+      // on hits. Agents needing the column list must force a
+      // fresh extraction.
+      row_schema: { columns: [] },
+      ttl_hours: status.meta.ttlHours,
+    } satisfies ExtractDatasetResult;
+  }
+
+  // Slot semantics: same name + different query or different source
+  // is a slot reassignment, not an error. commitWriteSlot does `rm -rf
+  // <final> && rename(tmp, final)` atomically. The log line
+  // preserves observability so an admin can audit reassignments.
+  const replacedPrior: boolean =
+    status.exists &&
+    status.meta != null &&
+    (status.meta.queryHash !== queryHash ||
+      status.meta.dataSourceId !== resolved.id);
+  if (replacedPrior && status.meta) {
+    log.info(
+      {
+        event: "dataset_replaced",
+        name: args.datasetName,
+        oldQueryHash: status.meta.queryHash,
+        newQueryHash: queryHash,
+        oldDataSourceId: status.meta.dataSourceId,
+        newDataSourceId: resolved.id,
+        oldRowCount: status.meta.rowCount,
+        dataSourceName: args.dataSourceName,
+      },
+      `dataset "${args.datasetName}" slot reassigned (${
+        status.meta.dataSourceId !== resolved.id
+          ? "different data source"
+          : "different query"
+      })`,
+    );
+  }
+
+  const source = getDataSource(resolved.provider);
+  const slot = await acquireWriteSlot(args.datasetName);
+  const ac = new AbortController();
+
+  let extracted: ExtractResult;
+  try {
+    extracted = await source.extract(resolved, {
+      datasetName: args.datasetName,
+      query: sqlText,
+      outputPath: slot.outputPath,
+      timeoutMs: limits.timeoutMs,
+      maxRows: limits.maxRows,
+      previewRows: rowLimit,
+      signal: ac.signal,
+    });
+  } catch (err) {
+    await abortWriteSlot(slot);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    log.error(
+      { err, dataSourceName: args.dataSourceName, datasetName: args.datasetName },
+      "extract_dataset_by_sql failed",
+    );
+    return {
+      ok: false,
+      error: {
+        code: "EXTRACT_FAILED",
+        message: sanitizeConnectionStringError(rawMessage, args.dataSourceName),
+      },
+    };
+  }
+
+  await commitWriteSlot({
+    name: args.datasetName,
+    slot,
+    source: resolved.provider,
+    dataSourceId: resolved.id,
+    queryHash,
+    ttlHours,
+    rowCount: extracted.schema.rowCount,
+    byteSize: extracted.schema.byteSize,
+  });
+
+  const preview = extracted.rows ?? [];
+
+  const result: ExtractDatasetResult = {
+    cache_hit: false,
+    dataset_name: args.datasetName,
+    total_rows: extracted.schema.rowCount,
+    returned_rows: preview.length,
+    rows: preview,
+    row_schema: { columns: extracted.schema.columns },
+    ttl_hours: ttlHours,
+  };
+  if (replacedPrior) {
+    result.replaced_prior = true;
+  }
+  return result;
+}
+
 export function buildExtractDatasetTool(
   allowedDataSourceIds: readonly string[],
 ): ToolDefinition {
-  const allowed = new Set(allowedDataSourceIds);
   return defineTool({
     name: "extract_dataset_by_sql",
     description:
@@ -148,187 +369,21 @@ export function buildExtractDatasetTool(
       "To run analysis on the full dataset, pass `dataset_name` to " +
       "run_code_in_sandbox.datasets[]; the Parquet files become " +
       "readable at ./tmp/data/<dataset_name>/ in the sandbox's working " +
-      "directory.",
+      "directory. For a reviewed SQL script declared by a bound skill " +
+      "under scripts-on-db, prefer run_skill_sql_script; use this tool " +
+      "for ad-hoc or modified SQL.",
     parameters: ExtractDatasetArgs,
-    execute: async (args) => {
-      try {
-        validateDatasetName(args.dataset_name);
-      } catch (err) {
-        if (err instanceof InvalidCacheKeyError) {
-          return {
-            ok: false,
-            error: { code: "INVALID_NAME", message: err.message },
-          };
-        }
-        throw err;
-      }
-
-      const lookup = await resolveDataSourceByName(args.data_source_name);
-      if (!lookup.ok) {
-        return {
-          ok: false,
-          error: { code: lookup.error, message: lookup.message },
-        };
-      }
-      const resolved = lookup.resolved;
-
-      // SECURITY (BUG-1): the editor/admin-approved binding is the
-      // authorization boundary. The name lookup is global, so reject any
-      // source outside the caller's allowed set. Return NOT_FOUND (not
-      // "forbidden") so we don't leak the existence of unbound sources.
-      if (!allowed.has(resolved.id)) {
-        return {
-          ok: false,
-          error: {
-            code: "NOT_FOUND",
-            message: `Data source "${args.data_source_name}" not found.`,
-          },
-        };
-      }
-
-      // Policy gate: parse the SQL and reject before touching the
-      // cache so writes / disallowed tables fail fast. The adapter
-      // ALSO wraps in a read-only transaction when policy.readOnly
-      // — defence in depth.
-      const policyCheck = validateSqlAgainstPolicy(
-        args.sql_text,
-        resolved.provider,
-        resolved.policy,
-      );
-      if (!policyCheck.ok) {
-        return {
-          ok: false,
-          error: { code: policyCheck.code, message: policyCheck.message },
-        };
-      }
-
-      const limits = getExtractLimits();
-      const ttlHours = limits.defaultTtlHours;
-      const queryHash = hashQuery(args.sql_text);
-      const rowLimit = Math.min(args.row_limit, PREVIEW_HARD_CAP_ROWS());
-
-      // We DO NOT re-validate policy on cache hits: the Parquet
-      // snapshot is a historical artefact, and re-checking would
-      // force a re-extract every time the policy tightens. The next
-      // miss naturally re-applies the new policy.
-      // CONTRACT: A cache hit requires the query hash AND data source ID to match.
-      // Reusing the same dataset name with a different source or different query
-      // is a slot reassignment and must re-extract.
-      const status = await getCacheStatus(args.dataset_name);
-      if (
-        !args.force_refresh &&
-        status.exists &&
-        status.isFresh &&
-        status.meta &&
-        status.meta.queryHash === queryHash &&
-        status.meta.dataSourceId === resolved.id
-      ) {
-        const preview =
-          rowLimit > 0 && status.meta.rowCount > 0
-            ? await readPreview(args.dataset_name, rowLimit)
-            : [];
-        return {
-          cache_hit: true,
-          dataset_name: args.dataset_name,
-          total_rows: status.meta.rowCount,
-          returned_rows: preview.length,
-          rows: preview,
-          // Sidecar persists totals only; columns are not preserved
-          // on hits. Agents needing the column list must force a
-          // fresh extraction.
-          row_schema: { columns: [] },
-          ttl_hours: status.meta.ttlHours,
-        } satisfies ExtractDatasetResult;
-      }
-
-      // Slot semantics: same name + different query or different source
-      // is a slot reassignment, not an error. commitWriteSlot does `rm -rf
-      // <final> && rename(tmp, final)` atomically. The log line
-      // preserves observability so an admin can audit reassignments.
-      const replacedPrior: boolean =
-        status.exists &&
-        status.meta != null &&
-        (status.meta.queryHash !== queryHash ||
-          status.meta.dataSourceId !== resolved.id);
-      if (replacedPrior && status.meta) {
-        log.info(
-          {
-            event: "dataset_replaced",
-            name: args.dataset_name,
-            oldQueryHash: status.meta.queryHash,
-            newQueryHash: queryHash,
-            oldDataSourceId: status.meta.dataSourceId,
-            newDataSourceId: resolved.id,
-            oldRowCount: status.meta.rowCount,
-            dataSourceName: args.data_source_name,
-          },
-          `dataset "${args.dataset_name}" slot reassigned (${
-            status.meta.dataSourceId !== resolved.id
-              ? "different data source"
-              : "different query"
-          })`,
-        );
-      }
-
-
-      const source = getDataSource(resolved.provider);
-      const slot = await acquireWriteSlot(args.dataset_name);
-      const ac = new AbortController();
-
-      let extracted: ExtractResult;
-      try {
-        extracted = await source.extract(resolved, {
+    execute: async (args) =>
+      extractDatasetForAgent(
+        {
+          dataSourceName: args.data_source_name,
           datasetName: args.dataset_name,
-          query: args.sql_text,
-          outputPath: slot.outputPath,
-          timeoutMs: limits.timeoutMs,
-          maxRows: limits.maxRows,
-          previewRows: rowLimit,
-          signal: ac.signal,
-        });
-      } catch (err) {
-        await abortWriteSlot(slot);
-        const rawMessage = err instanceof Error ? err.message : String(err);
-        log.error(
-          { err, dataSourceName: args.data_source_name, datasetName: args.dataset_name },
-          "extract_dataset_by_sql failed",
-        );
-        return {
-          ok: false,
-          error: {
-            code: "EXTRACT_FAILED",
-            message: sanitizeConnectionStringError(rawMessage, args.data_source_name),
-          },
-        };
-      }
-
-      await commitWriteSlot({
-        name: args.dataset_name,
-        slot,
-        source: resolved.provider,
-        dataSourceId: resolved.id,
-        queryHash,
-        ttlHours,
-        rowCount: extracted.schema.rowCount,
-        byteSize: extracted.schema.byteSize,
-      });
-
-      const preview = extracted.rows ?? [];
-
-      const result: ExtractDatasetResult = {
-        cache_hit: false,
-        dataset_name: args.dataset_name,
-        total_rows: extracted.schema.rowCount,
-        returned_rows: preview.length,
-        rows: preview,
-        row_schema: { columns: extracted.schema.columns },
-        ttl_hours: ttlHours,
-      };
-      if (replacedPrior) {
-        result.replaced_prior = true;
-      }
-      return result;
-    },
+          sqlText: args.sql_text,
+          rowLimit: args.row_limit,
+          forceRefresh: args.force_refresh,
+        },
+        allowedDataSourceIds,
+      ),
   });
 }
 

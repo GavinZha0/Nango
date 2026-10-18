@@ -97,6 +97,17 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
   ],
   [
+    "run_skill_sql_script",
+    {
+      riskLevel: "low",
+      sideEffects: "read",
+      readOnlyHint: true,
+      headlessAllowed: true,
+      // CONTRACT: the SQL file is reviewed skill content and the shared
+      // extraction path wraps it in COPY (single SELECT), so it is read-only.
+    },
+  ],
+  [
     "run_ssh_command",
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],

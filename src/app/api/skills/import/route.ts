@@ -25,6 +25,8 @@ import {
   SkillParseError,
   findMissingSshScripts,
   describeMissingSshScripts,
+  findMissingDeclaredScripts,
+  describeMissingDeclaredScripts,
 } from "@/lib/skills/parser";
 import { getDbSkillStorage } from "@/lib/skills/storage";
 import {
@@ -274,19 +276,41 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
+  // 5b-bis. scripts-on-db entries must be backed by a SQL file in this bundle.
+  if (parsed.frontmatter.scriptsOnDb?.length) {
+    const available = filesToWrite.map((f) => f.path);
+    const missing = findMissingDeclaredScripts(
+      parsed.frontmatter.scriptsOnDb,
+      available,
+    );
+    if (missing.length > 0) {
+      throw new ApiError(
+        "VALIDATION_FAILED",
+        400,
+        describeMissingDeclaredScripts(missing, available, "scripts-on-db"),
+      );
+    }
+  }
+
   // 5c. Declared scripts must be strict UTF-8 text. Their source is embedded
-  // in a command string shipped to a remote host, where a mangled byte
-  // executes as mojibake; rejecting here is the last point where the author
-  // can still re-save the file.
+  // in a command string shipped to a remote host or passed to the DB adapter,
+  // where a mangled byte becomes mojibake; rejecting here is the last point
+  // where the author can still re-save the file.
   const declaredSshScripts = new Set(parsed.frontmatter.scriptsOnSsh ?? []);
+  const declaredDbScripts = new Set(parsed.frontmatter.scriptsOnDb ?? []);
   for (const file of filesToWrite) {
-    if (!declaredSshScripts.has(file.path)) continue;
+    if (!declaredSshScripts.has(file.path) && !declaredDbScripts.has(file.path)) {
+      continue;
+    }
     const decoded = readSshScriptSource(file.content);
     if (!decoded.ok) {
       throw new ApiError(
         "VALIDATION_FAILED",
         400,
-        describeUnusableSshScript(file.path, decoded.reason),
+        declaredSshScripts.has(file.path)
+          ? describeUnusableSshScript(file.path, decoded.reason)
+          : `${file.path} is not valid UTF-8 or contains NUL bytes; ` +
+            "re-save it as UTF-8 before declaring it in scripts-on-db.",
       );
     }
   }

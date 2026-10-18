@@ -40,6 +40,8 @@ export interface SkillSpec {
    * so tools do not re-parse on every call.
    */
   scriptsOnSsh: ReadonlySet<string>;
+  /** Normalized `scripts/<path>.sql` entries for run_skill_sql_script. */
+  scriptsOnDb: ReadonlySet<string>;
 }
 
 export type SkillSpecLoader = (skillId: string) => Promise<SkillSpec | null>;
@@ -159,6 +161,7 @@ export const defaultLoadSkillSpec: SkillSpecLoader = async (skillId) => {
     visibility: row.visibility,
     createdBy: row.createdBy,
     scriptsOnSsh: new Set(parsed.frontmatter.scriptsOnSsh ?? []),
+    scriptsOnDb: new Set(parsed.frontmatter.scriptsOnDb ?? []),
   };
 };
 

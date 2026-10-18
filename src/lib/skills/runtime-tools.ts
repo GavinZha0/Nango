@@ -56,6 +56,12 @@ export interface BuildSkillsRuntimeArgs {
    * never silently downgraded to the sandbox.
    */
   hasSshBindings?: boolean;
+  /**
+   * True when the calling agent has at least one data source bound, i.e. when
+   * `run_skill_sql_script` is mounted next to these tools. Drives routing
+   * messages and the prompt annotation only.
+   */
+  hasDbBindings?: boolean;
 }
 
 export interface SkillsRuntime {
@@ -66,7 +72,7 @@ export interface SkillsRuntime {
 }
 
 export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime {
-  const { specs, hasSshBindings = false } = args;
+  const { specs, hasSshBindings = false, hasDbBindings = false } = args;
   if (specs.length === 0) {
     return { tools: [], promptBlock: "" };
   }
@@ -85,8 +91,14 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   // absent, or the model loops between two refusing tools.
   const sshToolAvailable: boolean =
     hasSshBindings && specs.some((spec) => spec.scriptsOnSsh.size > 0);
+  const dbToolAvailable: boolean =
+    hasDbBindings && specs.some((spec) => spec.scriptsOnDb.size > 0);
 
-  const promptBlock: string = renderPromptBlock(specs, sshToolAvailable);
+  const promptBlock: string = renderPromptBlock(
+    specs,
+    sshToolAvailable,
+    dbToolAvailable,
+  );
   const storage = getDbSkillStorage();
 
   const getSkill = defineTool({
@@ -486,16 +498,20 @@ export function buildRunSkillScriptOnSshTool(
 function renderPromptBlock(
   specs: SkillSpec[],
   sshToolAvailable: boolean,
+  dbToolAvailable: boolean,
 ): string {
   if (specs.length === 0) return "";
   const lines: string[] = [];
   lines.push("## Available Skills");
   lines.push(
     "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill live in author-defined folders (commonly references/, scripts/, assets/, evals/) and are reachable via `get_skill_file(name, filename)`.  Scripts (.py and .sh) can be executed with `run_skill_script(name, filename)` — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd." +
-      // Only name the SSH tool when it is actually mounted; otherwise the
-      // model would be instructed to call a tool that does not exist.
+      // Only name a tool when it is actually mounted; otherwise the model
+      // would be instructed to call a tool that does not exist.
       (sshToolAvailable
         ? " Scripts listed in `scripts-on-ssh` must use `run_skill_script_on_ssh(name, filename, serverName)` instead."
+        : "") +
+      (dbToolAvailable
+        ? " SQL files listed in `scripts-on-db` must use `run_skill_sql_script(name, filename, dataSourceName, datasetName)`. For ad-hoc or modified SQL, use `extract_dataset_by_sql`."
         : ""),
   );
   lines.push("");
@@ -511,7 +527,17 @@ function renderPromptBlock(
               : " — require an SSH host bound to this agent; not runnable"
           })`
         : "";
-    lines.push(`- **${spec.name}**${sshNote}: ${description}`);
+    const dbNote =
+      spec.scriptsOnDb.size > 0
+        ? ` (DB scripts: ${[...spec.scriptsOnDb]
+            .map((p) => p.replace(/^scripts\//, ""))
+            .join(", ")}${
+            dbToolAvailable
+              ? ""
+              : " — require a data source bound to this agent; not runnable"
+          })`
+        : "";
+    lines.push(`- **${spec.name}**${sshNote}${dbNote}: ${description}`);
   }
   return lines.join("\n");
 }

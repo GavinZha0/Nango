@@ -256,6 +256,42 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     expect(storageMock.createCustom).not.toHaveBeenCalled();
   });
 
+  it("imports a skill whose declared scripts-on-db file is present", async () => {
+    dbMock.$enqueue([], [
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
+    ]);
+
+    const res = await upload(
+      [
+        {
+          path: "scripts/reports/sales.sql",
+          content: "SELECT * FROM sales\n",
+        },
+      ],
+      'scripts-on-db: ["reports/sales.sql"]',
+    );
+
+    expect(res.status).toBe(201);
+    expect(storageMock.putFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "scripts/reports/sales.sql" }),
+    );
+  });
+
+  it("rejects a scripts-on-db declaration with no backing file", async () => {
+    dbMock.$enqueue([]);
+
+    const res = await upload(
+      [{ path: "scripts/reports/other.sql", content: "SELECT 1\n" }],
+      'scripts-on-db: ["reports/sales.sql"]',
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(
+      /scripts-on-db declares missing file\(s\): scripts\/reports\/sales\.sql/,
+    );
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
+  });
+
   it("leaves undeclared scripts alone", async () => {
     dbMock.$enqueue([], [
       { id: "skill-1", name: "probe-skill", createdBy: "user-1" },

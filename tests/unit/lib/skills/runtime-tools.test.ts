@@ -35,6 +35,7 @@ function makeSpec(overrides: Partial<SkillSpec> = {}): SkillSpec {
     visibility: "public",
     createdBy: "user-1",
     scriptsOnSsh: new Set(["scripts/probe.sh"]),
+    scriptsOnDb: new Set(),
     ...overrides,
   };
 }
@@ -44,6 +45,7 @@ const pythonSshSpec = makeSpec({
   skillId: "py-skill-id",
   name: "py-skill",
   scriptsOnSsh: new Set(["scripts/probe.py"]),
+  scriptsOnDb: new Set(),
 });
 const sandboxSkillSpec = makeSpec({
   skillId: "sandbox-skill-id",
@@ -51,6 +53,14 @@ const sandboxSkillSpec = makeSpec({
   description: "A skill with sandbox scripts",
   skillMd: "---\nname: sandbox-skill\ndescription: ...\n---",
   scriptsOnSsh: new Set(),
+  scriptsOnDb: new Set(),
+});
+const dbSkillSpec = makeSpec({
+  skillId: "db-skill-id",
+  name: "db-skill",
+  description: "A skill with SQL reports",
+  scriptsOnSsh: new Set(),
+  scriptsOnDb: new Set(["scripts/reports/sales.sql"]),
 });
 
 const specs: SkillSpec[] = [sshSkillSpec, pythonSshSpec, sandboxSkillSpec];
@@ -210,6 +220,36 @@ describe("buildSkillsRuntime — prompt block SSH annotations", () => {
     expect(runtime.promptBlock).not.toContain("SSH scripts:");
   });
 
+  it("names run_skill_sql_script only when a data source is bound", () => {
+    const mounted = buildSkillsRuntime({
+      specs: [dbSkillSpec],
+      hasDbBindings: true,
+    });
+    expect(mounted.promptBlock).toContain(
+      "must use `run_skill_sql_script(name, filename, dataSourceName, datasetName)`",
+    );
+    expect(mounted.promptBlock).toContain(
+      "(DB scripts: reports/sales.sql)",
+    );
+    expect(mounted.promptBlock).not.toContain("not runnable");
+  });
+
+  it("marks DB scripts as not runnable when no data source is bound", () => {
+    const unmounted = buildSkillsRuntime({ specs: [dbSkillSpec] });
+    expect(unmounted.promptBlock).not.toContain("run_skill_sql_script(");
+    expect(unmounted.promptBlock).toContain(
+      "(DB scripts: reports/sales.sql — require a data source bound to this agent; not runnable)",
+    );
+  });
+
+  it("adds no DB note for skills without scripts-on-db", () => {
+    const runtime = buildSkillsRuntime({
+      specs: [sandboxSkillSpec],
+      hasDbBindings: true,
+    });
+    expect(runtime.promptBlock).not.toContain("DB scripts:");
+  });
+
   it("returns an empty runtime for no specs", () => {
     expect(buildSkillsRuntime({ specs: [] })).toEqual({
       tools: [],
@@ -246,6 +286,7 @@ describe("buildRunSkillScriptOnSshTool", () => {
       skillId: "nested-skill-id",
       name: "nested-skill",
       scriptsOnSsh: new Set(["scripts/lib/probe.sh"]),
+      scriptsOnDb: new Set(),
     });
     const nestedTool = buildRunSkillScriptOnSshTool({
       specs: [nestedSpec],

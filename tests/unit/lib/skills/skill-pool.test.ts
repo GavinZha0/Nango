@@ -47,6 +47,7 @@ function fakeSpec(id: string): SkillSpec {
     visibility: "public",
     createdBy: "user-1",
     scriptsOnSsh: new Set(),
+    scriptsOnDb: new Set(),
   };
 }
 

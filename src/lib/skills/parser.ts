@@ -27,6 +27,13 @@ export interface SkillFrontmatter {
    * See docs/skills.md and the run_skill_script_on_ssh design doc.
    */
   scriptsOnSsh?: string[];
+  /**
+   * SQL scripts (normalized to `scripts/<path>.sql`) that may be executed
+   * against a bound data source via `run_skill_sql_script`.
+   * Accepted key spellings: `scripts-on-db` (canonical), `scripts_on_db`,
+   * `scriptsOnDb`. Only `.sql` files under `scripts/` are accepted.
+   */
+  scriptsOnDb?: string[];
   /** Any other frontmatter key the author included, kept verbatim. */
   extras: Record<string, string | string[]>;
 }
@@ -172,6 +179,25 @@ export function parseSkillMd(text: string): ParsedSkillMd {
     delete raw[sshRawKey];
   }
 
+  // SQL scripts that may run against a bound data source.
+  let scriptsOnDb: string[] | undefined;
+  const DB_KEY_CANONICAL = "scripts-on-db";
+  const DB_KEY_SNAKE = "scripts_on_db";
+  const DB_KEY_CAMEL = "scriptsOnDb";
+  const dbRawKey = DB_KEY_CANONICAL in raw
+    ? DB_KEY_CANONICAL
+    : DB_KEY_SNAKE in raw
+      ? DB_KEY_SNAKE
+      : DB_KEY_CAMEL in raw
+        ? DB_KEY_CAMEL
+        : null;
+  if (dbRawKey !== null) {
+    const v: string | string[] = raw[dbRawKey];
+    const entries: string[] = v === "" ? [] : Array.isArray(v) ? v : [v];
+    scriptsOnDb = normalizeScriptsOnDb(entries);
+    delete raw[dbRawKey];
+  }
+
   return {
     frontmatter: {
       name,
@@ -180,6 +206,7 @@ export function parseSkillMd(text: string): ParsedSkillMd {
       ...(context !== undefined ? { context } : {}),
       ...(allowedTools !== undefined ? { allowedTools } : {}),
       ...(scriptsOnSsh !== undefined ? { scriptsOnSsh } : {}),
+      ...(scriptsOnDb !== undefined ? { scriptsOnDb } : {}),
       extras: raw,
     },
     body,
@@ -214,26 +241,25 @@ function parseValue(raw: string): string | string[] {
 }
 
 /**
- * Validate and normalize a list of raw `scripts-on-ssh` entries.
+ * Validate and normalize declared script paths shared by scripts-on-ssh and
+ * scripts-on-db.
  *
- * Each entry is accepted as either a bare path (`probe.sh`,
- * `lib/probe.sh`) or a `scripts/`-prefixed path. Both normalize to
- * `scripts/<path>`. Sub-directories under `scripts/` are allowed so the
- * declaration can target the same scripts `run_skill_script` can execute.
- *
- * Extensions are not restricted here: renaming a declared script to a
- * non-executable name is a legitimate authoring action, and
- * `run_skill_script_on_ssh` reports `UNSUPPORTED_INTERPRETER` at runtime.
- *
- * Throws {@link SkillParseError} on:
- *   - path traversal (`..`, leading `/`, backslash)
- *   - empty segments (including a trailing `/`)
- *   - hidden segments (segment starting with `.`)
- *   - duplicate entries
+ * Entries may be bare (`probe.sh`, `lib/probe.sh`) or `scripts/`-prefixed;
+ * everything normalizes to `scripts/<path>`. Sub-directories are allowed.
+ * `allowedExtensions` is optional: SSH declarations intentionally accept any
+ * extension, while DB declarations require `.sql`.
  */
-function normalizeScriptsOnSsh(entries: string[]): string[] {
+function normalizeDeclaredScripts(
+  entries: string[],
+  key: string,
+  allowedExtensions?: ReadonlySet<string>,
+): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
+  const extensionHint =
+    allowedExtensions === undefined
+      ? null
+      : [...allowedExtensions].map((ext) => `.${ext}`).join(" / ");
 
   for (const raw of entries) {
     const entry = raw.trim();
@@ -242,7 +268,7 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
     // Reject path traversal / absolute paths.
     if (entry.includes("\\") || entry.startsWith("/") || entry.includes("..")) {
       throw new SkillParseError(
-        `scripts-on-ssh entry "${entry}" must be a relative path without \\\ or .. segments.`,
+        `${key} entry "${entry}" must be a relative path without \\\ or .. segments.`,
       );
     }
 
@@ -252,12 +278,22 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
     for (const segment of segments) {
       if (segment.length === 0 || segment === ".") {
         throw new SkillParseError(
-          `scripts-on-ssh entry "${entry}" must not contain empty or '.' segments.`,
+          `${key} entry "${entry}" must not contain empty or '.' segments.`,
         );
       }
       if (segment.startsWith(".")) {
         throw new SkillParseError(
-          `scripts-on-ssh entry "${entry}" must not contain hidden segments (starting with '.').`,
+          `${key} entry "${entry}" must not contain hidden segments (starting with '.').`,
+        );
+      }
+    }
+
+    if (allowedExtensions !== undefined) {
+      const dot = bare.lastIndexOf(".");
+      const ext = dot >= 0 ? bare.slice(dot + 1).toLowerCase() : "";
+      if (!allowedExtensions.has(ext)) {
+        throw new SkillParseError(
+          `${key} entry "${entry}" must have a ${extensionHint} extension.`,
         );
       }
     }
@@ -267,7 +303,7 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
     // Reject duplicates.
     if (seen.has(normalized)) {
       throw new SkillParseError(
-        `scripts-on-ssh contains duplicate entry "${normalized}".`,
+        `${key} contains duplicate entry "${normalized}".`,
       );
     }
     seen.add(normalized);
@@ -277,7 +313,21 @@ function normalizeScriptsOnSsh(entries: string[]): string[] {
   return result;
 }
 
-export interface RewriteScriptsOnSshResult {
+/** SSH scripts may use any extension; runtime dispatch reports unsupported ones. */
+function normalizeScriptsOnSsh(entries: string[]): string[] {
+  return normalizeDeclaredScripts(entries, "scripts-on-ssh");
+}
+
+/** DB scripts must be `.sql`. */
+function normalizeScriptsOnDb(entries: string[]): string[] {
+  return normalizeDeclaredScripts(
+    entries,
+    "scripts-on-db",
+    new Set(["sql"]),
+  );
+}
+
+export interface RewriteDeclaredScriptsResult {
   skillMd: string;
   changed: boolean;
 }
@@ -288,9 +338,14 @@ const SSH_KEY_PRECEDENCE = [
   "scripts_on_ssh",
   "scriptsOnSsh",
 ] as const;
+const DB_KEY_PRECEDENCE = [
+  "scripts-on-db",
+  "scripts_on_db",
+  "scriptsOnDb",
+] as const;
 
 /**
- * Rewrite `scripts-on-ssh` entries in a SKILL.md frontmatter without touching
+ * Rewrite declared-script entries in a SKILL.md frontmatter without touching
  * the rest of the document.
  *
  * Keys are normalized `scripts/<file>` paths; a value of `null` removes the
@@ -300,10 +355,11 @@ const SSH_KEY_PRECEDENCE = [
  * CONTRACT: the caller must parse `text` successfully first. This helper only
  * understands the inline forms parseSkillMd accepts.
  */
-export function rewriteScriptsOnSshInSkillMd(
+function rewriteDeclaredScriptsInSkillMd(
   text: string,
+  keyPrecedence: readonly string[],
   updates: ReadonlyMap<string, string | null>,
-): RewriteScriptsOnSshResult {
+): RewriteDeclaredScriptsResult {
   if (updates.size === 0) return { skillMd: text, changed: false };
 
   const lines = text.split("\n");
@@ -318,8 +374,8 @@ export function rewriteScriptsOnSshInSkillMd(
   }
   if (closeIdx === -1) return { skillMd: text, changed: false };
 
-  let key: (typeof SSH_KEY_PRECEDENCE)[number] | null = null;
-  for (const candidate of SSH_KEY_PRECEDENCE) {
+  let key: string | null = null;
+  for (const candidate of keyPrecedence) {
     if (lines.slice(1, closeIdx).some((line) => frontmatterLineKey(line) === candidate)) {
       key = candidate;
       break;
@@ -379,6 +435,20 @@ export function rewriteScriptsOnSshInSkillMd(
   return { skillMd: lines.join("\n"), changed: true };
 }
 
+export function rewriteScriptsOnSshInSkillMd(
+  text: string,
+  updates: ReadonlyMap<string, string | null>,
+): RewriteDeclaredScriptsResult {
+  return rewriteDeclaredScriptsInSkillMd(text, SSH_KEY_PRECEDENCE, updates);
+}
+
+export function rewriteScriptsOnDbInSkillMd(
+  text: string,
+  updates: ReadonlyMap<string, string | null>,
+): RewriteDeclaredScriptsResult {
+  return rewriteDeclaredScriptsInSkillMd(text, DB_KEY_PRECEDENCE, updates);
+}
+
 function frontmatterLineKey(line: string): string | null {
   const content = line.endsWith("\r") ? line.slice(0, -1) : line;
   const colon = content.indexOf(":");
@@ -408,15 +478,18 @@ export function findMissingSshScripts(
   return entries.filter((entry) => !available.has(entry));
 }
 
+export const findMissingDeclaredScripts = findMissingSshScripts;
+
 /**
- * Editor-facing explanation for a dangling `scripts-on-ssh` entry.
+ * Editor-facing explanation for a dangling declared-script entry.
  *
  * Lists the usable `scripts/` files because the usual cause is a filename
  * typo, and the author is the only one who can pick the right one.
  */
-export function describeMissingSshScripts(
+export function describeMissingDeclaredScripts(
   missing: readonly string[],
   availablePaths: Iterable<string>,
+  key = "scripts-on-ssh",
 ): string {
   const availableScripts = [...availablePaths].filter((p) =>
     p.startsWith("scripts/"),
@@ -426,7 +499,18 @@ export function describeMissingSshScripts(
       ? `Present under scripts/: ${availableScripts.join(", ")}.`
       : "This skill has no files under scripts/.";
   return (
-    `scripts-on-ssh declares missing file(s): ${missing.join(", ")}. ` +
+    `${key} declares missing file(s): ${missing.join(", ")}. ` +
     `Drop them from the declaration, or supply them under scripts/. ${found}`
+  );
+}
+
+export function describeMissingSshScripts(
+  missing: readonly string[],
+  availablePaths: Iterable<string>,
+): string {
+  return describeMissingDeclaredScripts(
+    missing,
+    availablePaths,
+    "scripts-on-ssh",
   );
 }

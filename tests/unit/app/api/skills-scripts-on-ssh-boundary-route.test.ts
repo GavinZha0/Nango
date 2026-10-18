@@ -84,6 +84,26 @@ describe("skills routes — scripts-on-ssh write boundaries", () => {
       expect(storageMock.createCustom).not.toHaveBeenCalled();
     });
 
+    it("rejects a scripts-on-db declaration instead of creating an unsatisfiable skill", async () => {
+      dbMock.$enqueue([]);
+
+      const req = createMockRequest("/api/skills", {
+        method: "POST",
+        body: {
+          skillMd: skillMd('scripts-on-db: ["reports/sales.sql"]'),
+        },
+      });
+      const res = await POST(req, rootCtx);
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.message).toMatch(
+        /scripts-on-db declares missing file\(s\): scripts\/reports\/sales\.sql/,
+      );
+      expect(json.message).toMatch(/POST \/api\/skills\/import/);
+      expect(storageMock.createCustom).not.toHaveBeenCalled();
+    });
+
     it("creates a skill with no declaration", async () => {
       dbMock.$enqueue([], [LOCAL_ROW]);
 
@@ -144,6 +164,47 @@ describe("skills routes — scripts-on-ssh write boundaries", () => {
     });
   });
 
+  describe("PATCH /api/skills/[id] — scripts-on-db", () => {
+    const DB_MD = skillMd('scripts-on-db: ["reports/sales.sql"]');
+    const DB_ROW = { ...LOCAL_ROW, skillMd: DB_MD };
+
+    it("rejects a scripts-on-db declaration whose file is not stored", async () => {
+      dbMock.$enqueue([DB_ROW]);
+      storageMock.listFiles.mockResolvedValue([
+        { path: "scripts/reports/other.sql" },
+      ]);
+
+      const req = createMockRequest("/api/skills/skill-1", {
+        method: "PATCH",
+        body: { skillMd: DB_MD },
+      });
+      const res = await PATCH(req, idCtx);
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.message).toMatch(
+        /scripts-on-db declares missing file\(s\): scripts\/reports\/sales\.sql/,
+      );
+      expect(storageMock.updateContent).not.toHaveBeenCalled();
+    });
+
+    it("accepts a scripts-on-db declaration backed by a stored file", async () => {
+      dbMock.$enqueue([DB_ROW], [DB_ROW]);
+      storageMock.listFiles.mockResolvedValue([
+        { path: "scripts/reports/sales.sql" },
+      ]);
+
+      const req = createMockRequest("/api/skills/skill-1", {
+        method: "PATCH",
+        body: { skillMd: DB_MD },
+      });
+      const res = await PATCH(req, idCtx);
+
+      expect(res.status).toBe(200);
+      expect(storageMock.updateContent).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("GET /api/skills/[id]", () => {
     it("reports unbacked declarations so the editor can warn", async () => {
       dbMock.$enqueue([LOCAL_ROW]);
@@ -153,6 +214,25 @@ describe("skills routes — scripts-on-ssh write boundaries", () => {
 
       expect(res.status).toBe(200);
       expect((await res.json()).missingSshScripts).toEqual(["scripts/probe.sh"]);
+    });
+
+    it("reports unbacked scripts-on-db declarations", async () => {
+      dbMock.$enqueue([
+        {
+          ...LOCAL_ROW,
+          skillMd: skillMd('scripts-on-db: ["reports/sales.sql"]'),
+        },
+      ]);
+      storageMock.listFiles.mockResolvedValue([
+        { path: "scripts/reports/other.sql" },
+      ]);
+
+      const res = await GET(createMockRequest("/api/skills/skill-1"), idCtx);
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.scriptsOnDb).toEqual(["scripts/reports/sales.sql"]);
+      expect(json.missingDbScripts).toEqual(["scripts/reports/sales.sql"]);
     });
 
     it("reports nothing when the declaration is satisfied", async () => {

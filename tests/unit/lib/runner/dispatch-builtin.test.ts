@@ -16,6 +16,7 @@ const {
   skillPoolGetManyMock,
   buildSkillsRuntimeMock,
   buildRunSkillScriptOnSshToolMock,
+  buildRunSkillSqlScriptToolMock,
   buildBuiltinToolsMock,
   buildDataSourcesPromptBlockMock,
   buildExtractDatasetToolMock,
@@ -45,6 +46,7 @@ const {
   skillPoolGetManyMock: vi.fn().mockResolvedValue([]),
   buildSkillsRuntimeMock: vi.fn().mockReturnValue({ tools: [], promptBlock: "" }),
   buildRunSkillScriptOnSshToolMock: vi.fn().mockReturnValue({ name: "run_skill_script_on_ssh" }),
+  buildRunSkillSqlScriptToolMock: vi.fn().mockReturnValue({ name: "run_skill_sql_script" }),
   buildBuiltinToolsMock: vi.fn().mockReturnValue([]),
   buildDataSourcesPromptBlockMock: vi.fn().mockResolvedValue({ promptBlock: "" }),
   buildExtractDatasetToolMock: vi.fn().mockReturnValue({ name: "extract_dataset_by_sql" }),
@@ -106,6 +108,10 @@ vi.mock("@/lib/skills", () => ({
 vi.mock("@/lib/skills/runtime-tools", () => ({
   buildSkillsRuntime: buildSkillsRuntimeMock,
   buildRunSkillScriptOnSshTool: buildRunSkillScriptOnSshToolMock,
+}));
+
+vi.mock("@/lib/skills/db-script-tools", () => ({
+  buildRunSkillSqlScriptTool: buildRunSkillSqlScriptToolMock,
 }));
 
 vi.mock("@/lib/data-sources/prompt-block.server", () => ({
@@ -669,7 +675,12 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
           makeSpec({ tools: [{ kind: "skill", skillId: "skill-1" }] }),
         );
         const skillSpecs = [
-          { skillId: "skill-1", name: "Py", scriptsOnSsh: new Set<string>() },
+          {
+            skillId: "skill-1",
+            name: "Py",
+            scriptsOnSsh: new Set<string>(),
+            scriptsOnDb: new Set<string>(),
+          },
         ];
         skillPoolGetManyMock.mockResolvedValue(skillSpecs);
         buildSkillsRuntimeMock.mockReturnValue({
@@ -683,6 +694,7 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
           specs: skillSpecs,
           hasSshBindings: false,
+          hasDbBindings: false,
         });
         const args = agentArgs();
         expect(args.prompt).toEqual(expect.stringContaining("## Skills"));
@@ -758,6 +770,7 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
             skillId: "skill-1",
             name: "k8s_ops",
             scriptsOnSsh: new Set(["scripts/probe.sh"]),
+            scriptsOnDb: new Set(),
           },
         ];
         skillPoolGetManyMock.mockResolvedValue(skillSpecs);
@@ -778,6 +791,7 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
           specs: skillSpecs,
           hasSshBindings: true,
+          hasDbBindings: false,
         });
         const args = agentArgs();
         const toolNames = (args.tools as Array<{ name: string }>).map((t) => t.name);
@@ -798,6 +812,7 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
             skillId: "skill-1",
             name: "k8s_ops",
             scriptsOnSsh: new Set(),
+            scriptsOnDb: new Set(),
           },
         ];
         skillPoolGetManyMock.mockResolvedValue(skillSpecs);
@@ -821,6 +836,7 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
             skillId: "skill-1",
             name: "k8s_ops",
             scriptsOnSsh: new Set(["scripts/probe.sh"]),
+            scriptsOnDb: new Set(),
           },
         ];
         skillPoolGetManyMock.mockResolvedValue(skillSpecs);
@@ -836,11 +852,85 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
           specs: skillSpecs,
           hasSshBindings: false,
+          hasDbBindings: false,
         });
         const toolNames = (agentArgs().tools as Array<{ name: string }>).map(
           (t) => t.name,
         );
         expect(toolNames).not.toContain("run_skill_script_on_ssh");
+      });
+
+      it("mounts run_skill_sql_script when both skill has scriptsOnDb and a data source is bound", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({
+            tools: [
+              { kind: "skill", skillId: "skill-1" },
+              { kind: "datasource", dataSourceId: "ds-1" },
+            ],
+          }),
+        );
+        const skillSpecs = [
+          {
+            skillId: "skill-1",
+            name: "sales_report",
+            scriptsOnSsh: new Set<string>(),
+            scriptsOnDb: new Set(["scripts/reports/sales.sql"]),
+          },
+        ];
+        skillPoolGetManyMock.mockResolvedValue(skillSpecs);
+        buildSkillsRuntimeMock.mockReturnValue({
+          tools: [{ name: "run_skill_script" }],
+          promptBlock: "## Skills\n- sales_report",
+        });
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildRunSkillSqlScriptToolMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          agentDataSourceIds: ["ds-1"],
+        });
+        expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          hasSshBindings: false,
+          hasDbBindings: true,
+        });
+        const toolNames = (agentArgs().tools as Array<{ name: string }>).map(
+          (t) => t.name,
+        );
+        expect(toolNames).toContain("run_skill_sql_script");
+      });
+
+      it("omits run_skill_sql_script when scriptsOnDb is declared but no data source is bound", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "skill", skillId: "skill-1" }] }),
+        );
+        const skillSpecs = [
+          {
+            skillId: "skill-1",
+            name: "sales_report",
+            scriptsOnSsh: new Set<string>(),
+            scriptsOnDb: new Set(["scripts/reports/sales.sql"]),
+          },
+        ];
+        skillPoolGetManyMock.mockResolvedValue(skillSpecs);
+        buildSkillsRuntimeMock.mockReturnValue({
+          tools: [{ name: "run_skill_script" }],
+          promptBlock: "## Skills\n- sales_report",
+        });
+        buildRunSkillSqlScriptToolMock.mockClear();
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildRunSkillSqlScriptToolMock).not.toHaveBeenCalled();
+        expect(buildSkillsRuntimeMock).toHaveBeenCalledWith({
+          specs: skillSpecs,
+          hasSshBindings: false,
+          hasDbBindings: false,
+        });
+        const toolNames = (agentArgs().tools as Array<{ name: string }>).map(
+          (t) => t.name,
+        );
+        expect(toolNames).not.toContain("run_skill_sql_script");
       });
 
       it("mounts fetch_calendar_events and calendar prompt when calendar binding present", async () => {
