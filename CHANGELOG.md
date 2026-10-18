@@ -5,11 +5,11 @@
 
 ### Features
 
-* **skills:** add full file editor with inline text editing and tree actions ([1804bc4](https://github.com/GavinZha0/Nango/commit/1804bc4626189f121a81ff13769e440e8dfd0f6e))
-* **skills:** add import file policy with allowlist and validation ([bbeabf9](https://github.com/GavinZha0/Nango/commit/bbeabf9645d12f5d5efd17d5debfcc0bc2d3eb84))
-* **skills:** add run_skill_script_on_ssh for SSH-targeted scripts ([9248f2a](https://github.com/GavinZha0/Nango/commit/9248f2aff2047f206d8db5caf4e10c61b54191d6))
-* **skills:** add run_skill_sql_script for declared SQL files ([dd135e2](https://github.com/GavinZha0/Nango/commit/dd135e205ef5e041b7d8f6df99d285e83b387dcb))
-* **skills:** remove folder name restrictions and add file preview support ([bfaaceb](https://github.com/GavinZha0/Nango/commit/bfaaceb600ec7fdc2a0985090c93bdc5f41348f7))
+* **skills:** add full file editor with inline text editing and tree actions ([1804bc4](https://github.com/GavinZha0/Nango/commit/1804bc4626189f121a81ff13769e440e8dfd0f6e)) by @GavinZha0
+* **skills:** add import file policy with allowlist and validation ([bbeabf9](https://github.com/GavinZha0/Nango/commit/bbeabf9645d12f5d5efd17d5debfcc0bc2d3eb84)) by @GavinZha0
+* **skills:** add run_skill_script_on_ssh for SSH-targeted scripts ([9248f2a](https://github.com/GavinZha0/Nango/commit/9248f2aff2047f206d8db5caf4e10c61b54191d6)) by @GavinZha0
+* **skills:** add run_skill_sql_script for declared SQL files ([dd135e2](https://github.com/GavinZha0/Nango/commit/dd135e205ef5e041b7d8f6df99d285e83b387dcb)) by @GavinZha0
+* **skills:** remove folder name restrictions and add file preview support ([bfaaceb](https://github.com/GavinZha0/Nango/commit/bfaaceb600ec7fdc2a0985090c93bdc5f41348f7)) by @GavinZha0
 
 ## [0.26.2](https://github.com/GavinZha0/Nango/compare/v0.26.1...v0.26.2) (2026-10-10)
 
