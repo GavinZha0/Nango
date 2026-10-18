@@ -271,13 +271,18 @@ POST /api/skills/import    multipart/form-data file=<archive.skill>
 3. For each entry:
      - reject absolute paths, '..' segments, back-slashes
      - reject symlinks (zip external_attr stat)
-     - keep root-level files such as LICENSE; skip dotfiles and SKILL.md
+     - classify the path (see §4.4):
+         ignored -> skip and report
+         blocked -> reject the whole import with a 400 + reasons
+         allowed -> keep (text/code/docs or images)
+     - reject text files containing NUL bytes
+     - verify image magic bytes match the extension
      - track total size; bail if > 10 MB
 4. Locate SKILL.md (root or single nested folder).
 5. Parse + validate frontmatter.
 6. Reject if the creator already owns a skill with the same name (409).
 7. Persist the skill row, then helper-file rows at their archive paths.
-8. Return the new row's id.
+8. Return the new row's id plus `filesImported` and `skipped`.
 ```
 
 Import does not auto-fill `source`; the new row starts unlabeled and the
@@ -291,6 +296,29 @@ surface for path traversal — there is no fs target to traverse to), not a
 persistence claim. Memory bounds: `Content-Length` ≤ 10 MB hard cap on the
 upload, plus per-entry uncompressed size accounting during decode to defeat
 zip-bomb amplification.
+
+### 4.4 Import file policy
+
+The open Agent Skills spec permits any file, but Nango can only execute
+`.py` / `.sh` scripts and preview images. Import therefore uses an allowlist
+(`src/lib/skills/import-policy.ts`):
+
+| Action | File types | Behavior |
+|---|---|---|
+| **Allow — text** | `md, markdown, txt, json, jsonl, yaml, yml, toml, ini, cfg, conf, csv, tsv, xml, sql, py, sh, js, mjs, cjs, ts, tsx, jsx, css, html, svg, rst, tex`, plus extensionless text files (`LICENSE`, `README`, `Dockerfile`, `Makefile`) | Imported after a NUL-byte check |
+| **Allow — image** | `png, jpg, jpeg, gif, webp` | Imported after magic-byte validation; the editor previews them |
+| **Ignore** | dotfiles/dot-directories, `__MACOSX/`, `node_modules/`, `Thumbs.db`, `desktop.ini`, root `SKILL.md` | Skipped and returned in `skipped: string[]`; import succeeds |
+| **Block** | executables/native binaries (`exe, dll, so, dylib, bin, msi, bat, cmd, ps1, jar, wasm, …`), audio/video, archives, fonts, PDF/Office documents, binary data/models, unknown extensions | Import fails with 400 and a path-by-path reason list; no rows are written |
+
+Rationale: Nango has no Windows/native executor, no skill-file materialization
+into the sandbox or SSH host, and no binary parser. An `.exe` or `.dll` stored
+in a skill is inert, while still being a malware-distribution liability.
+Windows executables should be exposed through an MCP server on the Windows
+host; the skill documents how to call that tool.
+
+The same policy drives editor creation (text only) and rename (text or image;
+the existing bytes must match the new type). Images can be imported but not
+created or downloaded from the editor.
 
 The `.skill` format is the same ZIP layout DeerFlow uses, so packs
 created elsewhere can be imported directly.

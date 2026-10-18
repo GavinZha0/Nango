@@ -9,11 +9,15 @@ import "server-only";
 import { ApiError } from "@/lib/http/route-handlers";
 
 import {
-  isBinaryFileName,
   isExecutableFileName,
   isRootSkillMd,
   isValidFileName,
 } from "./file-rules";
+import {
+  classifyEditorCreatePath,
+  classifyEditorRenamePath,
+  type FilePolicyResult,
+} from "./import-policy";
 import {
   getDbSkillStorage,
   InvalidSkillPathError,
@@ -77,7 +81,7 @@ export function assertExecutablePathRule(path: string): void {
  *
  * CONTRACT: binary assets are imported, never authored in the editor.
  */
-export function assertTextFileRules(path: string): void {
+export function assertEditorCreatePath(path: string): void {
   if (isRootSkillMd(path)) {
     throw new ApiError(
       VALIDATION_ERROR,
@@ -85,14 +89,33 @@ export function assertTextFileRules(path: string): void {
       "SKILL.md is edited as the main document and cannot be created here.",
     );
   }
-  if (isBinaryFileName(path)) {
+  const policy = classifyEditorCreatePath(path);
+  if (policy.action !== "allow-text") {
     throw new ApiError(
       VALIDATION_ERROR,
       400,
-      "Binary files must be imported as part of a .skill archive.",
+      policy.reason ?? "This file type is not allowed.",
     );
   }
   assertExecutablePathRule(path);
+}
+
+/**
+ * Rename validation. Text and image files are allowed; blocked/unknown types
+ * are refused. The route also checks that the existing bytes match the new
+ * type (text vs image magic).
+ */
+export function assertEditorRenamePath(path: string): FilePolicyResult {
+  const policy = classifyEditorRenamePath(path);
+  if (policy.action !== "allow-text" && policy.action !== "allow-image") {
+    throw new ApiError(
+      VALIDATION_ERROR,
+      400,
+      policy.reason ?? "This file type is not allowed.",
+    );
+  }
+  assertExecutablePathRule(path);
+  return policy;
 }
 
 /**

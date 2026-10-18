@@ -27,12 +27,13 @@ import {
   syncDeclarationsForFolderRename,
 } from "@/lib/skills/declaration-sync";
 import {
-  assertExecutablePathRule,
+  assertEditorRenamePath,
   assertPathFree,
   assertSkillPath,
   assertUserName,
   isUniqueViolation,
 } from "@/lib/skills/file-api";
+import { validateImageBytes } from "@/lib/skills/import-policy";
 import {
   getParentPath,
   isScriptsFolder,
@@ -275,8 +276,28 @@ export const PATCH = withEditor<{ id: string; path: string[] }>(
       name !== undefined ? joinSkillPath(getParentPath(oldPath), name) : oldPath;
     assertSkillPath(newPath);
     if (newPath !== oldPath) {
-      assertExecutablePathRule(newPath);
+      const policy = assertEditorRenamePath(newPath);
       await assertPathFree(skill.id, newPath);
+      if (policy.action === "allow-text" && !isLikelyText(current.content)) {
+        throw new ApiError(
+          "VALIDATION_FAILED",
+          400,
+          "Cannot rename binary content to a text file type.",
+        );
+      }
+      if (policy.action === "allow-image") {
+        if (isLikelyText(current.content)) {
+          throw new ApiError(
+            "VALIDATION_FAILED",
+            400,
+            "Cannot rename text content to an image file type.",
+          );
+        }
+        const imageError = validateImageBytes(newPath, current.content);
+        if (imageError) {
+          throw new ApiError("VALIDATION_FAILED", 400, imageError);
+        }
+      }
     }
 
     let content: Buffer | undefined;

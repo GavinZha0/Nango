@@ -132,7 +132,21 @@ describe("POST /api/skills/[id]/files", () => {
     );
 
     expect(res.status).toBe(400);
-    expect((await res.json()).message).toMatch(/Binary files/);
+    expect((await res.json()).message).toMatch(/must be imported via a \.skill archive/);
+    expect(storageMock.putFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects executable file creation", async () => {
+    const res = await POST(
+      createMockRequest("/api/skills/skill-1/files", {
+        method: "POST",
+        body: { parentFolder: "assets", name: "setup.exe" },
+      }),
+      rootCtx,
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(/executable file/);
     expect(storageMock.putFile).not.toHaveBeenCalled();
   });
 
@@ -241,6 +255,36 @@ describe("PATCH /api/skills/[id]/files/[...path]", () => {
         content: Buffer.from("print('updated')\n", "utf8"),
       }),
     );
+  });
+
+  it("rejects renaming a text file to an executable type", async () => {
+    const res = await PATCH(
+      createMockRequest(
+        "/api/skills/skill-1/files/scripts/probe.sh?kind=file",
+        { method: "PATCH", body: { name: "probe.exe" } },
+      ),
+      fileCtx("scripts", "probe.sh"),
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(/executable file/);
+    expect(storageMock.updateFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects renaming text content to an image type", async () => {
+    const res = await PATCH(
+      createMockRequest(
+        "/api/skills/skill-1/files/scripts/probe.sh?kind=file",
+        { method: "PATCH", body: { name: "probe.png" } },
+      ),
+      fileCtx("scripts", "probe.sh"),
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(
+      /Cannot rename text content to an image/,
+    );
+    expect(storageMock.updateFile).not.toHaveBeenCalled();
   });
 
   it("renames an implicit folder", async () => {

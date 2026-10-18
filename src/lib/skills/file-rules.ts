@@ -8,37 +8,6 @@
 /** One path segment: alnum/underscore/hyphen first, then dots allowed. */
 export const FILE_NAME_PATTERN = /^[A-Za-z0-9_\-][A-Za-z0-9._\-]*$/;
 
-/** Extensions the UI refuses to create as text; binary assets come via import. */
-const BINARY_EXTENSIONS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "ico",
-  "bmp",
-  "pdf",
-  "zip",
-  "gz",
-  "tar",
-  "woff",
-  "woff2",
-  "ttf",
-  "otf",
-  "eot",
-  "mp3",
-  "wav",
-  "ogg",
-  "mp4",
-  "webm",
-  "xls",
-  "xlsx",
-  "doc",
-  "docx",
-  "ppt",
-  "pptx",
-]);
-
 export function getExtension(name: string): string {
   const base = getBaseName(name);
   const dot = base.lastIndexOf(".");
@@ -49,10 +18,6 @@ export function getExtension(name: string): string {
 
 export function isValidFileName(name: string): boolean {
   return FILE_NAME_PATTERN.test(name);
-}
-
-export function isBinaryFileName(name: string): boolean {
-  return BINARY_EXTENSIONS.has(getExtension(name));
 }
 
 /** V1 interpreters: python3 and bash only. */

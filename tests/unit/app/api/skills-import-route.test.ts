@@ -97,7 +97,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     ]);
 
     expect(res.status).toBe(400);
-    expect((await res.json()).message).toMatch(/contains NUL bytes/);
+    expect((await res.json()).message).toMatch(/NUL bytes/);
   });
 
   it("imports a skill whose declared script is clean UTF-8", async () => {
@@ -115,7 +115,7 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     );
   });
 
-  it("persists a content type so the editor can preview binary files", async () => {
+  it("persists an image content type for the editor preview", async () => {
     dbMock.$enqueue([], [
       { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
     ]);
@@ -129,7 +129,6 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
       [
         { path: "assets/logo.png", content: png },
         { path: "references/guide.md", content: "# Guide\n" },
-        { path: "assets/mystery.bin", content: Buffer.from([0x00, 0x01, 0x02]) },
       ],
       null,
     );
@@ -145,10 +144,6 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
         path: "references/guide.md",
         contentType: "text/markdown",
       }),
-    );
-    // Unknown extensions stay unset rather than being guessed at.
-    expect(storageMock.putFile).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "assets/mystery.bin", contentType: undefined }),
     );
   });
 
@@ -188,6 +183,76 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()).message).toMatch(/both a file and a folder/);
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
+  });
+
+  it("rejects executables, media, archives, and documents with reasons", async () => {
+    const res = await upload(
+      [
+        { path: "setup.exe", content: "MZ" },
+        { path: "demo.mp4", content: "video" },
+        { path: "bundle.zip", content: "zip" },
+        { path: "template.docx", content: "docx" },
+      ],
+      null,
+    );
+
+    expect(res.status).toBe(400);
+    const message = (await res.json()).message as string;
+    expect(message).toMatch(/setup\.exe.*executable file/);
+    expect(message).toMatch(/demo\.mp4.*video file/);
+    expect(message).toMatch(/bundle\.zip.*archive file/);
+    expect(message).toMatch(/template\.docx.*Word document/);
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
+  });
+
+  it("skips dotfiles and archive noise and reports them", async () => {
+    dbMock.$enqueue([], [
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
+    ]);
+
+    const res = await upload(
+      [
+        { path: "references/guide.md", content: "# Guide\n" },
+        { path: ".env", content: "SECRET=1" },
+        { path: ".github/workflows/ci.yml", content: "name: CI" },
+        { path: "__MACOSX/foo", content: "x" },
+        { path: "Thumbs.db", content: "x" },
+      ],
+      null,
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect([...body.skipped].sort()).toEqual(
+      [".env", ".github/workflows/ci.yml", "__MACOSX/foo", "Thumbs.db"].sort(),
+    );
+    expect(
+      storageMock.putFile.mock.calls
+        .map((args: unknown[]) => (args[0] as { path: string }).path)
+        .sort(),
+    ).toEqual(["references/guide.md"]);
+  });
+
+  it("rejects binary content disguised as a text file", async () => {
+    const res = await upload(
+      [{ path: "notes.md", content: Buffer.from([0x68, 0x00, 0x69]) }],
+      null,
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(/notes\.md.*NUL bytes/);
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
+  });
+
+  it("rejects image bytes that do not match the extension", async () => {
+    const res = await upload(
+      [{ path: "assets/logo.png", content: "not a png" }],
+      null,
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(/logo\.png.*PNG content/);
     expect(storageMock.createCustom).not.toHaveBeenCalled();
   });
 

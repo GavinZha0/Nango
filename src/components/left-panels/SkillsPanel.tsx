@@ -26,6 +26,7 @@ import {
   useMemo,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -277,14 +278,34 @@ export function SkillsPanel(): ReactNode {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { message?: string };
-        alert(body.message ?? `Import failed (${res.status})`);
+        toast.error("Import failed", {
+          description: body.message ?? `Import failed (${res.status})`,
+          duration: 10_000,
+        });
         return;
       }
-      const created = (await res.json()) as { id: string };
+      const created = (await res.json()) as {
+        id: string;
+        filesImported?: number;
+        skipped?: string[];
+      };
+      const skipped = created.skipped ?? [];
+      if (skipped.length > 0) {
+        const preview = skipped.slice(0, 3).join(", ");
+        toast.warning(
+          `Imported ${created.filesImported ?? 0} file(s); skipped ${skipped.length}`,
+          {
+            description: `${preview}${skipped.length > 3 ? "…" : ""}`,
+          },
+        );
+      }
       await refresh();
       router.push(`/skills/${created.id}`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Import failed");
+      toast.error("Import failed", {
+        description: err instanceof Error ? err.message : "Import failed",
+        duration: 10_000,
+      });
     } finally {
       setImporting(false);
       if (importInputRef.current) importInputRef.current.value = "";

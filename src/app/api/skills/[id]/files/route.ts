@@ -18,9 +18,9 @@ import { loadEditableSkill } from "@/lib/skills/api-access";
 import {
   assertParentFolder,
   assertParentIsNotFile,
+  assertEditorCreatePath,
   assertPathFree,
   assertSkillPath,
-  assertTextFileRules,
   assertUserName,
   isUniqueViolation,
 } from "@/lib/skills/file-api";
@@ -56,7 +56,7 @@ export const POST = withEditor<{ id: string }>(
 
     const path = joinSkillPath(parent, name);
     assertSkillPath(path);
-    assertTextFileRules(path);
+    assertEditorCreatePath(path);
 
     const text = body.content ?? "";
     if (text.includes("\0")) {

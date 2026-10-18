@@ -39,6 +39,11 @@ import {
   MAX_FILES_PER_SKILL,
   MAX_TOTAL_BYTES_PER_SKILL,
 } from "@/lib/skills/storage/skill-storage";
+import {
+  classifyImportPath,
+  validateImageBytes,
+  validateTextBytes,
+} from "@/lib/skills/import-policy";
 
 const ROUTE = "/api/skills/import";
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -115,6 +120,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
 
   // 4. Validate entries + collect files.
   const filesToWrite: Array<{ path: string; content: Buffer }> = [];
+  const skipped: string[] = [];
+  const blocked: Array<{ path: string; reason: string }> = [];
   let totalUncompressedBytes = 0;
 
   for (const [rawPath, entry] of Object.entries(zip.files)) {
@@ -136,12 +143,26 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     const relativePath = rawPath.slice(prefix.length);
     if (!relativePath || relativePath === "SKILL.md") continue;
 
-    // Any folder name is legal, and root-level files such as LICENSE are
-    // kept. Dotfiles and the synthetic SKILL.md are skipped as noise.
+    const policy = classifyImportPath(relativePath);
+    if (policy.action === "ignore") {
+      skipped.push(relativePath);
+      continue;
+    }
+    if (policy.action === "block") {
+      blocked.push({
+        path: relativePath,
+        reason: policy.reason ?? "unsupported file type",
+      });
+      continue;
+    }
+
     try {
       validateSkillFilePath(relativePath);
     } catch (err) {
-      if (err instanceof InvalidSkillPathError) continue;
+      if (err instanceof InvalidSkillPathError) {
+        blocked.push({ path: relativePath, reason: "invalid path" });
+        continue;
+      }
       throw err;
     }
 
@@ -163,6 +184,21 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         `Total uncompressed size exceeds ${MAX_TOTAL_BYTES_PER_SKILL() / 1024 / 1024} MB limit.`,
       );
     }
+
+    if (policy.action === "allow-text") {
+      const textError = validateTextBytes(content);
+      if (textError) {
+        blocked.push({ path: relativePath, reason: textError });
+        continue;
+      }
+    } else if (policy.action === "allow-image") {
+      const imageError = validateImageBytes(relativePath, content);
+      if (imageError) {
+        blocked.push({ path: relativePath, reason: imageError });
+        continue;
+      }
+    }
+
     if (filesToWrite.length >= MAX_FILES_PER_SKILL()) {
       throw new ApiError(
         "BAD_REQUEST",
@@ -172,6 +208,20 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
 
     filesToWrite.push({ path: relativePath, content });
+  }
+
+  if (blocked.length > 0) {
+    const shown = blocked
+      .slice(0, 20)
+      .map((entry) => `"${entry.path}" (${entry.reason})`)
+      .join(", ");
+    const more =
+      blocked.length > 20 ? ` and ${blocked.length - 20} more` : "";
+    throw new ApiError(
+      "VALIDATION_FAILED",
+      400,
+      `Import rejected: ${shown}${more}.`,
+    );
   }
 
   // 4b. A single path cannot be both a file and a folder. Root-level files
@@ -288,7 +338,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     .limit(1);
 
   return NextResponse.json(
-    { ...row, filesImported: filesToWrite.length },
+    { ...row, filesImported: filesToWrite.length, skipped },
     { status: 201 },
   );
 });

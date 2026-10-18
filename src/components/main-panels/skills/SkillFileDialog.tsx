@@ -33,12 +33,15 @@ import type { SkillFileMeta } from "@/components/main-panels/skills/SkillFileTre
 import {
   getBaseName,
   getParentPath,
-  isBinaryFileName,
   isExecutableFileName,
   isRootSkillMd,
   isValidFileName,
   joinSkillPath,
 } from "@/lib/skills/file-rules";
+import {
+  classifyEditorCreatePath,
+  classifyEditorRenamePath,
+} from "@/lib/skills/import-policy";
 
 const ROOT_VALUE = "__root__";
 const NEW_FOLDER_VALUE = "__new__";
@@ -121,8 +124,23 @@ export function SkillFileDialog({
     if (!isValidFileName(trimmedName)) {
       return "Use letters, digits, dot, underscore or hyphen; do not start with a dot.";
     }
-    if (mode === "add" && isBinaryFileName(trimmedName)) {
-      return "Binary files must be imported as a .skill archive.";
+    const policy =
+      mode === "add"
+        ? classifyEditorCreatePath(resultingPath)
+        : target?.kind === "file"
+          ? classifyEditorRenamePath(resultingPath)
+          : null;
+    if (mode === "add" && policy && policy.action !== "allow-text") {
+      return policy.reason ?? "This file type is not allowed.";
+    }
+    if (
+      mode === "rename" &&
+      target?.kind === "file" &&
+      policy &&
+      policy.action !== "allow-text" &&
+      policy.action !== "allow-image"
+    ) {
+      return policy.reason ?? "This file type is not allowed.";
     }
     if (target?.kind === "folder" && target.path === "scripts") {
       return "The top-level scripts/ folder is reserved and cannot be renamed.";
