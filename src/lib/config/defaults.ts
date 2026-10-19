@@ -100,6 +100,13 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   // ── backend ────────────────────────────────────────────────────────
   { key: "backend.entity_fetch.timeout", value: "5", valueType: "number", description: "Backend entity discovery timeout in seconds" },
 
+  // ── web search ─────────────────────────────────────────────────────
+  { key: "web_search.timeout", value: "30", valueType: "number", description: "Wall-clock budget for one web_search call in seconds (all providers)" },
+  { key: "web_search.searxng.language", value: "", valueType: "string", description: "SearXNG language code (empty = instance default, e.g. zh-CN)" },
+  { key: "web_search.searxng.categories", value: "general", valueType: "string", description: "SearXNG categories, comma-separated (e.g. general,news)" },
+  { key: "web_search.searxng.safesearch", value: "0", valueType: "string", options: ["0", "1", "2"], description: "SearXNG safe search: 0 off, 1 moderate, 2 strict" },
+  { key: "web_search.searxng.include_thumbnails", value: "false", valueType: "boolean", description: "Forward SearXNG thumbnail URLs as result images (hotlinks origin sites — off by default for privacy)" },
+
   // ── guardrails ───────────────────────────────────────────────────
   { key: "guardrail.input_safety.enabled", value: "true", valueType: "boolean", description: "Enable input safety policy middleware (regex rules on tool arguments)" },
   { key: "guardrail.result_sanitization.enabled", value: "true", valueType: "boolean", description: "Enable tool result sanitization middleware (neutralize framework tags in external tool outputs)" },

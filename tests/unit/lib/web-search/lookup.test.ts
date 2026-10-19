@@ -14,6 +14,8 @@ vi.mock("@/lib/credentials/crypto", () => ({
     if (ciphertext === "exa-payload") return { key: "exa-secret" };
     if (ciphertext === "tavily-payload") return { key: "tavily-secret" };
     if (ciphertext === "brave-payload") return { key: "brave-secret" };
+    if (ciphertext === "jina-payload") return { token: "jina-secret" };
+    if (ciphertext === "searxng-payload") return { key: "none" };
     if (ciphertext === "empty-payload") return { key: "" };
     if (ciphertext === "no-key-payload") return { foo: "bar" };
     throw new Error("decryption failed");
@@ -77,6 +79,38 @@ describe("resolveSearchCredential", () => {
       expect(result.resolved.apiKey).toBe("exa-secret");
       expect(result.resolved.credentialId).toBe("c-exa");
       expect(result.resolved.restUrl).toBeNull();
+    }
+  });
+
+  it("prefers SearXNG over every other provider", async () => {
+    mockRows([
+      { id: "c-brave", provider: "brave", restUrl: null, encryptedPayload: "brave-payload" },
+      { id: "c-exa", provider: "exa", restUrl: null, encryptedPayload: "exa-payload" },
+      { id: "c-jina", provider: "jina", restUrl: null, encryptedPayload: "jina-payload" },
+      { id: "c-searxng", provider: "searxng", restUrl: "http://searxng:8080", encryptedPayload: "searxng-payload" },
+    ]);
+    const result = await resolveSearchCredential();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.resolved.provider).toBe("searxng");
+      // Placeholder values are usable: the provider decides not to
+      // send auth for them.
+      expect(result.resolved.apiKey).toBe("none");
+      expect(result.resolved.restUrl).toBe("http://searxng:8080");
+    }
+  });
+
+  it("prefers Jina over the paid providers when SearXNG is absent", async () => {
+    mockRows([
+      { id: "c-brave", provider: "brave", restUrl: null, encryptedPayload: "brave-payload" },
+      { id: "c-exa", provider: "exa", restUrl: null, encryptedPayload: "exa-payload" },
+      { id: "c-jina", provider: "jina", restUrl: null, encryptedPayload: "jina-payload" },
+    ]);
+    const result = await resolveSearchCredential();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.resolved.provider).toBe("jina");
+      expect(result.resolved.apiKey).toBe("jina-secret");
     }
   });
 

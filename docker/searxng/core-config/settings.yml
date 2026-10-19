@@ -1,0 +1,37 @@
+# SearXNG configuration for the local Nango integration.
+# Full reference: https://docs.searxng.org/admin/settings/
+#
+# `server.secret_key` is intentionally not set here: the container reads
+# SEARXNG_SECRET from the environment. That key signs session/CSRF
+# cookies — it is not an API credential and does not authenticate
+# /search (see docker/searxng/README.md).
+
+# Load SearXNG's default engine/category set, then apply the overrides
+# below. Keeping this explicit avoids a future edit accidentally
+# replacing the whole settings tree with an engine-less file.
+use_default_settings: true
+
+general:
+  instance_name: "Nango SearXNG"
+  # contact_url: "mailto:admin@example.com"
+
+server:
+  # /search is unauthenticated. Keep the port bound to loopback (see
+  # docker-compose.yaml) or put the instance behind an authenticating
+  # proxy before exposing it.
+  limiter: false
+  image_proxy: false
+  method: GET
+
+search:
+  # The JSON API is disabled by default. Nango's web_search provider
+  # needs it; format=json returns 403 when it is absent.
+  formats:
+    - html
+    - json
+
+outgoing:
+  # Per-engine upstream timeout. The total call budget is
+  # web_search.timeout (default 30s in Admin -> Config).
+  request_timeout: 4.0
+  max_request_timeout: 8.0

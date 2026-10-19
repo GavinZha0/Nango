@@ -9,15 +9,26 @@
 
 /**
  * Providers wired into the `web_search` runtime tool. Adding a new
- * provider: append here + add a file under `src/lib/web-search/<id>/`
+ * provider: append here + add `src/lib/web-search/<id>.server.ts`
  * + register in `registry.server.ts` (the `satisfies` clause enforces
  * compile-time coverage).
  *
  * The `jina` id binds to Jina Search (`s.jina.ai`), not the Reader
  * (`r.jina.ai`) — the latter is a URL → Markdown extractor and does
  * not fit a query-driven search abstraction.
+ *
+ * `searxng` is the self-hosted metasearch engine. Its /search endpoint
+ * has no request authentication; credentials created for it carry an
+ * anonymous placeholder (e.g. "none"/"empty") and the provider omits
+ * the Authorization header.
  */
-export const WEB_SEARCH_PROVIDER_IDS = ["exa", "tavily", "brave", "jina"] as const;
+export const WEB_SEARCH_PROVIDER_IDS = [
+  "exa",
+  "tavily",
+  "brave",
+  "jina",
+  "searxng",
+] as const;
 export type WebSearchProviderId = (typeof WEB_SEARCH_PROVIDER_IDS)[number];
 
 export function isWebSearchProvider(value: string): value is WebSearchProviderId {
@@ -57,6 +68,11 @@ export interface WebSearchResult {
  * plus the optional `restUrl` override stored on the credential row
  * (lets users point at a self-hosted / proxy endpoint without code
  * changes).
+ *
+ * `apiKey` may be an anonymous placeholder ("none", "empty", …) for
+ * keyless providers such as SearXNG. Keyless providers MUST treat
+ * placeholders as "send no authentication" — see
+ * `isAnonymousPlaceholder`.
  */
 export interface WebSearchAuth {
   apiKey: string;
@@ -72,8 +88,8 @@ export interface WebSearchAuth {
  *   - Throws on upstream / network / parse failure. The runtime
  *     tool's outer wrapper turns those throws into the standard
  *     `{ ok: false, error, message }` envelope (see `tool-failure.ts`).
- *   - Honours `signal` for cancellation (the runtime sets a 10 s
- *     wall-clock timeout).
+ *   - Honours `signal` for cancellation (the runtime sets a
+ *     `web_search.timeout` wall-clock budget, default 30 s).
  *   - Returns ≤ `topK` results; may return fewer if the upstream had
  *     fewer matches.
  */

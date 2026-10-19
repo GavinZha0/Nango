@@ -27,6 +27,12 @@ time instead of debugging them in production.
 | `dify-sandbox` | `langgenius/dify-sandbox:latest` | Code execution sandbox for Python scripts |
 | `duckdb-engine` | `nango-duckdb-engine:latest` (built from `docker/duckdb-engine/Dockerfile`) | DuckDB data extraction service |
 
+> The compose file also contains the optional `searxng` service — a
+> loopback-only, unauthenticated metasearch backend for the built-in
+> `web_search` tool. `SEARXNG_SECRET` has a local-development fallback;
+> set a random value in `.env` for non-local use. See
+> [`docker/searxng/README.md`](../docker/searxng/README.md).
+
 The app image is multi-stage:
 
 ```

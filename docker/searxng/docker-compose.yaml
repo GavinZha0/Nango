@@ -1,0 +1,40 @@
+name: nango-searxng
+
+# Standalone SearXNG for host-based development (`pnpm dev`).
+# When Nango itself runs in Docker, use the `searxng` service in the
+# repository-root docker-compose.yaml instead: containers reach it at
+# http://searxng:8080, not at http://localhost:8680.
+
+services:
+  searxng:
+    container_name: searxng
+    # Keep in sync with the root docker-compose.yaml.
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      # Loopback-only: /search is unauthenticated. Nango calls it
+      # server-side, so the browser never needs direct access.
+      - "127.0.0.1:8680:8080"
+    environment:
+      # Signing key for session/CSRF cookies — NOT an API key. The fallback
+      # is for local development; set SEARXNG_SECRET in .env for stable
+      # sessions and any non-local deployment.
+      SEARXNG_SECRET: "${SEARXNG_SECRET:-local-searxng-secret-change-me}"
+      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://localhost:8680/}"
+      # Single-user local instance. Enable the limiter + Valkey before
+      # exposing this beyond loopback.
+      SEARXNG_LIMITER: "false"
+      SEARXNG_IMAGE_PROXY: "true"
+    volumes:
+      - ./core-config:/etc/searxng:Z
+      - searxng-cache:/var/cache/searxng
+    healthcheck:
+      # Liveness only — does not hit upstream search engines.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  searxng-cache:

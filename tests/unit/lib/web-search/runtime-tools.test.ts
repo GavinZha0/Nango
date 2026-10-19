@@ -16,7 +16,7 @@ vi.mock("@/lib/web-search/lookup.server", () => ({
   resolveSearchCredential,
   // Re-export keeps the import surface valid even if other tests import it.
   isWebSearchProvider: (v: string) =>
-    ["exa", "tavily", "brave", "jina"].includes(v),
+    ["exa", "tavily", "brave", "jina", "searxng"].includes(v),
 }));
 
 const { buildWebSearchTool } = await import("@/lib/web-search/runtime-tools");
@@ -144,6 +144,34 @@ describe("buildWebSearchTool", () => {
       }
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it("maps a SearXNG network failure into UPSTREAM_UNREACHABLE", async () => {
+    resolveSearchCredential.mockResolvedValue({
+      ok: true,
+      resolved: {
+        credentialId: "c",
+        provider: "searxng",
+        apiKey: "none",
+        restUrl: "http://searxng:8080",
+      },
+    });
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("fetch failed", {
+        cause: new Error("getaddrinfo ENOTFOUND searxng"),
+      });
+    });
+
+    const tool = buildToolWithFetch(fetchMock as unknown as typeof fetch);
+    const exec = tool.execute as (args: unknown, ctx?: ExecuteCtx) => Promise<Envelope>;
+    const out = await exec({ query: "q", topK: 1 });
+
+    expect(out.ok).toBe(false);
+    if (out.ok === false) {
+      expect(out.error).toBe("UPSTREAM_UNREACHABLE");
+      expect(out.message).toContain("http://searxng:8080");
+      expect(out.message).toContain("ENOTFOUND");
     }
   });
 

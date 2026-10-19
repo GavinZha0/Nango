@@ -278,6 +278,10 @@ export function CredentialFormDialog({
   const fields = PAYLOAD_FIELDS[form.type];
   // SSH servers hide URL inputs.
   const isSsh = form.provider === "ssh";
+  // SearXNG is keyless, but the shared form requires a non-empty
+  // secret — the provider treats the value as an anonymous placeholder
+  // and sends no auth header.
+  const isSearxng = form.provider === "searxng";
   // AG-UI URL is only meaningful for `agent` providers.
   const isAgent = currentServiceType === "agent";
 
@@ -359,8 +363,10 @@ export function CredentialFormDialog({
                 placeholder={
                   isSsh
                     ? "Optional reference (e.g. prod.example.com) — not used at runtime"
-                    : (PROVIDER_MAP.get(form.provider)?.defaultRestUrl ??
-                        "http://localhost:7878")
+                    : isSearxng
+                      ? "http://127.0.0.1:8680 (pnpm dev) / http://searxng:8080 (nango-app in Docker)"
+                      : (PROVIDER_MAP.get(form.provider)?.defaultRestUrl ??
+                          "http://localhost:7878")
                 }
                 className="flex-1"
               />
@@ -428,6 +434,18 @@ export function CredentialFormDialog({
               <p className="text-xs text-muted-foreground">
                 The host, port, and pinned fingerprint live on the SSH server row —
                 create one from the SSH Hosts panel after saving the credential.
+              </p>
+            )}
+            {isSearxng && (
+              <p className="text-xs text-muted-foreground">
+                SearXNG has no request authentication. Enter{" "}
+                <code>none</code>, <code>empty</code>, or <code>anonymous</code>{" "}
+                in the secret field — the runtime treats these as anonymous
+                placeholders and sends no Authorization header. Base URL:
+                use <code>http://127.0.0.1:8680</code> when Nango runs via{" "}
+                <code>pnpm dev</code> on the host; use{" "}
+                <code>http://searxng:8080</code> only when the Nango app runs
+                in the same Docker compose stack.
               </p>
             )}
             {fields.map((f) => {

@@ -15,6 +15,7 @@ import { exaProvider } from "./exa.server";
 import { tavilyProvider } from "./tavily.server";
 import { braveProvider } from "./brave.server";
 import { jinaProvider } from "./jina.server";
+import { searxngProvider } from "./searxng.server";
 
 /**
  * Active provider map. Order is irrelevant here — selection priority
@@ -27,21 +28,26 @@ export const WEB_SEARCH_PROVIDERS = {
   tavily: tavilyProvider,
   brave: braveProvider,
   jina: jinaProvider,
+  searxng: searxngProvider,
 } as const satisfies Record<WebSearchProviderId, WebSearchProvider>;
 
 /**
  * Tie-breaker order when more than one search credential is enabled.
- * Paid providers come first (Exa with summary, Tavily, Brave with
- * thumbnails); Jina lands at the tail as the free-tier fallback —
- * cheaper but slower and visually plainer. Within a provider id,
- * the most recently created credential wins (handled in
- * `lookup.server.ts`).
+ * Local SearXNG wins (no per-call cost, no query leaves the operator's
+ * infrastructure), then Jina (free tier, no per-call charge), then the
+ * paid providers. Within a provider id, the most recently created
+ * credential wins (handled in `lookup.server.ts`).
+ *
+ * Operators who want a paid provider to win while a SearXNG credential
+ * is still enabled must disable the SearXNG credential — selection is
+ * global, not per-agent.
  */
 export const PROVIDER_PRIORITY: readonly WebSearchProviderId[] = [
+  "searxng",
+  "jina",
   "exa",
   "tavily",
   "brave",
-  "jina",
 ];
 
 export function getWebSearchProvider(id: WebSearchProviderId): WebSearchProvider {

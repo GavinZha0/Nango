@@ -70,16 +70,20 @@ export async function resolveSearchCredential(): Promise<SearchCredentialResolut
       error: "NO_PROVIDER",
       message:
         "No enabled web-search credential found. Ask an admin to add " +
-        "one under Credentials → Search (Exa, Tavily, or Brave).",
+        "one under Credentials → Search (SearXNG, Jina, Exa, Tavily, or Brave).",
     };
   }
 
   // Walk PROVIDER_PRIORITY in order; first row whose provider matches
-  // AND whose payload decrypts to a non-empty key wins. A decryption
-  // failure or empty key on the top-priority provider falls through
+  // AND whose payload decrypts to a non-empty value wins. A decryption
+  // failure or empty value on the top-priority provider falls through
   // to the next provider rather than failing the whole call — the
-  // operator may have a working Brave credential even if the Exa key
-  // got corrupted.
+  // operator may have a working lower-priority credential even if the
+  // top one got corrupted.
+  //
+  // Anonymous placeholders ("none", "empty", …) intentionally count as
+  // usable values: keyless providers such as SearXNG need the credential
+  // row to exist, but the provider itself decides not to send auth.
   for (const id of PROVIDER_PRIORITY) {
     const row = rows.find((r) => r.provider === id);
     if (!row) continue;

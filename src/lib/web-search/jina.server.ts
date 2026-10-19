@@ -40,14 +40,13 @@
  *       from `description`. Matches Brave's latency / shape.
  *     - "default" (Jina's own default, our opt-in): Jina extracts
  *       each result page server-side, producing rich `content`
- *       excerpts. Typical 3-7s, cold-cache up to 15s+. With our
- *       10s tool timeout this regularly aborts — that's why we
- *       flip the default to `direct` even though Jina itself
- *       prefers the slower mode.
+ *       excerpts. Typical 3-7s, cold-cache up to 15s+. The 30s
+ *       default call budget usually accommodates it, but `direct`
+ *       remains the default for snappy chat turns.
  *   Operators wanting richer content over speed can set
- *   `web_search.jina.engine=default` in env.
+ *   `web_search.jina.engine=default` in Admin -> Config.
  *
- * KNOBS (env-tunable):
+ * KNOBS (config-tunable):
  *   - web_search.exa.snippet_max_chars   (shared UI budget)
  *   - web_search.jina.engine             ("direct" | "default")
  */
@@ -82,8 +81,8 @@ type JinaEngine = "default" | "direct";
 
 function resolveEngine(): JinaEngine {
   // Default to "direct" (fast SERP, ~1-2s) rather than Jina's own
-  // default mode (content extraction, 3-7s+, often times out
-  // against our 10s tool budget). See the header comment.
+  // default mode (content extraction, 3-7s+, materially slower).
+  // See the header comment.
   const raw = getConfig("web_search.jina.engine", "direct");
   return raw === "default" ? "default" : "direct";
 }

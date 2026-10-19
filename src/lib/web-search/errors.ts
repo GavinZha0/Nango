@@ -17,12 +17,17 @@ import type { WebSearchProviderId } from "./types";
  * surfaced in pino logs for admin debugging but kept out of the
  * LLM-facing message to avoid leaking upstream error formats into
  * the conversation.
+ *
+ * `hint` is an optional, provider-authored remediation sentence that
+ * the runtime appends to the LLM-facing message (e.g. "enable JSON in
+ * SearXNG's search.formats"). Keep it free of response-body content.
  */
 export class ProviderHttpError extends Error {
   constructor(
     readonly provider: WebSearchProviderId,
     readonly status: number,
     readonly body: string,
+    readonly hint?: string,
   ) {
     super(`${provider} upstream HTTP ${status}: ${body}`);
     this.name = "ProviderHttpError";
@@ -30,9 +35,49 @@ export class ProviderHttpError extends Error {
 }
 
 /**
+ * Thrown when the upstream could not be reached at all — DNS failure,
+ * connection refused, TLS error. Distinct from {@link ProviderHttpError}
+ * (server answered with non-2xx) and from INVALID_RESPONSE (server
+ * answered but the body was unusable), so the LLM and the admin see the
+ * right remediation.
+ *
+ * `detail` is the underlying cause (`getaddrinfo ENOTFOUND …`,
+ * `connect ECONNREFUSED …`). `hint` is provider-authored deployment
+ * guidance, e.g. host vs Docker service name.
+ */
+export class ProviderNetworkError extends Error {
+  constructor(
+    readonly provider: WebSearchProviderId,
+    readonly url: string,
+    readonly detail: string,
+    readonly hint?: string,
+  ) {
+    super(
+      `Could not reach ${provider} at ${url}. ` +
+        "Check that the credential's Base URL is reachable from the Nango server." +
+        (hint ? ` ${hint}` : "") +
+        (detail ? ` (${detail})` : ""),
+    );
+    this.name = "ProviderNetworkError";
+  }
+}
+
+/**
+ * True for fetch/AbortSignal cancellation errors in both DOM (browser
+ * / older Node) and Error (undici) shapes. Kept here so the runtime tool
+ * and every provider classify cancellation identically.
+ */
+export function isAbortError(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  return false;
+}
+
+/**
  * Reserved for providers registered in the catalog but not yet wired
- * to their upstream API. No provider currently throws this — all
- * four shipping providers (Exa, Tavily, Brave, Jina) are implemented
+ * to their upstream API. No provider currently throws this — every
+ * shipping provider (Exa, Tavily, Brave, Jina, SearXNG) is implemented
  * — but the class stays exported so a future stub addition does not
  * need to re-introduce the runtime-tool `error: "NOT_IMPLEMENTED"`
  * branch from scratch.

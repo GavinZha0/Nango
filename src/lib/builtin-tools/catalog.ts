@@ -214,7 +214,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     name: "web_search",
     displayName: "Web search",
     description:
-      "Search the public web via a configured search engine (Exa today; Tavily / Brave).",
+      "Search the public web via a configured search engine (SearXNG, Jina, Exa, Tavily, or Brave).",
     category: "search",
     input_schema: {
       type: "object",
@@ -223,10 +223,12 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
           type: "string",
           description: "Search engine query string.",
         },
-        num_results: {
+        topK: {
           type: "integer",
+          minimum: 1,
+          maximum: 10,
           default: 5,
-          description: "Number of search results to return.",
+          description: "Number of search results to return (1-10).",
         },
       },
       required: ["query"],

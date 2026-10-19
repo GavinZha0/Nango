@@ -132,7 +132,7 @@ services:
       "--block-service-workers",
       "--caps", "vision,pdf",
       "--output-dir", "/app/.output",
-      "--output-max-size", "1073741824"           
+      "--output-max-size", "1073741824"
     ]
     ports:
       - "8931:8931"
@@ -146,6 +146,42 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  searxng:
+    container_name: searxng
+    # Pinned for reproducibility — SearXNG's JSON shape can change between
+    # releases. Bump deliberately after checking the release notes.
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      # Loopback-only: SearXNG's /search endpoint has no request
+      # authentication. The Nango app reaches it over the compose network
+      # at http://searxng:8080; this host binding is only for local UI/debug.
+      - "127.0.0.1:8680:8080"
+    environment:
+      # server.secret_key — signs session/CSRF cookies. This is NOT an API
+      # key: it never authenticates /search requests. The fallback matches
+      # the project's local-dev convention; set a random value in .env for
+      # stable sessions and any non-local deployment.
+      SEARXNG_SECRET: "${SEARXNG_SECRET:-local-searxng-secret-change-me}"
+      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://localhost:8680/}"
+      # Local single-user instance: no limiter. Enable the limiter (and
+      # configure Valkey) before exposing this service beyond loopback.
+      SEARXNG_LIMITER: "false"
+      SEARXNG_IMAGE_PROXY: "false"
+    volumes:
+      - ./docker/searxng/core-config:/etc/searxng:Z
+      - searxng-cache:/var/cache/searxng
+    healthcheck:
+      # /healthz is liveness-only. Probing /search on a timer would launch
+      # real upstream queries every 30s; see docker/searxng/README.md for
+      # the manual JSON readiness check.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   nango-db-data:
+  searxng-cache:
 

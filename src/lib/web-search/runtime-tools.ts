@@ -15,7 +15,12 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { getConfigMs } from "@/lib/config";
 import { logger } from "@/lib/observability/logger";
 
-import { NotImplementedError, ProviderHttpError } from "./errors";
+import {
+  isAbortError,
+  NotImplementedError,
+  ProviderHttpError,
+  ProviderNetworkError,
+} from "./errors";
 import { resolveSearchCredential } from "./lookup.server";
 import { getWebSearchProvider } from "./registry.server";
 import { webSearchArgsSchema } from "./schema";
@@ -35,30 +40,33 @@ export type {
 
 // Tool factory
 
-/** Wall-clock budget per call. SECONDS in env, ms in code (project
- *  convention; see ssh/sandbox tools). */
+/** Wall-clock budget per call. Config value is in seconds; converted
+ *  to milliseconds here. */
 const requestTimeoutMs = (): number =>
-  getConfigMs("web_search.timeout", 10);
+  getConfigMs("web_search.timeout", 30);
 
 export function buildWebSearchTool(): ToolDefinition {
   return defineTool({
     name: "web_search",
     description:
       "Search the public web for fresh information not in your training " +
-      "data. Uses a configured search provider (Exa, Tavily, or Brave). " +
+      "data. Uses a configured search provider (SearXNG, Jina, Exa, " +
+      "Tavily, or Brave). " +
       "Returns the top results — the upstream actually used is reported " +
       "as `provider`. On success: " +
       "{ ok: true, provider, results: [{ title, url, snippet, publishedAt?, image?, favicon? }] }. " +
       "On failure: { ok: false, error, message } where `error` is one of " +
-      "NO_PROVIDER, AUTH_MISSING, UPSTREAM_HTTP, UPSTREAM_TIMEOUT, " +
-      "INVALID_RESPONSE. " +
-      "`snippet` is a CONCISE, QUERY-RELEVANT SUMMARY (1-3 sentences) " +
-      "produced by the search provider's own LLM — not a raw page " +
-      "excerpt. It is suitable to quote or paraphrase directly when " +
-      "answering the user; verify by visiting the URL only if the " +
-      "claim is high-stakes or contested. " +
-      "COST AWARENESS — WHEN TO CALL: every web_search call consumes " +
-      "provider quota AND adds a card to the user's Outcomes panel. " +
+      "NO_PROVIDER, AUTH_MISSING, UPSTREAM_UNREACHABLE, UPSTREAM_HTTP, " +
+      "UPSTREAM_TIMEOUT, INVALID_RESPONSE. " +
+      "`snippet` is a CONCISE, QUERY-RELEVANT EXCERPT: Exa returns its " +
+      "own LLM summary, while the other providers return the search " +
+      "engine's extract (typically 1-3 sentences). It is suitable to " +
+      "quote or paraphrase, but treat it as a lead rather than a full " +
+      "answer; verify by visiting the URL if the claim is high-stakes " +
+      "or contested. " +
+      "COST AWARENESS — WHEN TO CALL: every web_search call adds a card " +
+      "to the user's Outcomes panel and may consume paid-provider quota " +
+      "(SearXNG is local and free; Exa/Tavily/Brave are not). " +
       "For open-ended questions (\"what's new\", \"top N news\", \"latest " +
       "in X\"), START WITH ONE broad query and reply from those " +
       "results. Only fire a follow-up search if the FIRST result set " +
@@ -169,6 +177,25 @@ function mapProviderError(
     };
   }
 
+  if (err instanceof ProviderNetworkError) {
+    logger.warn(
+      {
+        component: "web-search",
+        event: "upstream_unreachable",
+        provider,
+        credentialId,
+        url: err.url,
+        detail: err.detail,
+      },
+      "web_search upstream could not be reached",
+    );
+    return {
+      ok: false,
+      error: "UPSTREAM_UNREACHABLE",
+      message: err.message,
+    };
+  }
+
   if (err instanceof ProviderHttpError) {
     logger.warn(
       {
@@ -185,13 +212,15 @@ function mapProviderError(
     // the provider id (lowercase) — short, recognisable, and avoids
     // a separate "display name" mapping. The error code itself is
     // provider-agnostic so consumers branch on `error`, not on
-    // message string parsing.
+    // message string parsing. `hint` is provider-authored remediation
+    // (e.g. enable JSON in SearXNG's search.formats).
+    const hint = err.hint ? ` ${err.hint}` : "";
     return {
       ok: false,
       error: "UPSTREAM_HTTP",
       message:
         `${err.provider} returned HTTP ${err.status}. ` +
-        "Check the credential's API key or upstream quota.",
+        `Check the credential/configuration or upstream availability.${hint}`,
     };
   }
 
@@ -212,11 +241,4 @@ function mapProviderError(
     error: "INVALID_RESPONSE",
     message: `web_search failed: ${message}`,
   };
-}
-
-function isAbortError(err: unknown): boolean {
-  if (!err) return false;
-  if (err instanceof DOMException && err.name === "AbortError") return true;
-  if (err instanceof Error && err.name === "AbortError") return true;
-  return false;
 }

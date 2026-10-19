@@ -51,15 +51,23 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "deepagents",  label: "DeepAgents",  service: "agent" },
 
   // Search providers
+  // `searxng` is a self-hosted, unauthenticated metasearch engine. The
+  // shared credential form still requires a value in the API-key field;
+  // use an anonymous placeholder ("none"/"empty") — the provider omits
+  // the Authorization header for those. No defaultRestUrl: the right URL
+  // is http://localhost:8680 on the host but http://searxng:8080 inside
+  // the Docker compose network.
+  //
   // The `jina` slot consumes Jina Search (`s.jina.ai`) — a
   // query-driven search API with a generous anonymous-friendly
   // free tier. The Reader endpoint (`r.jina.ai`) is intentionally
   // out of scope: it's a URL → Markdown extractor, not a search,
   // and our `web_search` abstraction is query-driven.
+  { value: "searxng",   label: "SearXNG",      service: "search" },
+  { value: "jina",      label: "Jina",         service: "search", defaultRestUrl: "https://s.jina.ai" },
   { value: "exa",       label: "Exa",          service: "search", defaultRestUrl: "https://api.exa.ai" },
   { value: "tavily",    label: "Tavily",       service: "search", defaultRestUrl: "https://api.tavily.com" },
   { value: "brave",     label: "Brave Search", service: "search", defaultRestUrl: "https://api.search.brave.com" },
-  { value: "jina",      label: "Jina",         service: "search", defaultRestUrl: "https://s.jina.ai" },
 
   // Observability providers
   // QUIRK: exactly one enabled `langfuse` credential is consumed at a

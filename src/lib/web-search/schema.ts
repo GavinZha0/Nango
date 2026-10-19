@@ -60,6 +60,7 @@ export interface WebSearchErr {
     | "NO_PROVIDER"
     | "AUTH_MISSING"
     | "NOT_IMPLEMENTED"
+    | "UPSTREAM_UNREACHABLE"
     | "UPSTREAM_HTTP"
     | "UPSTREAM_TIMEOUT"
     | "INVALID_RESPONSE";
