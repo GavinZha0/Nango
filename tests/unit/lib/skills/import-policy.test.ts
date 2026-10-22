@@ -15,6 +15,10 @@ describe("classifyImportPath", () => {
     "README",
     "Dockerfile",
     "scripts/lib/probe.py",
+    "types/probe.pyi",
+    "notebooks/analysis.ipynb",
+    "scripts/setup.bash",
+    "scripts/setup.zsh",
     "data/table.csv",
     "templates/page.html",
   ])("allows text file %s", (path) => {
@@ -26,6 +30,7 @@ describe("classifyImportPath", () => {
     "assets/photo.jpeg",
     "assets/anim.gif",
     "assets/modern.webp",
+    "assets/favicon.ico",
   ])("allows image %s", (path) => {
     expect(classifyImportPath(path).action).toBe("allow-image");
   });
@@ -36,6 +41,34 @@ describe("classifyImportPath", () => {
     "references/.env.local",
     "__MACOSX/foo",
     "node_modules/pkg/index.js",
+    "__pycache__/probe.cpython-311.pyc",
+    "scripts/__pycache__/probe.cpython-311.pyc",
+    "probe.pyc",
+    "build/probe.pyc",
+    "probe.pyo",
+    "debug.log",
+    "backup.tmp",
+    "backup.temp",
+    "backup.bak",
+    "patch.orig",
+    "patch.rej",
+    "notes.swp",
+    "notes.swo",
+    "notes.md~",
+    "tsconfig.tsbuildinfo",
+    "app.js.map",
+    "project.iml",
+    "solution.suo",
+    "yarn.lock",
+    "bun.lockb",
+    "pkg-1.0.whl",
+    "pkg-1.0.egg",
+    "scripts/node_modules/pkg/index.js",
+    "venv/lib/python3.11/site-packages/native.so",
+    "virtualenv/pyvenv.cfg",
+    "lib/pkg.egg-info/PKG-INFO",
+    "lib/pkg.dist-info/METADATA",
+    "ehthumbs.db",
     "Thumbs.db",
     "desktop.ini",
   ])("ignores %s", (path) => {
@@ -97,11 +130,13 @@ describe("content validation", () => {
       Buffer.from([0x00, 0x00, 0x00, 0x00]),
       Buffer.from("WEBP"),
     ]);
+    const ico = Buffer.from([0x00, 0x00, 0x01, 0x00, 0x01, 0x00]);
 
     expect(validateImageBytes("logo.png", png)).toBeNull();
     expect(validateImageBytes("photo.jpg", jpeg)).toBeNull();
     expect(validateImageBytes("anim.gif", gif)).toBeNull();
     expect(validateImageBytes("modern.webp", webp)).toBeNull();
+    expect(validateImageBytes("favicon.ico", ico)).toBeNull();
   });
 
   it("rejects a text file renamed to an image extension", () => {
@@ -111,5 +146,8 @@ describe("content validation", () => {
     expect(
       validateImageBytes("logo.png", Buffer.from([0x89, 0x50])),
     ).toMatch(/too short/);
+    expect(
+      validateImageBytes("favicon.ico", Buffer.from("not an icon")),
+    ).toMatch(/ICO content/);
   });
 });

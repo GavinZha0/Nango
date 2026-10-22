@@ -147,6 +147,49 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     );
   });
 
+  it("allows type stubs, notebooks, shell variants, and ICO images", async () => {
+    dbMock.$enqueue([], [
+      { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
+    ]);
+
+    const ico = Buffer.from([0x00, 0x00, 0x01, 0x00, 0x01, 0x00]);
+    const res = await upload(
+      [
+        { path: "types/probe.pyi", content: "def probe() -> None: ...\n" },
+        { path: "notebooks/analysis.ipynb", content: '{"cells":[]}\n' },
+        { path: "scripts/setup.bash", content: "echo hi\n" },
+        { path: "scripts/setup.zsh", content: "echo hi\n" },
+        { path: "assets/favicon.ico", content: ico },
+      ],
+      null,
+    );
+
+    expect(res.status).toBe(201);
+    expect(
+      storageMock.putFile.mock.calls
+        .map((args: unknown[]) => (args[0] as { path: string }).path)
+        .sort(),
+    ).toEqual([
+      "assets/favicon.ico",
+      "notebooks/analysis.ipynb",
+      "scripts/setup.bash",
+      "scripts/setup.zsh",
+      "types/probe.pyi",
+    ]);
+    expect(storageMock.putFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "assets/favicon.ico",
+        contentType: "image/x-icon",
+      }),
+    );
+    expect(storageMock.putFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "notebooks/analysis.ipynb",
+        contentType: "application/json",
+      }),
+    );
+  });
+
   it("imports files under any folder name plus root-level files, skipping dotfiles", async () => {
     dbMock.$enqueue([], [
       { id: "skill-1", name: "probe-skill", createdBy: "user-1" },
@@ -217,6 +260,14 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
         { path: ".env", content: "SECRET=1" },
         { path: ".github/workflows/ci.yml", content: "name: CI" },
         { path: "__MACOSX/foo", content: "x" },
+        { path: "scripts/__pycache__/helper.cpython-311.pyc", content: "x" },
+        { path: "build/helper.pyc", content: "x" },
+        { path: "debug.log", content: "x" },
+        { path: "notes.md~", content: "x" },
+        { path: "yarn.lock", content: "x" },
+        { path: "project.iml", content: "x" },
+        { path: "venv/lib/python3.11/site-packages/native.so", content: "x" },
+        { path: "dist/pkg-1.0.whl", content: "x" },
         { path: "Thumbs.db", content: "x" },
       ],
       null,
@@ -225,7 +276,20 @@ describe("POST /api/skills/import — scripts-on-ssh boundaries", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect([...body.skipped].sort()).toEqual(
-      [".env", ".github/workflows/ci.yml", "__MACOSX/foo", "Thumbs.db"].sort(),
+      [
+        ".env",
+        ".github/workflows/ci.yml",
+        "__MACOSX/foo",
+        "scripts/__pycache__/helper.cpython-311.pyc",
+        "build/helper.pyc",
+        "debug.log",
+        "notes.md~",
+        "yarn.lock",
+        "project.iml",
+        "venv/lib/python3.11/site-packages/native.so",
+        "dist/pkg-1.0.whl",
+        "Thumbs.db",
+      ].sort(),
     );
     expect(
       storageMock.putFile.mock.calls

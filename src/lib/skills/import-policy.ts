@@ -29,6 +29,7 @@ const TEXT_EXTENSIONS = new Set([
   "txt",
   "json",
   "jsonl",
+  "ipynb",
   "yaml",
   "yml",
   "toml",
@@ -40,7 +41,10 @@ const TEXT_EXTENSIONS = new Set([
   "xml",
   "sql",
   "py",
+  "pyi",
   "sh",
+  "bash",
+  "zsh",
   "js",
   "mjs",
   "cjs",
@@ -55,7 +59,7 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 /** Images are allowed as reference assets; the editor can preview them. */
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico"]);
 
 /** Extension → rejection reason. */
 const BLOCKED_REASONS: Record<string, string> = {
@@ -82,7 +86,6 @@ const BLOCKED_REASONS: Record<string, string> = {
   iso: "disk image",
   img: "disk image",
   wasm: "WebAssembly binary",
-  pyc: "Python bytecode",
   // Audio / video
   mp3: "audio file",
   wav: "audio file",
@@ -142,15 +145,69 @@ const BLOCKED_REASONS: Record<string, string> = {
   pth: "binary model",
 };
 
-const IGNORED_BASENAMES = new Set(["thumbs.db", "desktop.ini"]);
+const IGNORED_BASENAMES = new Set([
+  "thumbs.db",
+  "desktop.ini",
+  "ehthumbs.db",
+]);
+
+/** Compiled bytecode, logs, and tool-generated files that are never
+ *  authoring sources. */
+const IGNORED_EXTENSIONS = new Set([
+  // Python bytecode
+  "pyc",
+  "pyo",
+  // Logs, temp files, editor/merge artifacts
+  "log",
+  "tmp",
+  "temp",
+  "bak",
+  "orig",
+  "rej",
+  "swp",
+  "swo",
+  // Tool build metadata
+  "tsbuildinfo",
+  "map",
+  "iml",
+  "suo",
+  // Package-manager locks and Python build outputs
+  "lock",
+  "lockb",
+  "whl",
+  "egg",
+  "egg-link",
+]);
+
+/** Generated dependency/cache directories, matched at any depth. */
+const IGNORED_DIR_NAMES = new Set([
+  "__pycache__",
+  "node_modules",
+  "__MACOSX",
+  "venv",
+  "virtualenv",
+  "__pypackages__",
+]);
+
+/** Generated metadata directories, matched by suffix. */
+const IGNORED_DIR_SUFFIXES = [".egg-info", ".dist-info", ".egg"];
 
 function ignoredByPath(path: string): boolean {
-  if (path.split("/").some((segment) => segment.startsWith("."))) {
+  const segments = path.split("/");
+  if (segments.some((segment) => segment.startsWith("."))) {
     return true;
   }
-  if (path === "__MACOSX" || path.startsWith("__MACOSX/")) return true;
-  if (path === "node_modules" || path.startsWith("node_modules/")) return true;
+  if (segments.some((segment) => IGNORED_DIR_NAMES.has(segment))) return true;
+  if (
+    segments.some((segment) =>
+      IGNORED_DIR_SUFFIXES.some((suffix) => segment.endsWith(suffix)),
+    )
+  ) {
+    return true;
+  }
   if (IGNORED_BASENAMES.has(getBaseName(path).toLowerCase())) return true;
+  // Emacs leaves `file~` backups next to the original.
+  if (getBaseName(path).endsWith("~")) return true;
   return false;
 }
 
@@ -166,6 +223,9 @@ export function classifyImportPath(path: string): FilePolicyResult {
   }
 
   const ext = getExtension(path);
+  if (IGNORED_EXTENSIONS.has(ext)) {
+    return { action: "ignore", reason: "generated build or tool artifact" };
+  }
   if (ext.length === 0) {
     // LICENSE, README, Dockerfile, Makefile, … — text is checked later.
     return { action: "allow-text" };
@@ -250,6 +310,14 @@ export function validateImageBytes(
       ascii(content, 0, 4) === "RIFF" &&
       ascii(content, 8, 12) === "WEBP";
     return ok ? null : "WEBP content does not match its extension.";
+  }
+  if (ext === "ico") {
+    const ok =
+      content[0] === 0x00 &&
+      content[1] === 0x00 &&
+      content[2] === 0x01 &&
+      content[3] === 0x00;
+    return ok ? null : "ICO content does not match its extension.";
   }
   return null;
 }

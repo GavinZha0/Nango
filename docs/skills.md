@@ -348,10 +348,25 @@ The open Agent Skills spec permits any file, but Nango can only execute
 
 | Action | File types | Behavior |
 |---|---|---|
-| **Allow — text** | `md, markdown, txt, json, jsonl, yaml, yml, toml, ini, cfg, conf, csv, tsv, xml, sql, py, sh, js, mjs, cjs, ts, tsx, jsx, css, html, svg, rst, tex`, plus extensionless text files (`LICENSE`, `README`, `Dockerfile`, `Makefile`) | Imported after a NUL-byte check |
-| **Allow — image** | `png, jpg, jpeg, gif, webp` | Imported after magic-byte validation; the editor previews them |
-| **Ignore** | dotfiles/dot-directories, `__MACOSX/`, `node_modules/`, `Thumbs.db`, `desktop.ini`, root `SKILL.md` | Skipped and returned in `skipped: string[]`; import succeeds |
+| **Allow — text** | `md, markdown, txt, json, jsonl, ipynb, yaml, yml, toml, ini, cfg, conf, csv, tsv, xml, sql, py, pyi, sh, bash, zsh, js, mjs, cjs, ts, tsx, jsx, css, html, svg, rst, tex`, plus extensionless text files (`LICENSE`, `README`, `Dockerfile`, `Makefile`) | Imported after a NUL-byte check |
+| **Allow — image** | `png, jpg, jpeg, gif, webp, ico` | Imported after magic-byte validation; the editor previews them |
+| **Ignore** | dotfiles/dot-directories, generated caches/build metadata, OS/editor metadata, root `SKILL.md` | Skipped and returned in `skipped: string[]`; import succeeds |
 | **Block** | executables/native binaries (`exe, dll, so, dylib, bin, msi, bat, cmd, ps1, jar, wasm, …`), audio/video, archives, fonts, PDF/Office documents, binary data/models, unknown extensions | Import fails with 400 and a path-by-path reason list; no rows are written |
+
+`.bash` / `.zsh` are imported as reference text; only `.py` / `.sh` under
+`scripts/` are executable.
+
+Generated noise ignored by default (matched at any depth):
+
+- Python: `__pycache__/`, `*.pyc`, `*.pyo`, `venv/`, `virtualenv/`,
+  `__pypackages__/`, `*.egg-info/`, `*.dist-info/`, `*.whl`, `*.egg`
+- JS/tooling: `node_modules/`, `*.tsbuildinfo`, `*.map`, `*.lock`, `*.lockb`
+- Logs/temp/editor: `*.log`, `*.tmp`, `*.temp`, `*.bak`, `*.orig`, `*.rej`,
+  `*.swp`, `*.swo`, `*~`, `*.iml`, `*.suo`
+- OS metadata: `__MACOSX/`, `Thumbs.db`, `desktop.ini`, `ehthumbs.db`
+
+Dot-prefixed directories such as `.git/`, `.idea/`, `.vscode/`, `.venv/`,
+`.pytest_cache/`, and `.mypy_cache/` are already covered by the dotfile rule.
 
 Rationale: Nango has no Windows/native executor, no skill-file materialization
 into the sandbox or SSH host, and no binary parser. An `.exe` or `.dll` stored

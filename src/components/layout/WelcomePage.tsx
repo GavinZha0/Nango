@@ -15,7 +15,7 @@
  * surrounding left panel, not here.
  */
 
-import { Crown, LayoutDashboard, MessageSquareMore, TrendingUp } from "lucide-react";
+import { Crown, Fan, FlaskConical, MessageSquareMore, TrendingUp } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function WelcomePage(): ReactNode {
@@ -31,22 +31,27 @@ export function WelcomePage(): ReactNode {
         </h1>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mt-4 grid w-full max-w-2xl grid-cols-1 gap-4 sm:grid-cols-2">
         {[
           {
             icon: MessageSquareMore,
             title: "AI Chat",
-            desc: "Chat with AI agents to collaborate on tasks together",
+            desc: "Talk to Nango and specialist agents. They call tools, delegate, and ask before acting",
           },
           {
             icon: TrendingUp,
             title: "Data Analysis",
-            desc: "Connect to data sources and transform data into visual artifacts",
+            desc: "Connect a database, ask in plain language, and get charts backed by governed SQL",
           },
           {
-            icon: LayoutDashboard,
-            title: "Dashboards",
-            desc: "Assemble generated artifacts into dashboards for publishing and sharing",
+            icon: FlaskConical,
+            title: "Automation",
+            desc: "Test agents and tools with deterministic assertions, LLM review, and real-browser regression",
+          },
+          {
+            icon: Fan,
+            title: "Artifacts",
+            desc: "Save results as reusable artifacts; workflow-backed ones refresh without AI",
           },
         ].map(({ icon: Icon, title, desc }) => (
           <div

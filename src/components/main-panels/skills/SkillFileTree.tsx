@@ -311,8 +311,7 @@ export function SkillFileTree({
 
         {files.length === 0 ? (
           <p className="px-3 py-3 text-[11px] leading-snug text-muted-foreground">
-            No helper files. Use the + button to add a text file; binary assets
-            come from a <code className="font-mono">.skill</code> import.
+            No helper files. Use the + button to add.
           </p>
         ) : (
           <div className="py-1">{renderNodes(tree, 0)}</div>
