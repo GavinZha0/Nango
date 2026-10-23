@@ -5,15 +5,15 @@
 
 ### Features
 
-* **host-files:** add read_file/write_file tools with jail-confined host directory access ([4c7d04d](https://github.com/GavinZha0/Nango/commit/4c7d04dd403acd40f000165fa766e7c31239de99))
-* **web-search:** add report flag to distinguish user-facing vs intermediate searches ([5cbfcf9](https://github.com/GavinZha0/Nango/commit/5cbfcf90ca7ba87f07417aef43964cd4bb4519d7))
-* **web-search:** add SearXNG provider with local-first priority ([df2506e](https://github.com/GavinZha0/Nango/commit/df2506e54bc71cca55dcc03c7b1637f63b489382))
+* **host-files:** add read_file/write_file tools with jail-confined host directory access ([4c7d04d](https://github.com/GavinZha0/Nango/commit/4c7d04dd403acd40f000165fa766e7c31239de99)) by @GavinZha0
+* **web-search:** add report flag to distinguish user-facing vs intermediate searches ([5cbfcf9](https://github.com/GavinZha0/Nango/commit/5cbfcf90ca7ba87f07417aef43964cd4bb4519d7)) by @GavinZha0
+* **web-search:** add SearXNG provider with local-first priority ([df2506e](https://github.com/GavinZha0/Nango/commit/df2506e54bc71cca55dcc03c7b1637f63b489382)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **skills:** import is blacked because of __pycache__ ([00cce14](https://github.com/GavinZha0/Nango/commit/00cce147b24b53fa5e77b1b55bd8298996e249c6))
-* **skills:** syncup issue when skill is deleted ([5b73c8e](https://github.com/GavinZha0/Nango/commit/5b73c8ee46b17cee4f26f3bf3683b5fbde021ffd))
+* **skills:** import is blacked because of __pycache__ ([00cce14](https://github.com/GavinZha0/Nango/commit/00cce147b24b53fa5e77b1b55bd8298996e249c6)) by @GavinZha0
+* **skills:** syncup issue when skill is deleted ([5b73c8e](https://github.com/GavinZha0/Nango/commit/5b73c8ee46b17cee4f26f3bf3683b5fbde021ffd)) by @GavinZha0
 
 ## [0.27.0](https://github.com/GavinZha0/Nango/compare/v0.26.2...v0.27.0) (2026-10-18)
 
