@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { mutate as globalMutate } from "swr";
 
 import {
   SkillEditor,
   type SkillDetail,
 } from "@/components/main-panels/SkillEditor";
+import { SKILLS_LIST_KEY } from "@/components/left-panels/SkillsPanel";
 
 /**
  * /skills/[id] — center workspace editor for one skill.
@@ -66,8 +68,18 @@ export default function SkillEditorPage() {
       skillId={isNew ? null : id}
       initialDetail={detail}
       onBack={() => router.push("/skills")}
-      onSaved={() => router.push("/skills")}
-      onDeleted={() => router.push("/skills")}
+      // The skills list lives in the left panel's SWR cache, and the panel
+      // stays mounted across these routes, so every write here has to
+      // invalidate it. Kicked off without awaiting to keep navigation
+      // snappy; the panel re-renders when the refetch lands.
+      onSaved={() => {
+        void globalMutate(SKILLS_LIST_KEY);
+        router.push("/skills");
+      }}
+      onDeleted={() => {
+        void globalMutate(SKILLS_LIST_KEY);
+        router.push("/skills");
+      }}
     />
   );
 }

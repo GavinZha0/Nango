@@ -21,16 +21,24 @@ import {
   type ReactNode,
   useRef,
   useState,
-  useEffect,
-  useCallback,
   useMemo,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+
+/** Shared so the editor route can invalidate the panel's list cache. */
+export const SKILLS_LIST_KEY = "/api/skills";
+
+const fetcher = (url: string) =>
+  fetch(url).then((res) => {
+    if (!res.ok) throw new Error("Failed to load skills");
+    return res.json();
+  });
 
 // Types
 
@@ -179,51 +187,18 @@ export function SkillsPanel(): ReactNode {
   const activeSkillId =
     skillsMatch && skillsMatch[1] !== "new" ? skillsMatch[1] : null;
 
-  const [skills, setSkills] = useState<SkillRow[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [importing, setImporting] = useState<boolean>(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  // Refresh on demand — used by the toolbar button and after admin sync.
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const res = await fetch("/api/skills");
-      if (res.ok) {
-        const data = (await res.json()) as SkillRow[];
-        setSkills(data);
-      }
-    } catch {
-      /* silent */
-    } finally {
-      setRefreshing(false);
-      setLoading(false);
-    }
-  }, []);
-
-  // Initial load — done inline in the effect rather than via `refresh()`
-  // to avoid the react-hooks/set-state-in-effect rule trip-wire that
-  // fires when an effect synchronously calls a function that flips state.
-  useEffect(() => {
-    let cancelled = false;
-    async function init(): Promise<void> {
-      try {
-        const res = await fetch("/api/skills");
-        if (!cancelled && res.ok) {
-          const data = (await res.json()) as SkillRow[];
-          setSkills(data);
-        }
-      } catch {
-        /* silent */
-      }
-      if (!cancelled) setLoading(false);
-    }
-    void init();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // CONTRACT: the SWR cache is the only source of truth for this list. The
+  // panel stays mounted across /skills and /skills/<id>, so writers outside
+  // it (the editor route's save/delete) must mutate SKILLS_LIST_KEY.
+  const {
+    data: skills = [],
+    isLoading: loading,
+    isValidating,
+    mutate,
+  } = useSWR<SkillRow[]>(SKILLS_LIST_KEY, fetcher, { revalidateOnFocus: false });
 
   // One flat, name-sorted list: the source column is a user label, not a
   // taxonomy.
@@ -234,37 +209,37 @@ export function SkillsPanel(): ReactNode {
   }, [skills]);
 
   // Mutations
-  async function handleToggleEnabled(row: SkillRow, enabled: boolean): Promise<void> {
-    setSkills((prev) => prev.map((s) => (s.id === row.id ? { ...s, enabled } : s)));
+  async function patchSkill(
+    row: SkillRow,
+    patch: Partial<SkillRow>,
+  ): Promise<void> {
+    void mutate(
+      (prev) =>
+        (prev ?? []).map((s) => (s.id === row.id ? { ...s, ...patch } : s)),
+      { revalidate: false },
+    );
     try {
-      await fetch(`/api/skills/${row.id}`, {
+      const res = await fetch(`/api/skills/${row.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify(patch),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch {
-      setSkills((prev) =>
-        prev.map((s) => (s.id === row.id ? { ...s, enabled: !enabled } : s)),
-      );
+      // Revert by pulling the server's truth back into the cache.
+      void mutate();
     }
   }
 
-  async function handleToggleVisibility(
+  function handleToggleEnabled(row: SkillRow, enabled: boolean): Promise<void> {
+    return patchSkill(row, { enabled });
+  }
+
+  function handleToggleVisibility(
     row: SkillRow,
     visibility: "private" | "public",
   ): Promise<void> {
-    setSkills((prev) => prev.map((s) => (s.id === row.id ? { ...s, visibility } : s)));
-    try {
-      await fetch(`/api/skills/${row.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility }),
-      });
-    } catch {
-      setSkills((prev) =>
-        prev.map((s) => (s.id === row.id ? { ...s, visibility: row.visibility } : s)),
-      );
-    }
+    return patchSkill(row, { visibility });
   }
 
   async function handleImportFile(file: File): Promise<void> {
@@ -299,7 +274,7 @@ export function SkillsPanel(): ReactNode {
           },
         );
       }
-      await refresh();
+      await mutate();
       router.push(`/skills/${created.id}`);
     } catch (err) {
       toast.error("Import failed", {
@@ -355,11 +330,11 @@ export function SkillsPanel(): ReactNode {
             variant="ghost"
             size="icon"
             className="h-6 w-6"
-            onClick={() => void refresh()}
-            disabled={refreshing}
+            onClick={() => void mutate()}
+            disabled={isValidating}
             aria-label="Refresh skills"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            <RefreshCw className={cn("h-3.5 w-3.5", isValidating && "animate-spin")} />
           </Button>
         </div>
       </div>
