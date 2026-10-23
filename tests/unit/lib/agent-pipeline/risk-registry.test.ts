@@ -42,6 +42,24 @@ describe("evaluateToolRisk — Builtin tools", () => {
     expect(res.requiresApproval).toBe(false);
     expect(res.headlessAllowed).toBe(true);
   });
+
+  it("evaluates read_file as a low-risk read", () => {
+    const res = evaluateToolRisk("read_file", { path: "notes.md" });
+    expect(res.riskLevel).toBe("low");
+    expect(res.sideEffects).toBe("read");
+    expect(res.requiresApproval).toBe(false);
+    expect(res.headlessAllowed).toBe(true);
+  });
+
+  it("evaluates write_file as high risk and denies it headlessly", () => {
+    // CONTRACT: the jail is the user's real mounted folder, so a write is
+    // never sandboxed — scheduled/async runs must deny it by default.
+    const res = evaluateToolRisk("write_file", { path: "notes.md", content: "x" });
+    expect(res.riskLevel).toBe("high");
+    expect(res.sideEffects).toBe("write");
+    expect(res.requiresApproval).toBe(true);
+    expect(res.headlessAllowed).toBe(false);
+  });
 });
 
 describe("evaluateToolRisk — MCP Annotations", () => {

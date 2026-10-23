@@ -60,3 +60,7 @@ next-env.d.ts
 # See `src/lib/data-sources/cache-root.ts` and `docs/sandbox.md` §3.
 /.cache/
 /docker/funasr/funasr-models/
+
+# Bind-mounted folder for the host-file tools (read_file / write_file).
+# Created by docker compose; its contents are the user's, not the repo's.
+/shared_folder/

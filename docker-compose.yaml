@@ -16,6 +16,11 @@ services:
     volumes:
       - .cache/datasource:/app/.cache/datasource:U
       - .cache/playwright:/app/.cache/playwright:ro
+      # Host-file tools (read_file / write_file). `host.file.root` defaults
+      # to the CONTAINER path below — the app never sees host paths. Drop
+      # `:ro` for writes, and make sure the host directory is writable by
+      # uid 1001 (the `nextjs` user). See docs/host-files.md.
+      - ./shared_folder:/shared_folder:ro
     environment:
       NO_HTTPS: ${NO_HTTPS:-1}
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}

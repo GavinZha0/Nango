@@ -49,7 +49,7 @@ interface BuiltinToolDescriptor {
   name: string;
   displayName: string;
   description: string;
-  category: "data-source" | "sandbox";
+  category: string;
 }
 interface LlmCredential { id: string; name: string; provider: string | null }
 

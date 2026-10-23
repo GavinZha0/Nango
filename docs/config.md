@@ -172,7 +172,7 @@ with options from the `options` JSONB column.
 
 ## 9. Config Keys Reference
 
-There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `auth`, `mcp`, and `observability`. 
+There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `host`, `auth`, `mcp`, and `observability`. 
 
 For the complete, authoritative list of keys, their default values, and descriptions, always refer to `src/lib/config/defaults.ts`.
 
@@ -226,6 +226,16 @@ For the complete, authoritative list of keys, their default values, and descript
 | `skill.max_file_bytes` | 262144 | number | Max single file size in bytes (256 KB) |
 | `skill.max_files` | 100 | number | Max files per skill |
 | `skill.max_total_bytes` | 10485760 | number | Max total size per skill (10 MB) |
+
+### host (3)
+
+Everything that reaches the machine Nango runs on — a mounted folder today, local CLIs later.
+
+| Key | Default | Type | Description |
+|---|---|---|---|
+| `host.file.root` | `/shared_folder` | string | Container path that `read_file` / `write_file` may touch; empty or unmounted fails every call |
+| `host.file.read_max_bytes` | 1048576 | number | Max bytes `read_file` returns per call |
+| `host.file.write_max_bytes` | 1048576 | number | Max bytes `write_file` accepts as one file body |
 
 ### auth (2)
 

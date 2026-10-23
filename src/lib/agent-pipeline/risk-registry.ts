@@ -108,6 +108,22 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     },
   ],
   [
+    "read_file",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
+    "write_file",
+    {
+      riskLevel: "high",
+      sideEffects: "write",
+      headlessAllowed: false,
+      // CONTRACT: headlessAllowed=false means G20 Headless Deny blocks this
+      // tool for scheduled/async runs even though it is a plain file write —
+      // the target is the user's real mounted folder, not a sandbox. Admins
+      // who want a scheduled writer raise it via a tool risk override.
+    },
+  ],
+  [
     "run_ssh_command",
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],

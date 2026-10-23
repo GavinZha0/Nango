@@ -19,6 +19,7 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 
 import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
+import { buildReadFileTool, buildWriteFileTool } from "@/lib/host-files/runtime-tools";
 import {
   buildGenerateEchartsConfigTool,
   buildGenerateHtmlPageTool,
@@ -28,7 +29,7 @@ import {
 import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 
 /** Coarse grouping for the UI's section headings. */
-export type BuiltinToolCategory = "sandbox" | "search" | "outcomes";
+export type BuiltinToolCategory = "sandbox" | "search" | "outcomes" | "files";
 
 export interface BuiltinToolEntry {
   /** Tool name as registered with `defineTool`; ALSO the slug stored in
@@ -104,6 +105,63 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       required: ["language", "code_text"],
     },
     build: buildRunInSandboxTool,
+  },
+  {
+    name: "read_file",
+    displayName: "Read host file",
+    // CONTRACT: mounted separately from write_file on purpose — that split
+    // is how an admin gives an agent read-only vs read-write reach.
+    description:
+      "Read a UTF-8 text file or list a directory inside the mounted shared folder (`host.file.root`; root-relative paths only).",
+    category: "files",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Root-relative file or directory path, e.g. \"notes/todo.md\". " +
+            "A directory returns a listing instead of content.",
+        },
+        offset: {
+          type: "integer",
+          minimum: 1,
+          description: "1-based first line to return. Default 1.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 2000,
+          description: "Max lines to return (1-2000). Default 500.",
+        },
+      },
+      required: ["path"],
+    },
+    build: buildReadFileTool,
+  },
+  {
+    name: "write_file",
+    displayName: "Write host file",
+    description:
+      "Create or atomically replace a UTF-8 text file inside the mounted shared folder (`host.file.root`; root-relative paths only). No delete, rename or move.",
+    category: "files",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Root-relative path of the file to create or overwrite, e.g. " +
+            "\"reports/digest.md\". Parent directory must already exist.",
+        },
+        content: {
+          type: "string",
+          description: "Complete new file body (UTF-8 text). Overwrites atomically.",
+        },
+      },
+      required: ["path", "content"],
+    },
+    build: buildWriteFileTool,
   },
   {
     name: "generate_html_page",

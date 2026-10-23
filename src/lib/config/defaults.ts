@@ -63,6 +63,16 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "skill.max_files", value: "100", valueType: "number", description: "Max files per skill" },
   { key: "skill.max_total_bytes", value: "10485760", valueType: "number", description: "Max total size per skill in bytes (10 MB)" },
 
+  // ── host ──────────────────────────────────────────────────────────
+  // `host.*` groups everything that reaches the machine Nango runs on
+  // (mounted folders today, local CLIs later) rather than the network
+  // or the DB. The root is a CONTAINER path — compose bind-mounts
+  // ./shared_folder at /shared_folder, so the default works out of the
+  // box; blank disables host-file access.
+  { key: "host.file.root", value: "/shared_folder", valueType: "string", description: "Container path that read_file / write_file may touch; docker-compose mounts ./shared_folder here. Empty or unmounted fails every call. Use a dedicated directory — never a home folder." },
+  { key: "host.file.read_max_bytes", value: "1048576", valueType: "number", description: "Max bytes read_file returns per call (1 MiB). Larger files are streamed in line windows instead of buffered whole." },
+  { key: "host.file.write_max_bytes", value: "1048576", valueType: "number", description: "Max bytes write_file accepts as one complete file body (1 MiB)." },
+
   // ── auth ──────────────────────────────────────────────────────────
   { key: "auth.session_expiry", value: "604800", valueType: "number", description: "Session lifetime in seconds (7 days)" },
   { key: "auth.session_refresh", value: "86400", valueType: "number", description: "Session refresh interval in seconds (1 day)" },

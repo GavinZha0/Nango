@@ -20,6 +20,21 @@ vi.mock("@/lib/web-search/runtime-tools", () => ({
   }),
 }));
 
+vi.mock("@/lib/host-files/runtime-tools", () => ({
+  buildReadFileTool: () => ({
+    name: "read_file",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+  buildWriteFileTool: () => ({
+    name: "write_file",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+}));
+
 vi.mock("@/lib/repeater/runtime-tools", () => ({
   buildRepeatTool: () => ({
     name: "repeat_tool",
@@ -46,14 +61,19 @@ describe("BUILTIN_TOOLS catalog", () => {
     // (extract_dataset_by_sql, run_ssh_command, get_skill, …) live in
     // their respective domain modules and are auto-mounted by
     // dispatch/builtin.ts when their binding is present.
+    // `read_file` / `write_file` are gated by operator config, not by a
+    // per-agent binding, so they belong here; they simply fail their
+    // calls when no shared folder is mounted.
     const names = BUILTIN_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual([
       "generate_bento_slides",
       "generate_echarts_config",
       "generate_html_page",
+      "read_file",
       "repeat_tool",
       "run_code_in_sandbox",
       "web_search",
+      "write_file",
     ]);
   });
 
@@ -61,9 +81,20 @@ describe("BUILTIN_TOOLS catalog", () => {
     for (const t of BUILTIN_TOOLS) {
       expect(t.displayName.length).toBeGreaterThan(0);
       expect(t.description.length).toBeGreaterThan(20);
-      expect(["sandbox", "search", "outcomes"]).toContain(t.category);
+      expect(["sandbox", "search", "outcomes", "files"]).toContain(t.category);
       expect(typeof t.build).toBe("function");
     }
+  });
+
+  it("read_file and write_file are separate toggles", () => {
+    // CONTRACT: the read/write split IS the per-agent permission model —
+    // bundling them would make a read-only agent writable.
+    const read = findBuiltinTool("read_file");
+    const write = findBuiltinTool("write_file");
+    expect(read?.category).toBe("files");
+    expect(write?.category).toBe("files");
+    expect(read?.bundled).toBeUndefined();
+    expect(write?.bundled).toBeUndefined();
   });
 
   it("findBuiltinTool returns the entry by slug", () => {
@@ -97,8 +128,7 @@ describe("BUILTIN_TOOLS catalog", () => {
     }
   });
 
-  it("listWorkflowToolDescriptors includes edit_bento_slides with full input_schema via bundled expansion", () => {
-    const descriptors = listWorkflowToolDescriptors();
+  it("listWorkflowToolDescriptors includes edit_bento_slides with full input_schema via bundled expansion", () => {    const descriptors = listWorkflowToolDescriptors();
     const editEntry = descriptors.find((d) => d.name === "edit_bento_slides");
     expect(editEntry).toBeDefined();
     expect(editEntry?.displayName).toBe("edit_bento_slides");
