@@ -580,6 +580,27 @@ describe("rebuildWebSearchOutcome", () => {
     );
     expect(built).toBeNull();
   });
+
+  it("returns null when report is false (intermediate search has no card on replay)", () => {
+    const chunk: ToolCallChunkPayload = {
+      toolCallId: "tc-internal",
+      toolName: "web_search",
+      args: JSON.stringify({ query: "nango docs api", topK: 5, report: false }),
+    };
+    const built = rebuildWebSearchOutcome(chunk, okResult, ctxFixture());
+    expect(built).toBeNull();
+  });
+
+  it("rebuilds when report is explicitly true", () => {
+    const chunk: ToolCallChunkPayload = {
+      toolCallId: "tc-explicit",
+      toolName: "web_search",
+      args: JSON.stringify({ query: "openai news", topK: 5, report: true }),
+    };
+    const built = rebuildWebSearchOutcome(chunk, okResult, ctxFixture());
+    expect(built).not.toBeNull();
+    expect(built!.outcome.title).toBe("Search: openai news");
+  });
 });
 
 describe("tryDomain", () => {

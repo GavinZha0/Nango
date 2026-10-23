@@ -302,7 +302,8 @@ function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): 
     render: DelegateToAgentCard,
   });
   // web_search renders an inline preview AND writes a Report
-  // outcome via useEffect — see WebSearchInlinePreview.
+  // outcome via useEffect (unless the call is `report: false`,
+  // which stays chat-inline only) — see WebSearchInlinePreview.
   useRenderTool({
     name: "web_search",
     parameters: webSearchArgsSchema,

@@ -33,7 +33,7 @@ An Outcome is composed of visual primitives called "blocks". This allows a singl
 
 ## 2. Detection & Rendering Pipeline
 
-When the agent uses a tool that produces visual output (e.g., searching the web or generating a chart), the system routes that output to the Outcomes panel.
+When the agent uses a tool that produces visual output (e.g., searching the web or generating a chart), the system routes that output to the Outcomes panel. The one exception is intermediate searches: `web_search` calls made with `report: false` (results feeding the agent's next steps, not the user) skip the Outcomes panel and only leave the chat-inline trace card.
 
 ```text
 Agent (Tool Call)

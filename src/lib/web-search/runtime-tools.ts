@@ -64,9 +64,10 @@ export function buildWebSearchTool(): ToolDefinition {
       "quote or paraphrase, but treat it as a lead rather than a full " +
       "answer; verify by visiting the URL if the claim is high-stakes " +
       "or contested. " +
-      "COST AWARENESS — WHEN TO CALL: every web_search call adds a card " +
-      "to the user's Outcomes panel and may consume paid-provider quota " +
-      "(SearXNG is local and free; Exa/Tavily/Brave are not). " +
+      "COST AWARENESS — WHEN TO CALL: every web_search call may consume " +
+      "paid-provider quota (SearXNG is local and free; Exa/Tavily/Brave " +
+      "are not), and calls with `report: true` (the default) also add a " +
+      "card to the user's Outcomes panel. " +
       "For open-ended questions (\"what's new\", \"top N news\", \"latest " +
       "in X\"), START WITH ONE broad query and reply from those " +
       "results. Only fire a follow-up search if the FIRST result set " +
@@ -78,19 +79,31 @@ export function buildWebSearchTool(): ToolDefinition {
       "across 2-3 searches IS appropriate. DO NOT chain 4 or more " +
       "searches on the same user turn — that's almost always wasted " +
       "quota and panel clutter. " +
-      "IMPORTANT — RENDERING: every successful search automatically " +
-      "appears as a card in the user's Outcomes panel (right side of " +
-      "the workspace), with thumbnails, titles, sources, and clickable " +
-      "links rendered from the result data. Your job is to write a " +
-      "TEXT narration of what you found — DO NOT embed `image`, " +
-      "`favicon`, or `url` values as inline markdown (no `![alt](image)`, " +
-      "no `[title](url)`); the user already sees those visually. " +
+      "REPORTING — USER-FACING VS INTERMEDIATE: pass `report: false` " +
+      "when the results are intermediate input for your next steps " +
+      "(feeding subsequent tool calls, sub-tasks, or background " +
+      "research) — no Outcomes card is created, keeping the panel " +
+      "focused on deliverables the user actually asked for. Keep the " +
+      "default `report: true` when the user asked for the information " +
+      "or you will cite the results in your reply. " +
+      "IMPORTANT — RENDERING: every successful search with " +
+      "`report: true` automatically appears as a card in the user's " +
+      "Outcomes panel (right side of the workspace), with thumbnails, " +
+      "titles, sources, and clickable links rendered from the result " +
+      "data. Your job is to write a TEXT narration of what you " +
+      "found — DO NOT embed `image`, `favicon`, or `url` values as " +
+      "inline markdown (no `![alt](image)`, no `[title](url)`); the " +
+      "user already sees those visually. " +
       "CITATION SYNTAX — REQUIRED: when referencing a specific search " +
       "result in your chat narration, use [N] notation where N is the " +
       "1-based position of the result in the `results` array (first " +
       "result = [1], second = [2], etc.). The Outcomes panel renders " +
       "matching numbered cards [1], [2], … so the user can " +
       "cross-reference your claims with the underlying sources. " +
+      "Citations are only valid for searches you ran with " +
+      "`report: true` — a `report: false` search has no card, so its " +
+      "results MUST NOT be cited with [N]; incorporate them into your " +
+      "work or paraphrase without a citation marker instead. " +
       "Cite specific sources for every claim drawn from the search " +
       "results — do not paraphrase a source without citing it. " +
       "Multiple citations per claim use [1][2] form (no separator). " +

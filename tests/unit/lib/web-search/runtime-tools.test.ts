@@ -22,6 +22,7 @@ vi.mock("@/lib/web-search/lookup.server", () => ({
 const { buildWebSearchTool } = await import("@/lib/web-search/runtime-tools");
 const registry = await import("@/lib/web-search/registry.server");
 const { NotImplementedError } = await import("@/lib/web-search/errors");
+const { webSearchArgsSchema } = await import("@/lib/web-search/schema");
 
 interface ExecuteCtx { abortSignal?: AbortSignal }
 interface WebSearchOk {
@@ -214,5 +215,15 @@ describe("buildWebSearchTool", () => {
     if (out.ok === false) {
       expect(out.error).toBe("INVALID_RESPONSE");
     }
+  });
+});
+
+describe("webSearchArgsSchema", () => {
+  it("defaults report to true so omitted args stay user-facing", () => {
+    expect(webSearchArgsSchema.parse({ query: "q" }).report).toBe(true);
+  });
+
+  it("parses an explicit report: false for intermediate searches", () => {
+    expect(webSearchArgsSchema.parse({ query: "q", report: false }).report).toBe(false);
   });
 });

@@ -159,6 +159,7 @@ export function rebuildChartOutcome(
 interface WebSearchArgsPersisted {
   query: string;
   topK?: number;
+  report?: boolean;
 }
 
 /**
@@ -175,6 +176,9 @@ interface WebSearchArgsPersisted {
  *  - args / result JSON parse failure
  *  - error envelope (`ok: false`) — failed searches show in chat,
  *    not as outcome cards (matches the live-path policy)
+ *  - intermediate search (`report: false`) — the live path never
+ *    wrote a card, so replay must not conjure one; the chat-inline
+ *    plain-text trace covers it
  */
 export function rebuildWebSearchOutcome(
   chunk: ToolCallChunkPayload,
@@ -198,6 +202,7 @@ export function rebuildWebSearchOutcome(
     return null;
   }
   if (!args.query) return null;
+  if (args.report === false) return null;
 
   let envelope: WebSearchResultEnvelope;
   try {

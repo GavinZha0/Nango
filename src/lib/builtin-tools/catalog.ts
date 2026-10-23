@@ -230,6 +230,14 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
           default: 5,
           description: "Number of search results to return (1-10).",
         },
+        report: {
+          type: "boolean",
+          default: true,
+          description:
+            "Whether the results become a card in the user's Outcomes panel. " +
+            "true (default) for user-facing searches; false for intermediate " +
+            "searches feeding subsequent steps (no card, no [N] citations).",
+        },
       },
       required: ["query"],
     },

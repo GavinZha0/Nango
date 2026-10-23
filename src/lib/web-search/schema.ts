@@ -38,6 +38,17 @@ export const webSearchArgsSchema = z.object({
       `Number of results to return (1–${MAX_TOP_K}). Default ${DEFAULT_TOP_K}. ` +
         "Smaller values are cheaper in tokens.",
     ),
+  report: z
+    .boolean()
+    .default(true)
+    .describe(
+      "Whether this search is user-facing. true (default): the results " +
+        "become a numbered card in the user's Outcomes panel and may be " +
+        "cited with [N] notation. false: intermediate search whose results " +
+        "only feed your next steps (subsequent tool calls, sub-tasks, " +
+        "background research) — no Outcomes card is created and the " +
+        "results MUST NOT be cited with [N].",
+    ),
 });
 
 export type WebSearchArgs = z.infer<typeof webSearchArgsSchema>;

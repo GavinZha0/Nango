@@ -4,13 +4,13 @@
  * WebSearchInlinePreview — chat-inline preview of a `web_search`
  * tool call. Renders a small status card AND writes the parsed
  * result into `outcomeStore` via a useEffect so the full card-list
- * also appears in the Outcomes panel. The LLM is unaware of this
- * bridge — it's a pure client-side rendering policy. Mirrors
- * `ChartPreviewCard`'s three-state shape. See
- * docs/data-visualization.md.
+ * also appears in the Outcomes panel — unless the LLM marked the
+ * search intermediate (`report: false`), in which case the inline
+ * card is the only trace. Mirrors `ChartPreviewCard`'s three-state
+ * shape. See docs/data-visualization.md.
  */
 
-import { ArrowUpRight, Globe, Loader2, AlertTriangle } from "lucide-react";
+import { Globe, Loader2, AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, type ReactElement } from "react";
 
@@ -60,11 +60,15 @@ export function WebSearchInlinePreview(
   }, [props.status, props.result]);
 
   // Idempotent on (toolCallId, parsed) — `addOutcome` is upsert
-  // by id. Failed envelopes (`ok: false`) skip outcome creation;
-  // the failure shows inline in the chat preview instead.
+  // by id. Failed envelopes (`ok: false`) and intermediate searches
+  // (`report: false`) skip outcome creation; failures show inline in
+  // the chat preview instead, intermediate searches stay trace-only.
+  // A missing `report` falls through to reporting, matching the
+  // schema default — the safe direction is the status quo.
   useEffect(() => {
     if (!parsed || !parsed.ok) return;
     const args = props.parameters as WebSearchArgs;
+    if (args.report === false) return;
     const ws = useWorkspaceStore.getState();
     // Citation contract: 1-based `index` + `sourceKind: 'web'` so
     // `[1]`/`[2]` chat citations line up with the numbered cards.
@@ -149,21 +153,29 @@ export function WebSearchInlinePreview(
     );
   }
 
+  const label = `Searched: "${args.query}" · ${parsed.results.length} results`;
+
+  // Two variants differing only in clickability: blue link jumps to
+  // the Outcomes card; plain text is the trace of an intermediate
+  // (`report: false`) search, which has no card to jump to.
   return (
     <CardShell actions={actions}>
       <Globe className="size-4 text-blue-500" aria-hidden />
-      <button
-        type="button"
-        onClick={() => {
-          router.push("/outcomes");
-          select(props.toolCallId);
-        }}
-        className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
-        aria-label={`View search "${args.query}" in Outcomes`}
-      >
-        Searched: &quot;{args.query}&quot; · {parsed.results.length} results
-        <ArrowUpRight className="size-3" aria-hidden />
-      </button>
+      {args.report === false ? (
+        <span className="text-sm font-medium">{label}</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            router.push("/outcomes");
+            select(props.toolCallId);
+          }}
+          className="cursor-pointer text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+          aria-label={`View search "${args.query}" in Outcomes`}
+        >
+          {label}
+        </button>
+      )}
     </CardShell>
   );
 }
