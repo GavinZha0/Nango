@@ -61,6 +61,21 @@ describe("evaluateToolRisk — Builtin tools", () => {
     expect(res.headlessAllowed).toBe(false);
   });
 
+  it("denies edit_file with the same posture as write_file", () => {
+    // CONTRACT: edit_file is auto-mounted beside write_file and rewrites the
+    // same real files, so it must not slip into a scheduled run through the
+    // unannotated default.
+    const res = evaluateToolRisk("edit_file", {
+      path: "notes.md",
+      old_string: "a",
+      new_string: "b",
+    });
+    expect(res.riskLevel).toBe("high");
+    expect(res.sideEffects).toBe("write");
+    expect(res.requiresApproval).toBe(true);
+    expect(res.headlessAllowed).toBe(false);
+  });
+
   it("denies download_file headlessly too", () => {
     // CONTRACT: download_file puts bytes into that same real folder and
     // makes an outbound request, so it inherits write_file's posture rather

@@ -233,9 +233,9 @@ Everything that reaches the machine Nango runs on — a mounted folder today, lo
 
 | Key | Default | Type | Description |
 |---|---|---|---|
-| `host.file.root` | `/shared_folder` | string | Container path that the host-file tools (`read_file` / `write_file` / `create_folder` / `download_file`) may touch; empty or unmounted fails every call |
-| `host.file.read_max_bytes` | 1048576 | number | Max bytes `read_file` returns per call |
-| `host.file.write_max_bytes` | 1048576 | number | Max bytes `write_file` accepts as one file body |
+| `host.file.root` | `/shared_folder` | string | Container path that the host-file tools (`read_file` / `write_file` / `edit_file` / `create_folder` / `download_file`) may touch; empty or unmounted fails every call |
+| `host.file.read_max_bytes` | 1048576 | number | Max bytes `read_file` returns per call (a `raw` read, which pages by byte from it, included); `edit_file` is capped by it too. Floors at 1 byte |
+| `host.file.write_max_bytes` | 1048576 | number | Max bytes `write_file` accepts as one call payload — a whole body or an appended chunk; `edit_file` checks its result against it. Floors at 1 byte |
 
 ### download (5)
 

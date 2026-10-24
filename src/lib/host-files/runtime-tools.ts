@@ -1,7 +1,8 @@
 /**
- * Server-side `read_file` / `write_file` / `create_folder` agent tools.
+ * Server-side `read_file` / `write_file` / `edit_file` / `create_folder`
+ * agent tools.
  *
- * All three operate exclusively inside the operator-mounted root
+ * All of them operate exclusively inside the operator-mounted root
  * configured by `host.file.root` (default `/shared_folder`, the
  * container-side of the compose bind mount). There is no availability
  * gate: a missing or mis-mounted root fails the call with
@@ -9,8 +10,9 @@
  * mount to check.
  *
  * Scope: text files and directories. No delete, no rename, no move, no
- * append — `write_file` replaces whole files. Binary payloads arrive
- * through `download_file`, not here.
+ * glob. `write_file` replaces whole files or appends (`mode: "append"`);
+ * `edit_file` changes a substring without a round trip through the whole
+ * body. Binary payloads arrive through `download_file`, not here.
  */
 
 import "server-only";
@@ -19,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { Stats } from "node:fs";
 import {
+  appendFile,
   lstat,
   mkdir,
   readdir,
@@ -43,10 +46,13 @@ import { describeFsError, isReadOnlyError, isRenameClobberError } from "./fs-err
 import { getHostFileRoot, resolveCreateInJail, resolveInJail } from "./jail.server";
 import {
   createFolderArgsSchema,
+  editFileArgsSchema,
   readFileArgsSchema,
   writeFileArgsSchema,
   type CreateFolderEnvelope,
   type DirListingEntry,
+  type EditFileEnvelope,
+  type EditFileError,
   type HostFileErr,
   type HostFileError,
   type ListDirOk,
@@ -64,12 +70,22 @@ function err(error: HostFileError, message: string): HostFileErr {
   return { ok: false, error, message };
 }
 
+/**
+ * The configured byte budget. A zero, negative or fractional value is a
+ * mis-configuration rather than a mode, so it is floored to whole bytes with a
+ * floor of 1: a read can always advance, and a byte window is never asked for
+ * a negative `end`.
+ */
+function byteBudget(key: string): number {
+  return Math.max(1, Math.floor(getConfigNumber(key, DEFAULT_MAX_BYTES)));
+}
+
 function readMaxBytes(): number {
-  return getConfigNumber("host.file.read_max_bytes", DEFAULT_MAX_BYTES);
+  return byteBudget("host.file.read_max_bytes");
 }
 
 function writeMaxBytes(): number {
-  return getConfigNumber("host.file.write_max_bytes", DEFAULT_MAX_BYTES);
+  return byteBudget("host.file.write_max_bytes");
 }
 
 /**
@@ -125,13 +141,21 @@ export function buildReadFileTool(): ToolDefinition {
       "absolute — anything resolving outside the configured root is refused, " +
       "and symlinks are never followed. " +
       "A directory path returns `{kind:\"directory\", entries:[{name, kind, " +
-      "sizeBytes?, modifiedAt?}]}` (directories first, capped, `truncated` " +
-      "when cut). Start there to discover paths — there is no glob or " +
-      "search. " +
+      "sizeBytes?, modifiedAt?}], startEntry, endEntry, truncated}` " +
+      "(directories first, 500 entries per page). Start there to discover " +
+      "paths — there is no glob or search. " +
       "A file returns `{kind:\"file\", content, startLine, endLine, " +
       "truncated}`. Files are read in LINES: by default the first 500. When " +
       "`truncated` is true, continue with a higher `offset` (e.g. " +
-      "offset: 501). Large files stay reachable through those windows. " +
+      "offset: 501) — the same argument pages a directory listing. Large " +
+      "files stay reachable through those windows, but a window cannot " +
+      "resume inside a line: a single line longer than the byte budget is " +
+      "cut and the rest of that line only comes back with `raw: true`. " +
+      "`raw: true` reads the file exactly as stored — no line splitting, no " +
+      "line-ending normalization — and pages by BYTE: `offset` is a byte " +
+      "position, `limit` is ignored, and you continue with the returned " +
+      "`nextByteOffset` until `truncated` is false. Use it for byte-faithful " +
+      "comparison (is this file CRLF?) and to reach what a line window cut. " +
       "Read failures come back as `{ok:false, error, message}` with codes " +
       "ROOT_NOT_CONFIGURED, INVALID_PATH, PATH_ESCAPE, NOT_FOUND, " +
       "NOT_TEXT, READ_FAILED. " +
@@ -140,7 +164,7 @@ export function buildReadFileTool(): ToolDefinition {
       "what you need.",
     parameters: readFileArgsSchema,
     execute: async (args): Promise<ReadFileEnvelope> => {
-      const { path, offset, limit } = args;
+      const { path, offset, limit, raw } = args;
       const resolved = await jailResolve(path, "read");
       if (!resolved.ok) return resolved;
 
@@ -156,7 +180,13 @@ export function buildReadFileTool(): ToolDefinition {
 
       if (st.isDirectory()) {
         try {
-          return await listDirectory(resolved.absPath, resolved.relPath, st);
+          return await listDirectory(
+            resolved.absPath,
+            resolved.relPath,
+            st,
+            offset ?? 1,
+            limit ?? MAX_LIST_ENTRIES,
+          );
         } catch (e) {
           return err(
             "READ_FAILED",
@@ -171,6 +201,7 @@ export function buildReadFileTool(): ToolDefinition {
         st,
         offset ?? 1,
         limit ?? DEFAULT_READ_LIMIT_LINES,
+        raw ?? false,
       ).catch((e: unknown) =>
         err("READ_FAILED", `Could not read "${resolved.relPath}": ${describeFsError(e)}`),
       );
@@ -179,9 +210,11 @@ export function buildReadFileTool(): ToolDefinition {
 }
 
 /**
- * Two read strategies share one envelope: whole-buffer for files inside
- * the byte budget (exact UTF-8 validation, exact line count), streaming
- * line-window for larger ones (never buffers the whole file).
+ * Three read strategies share one envelope: a byte window for `raw: true`
+ * (verbatim, resumable through `nextByteOffset`), whole-buffer line windows
+ * for files inside the budget (exact UTF-8 validation, exact line count),
+ * and a streaming line-window for larger ones (never buffers the whole
+ * file).
  */
 async function readTextFile(
   absPath: string,
@@ -189,8 +222,11 @@ async function readTextFile(
   st: Stats,
   offset: number,
   limit: number,
+  raw: boolean,
 ): Promise<ReadFileEnvelope> {
   const maxBytes = readMaxBytes();
+
+  if (raw) return readRawFile(absPath, relPath, st, maxBytes, offset);
 
   if (st.size <= maxBytes) {
     const buf = await readFile(absPath);
@@ -241,9 +277,15 @@ async function readTextFile(
         break;
       }
       if (line.includes("\uFFFD")) sawReplacement = true;
-      bytes += line.length + 1;
-      collected.push(line);
-      reachedEnd = true;
+      // SECURITY: the byte budget is what keeps one tool result from
+      // flooding the context, so a single line longer than the remaining
+      // budget is cut rather than returned whole. `truncated` reports it.
+      const room = maxBytes - bytes;
+      const piece = line.length > room ? line.slice(0, room) : line;
+      bytes += piece.length + 1;
+      collected.push(piece);
+      reachedEnd = piece.length === line.length;
+      if (!reachedEnd) break;
     }
   } finally {
     rl.close();
@@ -290,10 +332,94 @@ function emptyWindow(relPath: string, st: Stats, offset: number): ReadFileOk {
   };
 }
 
+/**
+ * `raw: true` — the file exactly as stored: no line splitting, no
+ * CRLF→LF normalization, no line windowing. `offset` is the 1-based byte
+ * position, so a window cut by the byte budget is always resumable, and a
+ * cut never drops a partial character.
+ */
+async function readRawFile(
+  absPath: string,
+  relPath: string,
+  st: Stats,
+  maxBytes: number,
+  offset: number,
+): Promise<ReadFileEnvelope> {
+  const start = offset - 1;
+  if (start >= st.size) {
+    // Past EOF: an empty window is more useful than an error.
+    return {
+      ok: true,
+      kind: "file",
+      path: relPath,
+      content: "",
+      sizeBytes: st.size,
+      modifiedAt: st.mtime.toISOString(),
+      truncated: false,
+    };
+  }
+
+  let buf = await readWindow(absPath, start, Math.min(maxBytes, st.size - start));
+  const truncated = start + buf.length < st.size;
+
+  if (!isUtf8(buf) && truncated) {
+    // The cut landed inside a multi-byte character; drop up to three
+    // trailing bytes rather than reporting a text file as binary.
+    const whole = buf;
+    for (let drop = 1; drop <= 3; drop++) {
+      const candidate = whole.subarray(0, whole.length - drop);
+      if (isUtf8(candidate)) {
+        buf = candidate;
+        break;
+      }
+    }
+  }
+  if (!isUtf8(buf)) {
+    return err(
+      "NOT_TEXT",
+      `"${relPath}" is not valid UTF-8 text (${st.size} bytes). This tool ` +
+        "handles text files only — do not retry.",
+    );
+  }
+
+  return {
+    ok: true,
+    kind: "file",
+    path: relPath,
+    content: buf.toString("utf8"),
+    sizeBytes: st.size,
+    modifiedAt: st.mtime.toISOString(),
+    // CONTRACT: this lands on a character boundary, so paging from it never
+    // re-reads or skips a byte.
+    ...(truncated ? { nextByteOffset: start + buf.length + 1 } : {}),
+    truncated,
+  };
+}
+
+/** Stream `bytes` from `start` without buffering the rest of the file. */
+async function readWindow(
+  absPath: string,
+  start: number,
+  bytes: number,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  const stream = createReadStream(absPath, { start, end: start + bytes - 1 });
+  try {
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+    }
+  } finally {
+    stream.destroy();
+  }
+  return Buffer.concat(chunks);
+}
+
 async function listDirectory(
   absPath: string,
   relPath: string,
   st: Stats,
+  offset: number,
+  limit: number,
 ): Promise<ListDirOk> {
   const dirents = await readdir(absPath, { withFileTypes: true });
   // Symlinks and special files are dropped rather than listed: the jail
@@ -305,8 +431,10 @@ async function listDirectory(
     a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name),
   );
 
-  const truncated = usable.length > MAX_LIST_ENTRIES;
-  const page = truncated ? usable.slice(0, MAX_LIST_ENTRIES) : usable;
+  const first = offset - 1;
+  const pageSize = Math.min(limit, MAX_LIST_ENTRIES);
+  const page = usable.slice(first, first + pageSize);
+  const truncated = first + page.length < usable.length;
 
   const entries: DirListingEntry[] = [];
   for (const item of page) {
@@ -331,6 +459,8 @@ async function listDirectory(
     path: relPath === "" ? "." : relPath,
     modifiedAt: st.mtime.toISOString(),
     entries,
+    startEntry: offset,
+    endEntry: offset + page.length - 1,
     truncated,
   };
 }
@@ -341,26 +471,30 @@ export function buildWriteFileTool(): ToolDefinition {
   return defineTool({
     name: "write_file",
     description:
-      "Create or replace a UTF-8 text file inside the operator-mounted host " +
-      "folder. Paths are root-relative (\"reports/digest.md\"); anything " +
-      "resolving outside the root is refused, symlinks are never followed, " +
-      "and the parent directory must already exist (create it with " +
-      "`create_folder`). " +
-      "`content` is the COMPLETE new file body — there is no append, patch " +
-      "or partial-edit mode, so when changing an existing file read it " +
-      "first and write back the whole result. Writes are atomic: a reader " +
-      "never sees a half-written file. " +
+      "Create, replace, or extend a UTF-8 text file inside the " +
+      "operator-mounted host folder. Paths are root-relative " +
+      "(\"reports/digest.md\"); anything resolving outside the root is " +
+      "refused, symlinks are never followed, and the parent directory must " +
+      "already exist (create it with `create_folder`). " +
+      "By default `content` is the COMPLETE new file body and replaces the " +
+      "file atomically, so when changing an existing file read it first and " +
+      "write back the whole result — or change one substring with " +
+      "`edit_file`. `mode: \"append\"` adds `content` at the end without " +
+      "rewriting, which keeps a growing log writable even when the file is " +
+      "bigger than the write budget; append is not atomic, so an interrupted " +
+      "call can leave a partial line. " +
       "There is NO delete, rename or move capability. To retire a file, " +
       "overwrite it with a short note that it is deprecated — never " +
       "assume a file is gone. " +
-      "Failures return `{ok:false, error, message}`: TOO_LARGE (over the " +
-      "byte budget), READ_ONLY_MOUNT (the folder is mounted read-only — " +
+      "Failures return `{ok:false, error, message}`: ROOT_NOT_CONFIGURED, " +
+      "INVALID_PATH, PATH_ESCAPE, TOO_LARGE (payload over " +
+      "the byte budget), READ_ONLY_MOUNT (the folder is mounted read-only — " +
       "tell the user, do not retry), NOT_FOUND (missing parent), " +
-      "IS_DIRECTORY, PATH_ESCAPE, WRITE_FAILED. This tool mutates the " +
+      "IS_DIRECTORY, WRITE_FAILED. This tool mutates the " +
       "user's real files; write only what the task requires.",
     parameters: writeFileArgsSchema,
     execute: async (args): Promise<WriteFileEnvelope> => {
-      const { path, content } = args;
+      const { path, content, mode = "overwrite" } = args;
       const resolved = await jailResolve(path, "write");
       if (!resolved.ok) return resolved;
 
@@ -389,41 +523,14 @@ export function buildWriteFileTool(): ToolDefinition {
         existedBefore = false;
       }
 
-      // Atomic replace: temp file in the SAME directory (rename across
-      // filesystems is not atomic), then rename over the target.
-      const tmpPath = `${resolved.absPath}.tmp-${randomUUID()}`;
       try {
-        await writeFile(tmpPath, content, "utf8");
-        try {
-          await rename(tmpPath, resolved.absPath);
-        } catch (e) {
-          // QUIRK: on Windows, rename onto an existing file fails with
-          // EPERM/EEXIST — POSIX replace semantics do not apply. Remove
-          // the target and retry; the brief absence window is the cost of
-          // a cross-platform replace.
-          if (existedBefore && isRenameClobberError(e)) {
-            await unlink(resolved.absPath).catch(() => {});
-            await rename(tmpPath, resolved.absPath);
-          } else {
-            throw e;
-          }
+        if (mode === "append") {
+          await appendFile(resolved.absPath, content, "utf8");
+        } else {
+          await atomicReplace(resolved.absPath, content, existedBefore);
         }
       } catch (e) {
-        await rm(tmpPath, { force: true }).catch(() => {});
-        if (isReadOnlyError(e)) {
-          return err(
-            "READ_ONLY_MOUNT",
-            `No write permission for "${resolved.relPath}" — the shared folder ` +
-              "is mounted read-only. Tell the user rather than retrying: an " +
-              "admin must drop the `:ro` flag from the shared_folder volume in " +
-              "the container's mount config (and own the host directory as the " +
-              "container user), or point `host.file.root` elsewhere.",
-          );
-        }
-        return err(
-          "WRITE_FAILED",
-          `Could not write "${resolved.relPath}": ${describeFsError(e)}`,
-        );
+        return writeFailure(resolved.relPath, mode === "append" ? "append to" : "write", e);
       }
 
       let st: Stats;
@@ -438,6 +545,142 @@ export function buildWriteFileTool(): ToolDefinition {
         sizeBytes: st.size,
         modifiedAt: st.mtime.toISOString(),
         created: !existedBefore,
+      };
+    },
+  });
+}
+
+// edit_file
+
+export function buildEditFileTool(): ToolDefinition {
+  return defineTool({
+    name: "edit_file",
+    description:
+      "Replace text inside an existing UTF-8 file in the operator-mounted " +
+      "host folder, without writing the whole body back. Paths are " +
+      "root-relative and jailed exactly like write_file. " +
+      "`old_string` must be copied verbatim from read_file and match " +
+      "exactly one place: zero matches is NOT_IN_FILE, several are " +
+      "NOT_UNIQUE (re-count them and widen the snippet with surrounding " +
+      "context, or set `replace_all`). An empty `new_string` deletes the " +
+      "match. " +
+      "The whole file is read, edited and atomically replaced, so it has to " +
+      "fit the read budget. Only the matched span is rewritten: every other " +
+      "byte keeps the ending it was stored with, and a snippet copied from " +
+      "read_file also matches a CRLF file. " +
+      "There is NO delete, rename or move capability, and this cannot " +
+      "create a file: use write_file. " +
+      "Failures return `{ok:false, error, message}`: NOT_IN_FILE, NOT_UNIQUE, " +
+      "ROOT_NOT_CONFIGURED, INVALID_PATH, PATH_ESCAPE, TOO_LARGE, " +
+      "READ_ONLY_MOUNT, NOT_FOUND, IS_DIRECTORY, NOT_TEXT, READ_FAILED, " +
+      "WRITE_FAILED.",
+    parameters: editFileArgsSchema,
+    execute: async (args): Promise<EditFileEnvelope> => {
+      const { path, old_string, new_string, replace_all = false } = args;
+      const resolved = await jailResolve(path, "write");
+      if (!resolved.ok) return resolved;
+
+      let st: Stats;
+      try {
+        st = await lstat(resolved.absPath);
+      } catch {
+        return editErr(
+          "NOT_FOUND",
+          `"${resolved.relPath}" does not exist. edit_file only edits ` +
+            "existing files — create it with write_file.",
+        );
+      }
+      if (st.isDirectory()) {
+        return editErr(
+          "IS_DIRECTORY",
+          `"${resolved.relPath}" is a directory. Provide a file path.`,
+        );
+      }
+
+      const max = readMaxBytes();
+      if (st.size > max) {
+        return editErr(
+          "TOO_LARGE",
+          `The file is ${st.size} bytes; edit_file reads and rewrites the ` +
+            `whole file, capped at ${max} (config ` +
+            "`host.file.read_max_bytes`). Ask the user to raise it, or split " +
+            "the file — there is no way to edit bytes past that cap.",
+        );
+      }
+
+      let buf: Buffer;
+      try {
+        buf = await readFile(resolved.absPath);
+      } catch (e) {
+        return editErr(
+          "READ_FAILED",
+          `Could not read "${resolved.relPath}": ${describeFsError(e)}`,
+        );
+      }
+      if (!isUtf8(buf)) {
+        return editErr(
+          "NOT_TEXT",
+          `"${resolved.relPath}" is not valid UTF-8 text (${st.size} bytes). ` +
+            "This tool handles text files only — do not retry.",
+        );
+      }
+
+      // QUIRK: read_file shows LF, so a snippet pasted from a CRLF file
+      // arrives LF. Matching on file bytes in each spelling keeps the
+      // rewrite inside the matched span — normalizing the whole file and
+      // restoring its endings afterwards would rewrite every line the edit
+      // never touched in a mixed-ending file.
+      const text = buf.toString("utf8");
+      const chosen = pickMatch(text, old_string, new_string);
+      if (!chosen) {
+        return editErr(
+          "NOT_IN_FILE",
+          `"${old_string.slice(0, 80)}" was not found in ` +
+            `"${resolved.relPath}". Copy the exact text from read_file — ` +
+            "indentation and line breaks must match. If the file mixes line " +
+            "endings, compare it with read_file using raw: true.",
+        );
+      }
+      if (chosen.matches > 1 && !replace_all) {
+        return editErr(
+          "NOT_UNIQUE",
+          `"${chosen.needle.slice(0, 80)}" matches ${chosen.matches} places in ` +
+            `"${resolved.relPath}". Widen the snippet with surrounding ` +
+            "context, or set replace_all to replace every occurrence.",
+        );
+      }
+
+      const edited = text.split(chosen.needle).join(chosen.replacement);
+      const outBytes = Buffer.byteLength(edited, "utf8");
+      if (outBytes > writeMaxBytes()) {
+        return editErr(
+          "TOO_LARGE",
+          `The edited file would be ${outBytes} bytes; the host-file write ` +
+            `budget is ${writeMaxBytes()} (config \`host.file.write_max_bytes\`).`,
+        );
+      }
+
+      try {
+        await atomicReplace(resolved.absPath, edited, true);
+      } catch (e) {
+        return writeFailure(resolved.relPath, "write", e);
+      }
+
+      let after: Stats;
+      try {
+        after = await stat(resolved.absPath);
+      } catch {
+        return editErr(
+          "WRITE_FAILED",
+          `Edited "${resolved.relPath}" but could not verify it.`,
+        );
+      }
+      return {
+        ok: true,
+        path: resolved.relPath,
+        replacements: replace_all ? chosen.matches : 1,
+        sizeBytes: after.size,
+        modifiedAt: after.mtime.toISOString(),
       };
     },
   });
@@ -525,8 +768,103 @@ export function buildCreateFolderTool(): ToolDefinition {
 
 // helpers
 
-/** Normalize CRLF/CR to LF so line windows are stable for the LLM. */
+/** The two line-ending spellings a snippet can arrive in. */
+const asLf = (text: string): string => text.replace(/\r\n?/g, "\n");
+const asCrlf = (text: string): string => asLf(text).replace(/\n/g, "\r\n");
+
+/** Normalize to LF so line windows are stable for the LLM. */
 function normalizeLines(text: string): string[] {
   if (text === "") return [];
-  return text.replace(/\r\n?/g, "\n").split("\n");
+  return asLf(text).split("\n");
+}
+
+/**
+ * The snippet an agent pastes can disagree with the file on line endings,
+ * because `read_file` shows LF. Each spelling is tried against the file as
+ * stored; the first that matches decides the edit, and only the matched
+ * span is rewritten — the bytes around it keep whatever endings they had.
+ */
+function matchVariants(
+  oldString: string,
+  newString: string,
+): Array<{ needle: string; replacement: string }> {
+  const variants: Array<{ needle: string; replacement: string }> = [];
+  for (const [needle, replacement] of [
+    [oldString, newString],
+    [asCrlf(oldString), asCrlf(newString)],
+    [asLf(oldString), asLf(newString)],
+  ] as Array<[string, string]>) {
+    if (!variants.some((v) => v.needle === needle)) variants.push({ needle, replacement });
+  }
+  return variants;
+}
+
+/** The first spelling of `old_string` present in the file, with its count. */
+function pickMatch(
+  text: string,
+  oldString: string,
+  newString: string,
+): { needle: string; replacement: string; matches: number } | null {
+  for (const variant of matchVariants(oldString, newString)) {
+    const matches = text.split(variant.needle).length - 1;
+    if (matches > 0) return { ...variant, matches };
+  }
+  return null;
+}
+
+/**
+ * Atomic whole-file replace: temp file in the SAME directory (rename across
+ * filesystems is not atomic), then rename over the target. Shared by
+ * `write_file` and `edit_file`.
+ */
+async function atomicReplace(
+  absPath: string,
+  content: string,
+  existedBefore: boolean,
+): Promise<void> {
+  const tmpPath = `${absPath}.tmp-${randomUUID()}`;
+  try {
+    await writeFile(tmpPath, content, "utf8");
+    try {
+      await rename(tmpPath, absPath);
+    } catch (e) {
+      // QUIRK: on Windows, rename onto an existing file fails with
+      // EPERM/EEXIST — POSIX replace semantics do not apply. Remove
+      // the target and retry; the brief absence window is the cost of
+      // a cross-platform replace.
+      if (existedBefore && isRenameClobberError(e)) {
+        await unlink(absPath).catch(() => {});
+        await rename(tmpPath, absPath);
+      } else {
+        throw e;
+      }
+    }
+  } catch (e) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw e;
+  }
+}
+
+/** The refusal every write-side tool shares when the mount says no. */
+function readOnlyMount(relPath: string): HostFileErr {
+  return err(
+    "READ_ONLY_MOUNT",
+    `No write permission for "${relPath}" — the shared folder is mounted ` +
+      "read-only. Tell the user rather than retrying: an admin must drop " +
+      "the `:ro` flag from the shared_folder volume in the container's " +
+      "mount config (and own the host directory as the container user), or " +
+      "point `host.file.root` elsewhere.",
+  );
+}
+
+function writeFailure(relPath: string, verb: string, e: unknown): HostFileErr {
+  if (isReadOnlyError(e)) return readOnlyMount(relPath);
+  return err(
+    "WRITE_FAILED",
+    `Could not ${verb} "${relPath}": ${describeFsError(e)}`,
+  );
+}
+
+function editErr(error: EditFileError, message: string): EditFileEnvelope {
+  return { ok: false, error, message };
 }

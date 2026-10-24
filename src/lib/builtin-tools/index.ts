@@ -8,7 +8,7 @@ import "server-only";
 
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 
-import { buildCreateFolderTool } from "@/lib/host-files/runtime-tools";
+import { buildCreateFolderTool, buildEditFileTool } from "@/lib/host-files/runtime-tools";
 
 import { BUILTIN_TOOLS, findBuiltinTool } from "./catalog";
 
@@ -35,10 +35,21 @@ const HOST_WRITE_TOOLS = new Set(["write_file", "download_file"]);
  * so they are deliberately absent from `BUILTIN_TOOLS` — they never show
  * up in the editor checkbox list (`/api/builtin-tools`) and cannot be
  * switched off independently. An agent that can write files can always
- * create a directory inside the same mount; nothing wider is granted.
+ * create a directory inside the same mount and edit a file it could
+ * already overwrite; nothing wider is granted.
  */
+const AUXILIARY_TOOLS: Record<string, () => ToolDefinition> = {
+  create_folder: buildCreateFolderTool,
+  edit_file: buildEditFileTool,
+};
+
 function auxiliaryTools(names: readonly string[]): string[] {
-  return names.some((name) => HOST_WRITE_TOOLS.has(name)) ? ["create_folder"] : [];
+  const out: string[] = [];
+  if (names.some((name) => HOST_WRITE_TOOLS.has(name))) out.push("create_folder");
+  // `edit_file` follows write_file only: download_file brings bytes in, it
+  // does not make the agent a text editor.
+  if (names.includes("write_file")) out.push("edit_file");
+  return out;
 }
 
 /**
@@ -53,8 +64,9 @@ export function buildBuiltinTools(names: readonly string[]): ToolDefinition[] {
   for (const name of [...names, ...auxiliaryTools(names)]) {
     if (seen.has(name)) continue;
     seen.add(name);
-    if (name === "create_folder") {
-      out.push(buildCreateFolderTool());
+    const auxiliary = AUXILIARY_TOOLS[name];
+    if (auxiliary) {
+      out.push(auxiliary());
       continue;
     }
     const entry = findBuiltinTool(name);

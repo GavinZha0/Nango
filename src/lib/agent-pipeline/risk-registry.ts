@@ -124,6 +124,18 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     },
   ],
   [
+    "edit_file",
+    {
+      riskLevel: "high",
+      sideEffects: "write",
+      headlessAllowed: false,
+      // CONTRACT: same posture as write_file — a substring replace rewrites
+      // the same real files, so it must not run unattended under the
+      // default policy either. It is auto-mounted beside write_file and so
+      // has no toggle of its own to override.
+    },
+  ],
+  [
     "download_file",
     {
       riskLevel: "high",

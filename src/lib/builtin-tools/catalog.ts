@@ -127,13 +127,28 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
         offset: {
           type: "integer",
           minimum: 1,
-          description: "1-based first line to return. Default 1.",
+          description:
+            "1-based first line to return, or the first entry of a " +
+            "directory listing. In a raw file read it is a 1-based BYTE " +
+            "position instead. Default 1.",
         },
         limit: {
           type: "integer",
           minimum: 1,
           maximum: 2000,
-          description: "Max lines to return (1-2000). Default 500.",
+          description:
+            "Max lines to return (1-2000). Default 500. For a directory " +
+            "this is the number of entries, capped at 500. A raw file read " +
+            "ignores it — there the byte budget is the only bound.",
+        },
+        raw: {
+          type: "boolean",
+          description:
+            "Return the content exactly as stored — no line splitting, no " +
+            "line-ending normalization. Applies to files: offset counts " +
+            "bytes, limit is ignored, and the byte budget still caps each " +
+            "call. Page on with the returned nextByteOffset to reach " +
+            "content a line window cut off. Default false.",
         },
       },
       required: ["path"],
@@ -143,8 +158,10 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
   {
     name: "write_file",
     displayName: "Write host file",
+    // Mounting this also brings `edit_file` (substring edits) and
+    // `create_folder`, none of which are tickable on their own.
     description:
-      "Create or atomically replace a UTF-8 text file inside the mounted shared folder (`host.file.root`; root-relative paths only). No delete, rename or move; the parent directory must already exist (`create_folder`).",
+      "Create, replace, or append a UTF-8 text file inside the mounted shared folder (`host.file.root`; root-relative paths only). No delete, rename or move; the parent directory must already exist (`create_folder`).",
     category: "files",
     input_schema: {
       type: "object",
@@ -157,7 +174,15 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
         },
         content: {
           type: "string",
-          description: "Complete new file body (UTF-8 text). Overwrites atomically.",
+          description:
+            "Complete new file body (UTF-8 text), or the text to append when mode is \"append\".",
+        },
+        mode: {
+          type: "string",
+          enum: ["overwrite", "append"],
+          description:
+            "\"overwrite\" (default) replaces the file atomically; \"append\" " +
+            "adds content at the end without rewriting and is not atomic.",
         },
       },
       required: ["path", "content"],

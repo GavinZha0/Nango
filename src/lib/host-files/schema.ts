@@ -1,6 +1,7 @@
 /**
  * Client-safe schema + result shapes for the host-file tools
- * (`read_file` / `write_file` / `create_folder` / `download_file`).
+ * (`read_file` / `write_file` / `edit_file` / `create_folder` /
+ * `download_file`).
  *
  * Same split as `web-search/schema.ts` — shared so LLM-facing arg
  * descriptions and client-side type inference stay in lock-step.
@@ -35,14 +36,35 @@ export const readFileArgsSchema = z.object({
     .int()
     .min(1)
     .optional()
-    .describe("1-based first line to return. Default 1."),
+    .describe(
+      "1-based first line to return, or the first entry of a directory " +
+        "listing. In a raw file read it is a 1-based BYTE position instead. " +
+        "Default 1.",
+    ),
   limit: z
     .number()
     .int()
     .min(1)
     .max(MAX_READ_LIMIT)
     .optional()
-    .describe(`Max lines to return (1-${MAX_READ_LIMIT}). Default 500.`),
+    .describe(
+      `Max lines to return (1-${MAX_READ_LIMIT}). Default 500. For a ` +
+        "directory this is the number of entries, capped at 500. A raw file " +
+        "read ignores it — there the byte budget is the only bound.",
+    ),
+  raw: z
+    .boolean()
+    .optional()
+    .describe(
+      "Return the content exactly as stored — no line splitting, no " +
+        "line-ending normalization. Applies to files; a directory listing is " +
+        "always windowed by `offset`/`limit`. With raw, `offset` counts " +
+        "bytes and `limit` is ignored; the read byte budget still caps each " +
+        "call and `truncated` reports it. Page with " +
+        "`offset: nextByteOffset` — this is how you reach content a line " +
+        "window cannot, such as a single line longer than the budget. " +
+        "Default false.",
+    ),
 });
 
 // write_file
@@ -59,7 +81,48 @@ export const writeFileArgsSchema = z.object({
     ),
   content: z
     .string()
-    .describe("Full new content of the file (UTF-8 text). Overwrites atomically."),
+    .describe(
+      "Full new content of the file (UTF-8 text). Overwrites atomically, " +
+        "or is added at the end when mode is \"append\".",
+    ),
+  mode: z
+    .enum(["overwrite", "append"])
+    .optional()
+    .describe(
+      '"overwrite" (default) replaces the whole file atomically. "append" ' +
+        "adds `content` at the end without rewriting, so a file larger than " +
+        "the write budget stays writable. Append is not atomic.",
+    ),
+});
+
+// edit_file
+
+export const editFileArgsSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .describe(
+      "Root-relative path of an existing UTF-8 text file, e.g. " +
+        "\"notes/todo.md\". Use write_file to create a file.",
+    ),
+  old_string: z
+    .string()
+    .min(1)
+    .describe(
+      "Exact text to find, copied verbatim from read_file. Must match one " +
+        "place in the file unless replace_all is set.",
+    ),
+  new_string: z
+    .string()
+    .describe("Replacement text. An empty string deletes the matched text."),
+  replace_all: z
+    .boolean()
+    .optional()
+    .describe(
+      "Replace every occurrence instead of requiring a unique match. " +
+        "Default false.",
+    ),
 });
 
 // create_folder
@@ -102,6 +165,7 @@ export const downloadFileArgsSchema = z.object({
 
 export type ReadFileArgs = z.infer<typeof readFileArgsSchema>;
 export type WriteFileArgs = z.infer<typeof writeFileArgsSchema>;
+export type EditFileArgs = z.infer<typeof editFileArgsSchema>;
 export type CreateFolderArgs = z.infer<typeof createFolderArgsSchema>;
 export type DownloadFileArgs = z.infer<typeof downloadFileArgsSchema>;
 
@@ -127,8 +191,10 @@ export interface HostFileErr {
 }
 
 /** Text content of a file, optionally line-windowed. `truncated`
- *  means more lines exist beyond `endLine` — re-call with a higher
- *  `offset`. */
+ *  means more content exists beyond `endLine` — re-call with a higher
+ *  `offset`. A line window cannot resume inside the line it cut, so for
+ *  that tail use a raw read, which pages by byte through
+ *  `nextByteOffset`. */
 export interface ReadFileOk {
   ok: true;
   kind: "file";
@@ -137,8 +203,12 @@ export interface ReadFileOk {
   content: string;
   sizeBytes: number;
   modifiedAt: string;
-  startLine: number;
-  endLine: number;
+  /** Line window; absent for raw reads, which are byte-windowed. */
+  startLine?: number;
+  endLine?: number;
+  /** Raw reads only: the 1-based `offset` that continues exactly where this
+   *  window stopped (never inside a multi-byte character). Absent at EOF. */
+  nextByteOffset?: number;
   truncated: boolean;
 }
 
@@ -155,7 +225,10 @@ export interface ListDirOk {
   path: string;
   modifiedAt: string;
   entries: DirListingEntry[];
-  /** Listing exceeded the entry cap and was cut. */
+  /** 1-based index of the first and last entry in this page. */
+  startEntry: number;
+  endEntry: number;
+  /** More entries exist beyond `endEntry` — re-call with a higher `offset`. */
   truncated: boolean;
 }
 
@@ -170,6 +243,26 @@ export interface WriteFileOk {
 }
 
 export type WriteFileEnvelope = WriteFileOk | HostFileErr;
+
+/** Match-stage failures that `HostFileError` cannot express. */
+export type EditFileError = HostFileError | "NOT_IN_FILE" | "NOT_UNIQUE";
+
+export interface EditFileErr {
+  ok: false;
+  error: EditFileError;
+  message: string;
+}
+
+export interface EditFileOk {
+  ok: true;
+  path: string;
+  /** Replacements performed (always 1 unless `replace_all`). */
+  replacements: number;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export type EditFileEnvelope = EditFileOk | EditFileErr;
 
 export interface CreateFolderOk {
   ok: true;

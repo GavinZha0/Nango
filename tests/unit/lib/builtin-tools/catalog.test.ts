@@ -33,6 +33,12 @@ vi.mock("@/lib/host-files/runtime-tools", () => ({
     parameters: { _def: {} },
     execute: async () => ({}),
   }),
+  buildEditFileTool: () => ({
+    name: "edit_file",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
   buildCreateFolderTool: () => ({
     name: "create_folder",
     description: "stub",
@@ -79,9 +85,9 @@ describe("BUILTIN_TOOLS catalog", () => {
     // `read_file` / `write_file` are gated by operator config, not by a
     // per-agent binding, so they belong here; they simply fail their
     // calls when no shared folder is mounted. `download_file` is the same
-    // kind of toggle. `create_folder` is deliberately NOT here — it is
-    // synthesized by buildBuiltinTools alongside a write-capable mount, so
-    // it can never be ticked on its own.
+    // kind of toggle. `create_folder` and `edit_file` are deliberately NOT
+    // here — they are synthesized by buildBuiltinTools alongside a
+    // write-capable mount, so they can never be ticked on their own.
     const names = BUILTIN_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual([
       "download_file",
@@ -95,6 +101,7 @@ describe("BUILTIN_TOOLS catalog", () => {
       "write_file",
     ]);
     expect(findBuiltinTool("create_folder")).toBeNull();
+    expect(findBuiltinTool("edit_file")).toBeNull();
   });
 
   it("each entry has a displayName, description, and category", () => {
@@ -223,6 +230,7 @@ describe("buildBuiltinTools", () => {
     expect(buildBuiltinTools(["write_file"]).map((t) => t.name)).toEqual([
       "write_file",
       "create_folder",
+      "edit_file",
     ]);
     expect(buildBuiltinTools(["download_file"]).map((t) => t.name)).toEqual([
       "download_file",
@@ -236,11 +244,34 @@ describe("buildBuiltinTools", () => {
     expect(buildBuiltinTools(["read_file"]).map((t) => t.name)).toEqual(["read_file"]);
   });
 
-  it("mounts create_folder exactly once when both write tools are bound", () => {
-    const tools = buildBuiltinTools(["write_file", "download_file"]);
-    expect(tools.map((t) => t.name)).toEqual(["write_file", "download_file", "create_folder"]);
+  it("mounts edit_file only beside write_file", () => {
+    // CONTRACT: edit_file rewrites text the agent could already overwrite
+    // wholesale, so it follows write_file and nothing else — a
+    // download-only agent gets no text editor.
+    expect(
+      buildBuiltinTools(["read_file", "download_file"])
+        .map((t) => t.name)
+        .filter((n) => n === "edit_file"),
+    ).toEqual([]);
 
+    const both = buildBuiltinTools(["write_file", "download_file"]).map((t) => t.name);
+    expect(both).toEqual(["write_file", "download_file", "create_folder", "edit_file"]);
+    expect(both.filter((n) => n === "edit_file")).toHaveLength(1);
+
+    // Explicitly listing it in a legacy row must not double-mount either.
+    expect(buildBuiltinTools(["write_file", "edit_file"]).map((t) => t.name)).toEqual([
+      "write_file",
+      "edit_file",
+      "create_folder",
+    ]);
+  });
+
+  it("mounts create_folder exactly once when both write tools are bound", () => {
     const explicit = buildBuiltinTools(["write_file", "create_folder"]);
-    expect(explicit.map((t) => t.name)).toEqual(["write_file", "create_folder"]);
+    expect(explicit.map((t) => t.name)).toEqual([
+      "write_file",
+      "create_folder",
+      "edit_file",
+    ]);
   });
 });
