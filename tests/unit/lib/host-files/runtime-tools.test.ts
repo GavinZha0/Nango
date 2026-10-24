@@ -14,12 +14,20 @@ vi.mock("@/lib/config", async (importOriginal) => {
   };
 });
 
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import { buildReadFileTool, buildWriteFileTool } from "@/lib/host-files/runtime-tools";
-import type { ReadFileEnvelope, WriteFileEnvelope } from "@/lib/host-files/schema";
+import {
+  buildCreateFolderTool,
+  buildReadFileTool,
+  buildWriteFileTool,
+} from "@/lib/host-files/runtime-tools";
+import type {
+  CreateFolderEnvelope,
+  ReadFileEnvelope,
+  WriteFileEnvelope,
+} from "@/lib/host-files/schema";
 
 let sandbox: string;
 let root: string;
@@ -36,6 +44,11 @@ async function read(args: {
 async function write(args: { path: string; content: string }): Promise<WriteFileEnvelope> {
   const tool = buildWriteFileTool();
   return (await tool.execute!(args)) as WriteFileEnvelope;
+}
+
+async function createFolder(args: { path: string }): Promise<CreateFolderEnvelope> {
+  const tool = buildCreateFolderTool();
+  return (await tool.execute!(args)) as CreateFolderEnvelope;
 }
 
 beforeEach(async () => {
@@ -226,5 +239,85 @@ describe("write_file", () => {
     const res = await write({ path: "../escaped.md", content: "x" });
     expect(!res.ok).toBe(true);
     if (!res.ok) expect(["PATH_ESCAPE", "NOT_FOUND"]).toContain(res.error);
+  });
+});
+
+describe("create_folder", () => {
+  it("creates missing parents in one call", async () => {
+    const res = await createFolder({ path: "inbox/debian/current" });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.created).toBe(true);
+      expect(res.path).toBe("inbox/debian/current");
+    }
+    const st = await stat(path.join(root, "inbox", "debian", "current"));
+    expect(st.isDirectory()).toBe(true);
+  });
+
+  it("is a safe no-op for a directory that already exists", async () => {
+    await mkdir(path.join(root, "notes"), { recursive: true });
+
+    const res = await createFolder({ path: "notes" });
+    // CONTRACT: created:false is success — an agent re-issuing mkdir to
+    // "make sure" must not read it as a failure and retry.
+    expect(res.ok && res.created).toBe(false);
+    if (res.ok) expect(res.path).toBe("notes");
+  });
+
+  it("reports the root itself as an existing directory", async () => {
+    for (const input of ["/", "."]) {
+      const res = await createFolder({ path: input });
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.created).toBe(false);
+        expect(res.path).toBe(".");
+      }
+    }
+  });
+
+  it("refuses to mint a directory over an existing file", async () => {
+    await writeFile(path.join(root, "notes"), "i am a file");
+
+    const res = await createFolder({ path: "notes" });
+    expect(!res.ok && res.error === "IS_FILE").toBe(true);
+    if (!res.ok) expect(res.message).toMatch(/no delete or rename/i);
+  });
+
+  it("unblocks write_file for a path that previously could not be written", async () => {
+    // This composition is the whole reason the tool exists.
+    const before = await write({ path: "reports/2026/digest.md", content: "x" });
+    expect(!before.ok && before.error === "NOT_FOUND").toBe(true);
+
+    expect((await createFolder({ path: "reports/2026" })).ok).toBe(true);
+    const after = await write({ path: "reports/2026/digest.md", content: "shipped" });
+    expect(after.ok).toBe(true);
+    const back = await read({ path: "reports/2026/digest.md" });
+    expect(back.ok && back.kind === "file" && back.content).toBe("shipped");
+  });
+
+  it("neutralizes an absolute path into the mount", async () => {
+    const res = await createFolder({ path: "/inbox/downloads" });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.path).toBe("inbox/downloads");
+  });
+
+  it("refuses to create outside the jail", async () => {
+    const res = await createFolder({ path: "../../escaped" });
+    expect(!res.ok && res.error === "PATH_ESCAPE").toBe(true);
+    await expect(stat(path.join(sandbox, "..", "escaped"))).rejects.toBeTruthy();
+  });
+
+  it("rejects blank and NUL input", async () => {
+    const blank = await createFolder({ path: "   " });
+    expect(!blank.ok && blank.error === "INVALID_PATH").toBe(true);
+
+    const nul = await createFolder({ path: "a\0b" });
+    expect(!nul.ok && nul.error === "INVALID_PATH").toBe(true);
+  });
+
+  it("refuses when no root is mounted", async () => {
+    mockConfig["host.file.root"] = "";
+    const res = await createFolder({ path: "inbox" });
+    expect(!res.ok && res.error === "ROOT_NOT_CONFIGURED").toBe(true);
   });
 });

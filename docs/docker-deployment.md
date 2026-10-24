@@ -86,12 +86,12 @@ The `dify-sandbox` service is an isolated code execution environment:
 
 ### 2.3 Host-file shared folder
 
-`read_file` / `write_file` reach exactly one directory — whatever `host.file.root` (Admin → Config) names **as seen from inside the container**. The compose file ships that mount, so a fresh install works without any config write:
+`read_file` / `write_file` / `create_folder` / `download_file` reach exactly one directory — whatever `host.file.root` (Admin → Config) names **as seen from inside the container**. The compose file ships that mount, so a fresh install works without any config write:
 
 ```yaml
   nango-app:
     volumes:
-      - ./shared_folder:/shared_folder:ro   # default: read-only
+      - ./shared_folder:/shared_folder      # shipped read-write
 ```
 
 ```
@@ -99,9 +99,9 @@ host.file.root = /shared_folder             # the container path, not ./shared_f
 ```
 
 - Agents see `./shared_folder` on the host as `/shared_folder`; paths passed to the tools are relative to that root, and anything resolving outside it is refused.
-- Drop `:ro` to let agents write. The container runs as uid 1001 (`nextjs`), so the host directory must be writable by it or every write returns `READ_ONLY_MOUNT`.
+- The mount ships read-write because `write_file`, `create_folder` and `download_file` all write into it. The container runs as uid 1001 (`nextjs`), so the host directory must be writable by it or every write returns `READ_ONLY_MOUNT`.
 - Keep it a dedicated directory, never `$HOME` or a project checkout — the jail confines the agent to the mount, and the mount is therefore the security boundary.
-- `:ro` is the strongest guarantee available: it blocks writes at the kernel regardless of which agents hold `write_file`.
+- Add `:ro` to the mount for a read-only deployment: it is the strongest guarantee available, because it blocks writes at the kernel regardless of which agents hold the write-side tools. Those tools then fail their calls with `READ_ONLY_MOUNT` rather than being hidden.
 - Running outside Docker (`pnpm dev`) needs no mount; the tools simply fail with `ROOT_NOT_CONFIGURED` until `host.file.root` names a real directory.
 
 Full reference: `docs/host-files.md`.

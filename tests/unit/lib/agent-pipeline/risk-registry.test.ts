@@ -60,6 +60,31 @@ describe("evaluateToolRisk — Builtin tools", () => {
     expect(res.requiresApproval).toBe(true);
     expect(res.headlessAllowed).toBe(false);
   });
+
+  it("denies download_file headlessly too", () => {
+    // CONTRACT: download_file puts bytes into that same real folder and
+    // makes an outbound request, so it inherits write_file's posture rather
+    // than falling through to the unannotated default (which would allow it
+    // headless).
+    const res = evaluateToolRisk("download_file", {
+      url: "https://example.com/a.txt",
+      target_path: "a.txt",
+    });
+    expect(res.riskLevel).toBe("high");
+    expect(res.sideEffects).toBe("write");
+    expect(res.requiresApproval).toBe(true);
+    expect(res.headlessAllowed).toBe(false);
+  });
+
+  it("lets create_folder stay headless-allowed at medium risk", () => {
+    // CONTRACT: mkdir is non-destructive and idempotent, so an unattended
+    // run may still lay out a directory; the content-landing tools carry
+    // the denials.
+    const res = evaluateToolRisk("create_folder", { path: "inbox/debian" });
+    expect(res.riskLevel).toBe("medium");
+    expect(res.sideEffects).toBe("write");
+    expect(res.headlessAllowed).toBe(true);
+  });
 });
 
 describe("evaluateToolRisk — MCP Annotations", () => {

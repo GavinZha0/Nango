@@ -172,7 +172,7 @@ with options from the `options` JSONB column.
 
 ## 9. Config Keys Reference
 
-There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `host`, `auth`, `mcp`, and `observability`. 
+There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `host`, `download`, `auth`, `mcp`, and `observability`. 
 
 For the complete, authoritative list of keys, their default values, and descriptions, always refer to `src/lib/config/defaults.ts`.
 
@@ -233,9 +233,21 @@ Everything that reaches the machine Nango runs on — a mounted folder today, lo
 
 | Key | Default | Type | Description |
 |---|---|---|---|
-| `host.file.root` | `/shared_folder` | string | Container path that `read_file` / `write_file` may touch; empty or unmounted fails every call |
+| `host.file.root` | `/shared_folder` | string | Container path that the host-file tools (`read_file` / `write_file` / `create_folder` / `download_file`) may touch; empty or unmounted fails every call |
 | `host.file.read_max_bytes` | 1048576 | number | Max bytes `read_file` returns per call |
 | `host.file.write_max_bytes` | 1048576 | number | Max bytes `write_file` accepts as one file body |
+
+### download (5)
+
+Budgets for the `download_file` tool. The destination jail is `host.file.root` (above); these keys govern only the transfer. See `docs/host-files.md` §8.
+
+| Key | Default | Type | Description |
+|---|---|---|---|
+| `download.max_bytes` | 52428800 | number | Max response body in bytes (50 MB) |
+| `download.timeout` | 60 | number | Deadline in seconds for the whole transfer, redirects included |
+| `download.max_redirects` | 5 | number | Redirect hops to follow before refusing |
+| `download.allowed_extensions` | dsc,txt,md,… | string | Comma-separated file suffixes the destination name may end in |
+| `download.allow_private_network` | false | boolean | Escape hatch: permit private/loopback targets, disabling the SSRF guard |
 
 ### auth (2)
 

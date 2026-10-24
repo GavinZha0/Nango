@@ -33,6 +33,21 @@ vi.mock("@/lib/host-files/runtime-tools", () => ({
     parameters: { _def: {} },
     execute: async () => ({}),
   }),
+  buildCreateFolderTool: () => ({
+    name: "create_folder",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+}));
+
+vi.mock("@/lib/host-files/download-runtime-tools", () => ({
+  buildDownloadFileTool: () => ({
+    name: "download_file",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
 }));
 
 vi.mock("@/lib/repeater/runtime-tools", () => ({
@@ -63,9 +78,13 @@ describe("BUILTIN_TOOLS catalog", () => {
     // dispatch/builtin.ts when their binding is present.
     // `read_file` / `write_file` are gated by operator config, not by a
     // per-agent binding, so they belong here; they simply fail their
-    // calls when no shared folder is mounted.
+    // calls when no shared folder is mounted. `download_file` is the same
+    // kind of toggle. `create_folder` is deliberately NOT here — it is
+    // synthesized by buildBuiltinTools alongside a write-capable mount, so
+    // it can never be ticked on its own.
     const names = BUILTIN_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual([
+      "download_file",
       "generate_bento_slides",
       "generate_echarts_config",
       "generate_html_page",
@@ -75,6 +94,7 @@ describe("BUILTIN_TOOLS catalog", () => {
       "web_search",
       "write_file",
     ]);
+    expect(findBuiltinTool("create_folder")).toBeNull();
   });
 
   it("each entry has a displayName, description, and category", () => {
@@ -195,5 +215,32 @@ describe("buildBuiltinTools", () => {
       "generate_bento_slides",
       "edit_bento_slides",
     ]);
+  });
+
+  it("mounts create_folder automatically for a write-capable agent", () => {
+    // CONTRACT: create_folder is not tickable, so the only way an agent
+    // gets it is by holding write_file or download_file.
+    expect(buildBuiltinTools(["write_file"]).map((t) => t.name)).toEqual([
+      "write_file",
+      "create_folder",
+    ]);
+    expect(buildBuiltinTools(["download_file"]).map((t) => t.name)).toEqual([
+      "download_file",
+      "create_folder",
+    ]);
+  });
+
+  it("never mounts create_folder for a read-only agent", () => {
+    // CONTRACT: the read/write split is the permission model — a read-only
+    // agent must not gain any write-side tool, including mkdir.
+    expect(buildBuiltinTools(["read_file"]).map((t) => t.name)).toEqual(["read_file"]);
+  });
+
+  it("mounts create_folder exactly once when both write tools are bound", () => {
+    const tools = buildBuiltinTools(["write_file", "download_file"]);
+    expect(tools.map((t) => t.name)).toEqual(["write_file", "download_file", "create_folder"]);
+
+    const explicit = buildBuiltinTools(["write_file", "create_folder"]);
+    expect(explicit.map((t) => t.name)).toEqual(["write_file", "create_folder"]);
   });
 });

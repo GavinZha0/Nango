@@ -19,6 +19,7 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 
 import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
+import { buildDownloadFileTool } from "@/lib/host-files/download-runtime-tools";
 import { buildReadFileTool, buildWriteFileTool } from "@/lib/host-files/runtime-tools";
 import {
   buildGenerateEchartsConfigTool,
@@ -143,7 +144,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
     name: "write_file",
     displayName: "Write host file",
     description:
-      "Create or atomically replace a UTF-8 text file inside the mounted shared folder (`host.file.root`; root-relative paths only). No delete, rename or move.",
+      "Create or atomically replace a UTF-8 text file inside the mounted shared folder (`host.file.root`; root-relative paths only). No delete, rename or move; the parent directory must already exist (`create_folder`).",
     category: "files",
     input_schema: {
       type: "object",
@@ -162,6 +163,38 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       required: ["path", "content"],
     },
     build: buildWriteFileTool,
+  },
+  {
+    name: "download_file",
+    displayName: "Download file to shared folder",
+    // A download is a write, so it is its own toggle: an agent with
+    // write_file can produce bytes, but only an agent with download_file
+    // can pull them in from the public internet.
+    description:
+      "Download one public HTTPS file into the mounted shared folder. Bytes stay on disk — they never enter the conversation.",
+    category: "files",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Absolute https:// URL of the file to fetch.",
+        },
+        target_path: {
+          type: "string",
+          description:
+            "Root-relative destination including the file name, e.g. " +
+            "\"inbox/debian/db5.3_5.3.28+dfsg2-9.dsc\".",
+        },
+        overwrite: {
+          type: "boolean",
+          default: false,
+          description: "Replace an existing file at target_path.",
+        },
+      },
+      required: ["url", "target_path"],
+    },
+    build: buildDownloadFileTool,
   },
   {
     name: "generate_html_page",

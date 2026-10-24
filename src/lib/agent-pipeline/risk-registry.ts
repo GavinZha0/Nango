@@ -124,6 +124,28 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     },
   ],
   [
+    "download_file",
+    {
+      riskLevel: "high",
+      sideEffects: "write",
+      headlessAllowed: false,
+      // CONTRACT: same posture as write_file (it lands bytes in the user's
+      // real folder) plus an outbound request, so it never runs unattended
+      // under the default policy either.
+    },
+  ],
+  [
+    "create_folder",
+    {
+      riskLevel: "medium",
+      sideEffects: "write",
+      headlessAllowed: true,
+      // CONTRACT: mkdir is non-destructive and idempotent, so a scheduled
+      // agent may still lay out a directory. The tools that put content on
+      // disk (write_file, download_file) carry the headless denials.
+    },
+  ],
+  [
     "run_ssh_command",
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],

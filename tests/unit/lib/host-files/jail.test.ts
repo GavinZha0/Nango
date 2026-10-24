@@ -10,11 +10,24 @@ vi.mock("@/lib/config", async (importOriginal) => {
   };
 });
 
-import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  realpath,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import { getHostFileRoot, isWithin, resolveInJail } from "@/lib/host-files/jail.server";
+import {
+  getHostFileRoot,
+  isWithin,
+  resolveCreateInJail,
+  resolveInJail,
+} from "@/lib/host-files/jail.server";
 
 let sandbox: string;
 let root: string;
@@ -99,7 +112,16 @@ describe("resolveInJail — containment", () => {
   it("reports a missing parent distinctly from an escape", async () => {
     const res = await resolveInJail(root, "nope/deeper/file.md", "write");
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toBe("NOT_FOUND");
+    if (!res.ok) {
+      expect(res.error).toBe("NOT_FOUND");
+      // CONTRACT: the write-side message names the fix, because the agent
+      // has no other way to learn that mkdir is a separate tool call.
+      expect(res.message).toMatch(/create_folder/);
+    }
+
+    const readSide = await resolveInJail(root, "nope/deeper/file.md", "read");
+    expect(!readSide.ok && readSide.error === "NOT_FOUND").toBe(true);
+    if (!readSide.ok) expect(readSide.message).not.toMatch(/create_folder/);
   });
 
   it("rejects NUL bytes and blank input", async () => {
@@ -161,6 +183,89 @@ describe("resolveInJail — symlinks", () => {
     const res = await resolveInJail(root, "linkdir/new-file.md", "write");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe("PATH_ESCAPE");
+  });
+
+  it("catches a symlinked ancestor for create_folder too", async () => {
+    // create_folder walks up to the deepest existing ancestor; the walk
+    // must meet the same realpath verdict as the read/write path.
+    const outside = path.join(sandbox, "outside-dir2");
+    await mkdir(outside, { recursive: true });
+    if (!(await symlinkOrSkip(outside, path.join(root, "linkdir")))) return;
+
+    const res = await resolveCreateInJail(root, "linkdir/deeper/newdir");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("PATH_ESCAPE");
+    // Nothing was created on the outside either.
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it("refuses to create a directory over a symlinked leaf", async () => {
+    if (!(await symlinkOrSkip(path.join(sandbox, "not-here-yet"), path.join(root, "linkleaf")))) return;
+
+    const res = await resolveCreateInJail(root, "linkleaf");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("PATH_ESCAPE");
+  });
+});
+
+describe("resolveCreateInJail — containment with missing parents", () => {
+  it("accepts a deep path whose parents do not exist yet", async () => {
+    const res = await resolveCreateInJail(root, "reports/2026/q1");
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.relPath).toBe("reports/2026/q1");
+      expect(res.absPath).toBe(path.join(root, "reports", "2026", "q1"));
+    }
+  });
+
+  it("maps the root itself to an empty relPath", async () => {
+    const res = await resolveCreateInJail(root, "/");
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.relPath).toBe("");
+  });
+
+  it("stays ok for a directory that already exists", async () => {
+    await mkdir(path.join(root, "notes"), { recursive: true });
+
+    const res = await resolveCreateInJail(root, "notes");
+    // Idempotence is the tool's answer; the jail only proves containment.
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.relPath).toBe("notes");
+  });
+
+  it("accepts a leaf occupied by a regular file", async () => {
+    // IS_FILE is decided by create_folder, not the jail — the jail has no
+    // opinion about what the leaf will become.
+    await writeFile(path.join(root, "occupant.txt"), "x");
+
+    const res = await resolveCreateInJail(root, "occupant.txt");
+    expect(res.ok).toBe(true);
+  });
+
+  it("refuses a traversal that reaches outside the root", async () => {
+    const res = await resolveCreateInJail(root, "../escaped/dir");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("PATH_ESCAPE");
+  });
+
+  it("neutralizes an absolute path into the root", async () => {
+    const res = await resolveCreateInJail(root, "/inbox/debian");
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.relPath).toBe("inbox/debian");
+  });
+
+  it("rejects NUL bytes and blank input", async () => {
+    const nul = await resolveCreateInJail(root, "a\0b");
+    expect(!nul.ok && nul.error === "INVALID_PATH").toBe(true);
+
+    const blank = await resolveCreateInJail(root, "   ");
+    expect(!blank.ok && blank.error === "INVALID_PATH").toBe(true);
+  });
+
+  it("fails loudly when the configured root itself is gone", async () => {
+    const res = await resolveCreateInJail(path.join(sandbox, "does-not-exist"), "dir");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("ROOT_NOT_CONFIGURED");
   });
 });
 

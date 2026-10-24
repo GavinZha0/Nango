@@ -29,6 +29,11 @@
  *     (short-name/casing aliases must not produce false rejections),
  *     and both sides are compared with a trailing separator so a
  *     sibling like `/mnt/root-evil` does not pass a `/mnt/root` check.
+ *
+ * Two entry points share steps 1-3 and 5: `resolveInJail` for file
+ * read/write (immediate parent must exist), and `resolveCreateInJail`
+ * for `create_folder` (containment proven on the deepest existing
+ * ancestor, so missing parents are the expected case).
  */
 
 import "server-only";
@@ -66,15 +71,35 @@ function invalidPath(detail: string): JailPathErr {
   return { ok: false, error: "INVALID_PATH", message: detail };
 }
 
+/** Escape when the configured root is itself missing from the fs. */
+function rootUnreachable(root: string): JailPathErr {
+  // CONTRACT: this is the only place the operator's mount layout is
+  // explained, so it names both fix sites instead of guessing which one
+  // is wrong.
+  return {
+    ok: false,
+    error: "ROOT_NOT_CONFIGURED",
+    message:
+      `Cannot reach the host-file root "${root}". The folder is not mounted ` +
+      "into the container (or host.file.root points somewhere else). Ask the " +
+      "user to check the shared_folder volume in docker-compose.yaml and the " +
+      "`host.file.root` setting in Admin → Config — do not retry.",
+  };
+}
+
 /**
- * Root-relative input → contained absolute path. `action` labels the
- * tool call for the error strings the LLM sees.
+ * Hostile input → lexical candidate inside the root. No fs access yet.
+ *
+ * Strip anything that could re-root the join: a drive spec or UNC
+ * prefix, then leading separators. `resolve` honours an absolute
+ * second argument on posix and resets on a drive letter on win32, so
+ * the separators must go LAST — otherwise the "/Windows/…" remainder
+ * of "C:/Windows/…" would re-root the join again.
  */
-export async function resolveInJail(
+function neutralizeInput(
   root: string,
   inputPath: string,
-  action: "read" | "write",
-): Promise<JailPathResult> {
+): { ok: true; absPath: string; trimmed: string } | JailPathErr {
   if (inputPath.includes("\0")) {
     return invalidPath("Path contains a NUL byte.");
   }
@@ -83,11 +108,6 @@ export async function resolveInJail(
     return invalidPath("Path is empty.");
   }
 
-  // Strip anything that could re-root the join: a drive spec or UNC
-  // prefix, then leading separators. `resolve` honours an absolute
-  // second argument on posix and resets on a drive letter on win32, so
-  // the separators must go LAST — otherwise the "/Windows/…" remainder
-  // of "C:/Windows/…" would re-root the join again.
   let rel = trimmed;
   if (/^[a-zA-Z]:/.test(rel) || rel.startsWith("\\\\")) {
     rel = rel.replace(/^[a-zA-Z]:/, "");
@@ -98,10 +118,15 @@ export async function resolveInJail(
     rel = ".";
   }
 
-  const absPath = path.resolve(root, rel);
+  return { ok: true, absPath: path.resolve(root, rel), trimmed };
+}
 
-  // 3. Final component must not be a symlink. ENOENT is expected for
-  // new-file writes and is not an error here.
+/** Reject a symlinked final component; missing or regular is fine. */
+async function refuseSymlink(
+  absPath: string,
+  action: string,
+  trimmed: string,
+): Promise<JailPathErr | null> {
   try {
     const st = await lstat(absPath);
     if (st.isSymbolicLink()) {
@@ -116,6 +141,26 @@ export async function resolveInJail(
       throw err;
     }
   }
+  return null;
+}
+
+/**
+ * Root-relative input → contained absolute path. `action` labels the
+ * tool call for the error strings the LLM sees.
+ */
+export async function resolveInJail(
+  root: string,
+  inputPath: string,
+  action: "read" | "write",
+): Promise<JailPathResult> {
+  const input = neutralizeInput(root, inputPath);
+  if (!input.ok) return input;
+  const { absPath, trimmed } = input;
+
+  // 3. Final component must not be a symlink. ENOENT is expected for
+  // new-file writes and is not an error here.
+  const symlinkErr = await refuseSymlink(absPath, action, trimmed);
+  if (symlinkErr) return symlinkErr;
 
   // 4. Containment is proven on the PARENT directory only: it must
   // exist, and its realpath must stay inside the root. realpath on the
@@ -128,18 +173,7 @@ export async function resolveInJail(
   try {
     realRoot = await realpath(root);
   } catch {
-    return {
-      ok: false,
-      error: "ROOT_NOT_CONFIGURED",
-      // CONTRACT: this is the only place the operator's mount layout is
-      // explained, so it names both fix sites instead of guessing which
-      // one is wrong.
-      message:
-        `Cannot reach the host-file root "${root}". The folder is not mounted ` +
-        "into the container (or host.file.root points somewhere else). Ask the " +
-        "user to check the shared_folder volume in docker-compose.yaml and the " +
-        "`host.file.root` setting in Admin → Config — do not retry.",
-    };
+    return rootUnreachable(root);
   }
 
   // The root addressed as itself ("" or "/"): its parent is outside the
@@ -159,7 +193,10 @@ export async function resolveInJail(
         error: "NOT_FOUND",
         message:
           `Cannot ${action} "${trimmed}": its parent directory does not ` +
-          "exist. For writes, the directory must be created first.",
+          "exist." +
+          (action === "write"
+            ? " Create it first with `create_folder`."
+            : " Nothing can be read from a directory that is not there."),
       };
     }
     throw err;
@@ -172,6 +209,88 @@ export async function resolveInJail(
       message:
         `Cannot ${action} "${trimmed}": the resolved location is outside ` +
         "the configured host-file root.",
+    };
+  }
+
+  return { ok: true, absPath, relPath: toRelPath(realRoot, absPath) };
+}
+
+/**
+ * Root-relative input → contained absolute path for a recursive
+ * `mkdir`. Same neutralization and symlink rules as `resolveInJail`,
+ * but containment is proven on the DEEPEST EXISTING ANCESTOR instead of
+ * the immediate parent — `create_folder` exists precisely to build
+ * missing parents, so a missing ancestor is the normal case rather than
+ * an error.
+ *
+ * Termination is guaranteed: the walk stops at `root`, whose realpath is
+ * resolved before the walk starts.
+ */
+export async function resolveCreateInJail(
+  root: string,
+  inputPath: string,
+): Promise<JailPathResult> {
+  const input = neutralizeInput(root, inputPath);
+  if (!input.ok) return input;
+  const { absPath, trimmed } = input;
+
+  let realRoot: string;
+  try {
+    realRoot = await realpath(root);
+  } catch {
+    return rootUnreachable(root);
+  }
+
+  // Lexical containment first: `..` segments are resolved above, so this
+  // only fires for a path that was re-rooted into a sibling of the
+  // original argument. Without it, the ancestor walk below could accept
+  // a candidate that never lived under the root.
+  if (!isWithin(realRoot, path.resolve(absPath))) {
+    return {
+      ok: false,
+      error: "PATH_ESCAPE",
+      message:
+        `Cannot create "${trimmed}": the resolved location is outside ` +
+        "the configured host-file root.",
+    };
+  }
+
+  const symlinkErr = await refuseSymlink(absPath, "create a directory at", trimmed);
+  if (symlinkErr) return symlinkErr;
+
+  if (normalizeForCompare(absPath) === normalizeForCompare(realRoot)) {
+    return { ok: true, absPath: realRoot, relPath: "" };
+  }
+
+  let anchor = path.dirname(absPath);
+  let realAnchor: string | null = null;
+  for (;;) {
+    try {
+      realAnchor = await realpath(anchor);
+      break;
+    } catch (err) {
+      if (!isNotFound(err) && !isNotDir(err)) throw err;
+      const parent = path.dirname(anchor);
+      if (parent === anchor) {
+        // Ran out of filesystem above the candidate without finding an
+        // existing directory — the root itself should have stopped us.
+        return {
+          ok: false,
+          error: "PATH_ESCAPE",
+          message: `Cannot create "${trimmed}": no existing ancestor of the path.`,
+        };
+      }
+      anchor = parent;
+    }
+  }
+
+  if (!isWithin(realRoot, realAnchor)) {
+    return {
+      ok: false,
+      error: "PATH_ESCAPE",
+      message:
+        `Cannot create "${trimmed}": an existing parent directory resolves ` +
+        "outside the configured host-file root.",
     };
   }
 

@@ -69,9 +69,19 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   // or the DB. The root is a CONTAINER path — compose bind-mounts
   // ./shared_folder at /shared_folder, so the default works out of the
   // box; blank disables host-file access.
-  { key: "host.file.root", value: "/shared_folder", valueType: "string", description: "Container path that read_file / write_file may touch; docker-compose mounts ./shared_folder here. Empty or unmounted fails every call. Use a dedicated directory — never a home folder." },
+  { key: "host.file.root", value: "/shared_folder", valueType: "string", description: "Container path that read_file / write_file / create_folder / download_file may touch; docker-compose mounts ./shared_folder here. Empty or unmounted fails every call. Use a dedicated directory — never a home folder." },
   { key: "host.file.read_max_bytes", value: "1048576", valueType: "number", description: "Max bytes read_file returns per call (1 MiB). Larger files are streamed in line windows instead of buffered whole." },
   { key: "host.file.write_max_bytes", value: "1048576", valueType: "number", description: "Max bytes write_file accepts as one complete file body (1 MiB)." },
+
+  // ── download ──────────────────────────────────────────────────────
+  // download_file lands bytes in the host.file.root mount, so the jail
+  // and ROOT_NOT_CONFIGURED behaviour are shared with read/write_file;
+  // only the network budgets live here.
+  { key: "download.max_bytes", value: "52428800", valueType: "number", description: "Max bytes one download_file call may save (50 MiB). Enforced on the stream, so a lying Content-Length cannot bypass it." },
+  { key: "download.allowed_extensions", value: "dsc,txt,md,csv,tsv,json,jsonl,xml,yaml,yml,toml,ini,cfg,conf,log,sql,py,js,ts,sh,html,htm", valueType: "string", description: "Comma-separated destination extensions download_file may write. Matched against the whole file name, so 'tar.gz' works as an entry." },
+  { key: "download.timeout", value: "60", valueType: "number", description: "Whole-operation deadline for one download_file call in seconds (redirects, headers, and body streaming included)." },
+  { key: "download.max_redirects", value: "5", valueType: "number", description: "Redirect hops download_file follows. Every hop is re-checked against the address guard." },
+  { key: "download.allow_private_network", value: "false", valueType: "boolean", description: "Allow download_file to reach loopback, private, link-local and cloud-metadata addresses. Off by default; enabling it removes the SSRF guard entirely." },
 
   // ── auth ──────────────────────────────────────────────────────────
   { key: "auth.session_expiry", value: "604800", valueType: "number", description: "Session lifetime in seconds (7 days)" },
