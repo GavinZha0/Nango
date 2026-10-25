@@ -15,6 +15,13 @@
       "when": 1792332001713,
       "tag": "0001_drop-skill-checksum-relabel-source",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792879616323,
+      "tag": "0002_kb_tables",
+      "breakpoints": true
     }
   ]
 }

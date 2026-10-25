@@ -75,6 +75,7 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   { kind: "panel", id: "agent", role: "editor" },
   { kind: "panel", id: "mcp", role: "editor" },
   { kind: "panel", id: "skills", role: "editor" },
+  { kind: "panel", id: "kb", role: "editor" },
   { kind: "panel", id: "datasource", role: "editor" },
   { kind: "panel", id: "ssh-server", role: "editor" },
   { kind: "panel", id: "verification", role: "editor" },

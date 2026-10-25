@@ -25,6 +25,7 @@ the central composer lives in `lib/runner/dispatch/builtin.ts`.
 | Data-source capability block | `lib/data-sources/prompt-block.server.ts` | static template + bound rows |
 | SSH capability block | `lib/ssh/prompt-block.server.ts` | static template + bound rows |
 | Calendar capability block | `lib/calendar/prompt-block.server.ts` | static template + bound rows |
+| Knowledge capability block | `lib/kb/prompt-block.server.ts` | static template + bound rows, capped at group level; re-rendered every dispatch (`docs/kb.md` §4.4) |
 | Sandbox capability block | `lib/sandbox/runtime-tools.ts` | static |
 | Orchestration mode directive | `lib/orchestration/modes.ts` (`ORCHESTRATION_MODES[*].promptDirective`) | static template × 4 modes, supervisor-only, per-turn |
 | Available-agents catalog | `lib/runner/supervisor-tools.server.ts` (`formatCatalogBlock`) | dynamic, supervisor-only, per-request |
@@ -53,12 +54,13 @@ just joins with blank lines.
 | 3 | Data-source block | only if bound |
 | 4 | SSH block | only if bound |
 | 5 | Calendar block | only if bound |
-| 6 | HTML page block | only if `generate_html_page` is bound (default-enabled on Nango) |
-| 7 | `SHARED_STATE_PROMPT_BLOCK` | when `sharedStateEnabled` (default true for supervisor) |
-| 8 | Page Context Snapshot | when present (from delegation with `includePageContext`) |
-| 9 | Available-agents catalog | always |
-| 10 | Mode directive | last for per-turn recency weighting |
-| 11 | Approval policy | when `toolApprovalMode` is `auto` or `always` |
+| 6 | Knowledge block | only if bound |
+| 7 | HTML page block | only if `generate_html_page` is bound (default-enabled on Nango) |
+| 8 | `SHARED_STATE_PROMPT_BLOCK` | when `sharedStateEnabled` (default true for supervisor) |
+| 9 | Page Context Snapshot | when present (from delegation with `includePageContext`) |
+| 10 | Available-agents catalog | always |
+| 11 | Mode directive | last for per-turn recency weighting |
+| 12 | Approval policy | when `toolApprovalMode` is `auto` or `always` |
 
 Skipped for supervisor: `SAFETY_POLICY_BLOCK`, `ERROR_POLICY_BLOCK`,
 chart block — they are already covered inside `SUPERVISOR_PROMPT`.
@@ -73,12 +75,13 @@ chart block — they are already covered inside `SUPERVISOR_PROMPT`.
 | 4 | Data-source block | only if bound |
 | 5 | SSH block | only if bound |
 | 6 | Calendar block | only if bound |
-| 7 | Chart block (`encourage` variant) | only if `generate_echarts_config` is bound |
-| 8 | HTML page block | only if `generate_html_page` is bound |
-| 9 | `SHARED_STATE_PROMPT_BLOCK` | when `sharedStateEnabled` (default true for tester) |
-| 10 | Page Context Snapshot | when present |
-| 11 | `ERROR_POLICY_BLOCK` | only when the agent has at least one tool |
-| 12 | Approval policy | when `toolApprovalMode` is `auto` or `always` |
+| 7 | Knowledge block | only if bound |
+| 8 | Chart block (`encourage` variant) | only if `generate_echarts_config` is bound |
+| 9 | HTML page block | only if `generate_html_page` is bound |
+| 10 | `SHARED_STATE_PROMPT_BLOCK` | when `sharedStateEnabled` (default true for tester) |
+| 11 | Page Context Snapshot | when present |
+| 12 | `ERROR_POLICY_BLOCK` | only when the agent has at least one tool |
+| 13 | Approval policy | when `toolApprovalMode` is `auto` or `always` |
 
 **Role variants of the regular path:**
 - `role = 'tester'`: `spec.prompt` is the tester system prompt (pre-filled from

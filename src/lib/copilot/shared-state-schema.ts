@@ -14,7 +14,7 @@ export interface NangoSharedState {
     activeUrl: string;
     activeView: 
       | "dashboard" | "artifact" | "schedules" | "notifications"
-      | "agent" | "mcp" | "skills" | "datasource" | "ssh-server" 
+      | "agent" | "mcp" | "skills" | "kb" | "datasource" | "ssh-server" 
       | "verification" | "evaluation" | "outcomes" | "profile"
       | "user" | "credential" | "config" | "trace" 
       | "none" | "web-auto";

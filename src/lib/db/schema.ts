@@ -875,6 +875,178 @@ export const SkillFileTable = pgTable(
 export type SkillFileEntity = typeof SkillFileTable.$inferSelect;
 
 /**
+ * kb_collection — one LLM-wiki knowledge base.
+ *
+ * `name` is the runtime-facing identifier: agents pass it to `list_kb_pages` /
+ * `read_kb_page`, so it is globally unique and slug-constrained with the same regex
+ * as `data_source.name` — `/^[a-z][a-z0-9_-]{0,62}$/`, enforced at the API
+ * edge. `description` is the level-1 routing signal, injected verbatim into
+ * every bound agent's system prompt. See docs/kb.md.
+ */
+export const KbCollectionTable = pgTable("kb_collection", {
+  id: uuid("id").primaryKey().notNull().defaultRandom(),
+
+  name: text("name").notNull(),
+  description: text("description"),
+
+  /** Disabled collections vanish from the prompt block and `list_kb_pages` refuses
+   *  them — same semantics as `skill.enabled`. */
+  enabled: boolean("enabled").notNull().default(true),
+  visibility: text("visibility").notNull().default("private"), // "private" | "public"
+
+  /** SECURITY: SET NULL, not CASCADE. A KB is a shared asset — hard-purging a
+   *  user must not destroy the corpus its agents read. An orphaned private
+   *  collection is then admin-visible only, which is the recoverable failure
+   *  mode; deleting it is not. See docs/kb.md. */
+  createdBy: uuid("created_by").references(() => UserTable.id, {
+    onDelete: "set null",
+  }),
+  updatedBy: uuid("updated_by").references(() => UserTable.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  uniqueIndex("kb_collection_name_unique").on(t.name),
+]);
+
+/**
+ * kb_group — a chapter / module / section inside one collection. This is the
+ * deepest level the mounted prompt block exposes (see docs/kb.md).
+ *
+ * A group table rather than `skill_file`-style path prefixes: renaming a group
+ * is a single-row update with no descendant rewrite, and a group carries its
+ * own `description`, which a path prefix cannot.
+ *
+ * QUIRK: depth is capped at 2 group levels and cross-row cycles are rejected
+ * by the KB service layer. SQL cannot express either as a CHECK — the
+ * constraint below only blocks the same-row `id = parent_id` loop.
+ *
+ * Ordering is by `name` through `alphabeticCompare` (see docs/kb.md); there
+ * is deliberately no `display_order` column.
+ */
+export const KbGroupTable = pgTable(
+  "kb_group",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => KbCollectionTable.id, { onDelete: "cascade" }),
+    /** Self-FK. NULL = level-1 group. RESTRICT so a parent cannot disappear
+     *  out from under its children — the service layer empties the subtree
+     *  first. Mirrors `artifact.parent_id`. */
+    parentId: bigint("parent_id", { mode: "number" }).references(
+      (): AnyPgColumn => KbGroupTable.id,
+      { onDelete: "restrict" },
+    ),
+
+    /** Unique within a collection. Also the string agents pass as
+     *  `list_kb_pages(group_name)`, so a rename silently invalidates any prompt
+     *  an agent is mid-answer against — display-facing in the block, addressed by
+     *  name at runtime. No slug form: it is prose, matched exactly. */
+    name: text("name").notNull(),
+    /** CONTRACT: prose about why these pages belong together. Must never
+     *  enumerate the group's pages — that list is derived (see docs/kb.md). */
+    description: text("description"),
+  },
+  (t) => [
+    uniqueIndex("kb_group_collection_name_idx").on(t.collectionId, t.name),
+    index("kb_group_collection_parent_idx").on(t.collectionId, t.parentId),
+    check("kb_group_not_self_parent_check", sql`${t.id} <> ${t.parentId}`),
+  ],
+);
+
+/**
+ * kb_page — one unit of knowledge: distilled, or stored verbatim when the
+ * source is already final form (a page-catalog CSV, a config dump, meeting
+ * notes).
+ *
+ * `content` lives in Postgres, not on a volume, for the same reasons
+ * `skill_file.content` does: transactional with its metadata, SQL-listable,
+ * covered by `pg_dump`. Text only — see docs/kb.md.
+ *
+ * `name` doubles as the LLM's page handle: `read_kb_page(kb_name, page_name)` matches
+ * it exactly, which is why uniqueness is collection-wide rather than per-group
+ * (an agent must be able to open a page without knowing where it sits).
+ */
+export const KbPageTable = pgTable(
+  "kb_page",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+
+    /** Denormalised alongside `group_id` so "every page in this KB" is one
+     *  index scan and so the collection-wide name uniqueness below is
+     *  expressible — Postgres cannot span a join in a unique index. */
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => KbCollectionTable.id, { onDelete: "cascade" }),
+    /** NULL = page sits directly under the collection. SET NULL: pages are
+     *  content and must not vanish with a directory reshuffle; the service
+     *  layer refuses to delete a group that still holds pages. */
+    groupId: bigint("group_id", { mode: "number" }).references(
+      () => KbGroupTable.id,
+      { onDelete: "set null" },
+    ),
+
+    name: text("name").notNull(),
+    /** Level-2 help shown by `list_kb_pages`. Never injected into the resident
+     *  prompt. Capped by the shared description limit (see docs/kb.md). */
+    description: text("description"),
+    content: text("content").notNull(),
+    contentType: text("content_type")
+      .$type<KbContentType>()
+      .notNull()
+      .default("text/markdown"),
+    /** Pre-computed byte length, matches `length(content)`. Mirrors
+     *  `skill_file.size` so lists and budget checks never read `content`. */
+    size: integer("size").notNull(),
+
+    /** CONTRACT: provenance for human maintenance only — a free-form label in
+     *  the spirit of `skill.source`. Never resolved, never validated, and
+     *  never returned by `read_kb_page` (see docs/kb.md). */
+    sourceRef: text("source_ref"),
+
+    createdBy: uuid("created_by").references(() => UserTable.id, {
+      onDelete: "set null",
+    }),
+    updatedBy: uuid("updated_by").references(() => UserTable.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    uniqueIndex("kb_page_collection_name_idx").on(t.collectionId, t.name),
+    index("kb_page_collection_group_idx").on(t.collectionId, t.groupId),
+    // Values are taken verbatim from EXTENSION_TO_MIME in
+    // src/lib/skills/storage/skill-storage.ts (json is `application/json`
+    // there, not `text/json`), so a future import path can reuse
+    // guessContentType() without colliding with this CHECK.
+    check(
+      "kb_page_content_type_check",
+      sql`${t.contentType} IN ('text/markdown', 'text/plain', 'text/csv', 'application/json', 'text/yaml', 'text/xml')`,
+    ),
+  ],
+);
+
+export type KbContentType =
+  | "text/markdown"
+  | "text/plain"
+  | "text/csv"
+  | "application/json"
+  | "text/yaml"
+  | "text/xml";
+
+export type KbCollectionEntity = typeof KbCollectionTable.$inferSelect;
+export type KbGroupEntity = typeof KbGroupTable.$inferSelect;
+export type KbPageEntity = typeof KbPageTable.$inferSelect;
+
+/**
  * BuiltinAgent — user-defined AI agent configuration (model, prompt, tools).
  * visibility: "private" = creator only; "public" = all users.
  */
@@ -977,7 +1149,7 @@ export const BuiltinAgentToolTable = pgTable(
       .notNull()
       .references(() => BuiltinAgentTable.id, { onDelete: "cascade" }),
 
-    /** Discriminator: "mcp_server" | "mcp_tool" | "skill" | "builtin_tool" | "datasource" | "ssh_server" */
+    /** Discriminator: "mcp_server" | "mcp_tool" | "skill" | "builtin_tool" | "datasource" | "ssh_server" | "calendar" | "knowledge" */
     toolType: text("tool_type").notNull(),
 
     // MCP
@@ -1017,6 +1189,16 @@ export const BuiltinAgentToolTable = pgTable(
       onDelete: "cascade",
     }),
 
+    // Knowledge
+    /** Set for toolType "knowledge". Binding any kb_collection auto-mounts
+     *  list_kb_pages + read_kb_page (not a user-tickable catalog entry). Mount
+     *  granularity is collection only — group- or page-level bindings would
+     *  make "what does this agent know" unauditable. See docs/kb.md. */
+    kbCollectionId: uuid("kb_collection_id").references(
+      () => KbCollectionTable.id,
+      { onDelete: "cascade" },
+    ),
+
     /** Display / injection order within the agent. Lower values come first. */
     order: integer("order").notNull().default(0),
   },
@@ -1029,6 +1211,7 @@ export const BuiltinAgentToolTable = pgTable(
     index("builtin_agent_tool_data_source_idx").on(t.dataSourceId),
     index("builtin_agent_tool_ssh_server_idx").on(t.sshServerId),
     index("builtin_agent_tool_calendar_credential_idx").on(t.calendarCredentialId),
+    index("builtin_agent_tool_kb_collection_idx").on(t.kbCollectionId),
   ],
 );
 
@@ -1134,7 +1317,8 @@ export type AgentToolType =
   | "builtin_tool"
   | "datasource"
   | "ssh_server"
-  | "calendar";
+  | "calendar"
+  | "knowledge";
 
 // Runner — entity_run + entity_run_event
 

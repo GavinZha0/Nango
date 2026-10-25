@@ -1,0 +1,36 @@
+/**
+ * Config-backed KB budgets.
+ *
+ * Byte and count ceilings are operator tunables (Admin → Config, `kb.` prefix);
+ * the authored-string caps beside them are code constants in
+ * `src/lib/kb/limits.ts`. See docs/kb.md.
+ */
+
+import "server-only";
+
+import { getConfigNumber } from "@/lib/config";
+
+/** Stored bytes for one page's `content`. */
+export const PAGE_MAX_BYTES = (): number =>
+  getConfigNumber("kb.page_max_bytes", 256 * 1024);
+
+/** Pages per collection. */
+export const MAX_PAGES_PER_COLLECTION = (): number =>
+  getConfigNumber("kb.max_pages", 50);
+
+/**
+ * Groups per collection. Also the ceiling on how many index lines a mounted
+ * collection injects into every bound agent's prompt — there is no separate
+ * mount byte budget.
+ */
+export const MAX_GROUPS_PER_COLLECTION = (): number =>
+  getConfigNumber("kb.max_groups", 20);
+
+/**
+ * Returned bytes for one `read_kb_page` call. The page itself may be stored
+ * larger (`PAGE_MAX_BYTES`), so this is a context-flooding guard, not a write
+ * limit — the stored-vs-returned pair beside `host.file.write_max_bytes` /
+ * `host.file.read_max_bytes`.
+ */
+export const READ_MAX_BYTES = (): number =>
+  getConfigNumber("kb.read_max_bytes", 64 * 1024);

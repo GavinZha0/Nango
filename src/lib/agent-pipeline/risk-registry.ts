@@ -80,6 +80,17 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     "list_ssh_hosts",
     { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
   ],
+  // Without these two entries an unannotated tool defaults to `medium` /
+  // `write`, which under a `require` approval policy denies them headless —
+  // see docs/kb.md.
+  [
+    "list_kb_pages",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
+    "read_kb_page",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
   [
     "repeat_tool",
     { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },

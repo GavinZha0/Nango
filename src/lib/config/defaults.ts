@@ -63,6 +63,16 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "skill.max_files", value: "100", valueType: "number", description: "Max files per skill" },
   { key: "skill.max_total_bytes", value: "10485760", valueType: "number", description: "Max total size per skill in bytes (10 MB)" },
 
+  // ── kb ────────────────────────────────────────────────────────────
+  // Knowledge-base storage and read budgets. Description caps are code
+  // constants (src/lib/kb/limits.ts), not keys here. `max_groups` is also the
+  // only bound on how many lines a mounted collection injects into every bound
+  // agent's prompt — there is no mount byte budget (docs/kb.md).
+  { key: "kb.page_max_bytes", value: "262144", valueType: "number", description: "Max stored bytes for one knowledge page's content (256 KB). Mirrors skill.max_file_bytes." },
+  { key: "kb.read_max_bytes", value: "65536", valueType: "number", description: "Max bytes one read_kb_page call returns (64 KB). A page is windowed by line inside this budget; totalLines and nextOffset tell the agent how much is left." },
+  { key: "kb.max_pages", value: "50", valueType: "number", description: "Max pages per knowledge collection." },
+  { key: "kb.max_groups", value: "20", valueType: "number", description: "Max groups per knowledge collection. Each group costs one injected index line in every agent that binds the collection." },
+
   // ── host ──────────────────────────────────────────────────────────
   // `host.*` groups everything that reaches the machine Nango runs on
   // (mounted folders today, local CLIs later) rather than the network

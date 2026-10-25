@@ -196,7 +196,6 @@ interface FormState {
   temperature: number;
   role: AgentRole | null;
   sharedStateEnabled: boolean;
-  kbEnabled: boolean;
 }
 
 const EMPTY_FORM: FormState = {
@@ -212,7 +211,6 @@ const EMPTY_FORM: FormState = {
   temperature: 0.3,
   role: null,
   sharedStateEnabled: false,
-  kbEnabled: false,
 };
 
 function formFromDetail(data: AgentDetail): FormState {
@@ -229,7 +227,6 @@ function formFromDetail(data: AgentDetail): FormState {
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
     sharedStateEnabled: resolveSharedStateEnabled(data),
-    kbEnabled: false,
   };
 }
 
@@ -240,6 +237,7 @@ interface ToolSelections {
   dataSources: Set<string>;
   sshServers: Set<string>;
   calendars: Set<string>;
+  knowledge: Set<string>;
 }
 
 const EMPTY_TOOLS: ToolSelections = {
@@ -249,6 +247,7 @@ const EMPTY_TOOLS: ToolSelections = {
   dataSources: new Set(),
   sshServers: new Set(),
   calendars: new Set(),
+  knowledge: new Set(),
 };
 
 function toolsFromBoundRows(rows: BoundToolRow[]): ToolSelections {
@@ -258,6 +257,7 @@ function toolsFromBoundRows(rows: BoundToolRow[]): ToolSelections {
   const dataSources = new Set<string>();
   const sshServers = new Set<string>();
   const calendars = new Set<string>();
+  const knowledge = new Set<string>();
   for (const t of rows) {
     if ((t.toolType === "mcp_server" || t.toolType === "mcp_tool") && t.mcpServerId) mcp.add(t.mcpServerId);
     if (t.toolType === "skill" && t.skillId) skills.add(t.skillId);
@@ -265,8 +265,9 @@ function toolsFromBoundRows(rows: BoundToolRow[]): ToolSelections {
     if (t.toolType === "datasource" && t.dataSourceId) dataSources.add(t.dataSourceId);
     if (t.toolType === "ssh_server" && t.sshServerId) sshServers.add(t.sshServerId);
     if (t.toolType === "calendar" && t.calendarCredentialId) calendars.add(t.calendarCredentialId);
+    if (t.toolType === "knowledge" && t.kbCollectionId) knowledge.add(t.kbCollectionId);
   }
-  return { mcp, skills, builtinTools, dataSources, sshServers, calendars };
+  return { mcp, skills, builtinTools, dataSources, sshServers, calendars, knowledge };
 }
 
 /** Serialize tool selections for dirty comparison (Sets are not JSON-comparable). */
@@ -278,6 +279,7 @@ function serializeTools(t: ToolSelections): string {
     dataSources: [...t.dataSources].sort(),
     sshServers: [...t.sshServers].sort(),
     calendars: [...t.calendars].sort(),
+    knowledge: [...t.knowledge].sort(),
   });
 }
 
@@ -320,6 +322,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   /** Calendar credentials (serviceType="calendar") available for binding. */
   const [calendars, setCalendars] = useState<
     Array<{ id: string; name: string; description: string | null; provider: string | null }>
+  >([]);
+  /** Knowledge collections visible to this user (own + public). The runtime
+   *  mounts only enabled ones, so disabled rows are filtered out here too. */
+  const [kbCollections, setKbCollections] = useState<
+    Array<{ id: string; name: string; description: string | null; enabled: boolean }>
   >([]);
   /** LLM credentials available to pick from */
   const [llmCredentials, setLlmCredentials] = useState<LlmCredential[]>([]);
@@ -365,6 +372,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         dataSources: [...tools.dataSources].sort(),
         sshServers: [...tools.sshServers].sort(),
         calendars: [...tools.calendars].sort(),
+        knowledge: [...tools.knowledge].sort(),
       },
     }) as Record<string, unknown>,
     [form, tools],
@@ -397,6 +405,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         dataSources:  Array.isArray(t.dataSources)  ? new Set(t.dataSources)  : prev.dataSources,
         sshServers:   Array.isArray(t.sshServers)   ? new Set(t.sshServers)   : prev.sshServers,
         calendars:    Array.isArray(t.calendars)    ? new Set(t.calendars)    : prev.calendars,
+        knowledge:    Array.isArray(t.knowledge)    ? new Set(t.knowledge)    : prev.knowledge,
       }));
       applied.push("tools");
     }
@@ -499,6 +508,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         dataSourcesRes,
         sshServersRes,
         calendarsRes,
+        kbRes,
       ] = await Promise.all([
         isNew ? Promise.resolve(null) : fetch(`/api/builtin-agents/${agentId}`),
         fetch("/api/tools"),
@@ -508,6 +518,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         fetch("/api/data-sources"),
         fetch("/api/ssh-servers"),
         fetch("/api/calendar-credentials"),
+        fetch("/api/kb"),
       ]);
       if (!isNew && agentRes && agentRes.ok) {
         const data = await agentRes.json() as AgentDetail;
@@ -562,6 +573,15 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         }>;
         setCalendars(all);
       }
+      if (kbRes.ok) {
+        const all = (await kbRes.json()) as Array<{
+          id: string;
+          name: string;
+          description: string | null;
+          enabled: boolean;
+        }>;
+        setKbCollections(all.filter((k) => k.enabled));
+      }
       if (allAgentsRes.ok) {
         // Find existing system agents to flag their slots as occupied.
         const all = (await allAgentsRes.json()) as Array<{ id: string; role?: AgentRole | null; createdBy?: string }>;
@@ -593,6 +613,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       ...[...tools.dataSources].map((id) => ({ toolType: "datasource", dataSourceId: id })),
       ...[...tools.sshServers].map((id) => ({ toolType: "ssh_server", sshServerId: id })),
       ...[...tools.calendars].map((id) => ({ toolType: "calendar", calendarCredentialId: id })),
+      ...[...tools.knowledge].map((id) => ({ toolType: "knowledge", kbCollectionId: id })),
     ];
 
     try {
@@ -1042,6 +1063,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 {
                   id: "knowledge" as const,
                   label: "Knowledge",
+                  count: { selected: tools.knowledge.size, total: kbCollections.length },
                 },
               ];
               
@@ -1180,9 +1202,16 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                       />
                     )}
                     {activeTab === "knowledge" && (
-                      <p className="text-xs text-muted-foreground py-2">
-                        Knowledge base support is coming soon.
-                      </p>
+                      <CheckList
+                        items={kbCollections.map((k) => ({
+                          id: k.id,
+                          name: k.name,
+                          description: k.description,
+                        }))}
+                        selected={tools.knowledge}
+                        onToggle={(id) => toggleTool("knowledge", id)}
+                        emptyText="No enabled knowledge collections. Create one from the Knowledge panel."
+                      />
                     )}
                   </div>
                 </>

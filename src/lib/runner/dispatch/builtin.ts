@@ -25,6 +25,11 @@ import {
 } from "@/lib/outcomes/prompt-block.server";
 import { mcpProviderPool } from "@/lib/mcp";
 import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
+import { buildKbPromptBlock } from "@/lib/kb/prompt-block.server";
+import {
+  buildListKbPagesTool,
+  buildReadKbPageTool,
+} from "@/lib/kb/runtime-tools";
 import {
   buildListSshHostsTool,
   buildRunSshCommandTool,
@@ -174,6 +179,7 @@ export async function buildBuiltinAgents(
     const dataSourceIds: string[] = [];
     const sshServerIds: string[] = [];
     const calendarCredentialIds: string[] = [];
+    const kbCollectionIds: string[] = [];
     for (const tool of spec.tools) {
       if (tool.kind === "mcp_server") {
         try {
@@ -258,6 +264,8 @@ export async function buildBuiltinAgents(
         sshServerIds.push(tool.sshServerId);
       } else if (tool.kind === "calendar") {
         calendarCredentialIds.push(tool.calendarCredentialId);
+      } else if (tool.kind === "knowledge") {
+        kbCollectionIds.push(tool.kbCollectionId);
       }
       // mcp_tool: not yet wired (single-tool granularity).
     }
@@ -276,6 +284,7 @@ export async function buildBuiltinAgents(
       await buildDataSourcesPromptBlock(dataSourceIds);
     const sshHostsRuntime =
       await buildSshHostsPromptBlock(sshServerIds);
+    const kbRuntime = await buildKbPromptBlock(kbCollectionIds);
 
     // Binding any data source auto-mounts `extract_dataset_by_sql`.
     // Built directly (not through buildBuiltinTools) — the user-tickable
@@ -290,6 +299,16 @@ export async function buildBuiltinAgents(
       ? [
           buildRunSshCommandTool({ agentSshServerIds: sshServerIds }),
           buildListSshHostsTool({ agentSshServerIds: sshServerIds }),
+        ]
+      : [];
+
+    // Binding any kb_collection auto-mounts list_kb_pages + read_kb_page. The
+    // pair is a capability rather than a checkbox, so it is absent from the
+    // user-tickable catalog and built directly here.
+    const kbTools: ToolDefinition[] = kbCollectionIds.length > 0
+      ? [
+          buildListKbPagesTool({ agentKbCollectionIds: kbCollectionIds }),
+          buildReadKbPageTool({ agentKbCollectionIds: kbCollectionIds }),
         ]
       : [];
 
@@ -498,6 +517,7 @@ export async function buildBuiltinAgents(
       if (calendarRuntime.promptBlock.length > 0) {
         parts.push(calendarRuntime.promptBlock);
       }
+      if (kbRuntime.promptBlock.length > 0) parts.push(kbRuntime.promptBlock);
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
       if (htmlPagePromptBlock.length > 0) parts.push(htmlPagePromptBlock);
       if (bentoSlidesPromptBlock.length > 0) parts.push(bentoSlidesPromptBlock);
@@ -577,6 +597,8 @@ export async function buildBuiltinAgents(
       // Ambient read-only
       "get_current_datetime",
       "list_ssh_hosts",
+      "list_kb_pages",
+      "read_kb_page",
       "get_trace_details",
       // Skill system tools (read-only metadata or reviewed code)
       "get_skill",
@@ -664,6 +686,7 @@ export async function buildBuiltinAgents(
       ...(repeatTool ? [repeatTool] : []),
       ...dataSourceTools,
       ...sshTools,
+      ...kbTools,
       ...calendarTools,
       ...ambientTools,
     ].map((t) => toolPipeline(t));

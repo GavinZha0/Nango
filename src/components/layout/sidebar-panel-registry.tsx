@@ -17,6 +17,7 @@ import {
   FlaskConical,
   Medal,
   GlobeCheck,
+  BookOpenText,
 } from "lucide-react";
 import type { LeftPanelId } from "@/store/sidebar";
 import { LEFT_PANEL_IDS } from "@/store/sidebar";
@@ -28,6 +29,7 @@ import { ArtifactPanel } from "@/components/left-panels/ArtifactPanel";
 import { AgentPanel } from "@/components/left-panels/AgentPanel";
 import { McpPanel } from "@/components/left-panels/McpPanel";
 import { SkillsPanel } from "@/components/left-panels/SkillsPanel";
+import { KbPanel } from "@/components/left-panels/KbPanel";
 import { SchedulesPanel } from "@/components/left-panels/SchedulesPanel";
 import { VerificationPanel } from "@/components/left-panels/VerificationPanel";
 import { EvaluationPanel } from "@/components/left-panels/EvaluationPanel";
@@ -114,6 +116,14 @@ export const SIDEBAR_PANEL_REGISTRY: Record<LeftPanelId, SidebarPanelDefinition>
     icon: BicepsFlexed,
     component: SkillsPanel,
     href: "/skills",
+    requiredRole: "editor",
+  },
+  kb: {
+    id: "kb",
+    label: "Knowledge",
+    icon: BookOpenText,
+    component: KbPanel,
+    href: "/kb",
     requiredRole: "editor",
   },
   verification: {

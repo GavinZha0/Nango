@@ -192,7 +192,7 @@ For detailed design and implementation phases, see:
 | Group | Paths | Guards | Purpose |
 |---|---|---|---|
 | `(auth)` | `/sign-in`, `/sign-up` | none | accessible while signed out |
-| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/schedule[/[id]]`, `/notifications`, `/web-auto[/[id]]`, `/admin/guardrails` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
+| `(workspace)` | `/`, `/admin/*`, `/profile`, `/agent[/[id]]`, `/mcp`, `/artifact`, `/dashboard`, `/outcomes`, `/skills[/[id]]`, `/kb[/[id]]`, `/schedule[/[id]]`, `/notifications`, `/web-auto[/[id]]`, `/admin/guardrails` | `requireSession()` in layout; `admin/*` adds `requireAdmin()` | main workspace |
 | API | `/api/*` | `getSession()` per-route | unified 401 handling |
 
 ### 4.2 Frontend Layout (Three-Pane)
@@ -216,6 +216,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `/api/builtin-agents`, `/[id]` | CRUD | Built-in agent + tool bindings (incl. `role` enum) | session |
 | `/api/mcp-servers`, `/[id]/discover`, `/[id]/call-tool` | CRUD/RPC | MCP server registration, tool discovery, invocation | session |
 | `/api/skills`, `/api/skills/[id]`, `/api/skills/[id]/files/[...]` | CRUD | Skills CRUD + helper-file read | session |
+| `/api/kb`, `/api/kb/[id]`, `/api/kb/[id]/groups/[groupId]`, `/api/kb/[id]/pages/[pageId]` | CRUD | Knowledge collections, groups, pages. Lists and the tree are visibility-filtered; only the single-page GET ships `content` | session read / editor write |
 | `/api/verification-suites[/id]`, `/api/verification-cases/[id]`, `/api/verification-runs[/id]`, `/api/verification-servers/[id]` | CRUD/RPC | Verification suites, cases, runs (suite + server-wide, viewer-scoped) and results | editor |
 | `/api/eval-suites[/id]`, `/api/eval-cases/[id]`, `/api/eval-runs[/id]` | CRUD/RPC | Evaluation suites, cases, runs (suite + agent batch), and results. Single-case runs (`/api/eval-cases/[id]/run?stream=true`) support request-scoped NDJSON two-phase streaming. | editor |
 | `/api/web-auto-suites[/id]`, `/api/web-auto-cases/[id]`, `/api/web-auto-runs[/id]` | CRUD/RPC | Web Auto suites, cases, execution batches, and results. Single-case runs (`/api/web-auto-cases/[id]/run?stream=true`) support request-scoped NDJSON two-phase streaming. | editor |
@@ -253,7 +254,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `credentials/lookup.ts` | Decrypt + lookup with in-memory cache and explicit invalidation |
 | `access/agent-visibility.ts` | Server-side visibility checks: `isAgentVisibleTo` (point lookup) and `listVisibleAgentIds` (enumeration). Replaces implicit cache-based authorization. |
 | `builtin-agents/agent-pool.ts` + `builtin-agents/index.ts` | Process-wide LRU cache (max 500, 10-min TTL) of decrypted `AgentSpec` keyed by agentId. Singleton in `builtin-agents/index.ts`. |
-| `builtin-agents/agent-spec.ts` | Polymorphic `AgentToolRef` (mcp_server / mcp_tool / skill / builtin_tool) decoded from `builtin_agent_tool` rows. |
+| `builtin-agents/agent-spec.ts` | Polymorphic `AgentToolRef` (mcp_server / mcp_tool / skill / builtin_tool / datasource / ssh_server / calendar / knowledge) decoded from `builtin_agent_tool` rows. |
 | `mcp/provider-pool.ts` + `mcp/index.ts` | Process-wide MCP provider pool: one transport per server, refcounted, with idle reaper and detach-on-evict. Singleton in `mcp/index.ts`. |
 | `credentials/invalidation.ts` | Cross-cutting helpers: `invalidateForCredentialChange` and `invalidateForMcpServerChange`. Call from any write path. |
 | `mcp/client-providers.ts` | `createGracefulMcpProvider` — degrade MCP failures without aborting agent runs; supports `mcp.execution_timeout` |
@@ -278,6 +279,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `agent-pipeline/` | Safety guardrail interceptor pipeline (`composeToolPipeline`), Tool Risk Registry, tag sanitization, loop detection, input/output inspection (see [docs/guardrails.md](file:///d:/AI/nango/docs/guardrails.md)) |
 | `outcomes/` | Transient outcomes management, pure reducer `applySlideEdit`, and thread replay rebuilders (see [docs/outcomes.md](file:///d:/AI/nango/docs/outcomes.md), [docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)) |
 | `bento/` | Bento Presentation Slides templates, HTML compiler, and export assets (see [docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)) |
+| `kb/` (see `docs/kb.md`) | Knowledge Base: service (tree + budget rules as typed errors), `lookup.ts` agent-side reads, `prompt-block.server.ts` derived index, `runtime-tools.ts` (`list_kb_pages` / `read_kb_page`). Deliberately uncached — the binding is the grant and every read goes to the DB. |
 | `domain/artifact.ts` | Artifact type enum: `code` / `chart` / `dashboard` / `image` / `html` / `ppt` / `report` |
 
 ### 4.5 Client State (Zustand)
@@ -457,6 +459,7 @@ Lookup paths (server-side only):
 | Credentials | `credential` | All secrets encrypted; `serviceType` ∈ `llm/search/agent/observability/integration/datasource/other` |
 | Built-in Agents | `builtin_agent`, `builtin_agent_tool` | Agent definition + tool bindings (discriminated union) |
 | Tool sources | `mcp_server`, `skill`, `skill_file` | MCP server / DB-resident Skill (helper bytes in `skill_file.content::bytea`) |
+| Knowledge | `kb_collection`, `kb_group`, `kb_page` | Human-authored, agent-read corpus in three disclosure levels (collection → group → page) with no vectors and no search tool: binding a collection injects its derived index and mounts `list_kb_pages` / `read_kb_page`. Deletes are hard; ownership columns are SET NULL (see [docs/kb.md](file:///d:/AI/nango/docs/kb.md)) |
 | Data analysis | `data_source`, `artifact`, `menu_item` | DataSource = agent-facing connection + access policy (referencing a `credential` for auth); Artifact = first-class resource for charts / dashboards / slides |
 | Verification | `verification_suite`, `verification_case`, `verification_run`, `verification_case_result` | Deterministic assert-on-output testing for MCP tools. Deleting an MCP server detaches suites (`mcp_server_id` → SET NULL; `mcp_server_name` snapshot kept) instead of cascading (see [docs/verification.md](file:///d:/AI/nango/docs/verification.md)) |
 | Evaluation | `eval_suite`, `eval_case`, `eval_run`, `eval_case_result` | Stochastic quality evaluations using LLM-as-Judge (see [docs/evaluation.md](file:///d:/AI/nango/docs/evaluation.md)) |
@@ -473,6 +476,7 @@ Lookup paths (server-side only):
 | `skill` | `skill_id` | DB-resident skill |
 | `builtin_tool` | `builtin_tool` (text) | named built-in tool e.g. `web_search` |
 | `datasource` | `data_source_id` | data source the agent is allowed to query via `extract_dataset_by_sql` |
+| `knowledge` | `kb_collection_id` | knowledge collection whose index is injected and whose `list_kb_pages` / `read_kb_page` are mounted (CASCADE: the mount is meaningless without the corpus) |
 
 Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the user); deleting the parent agent uses `CASCADE`.
 

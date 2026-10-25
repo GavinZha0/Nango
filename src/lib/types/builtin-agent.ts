@@ -54,6 +54,7 @@ export interface BoundToolRow {
   builtinTool?: string | null;
   dataSourceId?: string | null;
   calendarCredentialId?: string | null;
+  kbCollectionId?: string | null;
 }
 
 /**

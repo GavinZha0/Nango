@@ -11,6 +11,7 @@ export const LEFT_PANEL_IDS = [
   "agent",
   "mcp",
   "skills",
+  "kb",
   "datasource",
   "ssh-server",
   "verification",

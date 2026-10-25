@@ -172,7 +172,7 @@ with options from the `options` JSONB column.
 
 ## 9. Config Keys Reference
 
-There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `host`, `download`, `auth`, `mcp`, and `observability`. 
+There are predefined keys across groups such as `sandbox`, `cache`, `datasource`, `ssh`, `skill`, `kb`, `host`, `download`, `auth`, `mcp`, and `observability`. 
 
 For the complete, authoritative list of keys, their default values, and descriptions, always refer to `src/lib/config/defaults.ts`.
 
@@ -226,6 +226,20 @@ For the complete, authoritative list of keys, their default values, and descript
 | `skill.max_file_bytes` | 262144 | number | Max single file size in bytes (256 KB) |
 | `skill.max_files` | 100 | number | Max files per skill |
 | `skill.max_total_bytes` | 10485760 | number | Max total size per skill (10 MB) |
+
+### kb (4)
+
+Knowledge-base storage and read budgets. Description caps are code constants in
+`src/lib/kb/limits.ts`, not keys here. `kb.max_groups` is also the only bound on
+how many index lines a mounted collection injects into every bound agent's
+prompt — there is no mount byte budget (see `docs/kb.md`).
+
+| Key | Default | Type | Description |
+|---|---|---|---|
+| `kb.page_max_bytes` | 262144 | number | Max stored bytes for one knowledge page's content (256 KB) |
+| `kb.read_max_bytes` | 65536 | number | Max bytes one `read_kb_page` call returns (64 KB) |
+| `kb.max_pages` | 50 | number | Max pages per knowledge collection |
+| `kb.max_groups` | 20 | number | Max groups per knowledge collection |
 
 ### host (3)
 

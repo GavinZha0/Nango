@@ -124,6 +124,7 @@ interface ToolRow {
   dataSourceId: string | null;
   sshServerId: string | null;
   calendarCredentialId: string | null;
+  kbCollectionId: string | null;
 }
 
 /** Production loader: DB row + decrypted credential. CONTRACT: returns
@@ -171,6 +172,7 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
       dataSourceId: BuiltinAgentToolTable.dataSourceId,
       sshServerId: BuiltinAgentToolTable.sshServerId,
       calendarCredentialId: BuiltinAgentToolTable.calendarCredentialId,
+      kbCollectionId: BuiltinAgentToolTable.kbCollectionId,
     })
     .from(BuiltinAgentToolTable)
     .where(eq(BuiltinAgentToolTable.agentId, agentId))
@@ -235,6 +237,10 @@ function mapToolRow(row: ToolRow): AgentToolRef | null {
     case "calendar":
       return row.calendarCredentialId
         ? { kind: "calendar", calendarCredentialId: row.calendarCredentialId }
+        : null;
+    case "knowledge":
+      return row.kbCollectionId
+        ? { kind: "knowledge", kbCollectionId: row.kbCollectionId }
         : null;
     default: {
       // CONTRACT: extending `AgentToolType` without updating this
