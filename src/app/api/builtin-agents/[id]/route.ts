@@ -14,7 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { invalidateForAgentChange } from "@/lib/cache/invalidation";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
-import { assertKbCollectionsBindable } from "@/lib/kb/access";
+import { filterBindableKbCollectionIds } from "@/lib/kb/access";
 import {
   canChangeVisibility,
   canDeleteResource,
@@ -318,20 +318,29 @@ export const PATCH = withEditor<{ id: string }>(
               && t.builtinTool !== undefined
               && !SUPERVISOR_TOOL_NAME_SET.has(t.builtinTool)),
         );
-        // The binding is the KB grant, so the bind-time gate is the only place
-        // visibility and enabled can be checked before the runtime reads.
-        await assertKbCollectionsBindable(
+        // The binding is the KB grant, so this filter is the only place
+        // visibility and enabled are checked before the runtime reads. An id
+        // that is deleted, hidden, or disabled is dropped from the replacement
+        // set rather than rejected — the picker cannot render it, so rejecting
+        // would make the agent permanently unsaveable.
+        const bindableKbIds: Set<string> = await filterBindableKbCollectionIds(
           userTools
             .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
             .map((t) => t.kbCollectionId as string),
           session,
         );
+        const keptTools = userTools.filter(
+          (t) =>
+            t.toolType !== "knowledge"
+            || !t.kbCollectionId
+            || bindableKbIds.has(t.kbCollectionId),
+        );
         await tx
           .delete(BuiltinAgentToolTable)
           .where(eq(BuiltinAgentToolTable.agentId, id));
-        if (userTools.length > 0) {
+        if (keptTools.length > 0) {
           await tx.insert(BuiltinAgentToolTable).values(
-            userTools.map((t, i) => ({
+            keptTools.map((t, i) => ({
               agentId: id,
               toolType: t.toolType,
               mcpServerId: t.mcpServerId ?? null,

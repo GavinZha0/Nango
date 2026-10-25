@@ -214,8 +214,9 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
     });
   });
 
-  describe("PATCH knowledge binding grant gate", () => {
+  describe("PATCH knowledge binding filter", () => {
     const KB_ID = "123e4567-e89b-12d3-a456-426614174000";
+    const OTHER_KB_ID = "223e4567-e89b-12d3-a456-426614174000";
     const agent = {
       id: "agent-1",
       name: "Research Assistant",
@@ -226,44 +227,55 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
       prompt: null,
     };
 
-    // Awaiting order: agent SELECT -> UPDATE .returning() -> gate SELECT
-    // -> (pass only) tools DELETE -> tools INSERT .values().
-    function patchWithKnowledge() {
+    // Awaiting order: agent SELECT -> UPDATE .returning() -> filter SELECT
+    // -> tools DELETE -> (kept only) tools INSERT .values().
+    function patchWithKnowledge(ids: string[]) {
       return createMockRequest("/api/builtin-agents/agent-1", {
         method: "PATCH",
-        body: { tools: [{ toolType: "knowledge", kbCollectionId: KB_ID }] },
+        body: {
+          tools: ids.map((id) => ({ toolType: "knowledge", kbCollectionId: id })),
+        },
       });
     }
 
-    it("404s a hidden or missing collection and never inserts the binding", async () => {
+    it("drops a deleted, hidden, or disabled collection and still saves", async () => {
       dbMock.$enqueue([agent], [agent], []);
 
-      const res = await PATCH(patchWithKnowledge(), { params: Promise.resolve({ id: "agent-1" }) });
-
-      expect(res.status).toBe(404);
-      const json = await res.json();
-      expect(json.message).toMatch(/Knowledge collection not found/i);
-      expect(dbMock.insert).not.toHaveBeenCalled();
-    });
-
-    it("400s a disabled-but-visible collection, naming it", async () => {
-      dbMock.$enqueue([agent], [agent], [{ id: KB_ID, name: "x-manual", enabled: false }]);
-
-      const res = await PATCH(patchWithKnowledge(), { params: Promise.resolve({ id: "agent-1" }) });
-
-      expect(res.status).toBe(400);
-      const json = await res.json();
-      expect(json.message).toMatch(/x-manual.*disabled/);
-      expect(dbMock.insert).not.toHaveBeenCalled();
-    });
-
-    it("binds a visible enabled collection", async () => {
-      dbMock.$enqueue([agent], [agent], [{ id: KB_ID, name: "x-manual", enabled: true }]);
-
-      const res = await PATCH(patchWithKnowledge(), { params: Promise.resolve({ id: "agent-1" }) });
+      const res = await PATCH(patchWithKnowledge([KB_ID]), {
+        params: Promise.resolve({ id: "agent-1" }),
+      });
 
       expect(res.status).toBe(200);
-      expect(dbMock.insert).toHaveBeenCalled();
+      // The stale binding is removed with the rest of the replaced tool rows.
+      expect(dbMock.delete).toHaveBeenCalled();
+      expect(dbMock.insert).not.toHaveBeenCalled();
+    });
+
+    it("keeps bindable ids and drops the rest in the same save", async () => {
+      dbMock.$enqueue([agent], [agent], [{ id: KB_ID }]);
+
+      const req = createMockRequest("/api/builtin-agents/agent-1", {
+        method: "PATCH",
+        body: {
+          tools: [
+            { toolType: "knowledge", kbCollectionId: KB_ID },
+            { toolType: "knowledge", kbCollectionId: OTHER_KB_ID },
+            // A filter regression must not drop non-knowledge bindings.
+            { toolType: "skill", skillId: "423e4567-e89b-12d3-a456-426614174000" },
+          ],
+        },
+      });
+      const res = await PATCH(req, { params: Promise.resolve({ id: "agent-1" }) });
+
+      expect(res.status).toBe(200);
+      const valuesCalls = dbMock._chain.values.mock.calls;
+      const toolRows = valuesCalls[valuesCalls.length - 1]?.[0] as Array<{
+        kbCollectionId: string | null;
+        skillId: string | null;
+      }>;
+      expect(toolRows).toHaveLength(2);
+      expect(toolRows.map((r) => r.kbCollectionId).filter(Boolean)).toEqual([KB_ID]);
+      expect(toolRows.some((r) => r.skillId !== null)).toBe(true);
     });
   });
 });

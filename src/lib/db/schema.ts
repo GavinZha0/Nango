@@ -1053,8 +1053,10 @@ export type KbPageEntity = typeof KbPageTable.$inferSelect;
 export const BuiltinAgentTable = pgTable("builtin_agent", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
 
-  /** System-agent role; nullable. DB CHECK pins the enum (see migration
-   *  0003) — TS type narrows in client + server. */
+  /** System-agent role; nullable (null = regular agent). The column is plain
+   *  text: the enum is pinned only by the Zod schema at the built-in-agent API
+   *  edge and by the TS type. The DB adds two partial unique indexes — at most
+   *  one supervisor and one secretary per user. */
   role: text("role").$type<AgentRole | null>(),
 
   name: text("name").notNull(),

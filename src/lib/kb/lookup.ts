@@ -10,7 +10,7 @@
 
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -113,22 +113,31 @@ export async function listKbGroupLinesByIds(
   return orderGroupTree(rows);
 }
 
+/** Page total for one group of one collection; `groupId: null` is the ungrouped bucket. */
+export interface KbPageGroupCount {
+  collectionId: string;
+  groupId: number | null;
+  count: number;
+}
+
 /**
- * One row per page, carrying only which group it sits in, so the block can
- * count without pulling names or descriptions it never renders. The block
- * needs `(N pages)`; `list_kb_pages` needs the names and does its own read.
+ * Page totals per group, one grouped read for the whole bound set. The block
+ * only needs `(N pages)`; `list_kb_pages` needs the names and does its own
+ * read.
  */
 export async function countKbPagesByGroup(
   ids: readonly string[],
-): Promise<{ collectionId: string; groupId: number | null }[]> {
+): Promise<KbPageGroupCount[]> {
   if (ids.length === 0) return [];
   return db
     .select({
       collectionId: KbPageTable.collectionId,
       groupId: KbPageTable.groupId,
+      count: count(),
     })
     .from(KbPageTable)
-    .where(inArray(KbPageTable.collectionId, [...ids]));
+    .where(inArray(KbPageTable.collectionId, [...ids]))
+    .groupBy(KbPageTable.collectionId, KbPageTable.groupId);
 }
 
 /**

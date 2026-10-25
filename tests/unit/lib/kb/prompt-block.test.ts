@@ -77,12 +77,9 @@ describe("buildKbPromptBlock", () => {
       groupLine(3, "chapter-02", null, null),
     ]);
     mockPageCounts.mockResolvedValue([
-      { collectionId: KB_A, groupId: 1 },
-      { collectionId: KB_A, groupId: 1 },
-      { collectionId: KB_A, groupId: 2 },
-      { collectionId: KB_A, groupId: null },
-      { collectionId: KB_A, groupId: null },
-      { collectionId: KB_A, groupId: null },
+      { collectionId: KB_A, groupId: 1, count: 2 },
+      { collectionId: KB_A, groupId: 2, count: 1 },
+      { collectionId: KB_A, groupId: null, count: 3 },
     ]);
 
     const { promptBlock } = await buildKbPromptBlock([KB_A]);
@@ -101,11 +98,11 @@ describe("buildKbPromptBlock", () => {
   it("stops at group level: no page name or body ever reaches the block", async () => {
     mockCollections.mockResolvedValue([collection(KB_A, "x-manual", "Manual.")]);
     mockGroups.mockResolvedValue([groupLine(1, "chapter-01", null, "Install.")]);
-    mockPageCounts.mockResolvedValue([{ collectionId: KB_A, groupId: 1 }]);
+    mockPageCounts.mockResolvedValue([{ collectionId: KB_A, groupId: 1, count: 1 }]);
 
     const { promptBlock } = await buildKbPromptBlock([KB_A]);
 
-    // `countKbPagesByGroup` ships only the group pointer, so there is no page
+    // `countKbPagesByGroup` ships only per-group totals, so there is no page
     // title in the block even for a collection of one page.
     expect(promptBlock).not.toContain("bare-metal");
     expect(mockPageCounts.mock.calls[0][0]).toEqual([KB_A]);
@@ -121,9 +118,8 @@ describe("buildKbPromptBlock", () => {
       groupLine(1, "shared-name", null, null, KB_B),
     ]);
     mockPageCounts.mockResolvedValue([
-      { collectionId: KB_A, groupId: 1 },
-      { collectionId: KB_A, groupId: 1 },
-      { collectionId: KB_B, groupId: 1 },
+      { collectionId: KB_A, groupId: 1, count: 2 },
+      { collectionId: KB_B, groupId: 1, count: 1 },
     ]);
 
     const { promptBlock } = await buildKbPromptBlock([KB_A, KB_B]);

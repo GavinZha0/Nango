@@ -78,6 +78,24 @@ describe("kb/lookup — collection resolution", () => {
   });
 });
 
+describe("kb/lookup — prompt-block counts", () => {
+  it("counts pages per group in one grouped read", async () => {
+    dbMock.$enqueue([
+      { collectionId: COLLECTION_ID, groupId: 1, count: 3 },
+      { collectionId: COLLECTION_ID, groupId: null, count: 2 },
+    ]);
+
+    const rows = await countKbPagesByGroup([COLLECTION_ID]);
+
+    expect(rows).toEqual([
+      { collectionId: COLLECTION_ID, groupId: 1, count: 3 },
+      { collectionId: COLLECTION_ID, groupId: null, count: 2 },
+    ]);
+    expect(dbMock.select).toHaveBeenCalledTimes(1);
+    expect(dbMock._chain.groupBy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("kb/lookup — derived index", () => {
   it("prints each level-1 group immediately followed by its children", async () => {
     dbMock.$enqueue(

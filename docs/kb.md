@@ -155,6 +155,15 @@ see one row.
 | Slug pattern, description floor and ceiling, `content` non-empty, unknown body keys refused | API edge (Zod `.strict()`) | Typed `400 VALIDATION_FAILED` with the offending path, before any DB call. |
 | Visibility / edit / ownership | `src/lib/kb/access.ts` | §13. |
 
+**Known limitation — text validation is narrow.** `assertValidText` (§5) runs only
+on `content`, and only looks for unpaired surrogates. A NUL (`U+0000`) is checked
+nowhere — not in `content`, `name`, `description` or `source_ref` — and Postgres
+rejects the row with `22021`, which surfaces as an opaque 500 instead of
+`400 INVALID_TEXT`. A name or description carrying an unpaired surrogate is not
+pre-validated either. The row is never written, so this is a wrong error code, not
+stored corruption; fixing it means widening both the fields and the character set
+`assertValidText` covers.
+
 ### 3.4 Ownership columns are SET NULL
 
 `created_by` / `updated_by` on all three tables use `ON DELETE SET NULL`. A KB is a
@@ -232,7 +241,9 @@ Service-side rules, all in `src/lib/kb/service.ts`:
   `assertContentFits` measures `Buffer.byteLength(content, "utf8")` against
   `kb.page_max_bytes` and reports `{reason: "PAGE_TOO_LARGE", sizeBytes, maxBytes}`;
   `assertValidText` refuses an unpaired surrogate (`400 INVALID_TEXT`); `size` is
-  re-measured whenever `content` is written and left alone otherwise.
+  re-measured whenever `content` is written and left alone otherwise. Text
+  validation covers `content` only — names, descriptions and `source_ref` are not
+  scanned; see the limitation in §3.3.
 - **Audit.** Collection and page writes stamp `updatedBy` + `updatedAt`; group
   writes stamp nothing.
 
@@ -243,17 +254,21 @@ There is no cache invalidation step: nothing is cached (§4, §16).
 Binding is saved as a `builtin_agent_tool` row (§3.1); the agent editor's
 **Knowledge** tab is a picker over visible collections — disabled ones are
 listed with a hint rather than hidden, because a binding that was enabled at
-bind time and disabled later must stay reachable to uncheck — with a
+bind time and disabled later must stay reachable — re-enable the collection
+before saving, or let the save drop it — with a
 `{selected, total}` badge like the Skills and Data sources tabs.
 
-**CONTRACT — the bind gate.** "The binding is the grant" (§7.3) only holds if
-the grant's write path validates, so both built-in-agent routes call
-`assertKbCollectionsBindable` before inserting any `knowledge` tool row: every
-id must be visible to the session **and** enabled. Hidden and missing collapse
-into one `404` (private ids stay opaque); a disabled-but-visible id is refused
-with a `400` that names it. The picker's client-side list is not a check — the
-API accepts any uuid — and the runtime stays RBAC-free precisely because the
-gate settled each grant once, at the last point where it can be decided.
+**CONTRACT — the bind filter.** "The binding is the grant" (§7.3) only holds if
+the grant's write path validates, so both built-in-agent routes pass every
+`knowledge` id through `filterBindableKbCollectionIds` before inserting the tool
+rows: only ids visible to the session **and** enabled are written. An id that no
+longer resolves — deleted, hidden, or disabled — is **dropped from the binding
+rather than rejected**. The picker can only render what `GET /api/kb` returns, so
+a collection that turned private or disabled after it was bound would otherwise
+be impossible to uncheck, and every save of that agent would fail. Dropping is
+equally safe: an unbindable id is never written, so the RBAC-free runtime never
+sees a grant the binder could not see. The picker's client-side list is still not
+a check — the API accepts any uuid and decides server-side.
 
 At dispatch, [src/lib/runner/dispatch/builtin.ts:267](file:///d:/AI/nango/src/lib/runner/dispatch/builtin.ts#L267)
 collects `tool.kind === "knowledge"` into `kbCollectionIds`, then:
@@ -327,6 +342,16 @@ Rules of the render:
   (`flatten()` in the same file) before rendering. This text is author-written and
   lands in the system prompt, so a newline in a description must not mint its own
   bullet and imitate another collection.
+- **Known limitation — a flattened group name may not be a usable handle.**
+  `flatten()` collapses every whitespace run, but `list_kb_pages(group_name)`
+  matches the stored name exactly (§7.3). A group named with a newline or repeated
+  inner spaces therefore prints in the block as a single-spaced label that no
+  longer matches the argument. The agent can still recover the group from the
+  whole-collection listing — `list_kb_pages` prints stored names verbatim — so
+  nothing is lost, but the block's own label can miss. Page names never enter the
+  block, so page handles are unaffected. The repair is renaming the group to a
+  single-spaced form, not relaxing the matcher: flattening is the SECURITY rule
+  above, and the exact match is what makes a name a name.
 - `promptBlock` is `""` when no usable collection is bound, and the caller skips
   the concatenation.
 
@@ -417,10 +442,12 @@ illegitimate as a single context injection.
 - Content is normalised to LF first (`\r\n` and `\r` → `\n`) so windows are stable.
 - **A line longer than the remaining room is cut mid-line**, not returned whole —
   SECURITY: the budget is what keeps one tool result from flooding the context.
-  `truncated: true`, `nextOffset`, and a `note` that tells the agent paging cannot
-  recover the rest and that the repair is on the authoring side (re-import the page
-  pretty-printed / wrapped). Otherwise an agent loops on `offset` values that all
-  return the same head.
+  The cut is final for that line: `endLine` names the cut line and `nextOffset` is
+  `endLine + 1`, so **the tail of the line is reachable by no `offset`** — a retry
+  returns the same head. `truncated: true`, `nextOffset` and a `note` say so and
+  point at the repair on the authoring side (re-import the page pretty-printed /
+  wrapped). Known limitation: a page that is one unbroken line — minified JSON, a
+  single-row CSV — is readable only up to `kb.read_max_bytes`.
 - The cut drops a partial code point rather than emitting U+FFFD. Bytes, not
   characters, are counted: a CJK page's `line.length` understates its context cost
   threefold.
@@ -538,7 +565,7 @@ Page guard: `src/app/(workspace)/kb/layout.tsx` → `requireEditor`. Sidebar ent
 | Visible (own, public, or admin) | `loadVisibleCollection` | `404 NOT_FOUND` — hidden and missing are identical, so private ids stay opaque | `GET /api/kb/[id]`, `GET …/pages/[pageId]` |
 | Content write | `loadEditableCollection` | `403 FORBIDDEN` | all POST/PATCH/DELETE routes |
 | Strict ownership — `enabled`, `visibility`, collection delete | `loadOwnedCollection`, plus `canChangeVisibility` for the two fields | `403 FORBIDDEN` | `DELETE /api/kb/[id]`; the two fields inside `PATCH /api/kb/[id]` |
-| Bindable — visible **and** enabled | `assertKbCollectionsBindable` | `404` (hidden ≡ missing, ids stay opaque); `400` naming a disabled one | `POST /api/builtin-agents`, `PATCH /api/builtin-agents/[id]` when tools are replaced (§6) |
+| Bindable — visible **and** enabled | `filterBindableKbCollectionIds` | Ids that fail are silently dropped from the save; the rest are bound | `POST /api/builtin-agents`, `PATCH /api/builtin-agents/[id]` when tools are replaced (§6) |
 | Malformed uuid segment | `UUID_RE` pre-check | `404` before any query — a non-uuid can never match the column and Postgres would surface it as a 500 | all `[id]` routes |
 | bigint row id in the path | `requireRowId` | `400` "group/page id must be a positive integer." | group/page routes |
 
@@ -546,10 +573,47 @@ A public collection another editor authored can be read and improved but **not
 unmounted or made private** — that asymmetry is the whole reason the strict gate is
 separate from the edit gate.
 
-Runtime is RBAC-free by design (§7.3) — because the bind gate decided each
+Hidden ≡ missing holds for the **read** gate only. The write gates load the row by
+id before checking the right, so a private collection id the session cannot see
+answers `403`, while an unknown id answers `404`. Skills instead runs its
+visibility check first on every method and hides both behind `404`; the KB
+divergence is deliberate — on a write route the caller already names the row it
+means to change.
+
+Runtime is RBAC-free by design (§7.3) — because the bind filter settled each
 grant once (§6): `resolveKbCollectionForAgent(name,
 allowedIds)` checks only that the id is in the agent's own bound set and the row is
-`enabled`.
+`enabled`. That also means visibility is never re-evaluated against the runner;
+see §13.1.
+
+### 13.1 Known limitation — visibility is not re-checked at run time
+
+The bind filter evaluates **the binder's** session once, when the agent is saved.
+The runtime checks only that the collection is still `enabled` and that its id is
+in the agent's bound set; it never asks whether the user running the agent can see
+that collection (§7.3). A **public** agent is runnable by any signed-in user, so
+once the KB and the agent have different audiences, the runner still receives the
+collection's name, description and derived index, and `read_kb_page` still returns
+its full text. Two flips reach this state:
+
+- the collection turns from public to private after it was bound;
+- the agent turns from private to public after a private collection was bound to
+  it.
+
+Neither flip revokes the grant, because neither touches `builtin_agent_tool`. The
+only revocation points are the owner unbinding the KB in an editor save, a save of
+the agent's tools by an editor who cannot see the collection (the filter drops it,
+§6), or deleting / disabling the collection. Until a flip is paired with one of
+those, the exposure is real: `visibility` on `kb_collection` is an
+authoring-surface control, not a runtime one.
+
+This is a known gap, not the intended model. The intended model is that the
+binding is the grant **and the binder could see what they granted**; the gap is
+that the grant travels with the agent, not with the binder. Closing it means
+re-evaluating visibility against the runner on every KB read, which the
+RBAC-free runtime deliberately avoids; the gap is documented rather than hidden.
+Operationally: re-check an agent's Knowledge tab before making a KB private, and
+before publishing an agent that binds a private KB.
 
 ## 14. API surface
 
@@ -638,6 +702,7 @@ Cross-cutting UI rules:
 | `tests/unit/lib/kb/runtime-tools.test.ts` | Full vs. `group_name` subtree views; case-sensitive misses; the three envelopes with no discovery payload; line windowing under a byte budget, `nextOffset` continuation, mid-line cut + `note`; LF normalisation; partial code point dropped; `limit` vs. budget precedence; out-of-range offset → empty window; reads short-circuited when resolution fails. |
 | `tests/unit/lib/kb/prompt-block.test.ts` | Empty/disabled bindings render `""` with no reads; one read pass per level regardless of count; exact bullet lines and indentation; stops at group level; counts scoped per collection; legacy NULL description; whitespace flattening cannot mint a bullet; no trailing newline. |
 | `tests/unit/app/api/kb-routes.test.ts` | All six real route handlers end to end: role gates (`401`/`403`), malformed ids, slug and description refusals, `.strict()` unknown keys, two-gate PATCH, `204`/`409` deletes, tree projection, verbatim `content` and computed `size`, `contentType` enum, `kb.max_pages` refusal message. |
+| `tests/unit/app/api/builtin-agents-route.test.ts`, `builtin-agent-id-route.test.ts` | The bind filter on create and on tool replacement: a deleted, hidden or disabled id is dropped while the save still succeeds; bindable ids in the same save survive; non-knowledge bindings are never dropped. |
 | `tests/unit/lib/runner/dispatch-builtin.test.ts` | Binding mounts both tools with the agent's id set and injects the block; unbound renders nothing and builds nothing; slot order Calendars → knowledge → Charts. |
 | `tests/unit/lib/agent-pipeline/risk-registry.test.ts` | Both tools evaluate `low` / `read` / no approval / headless-allowed. |
 

@@ -216,12 +216,11 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
     });
   });
 
-  describe("POST knowledge binding grant gate", () => {
+  describe("POST knowledge binding filter", () => {
     const KB_ID = "123e4567-e89b-12d3-a456-426614174000";
+    const OTHER_KB_ID = "223e4567-e89b-12d3-a456-426614174000";
 
-    // The gate SELECT runs before the transaction, so it is the first
-    // awaited query in the create flow.
-    function createWithKnowledge() {
+    function createWithKnowledge(ids: string[]) {
       return createMockRequest("/api/builtin-agents", {
         method: "POST",
         body: {
@@ -229,33 +228,68 @@ describe("Builtin Agents API — RBAC & Security Boundaries", () => {
           model: "gpt-4o",
           modelProvider: "openai",
           credentialId: TEST_UUID,
-          tools: [{ toolType: "knowledge", kbCollectionId: KB_ID }],
+          tools: ids.map((id) => ({ toolType: "knowledge", kbCollectionId: id })),
         },
       });
     }
 
-    it("404s a hidden or missing collection before creating anything", async () => {
-      getSessionMock.mockResolvedValue(createMockSession(EDITOR_USER));
-      dbMock.$enqueue([]);
-
-      const res = await createAgent(createWithKnowledge(), { params: Promise.resolve({}) });
-
-      expect(res.status).toBe(404);
-      const json = await res.json();
-      expect(json.message).toMatch(/Knowledge collection not found/i);
-      expect(dbMock.insert).not.toHaveBeenCalled();
+    const createdAgent = createMockBuiltinAgent({
+      id: "323e4567-e89b-12d3-a456-426614174000",
+      name: "Manual Bot",
+      model: "gpt-4o",
+      modelProvider: "openai",
+      credentialId: TEST_UUID,
+      createdBy: EDITOR_USER.id,
+      visibility: "private",
     });
 
-    it("400s a disabled-but-visible collection, naming it", async () => {
+    // The filter SELECT runs before the transaction; the agent INSERT
+    // consumes the next queued result via .returning().
+    it("drops a deleted, hidden, or disabled collection and still creates the agent", async () => {
       getSessionMock.mockResolvedValue(createMockSession(EDITOR_USER));
-      dbMock.$enqueue([{ id: KB_ID, name: "x-manual", enabled: false }]);
+      dbMock.$enqueue([], [createdAgent]);
 
-      const res = await createAgent(createWithKnowledge(), { params: Promise.resolve({}) });
+      const res = await createAgent(createWithKnowledge([KB_ID]), {
+        params: Promise.resolve({}),
+      });
 
-      expect(res.status).toBe(400);
-      const json = await res.json();
-      expect(json.message).toMatch(/x-manual.*disabled/);
-      expect(dbMock.insert).not.toHaveBeenCalled();
+      expect(res.status).toBe(201);
+      // Agent row only — no knowledge tool row was inserted.
+      expect(dbMock.insert).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps bindable ids and drops the rest in the same save", async () => {
+      getSessionMock.mockResolvedValue(createMockSession(EDITOR_USER));
+      dbMock.$enqueue([{ id: KB_ID }], [createdAgent]);
+
+      const req = createMockRequest("/api/builtin-agents", {
+        method: "POST",
+        body: {
+          name: "Manual Bot",
+          model: "gpt-4o",
+          modelProvider: "openai",
+          credentialId: TEST_UUID,
+          tools: [
+            { toolType: "knowledge", kbCollectionId: KB_ID },
+            { toolType: "knowledge", kbCollectionId: OTHER_KB_ID },
+            // A filter regression must not drop non-knowledge bindings.
+            { toolType: "skill", skillId: "423e4567-e89b-12d3-a456-426614174000" },
+          ],
+        },
+      });
+
+      const res = await createAgent(req, { params: Promise.resolve({}) });
+
+      expect(res.status).toBe(201);
+      const valuesCalls = dbMock._chain.values.mock.calls;
+      const toolRows = valuesCalls[valuesCalls.length - 1]?.[0] as Array<{
+        toolType: string;
+        kbCollectionId: string | null;
+        skillId: string | null;
+      }>;
+      expect(toolRows).toHaveLength(2);
+      expect(toolRows.map((r) => r.kbCollectionId).filter(Boolean)).toEqual([KB_ID]);
+      expect(toolRows.some((r) => r.skillId !== null)).toBe(true);
     });
   });
 });

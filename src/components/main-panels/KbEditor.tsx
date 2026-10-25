@@ -122,11 +122,13 @@ async function request<T = unknown>(
   method: string,
   url: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(url, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     const payload = (await res.json().catch(() => null)) as {
@@ -191,7 +193,15 @@ export function KbEditor({
   const [pending, setPending] = useState<KbSelection | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      // Nulling the ref is what makes the aborted read's continuation a no-op:
+      // both of its paths compare the controller identity before touching state.
+      abortRef.current = null;
+    },
+    [],
+  );
 
   const {
     canEdit,
@@ -266,7 +276,20 @@ export function KbEditor({
     setError(null);
   }
 
+  /**
+   * Drop the in-flight page read. Called before the pane moves to any other
+   * target, so a response that is no longer wanted can never land over the
+   * selection that replaced it — including a cached page, or leaving the pane
+   * while the previous page is still loading.
+   */
+  function cancelPageLoad(): void {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setPageLoading(false);
+  }
+
   function loadPage(sel: { kind: "page"; id: number }): void {
+    cancelPageLoad();
     const cached = pageCache.get(sel.id);
     if (cached) {
       adopt(sel, draftOfPage(cached));
@@ -274,7 +297,6 @@ export function KbEditor({
     }
     const previous = { selection, draft, saved };
     setSelection(sel);
-    abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setPageLoading(true);
@@ -283,11 +305,16 @@ export function KbEditor({
         const page = await request<KbPageDetail>(
           "GET",
           `/api/kb/${detail.id}/pages/${sel.id}`,
+          undefined,
+          ctrl.signal,
         );
+        if (abortRef.current !== ctrl) return;
         setPageCache((prev) => new Map(prev).set(sel.id, page));
         adopt(sel, draftOfPage(page));
       } catch (err) {
-        if ((err as Error).name === "AbortError") return;
+        // A superseded read (or an unmount) lands here; the selection that
+        // replaced it is the one on screen, so there is nothing to restore.
+        if (abortRef.current !== ctrl) return;
         // Stay on the node the author was reading rather than opening a pane
         // with no body behind it.
         setSelection(previous.selection);
@@ -304,9 +331,11 @@ export function KbEditor({
   function applySelect(sel: KbSelection): void {
     switch (sel.kind) {
       case "none":
+        cancelPageLoad();
         adopt(sel, BLANK_DRAFT);
         return;
       case "new-page":
+        cancelPageLoad();
         adopt(sel, { ...BLANK_DRAFT, ...identityPatch(sel.identity) });
         return;
       case "page":
@@ -462,6 +491,9 @@ export function KbEditor({
         return next;
       });
       if (selection.kind === "page" && lostPageIds.includes(selection.id)) {
+        // An in-flight read of the page just deleted must not adopt it back
+        // once its response lands.
+        cancelPageLoad();
         adopt({ kind: "none" }, BLANK_DRAFT);
       } else if (
         kind === "group" &&

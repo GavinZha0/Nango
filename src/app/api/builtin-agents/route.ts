@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { BuiltinAgentTable, BuiltinAgentToolTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
-import { assertKbCollectionsBindable } from "@/lib/kb/access";
+import { filterBindableKbCollectionIds } from "@/lib/kb/access";
 import { isEditor, visibilitySql } from "@/lib/auth/permissions";
 import {
   isUniqueViolation,
@@ -164,13 +164,28 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     ? SUPERVISOR_PROMPT
     : body.prompt ?? null;
 
-  // The binding is the KB grant, so the bind-time gate is the only place
-  // visibility and enabled can be checked before the runtime reads.
-  await assertKbCollectionsBindable(
-    (body.tools ?? [])
+  // Build the set before the write: the bind filter decides which knowledge
+  // rows survive. Ids that are deleted, hidden, or disabled are dropped from
+  // the binding rather than failing the save — the picker cannot render them,
+  // so a rejection would make the request unfixable.
+  const userTools = (body.tools ?? []).filter(
+    (t) =>
+      t.toolType !== "builtin_tool"
+      || (t.builtinTool !== null
+        && t.builtinTool !== undefined
+        && !SUPERVISOR_TOOL_NAME_SET.has(t.builtinTool)),
+  );
+  const bindableKbIds: Set<string> = await filterBindableKbCollectionIds(
+    userTools
       .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
       .map((t) => t.kbCollectionId as string),
     session,
+  );
+  const keptTools = userTools.filter(
+    (t) =>
+      t.toolType !== "knowledge"
+      || !t.kbCollectionId
+      || bindableKbIds.has(t.kbCollectionId),
   );
 
   try {
@@ -199,18 +214,11 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         })
         .returning();
 
-      // Insert user-supplied bindings, dropping supervisor-injected
-      // tool names (server appends those itself below).
-      const userTools = (body.tools ?? []).filter(
-        (t) =>
-          t.toolType !== "builtin_tool"
-          || (t.builtinTool !== null
-            && t.builtinTool !== undefined
-            && !SUPERVISOR_TOOL_NAME_SET.has(t.builtinTool)),
-      );
-      if (userTools.length > 0) {
+      // Insert user-supplied bindings (already stripped of supervisor-injected
+      // tool names and of knowledge ids that could not be granted).
+      if (keptTools.length > 0) {
         await tx.insert(BuiltinAgentToolTable).values(
-          userTools.map((t, i) => ({
+          keptTools.map((t, i) => ({
             agentId: agent.id,
             toolType: t.toolType,
             mcpServerId: t.mcpServerId ?? null,

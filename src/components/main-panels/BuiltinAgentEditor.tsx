@@ -324,8 +324,8 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
     Array<{ id: string; name: string; description: string | null; provider: string | null }>
   >([]);
   /** Knowledge collections visible to this user (own + public). Disabled ones
-   *  stay in the list with a hint: the bind gate rejects them, and an existing
-   *  binding turned disabled later must stay reachable so it can be unchecked. */
+   *  stay in the list with a hint: the next save drops them from the binding,
+   *  so the author should see why before that happens. */
   const [kbCollections, setKbCollections] = useState<
     Array<{ id: string; name: string; description: string | null; enabled: boolean }>
   >([]);
@@ -1209,7 +1209,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                           name: k.name,
                           description: k.enabled
                             ? k.description
-                            : [k.description, "(disabled — binding is rejected until it is enabled)"]
+                            : [k.description, "(disabled — saving will remove this binding unless it is enabled again)"]
                                 .filter(Boolean)
                                 .join(" "),
                         }))}

@@ -369,7 +369,15 @@ export async function deleteGroup(
   }
 
   await db.transaction(async (tx) => {
-    await tx.delete(KbPageTable).where(eq(KbPageTable.groupId, groupId));
+    // `collection_id` is implied by the group's own collection but stated
+    // anyway: it is the leading column of the composite index, so the delete
+    // stays an index scan instead of a full read of `kb_page`.
+    await tx.delete(KbPageTable).where(
+      and(
+        eq(KbPageTable.collectionId, collectionId),
+        eq(KbPageTable.groupId, groupId),
+      ),
+    );
     await tx.delete(KbGroupTable).where(eq(KbGroupTable.id, groupId));
   });
 }

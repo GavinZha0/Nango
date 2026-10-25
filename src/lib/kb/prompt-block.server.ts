@@ -30,15 +30,16 @@ const INTRO =
 
 /**
  * Build the block from the `kb_collection` ids bound to one agent. Three
- * indexed queries for the whole set, regardless of how many collections are
- * bound; safe to call once per dispatch.
+ * queries per dispatch for the whole bound set — not per collection — with no
+ * cache and no byte budget: bounded by `kb.max_pages` (50), so rebuilding it
+ * every time stays cheap and a KB write needs no invalidation.
  */
 export async function buildKbPromptBlock(
   kbCollectionIds: readonly string[],
 ): Promise<KbPromptBlock> {
   if (kbCollectionIds.length === 0) return { promptBlock: "" };
 
-  const [collections, groupLines, pageRows] = await Promise.all([
+  const [collections, groupLines, pageCounts] = await Promise.all([
     listEnabledKbCollectionsByIds(kbCollectionIds),
     listKbGroupLinesByIds(kbCollectionIds),
     countKbPagesByGroup(kbCollectionIds),
@@ -55,9 +56,8 @@ export async function buildKbPromptBlock(
   // `collectionId:groupId` — `0` is the ungrouped bucket, since group ids
   // start at 1 and one counter line per collection is all this needs.
   const pageCount = new Map<string, number>();
-  for (const page of pageRows) {
-    const key = `${page.collectionId}:${page.groupId ?? 0}`;
-    pageCount.set(key, (pageCount.get(key) ?? 0) + 1);
+  for (const row of pageCounts) {
+    pageCount.set(`${row.collectionId}:${row.groupId ?? 0}`, row.count);
   }
 
   const lines: string[] = [];

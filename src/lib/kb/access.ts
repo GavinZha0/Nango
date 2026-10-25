@@ -2,8 +2,11 @@
  * KB access checks: one place that turns a URL id into an authorised
  * `kb_collection` row, plus the bind-time grant gate for agent routes.
  *
- * CONTRACT: hidden and missing are both 404, so private collection ids stay
- * opaque — the same policy `src/app/api/skills/[id]/route.ts` applies.
+ * CONTRACT: `loadVisibleCollection` answers 404 for both hidden and missing, so
+ * private collection ids stay opaque on the read routes. The write gates load by
+ * id and then check the right, so on those routes a hidden-but-existing id is
+ * 403 while a missing id is 404 — unlike `src/app/api/skills/[id]/route.ts`,
+ * which runs its visibility check first on every method.
  */
 
 import "server-only";
@@ -95,48 +98,36 @@ export function requireRowId(raw: string, what: "group" | "page"): number {
 }
 
 /**
- * The bind-time grant gate, called from the built-in-agent routes before a
+ * The bind-time grant filter, called from the built-in-agent routes before a
  * `knowledge` tool row is inserted.
  *
  * CONTRACT: the runtime is RBAC-free — the binding itself is the grant
  * (`lookup.ts`) — so this is the last decidable boundary for "binding is the
  * grant", and it must re-check server-side what the editor picker only filters
- * client-side. Every id must be visible to the session AND enabled; hidden
- * and missing collapse into one 404, so a bind attempt cannot enumerate
- * private collection ids. A disabled-but-visible rejection is safe to name:
- * the picker already shows it.
+ * client-side. Only ids visible to the session AND enabled are returned.
+ *
+ * An id that no longer resolves — deleted, hidden, or disabled — is dropped
+ * from the binding rather than rejected. The editor picker can only render what
+ * `GET /api/kb` returns, so a collection that turned private or disabled after
+ * it was bound would otherwise be impossible to uncheck and every save of that
+ * agent would fail. Dropping is equally safe: an unbindable id is never
+ * written, so the runtime still only sees grants the binder could see.
  */
-export async function assertKbCollectionsBindable(
+export async function filterBindableKbCollectionIds(
   ids: readonly string[],
   session: Session,
-): Promise<void> {
-  if (ids.length === 0) return;
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
   const unique = [...new Set(ids)];
-  const rows: Array<{ id: string; name: string; enabled: boolean }> = await db
-    .select({
-      id: KbCollectionTable.id,
-      name: KbCollectionTable.name,
-      enabled: KbCollectionTable.enabled,
-    })
+  const rows: Array<{ id: string }> = await db
+    .select({ id: KbCollectionTable.id })
     .from(KbCollectionTable)
     .where(
       and(
         inArray(KbCollectionTable.id, unique),
+        eq(KbCollectionTable.enabled, true),
         visibilitySql(session, KbCollectionTable.visibility, KbCollectionTable.createdBy),
       ),
     );
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  for (const id of unique) {
-    const row: { id: string; name: string; enabled: boolean } | undefined = byId.get(id);
-    if (!row) {
-      throw new ApiError("NOT_FOUND", 404, "Knowledge collection not found.");
-    }
-    if (!row.enabled) {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        `Knowledge collection "${row.name}" is disabled. Enable it or unbind it.`,
-      );
-    }
-  }
+  return new Set(rows.map((row) => row.id));
 }
