@@ -31,6 +31,12 @@ export const MAX_GROUPS_PER_COLLECTION = (): number =>
  * larger (`PAGE_MAX_BYTES`), so this is a context-flooding guard, not a write
  * limit — the stored-vs-returned pair beside `host.file.write_max_bytes` /
  * `host.file.read_max_bytes`.
+ *
+ * Zero, negative or fractional values are a mis-configuration, not a mode, so
+ * the budget floors at whole bytes with a floor of 1: an unfloored budget
+ * breaks the window loop before it consumes a line, and the agent then pages
+ * on a `nextOffset` equal to its own `offset` forever. Same floor as
+ * `host.file.read_max_bytes`.
  */
 export const READ_MAX_BYTES = (): number =>
-  getConfigNumber("kb.read_max_bytes", 64 * 1024);
+  Math.max(1, Math.floor(getConfigNumber("kb.read_max_bytes", 64 * 1024)));

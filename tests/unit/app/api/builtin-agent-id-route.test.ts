@@ -213,4 +213,57 @@ describe("Built-in Agent ID Route — /api/builtin-agents/[id]", () => {
       expect(invalidateForAgentChangeMock).toHaveBeenCalledWith("agent-del-2");
     });
   });
+
+  describe("PATCH knowledge binding grant gate", () => {
+    const KB_ID = "123e4567-e89b-12d3-a456-426614174000";
+    const agent = {
+      id: "agent-1",
+      name: "Research Assistant",
+      role: null,
+      visibility: "private",
+      createdBy: "user-1",
+      description: null,
+      prompt: null,
+    };
+
+    // Awaiting order: agent SELECT -> UPDATE .returning() -> gate SELECT
+    // -> (pass only) tools DELETE -> tools INSERT .values().
+    function patchWithKnowledge() {
+      return createMockRequest("/api/builtin-agents/agent-1", {
+        method: "PATCH",
+        body: { tools: [{ toolType: "knowledge", kbCollectionId: KB_ID }] },
+      });
+    }
+
+    it("404s a hidden or missing collection and never inserts the binding", async () => {
+      dbMock.$enqueue([agent], [agent], []);
+
+      const res = await PATCH(patchWithKnowledge(), { params: Promise.resolve({ id: "agent-1" }) });
+
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.message).toMatch(/Knowledge collection not found/i);
+      expect(dbMock.insert).not.toHaveBeenCalled();
+    });
+
+    it("400s a disabled-but-visible collection, naming it", async () => {
+      dbMock.$enqueue([agent], [agent], [{ id: KB_ID, name: "x-manual", enabled: false }]);
+
+      const res = await PATCH(patchWithKnowledge(), { params: Promise.resolve({ id: "agent-1" }) });
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.message).toMatch(/x-manual.*disabled/);
+      expect(dbMock.insert).not.toHaveBeenCalled();
+    });
+
+    it("binds a visible enabled collection", async () => {
+      dbMock.$enqueue([agent], [agent], [{ id: KB_ID, name: "x-manual", enabled: true }]);
+
+      const res = await PATCH(patchWithKnowledge(), { params: Promise.resolve({ id: "agent-1" }) });
+
+      expect(res.status).toBe(200);
+      expect(dbMock.insert).toHaveBeenCalled();
+    });
+  });
 });

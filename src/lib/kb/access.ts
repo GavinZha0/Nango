@@ -1,6 +1,6 @@
 /**
- * KB read-path access checks: one place that turns a URL id into an
- * authorised `kb_collection` row.
+ * KB access checks: one place that turns a URL id into an authorised
+ * `kb_collection` row, plus the bind-time grant gate for agent routes.
  *
  * CONTRACT: hidden and missing are both 404, so private collection ids stay
  * opaque — the same policy `src/app/api/skills/[id]/route.ts` applies.
@@ -8,7 +8,7 @@
 
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { KbCollectionTable, type KbCollectionEntity } from "@/lib/db/schema";
@@ -16,6 +16,7 @@ import {
   canDeleteResource,
   canEditResource,
   canViewResource,
+  visibilitySql,
 } from "@/lib/auth/permissions";
 import { ApiError, type Session } from "@/lib/http/route-handlers";
 import { parseRowId } from "@/lib/kb/validation";
@@ -91,4 +92,51 @@ export function requireRowId(raw: string, what: "group" | "page"): number {
     throw new ApiError("BAD_REQUEST", 400, `${what} id must be a positive integer.`);
   }
   return id;
+}
+
+/**
+ * The bind-time grant gate, called from the built-in-agent routes before a
+ * `knowledge` tool row is inserted.
+ *
+ * CONTRACT: the runtime is RBAC-free — the binding itself is the grant
+ * (`lookup.ts`) — so this is the last decidable boundary for "binding is the
+ * grant", and it must re-check server-side what the editor picker only filters
+ * client-side. Every id must be visible to the session AND enabled; hidden
+ * and missing collapse into one 404, so a bind attempt cannot enumerate
+ * private collection ids. A disabled-but-visible rejection is safe to name:
+ * the picker already shows it.
+ */
+export async function assertKbCollectionsBindable(
+  ids: readonly string[],
+  session: Session,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const unique = [...new Set(ids)];
+  const rows: Array<{ id: string; name: string; enabled: boolean }> = await db
+    .select({
+      id: KbCollectionTable.id,
+      name: KbCollectionTable.name,
+      enabled: KbCollectionTable.enabled,
+    })
+    .from(KbCollectionTable)
+    .where(
+      and(
+        inArray(KbCollectionTable.id, unique),
+        visibilitySql(session, KbCollectionTable.visibility, KbCollectionTable.createdBy),
+      ),
+    );
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const id of unique) {
+    const row: { id: string; name: string; enabled: boolean } | undefined = byId.get(id);
+    if (!row) {
+      throw new ApiError("NOT_FOUND", 404, "Knowledge collection not found.");
+    }
+    if (!row.enabled) {
+      throw new ApiError(
+        "BAD_REQUEST",
+        400,
+        `Knowledge collection "${row.name}" is disabled. Enable it or unbind it.`,
+      );
+    }
+  }
 }

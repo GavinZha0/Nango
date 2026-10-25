@@ -179,7 +179,7 @@ knowledge.
 | `src/lib/kb/limits.ts` | Authored-string constants (`MAX_DESCRIPTION_CHARS`, `MIN_DESCRIPTION_CHARS`, `MAX_LABEL_CHARS`, `MAX_GROUP_DEPTH`). Client-readable. |
 | `src/lib/kb/budgets.ts` | Config-backed byte/count ceilings behind `import "server-only"`. |
 | `src/lib/kb/validation.ts` | Shared Zod edge schemas + `parseRowId`. Imported by the client so it cannot be told a different limit than the server enforces. No `server-only`. |
-| `src/lib/kb/access.ts` | URL id → authorised collection row; the three gates + `requireRowId`. |
+| `src/lib/kb/access.ts` | URL id → authorised collection row; the three authoring gates, the bind-time grant gate and `requireRowId`. |
 | `src/lib/kb/service.ts` | All structural invariants and budgets for the authoring surface; typed `ApiError`s; the single sort site for the tree. |
 | `src/app/api/kb/**` | Six route handlers (§14). |
 | `src/lib/kb/lookup.ts` | Agent-side reads. **Deliberately RBAC-free** — the binding is the grant (§7.3). |
@@ -241,8 +241,19 @@ There is no cache invalidation step: nothing is cached (§4, §16).
 ## 6. Flow B — binding and mounting
 
 Binding is saved as a `builtin_agent_tool` row (§3.1); the agent editor's
-**Knowledge** tab is a picker over visible collections, with a
+**Knowledge** tab is a picker over visible collections — disabled ones are
+listed with a hint rather than hidden, because a binding that was enabled at
+bind time and disabled later must stay reachable to uncheck — with a
 `{selected, total}` badge like the Skills and Data sources tabs.
+
+**CONTRACT — the bind gate.** "The binding is the grant" (§7.3) only holds if
+the grant's write path validates, so both built-in-agent routes call
+`assertKbCollectionsBindable` before inserting any `knowledge` tool row: every
+id must be visible to the session **and** enabled. Hidden and missing collapse
+into one `404` (private ids stay opaque); a disabled-but-visible id is refused
+with a `400` that names it. The picker's client-side list is not a check — the
+API accepts any uuid — and the runtime stays RBAC-free precisely because the
+gate settled each grant once, at the last point where it can be decided.
 
 At dispatch, [src/lib/runner/dispatch/builtin.ts:267](file:///d:/AI/nango/src/lib/runner/dispatch/builtin.ts#L267)
 collects `tool.kind === "knowledge"` into `kbCollectionIds`, then:
@@ -399,6 +410,10 @@ illegitimate as a single context injection.
 - `offset` is a 1-based line index (default 1), `limit` a line count (1–5000). An
   omitted `limit` means "as many lines as fit the remaining `kb.read_max_bytes`".
 - The budget always wins: a window is cut at the budget even with a large `limit`.
+  A zero/negative/fractional `kb.read_max_bytes` is a mis-configuration, not a
+  mode, and floors at 1 byte (like `host.file.read_max_bytes`) — an unfloored
+  budget would return an empty window whose `nextOffset` equals the requested
+  `offset`, and the agent would page in place forever.
 - Content is normalised to LF first (`\r\n` and `\r` → `\n`) so windows are stable.
 - **A line longer than the remaining room is cut mid-line**, not returned whole —
   SECURITY: the budget is what keeps one tool result from flooding the context.
@@ -472,7 +487,7 @@ prefix (`docs/config.md`), never `.env`, consistent with the `skill.*` and
 | `MAX_LABEL_CHARS` | 200 | same | Group and page `name`, and `source_ref`. |
 | `MAX_GROUP_DEPTH` | 2 | same | Levels below a collection; stated in the runtime index, the tree UI and the move checks. Client-readable, unlike the budgets. |
 | `kb.page_max_bytes` | 262144 | `src/lib/kb/budgets.ts` + config | One page's stored `content`. |
-| `kb.read_max_bytes` | 65536 | same | One `read_kb_page` response — a context-flooding guard, not a write limit; the stored-vs-returned pair mirrors `host.file.write_max_bytes` / `read_max_bytes`. |
+| `kb.read_max_bytes` | 65536 | same | One `read_kb_page` response — a context-flooding guard, not a write limit; floors at 1 byte (§8); the stored-vs-returned pair mirrors `host.file.write_max_bytes` / `read_max_bytes`. |
 | `kb.max_pages` | 50 | same | Pages per collection. |
 | `kb.max_groups` | 20 | same | Groups per collection, and therefore the ceiling on injected index lines. |
 
@@ -523,6 +538,7 @@ Page guard: `src/app/(workspace)/kb/layout.tsx` → `requireEditor`. Sidebar ent
 | Visible (own, public, or admin) | `loadVisibleCollection` | `404 NOT_FOUND` — hidden and missing are identical, so private ids stay opaque | `GET /api/kb/[id]`, `GET …/pages/[pageId]` |
 | Content write | `loadEditableCollection` | `403 FORBIDDEN` | all POST/PATCH/DELETE routes |
 | Strict ownership — `enabled`, `visibility`, collection delete | `loadOwnedCollection`, plus `canChangeVisibility` for the two fields | `403 FORBIDDEN` | `DELETE /api/kb/[id]`; the two fields inside `PATCH /api/kb/[id]` |
+| Bindable — visible **and** enabled | `assertKbCollectionsBindable` | `404` (hidden ≡ missing, ids stay opaque); `400` naming a disabled one | `POST /api/builtin-agents`, `PATCH /api/builtin-agents/[id]` when tools are replaced (§6) |
 | Malformed uuid segment | `UUID_RE` pre-check | `404` before any query — a non-uuid can never match the column and Postgres would surface it as a 500 | all `[id]` routes |
 | bigint row id in the path | `requireRowId` | `400` "group/page id must be a positive integer." | group/page routes |
 
@@ -530,7 +546,8 @@ A public collection another editor authored can be read and improved but **not
 unmounted or made private** — that asymmetry is the whole reason the strict gate is
 separate from the edit gate.
 
-Runtime is RBAC-free by design (§7.3): `resolveKbCollectionForAgent(name,
+Runtime is RBAC-free by design (§7.3) — because the bind gate decided each
+grant once (§6): `resolveKbCollectionForAgent(name,
 allowedIds)` checks only that the id is in the agent's own bound set and the row is
 `enabled`.
 

@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { invalidateForAgentChange } from "@/lib/cache/invalidation";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
+import { assertKbCollectionsBindable } from "@/lib/kb/access";
 import {
   canChangeVisibility,
   canDeleteResource,
@@ -310,9 +311,6 @@ export const PATCH = withEditor<{ id: string }>(
 
       // Replace tools if provided. Supervisor tools are managed exclusively by the role flip logic below.
       if (body.tools !== undefined) {
-        await tx
-          .delete(BuiltinAgentToolTable)
-          .where(eq(BuiltinAgentToolTable.agentId, id));
         const userTools = body.tools.filter(
           (t) =>
             t.toolType !== "builtin_tool"
@@ -320,6 +318,17 @@ export const PATCH = withEditor<{ id: string }>(
               && t.builtinTool !== undefined
               && !SUPERVISOR_TOOL_NAME_SET.has(t.builtinTool)),
         );
+        // The binding is the KB grant, so the bind-time gate is the only place
+        // visibility and enabled can be checked before the runtime reads.
+        await assertKbCollectionsBindable(
+          userTools
+            .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
+            .map((t) => t.kbCollectionId as string),
+          session,
+        );
+        await tx
+          .delete(BuiltinAgentToolTable)
+          .where(eq(BuiltinAgentToolTable.agentId, id));
         if (userTools.length > 0) {
           await tx.insert(BuiltinAgentToolTable).values(
             userTools.map((t, i) => ({

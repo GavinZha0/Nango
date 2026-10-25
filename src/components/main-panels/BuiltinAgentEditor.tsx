@@ -323,8 +323,9 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
   const [calendars, setCalendars] = useState<
     Array<{ id: string; name: string; description: string | null; provider: string | null }>
   >([]);
-  /** Knowledge collections visible to this user (own + public). The runtime
-   *  mounts only enabled ones, so disabled rows are filtered out here too. */
+  /** Knowledge collections visible to this user (own + public). Disabled ones
+   *  stay in the list with a hint: the bind gate rejects them, and an existing
+   *  binding turned disabled later must stay reachable so it can be unchecked. */
   const [kbCollections, setKbCollections] = useState<
     Array<{ id: string; name: string; description: string | null; enabled: boolean }>
   >([]);
@@ -580,7 +581,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
           description: string | null;
           enabled: boolean;
         }>;
-        setKbCollections(all.filter((k) => k.enabled));
+        setKbCollections(all);
       }
       if (allAgentsRes.ok) {
         // Find existing system agents to flag their slots as occupied.
@@ -1206,11 +1207,15 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                         items={kbCollections.map((k) => ({
                           id: k.id,
                           name: k.name,
-                          description: k.description,
+                          description: k.enabled
+                            ? k.description
+                            : [k.description, "(disabled — binding is rejected until it is enabled)"]
+                                .filter(Boolean)
+                                .join(" "),
                         }))}
                         selected={tools.knowledge}
                         onToggle={(id) => toggleTool("knowledge", id)}
-                        emptyText="No enabled knowledge collections. Create one from the Knowledge panel."
+                        emptyText="No knowledge collections visible. Create one from the Knowledge panel."
                       />
                     )}
                   </div>

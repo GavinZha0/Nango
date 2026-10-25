@@ -223,6 +223,24 @@ describe("read_kb_page", () => {
     expect(tail.truncated).toBe(false);
   });
 
+  it("floors a zero or negative budget at 1 byte so paging keeps advancing", async () => {
+    bound();
+    page("aaa\nbbb\nccc");
+
+    for (const misconfiguration of ["0", "-5", "0.4"]) {
+      mockConfig["kb.read_max_bytes"] = misconfiguration;
+
+      const ok = (await read({ page_name: "bare-metal" })) as ReadKbPageOk;
+
+      // Without the floor the loop breaks before consuming a line and
+      // `nextOffset` equals the requested `offset` — the agent pages in place
+      // forever on an empty window.
+      expect(ok.content).toBe("a");
+      expect(ok.endLine).toBe(1);
+      expect(ok.nextOffset).toBe(2);
+    }
+  });
+
   it("byte-caps a single long line and tells the author to re-format instead of looping", async () => {
     bound();
     mockConfig["kb.read_max_bytes"] = "10";

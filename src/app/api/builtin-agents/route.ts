@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { BuiltinAgentTable, BuiltinAgentToolTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
+import { assertKbCollectionsBindable } from "@/lib/kb/access";
 import { isEditor, visibilitySql } from "@/lib/auth/permissions";
 import {
   isUniqueViolation,
@@ -162,6 +163,15 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const finalPrompt: string | null = isSupervisor
     ? SUPERVISOR_PROMPT
     : body.prompt ?? null;
+
+  // The binding is the KB grant, so the bind-time gate is the only place
+  // visibility and enabled can be checked before the runtime reads.
+  await assertKbCollectionsBindable(
+    (body.tools ?? [])
+      .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
+      .map((t) => t.kbCollectionId as string),
+    session,
+  );
 
   try {
     const row = await db.transaction(async (tx) => {
