@@ -267,7 +267,7 @@ describe("buildRunSkillScriptOnSshTool", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("SKILL_NOT_FOUND");
-    expect(result.available).toEqual(["ssh-skill", "py-skill", "sandbox-skill"]);
+    expect(result).not.toHaveProperty("available");
   });
 
   it("returns NOT_AN_SSH_SCRIPT for a script missing from scripts-on-ssh", async () => {

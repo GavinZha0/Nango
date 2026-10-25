@@ -25,6 +25,7 @@ Key system capabilities:
 |---|---|---|
 | **Multi-backend agent integration** | Connect heterogeneous agent platforms (agno / Mastra / Dify); browser sees a uniform **AG-UI protocol** | `src/lib/backends/` |
 | **Built-in Agent + MCP** | Build agents in-app via the CopilotKit runtime; extend tools through the Model Context Protocol (MCP) | `src/lib/builtin-agents/agent-pool.ts`, `src/lib/mcp/provider-pool.ts` |
+| **Knowledge Base (LLM wiki)** | Human-authored, agent-read corpus with structural disclosure (collection → group → page); binding a collection injects its derived group index and mounts `list_kb_pages` / `read_kb_page` — no vectors, no search tool | `src/lib/kb/` ([docs/kb.md](file:///d:/AI/nango/docs/kb.md)) |
 | **AI outcome / artifact pipeline** | Per-thread Outcomes panel (`/outcomes`) for transient chat outputs; permanent Artifact library via Save | `src/lib/artifacts/`, `src/lib/outcomes/` ([docs/outcomes.md](file:///d:/AI/nango/docs/outcomes.md), [docs/artifact.md](file:///d:/AI/nango/docs/artifact.md)) |
 | **Bento Presentation Slides** | Structured 16:9 visual slide decks; two-tool state machine (`generate`/`edit`) with pure reducer (`applySlideEdit`) | `src/lib/outcomes/`, `src/lib/bento/` ([docs/bento-slides.md](file:///d:/AI/nango/docs/bento-slides.md)) |
 | **Safety Guardrails & Pipeline** | Interceptor pipeline for tool execution, Tool Risk Registry, fail-closed isolation, and admin control plane | `src/lib/agent-pipeline/` ([docs/guardrails.md](file:///d:/AI/nango/docs/guardrails.md)) |
@@ -74,7 +75,7 @@ Key system capabilities:
 │                                                                     │
 │  /api/copilotkit/[...path]   ──►  Backend chat → Runner → AG-UI     │
 │  /api/copilotkit/builtin/... ──►  Built-in chat → Runner → AG-UI    │
-│  /api/{agents, mcp, skills}       Resource configs & lifecycles      │
+│  /api/{agents, mcp, skills, kb}   Resource configs & lifecycles      │
 │  /api/{verification, eval, web-auto}-*   Test suites, cases & run loops     │
 │  /api/{schedules, notifications}  Triggers & live user notifications │
 │  /api/runs/stream                 SSE: notifications + finalized     │
@@ -199,7 +200,7 @@ For detailed design and implementation phases, see:
 
 `ThreePanelContent` uses `react-resizable-panels` for draggable, collapsible panels:
 
-- **Left**: `SidePanel`, renders one of `DashboardPanel` / `ArtifactPanel` / `AgentPanel` / `McpPanel` / `SkillsPanel` / `SchedulesPanel` based on `useSidebarStore.activeLeftPanel`.
+- **Left**: `SidePanel` renders the panel registered for the current URL (`resolveActivePanel` → `SIDEBAR_PANEL_REGISTRY`): `DashboardPanel` / `ArtifactPanel` / `SchedulesPanel` / `AgentPanel` / `McpPanel` / `SkillsPanel` / `KbPanel` / `VerificationPanel` / `EvaluationPanel` / `DataSourcePanel` / `SshServerPanel` / `WebAutoPanel`. Toolbar clicks push the panel's `href`, so the URL — not the sidebar store — is the single source of truth.
 - **Center**: route-driven main area. `/outcomes` shows the current thread's transient Outcomes panel (V1); editor routes like `/agent/[id]` or `/web-auto/[id]` render their own pages; `/` is the welcome page.
 - **Right**: `RightPanel` — hosts the CopilotKit provider plus `ChatPanel` / `HistoryPanel` / `BuiltinAgentEditor`.
 
@@ -216,7 +217,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 | `/api/builtin-agents`, `/[id]` | CRUD | Built-in agent + tool bindings (incl. `role` enum) | session |
 | `/api/mcp-servers`, `/[id]/discover`, `/[id]/call-tool` | CRUD/RPC | MCP server registration, tool discovery, invocation | session |
 | `/api/skills`, `/api/skills/[id]`, `/api/skills/[id]/files/[...]` | CRUD | Skills CRUD + helper-file read | session |
-| `/api/kb`, `/api/kb/[id]`, `/api/kb/[id]/groups/[groupId]`, `/api/kb/[id]/pages/[pageId]` | CRUD | Knowledge collections, groups, pages. Lists and the tree are visibility-filtered; only the single-page GET ships `content` | session read / editor write |
+| `/api/kb`, `/api/kb/[id]`, `/api/kb/[id]/groups[/[groupId]]`, `/api/kb/[id]/pages[/[pageId]]` | CRUD | Knowledge collections, groups, pages. Lists and the tree are visibility-filtered; only the single-page GET ships `content` | session read / editor write |
 | `/api/verification-suites[/id]`, `/api/verification-cases/[id]`, `/api/verification-runs[/id]`, `/api/verification-servers/[id]` | CRUD/RPC | Verification suites, cases, runs (suite + server-wide, viewer-scoped) and results | editor |
 | `/api/eval-suites[/id]`, `/api/eval-cases/[id]`, `/api/eval-runs[/id]` | CRUD/RPC | Evaluation suites, cases, runs (suite + agent batch), and results. Single-case runs (`/api/eval-cases/[id]/run?stream=true`) support request-scoped NDJSON two-phase streaming. | editor |
 | `/api/web-auto-suites[/id]`, `/api/web-auto-cases/[id]`, `/api/web-auto-runs[/id]` | CRUD/RPC | Web Auto suites, cases, execution batches, and results. Single-case runs (`/api/web-auto-cases/[id]/run?stream=true`) support request-scoped NDJSON two-phase streaming. | editor |
@@ -478,7 +479,7 @@ Lookup paths (server-side only):
 | `datasource` | `data_source_id` | data source the agent is allowed to query via `extract_dataset_by_sql` |
 | `knowledge` | `kb_collection_id` | knowledge collection whose index is injected and whose `list_kb_pages` / `read_kb_page` are mounted (CASCADE: the mount is meaningless without the corpus) |
 
-Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the user); deleting the parent agent uses `CASCADE`.
+Tool table deletes use `SET NULL` (so orphaned bindings can be surfaced to the user), except `knowledge`, whose binding `CASCADE`s with the collection because the mount is meaningless without the corpus; deleting the parent agent uses `CASCADE`.
 
 > Plain REST APIs are not a first-class binding kind. To expose a REST endpoint to a built-in agent, wrap it as an MCP server (e.g. via [MCPHub](https://github.com/samanhappy/mcphub) or a similar OpenAPI→MCP bridge) and bind that MCP server through `mcp_server` / `mcp_tool`.
 

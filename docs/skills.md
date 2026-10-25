@@ -40,10 +40,18 @@ server-side tools to load the actual content:
 | Tool | What it returns |
 |---|---|
 | `get_skill(name)` | The full SKILL.md text (frontmatter + body) |
-| `get_skill_file(name, path)` | A helper file from the skill's tree, in any folder |
+| `get_skill_file(name, filename)` | A helper file from the skill's tree, in any folder. A bare filename is matched by basename across the tree; a path containing `/` is resolved directly. |
 | `run_skill_script(name, filename, datasets?)` | Execute a script bundled with the skill in the same sandbox as `run_code_in_sandbox`. A bare filename resolves under `scripts/`; any relative path must also be under `scripts/` (e.g. `scripts/lib/analyze.py`). Executable scripts outside `scripts/` are refused with `SCRIPT_OUTSIDE_SCRIPTS`. Interpreter dispatched by extension (V1: `.py` → python3, `.sh` → bash). `stdin` is NOT exposed as a parameter — script source bytes go through stdin internally and cannot be overridden. Scripts declared in `scripts-on-ssh` are refused here: `SSH_SCRIPT` when `run_skill_script_on_ssh` is mounted, `SSH_NOT_AVAILABLE` (with a "bind an SSH host" hint) when the agent has no `ssh_server` binding. They are never silently downgraded to the sandbox, because a host-targeted script run locally reports the sandbox instead of the target. |
 | `run_skill_script_on_ssh(name, filename, serverName, args?, timeoutSeconds?)` | Execute a reviewed script declared in `scripts-on-ssh` on a bound SSH host. Declared paths may be nested under `scripts/` (e.g. `scripts/lib/probe.sh`). Dispatched via `runOnBoundServer` subject to server allow/deny policy. Bash (`.sh`) passes skill name as `$0` and args as `$1..`; Python (`.py`) passes args as `sys.argv[1:]`. Command capped at 16,000 characters, measured by `runOnBoundServer` on the string that actually reaches `sshd` (login-shell wrapping included), so `COMMAND_TOO_LONG` never fires after the channel is open. Script bytes are decoded with a fatal `TextDecoder` — invalid UTF-8 or NUL bytes return `INVALID_SCRIPT_BYTES` instead of executing mojibake; a leading BOM is stripped. |
 | `run_skill_sql_script(name, filename, dataSourceName, datasetName, rowLimit?, forceRefresh?)` | Execute a reviewed `.sql` file declared in `scripts-on-db` against a bound data source. Reads the file server-side (never accepts raw SQL), validates single-statement SQL and the data-source policy, then reuses `extract_dataset_by_sql`'s DuckDB + Parquet cache path. Returns the extract result plus `skill`, `script`, `scriptSha256`, `dataSourceName`. For ad-hoc or modified SQL, use `extract_dataset_by_sql` instead. |
+
+**CONTRACT — failure envelopes.** A failed read names the reason and nothing
+else: a wrong skill name returns `No skill named "…" is available to this agent.`
+and a missing helper file returns `File not found: <filename>` — no `available`
+array and no file listing. `## Available Skills` is the skills discovery channel;
+the read tools are not. Script failures follow the same rule (`SCRIPT_NOT_FOUND`,
+`NOT_AN_SSH_SCRIPT`, `NOT_A_DB_SCRIPT` name the reason only). See `docs/kb.md` §12
+for the identical KB contract.
 
 Token cost is bounded by the description list, not by the full skill
 bodies. `run_skill_script_on_ssh` is mounted only when **both** at least
@@ -104,8 +112,8 @@ LICENSE
 Validated by regex on every write. Parent-directory traversal (`..`),
 absolute paths, back-slashes, and dotfiles are rejected. The synthetic root
 `SKILL.md` is reserved. Folders are implicit: they exist only while at least
-one file lives under them. There is no actual filesystem to traverse — `path`
-is only a string used as a logical locator for `get_skill_file(name, path)`.
+one file lives under them. There is no actual filesystem to traverse — the path
+is only a string used as a logical locator for `get_skill_file(name, filename)`.
 
 **Content storage**: `bytea`. Postgres TOASTs and compresses
 automatically. The 256 KB per-file cap is enforced at write time

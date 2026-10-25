@@ -99,7 +99,6 @@ export function buildRunSkillSqlScriptTool(
           ok: false,
           error: "SKILL_NOT_FOUND",
           message: `No skill named "${args.name}" is available to this agent.`,
-          available: [...byName.keys()],
         };
       }
 

@@ -116,7 +116,6 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         return {
           ok: false,
           error: `No skill named "${name}" is available to this agent.`,
-          available: [...byName.keys()],
         };
       }
       return { ok: true, name: spec.name, skillMd: spec.skillMd };
@@ -220,7 +219,6 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
         return {
           ok: false,
           error: `No skill named "${name}" is available to this agent.`,
-          available: [...byName.keys()],
         };
       }
 
@@ -383,7 +381,6 @@ export function buildRunSkillScriptOnSshTool(
           ok: false,
           error: "SKILL_NOT_FOUND",
           message: `No skill named "${args.name}" is available to this agent.`,
-          available: [...byName.keys()],
         };
       }
 
