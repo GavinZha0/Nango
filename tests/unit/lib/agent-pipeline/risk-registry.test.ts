@@ -51,6 +51,18 @@ describe("evaluateToolRisk — Builtin tools", () => {
     expect(res.headlessAllowed).toBe(true);
   });
 
+  it("evaluates both knowledge tools as low-risk reads", () => {
+    // CONTRACT: an unannotated tool defaults to medium / write, which would make
+    // a scheduled run deny a KB read.
+    for (const name of ["list_kb_pages", "read_kb_page"]) {
+      const res = evaluateToolRisk(name, { kb_name: "x-manual" });
+      expect(res.riskLevel).toBe("low");
+      expect(res.sideEffects).toBe("read");
+      expect(res.requiresApproval).toBe(false);
+      expect(res.headlessAllowed).toBe(true);
+    }
+  });
+
   it("evaluates write_file as high risk and denies it headlessly", () => {
     // CONTRACT: the jail is the user's real mounted folder, so a write is
     // never sandboxed — scheduled/async runs must deny it by default.

@@ -25,7 +25,7 @@ the central composer lives in `lib/runner/dispatch/builtin.ts`.
 | Data-source capability block | `lib/data-sources/prompt-block.server.ts` | static template + bound rows |
 | SSH capability block | `lib/ssh/prompt-block.server.ts` | static template + bound rows |
 | Calendar capability block | `lib/calendar/prompt-block.server.ts` | static template + bound rows |
-| Knowledge capability block | `lib/kb/prompt-block.server.ts` | static template + bound rows, capped at group level; re-rendered every dispatch (`docs/kb.md` §4.4) |
+| Knowledge capability block | `lib/kb/prompt-block.server.ts` | static template + bound rows, capped at group level; re-rendered every dispatch (`docs/kb.md` §7) |
 | Sandbox capability block | `lib/sandbox/runtime-tools.ts` | static |
 | Orchestration mode directive | `lib/orchestration/modes.ts` (`ORCHESTRATION_MODES[*].promptDirective`) | static template × 4 modes, supervisor-only, per-turn |
 | Available-agents catalog | `lib/runner/supervisor-tools.server.ts` (`formatCatalogBlock`) | dynamic, supervisor-only, per-request |

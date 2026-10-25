@@ -28,6 +28,9 @@ const {
   buildSshHostsPromptBlockMock,
   buildRunSshCommandToolMock,
   buildListSshHostsToolMock,
+  buildKbPromptBlockMock,
+  buildListKbPagesToolMock,
+  buildReadKbPageToolMock,
   buildSupervisorRuntimeMock,
   composeToolPipelineMock,
   composePipelinedMcpProviderMock,
@@ -58,6 +61,9 @@ const {
   buildSshHostsPromptBlockMock: vi.fn().mockResolvedValue({ promptBlock: "" }),
   buildRunSshCommandToolMock: vi.fn().mockReturnValue({ name: "run_ssh_command" }),
   buildListSshHostsToolMock: vi.fn().mockReturnValue({ name: "list_ssh_hosts" }),
+  buildKbPromptBlockMock: vi.fn().mockResolvedValue({ promptBlock: "" }),
+  buildListKbPagesToolMock: vi.fn().mockReturnValue({ name: "list_kb_pages" }),
+  buildReadKbPageToolMock: vi.fn().mockReturnValue({ name: "read_kb_page" }),
   buildSupervisorRuntimeMock: vi.fn(),
   composeToolPipelineMock: vi.fn().mockReturnValue((t: unknown) => t),
   composePipelinedMcpProviderMock: vi.fn().mockImplementation((p: unknown) => p),
@@ -146,6 +152,15 @@ vi.mock("@/lib/ssh/prompt-block.server", () => ({
 vi.mock("@/lib/ssh/runtime-tools", () => ({
   buildRunSshCommandTool: buildRunSshCommandToolMock,
   buildListSshHostsTool: buildListSshHostsToolMock,
+}));
+
+vi.mock("@/lib/kb/prompt-block.server", () => ({
+  buildKbPromptBlock: buildKbPromptBlockMock,
+}));
+
+vi.mock("@/lib/kb/runtime-tools", () => ({
+  buildListKbPagesTool: buildListKbPagesToolMock,
+  buildReadKbPageTool: buildReadKbPageToolMock,
 }));
 
 vi.mock("@/lib/runner/supervisor-tools.server", () => ({
@@ -388,6 +403,9 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
       buildBuiltinToolsMock.mockReturnValue([]);
       buildDataSourcesPromptBlockMock.mockResolvedValue({ promptBlock: "" });
       buildSshHostsPromptBlockMock.mockResolvedValue({ promptBlock: "" });
+      buildKbPromptBlockMock.mockResolvedValue({ promptBlock: "" });
+      buildListKbPagesToolMock.mockReturnValue({ name: "list_kb_pages" });
+      buildReadKbPageToolMock.mockReturnValue({ name: "read_kb_page" });
       buildCalendarPromptBlockMock.mockResolvedValue({ promptBlock: "" });
       buildGetCurrentDatetimeToolMock.mockReturnValue({ name: "get_current_datetime" });
       buildExtractDatasetToolMock.mockReturnValue({ name: "extract_dataset_by_sql" });
@@ -754,6 +772,63 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(args.prompt).toEqual(expect.stringContaining("## SSH Hosts"));
         // ambient + run_ssh + list_ssh
         expect((args.tools as unknown[]).length).toBe(3);
+      });
+
+      it("mounts list_kb_pages + read_kb_page and the knowledge block when a collection is bound", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "knowledge", kbCollectionId: "kb-1" }] }),
+        );
+        buildKbPromptBlockMock.mockResolvedValue({
+          promptBlock: "## Available knowledge\n- **x-manual**: Manual.",
+        });
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildKbPromptBlockMock).toHaveBeenCalledWith(["kb-1"]);
+        expect(buildListKbPagesToolMock).toHaveBeenCalledWith({ agentKbCollectionIds: ["kb-1"] });
+        expect(buildReadKbPageToolMock).toHaveBeenCalledWith({ agentKbCollectionIds: ["kb-1"] });
+        const args = agentArgs();
+        expect(args.prompt).toEqual(expect.stringContaining("## Available knowledge"));
+        const names = (args.tools as Array<{ name: string }>).map((t) => t.name);
+        expect(names).toContain("list_kb_pages");
+        expect(names).toContain("read_kb_page");
+      });
+
+      it("builds neither knowledge tool when the agent binds no collection", async () => {
+        agentPoolGetMock.mockResolvedValue(makeSpec());
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        expect(buildKbPromptBlockMock).toHaveBeenCalledWith([]);
+        expect(buildListKbPagesToolMock).not.toHaveBeenCalled();
+        expect(buildReadKbPageToolMock).not.toHaveBeenCalled();
+        const names = (agentArgs().tools as Array<{ name: string }>).map((t) => t.name);
+        expect(names).not.toContain("list_kb_pages");
+      });
+
+      it("renders the knowledge block after Calendar and before Chart", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({
+            tools: [
+              { kind: "calendar", calendarCredentialId: "cal-1" },
+              { kind: "knowledge", kbCollectionId: "kb-1" },
+              { kind: "builtin_tool", name: "generate_echarts_config" },
+            ],
+          }),
+        );
+        buildCalendarPromptBlockMock.mockResolvedValue({ promptBlock: "## Calendars" });
+        buildKbPromptBlockMock.mockResolvedValue({ promptBlock: "## Available knowledge" });
+        buildChartPromptBlockMock.mockReturnValue("## Charts");
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
+
+        const prompt = agentArgs().prompt as string;
+        expect(prompt.indexOf("## Calendars")).toBeLessThan(
+          prompt.indexOf("## Available knowledge"),
+        );
+        expect(prompt.indexOf("## Available knowledge")).toBeLessThan(
+          prompt.indexOf("## Charts"),
+        );
       });
 
       it("mounts run_skill_script_on_ssh when both skill has scriptsOnSsh and ssh_server is bound", async () => {
