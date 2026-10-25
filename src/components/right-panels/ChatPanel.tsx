@@ -2,7 +2,7 @@
 
 import "@copilotkit/react-ui/v2/styles.css";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   CopilotChat,
@@ -10,7 +10,6 @@ import {
   CopilotChatReasoningMessage,
   CopilotChatUserMessage,
   CopilotChatView,
-  type CopilotAgent,
   type CopilotChatAssistantMessageProps,
   type CopilotChatReasoningMessageProps,
   type CopilotChatUserMessageProps,
@@ -24,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/store/workspace";
 import { NangoSlotButton } from "@/components/right-panels/NangoSlotButton";
 import { useElapsedSeconds } from "@/components/copilotkit/use-elapsed-seconds";
+import { useRegenerate } from "@/hooks/useRegenerate";
 import { useInjectHandoffContext } from "@/hooks/useHandoff";
 import { authClient } from "@/lib/auth/client";
 import { classifyError } from "@/lib/copilot/classify-error";
@@ -149,57 +149,6 @@ async function readAloud(message: {id?: string; content?: string}): Promise<void
   }
 }
 
-// Regeneration logic
-
-/** v2 `onRegenerate` is a notification slot — it doesn't reload
- *  messages. We truncate history to the preceding user prompt and
- *  re-run the agent ourselves. Caller must pass the live per-thread
- *  agent (typically via `useAgent` inside the chatView slot).
- *  Ref-captured for referential stability. */
-function useOnRegenerate(agent: CopilotAgent | undefined) {
-  const { copilotkit } = useCopilotKit();
-
-  // Ref-capture for stability; assignment in useEffect avoids lint noise.
-  const agentRef = useRef(agent);
-  const copilotKitRef = useRef(copilotkit);
-  useEffect(() => {
-    agentRef.current = agent;
-    copilotKitRef.current = copilotkit;
-  });
-
-  return useCallback((message: { id: string }) => {
-    const currentAgent = agentRef.current;
-    const ck = copilotKitRef.current;
-    if (!currentAgent) return;
-
-    const messages = [...currentAgent.messages];
-    if (currentAgent.isRunning || messages.length === 0) return;
-
-    const targetIdx = messages.findIndex((m) => m.id === message.id);
-    if (targetIdx === -1) return;
-
-    // Truncate to the preceding user message (inclusive).
-    let historyCutoff = [messages[0]!];
-    if (messages.length > 2 && targetIdx !== 0) {
-      const lastUserMsg = messages
-        .slice(0, targetIdx)
-        .toReversed()
-        .find((m) => m.role === "user");
-      if (lastUserMsg) {
-        const userIdx = messages.findIndex((m) => m.id === lastUserMsg.id);
-        historyCutoff = messages.slice(0, userIdx + 1);
-      }
-    } else if (messages.length > 2 && targetIdx === 0) {
-      historyCutoff = [messages[0]!, messages[1]!];
-    }
-
-    currentAgent.setMessages(historyCutoff);
-    ck.runAgent({ agent: currentAgent }).catch((err: unknown) =>
-      console.error("ChatPanel: regeneration failed", err),
-    );
-  }, []); // stable — deps captured via refs
-}
-
 function CollapsibleUserMessage(props: CopilotChatUserMessageProps): ReactNode {
   const [isExpanded, setIsExpanded] = useState(false);
   const [canCollapse, setCanCollapse] = useState(false);
@@ -249,7 +198,7 @@ function ConnectedAssistantMessage(
 ): ReactNode {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
   const { agent } = useAgent({ agentId: activeAgentId ?? "" });
-  const onRegenerate = useOnRegenerate(agent);
+  const regenerate = useRegenerate(agent);
 
   const { data: session } = authClient.useSession();
   const userFields = session?.user as { ttsCredentialId?: string | null } | undefined;
@@ -285,7 +234,7 @@ function ConnectedAssistantMessage(
   return (
     <CopilotChatAssistantMessage
       {...props}
-      onRegenerate={isEndOfTurn ? onRegenerate : undefined}
+      onRegenerate={isEndOfTurn ? regenerate : undefined}
       onThumbsUp={isEndOfTurn ? noop : undefined}
       onThumbsDown={isEndOfTurn ? noop : undefined}
       onReadAloud={isEndOfTurn && hasTts ? readAloud : undefined}
