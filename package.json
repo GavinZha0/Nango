@@ -64,7 +64,6 @@
     "echarts": "^6.1.0",
     "emoji-picker-react": "^4.22.3",
     "jsonpath-plus": "^10.4.0",
-    "jszip": "^3.10.1",
     "langfuse": "^3.38.20",
     "lru-cache": "^11.5.2",
     "lucide-react": "^1.61.0",

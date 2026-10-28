@@ -4,7 +4,7 @@
  * These files are not executed locally: their source is embedded in a command
  * string and handed to `bash -c` / `python3 -c` on a remote host. Anything the
  * encoder mangles in transit executes as mojibake there, far from the skill
- * author. Every boundary that can see the bytes — ZIP
+ * author. Every boundary that can see the bytes — folder
  * import and dispatch — calls {@link readSshScriptSource} so the check has
  * one definition.
  *

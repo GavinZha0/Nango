@@ -34,9 +34,17 @@ export interface SkillFrontmatter {
    * `scriptsOnDb`. Only `.sql` files under `scripts/` are accepted.
    */
   scriptsOnDb?: string[];
-  /** Any other frontmatter key the author included, kept verbatim. */
-  extras: Record<string, string | string[]>;
+  /** Any other frontmatter key the author included, kept verbatim. Nested
+   *  mappings are kept one level deep rather than flattened, so a sub-key can
+   *  never shadow a first-class field. */
+  extras: Record<string, string | string[] | Record<string, string | string[]>>;
 }
+
+/** A frontmatter value: a scalar, a sequence of scalars, or one-level mapping. */
+type FrontmatterValue = string | string[] | Record<string, string | string[]>;
+
+/** A scalar-or-list value, i.e. anything a first-class field may accept. */
+type FrontmatterScalar = string | string[];
 
 export interface ParsedSkillMd {
   frontmatter: SkillFrontmatter;
@@ -51,8 +59,8 @@ export class SkillParseError extends Error {
   }
 }
 
-const MAX_DESCRIPTION_LEN = 1_000;
-const MIN_DESCRIPTION_LEN = 10;
+/** Spec bound: a skill description may be at most 1024 characters. */
+const MAX_DESCRIPTION_LEN = 1_024;
 /** Skill names are slug-like; matches Claude's published examples. */
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -86,77 +94,157 @@ export function parseSkillMd(text: string): ParsedSkillMd {
     );
   }
 
-  const fmLines: string[] = lines.slice(1, closeIdx);
   const body: string = lines.slice(closeIdx + 1).join("\n").replace(/^\n+/, "");
 
-  const raw: Record<string, string | string[]> = {};
-  for (const line of fmLines) {
-    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+  const raw: Record<string, FrontmatterValue> = {};
+  /** Absolute 1-based line of each key's declaration, used by error locators. */
+  const declaredAt = new Map<string, number>();
+  /** Keys whose value spans more than its own line. */
+  const multilineKeys = new Set<string>();
+
+  let i = 1;
+  while (i < closeIdx) {
+    const line: string = lines[i];
+    const trimmed: string = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      i += 1;
+      continue;
+    }
+
+    // Keys are only recognised at the left margin. An indented line reaching
+    // here is a block that no key above it claimed as its value.
+    if (indentWidth(line) !== 0) {
+      throw new SkillParseError(
+        `SKILL.md line ${i + 1}: unexpected indentation inside frontmatter: ${trimmed}`,
+      );
+    }
+
     const colon: number = line.indexOf(":");
     if (colon === -1) {
       throw new SkillParseError(
-        `Invalid frontmatter line (expected "key: value"): ${line}`,
+        `SKILL.md line ${i + 1}: invalid frontmatter line (expected "key: value"): ${trimmed}`,
       );
     }
     const key: string = line.slice(0, colon).trim();
-    const rawValue: string = line.slice(colon + 1).trim();
-    raw[key] = parseValue(rawValue);
+    if (key.length === 0) {
+      throw new SkillParseError(
+        `SKILL.md line ${i + 1}: frontmatter line has no key before the ':'`,
+      );
+    }
+
+    const read = readFrontmatterValue(lines, i, closeIdx);
+    raw[key] = read.value;
+    declaredAt.set(key, i + 1);
+    if (read.lastLine > i) multilineKeys.add(key);
+    i = read.lastLine + 1;
   }
 
+  /** `SKILL.md line N:` when the key is present, else a bare `SKILL.md:`. */
+  const at = (key: string): string => {
+    const line: number | undefined = declaredAt.get(key);
+    return line === undefined ? "SKILL.md" : `SKILL.md line ${line}`;
+  };
+
+  /** Read a first-class field as a string, naming where it came from. */
+  const scalarField = (key: string): string => {
+    const value: FrontmatterValue | undefined = raw[key];
+    if (value === undefined) {
+      throw new SkillParseError(`${at(key)}: frontmatter \`${key}\` is required.`);
+    }
+    if (typeof value !== "string") {
+      throw new SkillParseError(
+        `${at(key)}: frontmatter \`${key}\` must be a string, not a list or nested block.`,
+      );
+    }
+    return value;
+  };
+
   // Required fields
-  const name: unknown = raw.name;
-  if (typeof name !== "string" || name.length === 0) {
-    throw new SkillParseError("Frontmatter `name` is required.");
+  const name: string = scalarField("name");
+  if (name.length === 0) {
+    throw new SkillParseError(`${at("name")}: frontmatter \`name\` is required.`);
   }
   if (!NAME_PATTERN.test(name)) {
     throw new SkillParseError(
-      `Frontmatter \`name\` must be a kebab-case slug (a-z, 0-9, -, _; up to 64 chars). Got: ${name}`,
+      `${at("name")}: frontmatter \`name\` must be a kebab-case slug (a-z, 0-9, -, _; up to 64 chars). Got: ${name}`,
     );
   }
   delete raw.name;
 
-  const description: unknown = raw.description;
-  if (typeof description !== "string" || description.length === 0) {
-    throw new SkillParseError("Frontmatter `description` is required.");
-  }
-  if (description.length < MIN_DESCRIPTION_LEN) {
+  const description: string = scalarField("description");
+  if (description.length === 0) {
     throw new SkillParseError(
-      `Frontmatter \`description\` is too short (need at least ${MIN_DESCRIPTION_LEN} chars).`,
+      `${at("description")}: frontmatter \`description\` must not be empty.`,
     );
   }
   if (description.length > MAX_DESCRIPTION_LEN) {
     throw new SkillParseError(
-      `Frontmatter \`description\` exceeds ${MAX_DESCRIPTION_LEN} characters.`,
+      `${at("description")}: frontmatter \`description\` exceeds ${MAX_DESCRIPTION_LEN} characters (got ${description.length}).`,
     );
   }
   delete raw.description;
 
-  // Version (first-class field; default "1.0.0")
+  // Version (first-class field; default "1.0.0"). The Agent Skills spec defines
+  // no top-level `version` — compliant packs carry it under `metadata`, so fall
+  // back to `metadata.version` when the author skipped our convention.
   let version = "1.0.0";
   if ("version" in raw) {
-    const v: string | string[] | undefined = raw.version;
+    const v: FrontmatterValue = raw.version as FrontmatterValue;
     if (typeof v === "string" && v.length > 0) version = v;
     delete raw.version;
+  } else {
+    const metadata: FrontmatterValue | undefined = raw.metadata;
+    if (
+      metadata !== undefined &&
+      !Array.isArray(metadata) &&
+      typeof metadata === "object"
+    ) {
+      const nested: string | string[] | undefined = metadata.version;
+      if (typeof nested === "string" && nested.length > 0) version = nested;
+    }
   }
 
   // Optional Skills 2.0 fields
   let context: string | undefined;
   if ("context" in raw) {
-    const v: string | string[] | undefined = raw.context;
+    const v: FrontmatterValue = raw.context as FrontmatterValue;
     if (typeof v === "string") context = v;
     delete raw.context;
   }
 
   let allowedTools: string[] | undefined;
-  if ("allowed-tools" in raw) {
-    const v: string | string[] = raw["allowed-tools"];
-    allowedTools = Array.isArray(v) ? v : [v];
-    delete raw["allowed-tools"];
-  } else if ("allowedTools" in raw) {
-    const v: string | string[] = raw.allowedTools;
-    allowedTools = Array.isArray(v) ? v : [v];
-    delete raw.allowedTools;
+  const allowedToolsKey =
+    "allowed-tools" in raw
+      ? "allowed-tools"
+      : "allowedTools" in raw
+        ? "allowedTools"
+        : null;
+  if (allowedToolsKey !== null) {
+    const v: FrontmatterValue = raw[allowedToolsKey] as FrontmatterValue;
+    if (Array.isArray(v)) allowedTools = v;
+    else if (typeof v === "string") {
+      // The spec spells this as one space-separated string (`read_file Bash`).
+      allowedTools = v.split(/\s+/).filter((tool: string) => tool.length > 0);
+    } else {
+      throw new SkillParseError(
+        `${at(allowedToolsKey)}: frontmatter \`${allowedToolsKey}\` must be a string or a list of strings.`,
+      );
+    }
+    delete raw[allowedToolsKey];
   }
+
+  // CONTRACT: the two declaration keys must stay single-line. Renaming or
+  // deleting a declared file rewrites the SKILL.md text in place
+  // (rewriteDeclaredScriptsInSkillMd), and that helper only understands the
+  // inline forms — accepting a folded value there would leave the continuation
+  // lines orphaned.
+  const assertInlineDeclaration = (key: string): void => {
+    if (!multilineKeys.has(key)) return;
+    throw new SkillParseError(
+      `${at(key)}: \`${key}\` must be one line — an inline array or a single path. ` +
+        "Multi-line values are not supported for this key.",
+    );
+  };
 
   // Scripts that must run on an SSH host rather than in the sandbox.
   // Three canonical alias spellings — same precedence pattern as allowedTools.
@@ -172,7 +260,8 @@ export function parseSkillMd(text: string): ParsedSkillMd {
         ? SSH_KEY_CAMEL
         : null;
   if (sshRawKey !== null) {
-    const v: string | string[] = raw[sshRawKey];
+    assertInlineDeclaration(sshRawKey);
+    const v: FrontmatterScalar = raw[sshRawKey] as FrontmatterScalar;
     // Single bare value or empty string → coerce to array.
     const entries: string[] = v === "" ? [] : Array.isArray(v) ? v : [v];
     scriptsOnSsh = normalizeScriptsOnSsh(entries);
@@ -192,7 +281,8 @@ export function parseSkillMd(text: string): ParsedSkillMd {
         ? DB_KEY_CAMEL
         : null;
   if (dbRawKey !== null) {
-    const v: string | string[] = raw[dbRawKey];
+    assertInlineDeclaration(dbRawKey);
+    const v: FrontmatterScalar = raw[dbRawKey] as FrontmatterScalar;
     const entries: string[] = v === "" ? [] : Array.isArray(v) ? v : [v];
     scriptsOnDb = normalizeScriptsOnDb(entries);
     delete raw[dbRawKey];
@@ -238,6 +328,179 @@ function parseValue(raw: string): string | string[] {
   }
 
   return raw;
+}
+
+interface FrontmatterValueRead {
+  value: FrontmatterValue;
+  /** Inclusive last line consumed. Equals the key's own line for inline values. */
+  lastLine: number;
+}
+
+/** Indentation of a frontmatter line; tabs and spaces both count as one. */
+function indentWidth(line: string): number {
+  return line.match(/^[ \t]*/)?.[0].length ?? 0;
+}
+
+// `>` / `|` block scalar header with optional chomping and indent indicators
+// (`>-`, `|+`, `>2`). Chomping is parsed and ignored: these values are consumed
+// as metadata text, so trailing line breaks carry no meaning.
+const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d?$/;
+
+// A line that opens `sub: value`, i.e. a nested mapping rather than prose.
+// YAML resolves the same ambiguity by forbidding ": " inside a plain scalar.
+const MAPPING_LINE = /^[^\s:][^:]*:(\s|$)/;
+
+/** A block sequence item, including the bare `-` empty entry. */
+const SEQUENCE_ITEM = /^-(\s.*|$)/;
+
+/**
+ * Read the value belonging to the key on `lines[idx]`, consuming any block of
+ * more-indented lines that follows it.
+ */
+function readFrontmatterValue(
+  lines: string[],
+  idx: number,
+  closeIdx: number,
+): FrontmatterValueRead {
+  const line: string = lines[idx];
+  const colon: number = line.indexOf(":");
+  const inline: string = line.slice(colon + 1).trim();
+  if (inline.length > 0 && !BLOCK_SCALAR_HEADER.test(inline)) {
+    return { value: parseValue(inline), lastLine: idx };
+  }
+
+  const block = collectIndentedBlock(lines, idx + 1, closeIdx, indentWidth(line));
+  // A `key:` or block header with nothing indented under it is an empty value.
+  if (block === null) return { value: "", lastLine: idx };
+  const content: string[] = block.lines.filter((l) => l.trim() !== "");
+  if (content.length === 0) return { value: "", lastLine: idx };
+
+  if (content.every((l) => MAPPING_LINE.test(l.trim()))) {
+    return { value: readNestedMapping(block.lines), lastLine: block.lastLine };
+  }
+  if (content.every((l) => SEQUENCE_ITEM.test(l.trim()))) {
+    return { value: readSequence(block.lines), lastLine: block.lastLine };
+  }
+  return {
+    value: foldLines(block.lines, inline.startsWith("|") ? "literal" : "folded"),
+    lastLine: block.lastLine,
+  };
+}
+
+/** Collect the contiguous, more-indented block that starts at `start`. */
+function collectIndentedBlock(
+  lines: string[],
+  start: number,
+  closeIdx: number,
+  keyIndent: number,
+): { lines: string[]; lastLine: number } | null {
+  let lastContent = -1;
+  let i = start;
+  while (i < closeIdx) {
+    const line: string = lines[i];
+    if (line.trim() === "") {
+      i += 1;
+      continue;
+    }
+    if (indentWidth(line) <= keyIndent) break;
+    lastContent = i;
+    i += 1;
+  }
+  if (lastContent === -1) return null;
+  return { lines: lines.slice(start, lastContent + 1), lastLine: lastContent };
+}
+
+/**
+ * Turn an indented block into text. `folded` joins consecutive content lines
+ * with a single space and turns each blank line into a break, which is how YAML
+ * folds a plain multi-line scalar; `literal` keeps the line breaks.
+ */
+function foldLines(entries: string[], mode: "folded" | "literal"): string {
+  const content: string[] = entries.filter((l) => l.trim() !== "");
+  if (content.length === 0) return "";
+  const base: number = Math.min(...content.map(indentWidth));
+  const dedented: string[] = entries.map((l) =>
+    l.trim() === "" ? "" : l.slice(base).trimEnd(),
+  );
+
+  if (mode === "literal") return dedented.join("\n").replace(/\n+$/, "");
+
+  let out = "";
+  for (const entry of dedented) {
+    if (entry === "") {
+      if (out.length > 0) out += "\n";
+      continue;
+    }
+    out += out.length === 0 || out.endsWith("\n") ? entry : ` ${entry}`;
+  }
+  return out;
+}
+
+/** Read `- item` lines as a list of scalars, ignoring blank separators. */
+function readSequence(entries: string[]): string[] {
+  const out: string[] = [];
+  for (const line of entries) {
+    const trimmed: string = line.trim();
+    if (trimmed === "") continue;
+    const parsed: string | string[] = parseValue(trimmed.replace(/^-\s*/, ""));
+    if (Array.isArray(parsed)) out.push(...parsed);
+    else out.push(parsed);
+  }
+  return out;
+}
+
+/**
+ * Read one level of nested mapping. Deeper lines fold into the sub-key's value;
+ * two levels of mapping are not modelled, because no skill frontmatter field
+ * consumes them.
+ */
+function readNestedMapping(entries: string[]): Record<string, string | string[]> {
+  const content: string[] = entries.filter((l) => l.trim() !== "");
+  const base: number = Math.min(...content.map(indentWidth));
+  const out: Record<string, string | string[]> = {};
+
+  let key: string | null = null;
+  let inline = "";
+  let tail: string[] = [];
+
+  const flush = (): void => {
+    const current: string | null = key;
+    if (current === null) return;
+    const tailContent: string[] = tail.filter((l) => l.trim() !== "");
+    if (inline.length > 0) {
+      out[current] =
+        tailContent.length === 0
+          ? parseValue(inline)
+          : `${inline} ${foldLines(tail, "folded")}`;
+    } else if (
+      tailContent.length > 0 &&
+      tailContent.every((l) => SEQUENCE_ITEM.test(l.trim()))
+    ) {
+      out[current] = readSequence(tail);
+    } else {
+      out[current] = foldLines(tail, "folded");
+    }
+    key = null;
+    inline = "";
+    tail = [];
+  };
+
+  for (const line of entries) {
+    if (line.trim() === "") {
+      if (key !== null) tail.push(line);
+      continue;
+    }
+    if (indentWidth(line) === base) {
+      flush();
+      const colon: number = line.indexOf(":");
+      key = line.slice(0, colon).trim();
+      inline = line.slice(colon + 1).trim();
+    } else {
+      tail.push(line);
+    }
+  }
+  flush();
+  return out;
 }
 
 /**
@@ -353,7 +616,9 @@ const DB_KEY_PRECEDENCE = [
  * are preserved. Removing the last entry removes the whole key line.
  *
  * CONTRACT: the caller must parse `text` successfully first. This helper only
- * understands the inline forms parseSkillMd accepts.
+ * understands the inline forms, which stay true for the declaration keys
+ * because parseSkillMd rejects a multi-line `scripts-on-ssh` / `scripts-on-db`
+ * value outright.
  */
 function rewriteDeclaredScriptsInSkillMd(
   text: string,
@@ -451,6 +716,9 @@ export function rewriteScriptsOnDbInSkillMd(
 
 function frontmatterLineKey(line: string): string | null {
   const content = line.endsWith("\r") ? line.slice(0, -1) : line;
+  // Left-margin keys only: a declaration nested inside another mapping is not
+  // a declaration, and rewriting it would corrupt the parent block.
+  if (content.length > 0 && /^[ \t]/.test(content)) return null;
   const colon = content.indexOf(":");
   if (colon === -1) return null;
   return content.slice(0, colon).trim();
@@ -461,7 +729,7 @@ function frontmatterLineKey(line: string): string | null {
  * that actually exist (or are about to be written).
  *
  * Pure by design: callers supply the path set from wherever it is known —
- * the in-memory ZIP entries or `SkillStorage.listFiles()` — instead of this
+ * the in-memory import entries or `SkillStorage.listFiles()` — instead of this
  * module poking storage. That keeps the check usable before a skill row has
  * any files at all.
  *

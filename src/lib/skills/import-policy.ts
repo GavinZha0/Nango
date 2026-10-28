@@ -212,14 +212,15 @@ function ignoredByPath(path: string): boolean {
 }
 
 /**
- * Classify a path entering a `.skill` archive.
+ * Classify a path entering a skill import.
  *
- * `ignore` entries are archive noise and are skipped with a report.
+ * `ignore` entries are noise a directory tree always carries (dotfiles,
+ * caches, OS metadata) and are skipped with a report.
  * `block` entries reject the whole import with a reason.
  */
 export function classifyImportPath(path: string): FilePolicyResult {
   if (ignoredByPath(path)) {
-    return { action: "ignore", reason: "archive noise or dotfile" };
+    return { action: "ignore", reason: "noise or dotfile" };
   }
 
   const ext = getExtension(path);
@@ -244,13 +245,13 @@ export function classifyEditorCreatePath(path: string): FilePolicyResult {
   if (result.action === "allow-image") {
     return {
       action: "block",
-      reason: "Images and other binary assets must be imported via a .skill archive.",
+      reason: "Images and other binary assets must be added through a folder import.",
     };
   }
   if (result.action === "ignore") {
     return {
       action: "block",
-      reason: "This name is reserved archive noise; choose another file name.",
+      reason: "This name is reserved for generated or OS noise; choose another file name.",
     };
   }
   return result;
@@ -260,7 +261,7 @@ export function classifyEditorCreatePath(path: string): FilePolicyResult {
 export function classifyEditorRenamePath(path: string): FilePolicyResult {
   const result = classifyImportPath(path);
   if (result.action === "ignore") {
-    return { action: "block", reason: "That path is archive noise and cannot be used." };
+    return { action: "block", reason: "That path is generated or OS noise and cannot be used." };
   }
   return result;
 }

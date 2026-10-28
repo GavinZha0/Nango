@@ -303,7 +303,7 @@ export function SkillFileDialog({
                   }}
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Helper files are text. Use a <code>.skill</code> import for
+                  Helper files are text. Use a folder import for
                   binary assets.
                 </p>
               </div>

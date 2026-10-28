@@ -130,10 +130,11 @@ export function requireRowId(raw: string, what: "group" | "page"): number {
  */
 export async function filterVisibleKbCollectionIds(
   ids: readonly string[],
-  auth: SessionOrAuth,
+  auth: SessionOrAuth | undefined,
   runner: KbQueryRunner = db,
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
+  if (!auth) return new Set();
   const unique = [...new Set(ids)];
   const rows: Array<{ id: string }> = await runner
     .select({ id: KbCollectionTable.id })

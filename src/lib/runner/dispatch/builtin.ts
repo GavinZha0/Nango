@@ -28,6 +28,12 @@ import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
 import { buildKbPromptBlock } from "@/lib/kb/prompt-block.server";
 import { filterVisibleKbCollectionIds } from "@/lib/kb/access";
 import {
+  filterVisibleDataSourceIds,
+  filterVisibleMcpServerIds,
+  filterVisibleSkillIds,
+  filterVisibleSshServerIds,
+} from "./visibility";
+import {
   buildListKbPagesTool,
   buildReadKbPageTool,
 } from "@/lib/kb/runtime-tools";
@@ -174,7 +180,8 @@ export async function buildBuiltinAgents(
       continue;
     }
 
-    const providers: GracefulMcpProvider[] = [];
+    // Phase 1 — collect binding ids only; no borrows, no reads yet.
+    const mcpServerIds: string[] = [];
     const skillIds: string[] = [];
     const builtinToolNames: Set<string> = new Set();
     const dataSourceIds: string[] = [];
@@ -183,78 +190,7 @@ export async function buildBuiltinAgents(
     const kbCollectionIds: string[] = [];
     for (const tool of spec.tools) {
       if (tool.kind === "mcp_server") {
-        try {
-          const provider: GracefulMcpProvider = await mcpProviderPool.borrow(
-            tool.mcpServerId,
-          );
-          borrowed.push({ serverId: tool.mcpServerId, provider });
-          providers.push(provider);
-
-          // Borrow can succeed while discovery latched earlier as
-          // failed. Inspect health on every borrow so the user-visible
-          // degradation surface matches what the agent actually sees.
-          // `tools()` awaited so warming-up providers get a chance.
-          await provider.tools();
-          if (provider.health !== "ready") {
-            const reason =
-              provider.health === "discovery-timed-out"
-                ? "mcp_discovery_timed_out"
-                : "mcp_discovery_failed";
-            const message =
-              provider.lastErrorMessage ?? `MCP provider state: ${provider.health}`;
-            log.warn(
-              {
-                event: reason,
-                agentId,
-                mcpServerId: tool.mcpServerId,
-                providerHealth: provider.health,
-                message,
-              },
-              "MCP discovery did not succeed; agent will run without these tools",
-            );
-            recordDegradation(agentId, {
-              ref: tool.mcpServerId,
-              refName: provider.label,
-              reason,
-              message,
-            });
-
-            // Evict with cooldown so subsequent dispatches don't keep
-            // using a known-bad provider AND don't pummel the upstream
-            // with reconnects every turn. Fire-and-forget.
-            const mcpServerId = tool.mcpServerId;
-            void mcpProviderPool.evictWithCooldown(mcpServerId).catch((e) => {
-              log.warn(
-                {
-                  event: "mcp_evict_failed",
-                  mcpServerId,
-                  err: e instanceof Error ? { name: e.name, message: e.message } : String(e),
-                },
-                "evictWithCooldown failed; pool state may be inconsistent",
-              );
-            });
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(
-            {
-              event: "mcp_borrow_failed",
-              agentId,
-              mcpServerId: tool.mcpServerId,
-              err:
-                err instanceof Error
-                  ? { message: err.message, name: err.name }
-                  : String(err),
-            },
-            "mcp borrow failed; agent will run without it",
-          );
-          recordDegradation(agentId, {
-            ref: tool.mcpServerId,
-            refName: null,
-            reason: "mcp_borrow_failed",
-            message,
-          });
-        }
+        mcpServerIds.push(tool.mcpServerId);
       } else if (tool.kind === "skill") {
         skillIds.push(tool.skillId);
       } else if (tool.kind === "builtin_tool") {
@@ -271,51 +207,141 @@ export async function buildBuiltinAgents(
       // mcp_tool: not yet wired (single-tool granularity).
     }
 
-    const skillSpecs: SkillSpec[] = await skillPool.getMany(skillIds);
+    // Phase 2 — SECURITY: the binding is the grant, but a grant made against
+    // a private resource must not outlive the audience the binder could see —
+    // a public agent run by another user would otherwise serve the binder's
+    // private skills, SSH hosts, data sources, and MCP servers. Re-filter each
+    // bound set against the runner before building anything; no runner
+    // identity (programmatic build) fails closed. See docs/skills.md.
+    const runnerAuth = ctx
+      ? { userId: ctx.userId, isAdmin: ctx.isAdmin, isEditor: ctx.isEditor }
+      : undefined;
+    const [
+      visibleSkillIds,
+      visibleSshIds,
+      visibleDataSourceIds,
+      visibleMcpIds,
+      visibleKbIds,
+    ] = await Promise.all([
+      filterVisibleSkillIds(skillIds, runnerAuth),
+      filterVisibleSshServerIds(sshServerIds, runnerAuth),
+      filterVisibleDataSourceIds(dataSourceIds, runnerAuth),
+      filterVisibleMcpServerIds(mcpServerIds, runnerAuth),
+      filterVisibleKbCollectionIds(kbCollectionIds, runnerAuth),
+    ]);
+    const runnableMcpIds = mcpServerIds.filter((id) => visibleMcpIds.has(id));
+    const runnableSkillIds = skillIds.filter((id) => visibleSkillIds.has(id));
+    const runnableSshIds = sshServerIds.filter((id) => visibleSshIds.has(id));
+    const runnableDataSourceIds = dataSourceIds.filter((id) =>
+      visibleDataSourceIds.has(id),
+    );
+    const runnableKbIds = kbCollectionIds.filter((id) => visibleKbIds.has(id));
+
+    // Phase 3 — borrow MCP providers for the still-visible servers.
+    const providers: GracefulMcpProvider[] = [];
+    for (const mcpServerId of runnableMcpIds) {
+      try {
+        const provider: GracefulMcpProvider = await mcpProviderPool.borrow(
+          mcpServerId,
+        );
+        borrowed.push({ serverId: mcpServerId, provider });
+        providers.push(provider);
+
+        // Borrow can succeed while discovery latched earlier as
+        // failed. Inspect health on every borrow so the user-visible
+        // degradation surface matches what the agent actually sees.
+        // `tools()` awaited so warming-up providers get a chance.
+        await provider.tools();
+        if (provider.health !== "ready") {
+          const reason =
+            provider.health === "discovery-timed-out"
+              ? "mcp_discovery_timed_out"
+              : "mcp_discovery_failed";
+          const message =
+            provider.lastErrorMessage ?? `MCP provider state: ${provider.health}`;
+          log.warn(
+            {
+              event: reason,
+              agentId,
+              mcpServerId,
+              providerHealth: provider.health,
+              message,
+            },
+            "MCP discovery did not succeed; agent will run without these tools",
+          );
+          recordDegradation(agentId, {
+            ref: mcpServerId,
+            refName: provider.label,
+            reason,
+            message,
+          });
+
+          // Evict with cooldown so subsequent dispatches don't keep
+          // using a known-bad provider AND don't pummel the upstream
+          // with reconnects every turn. Fire-and-forget.
+          void mcpProviderPool.evictWithCooldown(mcpServerId).catch((e) => {
+            log.warn(
+              {
+                event: "mcp_evict_failed",
+                mcpServerId,
+                err: e instanceof Error ? { name: e.name, message: e.message } : String(e),
+              },
+              "evictWithCooldown failed; pool state may be inconsistent",
+            );
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(
+          {
+            event: "mcp_borrow_failed",
+            agentId,
+            mcpServerId,
+            err:
+              err instanceof Error
+                ? { message: err.message, name: err.name }
+                : String(err),
+          },
+          "mcp borrow failed; agent will run without it",
+        );
+        recordDegradation(agentId, {
+          ref: mcpServerId,
+          refName: null,
+          reason: "mcp_borrow_failed",
+          message,
+        });
+      }
+    }
+
+    const skillSpecs: SkillSpec[] = await skillPool.getMany(runnableSkillIds);
     const hasSshScripts = skillSpecs.some((s) => s.scriptsOnSsh.size > 0);
-    const hasSshBindings = sshServerIds.length > 0;
+    const hasSshBindings = runnableSshIds.length > 0;
     const hasDbScripts = skillSpecs.some((s) => s.scriptsOnDb.size > 0);
-    const hasDbBindings = dataSourceIds.length > 0;
+    const hasDbBindings = runnableDataSourceIds.length > 0;
     const skillsRuntime = buildSkillsRuntime({
       specs: skillSpecs,
       hasSshBindings,
       hasDbBindings,
     });
     const dataSourcesRuntime =
-      await buildDataSourcesPromptBlock(dataSourceIds);
+      await buildDataSourcesPromptBlock(runnableDataSourceIds);
     const sshHostsRuntime =
-      await buildSshHostsPromptBlock(sshServerIds);
-    // SECURITY: the binding is the grant, but a grant made against a private
-    // collection must not outlive the audience the binder could see — a
-    // public agent run by another user would otherwise disclose that user's
-    // private pages. Re-filter the bound set against the runner before
-    // mounting the block and tools; no runner identity (programmatic build)
-    // fails closed. See docs/kb.md.
-    const visibleKbIds: Set<string> = ctx
-      ? await filterVisibleKbCollectionIds(kbCollectionIds, {
-          userId: ctx.userId,
-          isAdmin: ctx.isAdmin,
-          isEditor: ctx.isEditor,
-        })
-      : new Set<string>();
-    const runnableKbIds: string[] = kbCollectionIds.filter((id) =>
-      visibleKbIds.has(id),
-    );
+      await buildSshHostsPromptBlock(runnableSshIds);
     const kbRuntime = await buildKbPromptBlock(runnableKbIds);
 
     // Binding any data source auto-mounts `extract_dataset_by_sql`.
     // Built directly (not through buildBuiltinTools) — the user-tickable
     // catalog deliberately omits it; routing through there would drop
     // the slug on lookup miss.
-    const dataSourceTools: ToolDefinition[] = dataSourceIds.length > 0
-      ? [buildExtractDatasetTool(dataSourceIds)]
+    const dataSourceTools: ToolDefinition[] = runnableDataSourceIds.length > 0
+      ? [buildExtractDatasetTool(runnableDataSourceIds)]
       : [];
 
     // Binding any ssh_server auto-mounts run_ssh_command + list_ssh_hosts.
-    const sshTools: ToolDefinition[] = sshServerIds.length > 0
+    const sshTools: ToolDefinition[] = runnableSshIds.length > 0
       ? [
-          buildRunSshCommandTool({ agentSshServerIds: sshServerIds }),
-          buildListSshHostsTool({ agentSshServerIds: sshServerIds }),
+          buildRunSshCommandTool({ agentSshServerIds: runnableSshIds }),
+          buildListSshHostsTool({ agentSshServerIds: runnableSshIds }),
         ]
       : [];
 
@@ -338,7 +364,7 @@ export async function buildBuiltinAgents(
         ? [
             buildRunSkillScriptOnSshTool({
               specs: skillSpecs,
-              agentSshServerIds: sshServerIds,
+              agentSshServerIds: runnableSshIds,
             }),
           ]
         : [];
@@ -351,7 +377,7 @@ export async function buildBuiltinAgents(
         ? [
             buildRunSkillSqlScriptTool({
               specs: skillSpecs,
-              agentDataSourceIds: dataSourceIds,
+              agentDataSourceIds: runnableDataSourceIds,
             }),
           ]
         : [];
@@ -467,7 +493,7 @@ export async function buildBuiltinAgents(
     const chartPromptBlock: string = (isSupervisor || !hasEcharts)
       ? ""
       : buildChartPromptBlock({
-          hasDataSource: dataSourceIds.length > 0,
+          hasDataSource: runnableDataSourceIds.length > 0,
           hasSandbox: builtinToolNames.has("run_code_in_sandbox"),
         });
 

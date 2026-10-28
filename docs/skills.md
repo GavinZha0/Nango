@@ -10,7 +10,7 @@ skill is one row in the `skill` table plus zero-or-more rows in
 `skill_file`.
 
 There is **one kind of skill**: user-authored or imported. Every row is
-created through the UI / API or a `.skill` ZIP import, and is subject to
+created through the UI / API or a folder import, and is subject to
 RBAC × visibility × ownership rules (see `docs/rbac.md`). `source` is a
 free-form origin label (e.g. `"anthropic"`, `"skills.sh"`), not a
 built-in/custom switch; empty string means unlabeled.
@@ -102,7 +102,8 @@ creator returns 409.
 **Path semantics**: `path` is a **relative POSIX path** with one or more
 segments. Root-level files such as `LICENSE` are valid; other files usually
 live in author-defined folders (`references/`, `scripts/`, `lib/`, `rules/`,
-`templates/`, …), and a ZIP import keeps whatever layout the archive ships:
+`templates/`, …), and a folder import keeps whatever layout the picked
+directory ships:
 
 ```
 <any-folder>/...
@@ -136,8 +137,8 @@ Caps are config-backed (`skill.max_file_bytes`, `skill.max_files`,
 ## 3. Authoring a skill
 
 Skills are authored as directory trees, identical to the Anthropic
-Claude Skills convention, then uploaded as a `.skill` (ZIP) archive or
-created as a single SKILL.md through the editor:
+Claude Skills convention, then imported as a folder or created as a single
+SKILL.md through the editor:
 
 ```
 my-skill/
@@ -170,13 +171,46 @@ Procedure ...
 | Frontmatter field | Required | Validation |
 |---|---|---|
 | `name` | yes | Kebab-case `[a-z0-9][a-z0-9_-]{0,63}`; unique per creator |
-| `description` | yes | 10–1000 chars |
-| `version` | no | Free-form string; default `'1.0.0'` |
+| `description` | yes | Non-empty, at most 1024 chars (the spec bounds) |
+| `version` | no | Free-form string; default `'1.0.0'`. Not a spec field: packs that follow the spec put the version under `metadata:` instead, and that value is adopted when no top-level `version` exists. Display-only — nothing consumes it at runtime. |
 | `context` | no | Skills 2.0 spec field; parsed but unused in v1 |
-| `allowed-tools` | no | Skills 2.0 spec field; parsed but unused in v1 |
+| `allowed-tools` | no | Spec field, spelled as one space-separated string (`read_file write_file`); a YAML list is also accepted. Both normalize to `string[]`. Parsed but unused in v1 |
 | `scripts-on-ssh` | no | String or array of file paths under `scripts/` (e.g. `['probe.sh']` or `['lib/probe.sh']`). Aliases: `scripts_on_ssh`, `scriptsOnSsh`. Normalized to `scripts/<path>`; sub-directories are allowed. Extensions are not restricted: only `.py` / `.sh` are executable, and other declared files return `UNSUPPORTED_INTERPRETER` at runtime. Import fails if the declared file is missing or is not valid UTF-8; PATCH checks existence only (the bytes were already gated at import). |
 | `scripts-on-db` | no | String or array of `.sql` file paths under `scripts/` (e.g. `['reports/sales.sql']`). Aliases: `scripts_on_db`, `scriptsOnDb`. Normalized to `scripts/<path>.sql`; sub-directories are allowed. Declared files are executed by `run_skill_sql_script` against a bound data source. Import/PATCH reject missing files; the editor shows `missingDbScripts` for legacy rows. |
 | Other fields | no | Captured into `extras`, not consumed |
+
+**Accepted value forms.** The parser is line-based, not a YAML engine, and it
+models exactly the shapes real skill packs ship:
+
+| Form | Example | Result |
+|---|---|---|
+| Single-line scalar / inline array | `description: One line.` · `scripts-on-ssh: ["a.sh", "b.sh"]` | string / string[] |
+| Plain multi-line scalar | `description:` then more-indented continuation lines | folded into one string (blank lines become `\n`) |
+| Block scalar | `description: >-` / `description: \|` then an indented block | folded (`>`) or line-preserving (`\|`); chomping indicators parse but trailing breaks are dropped |
+| Nested mapping | `metadata:` then `author: vercel` at one deeper indent | object under `metadata` in `extras` |
+| Block sequence | `tags:` then `- mobile` | string[] |
+
+Keys are recognised only at the left margin, and a nested mapping is **not**
+flattened: nothing inside `metadata:` can shadow a first-class field, which is
+what made third-party packs (Vercel, Anthropic) mis-parse before. `version` is
+the one deliberate exception — the spec has no top-level version key, so a
+missing one falls back to `metadata.version` rather than the default, and the
+top-level key still wins when both are present. Mixed prose and
+`key: value` continuation lines stay prose — the fold wins, matching YAML's rule
+that a plain scalar cannot contain `: `. Two levels of nested mapping are not
+modelled.
+
+**CONTRACT — declaration keys stay single-line.** `scripts-on-ssh` and
+`scripts-on-db` must be an inline array or one bare path; a folded or block form
+throws with the SKILL.md line number. Reason: rename/delete rewrites those lines
+in the stored text (`rewriteDeclaredScriptsInSkillMd`), which only understands
+the inline form — a multi-line declaration would leave its continuation lines
+orphaned in the document.
+
+Every parse failure names `SKILL.md`, and where the offending line is known, its
+absolute line number: `SKILL.md line 4: invalid frontmatter line (expected
+"key: value"): …`, `SKILL.md line 3: frontmatter \`description\` exceeds 1024
+characters (got 1025).`
 
 `dependencies-python` is no longer parsed. Sandbox packages are
 hand-maintained in `docker/dify-sandbox/requirements.txt`; a skill's
@@ -248,7 +282,7 @@ exist, because a dangling declaration is invisible until
 
 | Boundary | Judged against | Outcome |
 |---|---|---|
-| `POST /api/skills/import` | In-memory ZIP entries | 400 before any write |
+| `POST /api/skills/import` | The uploaded folder entries | 400 before any write |
 | `POST /api/skills` | Nothing — a created row has no files | 400 |
 | `PATCH /api/skills/:id` | `storage.listFiles(id)` | 400, body untouched |
 | `GET /api/skills/:id` | `storage.listFiles(id)` | `missingSshScripts: string[]` for pre-existing rows |
@@ -303,50 +337,68 @@ together.
 
 Executable scripts created or renamed through the editor must live under
 `scripts/` (subfolders are allowed); `.py` / `.sh` files elsewhere are
-rejected. Imported archives may still contain `.py` / `.sh` reference files
+rejected. Imported folders may still contain `.py` / `.sh` reference files
 outside `scripts/`, but they are not executable.
 
-### 4.3 ZIP import
+### 4.3 Folder import
 
 ```
-POST /api/skills/import    multipart/form-data file=<archive.skill>
+POST /api/skills/import    application/json { entries: [{ path, contentBase64 }] }
                            withEditor
 ```
 
-`.skill` is a ZIP archive. Server-side:
+The Skills panel's import button opens a directory picker (`<input type="file"
+webkitdirectory multiple>`). The browser enumerates the picked folder, strips
+the leading folder name from each `webkitRelativePath`, base64-encodes the
+bytes, and POSTs the manifest. **There is no archive format**: the server
+receives already-materialised file bytes, so there is no decompression step and
+no symlink entry to forge.
+
+Client-side, before any byte is encoded: `classifyImportPath` pre-filters each
+path (ignore → reported as skipped, block → toast and abort) and the caps are
+mirrored for a faster failure. The server re-checks everything authoritatively
+and never trusts the client.
 
 ```
-1. Read upload to memory (cap: 10 MB total).
-2. Open as ZIP. Reject if invalid.
+1. Reject a body whose Content-Length exceeds 16 MB before buffering it.
+2. Parse the manifest: 1..1000 entries, each { path (1..256 chars),
+   contentBase64 }.
 3. For each entry:
-     - reject absolute paths, '..' segments, back-slashes
-     - reject symlinks (zip external_attr stat)
+     - `SKILL.md` at the root -> the skill body (duplicate paths collapse on
+       write: `putFile` upserts by `(skillId, path)`, so the last one wins)
+     - reject '..', back-slashes, and absolute paths outright (400)
      - classify the path (see §4.4):
          ignored -> skip and report
          blocked -> reject the whole import with a 400 + reasons
          allowed -> keep (text/code/docs or images)
+     - validate the path with the editor's rules (leading dots, reserved names)
+     - enforce file count (100) BEFORE decoding, so a hostile body fails fast
+     - decode base64; enforce 256 KB per file and 10 MB across the import
      - reject text files containing NUL bytes
      - verify image magic bytes match the extension
-     - track total size; bail if > 10 MB
-4. Locate SKILL.md (root or single nested folder).
-5. Parse + validate frontmatter, including scripts-on-ssh / scripts-on-db
-   declarations backed by files in the same bundle.
-6. Reject if the creator already owns a skill with the same name (409).
-7. Persist the skill row, then helper-file rows at their archive paths.
-8. Return the new row's id plus `filesImported` and `skipped`.
+4. Reject a path that is both a file and a folder.
+5. Parse + validate the SKILL.md frontmatter, including scripts-on-ssh /
+   scripts-on-db declarations backed by files in the same upload.
+6. Decode every declared script through the strict UTF-8 helper; reject bytes
+   that cannot safely reach a remote host or the SQL runner.
+7. Reject if the creator already owns a skill with the same name (409).
+8. Persist the skill row, then helper-file rows at their upload paths.
+9. Return the new row's id plus `filesImported` and `skipped`.
 ```
 
 Import does not auto-fill `source`; the new row starts unlabeled and the
 user can set a label in the editor. The resulting row is a normal skill:
 listed in `/skills`, editable, and deletable like any other row.
 
-What's "in-memory only" is the **ZIP processing pipeline**, not the resulting
-skill: the upload is parsed entirely as Buffers + strings without ever writing
-temp files to the host filesystem. This is a security property (zero attack
-surface for path traversal — there is no fs target to traverse to), not a
-persistence claim. Memory bounds: `Content-Length` ≤ 10 MB hard cap on the
-upload, plus per-entry uncompressed size accounting during decode to defeat
-zip-bomb amplification.
+Nothing touches the host filesystem: the entries live as Buffers and strings
+until they become rows. That is a security property (no fs target to traverse),
+not a persistence claim. Memory bounds: `Content-Length` ≤ 16 MB on the JSON
+body, plus per-entry **decoded**-size accounting against the 10 MB cap — the
+base64 transport shell is a fixed 4/3 inflation, not a zip-bomb amplification,
+so the cap that matters is the one measured after decoding.
+
+A folder whose `SKILL.md` is not at the picked root fails with a 400 naming the
+requirement; pick the skill folder itself, not its parent.
 
 ### 4.4 Import file policy
 
@@ -358,8 +410,13 @@ The open Agent Skills spec permits any file, but Nango can only execute
 |---|---|---|
 | **Allow — text** | `md, markdown, txt, json, jsonl, ipynb, yaml, yml, toml, ini, cfg, conf, csv, tsv, xml, sql, py, pyi, sh, bash, zsh, js, mjs, cjs, ts, tsx, jsx, css, html, svg, rst, tex`, plus extensionless text files (`LICENSE`, `README`, `Dockerfile`, `Makefile`) | Imported after a NUL-byte check |
 | **Allow — image** | `png, jpg, jpeg, gif, webp, ico` | Imported after magic-byte validation; the editor previews them |
-| **Ignore** | dotfiles/dot-directories, generated caches/build metadata, OS/editor metadata, root `SKILL.md` | Skipped and returned in `skipped: string[]`; import succeeds |
+| **Ignore** | dotfiles/dot-directories, generated caches/build metadata, OS/editor metadata | Skipped and returned in `skipped: string[]`; import succeeds |
 | **Block** | executables/native binaries (`exe, dll, so, dylib, bin, msi, bat, cmd, ps1, jar, wasm, …`), audio/video, archives, fonts, PDF/Office documents, binary data/models, unknown extensions | Import fails with 400 and a path-by-path reason list; no rows are written |
+
+The root `SKILL.md` never reaches the policy: it is consumed as the skill body.
+A `SKILL.md` in a subfolder is an ordinary helper file, and a root-level
+`skill.md` in another case is refused as an invalid path — the body is matched
+by its exact name.
 
 `.bash` / `.zsh` are imported as reference text; only `.py` / `.sh` under
 `scripts/` are executable.
@@ -386,8 +443,9 @@ The same policy drives editor creation (text only) and rename (text or image;
 the existing bytes must match the new type). Images can be imported but not
 created or downloaded from the editor.
 
-The `.skill` format is the same ZIP layout DeerFlow uses, so packs
-created elsewhere can be imported directly.
+Because the policy lives in `classifyImportPath` rather than in the transport,
+a skill folder produced elsewhere imports unchanged as long as its files clear
+the allowlist — with no archive wrapper to unwrap.
 
 ---
 
@@ -406,6 +464,22 @@ canChange = canDelete   // visibility / enabled gate
 `updatedBy` is set automatically on every PATCH. Listing uses
 `visibilitySql()` from `lib/auth/permissions.ts`.
 
+### 5.1 Runtime visibility is re-checked once, at dispatch
+
+The binding is the grant, but a grant must not outlive the audience the binder
+could see. The runtime read path stays RBAC-free — `get_skill` and the script
+tools resolve by bound id with no per-call visibility check — so the built-in
+dispatch re-evaluates visibility **once, at dispatch time, against the runner**:
+[src/lib/runner/dispatch/visibility.ts](file:///d:/AI/nango/src/lib/runner/dispatch/visibility.ts)
+filters the bound `skill`, `ssh_server`, `data_source`, and `mcp_server` id sets
+through the same visible-and-enabled predicate (`visibilitySql`) before building
+the prompt blocks, loading skill specs, and borrowing MCP providers. A **public
+agent run by another user** therefore mounts nothing for a **private skill /
+SSH host / data source / MCP server bound by its author**, and a programmatic
+dispatch with no runner identity fails closed. The check is a per-run snapshot:
+a visibility flip mid-run is not re-checked on later tool calls (same trade-off
+as `docs/kb.md` §13.1).
+
 ---
 
 ## 6. Runtime caches
@@ -418,7 +492,7 @@ Two caches participate in the skills hot path:
 | `skillPool` | skillId | `lib/skills/skill-pool.ts` | Per-skill `SkillSpec` (skillMd + parsed frontmatter + metadata) |
 
 Both are LRU + 10-min TTL (configurable via `cache.skill_pool.*`). After every
-skill mutation (`POST` / `PATCH` / `DELETE` / ZIP import), the write path calls
+skill mutation (`POST` / `PATCH` / `DELETE` / folder import), the write path calls
 `invalidateForSkillChange(skillId)` which:
 
 1. Drops the cached `SkillSpec` from `skillPool`.
@@ -471,14 +545,17 @@ Skills are identified by `(id)` (URL-stable). Names are unique per
 creator and are expected to match the SKILL.md frontmatter, but the id
 is what agent bindings and caches use.
 
-### 8.3 ZIP import isn't path traversal
+### 8.3 Folder import isn't path traversal
 
 `skill_file.path` is a **string column**, not a filesystem path. A
-hostile ZIP entry named `../../etc/passwd` would simply fail the regex
-validation; it cannot reach the host filesystem because no extraction
-to disk ever happens. `.skill` packs are *processed* entirely in
-memory and *persisted* into `skill` + `skill_file` rows like any
-other custom skill — no fs side effect at any stage.
+crafted upload named `../../etc/passwd` is rejected outright before
+classification; even if it slipped through it would only fail the regex
+validation, because there is no extraction to disk to traverse to. Imported
+folders are *processed* entirely in memory and *persisted* into `skill` +
+`skill_file` rows like any other custom skill — no fs side effect at any
+stage. The transport has no decompression and no symlink records, so the
+amplification and link-forging surfaces an archive format would add simply do
+not exist here.
 
 ### 8.4 Caching `get_skill_file` is unnecessary
 

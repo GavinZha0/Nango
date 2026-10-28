@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+import { classifyImportPath } from "@/lib/skills/import-policy";
 
 /** Shared so the editor route can invalidate the panel's list cache. */
 export const SKILLS_LIST_KEY = "/api/skills";
@@ -242,14 +243,64 @@ export function SkillsPanel(): ReactNode {
     return patchSkill(row, { visibility });
   }
 
-  async function handleImportFile(file: File): Promise<void> {
+  async function handleImportFiles(files: File[]): Promise<void> {
     setImporting(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
+      // Client-side pre-checks mirror the server's defaults for a faster
+      // failure; the server re-checks everything authoritatively.
+      const entries: Array<{ path: string; contentBase64: string }> = [];
+      const skipped: string[] = [];
+      let total = 0;
+
+      for (const file of files) {
+        // webkitRelativePath is "<folder>/<sub>/<file>"; drop the top folder.
+        const rel = file.webkitRelativePath || file.name;
+        const path = rel.includes("/") ? rel.slice(rel.indexOf("/") + 1) : rel;
+
+        const policy = classifyImportPath(path);
+        if (policy.action === "ignore") {
+          skipped.push(path);
+          continue;
+        }
+        if (policy.action === "block") {
+          toast.error("Import failed", {
+            description: `"${path}" (${policy.reason ?? "unsupported file type"})`,
+            duration: 10_000,
+          });
+          return;
+        }
+        if (entries.length >= 100) {
+          toast.error("Import failed", {
+            description: "The folder exceeds the 100 file limit.",
+            duration: 10_000,
+          });
+          return;
+        }
+
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        total += bytes.length;
+        if (bytes.length > 256 * 1024) {
+          toast.error("Import failed", {
+            description: `"${path}" exceeds the 256 KB per-file limit.`,
+            duration: 10_000,
+          });
+          return;
+        }
+        if (total > 10 * 1024 * 1024) {
+          toast.error("Import failed", {
+            description: "The folder exceeds the 10 MB total limit.",
+            duration: 10_000,
+          });
+          return;
+        }
+
+        entries.push({ path, contentBase64: bytesToBase64(bytes) });
+      }
+
       const res = await fetch("/api/skills/import", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -264,13 +315,13 @@ export function SkillsPanel(): ReactNode {
         filesImported?: number;
         skipped?: string[];
       };
-      const skipped = created.skipped ?? [];
-      if (skipped.length > 0) {
-        const preview = skipped.slice(0, 3).join(", ");
+      const allSkipped = [...skipped, ...(created.skipped ?? [])];
+      if (allSkipped.length > 0) {
+        const preview = allSkipped.slice(0, 3).join(", ");
         toast.warning(
-          `Imported ${created.filesImported ?? 0} file(s); skipped ${skipped.length}`,
+          `Imported ${created.filesImported ?? 0} file(s); skipped ${allSkipped.length}`,
           {
-            description: `${preview}${skipped.length > 3 ? "…" : ""}`,
+            description: `${preview}${allSkipped.length > 3 ? "…" : ""}`,
           },
         );
       }
@@ -285,6 +336,15 @@ export function SkillsPanel(): ReactNode {
       setImporting(false);
       if (importInputRef.current) importInputRef.current.value = "";
     }
+  }
+
+  function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
   }
 
   // Render
@@ -312,18 +372,19 @@ export function SkillsPanel(): ReactNode {
             className="h-6 w-6"
             onClick={() => importInputRef.current?.click()}
             disabled={importing}
-            aria-label="Import .skill archive"
+            aria-label="Import skill folder"
           >
             <FolderUp className={cn("h-3.5 w-3.5", importing && "animate-pulse")} />
           </Button>
           <input
             ref={importInputRef}
             type="file"
-            accept="*/*"
+            multiple
             className="hidden"
+            {...({ webkitdirectory: "" } as object)}
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleImportFile(f);
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) void handleImportFiles(files);
             }}
           />
           <Button
@@ -352,7 +413,7 @@ export function SkillsPanel(): ReactNode {
             >
               Create one
             </button>{" "}
-            or import a <code>.skill</code> archive.
+            or import a skill folder.
           </div>
         ) : (
           sortedSkills.map((row) => (

@@ -100,7 +100,7 @@ describe("editor policies", () => {
     );
     const image = classifyEditorCreatePath("assets/logo.png");
     expect(image.action).toBe("block");
-    expect(image.reason).toMatch(/imported via a \.skill archive/);
+    expect(image.reason).toMatch(/added through a folder import/);
   });
 
   it("allows text/image renames but refuses executables", () => {

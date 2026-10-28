@@ -32,6 +32,10 @@ const {
   buildListKbPagesToolMock,
   buildReadKbPageToolMock,
   filterVisibleKbCollectionIdsMock,
+  filterVisibleSkillIdsMock,
+  filterVisibleSshServerIdsMock,
+  filterVisibleDataSourceIdsMock,
+  filterVisibleMcpServerIdsMock,
   buildSupervisorRuntimeMock,
   composeToolPipelineMock,
   composePipelinedMcpProviderMock,
@@ -66,6 +70,10 @@ const {
   buildListKbPagesToolMock: vi.fn().mockReturnValue({ name: "list_kb_pages" }),
   buildReadKbPageToolMock: vi.fn().mockReturnValue({ name: "read_kb_page" }),
   filterVisibleKbCollectionIdsMock: vi.fn(),
+  filterVisibleSkillIdsMock: vi.fn(),
+  filterVisibleSshServerIdsMock: vi.fn(),
+  filterVisibleDataSourceIdsMock: vi.fn(),
+  filterVisibleMcpServerIdsMock: vi.fn(),
   buildSupervisorRuntimeMock: vi.fn(),
   composeToolPipelineMock: vi.fn().mockReturnValue((t: unknown) => t),
   composePipelinedMcpProviderMock: vi.fn().mockImplementation((p: unknown) => p),
@@ -162,6 +170,13 @@ vi.mock("@/lib/kb/prompt-block.server", () => ({
 
 vi.mock("@/lib/kb/access", () => ({
   filterVisibleKbCollectionIds: filterVisibleKbCollectionIdsMock,
+}));
+
+vi.mock("@/lib/runner/dispatch/visibility", () => ({
+  filterVisibleSkillIds: filterVisibleSkillIdsMock,
+  filterVisibleSshServerIds: filterVisibleSshServerIdsMock,
+  filterVisibleDataSourceIds: filterVisibleDataSourceIdsMock,
+  filterVisibleMcpServerIds: filterVisibleMcpServerIdsMock,
 }));
 
 vi.mock("@/lib/kb/runtime-tools", () => ({
@@ -412,12 +427,18 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
       buildKbPromptBlockMock.mockResolvedValue({ promptBlock: "" });
       buildListKbPagesToolMock.mockReturnValue({ name: "list_kb_pages" });
       buildReadKbPageToolMock.mockReturnValue({ name: "read_kb_page" });
-      // Identity by default: the runner sees every bound collection, so the
-      // pre-existing KB mounting assertions stay true. Tests that exercise the
-      // visibility cut override this to an empty/subset Set.
-      filterVisibleKbCollectionIdsMock.mockImplementation(
-        async (ids: readonly string[]) => new Set(ids),
-      );
+      // Identity when a runner identity exists, empty (fail-closed) otherwise —
+      // mirrors the real filters' `!auth → empty set` contract, so the
+      // pre-existing mounting assertions stay true while no-ctx builds drop
+      // everything. Tests that exercise the visibility cut override to a
+      // subset Set.
+      const identityOrClosed = (ids: readonly string[], auth?: unknown) =>
+        auth ? new Set(ids) : new Set();
+      filterVisibleKbCollectionIdsMock.mockImplementation(identityOrClosed);
+      filterVisibleSkillIdsMock.mockImplementation(identityOrClosed);
+      filterVisibleSshServerIdsMock.mockImplementation(identityOrClosed);
+      filterVisibleDataSourceIdsMock.mockImplementation(identityOrClosed);
+      filterVisibleMcpServerIdsMock.mockImplementation(identityOrClosed);
       buildCalendarPromptBlockMock.mockResolvedValue({ promptBlock: "" });
       buildGetCurrentDatetimeToolMock.mockReturnValue({ name: "get_current_datetime" });
       buildExtractDatasetToolMock.mockReturnValue({ name: "extract_dataset_by_sql" });
@@ -846,10 +867,59 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
 
         await buildBuiltinAgents(["agent-1"], mockLogger);
 
-        expect(filterVisibleKbCollectionIdsMock).not.toHaveBeenCalled();
+        expect(filterVisibleKbCollectionIdsMock).toHaveBeenCalledWith(
+          ["kb-1"],
+          undefined,
+        );
         expect(buildKbPromptBlockMock).toHaveBeenCalledWith([]);
         expect(buildListKbPagesToolMock).not.toHaveBeenCalled();
         expect(buildReadKbPageToolMock).not.toHaveBeenCalled();
+      });
+
+      it("drops a bound private skill the runner cannot see", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "skill", skillId: "skill-private" }] }),
+        );
+        // user-2 runs a public agent whose author bound a private skill.
+        filterVisibleSkillIdsMock.mockResolvedValueOnce(new Set());
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-2" });
+
+        expect(filterVisibleSkillIdsMock).toHaveBeenCalledWith(
+          ["skill-private"],
+          expect.objectContaining({ userId: "user-2" }),
+        );
+        expect(skillPoolGetManyMock).toHaveBeenCalledWith([]);
+      });
+
+      it("does not borrow an MCP server the runner cannot see", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "mcp_server", mcpServerId: "mcp-private" }] }),
+        );
+        filterVisibleMcpServerIdsMock.mockResolvedValueOnce(new Set());
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-2" });
+
+        expect(filterVisibleMcpServerIdsMock).toHaveBeenCalledWith(
+          ["mcp-private"],
+          expect.objectContaining({ userId: "user-2" }),
+        );
+        expect(mcpBorrowMock).not.toHaveBeenCalled();
+        expect(agentArgs().mcpClients).toBeUndefined();
+      });
+
+      it("fails closed (no skill) when the agent binds a skill but dispatch has no runner ctx", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "skill", skillId: "skill-1" }] }),
+        );
+
+        await buildBuiltinAgents(["agent-1"], mockLogger);
+
+        expect(filterVisibleSkillIdsMock).toHaveBeenCalledWith(
+          ["skill-1"],
+          undefined,
+        );
+        expect(skillPoolGetManyMock).toHaveBeenCalledWith([]);
       });
 
       it("renders the knowledge block after Calendar and before Chart", async () => {

@@ -1,11 +1,17 @@
 /**
- * POST /api/skills/import — import a .skill (ZIP) archive as a custom skill.
+ * POST /api/skills/import — import a folder of files as a custom skill.
  *
- * Processing is entirely in-memory (no temp files). Security properties:
- * - Content-Length hard cap (10 MB)
- * - Symlink rejection via ZIP external_attr
- * - Path traversal impossible (skill_file.path is a string column, not fs)
- * - Zip-bomb mitigation via per-entry uncompressed size tracking
+ * The browser enumerates the user-picked directory (via `<input
+ * webkitdirectory>`) and POSTs a JSON manifest of `{ path, contentBase64 }`
+ * entries. There is no archive format, no decompression, and no symlink
+ * surface — the server receives already-materialised file bytes, so the only
+ * inflation risk is base64 (a fixed 4/3 factor, bounded by the decoded-size
+ * cap).
+ *
+ * Security properties:
+ * - Content-Length pre-check + per-entry decoded-size accounting (10 MB total)
+ * - Path-traversal / dotfile / absolute-path rejection (never trusts the client)
+ * - Text/image allowlist with NUL-byte and image-magic validation
  *
  * See docs/skills.md.
  */
@@ -13,12 +19,13 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import JSZip from "jszip";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { SkillTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
+import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
 import {
   parseSkillMd,
@@ -48,168 +55,125 @@ import {
 } from "@/lib/skills/import-policy";
 
 const ROUTE = "/api/skills/import";
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-/** Unix mode mask for file type; symlink = 0xA000. */
-const S_IFMT = 0xF000;
-const S_IFLNK = 0xA000;
+// Request-body ceiling. base64 is a fixed 4/3 factor over the 10 MB decoded
+// cap, plus JSON path overhead — 16 MB leaves comfortable headroom while
+// still rejecting a hostile multi-hundred-MB body before `req.json()` reads it.
+const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 
-/** SKILL.md must be at root or inside a single top-level folder. */
-function locateSkillMd(
-  files: Record<string, JSZip.JSZipObject>,
-): JSZip.JSZipObject | null {
-  // Try root first
-  if (files["SKILL.md"]) return files["SKILL.md"];
+const folderEntrySchema = z.object({
+  path: z.string().min(1).max(256),
+  contentBase64: z.string().min(1),
+});
 
-  // Try single nested folder (e.g. my-skill/SKILL.md)
-  const candidates = Object.keys(files).filter(
-    (p) => p.endsWith("/SKILL.md") && p.split("/").length === 2,
-  );
-  if (candidates.length === 1) return files[candidates[0]];
-  return null;
-}
-
-/** Derive the prefix to strip from file paths when the SKILL.md is
- *  inside a nested folder (e.g. "my-skill/" → strip "my-skill/"). */
-function derivePrefix(skillMdPath: string): string {
-  const idx = skillMdPath.lastIndexOf("/");
-  return idx === -1 ? "" : skillMdPath.slice(0, idx + 1);
-}
+const importFolderSchema = z
+  .object({
+    entries: z.array(folderEntrySchema).min(1).max(1000),
+  })
+  .strict();
 
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
-  // 1. Read upload body with size guard.
+  // 1. Reject an oversized body before buffering it.
   const contentLength = Number(req.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_UPLOAD_BYTES) {
+  if (contentLength > MAX_REQUEST_BYTES) {
     throw new ApiError(
       "BAD_REQUEST",
       413,
-      `Upload exceeds ${MAX_UPLOAD_BYTES / 1024 / 1024} MB limit.`,
+      `Upload exceeds ${Math.round(MAX_REQUEST_BYTES / 1024 / 1024)} MB.`,
     );
   }
 
-  const formData = await req.formData();
-  const file = formData.get("file");
-  if (!file || !(file instanceof File)) {
-    throw new ApiError("BAD_REQUEST", 400, "Missing 'file' field in form data.");
-  }
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > MAX_UPLOAD_BYTES) {
-    throw new ApiError(
-      "BAD_REQUEST",
-      413,
-      `Upload exceeds ${MAX_UPLOAD_BYTES / 1024 / 1024} MB limit.`,
-    );
-  }
+  const body = await parseBody(req, importFolderSchema);
 
-  // 2. Parse ZIP.
-  let zip: JSZip;
-  try {
-    zip = await JSZip.loadAsync(buffer);
-  } catch {
-    throw new ApiError("BAD_REQUEST", 400, "Invalid ZIP archive.");
-  }
-
-  // 3. Locate SKILL.md.
-  const skillMdEntry = locateSkillMd(zip.files);
-  if (!skillMdEntry) {
-    throw new ApiError(
-      "BAD_REQUEST",
-      400,
-      "ZIP must contain a SKILL.md at the root or inside a single top-level folder.",
-    );
-  }
-  const prefix = derivePrefix(skillMdEntry.name);
-
-  // 4. Validate entries + collect files.
+  // 2. Walk the entries: locate SKILL.md, classify the rest, and enforce the
+  //    same policy + caps every other skill-file write applies.
+  let skillMdText: string | null = null;
   const filesToWrite: Array<{ path: string; content: Buffer }> = [];
   const skipped: string[] = [];
   const blocked: Array<{ path: string; reason: string }> = [];
-  let totalUncompressedBytes = 0;
+  let totalDecodedBytes = 0;
 
-  for (const [rawPath, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue;
+  for (const entry of body.entries) {
+    const { path } = entry;
 
-    // Security: reject symlinks via Unix mode bits.
-    const unixMode = (entry.unixPermissions ?? 0) as number;
-    if ((unixMode & S_IFMT) === S_IFLNK) {
-      throw new ApiError("BAD_REQUEST", 400, `Symlink rejected: ${rawPath}`);
+    // SKILL.md lives at the folder root and is stored in the skill row.
+    if (path === "SKILL.md") {
+      skillMdText = Buffer.from(entry.contentBase64, "base64").toString("utf-8");
+      continue;
     }
 
-    // Security: reject path traversal patterns.
-    if (rawPath.includes("..") || rawPath.includes("\\") || rawPath.startsWith("/")) {
-      throw new ApiError("BAD_REQUEST", 400, `Invalid path in archive: ${rawPath}`);
+    // SECURITY: never trust the client — a crafted client can send `..`,
+    // back-slashes, or absolute paths even though the real directory picker
+    // cannot. Reject outright, before classification.
+    if (path.includes("..") || path.includes("\\") || path.startsWith("/")) {
+      throw new ApiError("BAD_REQUEST", 400, `Invalid path in upload: ${path}`);
     }
 
-    // Strip prefix (for nested-folder archives).
-    if (!rawPath.startsWith(prefix)) continue;
-    const relativePath = rawPath.slice(prefix.length);
-    if (!relativePath || relativePath === "SKILL.md") continue;
-
-    const policy = classifyImportPath(relativePath);
+    // Classify before path validation: dotfiles are folder noise (skipped),
+    // while `validateSkillFilePath` would reject their leading dot as invalid.
+    const policy = classifyImportPath(path);
     if (policy.action === "ignore") {
-      skipped.push(relativePath);
+      skipped.push(path);
       continue;
     }
     if (policy.action === "block") {
-      blocked.push({
-        path: relativePath,
-        reason: policy.reason ?? "unsupported file type",
-      });
+      blocked.push({ path, reason: policy.reason ?? "unsupported file type" });
       continue;
     }
 
     try {
-      validateSkillFilePath(relativePath);
+      validateSkillFilePath(path);
     } catch (err) {
       if (err instanceof InvalidSkillPathError) {
-        blocked.push({ path: relativePath, reason: "invalid path" });
+        blocked.push({ path, reason: "invalid path" });
         continue;
       }
       throw err;
     }
 
-    // Extract content with size tracking (zip-bomb mitigation).
-    const content = Buffer.from(await entry.async("nodebuffer"));
-    totalUncompressedBytes += content.length;
+    // Count cap before decoding so a hostile thousand-entry body fails fast
+    // without allocating a Buffer for each one.
+    if (filesToWrite.length >= MAX_FILES_PER_SKILL()) {
+      throw new ApiError(
+        "BAD_REQUEST",
+        413,
+        `Upload exceeds ${MAX_FILES_PER_SKILL()} file limit.`,
+      );
+    }
+
+    const content = Buffer.from(entry.contentBase64, "base64");
+    totalDecodedBytes += content.length;
 
     if (content.length > MAX_FILE_BYTES()) {
       throw new ApiError(
         "BAD_REQUEST",
         413,
-        `File ${relativePath} exceeds ${MAX_FILE_BYTES() / 1024} KB limit.`,
+        `File ${path} exceeds ${MAX_FILE_BYTES() / 1024} KB limit.`,
       );
     }
-    if (totalUncompressedBytes > MAX_TOTAL_BYTES_PER_SKILL()) {
+    if (totalDecodedBytes > MAX_TOTAL_BYTES_PER_SKILL()) {
       throw new ApiError(
         "BAD_REQUEST",
         413,
-        `Total uncompressed size exceeds ${MAX_TOTAL_BYTES_PER_SKILL() / 1024 / 1024} MB limit.`,
+        `Total size exceeds ${MAX_TOTAL_BYTES_PER_SKILL() / 1024 / 1024} MB limit.`,
       );
     }
 
     if (policy.action === "allow-text") {
       const textError = validateTextBytes(content);
       if (textError) {
-        blocked.push({ path: relativePath, reason: textError });
+        blocked.push({ path, reason: textError });
         continue;
       }
     } else if (policy.action === "allow-image") {
-      const imageError = validateImageBytes(relativePath, content);
+      const imageError = validateImageBytes(path, content);
       if (imageError) {
-        blocked.push({ path: relativePath, reason: imageError });
+        blocked.push({ path, reason: imageError });
         continue;
       }
     }
 
-    if (filesToWrite.length >= MAX_FILES_PER_SKILL()) {
-      throw new ApiError(
-        "BAD_REQUEST",
-        413,
-        `Archive exceeds ${MAX_FILES_PER_SKILL()} file limit.`,
-      );
-    }
-
-    filesToWrite.push({ path: relativePath, content });
+    filesToWrite.push({ path, content });
   }
 
   if (blocked.length > 0) {
@@ -226,9 +190,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     );
   }
 
-  // 4b. A single path cannot be both a file and a folder. Root-level files
-  // are allowed, so this collision is now representable and must be rejected
-  // before any row is written.
+  // 3. A single path cannot be both a file and a folder.
   const pathSet = new Set(filesToWrite.map((f) => f.path));
   for (const file of filesToWrite) {
     const segments = file.path.split("/");
@@ -239,14 +201,20 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         throw new ApiError(
           "BAD_REQUEST",
           400,
-          `Archive contains both a file and a folder named "${prefix}".`,
+          `Upload contains both a file and a folder named "${prefix}".`,
         );
       }
     }
   }
 
-  // 5. Parse and validate SKILL.md.
-  const skillMdText = await skillMdEntry.async("string");
+  // 4. Parse and validate SKILL.md.
+  if (!skillMdText) {
+    throw new ApiError(
+      "BAD_REQUEST",
+      400,
+      "The folder must contain a SKILL.md at its root.",
+    );
+  }
   let parsed;
   try {
     parsed = parseSkillMd(skillMdText);
@@ -257,10 +225,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     throw err;
   }
 
-  // 5b. scripts-on-ssh entries must be backed by a file in this same bundle.
-  // The bundle is fully in memory here, so this is decidable before any write
-  // — rejecting later would leave a dangling declaration that only blows up at
-  // run time as SCRIPT_NOT_FOUND.
+  // 5. scripts-on-ssh / scripts-on-db entries must be backed by a file in
+  //    this same upload.
   if (parsed.frontmatter.scriptsOnSsh?.length) {
     const available = filesToWrite.map((f) => f.path);
     const missing = findMissingSshScripts(
@@ -275,8 +241,6 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       );
     }
   }
-
-  // 5b-bis. scripts-on-db entries must be backed by a SQL file in this bundle.
   if (parsed.frontmatter.scriptsOnDb?.length) {
     const available = filesToWrite.map((f) => f.path);
     const missing = findMissingDeclaredScripts(
@@ -292,10 +256,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
-  // 5c. Declared scripts must be strict UTF-8 text. Their source is embedded
-  // in a command string shipped to a remote host or passed to the DB adapter,
-  // where a mangled byte becomes mojibake; rejecting here is the last point
-  // where the author can still re-save the file.
+  // 6. Declared scripts must be strict UTF-8 text.
   const declaredSshScripts = new Set(parsed.frontmatter.scriptsOnSsh ?? []);
   const declaredDbScripts = new Set(parsed.frontmatter.scriptsOnDb ?? []);
   for (const file of filesToWrite) {
@@ -315,7 +276,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
-  // 6. Name collision check (per-creator uniqueness).
+  // 7. Name collision check (per-creator uniqueness).
   const existing = await db
     .select({ id: SkillTable.id })
     .from(SkillTable)
@@ -334,7 +295,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     );
   }
 
-  // 7. Persist skill row + helper files in one logical write.
+  // 8. Persist skill row + helper files.
   const storage = getDbSkillStorage();
   const { id } = await storage.createCustom({
     skillMd: skillMdText,
@@ -351,10 +312,10 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     });
   }
 
-  // 8. Cache invalidation.
+  // 9. Cache invalidation.
   await invalidateForSkillChange(id);
 
-  // 9. Return created row.
+  // 10. Return the created row.
   const [row] = await db
     .select()
     .from(SkillTable)

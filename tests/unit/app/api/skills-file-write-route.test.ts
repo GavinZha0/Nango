@@ -132,7 +132,7 @@ describe("POST /api/skills/[id]/files", () => {
     );
 
     expect(res.status).toBe(400);
-    expect((await res.json()).message).toMatch(/must be imported via a \.skill archive/);
+    expect((await res.json()).message).toMatch(/must be added through a folder import/);
     expect(storageMock.putFile).not.toHaveBeenCalled();
   });
 
