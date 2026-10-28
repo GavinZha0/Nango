@@ -14,7 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { invalidateForAgentChange } from "@/lib/cache/invalidation";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
-import { filterBindableKbCollectionIds } from "@/lib/kb/access";
+import { filterVisibleKbCollectionIds } from "@/lib/kb/access";
 import {
   canChangeVisibility,
   canDeleteResource,
@@ -319,15 +319,18 @@ export const PATCH = withEditor<{ id: string }>(
               && !SUPERVISOR_TOOL_NAME_SET.has(t.builtinTool)),
         );
         // The binding is the KB grant, so this filter is the only place
-        // visibility and enabled are checked before the runtime reads. An id
-        // that is deleted, hidden, or disabled is dropped from the replacement
-        // set rather than rejected — the picker cannot render it, so rejecting
-        // would make the agent permanently unsaveable.
-        const bindableKbIds: Set<string> = await filterBindableKbCollectionIds(
+        // visibility and enabled are checked before the runtime reads. It runs
+        // on the transaction's connection so a collection that turns private,
+        // disabled, or is deleted mid-save cannot slip a stale grant between
+        // the read and the insert. An id that fails is dropped from the
+        // replacement set rather than rejected — the picker cannot render it,
+        // so rejecting would make the agent permanently unsaveable.
+        const bindableKbIds: Set<string> = await filterVisibleKbCollectionIds(
           userTools
             .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
             .map((t) => t.kbCollectionId as string),
           session,
+          tx,
         );
         const keptTools = userTools.filter(
           (t) =>

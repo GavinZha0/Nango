@@ -392,6 +392,50 @@ describe("kb/service — page writes", () => {
     expect(dbMock.insert).not.toHaveBeenCalled();
   });
 
+  it("refuses a NUL byte in content before Postgres can reject the row", async () => {
+    dbMock.$enqueue([{ count: 0 }]);
+    await expectApiError(
+      () => createPage(COLLECTION_ID, { name: "nul", content: "ok\u0000tail" }, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
+    );
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("refuses a NUL byte in the page name before any query", async () => {
+    await expectApiError(
+      () => createPage(COLLECTION_ID, { name: "bad\u0000name", content: body }, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
+    );
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("refuses a NUL byte in the page description before any query", async () => {
+    await expectApiError(
+      () =>
+        createPage(
+          COLLECTION_ID,
+          { name: "desc", description: "bad\u0000desc", content: body },
+          ACTOR_ID,
+        ),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
+    );
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("accepts a NUL byte in source_ref — provenance is exempt from text validation", async () => {
+    dbMock.$enqueue([{ count: 0 }], [{ id: 22, name: "nul-src" }]);
+
+    await createPage(
+      COLLECTION_ID,
+      { name: "nul-src", content: body, sourceRef: "note\u0000nul" },
+      ACTOR_ID,
+    );
+
+    expect(dbMock._chain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceRef: "note\u0000nul" }),
+    );
+  });
+
   it("refuses the insert at the configured page ceiling", async () => {
     mockConfig["kb.max_pages"] = "50";
     dbMock.$enqueue([{ count: 50 }]);

@@ -223,6 +223,8 @@ export async function getPage(
 export async function createCollection(
   input: CreateCollectionInput,
 ): Promise<KbCollectionEntity> {
+  assertValidText("Collection name", input.name);
+  assertValidText("Collection description", input.description);
   try {
     const [row] = await db
       .insert(KbCollectionTable)
@@ -248,6 +250,10 @@ export async function updateCollection(
 ): Promise<KbCollectionEntity> {
   if (Object.keys(patch).length === 0) {
     throw new ApiError("BAD_REQUEST", 400, "No fields to update.");
+  }
+  if (patch.name !== undefined) assertValidText("Collection name", patch.name);
+  if (patch.description !== undefined) {
+    assertValidText("Collection description", patch.description);
   }
   try {
     const [row] = await db
@@ -283,6 +289,8 @@ export async function createGroup(
   collectionId: string,
   input: CreateGroupInput,
 ): Promise<KbGroupEntity> {
+  assertValidText("Group name", input.name);
+  assertValidText("Group description", input.description);
   if (input.parentId != null) {
     await requireLevelOneParent(collectionId, input.parentId);
   }
@@ -313,6 +321,10 @@ export async function updateGroup(
   const current: KbGroupEntity = await loadGroup(collectionId, groupId);
   if (Object.keys(patch).length === 0) {
     throw new ApiError("BAD_REQUEST", 400, "No fields to update.");
+  }
+  if (patch.name !== undefined) assertValidText("Group name", patch.name);
+  if (patch.description !== undefined) {
+    assertValidText("Group description", patch.description);
   }
 
   if (patch.parentId !== undefined && patch.parentId !== current.parentId) {
@@ -389,12 +401,16 @@ export async function createPage(
   input: CreatePageInput,
   actorId: string,
 ): Promise<KbPageEntity> {
+  assertValidText("Page name", input.name);
+  if (input.description != null) {
+    assertValidText("Page description", input.description);
+  }
   if (input.groupId != null) {
     await requirePayloadGroup(collectionId, input.groupId);
   }
   await assertPageLimit(collectionId);
   const size: number = assertContentFits(input.content);
-  assertValidText(input.content);
+  assertValidText("Page content", input.content);
 
   try {
     const [row] = await db
@@ -432,8 +448,16 @@ export async function updatePage(
   await getPage(collectionId, pageId);
 
   const sets: Partial<KbPageEntity> = {};
-  if (patch.name !== undefined) sets.name = patch.name;
-  if (patch.description !== undefined) sets.description = patch.description;
+  if (patch.name !== undefined) {
+    assertValidText("Page name", patch.name);
+    sets.name = patch.name;
+  }
+  if (patch.description !== undefined) {
+    if (patch.description != null) {
+      assertValidText("Page description", patch.description);
+    }
+    sets.description = patch.description;
+  }
   if (patch.sourceRef !== undefined) sets.sourceRef = patch.sourceRef;
   if (patch.contentType !== undefined) sets.contentType = patch.contentType;
   if (patch.groupId !== undefined) {
@@ -445,7 +469,7 @@ export async function updatePage(
   if (patch.content !== undefined) {
     sets.content = patch.content;
     sets.size = assertContentFits(patch.content);
-    assertValidText(patch.content);
+    assertValidText("Page content", patch.content);
   }
   sets.updatedBy = actorId;
   sets.updatedAt = new Date();
@@ -636,19 +660,24 @@ function assertContentFits(content: string): number {
 }
 
 /**
- * QUIRK: Postgres rejects a string holding an unpaired surrogate with
- * `22021 invalid byte sequence`, and the row is never written — so a paste from
- * a client that split a multi-byte grapheme would otherwise surface as an
- * opaque 500.
+ * QUIRK: Postgres rejects a string holding a NUL byte or an unpaired
+ * surrogate with `22021 invalid byte sequence`, and the row is never written —
+ * so a paste that split a multi-byte grapheme, or embedded a NUL, would
+ * otherwise surface as an opaque 500. `source_ref` is exempt: it is a
+ * free-form maintenance note never read by any agent path (docs/kb.md).
  */
-function assertValidText(content: string): void {
+function assertValidText(field: string, value: string): void {
   const loneHighSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/;
   const loneLowSurrogate = /(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-  if (loneHighSurrogate.test(content) || loneLowSurrogate.test(content)) {
+  if (
+    value.includes("\u0000") ||
+    loneHighSurrogate.test(value) ||
+    loneLowSurrogate.test(value)
+  ) {
     throw new ApiError(
       "BAD_REQUEST",
       400,
-      "Page content contains an incomplete character (unpaired surrogate) and cannot be stored.",
+      `${field} contains a NUL byte or an unpaired surrogate, which Postgres cannot store.`,
       { reason: "INVALID_TEXT" },
     );
   }

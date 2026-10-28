@@ -20,9 +20,15 @@ import {
   canEditResource,
   canViewResource,
   visibilitySql,
+  type SessionOrAuth,
 } from "@/lib/auth/permissions";
 import { ApiError, type Session } from "@/lib/http/route-handlers";
 import { parseRowId } from "@/lib/kb/validation";
+
+/** One query runner: the pool client, or a transaction's connection. */
+type KbQueryRunner =
+  | typeof db
+  | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -98,35 +104,45 @@ export function requireRowId(raw: string, what: "group" | "page"): number {
 }
 
 /**
- * The bind-time grant filter, called from the built-in-agent routes before a
- * `knowledge` tool row is inserted.
+ * Visibility + enabled filter over a set of collection ids, used at two
+ * moments with the same predicate:
  *
- * CONTRACT: the runtime is RBAC-free — the binding itself is the grant
- * (`lookup.ts`) — so this is the last decidable boundary for "binding is the
- * grant", and it must re-check server-side what the editor picker only filters
- * client-side. Only ids visible to the session AND enabled are returned.
+ *  - bind-time — the built-in-agent routes call it before writing each
+ *    `knowledge` tool row, so the grant's write path validates what the editor
+ *    picker only filters client-side.
+ *  - dispatch-time — the runner calls it before building the prompt block and
+ *    the two tools, so a grant never outlives the audience the binder could
+ *    see (docs/kb.md).
  *
- * An id that no longer resolves — deleted, hidden, or disabled — is dropped
- * from the binding rather than rejected. The editor picker can only render what
- * `GET /api/kb` returns, so a collection that turned private or disabled after
- * it was bound would otherwise be impossible to uncheck and every save of that
- * agent would fail. Dropping is equally safe: an unbindable id is never
- * written, so the runtime still only sees grants the binder could see.
+ * CONTRACT: the runtime is RBAC-free — the binding is the grant (`lookup.ts`)
+ * — so both call sites must re-check server-side. Only ids visible to `auth`
+ * AND enabled are returned. An id that no longer resolves — deleted, hidden,
+ * or disabled — is dropped rather than rejected. Dropping is safe: an
+ * unreturned id is never written (bind) or never mounted (dispatch), so the
+ * runtime only ever sees grants `auth` could see. At bind time the picker can
+ * only render what `GET /api/kb` returns, so a collection that turned private
+ * or disabled after it was bound would otherwise be impossible to uncheck and
+ * every save of that agent would fail.
+ *
+ * `runner` lets a bind-time caller run the read on the same transaction
+ * connection as the write, so the visibility check and the tool-row insert are
+ * one atomic unit. Dispatch passes no runner and reads from the pool.
  */
-export async function filterBindableKbCollectionIds(
+export async function filterVisibleKbCollectionIds(
   ids: readonly string[],
-  session: Session,
+  auth: SessionOrAuth,
+  runner: KbQueryRunner = db,
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
   const unique = [...new Set(ids)];
-  const rows: Array<{ id: string }> = await db
+  const rows: Array<{ id: string }> = await runner
     .select({ id: KbCollectionTable.id })
     .from(KbCollectionTable)
     .where(
       and(
         inArray(KbCollectionTable.id, unique),
         eq(KbCollectionTable.enabled, true),
-        visibilitySql(session, KbCollectionTable.visibility, KbCollectionTable.createdBy),
+        visibilitySql(auth, KbCollectionTable.visibility, KbCollectionTable.createdBy),
       ),
     );
   return new Set(rows.map((row) => row.id));

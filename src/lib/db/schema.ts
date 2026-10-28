@@ -985,9 +985,10 @@ export const KbPageTable = pgTable(
     collectionId: uuid("collection_id")
       .notNull()
       .references(() => KbCollectionTable.id, { onDelete: "cascade" }),
-    /** NULL = page sits directly under the collection. SET NULL: pages are
-     *  content and must not vanish with a directory reshuffle; the service
-     *  layer refuses to delete a group that still holds pages. */
+    /** NULL = page sits directly under the collection. SET NULL is the DB-side
+     *  safety net for a hand-run `DELETE` of a group; the service layer is the
+     *  only path that turns "delete the group" into "delete its pages". See
+     *  docs/kb.md. */
     groupId: bigint("group_id", { mode: "number" }).references(
       () => KbGroupTable.id,
       { onDelete: "set null" },

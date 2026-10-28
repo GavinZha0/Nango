@@ -26,6 +26,7 @@ import {
 import { mcpProviderPool } from "@/lib/mcp";
 import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
 import { buildKbPromptBlock } from "@/lib/kb/prompt-block.server";
+import { filterVisibleKbCollectionIds } from "@/lib/kb/access";
 import {
   buildListKbPagesTool,
   buildReadKbPageTool,
@@ -284,7 +285,23 @@ export async function buildBuiltinAgents(
       await buildDataSourcesPromptBlock(dataSourceIds);
     const sshHostsRuntime =
       await buildSshHostsPromptBlock(sshServerIds);
-    const kbRuntime = await buildKbPromptBlock(kbCollectionIds);
+    // SECURITY: the binding is the grant, but a grant made against a private
+    // collection must not outlive the audience the binder could see — a
+    // public agent run by another user would otherwise disclose that user's
+    // private pages. Re-filter the bound set against the runner before
+    // mounting the block and tools; no runner identity (programmatic build)
+    // fails closed. See docs/kb.md.
+    const visibleKbIds: Set<string> = ctx
+      ? await filterVisibleKbCollectionIds(kbCollectionIds, {
+          userId: ctx.userId,
+          isAdmin: ctx.isAdmin,
+          isEditor: ctx.isEditor,
+        })
+      : new Set<string>();
+    const runnableKbIds: string[] = kbCollectionIds.filter((id) =>
+      visibleKbIds.has(id),
+    );
+    const kbRuntime = await buildKbPromptBlock(runnableKbIds);
 
     // Binding any data source auto-mounts `extract_dataset_by_sql`.
     // Built directly (not through buildBuiltinTools) — the user-tickable
@@ -305,10 +322,10 @@ export async function buildBuiltinAgents(
     // Binding any kb_collection auto-mounts list_kb_pages + read_kb_page. The
     // pair is a capability rather than a checkbox, so it is absent from the
     // user-tickable catalog and built directly here.
-    const kbTools: ToolDefinition[] = kbCollectionIds.length > 0
+    const kbTools: ToolDefinition[] = runnableKbIds.length > 0
       ? [
-          buildListKbPagesTool({ agentKbCollectionIds: kbCollectionIds }),
-          buildReadKbPageTool({ agentKbCollectionIds: kbCollectionIds }),
+          buildListKbPagesTool({ agentKbCollectionIds: runnableKbIds }),
+          buildReadKbPageTool({ agentKbCollectionIds: runnableKbIds }),
         ]
       : [];
 

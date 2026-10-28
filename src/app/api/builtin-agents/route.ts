@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { BuiltinAgentTable, BuiltinAgentToolTable } from "@/lib/db/schema";
 import { ApiError, withEditor, withSession } from "@/lib/http/route-handlers";
-import { filterBindableKbCollectionIds } from "@/lib/kb/access";
+import { filterVisibleKbCollectionIds } from "@/lib/kb/access";
 import { isEditor, visibilitySql } from "@/lib/auth/permissions";
 import {
   isUniqueViolation,
@@ -164,10 +164,8 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     ? SUPERVISOR_PROMPT
     : body.prompt ?? null;
 
-  // Build the set before the write: the bind filter decides which knowledge
-  // rows survive. Ids that are deleted, hidden, or disabled are dropped from
-  // the binding rather than failing the save — the picker cannot render them,
-  // so a rejection would make the request unfixable.
+  // Strip supervisor-injected builtin tool names from client input. The KB
+  // bind filter runs inside the transaction below (docs/kb.md).
   const userTools = (body.tools ?? []).filter(
     (t) =>
       t.toolType !== "builtin_tool"
@@ -175,21 +173,29 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
         && t.builtinTool !== undefined
         && !SUPERVISOR_TOOL_NAME_SET.has(t.builtinTool)),
   );
-  const bindableKbIds: Set<string> = await filterBindableKbCollectionIds(
-    userTools
-      .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
-      .map((t) => t.kbCollectionId as string),
-    session,
-  );
-  const keptTools = userTools.filter(
-    (t) =>
-      t.toolType !== "knowledge"
-      || !t.kbCollectionId
-      || bindableKbIds.has(t.kbCollectionId),
-  );
 
   try {
     const row = await db.transaction(async (tx) => {
+      // The bind filter decides which knowledge rows survive, on the same
+      // connection as the write so a collection that turns private, disabled,
+      // or is deleted mid-save cannot slip a stale grant between the read and
+      // the insert. Ids that fail are dropped rather than rejected — the
+      // picker cannot render them, so a rejection would make the request
+      // unfixable.
+      const bindableKbIds: Set<string> = await filterVisibleKbCollectionIds(
+        userTools
+          .filter((t) => t.toolType === "knowledge" && t.kbCollectionId)
+          .map((t) => t.kbCollectionId as string),
+        session,
+        tx,
+      );
+      const keptTools = userTools.filter(
+        (t) =>
+          t.toolType !== "knowledge"
+          || !t.kbCollectionId
+          || bindableKbIds.has(t.kbCollectionId),
+      );
+
       const [agent] = await tx
         .insert(BuiltinAgentTable)
         .values({

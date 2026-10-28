@@ -113,7 +113,7 @@ All three tables use the project's entity vocabulary `name` + `description`.
 `skill_file.content` does: transactional with its metadata, SQL-listable,
 covered by `pg_dump`.
 
-Binding ([src/lib/db/schema.ts:1193](file:///d:/AI/nango/src/lib/db/schema.ts#L1193))
+Binding ([src/lib/db/schema.ts:1200](file:///d:/AI/nango/src/lib/db/schema.ts#L1200))
 
 The existing junction `builtin_agent_tool` gains one discriminator value and its
 column:
@@ -151,18 +151,17 @@ see one row.
 | A parent group cannot be deleted under its children | RESTRICT FK + `409 GROUP_HAS_CHILDREN` in the service | Silently promoting children rewrites the author's structure. |
 | Page/group `group_id` belongs to this collection | Service | Cross-row. |
 | `kb.max_pages` / `kb.max_groups` / `kb.page_max_bytes` | Service | Config-backed budgets, and the refusal must quote the measured value and the limit. |
-| `content` is storable text — no unpaired surrogate | Service | Postgres fails the row with `22021`, which would surface as an opaque 500. |
+| `content` is storable text — no NUL, no unpaired surrogate | Service | Postgres fails the row with `22021`, which would surface as an opaque 500. |
 | Slug pattern, description floor and ceiling, `content` non-empty, unknown body keys refused | API edge (Zod `.strict()`) | Typed `400 VALIDATION_FAILED` with the offending path, before any DB call. |
 | Visibility / edit / ownership | `src/lib/kb/access.ts` | §13. |
 
-**Known limitation — text validation is narrow.** `assertValidText` (§5) runs only
-on `content`, and only looks for unpaired surrogates. A NUL (`U+0000`) is checked
-nowhere — not in `content`, `name`, `description` or `source_ref` — and Postgres
-rejects the row with `22021`, which surfaces as an opaque 500 instead of
-`400 INVALID_TEXT`. A name or description carrying an unpaired surrogate is not
-pre-validated either. The row is never written, so this is a wrong error code, not
-stored corruption; fixing it means widening both the fields and the character set
-`assertValidText` covers.
+**Text validation — NUL and unpaired surrogates.** `assertValidText` (§5) runs
+on `content`, `name` and `description` and rejects a NUL (`U+0000`) or an
+unpaired surrogate with `400 INVALID_TEXT`, before Postgres could fail the row
+with `22021` and surface an opaque 500. `source_ref` is exempt: it is a
+free-form maintenance note never read by any agent path, and a malformed note
+there fails with a 500 rather than a 400 — accepted, not a stored-corruption
+risk, because the row is never written either way.
 
 ### 3.4 Ownership columns are SET NULL
 
@@ -171,7 +170,7 @@ shared asset: a hard user purge must not destroy the corpus its agents read. Two
 consequences, both intended:
 
 - `ResourceWithRBAC.createdBy` is already `string | null`
-  ([src/lib/auth/permissions.ts:107](file:///d:/AI/nango/src/lib/auth/permissions.ts#L107)): an orphaned **public** row stays editable by any editor, an orphaned **private** one only by an admin.
+  ([src/lib/auth/permissions.ts:88](file:///d:/AI/nango/src/lib/auth/permissions.ts#L88)): an orphaned **public** row stays editable by any editor, an orphaned **private** one only by an admin.
 - A **private** orphaned collection is invisible to everyone but an admin
   (`visibilitySql` compares `created_by = <uid>`, false against NULL). Content
   survives; recovery means an admin re-shares or re-owns it.
@@ -188,7 +187,7 @@ knowledge.
 | `src/lib/kb/limits.ts` | Authored-string constants (`MAX_DESCRIPTION_CHARS`, `MIN_DESCRIPTION_CHARS`, `MAX_LABEL_CHARS`, `MAX_GROUP_DEPTH`). Client-readable. |
 | `src/lib/kb/budgets.ts` | Config-backed byte/count ceilings behind `import "server-only"`. |
 | `src/lib/kb/validation.ts` | Shared Zod edge schemas + `parseRowId`. Imported by the client so it cannot be told a different limit than the server enforces. No `server-only`. |
-| `src/lib/kb/access.ts` | URL id → authorised collection row; the three authoring gates, the bind-time grant gate and `requireRowId`. |
+| `src/lib/kb/access.ts` | URL id → authorised collection row; the three authoring gates, the visibility+enabled filter (`filterVisibleKbCollectionIds`, used at bind time and dispatch time) and `requireRowId`. |
 | `src/lib/kb/service.ts` | All structural invariants and budgets for the authoring surface; typed `ApiError`s; the single sort site for the tree. |
 | `src/app/api/kb/**` | Six route handlers (§14). |
 | `src/lib/kb/lookup.ts` | Agent-side reads. **Deliberately RBAC-free** — the binding is the grant (§7.3). |
@@ -240,10 +239,10 @@ Service-side rules, all in `src/lib/kb/service.ts`:
   wrong address (`404` via `loadGroup`). `assertPageLimit` enforces `kb.max_pages`;
   `assertContentFits` measures `Buffer.byteLength(content, "utf8")` against
   `kb.page_max_bytes` and reports `{reason: "PAGE_TOO_LARGE", sizeBytes, maxBytes}`;
-  `assertValidText` refuses an unpaired surrogate (`400 INVALID_TEXT`); `size` is
-  re-measured whenever `content` is written and left alone otherwise. Text
-  validation covers `content` only — names, descriptions and `source_ref` are not
-  scanned; see the limitation in §3.3.
+  `assertValidText` refuses a NUL or an unpaired surrogate (`400 INVALID_TEXT`);
+  `size` is re-measured whenever `content` is written and left alone otherwise.
+  Name and description writes are scanned the same way; `source_ref` is exempt
+  (§3.3).
 - **Audit.** Collection and page writes stamp `updatedBy` + `updatedAt`; group
   writes stamp nothing.
 
@@ -260,29 +259,37 @@ before saving, or let the save drop it — with a
 
 **CONTRACT — the bind filter.** "The binding is the grant" (§7.3) only holds if
 the grant's write path validates, so both built-in-agent routes pass every
-`knowledge` id through `filterBindableKbCollectionIds` before inserting the tool
-rows: only ids visible to the session **and** enabled are written. An id that no
-longer resolves — deleted, hidden, or disabled — is **dropped from the binding
-rather than rejected**. The picker can only render what `GET /api/kb` returns, so
-a collection that turned private or disabled after it was bound would otherwise
-be impossible to uncheck, and every save of that agent would fail. Dropping is
-equally safe: an unbindable id is never written, so the RBAC-free runtime never
-sees a grant the binder could not see. The picker's client-side list is still not
-a check — the API accepts any uuid and decides server-side.
+`knowledge` id through `filterVisibleKbCollectionIds` before inserting the tool
+rows: only ids visible to the session **and** enabled are written. The read runs
+on the write transaction's connection, so the visibility check and the tool-row
+insert are one atomic unit — a collection that turns private, disabled, or is
+deleted mid-save cannot slip a stale grant between the read and the write. An id
+that no longer resolves — deleted, hidden, or disabled — is **dropped from the
+binding rather than rejected**. The picker can only render what `GET /api/kb`
+returns, so a collection that turned private or disabled after it was bound
+would otherwise be impossible to uncheck, and every save of that agent would
+fail. Dropping is equally safe: an unbindable id is never written, so the
+RBAC-free runtime never sees a grant the binder could not see. The picker's
+client-side list is still not a check — the API accepts any uuid and decides
+server-side. The same predicate runs a second time at dispatch, against the
+runner rather than the binder (§13.1).
 
-At dispatch, [src/lib/runner/dispatch/builtin.ts:267](file:///d:/AI/nango/src/lib/runner/dispatch/builtin.ts#L267)
-collects `tool.kind === "knowledge"` into `kbCollectionIds`, then:
+At dispatch, [src/lib/runner/dispatch/builtin.ts:268](file:///d:/AI/nango/src/lib/runner/dispatch/builtin.ts#L268)
+collects `tool.kind === "knowledge"` into `kbCollectionIds`, filters them through
+`filterVisibleKbCollectionIds` against the runner into `runnableKbIds` (§13.1; no
+runner identity fails closed), then:
 
-1. `buildKbPromptBlock(kbCollectionIds)` runs on **every** dispatch — three
+1. `buildKbPromptBlock(runnableKbIds)` runs on **every** dispatch — three
    indexed queries for the whole bound set, no byte budget, no cache. The result
    is concatenated only when non-empty.
-2. When `kbCollectionIds.length > 0`, `buildListKbPagesTool` and
-   `buildReadKbPageTool` are constructed with `{ agentKbCollectionIds }` and
-   appended to the server tools. Both are **absent from `BUILTIN_TOOLS`**: the
-   pair is a capability of the binding, not a user-tickable catalog entry — the
-   same shape as the data-source and SSH auto-mounts.
+2. When `runnableKbIds.length > 0`, `buildListKbPagesTool` and
+   `buildReadKbPageTool` are constructed with
+   `{ agentKbCollectionIds: runnableKbIds }` and appended to the server tools.
+   Both are **absent from `BUILTIN_TOOLS`**: the pair is a capability of the
+   binding, not a user-tickable catalog entry — the same shape as the
+   data-source and SSH auto-mounts.
 3. Both tools are members of `APPROVAL_EXEMPT_TOOLS`
-   ([src/lib/runner/dispatch/builtin.ts:576](file:///d:/AI/nango/src/lib/runner/dispatch/builtin.ts#L576)):
+   ([src/lib/runner/dispatch/builtin.ts:593](file:///d:/AI/nango/src/lib/runner/dispatch/builtin.ts#L593)):
    read-only over operator-curated content, so gating them would only train users
    to click through.
 4. Both are annotated `low` / `read` / `readOnlyHint: true` / `headlessAllowed: true`
@@ -301,7 +308,7 @@ slot 6 of the regular-agent order and slot 7 of the supervisor order
 ### 7.1 The injected block
 
 One render of `buildKbPromptBlock` produces
-[src/lib/kb/prompt-block.server.ts:36](file:///d:/AI/nango/src/lib/kb/prompt-block.server.ts#L36):
+[src/lib/kb/prompt-block.server.ts:37](file:///d:/AI/nango/src/lib/kb/prompt-block.server.ts#L37):
 
 ```
 ## Available knowledge
@@ -383,8 +390,9 @@ takes no budget key.
 ### 7.3 `list_kb_pages`
 
 `src/lib/kb/lookup.ts` is the agent-side read layer: **no RBAC**, because binding
-the collection is the grant. The authoring surface (`service.ts` + routes) is where
-visibility is evaluated, exactly as skills and data sources already work.
+the collection is the grant. Visibility is evaluated at the two grant moments —
+bind time (§6) and dispatch time (§13.1) — so the per-call read path here stays
+RBAC-free, exactly as skills and data sources already work.
 
 `getKbIndex(collectionId)` runs two queries (groups, then page summaries — the
 page projection is exactly `name`, `description`, `groupId`, so a body never
@@ -558,14 +566,15 @@ Risk classification: `low` / `sideEffects: "read"` / `readOnlyHint` /
 
 Page guard: `src/app/(workspace)/kb/layout.tsx` → `requireEditor`. Sidebar entry
 `kb` ("Knowledge") is `requiredRole: "editor"`
-([src/components/layout/sidebar-panel-registry.tsx:121](file:///d:/AI/nango/src/components/layout/sidebar-panel-registry.tsx#L121)).
+([src/components/layout/sidebar-panel-registry.tsx:122](file:///d:/AI/nango/src/components/layout/sidebar-panel-registry.tsx#L122)).
 
 | Gate | Home | Failure | Used by |
 |---|---|---|---|
 | Visible (own, public, or admin) | `loadVisibleCollection` | `404 NOT_FOUND` — hidden and missing are identical, so private ids stay opaque | `GET /api/kb/[id]`, `GET …/pages/[pageId]` |
 | Content write | `loadEditableCollection` | `403 FORBIDDEN` | all POST/PATCH/DELETE routes |
 | Strict ownership — `enabled`, `visibility`, collection delete | `loadOwnedCollection`, plus `canChangeVisibility` for the two fields | `403 FORBIDDEN` | `DELETE /api/kb/[id]`; the two fields inside `PATCH /api/kb/[id]` |
-| Bindable — visible **and** enabled | `filterBindableKbCollectionIds` | Ids that fail are silently dropped from the save; the rest are bound | `POST /api/builtin-agents`, `PATCH /api/builtin-agents/[id]` when tools are replaced (§6) |
+| Bindable — visible **and** enabled | `filterVisibleKbCollectionIds` | Ids that fail are silently dropped from the save; the rest are bound | `POST /api/builtin-agents`, `PATCH /api/builtin-agents/[id]` when tools are replaced (§6) |
+| Runnable — visible **and** enabled | `filterVisibleKbCollectionIds` | Ids that fail are dropped from the block and tools at dispatch; no runner identity fails closed | `src/lib/runner/dispatch/builtin.ts` (§13.1) |
 | Malformed uuid segment | `UUID_RE` pre-check | `404` before any query — a non-uuid can never match the column and Postgres would surface it as a 500 | all `[id]` routes |
 | bigint row id in the path | `requireRowId` | `400` "group/page id must be a positive integer." | group/page routes |
 
@@ -580,40 +589,43 @@ visibility check first on every method and hides both behind `404`; the KB
 divergence is deliberate — on a write route the caller already names the row it
 means to change.
 
-Runtime is RBAC-free by design (§7.3) — because the bind filter settled each
-grant once (§6): `resolveKbCollectionForAgent(name,
-allowedIds)` checks only that the id is in the agent's own bound set and the row is
-`enabled`. That also means visibility is never re-evaluated against the runner;
-see §13.1.
+Runtime reads stay RBAC-free by design (§7.3):
+`resolveKbCollectionForAgent(name, allowedIds)` checks only that the id is in the
+agent's own bound set and the row is `enabled`. Visibility is re-evaluated
+**once per dispatch** against the runner — not per tool call — see §13.1.
 
-### 13.1 Known limitation — visibility is not re-checked at run time
+### 13.1 Visibility is re-checked once, at dispatch
 
-The bind filter evaluates **the binder's** session once, when the agent is saved.
-The runtime checks only that the collection is still `enabled` and that its id is
-in the agent's bound set; it never asks whether the user running the agent can see
-that collection (§7.3). A **public** agent is runnable by any signed-in user, so
-once the KB and the agent have different audiences, the runner still receives the
-collection's name, description and derived index, and `read_kb_page` still returns
-its full text. Two flips reach this state:
+The binding is the grant, but a grant must not outlive the audience the binder
+could see. The built-in dispatch re-evaluates visibility **once, at dispatch
+time, against the runner**: after collecting the agent's bound `knowledge` ids,
+`buildBuiltinAgents` passes them through `filterVisibleKbCollectionIds` (the same
+visible-and-enabled predicate the bind filter uses, §6) with the runner's
+`{userId, isAdmin, isEditor}`. Only the surviving ids are handed to
+`buildKbPromptBlock` and the two tools, so a **public agent run by another user**
+mounts no block and no tools for a **private collection bound by its author** —
+the cross-user disclosure the bind-time-only check allowed. A programmatic
+dispatch with no runner identity fails closed and mounts nothing.
+
+Two flips previously reached the leaky state; both are settled now:
 
 - the collection turns from public to private after it was bound;
-- the agent turns from private to public after a private collection was bound to
-  it.
+- the agent turns from private to public after a private collection was bound.
 
-Neither flip revokes the grant, because neither touches `builtin_agent_tool`. The
-only revocation points are the owner unbinding the KB in an editor save, a save of
-the agent's tools by an editor who cannot see the collection (the filter drops it,
-§6), or deleting / disabling the collection. Until a flip is paired with one of
-those, the exposure is real: `visibility` on `kb_collection` is an
-authoring-surface control, not a runtime one.
+Neither flip touches `builtin_agent_tool`, but the dispatch filter drops the
+collection from the running user's view regardless. The grant row itself is
+unchanged, so the revocation points remain the owner unbinding in an editor
+save, an editor save that cannot see the collection (the bind filter drops it,
+§6), or deleting / disabling the collection. The binder's own runs still see the
+collection, because the runner is the binder and `visibilitySql` admits the
+owner.
 
-This is a known gap, not the intended model. The intended model is that the
-binding is the grant **and the binder could see what they granted**; the gap is
-that the grant travels with the agent, not with the binder. Closing it means
-re-evaluating visibility against the runner on every KB read, which the
-RBAC-free runtime deliberately avoids; the gap is documented rather than hidden.
-Operationally: re-check an agent's Knowledge tab before making a KB private, and
-before publishing an agent that binds a private KB.
+Residual, deliberate: visibility is a **per-run snapshot**. A flip that happens
+mid-run is not re-checked on later tool calls — `resolveKbCollectionForAgent`
+still checks only `enabled` + membership — so an in-flight run keeps reading a
+collection made private after it started. That window is a single run's
+lifetime; closing it would mean per-call RBAC in the read path, which is
+rejected for the same reason as before.
 
 ## 14. API surface
 
@@ -697,17 +709,19 @@ Cross-cutting UI rules:
 
 | File | Covers |
 |---|---|
-| `tests/unit/lib/kb/service.test.ts` | Write edges and budgets: list tallies, natural sort on both tree branches, `404` guards that fire before a mutation, private-by-default and audit stamps, empty-patch `400` before any query, `NAME_TAKEN` only for `23505` (other errors rethrown untouched), depth/cycle/self-parent moves, `GROUP_HAS_CHILDREN` plus the two-delete transaction order, byte-`size` re-measure, CJK `PAGE_TOO_LARGE`, `INVALID_TEXT`, page/group ceilings, `GROUP_NOT_IN_COLLECTION`. |
+| `tests/unit/lib/kb/service.test.ts` | Write edges and budgets: list tallies, natural sort on both tree branches, `404` guards that fire before a mutation, private-by-default and audit stamps, empty-patch `400` before any query, `NAME_TAKEN` only for `23505` (other errors rethrown untouched), depth/cycle/self-parent moves, `GROUP_HAS_CHILDREN` plus the two-delete transaction order, byte-`size` re-measure, CJK `PAGE_TOO_LARGE`, `INVALID_TEXT` (NUL/unpaired surrogate in content, name and description; `source_ref` exempt), page/group ceilings, `GROUP_NOT_IN_COLLECTION`. |
 | `tests/unit/lib/kb/lookup.test.ts` | No query for an empty id set; natural order of mounted collections; unbound vs. disabled indistinguishable; group-tree order with `parentName`; page bucketing and the ungrouped tail; exact projections (index omits `content`, page read omits `sourceRef`); two queries per index. |
 | `tests/unit/lib/kb/runtime-tools.test.ts` | Full vs. `group_name` subtree views; case-sensitive misses; the three envelopes with no discovery payload; line windowing under a byte budget, `nextOffset` continuation, mid-line cut + `note`; LF normalisation; partial code point dropped; `limit` vs. budget precedence; out-of-range offset → empty window; reads short-circuited when resolution fails. |
 | `tests/unit/lib/kb/prompt-block.test.ts` | Empty/disabled bindings render `""` with no reads; one read pass per level regardless of count; exact bullet lines and indentation; stops at group level; counts scoped per collection; legacy NULL description; whitespace flattening cannot mint a bullet; no trailing newline. |
 | `tests/unit/app/api/kb-routes.test.ts` | All six real route handlers end to end: role gates (`401`/`403`), malformed ids, slug and description refusals, `.strict()` unknown keys, two-gate PATCH, `204`/`409` deletes, tree projection, verbatim `content` and computed `size`, `contentType` enum, `kb.max_pages` refusal message. |
 | `tests/unit/app/api/builtin-agents-route.test.ts`, `builtin-agent-id-route.test.ts` | The bind filter on create and on tool replacement: a deleted, hidden or disabled id is dropped while the save still succeeds; bindable ids in the same save survive; non-knowledge bindings are never dropped. |
-| `tests/unit/lib/runner/dispatch-builtin.test.ts` | Binding mounts both tools with the agent's id set and injects the block; unbound renders nothing and builds nothing; slot order Calendars → knowledge → Charts. |
+| `tests/unit/lib/runner/dispatch-builtin.test.ts` | Binding mounts both tools with the agent's id set and injects the block; unbound renders nothing and builds nothing; slot order Calendars → knowledge → Charts; dispatch-time visibility filter drops a bound collection the runner cannot see and fails closed without a runner ctx. |
 | `tests/unit/lib/agent-pipeline/risk-registry.test.ts` | Both tools evaluate `low` / `read` / no approval / headless-allowed. |
 
 ```bash
-pnpm test -- tests/unit/lib/kb tests/unit/app/api/kb-routes.test.ts
+pnpm test -- tests/unit/lib/kb tests/unit/app/api/kb-routes.test.ts \
+  tests/unit/app/api/builtin-agents-route.test.ts tests/unit/app/api/builtin-agent-id-route.test.ts \
+  tests/unit/lib/runner/dispatch-builtin.test.ts
 pnpm check-types && pnpm lint && pnpm comments:check:all
 ```
 

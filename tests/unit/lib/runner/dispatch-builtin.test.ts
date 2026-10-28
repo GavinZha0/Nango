@@ -31,6 +31,7 @@ const {
   buildKbPromptBlockMock,
   buildListKbPagesToolMock,
   buildReadKbPageToolMock,
+  filterVisibleKbCollectionIdsMock,
   buildSupervisorRuntimeMock,
   composeToolPipelineMock,
   composePipelinedMcpProviderMock,
@@ -64,6 +65,7 @@ const {
   buildKbPromptBlockMock: vi.fn().mockResolvedValue({ promptBlock: "" }),
   buildListKbPagesToolMock: vi.fn().mockReturnValue({ name: "list_kb_pages" }),
   buildReadKbPageToolMock: vi.fn().mockReturnValue({ name: "read_kb_page" }),
+  filterVisibleKbCollectionIdsMock: vi.fn(),
   buildSupervisorRuntimeMock: vi.fn(),
   composeToolPipelineMock: vi.fn().mockReturnValue((t: unknown) => t),
   composePipelinedMcpProviderMock: vi.fn().mockImplementation((p: unknown) => p),
@@ -156,6 +158,10 @@ vi.mock("@/lib/ssh/runtime-tools", () => ({
 
 vi.mock("@/lib/kb/prompt-block.server", () => ({
   buildKbPromptBlock: buildKbPromptBlockMock,
+}));
+
+vi.mock("@/lib/kb/access", () => ({
+  filterVisibleKbCollectionIds: filterVisibleKbCollectionIdsMock,
 }));
 
 vi.mock("@/lib/kb/runtime-tools", () => ({
@@ -406,6 +412,12 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
       buildKbPromptBlockMock.mockResolvedValue({ promptBlock: "" });
       buildListKbPagesToolMock.mockReturnValue({ name: "list_kb_pages" });
       buildReadKbPageToolMock.mockReturnValue({ name: "read_kb_page" });
+      // Identity by default: the runner sees every bound collection, so the
+      // pre-existing KB mounting assertions stay true. Tests that exercise the
+      // visibility cut override this to an empty/subset Set.
+      filterVisibleKbCollectionIdsMock.mockImplementation(
+        async (ids: readonly string[]) => new Set(ids),
+      );
       buildCalendarPromptBlockMock.mockResolvedValue({ promptBlock: "" });
       buildGetCurrentDatetimeToolMock.mockReturnValue({ name: "get_current_datetime" });
       buildExtractDatasetToolMock.mockReturnValue({ name: "extract_dataset_by_sql" });
@@ -804,6 +816,40 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(buildReadKbPageToolMock).not.toHaveBeenCalled();
         const names = (agentArgs().tools as Array<{ name: string }>).map((t) => t.name);
         expect(names).not.toContain("list_kb_pages");
+      });
+
+      it("drops a bound collection the runner cannot see (private KB on a public agent)", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "knowledge", kbCollectionId: "kb-private" }] }),
+        );
+        // user-2 runs a public agent whose author bound a private collection.
+        filterVisibleKbCollectionIdsMock.mockResolvedValueOnce(new Set());
+
+        await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-2" });
+
+        expect(filterVisibleKbCollectionIdsMock).toHaveBeenCalledWith(
+          ["kb-private"],
+          expect.objectContaining({ userId: "user-2" }),
+        );
+        expect(buildKbPromptBlockMock).toHaveBeenCalledWith([]);
+        expect(buildListKbPagesToolMock).not.toHaveBeenCalled();
+        expect(buildReadKbPageToolMock).not.toHaveBeenCalled();
+        const names = (agentArgs().tools as Array<{ name: string }>).map((t) => t.name);
+        expect(names).not.toContain("list_kb_pages");
+        expect(names).not.toContain("read_kb_page");
+      });
+
+      it("fails closed (no KB) when the agent binds a collection but dispatch has no runner ctx", async () => {
+        agentPoolGetMock.mockResolvedValue(
+          makeSpec({ tools: [{ kind: "knowledge", kbCollectionId: "kb-1" }] }),
+        );
+
+        await buildBuiltinAgents(["agent-1"], mockLogger);
+
+        expect(filterVisibleKbCollectionIdsMock).not.toHaveBeenCalled();
+        expect(buildKbPromptBlockMock).toHaveBeenCalledWith([]);
+        expect(buildListKbPagesToolMock).not.toHaveBeenCalled();
+        expect(buildReadKbPageToolMock).not.toHaveBeenCalled();
       });
 
       it("renders the knowledge block after Calendar and before Chart", async () => {
