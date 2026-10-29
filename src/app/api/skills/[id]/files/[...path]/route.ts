@@ -37,15 +37,15 @@ import {
   isUniqueViolation,
 } from "@/lib/skills/file-api";
 import { validateImageBytes } from "@/lib/skills/import-policy";
+import { getParentPath } from "@/lib/paths";
 import {
-  getParentPath,
   isScriptsFolder,
   joinSkillPath,
 } from "@/lib/skills/file-rules";
+import { guessContentType } from "@/lib/folder-import/mime";
 import { SkillParseError } from "@/lib/skills/parser";
 import {
   getDbSkillStorage,
-  guessContentType,
   InvalidSkillPathError,
   type SkillFileRecord,
 } from "@/lib/skills/storage";

@@ -9,7 +9,8 @@
 
 import "server-only";
 
-import { getExtension, isExecutableFileName } from "@/lib/skills/file-rules";
+import { getExtension } from "@/lib/paths";
+import { isExecutableFileName } from "@/lib/skills/file-rules";
 import {
   parseSkillMd,
   rewriteScriptsOnDbInSkillMd,

@@ -1,26 +1,21 @@
 /**
- * Shared skill-file import policy.
+ * Skill-file import policy.
  *
  * The open Agent Skills spec permits any files, but Nango can only execute
  * `.py` / `.sh` scripts and preview images. Everything else is either inert or
  * a storage/security liability, so the import pipeline uses an allowlist.
  *
+ * OS/tool noise and the shared path rules live in `@/lib/folder-import/manifest`;
+ * this module is the skills-specific content decision.
+ *
  * Client-safe: the editor's Add/Rename dialogs use the same rules.
  */
 
-import { getBaseName, getExtension } from "@/lib/skills/file-rules";
-
-export type FilePolicyAction =
-  | "allow-text"
-  | "allow-image"
-  | "ignore"
-  | "block";
-
-export interface FilePolicyResult {
-  action: FilePolicyAction;
-  /** User-facing reason for `ignore` / `block`. */
-  reason?: string;
-}
+import { getExtension } from "@/lib/paths";
+import {
+  noiseReason,
+  type FilePolicyResult,
+} from "@/lib/folder-import/manifest";
 
 /** Text/code/document extensions the agent or editor can actually use. */
 const TEXT_EXTENSIONS = new Set([
@@ -145,72 +140,6 @@ const BLOCKED_REASONS: Record<string, string> = {
   pth: "binary model",
 };
 
-const IGNORED_BASENAMES = new Set([
-  "thumbs.db",
-  "desktop.ini",
-  "ehthumbs.db",
-]);
-
-/** Compiled bytecode, logs, and tool-generated files that are never
- *  authoring sources. */
-const IGNORED_EXTENSIONS = new Set([
-  // Python bytecode
-  "pyc",
-  "pyo",
-  // Logs, temp files, editor/merge artifacts
-  "log",
-  "tmp",
-  "temp",
-  "bak",
-  "orig",
-  "rej",
-  "swp",
-  "swo",
-  // Tool build metadata
-  "tsbuildinfo",
-  "map",
-  "iml",
-  "suo",
-  // Package-manager locks and Python build outputs
-  "lock",
-  "lockb",
-  "whl",
-  "egg",
-  "egg-link",
-]);
-
-/** Generated dependency/cache directories, matched at any depth. */
-const IGNORED_DIR_NAMES = new Set([
-  "__pycache__",
-  "node_modules",
-  "__MACOSX",
-  "venv",
-  "virtualenv",
-  "__pypackages__",
-]);
-
-/** Generated metadata directories, matched by suffix. */
-const IGNORED_DIR_SUFFIXES = [".egg-info", ".dist-info", ".egg"];
-
-function ignoredByPath(path: string): boolean {
-  const segments = path.split("/");
-  if (segments.some((segment) => segment.startsWith("."))) {
-    return true;
-  }
-  if (segments.some((segment) => IGNORED_DIR_NAMES.has(segment))) return true;
-  if (
-    segments.some((segment) =>
-      IGNORED_DIR_SUFFIXES.some((suffix) => segment.endsWith(suffix)),
-    )
-  ) {
-    return true;
-  }
-  if (IGNORED_BASENAMES.has(getBaseName(path).toLowerCase())) return true;
-  // Emacs leaves `file~` backups next to the original.
-  if (getBaseName(path).endsWith("~")) return true;
-  return false;
-}
-
 /**
  * Classify a path entering a skill import.
  *
@@ -219,14 +148,10 @@ function ignoredByPath(path: string): boolean {
  * `block` entries reject the whole import with a reason.
  */
 export function classifyImportPath(path: string): FilePolicyResult {
-  if (ignoredByPath(path)) {
-    return { action: "ignore", reason: "noise or dotfile" };
-  }
+  const noise: string | null = noiseReason(path);
+  if (noise) return { action: "ignore", reason: noise };
 
-  const ext = getExtension(path);
-  if (IGNORED_EXTENSIONS.has(ext)) {
-    return { action: "ignore", reason: "generated build or tool artifact" };
-  }
+  const ext: string = getExtension(path);
   if (ext.length === 0) {
     // LICENSE, README, Dockerfile, Makefile, … — text is checked later.
     return { action: "allow-text" };
@@ -245,7 +170,8 @@ export function classifyEditorCreatePath(path: string): FilePolicyResult {
   if (result.action === "allow-image") {
     return {
       action: "block",
-      reason: "Images and other binary assets must be added through a folder import.",
+      reason:
+        "Images and other binary assets must be added through a folder import.",
     };
   }
   if (result.action === "ignore") {
@@ -264,13 +190,6 @@ export function classifyEditorRenamePath(path: string): FilePolicyResult {
     return { action: "block", reason: "That path is generated or OS noise and cannot be used." };
   }
   return result;
-}
-
-/** Text content must not contain NUL bytes. */
-export function validateTextBytes(content: Uint8Array): string | null {
-  return content.includes(0)
-    ? "Text files cannot contain NUL bytes."
-    : null;
 }
 
 function ascii(content: Uint8Array, start: number, end: number): string {

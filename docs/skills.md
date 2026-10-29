@@ -354,10 +354,16 @@ bytes, and POSTs the manifest. **There is no archive format**: the server
 receives already-materialised file bytes, so there is no decompression step and
 no symlink entry to forge.
 
-Client-side, before any byte is encoded: `classifyImportPath` pre-filters each
-path (ignore → reported as skipped, block → toast and abort) and the caps are
-mirrored for a faster failure. The server re-checks everything authoritatively
-and never trusts the client.
+The manifest shape, the path-legality rules, the OS/tool noise tables and the
+byte budgets are shared with every other folder import in
+`src/lib/folder-import/` (`manifest.ts` for the client-safe rules, `preflight.ts`
+for the server walk, `collect.ts` for the browser side, `mime.ts` for the stored
+content-type hint). Skills contributes only the content allowlist below.
+
+Client-side, before any byte is encoded: `collectFolderFiles` pre-filters each
+path with `classifyImportPath` (ignore → reported as skipped, block → toast and
+abort) and mirrors the caps for a faster failure. The server re-checks
+everything authoritatively and never trusts the client.
 
 ```
 1. Reject a body whose Content-Length exceeds 16 MB before buffering it.
@@ -404,7 +410,9 @@ requirement; pick the skill folder itself, not its parent.
 
 The open Agent Skills spec permits any file, but Nango can only execute
 `.py` / `.sh` scripts and preview images. Import therefore uses an allowlist
-(`src/lib/skills/import-policy.ts`):
+(`src/lib/skills/import-policy.ts`); the noise half of the decision
+(dotfiles, caches, build metadata, OS junk) comes from the shared
+`noiseReason()` in `src/lib/folder-import/manifest.ts`.
 
 | Action | File types | Behavior |
 |---|---|---|

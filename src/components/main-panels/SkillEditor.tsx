@@ -38,7 +38,7 @@ import {
 } from "@/components/main-panels/skills/SkillFileTree";
 import { SkillFileDialog } from "@/components/main-panels/skills/SkillFileDialog";
 import { UnsavedChangesDialog } from "@/components/main-panels/skills/UnsavedChangesDialog";
-import { getParentPath } from "@/lib/skills/file-rules";
+import { getParentPath } from "@/lib/paths";
 import { cn, formatBytes } from "@/lib/utils";
 
 export interface SkillRow {

@@ -1024,10 +1024,9 @@ export const KbPageTable = pgTable(
   (t) => [
     uniqueIndex("kb_page_collection_name_idx").on(t.collectionId, t.name),
     index("kb_page_collection_group_idx").on(t.collectionId, t.groupId),
-    // Values are taken verbatim from EXTENSION_TO_MIME in
-    // src/lib/skills/storage/skill-storage.ts (json is `application/json`
-    // there, not `text/json`), so a future import path can reuse
-    // guessContentType() without colliding with this CHECK.
+    // A text-only subset of CONTENT_TYPES in src/lib/folder-import/mime.ts,
+    // spelled identically there (json is `application/json`, not `text/json`),
+    // so a folder import can map a file onto this CHECK without guessing.
     check(
       "kb_page_content_type_check",
       sql`${t.contentType} IN ('text/markdown', 'text/plain', 'text/csv', 'application/json', 'text/yaml', 'text/xml')`,

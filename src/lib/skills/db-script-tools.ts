@@ -16,7 +16,7 @@ import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { z } from "zod";
 
 import { extractDatasetForAgent } from "@/lib/data-sources/runtime-tools";
-import { getExtension } from "./file-rules";
+import { getExtension } from "@/lib/paths";
 import { readTextScriptSource } from "./ssh-script-source";
 import type { SkillSpec } from "./skill-pool";
 import {

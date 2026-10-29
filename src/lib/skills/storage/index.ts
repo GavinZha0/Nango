@@ -13,7 +13,6 @@ export {
   type DeleteFolderInput,
   validateSkillFilePath,
   InvalidSkillPathError,
-  guessContentType,
   MAX_FILE_BYTES,
   MAX_FILES_PER_SKILL,
   MAX_TOTAL_BYTES_PER_SKILL,

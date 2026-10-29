@@ -25,9 +25,9 @@ import {
   isUniqueViolation,
 } from "@/lib/skills/file-api";
 import { joinSkillPath } from "@/lib/skills/file-rules";
+import { guessContentType } from "@/lib/folder-import/mime";
 import {
   getDbSkillStorage,
-  guessContentType,
   InvalidSkillPathError,
 } from "@/lib/skills/storage";
 

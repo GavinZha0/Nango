@@ -30,9 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SkillFileMeta } from "@/components/main-panels/skills/SkillFileTree";
+import { getBaseName, getParentPath } from "@/lib/paths";
 import {
-  getBaseName,
-  getParentPath,
   isExecutableFileName,
   isRootSkillMd,
   isValidFileName,

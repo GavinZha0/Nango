@@ -5,7 +5,6 @@ import {
   classifyEditorRenamePath,
   classifyImportPath,
   validateImageBytes,
-  validateTextBytes,
 } from "@/lib/skills/import-policy";
 
 describe("classifyImportPath", () => {
@@ -112,13 +111,6 @@ describe("editor policies", () => {
 });
 
 describe("content validation", () => {
-  it("rejects NUL bytes in text", () => {
-    expect(validateTextBytes(Buffer.from("hello"))).toBeNull();
-    expect(validateTextBytes(Buffer.from([0x68, 0x00, 0x69]))).toMatch(
-      /NUL bytes/,
-    );
-  });
-
   it("checks image magic bytes", () => {
     const png = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,

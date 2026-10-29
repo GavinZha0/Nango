@@ -16,8 +16,8 @@ import {
 import {
   classifyEditorCreatePath,
   classifyEditorRenamePath,
-  type FilePolicyResult,
 } from "./import-policy";
+import type { FilePolicyResult } from "@/lib/folder-import/manifest";
 import {
   getDbSkillStorage,
   InvalidSkillPathError,
