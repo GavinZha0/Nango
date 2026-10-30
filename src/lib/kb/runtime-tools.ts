@@ -13,22 +13,22 @@ import { z } from "zod";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import type { KbContentType } from "@/lib/db/schema";
 import { READ_MAX_BYTES } from "@/lib/kb/budgets";
-import { MAX_LABEL_CHARS } from "@/lib/kb/limits";
+import { MAX_PATH_CHARS } from "@/lib/kb/limits";
+import { isUnderFolder } from "@/lib/kb/paths";
 import {
-  getKbIndex,
-  getKbPageByName,
+  getKbPageByPath,
+  listKbIndexPages,
   resolveKbCollectionForAgent,
-  type KbIndexGroup,
   type KbIndexPage,
 } from "@/lib/kb/lookup";
 
 /**
  * CONTRACT: three codes and nothing else. `KB_NOT_AVAILABLE` covers unknown
  * slug, unbound collection and disabled collection as one indistinguishable
- * answer, and no failure returns the list of valid names — `list_kb_pages` is
+ * answer, and no failure returns the list of valid paths — `list_kb_pages` is
  * the discovery tool and an error path is not it (docs/kb.md).
  */
-type KbToolError = "KB_NOT_AVAILABLE" | "NO_SUCH_PAGE" | "GROUP_NOT_FOUND";
+type KbToolError = "KB_NOT_AVAILABLE" | "NO_SUCH_PAGE" | "FOLDER_NOT_FOUND";
 
 interface KbToolFailure {
   ok: false;
@@ -46,27 +46,26 @@ const KbNameArg = z
   .max(63)
   .describe(
     "Slug of the knowledge base, copied exactly from the `## Available knowledge` " +
-      "block in your prompt. Do NOT pass a uuid, a group name or a page title here.",
+      "block in your prompt. Do NOT pass a uuid, a folder path or a page title here.",
   );
 
-const KbGroupNameArg = z
+const KbFolderArg = z
   .string()
   .min(1)
-  .max(MAX_LABEL_CHARS)
+  .max(MAX_PATH_CHARS)
   .optional()
   .describe(
-    "Optional. Return one group and its child groups instead of the whole index. " +
-      "Matched exactly and case-sensitively against the group names in the block; " +
-      "a level-1 group includes its level-2 children, so narrowing to it never " +
-      "hides content. Pages that sit in no group are not addressable here — read " +
-      "those by page name.",
+    "Optional. Return only the pages under this folder prefix instead of the whole " +
+      "collection. Matched exactly and case-sensitively against the leading segments " +
+      "of the paths in the index, and it covers every deeper folder below it, so " +
+      "narrowing never hides content. A prefix that holds no page is not found.",
   );
 
 // ──────────────────────── list_kb_pages ──────────────────────────
 
 const ListKbPagesArgs = z.object({
   kb_name: KbNameArg,
-  group_name: KbGroupNameArg,
+  folder: KbFolderArg,
 });
 
 export interface ListKbPagesOk {
@@ -74,12 +73,10 @@ export interface ListKbPagesOk {
   kbName: string;
   /** The collection's routing description, verbatim from the prompt block. */
   description: string | null;
-  /** Echoed only when the view is a single group's subtree. */
-  groupName?: string;
-  /** Level-1 groups each followed by their children, both alphabetically. */
-  groups: KbIndexGroup[];
-  /** Pages with no group. Empty in a `group_name` view. */
-  ungroupedPages: KbIndexPage[];
+  /** Echoed only when the view is a single folder's subtree. */
+  folder?: string;
+  /** Every page of the view, by full path, `alphabeticCompare` order. */
+  pages: KbIndexPage[];
 }
 
 type ListKbPagesResult = ListKbPagesOk | KbToolFailure;
@@ -92,11 +89,10 @@ export function buildListKbPagesTool(opts: {
   return defineTool({
     name: "list_kb_pages",
     description:
-      "Show the index of one knowledge base: every group with its description " +
-      "and page count, and every page with its name and one-line summary. This " +
-      "is how you find a page name to pass to read_kb_page — page bodies are " +
-      "never returned here. Call it before guessing a page name, and again with " +
-      "`group_name` if the index is long.",
+      "Show the pages of one knowledge base: each path with its one-line " +
+      "summary. This is how you find the path to pass to read_kb_page — page " +
+      "bodies are never returned here. Call it before guessing a path, and " +
+      "again with `folder` if the collection is long.",
     parameters: ListKbPagesArgs,
     execute: async (args): Promise<ListKbPagesResult> => {
       const collection = await resolveKbCollectionForAgent(
@@ -105,26 +101,25 @@ export function buildListKbPagesTool(opts: {
       );
       if (!collection) return notAvailable(args.kb_name);
 
-      const index = await getKbIndex(collection.id);
+      const pages = await listKbIndexPages(collection.id);
 
-      if (args.group_name === undefined) {
+      if (args.folder === undefined) {
         return {
           ok: true,
           kbName: collection.name,
           description: collection.description,
-          groups: index.groups,
-          ungroupedPages: index.ungroupedPages,
+          pages,
         };
       }
 
-      const group = index.groups.find((g) => g.name === args.group_name);
-      if (!group) {
+      const inside = pages.filter((page) => isUnderFolder(page.path, args.folder!));
+      if (inside.length === 0) {
         return fail(
-          "GROUP_NOT_FOUND",
-          `Knowledge base '${args.kb_name}' has no group named ` +
-            `'${args.group_name}'. Group names are exactly as the ` +
-            "`## Available knowledge` block shows them; call list_kb_pages " +
-            "without `group_name` for the full index.",
+          "FOLDER_NOT_FOUND",
+          `Knowledge base '${args.kb_name}' has no folder named ` +
+            `'${args.folder}'. Folder names are the leading segments of the ` +
+            "paths the `## Available knowledge` block shows; call list_kb_pages " +
+            "without `folder` for the whole collection.",
         );
       }
 
@@ -132,11 +127,8 @@ export function buildListKbPagesTool(opts: {
         ok: true,
         kbName: collection.name,
         description: collection.description,
-        groupName: group.name,
-        groups: index.groups.filter(
-          (g) => g.name === group.name || g.parentName === group.name,
-        ),
-        ungroupedPages: [],
+        folder: args.folder,
+        pages: inside,
       };
     },
   });
@@ -146,14 +138,14 @@ export function buildListKbPagesTool(opts: {
 
 const ReadKbPageArgs = z.object({
   kb_name: KbNameArg,
-  page_name: z
+  page_path: z
     .string()
     .min(1)
-    .max(MAX_LABEL_CHARS)
+    .max(MAX_PATH_CHARS)
     .describe(
-      "Exact page name as returned by list_kb_pages — case-sensitive, and not a " +
-        "title, a fragment or a group name. Page names are unique inside one " +
-        "knowledge base, so you do not need to know which group holds it.",
+      "Exact page path as returned by list_kb_pages — case-sensitive, `/`-separated, " +
+        "and not a title, a fragment or a folder. Paths are unique inside one " +
+        "knowledge base, so this single string addresses the page.",
     ),
   offset: z
     .number()
@@ -191,7 +183,7 @@ export interface LineWindow {
 export interface ReadKbPageOk extends LineWindow {
   ok: true;
   kbName: string;
-  pageName: string;
+  pagePath: string;
   description: string | null;
   contentType: KbContentType;
 }
@@ -209,7 +201,7 @@ export function buildReadKbPageTool(opts: {
       "Read one page of a knowledge base, as text. Long pages come back in line " +
       "windows: check `truncated` and continue with `nextOffset` before " +
       "concluding a page says nothing about your question. Returns " +
-      "`NO_SUCH_PAGE` for a name that is not in the index — get the exact name " +
+      "`NO_SUCH_PAGE` for a path that is not in the index — get the exact path " +
       "from list_kb_pages instead of guessing again.",
     parameters: ReadKbPageArgs,
     execute: async (args): Promise<ReadKbPageResult> => {
@@ -219,13 +211,13 @@ export function buildReadKbPageTool(opts: {
       );
       if (!collection) return notAvailable(args.kb_name);
 
-      const page = await getKbPageByName(collection.id, args.page_name);
+      const page = await getKbPageByPath(collection.id, args.page_path);
       if (!page) {
         return fail(
           "NO_SUCH_PAGE",
-          `Knowledge base '${args.kb_name}' has no page named ` +
-            `'${args.page_name}'. Call list_kb_pages(kb_name: ` +
-            `'${args.kb_name}') and pass a name from its index.`,
+          `Knowledge base '${args.kb_name}' has no page at path ` +
+            `'${args.page_path}'. Call list_kb_pages(kb_name: ` +
+            `'${args.kb_name}') and pass a path from its index.`,
         );
       }
 
@@ -239,7 +231,7 @@ export function buildReadKbPageTool(opts: {
       return {
         ok: true,
         kbName: collection.name,
-        pageName: page.name,
+        pagePath: page.path,
         description: page.description,
         contentType: page.contentType,
         ...windowed,

@@ -12,7 +12,7 @@ const ROUTE = "/api/kb";
 
 // GET /api/kb
 // Collections visible to the session (own + public + all for admin), each with
-// its group and page counts. Newest first.
+// its folder and page counts. Newest first.
 
 export const GET = withSession(ROUTE, async ({ session }) => {
   const collections = await listCollections(session);
@@ -20,9 +20,9 @@ export const GET = withSession(ROUTE, async ({ session }) => {
 });
 
 // POST /api/kb
-// A collection is an empty shell until a group or page is added; `description`
-// is required because it is the level-1 routing signal injected into every
-// bound agent's prompt.
+// A collection is an empty shell until its first page is added; `description`
+// is required because it is the routing line injected into every bound agent's
+// prompt.
 
 const createSchema = z
   .object({

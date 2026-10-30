@@ -19,12 +19,12 @@ export const MAX_PAGES_PER_COLLECTION = (): number =>
   getConfigNumber("kb.max_pages", 50);
 
 /**
- * Groups per collection. Also the ceiling on how many index lines a mounted
- * collection injects into every bound agent's prompt — there is no separate
- * mount byte budget.
+ * Folders per collection — the distinct path prefixes the pages imply. Also the
+ * ceiling on how many index lines a mounted collection injects into every bound
+ * agent's prompt — there is no separate mount byte budget.
  */
-export const MAX_GROUPS_PER_COLLECTION = (): number =>
-  getConfigNumber("kb.max_groups", 20);
+export const MAX_FOLDERS_PER_COLLECTION = (): number =>
+  getConfigNumber("kb.max_folders", 20);
 
 /**
  * Returned bytes for one `read_kb_page` call. The page itself may be stored

@@ -6,7 +6,7 @@
  * One row per collection: the slug, how many pages an agent could read from it,
  * and the two shared-state toggles. Creating a collection is a two-field dialog
  * rather than a `/kb/new` route because an empty collection has nothing to
- * edit — the editor only becomes meaningful once a group or page exists. That
+ * edit — the editor only becomes meaningful once a page exists. That
  * same dialog is the only place a collection's name and description are edited:
  * the editor has no row for the corpus it shows.
  *
@@ -88,7 +88,7 @@ function KbItem({ row, active, onOpen, onEdit, onPatch }: KbItemProps): ReactNod
   });
   /** The editor header prints the same helper's answer for this collection. */
   const tally: number = kbTopTally({
-    groups: row.topLevelGroupCount,
+    folders: row.folderCount,
     pages: row.pageCount,
   });
 
@@ -338,7 +338,7 @@ export function KbPanel(): ReactNode {
 
   // CONTRACT: the SWR cache is the only source of truth for this list. The
   // panel stays mounted across /kb and /kb/<id>, so writers outside it (the
-  // editor's save/delete, group and page writes) must mutate KB_LIST_KEY.
+  // editor's collection save/delete and its page writes) must mutate KB_LIST_KEY.
   const {
     data: collections = [],
     isLoading: loading,

@@ -911,55 +911,6 @@ export const KbCollectionTable = pgTable("kb_collection", {
 ]);
 
 /**
- * kb_group — a chapter / module / section inside one collection. This is the
- * deepest level the mounted prompt block exposes (see docs/kb.md).
- *
- * A group table rather than `skill_file`-style path prefixes: renaming a group
- * is a single-row update with no descendant rewrite, and a group carries its
- * own `description`, which a path prefix cannot.
- *
- * QUIRK: depth is capped at 2 group levels and cross-row cycles are rejected
- * by the KB service layer. SQL cannot express either as a CHECK — the
- * constraint below only blocks the same-row `id = parent_id` loop.
- *
- * Ordering is by `name` through `alphabeticCompare` (see docs/kb.md); there
- * is deliberately no `display_order` column.
- */
-export const KbGroupTable = pgTable(
-  "kb_group",
-  {
-    id: bigint("id", { mode: "number" })
-      .primaryKey()
-      .generatedAlwaysAsIdentity(),
-
-    collectionId: uuid("collection_id")
-      .notNull()
-      .references(() => KbCollectionTable.id, { onDelete: "cascade" }),
-    /** Self-FK. NULL = level-1 group. RESTRICT so a parent cannot disappear
-     *  out from under its children — the service layer empties the subtree
-     *  first. Mirrors `artifact.parent_id`. */
-    parentId: bigint("parent_id", { mode: "number" }).references(
-      (): AnyPgColumn => KbGroupTable.id,
-      { onDelete: "restrict" },
-    ),
-
-    /** Unique within a collection. Also the string agents pass as
-     *  `list_kb_pages(group_name)`, so a rename silently invalidates any prompt
-     *  an agent is mid-answer against — display-facing in the block, addressed by
-     *  name at runtime. No slug form: it is prose, matched exactly. */
-    name: text("name").notNull(),
-    /** CONTRACT: prose about why these pages belong together. Must never
-     *  enumerate the group's pages — that list is derived (see docs/kb.md). */
-    description: text("description"),
-  },
-  (t) => [
-    uniqueIndex("kb_group_collection_name_idx").on(t.collectionId, t.name),
-    index("kb_group_collection_parent_idx").on(t.collectionId, t.parentId),
-    check("kb_group_not_self_parent_check", sql`${t.id} <> ${t.parentId}`),
-  ],
-);
-
-/**
  * kb_page — one unit of knowledge: distilled, or stored verbatim when the
  * source is already final form (a page-catalog CSV, a config dump, meeting
  * notes).
@@ -968,9 +919,14 @@ export const KbGroupTable = pgTable(
  * `skill_file.content` does: transactional with its metadata, SQL-listable,
  * covered by `pg_dump`. Text only — see docs/kb.md.
  *
- * `name` doubles as the LLM's page handle: `read_kb_page(kb_name, page_name)` matches
- * it exactly, which is why uniqueness is collection-wide rather than per-group
- * (an agent must be able to open a page without knowing where it sits).
+ * Folders are the same implicit path prefixes `skill_file` uses — there is no
+ * folder table, because a folder is a name shared by the leading segments of
+ * its pages and nothing else. Renaming or deleting one is a rewrite or a delete
+ * of every page under the prefix, which the service does in one transaction.
+ *
+ * `path` doubles as the LLM's page handle: `read_kb_page(kb_name, page_path)`
+ * matches it exactly, so it is what the agent sees in `list_kb_pages` and what
+ * uniqueness is scoped to.
  */
 export const KbPageTable = pgTable(
   "kb_page",
@@ -979,24 +935,20 @@ export const KbPageTable = pgTable(
       .primaryKey()
       .generatedAlwaysAsIdentity(),
 
-    /** Denormalised alongside `group_id` so "every page in this KB" is one
-     *  index scan and so the collection-wide name uniqueness below is
-     *  expressible — Postgres cannot span a join in a unique index. */
+    /** Denormalised alongside `path` so "every page in this KB" is one index
+     *  scan and so the per-collection path uniqueness below is expressible —
+     *  Postgres cannot span a join in a unique index. Mirrors `skill_file`. */
     collectionId: uuid("collection_id")
       .notNull()
       .references(() => KbCollectionTable.id, { onDelete: "cascade" }),
-    /** NULL = page sits directly under the collection. SET NULL is the DB-side
-     *  safety net for a hand-run `DELETE` of a group; the service layer is the
-     *  only path that turns "delete the group" into "delete its pages". See
-     *  docs/kb.md. */
-    groupId: bigint("group_id", { mode: "number" }).references(
-      () => KbGroupTable.id,
-      { onDelete: "set null" },
-    ),
 
-    name: text("name").notNull(),
-    /** Level-2 help shown by `list_kb_pages`. Never injected into the resident
-     *  prompt. Capped by the shared description limit (see docs/kb.md). */
+    /** Relative path, `/`-separated, folder depth capped by MAX_FOLDER_DEPTH.
+     *  Legality is enforced in `src/lib/kb/paths.ts`, not by a CHECK: a page
+     *  name is prose (spaces and CJK are legal), so the rules are about
+     *  separators, not a character class. */
+    path: text("path").notNull(),
+    /** Agent-facing help, shown by `list_kb_pages`. Never injected into the
+     *  resident prompt. Capped by the shared description limit (see docs/kb.md). */
     description: text("description"),
     content: text("content").notNull(),
     contentType: text("content_type")
@@ -1022,8 +974,9 @@ export const KbPageTable = pgTable(
     updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    uniqueIndex("kb_page_collection_name_idx").on(t.collectionId, t.name),
-    index("kb_page_collection_group_idx").on(t.collectionId, t.groupId),
+    // Leading column `collection_id` also serves "every page in this KB", so
+    // there is no separate collection index.
+    uniqueIndex("kb_page_collection_path_idx").on(t.collectionId, t.path),
     // A text-only subset of CONTENT_TYPES in src/lib/folder-import/mime.ts,
     // spelled identically there (json is `application/json`, not `text/json`),
     // so a folder import can map a file onto this CHECK without guessing.
@@ -1043,7 +996,6 @@ export type KbContentType =
   | "text/xml";
 
 export type KbCollectionEntity = typeof KbCollectionTable.$inferSelect;
-export type KbGroupEntity = typeof KbGroupTable.$inferSelect;
 export type KbPageEntity = typeof KbPageTable.$inferSelect;
 
 /**
@@ -1194,7 +1146,7 @@ export const BuiltinAgentToolTable = pgTable(
     // Knowledge
     /** Set for toolType "knowledge". Binding any kb_collection auto-mounts
      *  list_kb_pages + read_kb_page (not a user-tickable catalog entry). Mount
-     *  granularity is collection only — group- or page-level bindings would
+     *  granularity is collection only — folder- or page-level bindings would
      *  make "what does this agent know" unauditable. See docs/kb.md. */
     kbCollectionId: uuid("kb_collection_id").references(
       () => KbCollectionTable.id,

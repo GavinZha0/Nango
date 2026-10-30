@@ -23,7 +23,6 @@ import {
   type SessionOrAuth,
 } from "@/lib/auth/permissions";
 import { ApiError, type Session } from "@/lib/http/route-handlers";
-import { parseRowId } from "@/lib/kb/validation";
 
 /** One query runner: the pool client, or a transaction's connection. */
 type KbQueryRunner =
@@ -66,7 +65,7 @@ export async function loadVisibleCollection(
   return row;
 }
 
-/** Content writes: description, group, page mutations. */
+/** Content writes: collection prose, page and folder mutations. */
 export async function loadEditableCollection(
   id: string,
   session: Session,
@@ -92,15 +91,6 @@ export async function loadOwnedCollection(
     throw new ApiError("FORBIDDEN", 403, "You do not own this knowledge collection.");
   }
   return row;
-}
-
-/** bigint group / page ids arrive as URL strings. */
-export function requireRowId(raw: string, what: "group" | "page"): number {
-  const id: number | null = parseRowId(raw);
-  if (id === null) {
-    throw new ApiError("BAD_REQUEST", 400, `${what} id must be a positive integer.`);
-  }
-  return id;
 }
 
 /**

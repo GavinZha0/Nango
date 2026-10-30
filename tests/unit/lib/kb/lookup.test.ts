@@ -8,11 +8,10 @@ vi.mock("@/lib/db", async () => {
 import { db } from "@/lib/db";
 import type { MockDrizzleDb } from "tests/unit/helpers";
 import {
-  countKbPagesByGroup,
-  getKbIndex,
-  getKbPageByName,
+  getKbPageByPath,
   listEnabledKbCollectionsByIds,
-  listKbGroupLinesByIds,
+  listKbIndexPages,
+  listKbPagePathsByIds,
   resolveKbCollectionForAgent,
 } from "@/lib/kb/lookup";
 
@@ -21,23 +20,6 @@ const dbMock = db as unknown as MockDrizzleDb;
 const COLLECTION_ID = "11111111-1111-1111-1111-111111111111";
 const OTHER_ID = "22222222-2222-2222-2222-222222222222";
 
-interface GroupRow {
-  collectionId: string;
-  id: number;
-  name: string;
-  parentId: number | null;
-  description: string | null;
-}
-
-function groupRow(overrides: Partial<GroupRow> & { id: number; name: string }): GroupRow {
-  return {
-    collectionId: COLLECTION_ID,
-    parentId: null,
-    description: "Chapter body.",
-    ...overrides,
-  };
-}
-
 beforeEach(() => {
   dbMock.$reset();
 });
@@ -45,8 +27,7 @@ beforeEach(() => {
 describe("kb/lookup — collection resolution", () => {
   it("runs no query when the agent binds nothing", async () => {
     expect(await listEnabledKbCollectionsByIds([])).toEqual([]);
-    expect(await listKbGroupLinesByIds([])).toEqual([]);
-    expect(await countKbPagesByGroup([])).toEqual([]);
+    expect(await listKbPagePathsByIds([])).toEqual([]);
     expect(dbMock.select).not.toHaveBeenCalled();
   });
 
@@ -78,84 +59,54 @@ describe("kb/lookup — collection resolution", () => {
   });
 });
 
-describe("kb/lookup — prompt-block counts", () => {
-  it("counts pages per group in one grouped read", async () => {
+describe("kb/lookup — prompt-block paths", () => {
+  it("ships every path of the bound set from one read, buckets included", async () => {
     dbMock.$enqueue([
-      { collectionId: COLLECTION_ID, groupId: 1, count: 3 },
-      { collectionId: COLLECTION_ID, groupId: null, count: 2 },
+      { collectionId: COLLECTION_ID, path: "chapter-02/a" },
+      { collectionId: COLLECTION_ID, path: "chapter-10/a" },
+      { collectionId: OTHER_ID, path: "notes" },
     ]);
 
-    const rows = await countKbPagesByGroup([COLLECTION_ID]);
+    const rows = await listKbPagePathsByIds([COLLECTION_ID, OTHER_ID]);
 
+    // The block derives folders in JS, so this read stays raw: no ordering, no
+    // description, no body.
     expect(rows).toEqual([
-      { collectionId: COLLECTION_ID, groupId: 1, count: 3 },
-      { collectionId: COLLECTION_ID, groupId: null, count: 2 },
+      { collectionId: COLLECTION_ID, path: "chapter-02/a" },
+      { collectionId: COLLECTION_ID, path: "chapter-10/a" },
+      { collectionId: OTHER_ID, path: "notes" },
     ]);
     expect(dbMock.select).toHaveBeenCalledTimes(1);
-    expect(dbMock._chain.groupBy).toHaveBeenCalledTimes(1);
+    const selection = dbMock.select.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(selection)).toEqual(["collectionId", "path"]);
   });
 });
 
 describe("kb/lookup — derived index", () => {
-  it("prints each level-1 group immediately followed by its children", async () => {
-    dbMock.$enqueue(
-      [
-        groupRow({ id: 3, name: "chapter-2" }),
-        groupRow({ id: 1, name: "chapter-10" }),
-        groupRow({ id: 4, name: "b-appendix", parentId: 1 }),
-        groupRow({ id: 5, name: "a-install", parentId: 1 }),
-      ],
-      [],
-    );
+  it("natural-sorts the paths after the SQL read", async () => {
+    dbMock.$enqueue([
+      { path: "chapter-10", description: null },
+      { path: "chapter-2", description: "Two." },
+      { path: "chapter-2-images", description: null },
+    ]);
 
-    const index = await getKbIndex(COLLECTION_ID);
+    const pages = await listKbIndexPages(COLLECTION_ID);
 
-    expect(index.groups.map((g) => [g.name, g.parentName])).toEqual([
-      ["chapter-2", null],
-      ["chapter-10", null],
-      ["a-install", "chapter-10"],
-      ["b-appendix", "chapter-10"],
+    expect(pages.map((p) => p.path)).toEqual([
+      "chapter-2",
+      "chapter-2-images",
+      "chapter-10",
     ]);
   });
 
-  it("buckets pages under their group and keeps root pages in the ungrouped tail", async () => {
-    dbMock.$enqueue(
-      [groupRow({ id: 1, name: "chapter-01" })],
-      [
-        { name: "notes-2", description: null, groupId: null },
-        { name: "install", description: "How to install.", groupId: 1 },
-        { name: "notes-10", description: null, groupId: null },
-        { name: "config", description: null, groupId: 1 },
-        { name: "orphans-only", description: null, groupId: 99 },
-      ],
-    );
-
-    const index = await getKbIndex(COLLECTION_ID);
-
-    expect(index.groups[0].pages.map((p) => p.name)).toEqual(["config", "install"]);
-    expect(index.ungroupedPages.map((p) => p.name)).toEqual(["notes-2", "notes-10"]);
-    // A page whose group row is outside this collection's read is unreachable:
-    // no group line names it and it is not in the ungrouped tail.
-    const reachable = [
-      ...index.groups.flatMap((g) => g.pages.map((p) => p.name)),
-      ...index.ungroupedPages.map((p) => p.name),
-    ];
-    expect(reachable).not.toContain("orphans-only");
-  });
-
   it("never ships a page body in the index", async () => {
-    dbMock.$enqueue([], [{ name: "a", description: null, groupId: null }]);
-    const index = await getKbIndex(COLLECTION_ID);
+    dbMock.$enqueue([{ path: "a", description: null }]);
 
-    expect(index.ungroupedPages[0]).toEqual({ name: "a", description: null });
-    const pageSelection = dbMock.select.mock.calls[1][0] as Record<string, unknown>;
-    expect(Object.keys(pageSelection)).toEqual(["name", "description", "groupId"]);
-  });
+    const pages = await listKbIndexPages(COLLECTION_ID);
 
-  it("reads groups and pages for one collection in two queries", async () => {
-    dbMock.$enqueue([], []);
-    await getKbIndex(COLLECTION_ID);
-    expect(dbMock.select).toHaveBeenCalledTimes(2);
+    expect(pages[0]).toEqual({ path: "a", description: null });
+    const selection = dbMock.select.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(selection)).toEqual(["path", "description"]);
   });
 });
 
@@ -163,19 +114,19 @@ describe("kb/lookup — page body fetch", () => {
   it("selects the four agent-visible columns and no provenance", async () => {
     dbMock.$enqueue([
       {
-        name: "install",
+        path: "chapter-01/install",
         description: null,
         content: "body",
         contentType: "text/markdown",
       },
     ]);
 
-    const page = await getKbPageByName(COLLECTION_ID, "install");
+    const page = await getKbPageByPath(COLLECTION_ID, "chapter-01/install");
 
     expect(page?.content).toBe("body");
     const selection = dbMock.select.mock.calls[0][0] as Record<string, unknown>;
     expect(Object.keys(selection)).toEqual([
-      "name",
+      "path",
       "description",
       "content",
       "contentType",
@@ -183,8 +134,8 @@ describe("kb/lookup — page body fetch", () => {
     expect(selection).not.toHaveProperty("sourceRef");
   });
 
-  it("returns null for a name that is not in this collection", async () => {
+  it("returns null for a path this collection does not hold", async () => {
     dbMock.$enqueue([]);
-    expect(await getKbPageByName(COLLECTION_ID, "nope")).toBeNull();
+    expect(await getKbPageByPath(COLLECTION_ID, "nope")).toBeNull();
   });
 });

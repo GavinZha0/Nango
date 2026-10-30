@@ -4,7 +4,7 @@
  * /kb/[id] — center workspace editor for one knowledge collection.
  *
  * There is no `/kb/new`: the left panel creates the empty collection through a
- * dialog and routes here, because a collection with no groups or pages has
+ * dialog and routes here, because a collection with no pages has
  * nothing this pane could edit.
  */
 
@@ -14,13 +14,13 @@ import { mutate as globalMutate } from "swr";
 
 import { KbEditor } from "@/components/main-panels/KbEditor";
 import { KB_LIST_KEY } from "@/components/left-panels/KbPanel";
-import type { KbTreeDetail } from "@/lib/types/kb";
+import type { KbCollectionDetail } from "@/lib/types/kb";
 
 export default function KbEditorPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
-  const [detail, setDetail] = useState<KbTreeDetail | undefined>(undefined);
+  const [detail, setDetail] = useState<KbCollectionDetail | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -39,7 +39,7 @@ export default function KbEditorPage() {
           } | null;
           throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
         }
-        const d = (await res.json()) as KbTreeDetail;
+        const d = (await res.json()) as KbCollectionDetail;
         if (!cancelled) setDetail(d);
       } catch (err) {
         if (!cancelled) {

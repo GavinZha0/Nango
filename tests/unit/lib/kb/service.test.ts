@@ -19,22 +19,21 @@ vi.mock("@/lib/db", async () => {
   return { db: createDrizzleMock() };
 });
 
-import { KbGroupTable, KbPageTable, type KbGroupEntity } from "@/lib/db/schema";
+import { KbPageTable } from "@/lib/db/schema";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http/route-handlers";
 import type { MockDrizzleDb } from "tests/unit/helpers";
 import {
   createCollection,
-  createGroup,
   createPage,
   deleteCollection,
-  deleteGroup,
+  deleteFolder,
   deletePage,
   getPage,
-  getTree,
+  getPages,
   listCollections,
+  renameFolder,
   updateCollection,
-  updateGroup,
   updatePage,
 } from "@/lib/kb/service";
 
@@ -49,15 +48,43 @@ const SESSION = {
   session: { id: "sess-1" },
 } as never;
 
-function group(overrides: Partial<KbGroupEntity> = {}): KbGroupEntity {
+/**
+ * The collection's address set — the rows every write reads before it commits,
+ * because a folder exists only as a prefix of these paths.
+ */
+function pageRows(...paths: string[]): Array<{ id: number; path: string }> {
+  return paths.map((path, index) => ({ id: index + 1, path }));
+}
+
+/** The same set with ids chosen, for assertions on which rows a rewrite touched. */
+function pageRowsByIds(
+  ...rows: Array<[number, string]>
+): Array<{ id: number; path: string }> {
+  return rows.map(([id, path]) => ({ id, path }));
+}
+
+/** `{collectionId, path}` — the one read that backs the panel's tallies. */
+function pathRows(
+  collectionId: string,
+  ...paths: string[]
+): Array<{ collectionId: string; path: string }> {
+  return paths.map((path) => ({ collectionId, path }));
+}
+
+function pageRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: 1,
+    id: 21,
     collectionId: COLLECTION_ID,
-    parentId: null,
-    name: "chapter-01",
-    description: "Install paths for the product.",
+    path: "chapter-01/install",
+    description: null,
+    content: "body",
+    contentType: "text/markdown",
+    size: 4,
+    sourceRef: null,
+    createdBy: ACTOR_ID,
+    updatedBy: ACTOR_ID,
     ...overrides,
-  } as KbGroupEntity;
+  };
 }
 
 /** The `code: "23505"` shape Postgres sends for a unique-index violation. */
@@ -83,63 +110,94 @@ async function expectApiError(
   return apiErr;
 }
 
+/** The paths the rewrite wrote, in the order the subtree was walked. */
+function rewrittenPaths(): string[] {
+  return dbMock._chain.set.mock.calls.map(
+    (call) => (call[0] as { path: string }).path,
+  );
+}
+
 beforeEach(() => {
   for (const key of Object.keys(mockConfig)) delete mockConfig[key];
   dbMock.$reset();
 });
 
 describe("kb/service — collection reads", () => {
-  it("pairs each collection with its level-1 group and page tallies", async () => {
+  it("derives both tallies for each collection from one path read", async () => {
     dbMock.$enqueue(
       [
         { id: COLLECTION_ID, name: "x-manual", description: "Manual." },
-        { id: OTHER_COLLECTION_ID, name: "team-notes", description: "Notes." },
+        { id: OTHER_COLLECTION_ID, name: "team-notes" },
       ],
-      // Both counters arrive sparse: a collection with no row in the grouped
-      // result must read 0, not undefined.
-      [{ collectionId: COLLECTION_ID, count: 3 }],
-      [{ collectionId: OTHER_COLLECTION_ID, count: 12 }],
+      // One read for the whole set: a nested folder counts once toward its
+      // level-1 parent, a loose page counts nowhere, and the second
+      // collection's bucket comes out of the same rows.
+      [
+        ...pathRows(
+          COLLECTION_ID,
+          "chapter-10/a",
+          "chapter-2/b",
+          "chapter-2/x/y",
+          "loose",
+        ),
+        ...pathRows(OTHER_COLLECTION_ID, "notes/one"),
+      ],
     );
 
     const rows = await listCollections(SESSION);
 
-    expect(rows.map((r) => [r.topLevelGroupCount, r.pageCount])).toEqual([
-      [3, 0],
-      [0, 12],
+    expect(rows.map((r) => [r.folderCount, r.pageCount])).toEqual([
+      [2, 4],
+      [1, 1],
     ]);
   });
 
-  it("skips the count queries for an empty list", async () => {
+  it("gives a collection with no pages zero of both, without a per-collection query", async () => {
+    dbMock.$enqueue(
+      [{ id: COLLECTION_ID, name: "empty" }],
+      pathRows(OTHER_COLLECTION_ID, "notes/one"),
+    );
+
+    const [row] = await listCollections(SESSION);
+
+    expect([row.folderCount, row.pageCount]).toEqual([0, 0]);
+    expect(dbMock.select).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the path read for an empty list", async () => {
     dbMock.$enqueue([]);
     expect(await listCollections(SESSION)).toEqual([]);
     expect(dbMock.select).toHaveBeenCalledTimes(1);
   });
 
-  it("natural-sorts both branches of the tree after the SQL read", async () => {
+  it("natural-sorts the page list after the SQL read", async () => {
     // Simulates what Postgres returns without COLLATE: byte order.
-    dbMock.$enqueue(
-      [group({ id: 2, name: "chapter-10" }), group({ id: 1, name: "chapter-2" })],
-      [
-        { id: 11, name: "chapter-10", groupId: 2 },
-        { id: 12, name: "chapter-2", groupId: 1 },
-      ],
-    );
+    dbMock.$enqueue([
+      { path: "chapter-10" },
+      { path: "chapter-2" },
+      { path: "chapter-2-images" },
+    ]);
 
-    const tree = await getTree(COLLECTION_ID);
+    const pages = await getPages(COLLECTION_ID);
 
-    expect(tree.groups.map((g) => g.name)).toEqual(["chapter-2", "chapter-10"]);
-    expect(tree.pages.map((p) => p.name)).toEqual(["chapter-2", "chapter-10"]);
+    expect(pages.map((p) => p.path)).toEqual([
+      "chapter-2",
+      "chapter-2-images",
+      "chapter-10",
+    ]);
   });
 
-  it("returns one page body or 404 for a page outside the collection", async () => {
+  it("reads a page by path and 404s one the collection does not hold", async () => {
     dbMock.$enqueue([]);
-    await expectApiError(() => getPage(COLLECTION_ID, 99), {
+    await expectApiError(() => getPage(COLLECTION_ID, "chapter-01/nope"), {
       code: "NOT_FOUND",
       status: 404,
     });
 
-    dbMock.$resolveWith([{ id: 99, name: "a-page", content: "body" }]);
-    expect((await getPage(COLLECTION_ID, 99)).content).toBe("body");
+    dbMock.$resolveWith([pageRow({ content: "the body" })]);
+    expect((await getPage(COLLECTION_ID, "chapter-01/install")).content).toBe(
+      "the body",
+    );
   });
 });
 
@@ -186,6 +244,19 @@ describe("kb/service — collection writes", () => {
     ).rejects.toBe(other);
   });
 
+  it("refuses a NUL byte in collection prose before any query", async () => {
+    await expectApiError(
+      () =>
+        createCollection({
+          name: "x-manual",
+          description: "bad\u0000description",
+          createdBy: ACTOR_ID,
+        }),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
+    );
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
   it("refuses an empty patch before touching the database", async () => {
     await expectApiError(() => updateCollection(COLLECTION_ID, {}, ACTOR_ID), {
       code: "BAD_REQUEST",
@@ -210,171 +281,122 @@ describe("kb/service — collection writes", () => {
   });
 });
 
-describe("kb/service — group writes", () => {
-  it("refuses a level-2 parent: depth is capped at two levels", async () => {
-    dbMock.$enqueue([group({ id: 7, parentId: 3 })]);
-    await expectApiError(
-      () => createGroup(COLLECTION_ID, { name: "sub", description: "Nested one.", parentId: 7 }),
-      { code: "BAD_REQUEST", status: 400, reason: "DEPTH_EXCEEDED" },
-    );
-    expect(dbMock.insert).not.toHaveBeenCalled();
-  });
-
-  it("refuses the insert at the configured group ceiling", async () => {
-    mockConfig["kb.max_groups"] = "2";
-    dbMock.$enqueue([{ count: 2 }]);
-
-    await expectApiError(
-      () => createGroup(COLLECTION_ID, { name: "third", description: "One too many." }),
-      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
-    );
-    expect(dbMock.insert).not.toHaveBeenCalled();
-  });
-
-  it("accepts a group below the ceiling and attaches it at level 1 by default", async () => {
-    dbMock.$enqueue([{ count: 0 }], [{ id: 4, name: "chapter-04" }]);
-
-    await createGroup(COLLECTION_ID, {
-      name: "chapter-04",
-      description: "Operations runbook.",
-    });
-
-    expect(dbMock._chain.values).toHaveBeenCalledWith(
-      expect.objectContaining({ collectionId: COLLECTION_ID, parentId: null }),
-    );
-  });
-
-  it("404s a move whose target group is in another collection", async () => {
-    dbMock.$enqueue([group({ id: 5 })], []);
-    await expectApiError(
-      () => updateGroup(COLLECTION_ID, 5, { parentId: 9 }),
-      { code: "NOT_FOUND", status: 404 },
-    );
-    expect(dbMock.update).not.toHaveBeenCalled();
-  });
-
-  it("refuses a move into the moved group's own subtree", async () => {
-    dbMock.$enqueue(
-      [group({ id: 1, parentId: null })],
-      [group({ id: 1, parentId: null }), group({ id: 2, parentId: 1 })],
-    );
-    await expectApiError(
-      () => updateGroup(COLLECTION_ID, 1, { parentId: 2 }),
-      { code: "BAD_REQUEST", status: 400, reason: "CYCLE_REJECTED" },
-    );
-    expect(dbMock.update).not.toHaveBeenCalled();
-  });
-
-  it("refuses a group that would become its own parent", async () => {
-    dbMock.$enqueue([group({ id: 1, parentId: null })]);
-    await expectApiError(
-      () => updateGroup(COLLECTION_ID, 1, { parentId: 1 }),
-      { code: "BAD_REQUEST", status: 400 },
-    );
-    expect(dbMock.update).not.toHaveBeenCalled();
-  });
-
-  it("refuses a move that would make a group with children level 2", async () => {
-    dbMock.$enqueue(
-      [group({ id: 1, parentId: null })],
-      [
-        group({ id: 1, parentId: null }),
-        group({ id: 2, parentId: 1 }),
-        group({ id: 3, parentId: null, name: "chapter-02" }),
-      ],
-    );
-    await expectApiError(
-      () => updateGroup(COLLECTION_ID, 1, { parentId: 3 }),
-      { code: "BAD_REQUEST", status: 400, reason: "DEPTH_EXCEEDED" },
-    );
-  });
-
-  it("lets a leaf group move under a level-1 group", async () => {
-    dbMock.$enqueue(
-      [group({ id: 1, parentId: null })],
-      [
-        group({ id: 1, parentId: null }),
-        group({ id: 3, parentId: null, name: "chapter-02" }),
-      ],
-      [{ id: 1, parentId: 3 }],
-    );
-
-    const row = await updateGroup(COLLECTION_ID, 1, { parentId: 3 });
-    expect(row.parentId).toBe(3);
-  });
-
-  it("sends only the fields the patch named", async () => {
-    dbMock.$enqueue([group({ id: 1 })], [{ id: 1, name: "renamed" }]);
-
-    await updateGroup(COLLECTION_ID, 1, { name: "renamed" });
-
-    expect(dbMock._chain.set).toHaveBeenCalledWith({ name: "renamed" });
-  });
-});
-
-describe("kb/service — deleting a group deletes its pages", () => {
-  it("refuses while nested groups remain, and reports how many", async () => {
-    dbMock.$enqueue([group({ id: 1 })], [{ count: 2 }]);
-
-    const err = await expectApiError(() => deleteGroup(COLLECTION_ID, 1), {
-      code: "CONFLICT",
-      status: 409,
-      reason: "GROUP_HAS_CHILDREN",
-    });
-    expect((err.details as Record<string, unknown>).childGroupCount).toBe(2);
-    expect(dbMock.transaction).not.toHaveBeenCalled();
-  });
-
-  it("clears the group's pages before the group itself, in one transaction", async () => {
-    dbMock.$enqueue([group({ id: 1 })], [{ count: 0 }]);
-
-    await deleteGroup(COLLECTION_ID, 1);
-
-    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
-    expect(dbMock.delete).toHaveBeenCalledTimes(2);
-    expect(dbMock.delete.mock.calls[0][0]).toBe(KbPageTable);
-    expect(dbMock.delete.mock.calls[1][0]).toBe(KbGroupTable);
-  });
-
-  it("404s a group id that is not in this collection before deleting anything", async () => {
-    dbMock.$enqueue([]);
-    await expectApiError(() => deleteGroup(COLLECTION_ID, 1), {
-      code: "NOT_FOUND",
-      status: 404,
-    });
-    expect(dbMock.delete).not.toHaveBeenCalled();
-  });
-});
-
 describe("kb/service — page writes", () => {
   const body = "# Install\n\nRun `make up`.\n";
 
-  it("measures `size` in stored UTF-8 bytes and defaults the content type", async () => {
-    dbMock.$enqueue([{ count: 0 }], [{ id: 21, name: "install" }]);
+  it("stores the path verbatim, measures `size` in UTF-8 bytes and defaults the content type", async () => {
+    dbMock.$enqueue([], [pageRow()]);
 
     await createPage(
       COLLECTION_ID,
-      { name: "install", content: body },
+      { path: "chapter-01/裸机安装.md", content: body },
       ACTOR_ID,
     );
 
     expect(dbMock._chain.values).toHaveBeenCalledWith(
       expect.objectContaining({
+        collectionId: COLLECTION_ID,
+        path: "chapter-01/裸机安装.md",
         size: Buffer.byteLength(body, "utf8"),
         contentType: "text/markdown",
-        groupId: null,
         createdBy: ACTOR_ID,
         updatedBy: ACTOR_ID,
       }),
     );
   });
 
-  it("charges CJK prose by byte, not by character", async () => {
-    mockConfig["kb.page_max_bytes"] = "12";
-    dbMock.$enqueue([{ count: 0 }]);
+  it("rejects an illegal path before reading the collection's addresses", async () => {
+    await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "a/b/c/leaf", content: body }, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_PATH" },
+    );
+    expect(dbMock.select).not.toHaveBeenCalled();
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("catches a control byte in the path as a path problem, not a text problem", async () => {
+    const err = await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "bad\u0000name", content: body }, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_PATH" },
+    );
+    expect(err.message).toContain("Page path");
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("refuses a page that would land inside an existing page", async () => {
+    dbMock.$enqueue(pageRows("chapter-01"));
 
     const err = await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "notes", content: "知识库知识" }, ACTOR_ID),
+      () => createPage(COLLECTION_ID, { path: "chapter-01/install", content: body }, ACTOR_ID),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+    expect(err.message).toContain("chapter-01/install");
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("refuses a page whose name an existing folder already owns", async () => {
+    dbMock.$enqueue(pageRows("chapter-01/install"));
+
+    await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "chapter-01", content: body }, ACTOR_ID),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("turns a unique-violation race into the same 409 PATH_TAKEN", async () => {
+    dbMock.$enqueue([]);
+    dbMock._chain.returning.mockRejectedValueOnce(UNIQUE_VIOLATION);
+
+    await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "chapter-01/install", content: body }, ACTOR_ID),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+  });
+
+  it("refuses the insert at the configured page ceiling", async () => {
+    mockConfig["kb.max_pages"] = "3";
+    dbMock.$enqueue(pageRows("a", "b", "c"));
+
+    const err = await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "d", content: body }, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
+    );
+    expect((err.details as Record<string, unknown>).kind).toBe("page");
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("refuses a write that would push the collection over its folder budget", async () => {
+    mockConfig["kb.max_folders"] = "2";
+    dbMock.$enqueue(pageRows("a/x", "b/y"));
+
+    const err = await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "c/z", content: body }, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
+    );
+    const details = err.details as Record<string, unknown>;
+    expect(details.kind).toBe("folder");
+    expect(details.count).toBe(3);
+    expect(details.max).toBe(2);
+    expect(err.message).toContain("kb.max_folders");
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("lets a page join a folder the collection already has while at the budget", async () => {
+    mockConfig["kb.max_folders"] = "2";
+    dbMock.$enqueue(pageRows("a/x", "b/y"), [pageRow()]);
+
+    await createPage(COLLECTION_ID, { path: "a/z", content: body }, ACTOR_ID);
+
+    expect(dbMock.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("charges CJK prose by byte, not by character", async () => {
+    mockConfig["kb.page_max_bytes"] = "12";
+    dbMock.$enqueue([]);
+
+    const err = await expectApiError(
+      () => createPage(COLLECTION_ID, { path: "notes", content: "知识库知识" }, ACTOR_ID),
       { code: "BAD_REQUEST", status: 400, reason: "PAGE_TOO_LARGE" },
     );
     const details = err.details as Record<string, number>;
@@ -384,26 +406,18 @@ describe("kb/service — page writes", () => {
   });
 
   it("refuses an unpaired surrogate before Postgres can reject the row", async () => {
-    dbMock.$enqueue([{ count: 0 }]);
+    dbMock.$enqueue([]);
     await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "broken", content: "ok \uD800 tail" }, ACTOR_ID),
+      () => createPage(COLLECTION_ID, { path: "broken", content: "ok \uD800 tail" }, ACTOR_ID),
       { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
     );
     expect(dbMock.insert).not.toHaveBeenCalled();
   });
 
   it("refuses a NUL byte in content before Postgres can reject the row", async () => {
-    dbMock.$enqueue([{ count: 0 }]);
+    dbMock.$enqueue([]);
     await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "nul", content: "ok\u0000tail" }, ACTOR_ID),
-      { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
-    );
-    expect(dbMock.insert).not.toHaveBeenCalled();
-  });
-
-  it("refuses a NUL byte in the page name before any query", async () => {
-    await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "bad\u0000name", content: body }, ACTOR_ID),
+      () => createPage(COLLECTION_ID, { path: "nul", content: "ok\u0000tail" }, ACTOR_ID),
       { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
     );
     expect(dbMock.insert).not.toHaveBeenCalled();
@@ -414,20 +428,21 @@ describe("kb/service — page writes", () => {
       () =>
         createPage(
           COLLECTION_ID,
-          { name: "desc", description: "bad\u0000desc", content: body },
+          { path: "desc", description: "bad\u0000desc", content: body },
           ACTOR_ID,
         ),
       { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
     );
+    expect(dbMock.select).not.toHaveBeenCalled();
     expect(dbMock.insert).not.toHaveBeenCalled();
   });
 
   it("accepts a NUL byte in source_ref — provenance is exempt from text validation", async () => {
-    dbMock.$enqueue([{ count: 0 }], [{ id: 22, name: "nul-src" }]);
+    dbMock.$enqueue([], [pageRow()]);
 
     await createPage(
       COLLECTION_ID,
-      { name: "nul-src", content: body, sourceRef: "note\u0000nul" },
+      { path: "nul-src", content: body, sourceRef: "note\u0000nul" },
       ACTOR_ID,
     );
 
@@ -436,87 +451,245 @@ describe("kb/service — page writes", () => {
     );
   });
 
-  it("refuses the insert at the configured page ceiling", async () => {
-    mockConfig["kb.max_pages"] = "50";
-    dbMock.$enqueue([{ count: 50 }]);
-    await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "fifty-first", content: body }, ACTOR_ID),
-      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
-    );
-  });
-
-  it("turns a page name collision inside the collection into 409 NAME_TAKEN", async () => {
-    dbMock.$enqueue([{ count: 0 }]);
-    dbMock._chain.returning.mockRejectedValueOnce(UNIQUE_VIOLATION);
-
-    await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "install", content: body }, ACTOR_ID),
-      { code: "CONFLICT", status: 409, reason: "NAME_TAKEN" },
-    );
-  });
-
-  it("rejects a groupId belonging to another collection as a malformed payload", async () => {
-    dbMock.$enqueue([group({ id: 8, collectionId: OTHER_COLLECTION_ID })]);
-
-    await expectApiError(
-      () => createPage(COLLECTION_ID, { name: "misplaced", groupId: 8, content: body }, ACTOR_ID),
-      { code: "BAD_REQUEST", status: 400, reason: "GROUP_NOT_IN_COLLECTION" },
-    );
-    expect(dbMock.insert).not.toHaveBeenCalled();
-  });
-
   it("re-measures size when content changes and leaves it alone otherwise", async () => {
     const grown = "a much longer body than before, and it is UTF-8 too.";
-    dbMock.$enqueue(
-      [{ id: 21, content: "short", size: 5 }],
-      [{ id: 21, content: grown, size: Buffer.byteLength(grown) }],
-    );
+    dbMock.$enqueue([pageRow()], [pageRow({ content: grown })]);
 
-    await updatePage(COLLECTION_ID, 21, { content: grown }, ACTOR_ID);
+    await updatePage(COLLECTION_ID, "chapter-01/install", { content: grown }, ACTOR_ID);
     expect(dbMock._chain.set).toHaveBeenCalledWith(
-      expect.objectContaining({ size: Buffer.byteLength(grown, "utf8") }),
+      expect.objectContaining({ content: grown, size: Buffer.byteLength(grown, "utf8") }),
     );
 
-    dbMock.$enqueue([{ id: 21, content: grown, size: 41 }], [{ id: 21 }]);
+    dbMock.$enqueue([pageRow()], [pageRow()]);
     dbMock._chain.set.mockClear();
-    await updatePage(COLLECTION_ID, 21, { description: "now NULL" }, ACTOR_ID);
+    await updatePage(
+      COLLECTION_ID,
+      "chapter-01/install",
+      { description: null },
+      ACTOR_ID,
+    );
     const sets = dbMock._chain.set.mock.calls[0][0] as Record<string, unknown>;
     expect(sets.content).toBeUndefined();
     expect(sets.size).toBeUndefined();
     expect(sets.updatedBy).toBe(ACTOR_ID);
   });
 
-  it("validates the move target before writing a page patch", async () => {
+  it("puts one field in charge of both renaming and moving", async () => {
     dbMock.$enqueue(
-      [{ id: 21, content: "body", groupId: 1 }],
-      [group({ id: 9, collectionId: OTHER_COLLECTION_ID })],
+      [pageRow()],
+      pageRows("chapter-02/config"),
+      [pageRow({ path: "chapter-02/install" })],
     );
+
+    await updatePage(
+      COLLECTION_ID,
+      "chapter-01/install",
+      { path: "chapter-02/install" },
+      ACTOR_ID,
+    );
+
+    expect(dbMock._chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "chapter-02/install" }),
+    );
+  });
+
+  it("refuses a move onto an existing page or folder", async () => {
+    dbMock.$enqueue([pageRow()], pageRows("chapter-02/install", "chapter-02/arch"));
+
     await expectApiError(
-      () => updatePage(COLLECTION_ID, 21, { groupId: 9 }, ACTOR_ID),
-      { code: "BAD_REQUEST", status: 400, reason: "GROUP_NOT_IN_COLLECTION" },
+      () =>
+        updatePage(
+          COLLECTION_ID,
+          "chapter-01/install",
+          { path: "chapter-02/install" },
+          ACTOR_ID,
+        ),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
     );
     expect(dbMock.update).not.toHaveBeenCalled();
   });
 
-  it("404s a page id that is not in this collection before any mutation", async () => {
+  it("skips the address re-read when the new path is the current one", async () => {
+    dbMock.$enqueue([pageRow()], [pageRow()]);
+
+    await updatePage(
+      COLLECTION_ID,
+      "chapter-01/install",
+      { path: "chapter-01/install", description: "same place" },
+      ACTOR_ID,
+    );
+
+    expect(dbMock.select).toHaveBeenCalledTimes(1);
+    const sets = dbMock._chain.set.mock.calls[0][0] as Record<string, unknown>;
+    expect(sets.path).toBeUndefined();
+  });
+
+  it("404s a path the collection does not hold before any mutation", async () => {
     dbMock.$enqueue([]);
     await expectApiError(
-      () => updatePage(COLLECTION_ID, 21, { name: "renamed" }, ACTOR_ID),
+      () => updatePage(COLLECTION_ID, "chapter-01/nope", { content: body }, ACTOR_ID),
       { code: "NOT_FOUND", status: 404 },
     );
     expect(dbMock.update).not.toHaveBeenCalled();
   });
 
-  it("deletes a page only after confirming it exists in this collection", async () => {
+  it("refuses an empty page patch without reading the row", async () => {
+    await expectApiError(
+      () => updatePage(COLLECTION_ID, "chapter-01/install", {}, ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400 },
+    );
+    expect(dbMock.select).not.toHaveBeenCalled();
+  });
+
+  it("deletes a page only after confirming its path is in this collection", async () => {
     dbMock.$enqueue([]);
-    await expectApiError(() => deletePage(COLLECTION_ID, 21), {
+    await expectApiError(() => deletePage(COLLECTION_ID, "chapter-01/nope"), {
       code: "NOT_FOUND",
       status: 404,
     });
     expect(dbMock.delete).not.toHaveBeenCalled();
 
-    dbMock.$enqueue([{ id: 21, content: "body" }]);
-    await deletePage(COLLECTION_ID, 21);
+    dbMock.$enqueue([pageRow()]);
+    await deletePage(COLLECTION_ID, "chapter-01/install");
     expect(dbMock.delete).toHaveBeenCalledTimes(1);
+    expect(dbMock.delete.mock.calls[0][0]).toBe(KbPageTable);
+  });
+});
+
+describe("kb/service — folder rename rewrites the subtree", () => {
+  it("rewrites every page under the prefix and reports how many", async () => {
+    dbMock.$enqueue(
+      pageRowsByIds(
+        [1, "chapter-01/install"],
+        [2, "chapter-01/images/build"],
+        [3, "chapter-02/config"],
+      ),
+    );
+
+    const rewritten = await renameFolder(
+      COLLECTION_ID,
+      "chapter-01",
+      "appendix",
+      ACTOR_ID,
+    );
+
+    expect(rewritten).toBe(2);
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(rewrittenPaths()).toEqual([
+      "appendix/install",
+      "appendix/images/build",
+    ]);
+    expect(dbMock._chain.set.mock.calls[0][0]).toMatchObject({
+      updatedBy: ACTOR_ID,
+    });
+    // The row outside the subtree keeps its address: only two writes ran.
+    expect(dbMock._chain.set).toHaveBeenCalledTimes(2);
+  });
+
+  it("404s a prefix no page carries, before any write", async () => {
+    dbMock.$enqueue(pageRows("chapter-01/install"));
+
+    const err = await expectApiError(
+      () => renameFolder(COLLECTION_ID, "chapter-09", "x", ACTOR_ID),
+      { code: "NOT_FOUND", status: 404 },
+    );
+    expect(err.message).toContain("chapter-09");
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a prefix-only rename whose target nests too deep", async () => {
+    await expectApiError(
+      () => renameFolder(COLLECTION_ID, "chapter-01", "a/b/c", ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_PATH" },
+    );
+    expect(dbMock.select).not.toHaveBeenCalled();
+  });
+
+  it("refuses a move that would push a page past the depth cap", async () => {
+    dbMock.$enqueue(pageRows("chapter-01/images/build"));
+
+    // `chapter-01` → `chapter-01/cover` is legal as a prefix, but the page
+    // under it would then sit three folders deep.
+    await expectApiError(
+      () => renameFolder(COLLECTION_ID, "chapter-01", "chapter-01/cover", ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_PATH" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a rewrite that would land on a page outside the subtree", async () => {
+    dbMock.$enqueue(
+      pageRowsByIds([1, "chapter-01/install"], [2, "chapter-02/install"]),
+    );
+
+    await expectApiError(
+      () => renameFolder(COLLECTION_ID, "chapter-01", "chapter-02", ACTOR_ID),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("checks the folder budget on the post-rewrite set, so a swap stays legal", async () => {
+    mockConfig["kb.max_folders"] = "2";
+    dbMock.$enqueue(pageRowsByIds([1, "a/x"], [2, "b/y"]));
+
+    // `a` gives up its prefix as `c` takes one: still two folders afterwards.
+    expect(await renameFolder(COLLECTION_ID, "a", "c", ACTOR_ID)).toBe(1);
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a rewrite that would add folders beyond the budget", async () => {
+    mockConfig["kb.max_folders"] = "2";
+    dbMock.$enqueue(pageRowsByIds([1, "a/x"], [2, "b/y"]));
+
+    const err = await expectApiError(
+      () => renameFolder(COLLECTION_ID, "a", "c/d", ACTOR_ID),
+      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
+    );
+    expect((err.details as Record<string, unknown>).kind).toBe("folder");
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("lifts a subtree to the collection root by rewriting to the empty prefix", async () => {
+    dbMock.$enqueue(pageRowsByIds([1, "chapter-01/install"], [2, "chapter-01/config"]));
+
+    expect(await renameFolder(COLLECTION_ID, "chapter-01", "", ACTOR_ID)).toBe(2);
+    expect(rewrittenPaths()).toEqual(["install", "config"]);
+  });
+});
+
+describe("kb/service — folder delete takes the subtree", () => {
+  it("deletes every page under the prefix, nested folders included", async () => {
+    dbMock.$enqueue(
+      pageRowsByIds(
+        [1, "chapter-01/install"],
+        [2, "chapter-01/images/build"],
+        [3, "other"],
+      ),
+    );
+
+    expect(await deleteFolder(COLLECTION_ID, "chapter-01")).toBe(2);
+    expect(dbMock.delete).toHaveBeenCalledTimes(1);
+    expect(dbMock.delete.mock.calls[0][0]).toBe(KbPageTable);
+  });
+
+  it("404s a prefix no page carries instead of deleting nothing", async () => {
+    dbMock.$enqueue(pageRows("chapter-01/install"));
+
+    await expectApiError(() => deleteFolder(COLLECTION_ID, "chapter-09"), {
+      code: "NOT_FOUND",
+      status: 404,
+    });
+    expect(dbMock.delete).not.toHaveBeenCalled();
+  });
+
+  it("refuses the root prefix, which would empty the collection by name", async () => {
+    dbMock.$enqueue(pageRows("install"));
+
+    await expectApiError(() => deleteFolder(COLLECTION_ID, ""), {
+      code: "NOT_FOUND",
+      status: 404,
+    });
+    expect(dbMock.delete).not.toHaveBeenCalled();
   });
 });

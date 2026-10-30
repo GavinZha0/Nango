@@ -1,23 +1,23 @@
 /**
- * Domain service for the knowledge base: three levels (collection → group →
- * page), all structural invariants, all config-backed budgets.
+ * Domain service for the knowledge base: two levels (collection → page), all
+ * structural invariants, all config-backed budgets.
  *
- * Every write path goes through here so the tree rules cannot be bypassed.
- * See docs/kb.md.
+ * Folders are implicit path prefixes on a page, exactly as `skill_file` does it,
+ * so every folder operation here is arithmetic over the collection's page paths
+ * plus one transaction. Every write path goes through this module so those rules
+ * cannot be bypassed. See docs/kb.md.
  */
 
 import "server-only";
 
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
   KbCollectionTable,
-  KbGroupTable,
   KbPageTable,
   type KbCollectionEntity,
   type KbContentType,
-  type KbGroupEntity,
   type KbPageEntity,
 } from "@/lib/db/schema";
 import { visibilitySql } from "@/lib/auth/permissions";
@@ -25,23 +25,27 @@ import { ApiError, type Session } from "@/lib/http/route-handlers";
 import { isUniqueViolation } from "@/lib/http/validation";
 import { alphabeticCompare } from "@/lib/utils/sort";
 import {
-  MAX_GROUPS_PER_COLLECTION,
+  MAX_FOLDERS_PER_COLLECTION,
   MAX_PAGES_PER_COLLECTION,
   PAGE_MAX_BYTES,
 } from "@/lib/kb/budgets";
-import { MAX_GROUP_DEPTH } from "@/lib/kb/limits";
+import { MAX_FOLDER_DEPTH } from "@/lib/kb/limits";
+import {
+  ancestorFolders,
+  distinctFolders,
+  isUnderFolder,
+  pathProblem,
+  folderProblem,
+  rewriteFolderPrefix,
+  topLevelFolderCount,
+} from "@/lib/kb/paths";
 
 /** Columns a list/tree read returns for a page — `content` stays behind. */
 export type KbPageSummary = Omit<KbPageEntity, "content">;
 
-export interface KbTree {
-  groups: KbGroupEntity[];
-  pages: KbPageSummary[];
-}
-
 export interface CollectionListItem extends KbCollectionEntity {
-  /** Level-1 groups only: the panel prints this, or `pageCount` when it is 0. */
-  topLevelGroupCount: number;
+  /** Level-1 folders only: the panel prints this, or `pageCount` when it is 0. */
+  folderCount: number;
   pageCount: number;
 }
 
@@ -59,33 +63,18 @@ export interface UpdateCollectionInput {
   visibility?: "private" | "public";
 }
 
-export interface CreateGroupInput {
-  name: string;
-  description: string;
-  parentId?: number | null;
-}
-
-export interface UpdateGroupInput {
-  name?: string;
-  description?: string;
-  /** Move. `null` moves the group to level 1. */
-  parentId?: number | null;
-}
-
 export interface CreatePageInput {
-  name: string;
+  path: string;
   description?: string | null;
-  groupId?: number | null;
   content: string;
   contentType?: KbContentType;
   sourceRef?: string | null;
 }
 
 export interface UpdatePageInput {
-  name?: string;
+  /** Rename or move — one field, because a path is both. */
+  path?: string;
   description?: string | null;
-  /** Move between groups. `null` puts the page at the collection root. */
-  groupId?: number | null;
   content?: string;
   contentType?: KbContentType;
   sourceRef?: string | null;
@@ -93,7 +82,7 @@ export interface UpdatePageInput {
 
 // ──────────────────────────── Reads ──────────────────────────────
 
-/** Collections visible to the session, each with its top-level and page tallies. */
+/** Collections visible to the session, each with its folder and page tallies. */
 export async function listCollections(
   session: Session,
 ): Promise<CollectionListItem[]> {
@@ -111,107 +100,61 @@ export async function listCollections(
 
   if (rows.length === 0) return [];
 
-  const ids: string[] = rows.map((row) => row.id);
-  const [groupCounts, pageCounts] = await Promise.all([
-    countTopLevelGroupsByCollection(ids),
-    countPagesByCollection(ids),
-  ]);
+  const pathsByCollection = await loadPagePathsByCollection(
+    rows.map((row) => row.id),
+  );
 
-  return rows.map((row) => ({
-    ...row,
-    topLevelGroupCount: groupCounts.get(row.id) ?? 0,
-    pageCount: pageCounts.get(row.id) ?? 0,
-  }));
+  return rows.map((row) => {
+    const paths: string[] = pathsByCollection.get(row.id) ?? [];
+    return {
+      ...row,
+      folderCount: topLevelFolderCount(paths),
+      pageCount: paths.length,
+    };
+  });
 }
 
 /**
- * Level-1 groups per collection — the top level the editor tree opens on, not
- * every group at any depth, so the panel's number and the header's are the same
- * number.
- */
-async function countTopLevelGroupsByCollection(
-  ids: string[],
-): Promise<Map<string, number>> {
-  const rows: Array<{ collectionId: string; count: number }> = await db
-    .select({
-      collectionId: KbGroupTable.collectionId,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(KbGroupTable)
-    .where(
-      and(
-        inArray(KbGroupTable.collectionId, ids),
-        isNull(KbGroupTable.parentId),
-      ),
-    )
-    .groupBy(KbGroupTable.collectionId);
-  return new Map(rows.map((row) => [row.collectionId, row.count]));
-}
-
-async function countPagesByCollection(
-  ids: string[],
-): Promise<Map<string, number>> {
-  const rows: Array<{ collectionId: string; count: number }> = await db
-    .select({
-      collectionId: KbPageTable.collectionId,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(KbPageTable)
-    .where(inArray(KbPageTable.collectionId, ids))
-    .groupBy(KbPageTable.collectionId);
-  return new Map(rows.map((row) => [row.collectionId, row.count]));
-}
-
-/**
- * The whole tree, minus page bodies.
+ * The collection's pages, minus their bodies, in the order the agent-facing
+ * index uses.
  *
  * CONTRACT: sorted here with `alphabeticCompare`, once, so the editor tree and
- * the agent-facing index cannot drift. Postgres orders bytes without `COLLATE`,
- * which puts `chapter-10` before `chapter-2`.
+ * the index cannot drift. Postgres orders bytes without `COLLATE`, which puts
+ * `chapter-10` before `chapter-2`. The tree is derived from these paths by the
+ * client — there is no folder row to join.
  */
-export async function getTree(collectionId: string): Promise<KbTree> {
-  const [groups, pages] = await Promise.all([
-    db
-      .select()
-      .from(KbGroupTable)
-      .where(eq(KbGroupTable.collectionId, collectionId))
-      .orderBy(asc(KbGroupTable.name)),
-    db
-      .select({
-        id: KbPageTable.id,
-        collectionId: KbPageTable.collectionId,
-        groupId: KbPageTable.groupId,
-        name: KbPageTable.name,
-        description: KbPageTable.description,
-        contentType: KbPageTable.contentType,
-        size: KbPageTable.size,
-        sourceRef: KbPageTable.sourceRef,
-        createdBy: KbPageTable.createdBy,
-        updatedBy: KbPageTable.updatedBy,
-        createdAt: KbPageTable.createdAt,
-        updatedAt: KbPageTable.updatedAt,
-      })
-      .from(KbPageTable)
-      .where(eq(KbPageTable.collectionId, collectionId))
-      .orderBy(asc(KbPageTable.name)),
-  ]);
+export async function getPages(collectionId: string): Promise<KbPageSummary[]> {
+  const rows: KbPageSummary[] = await db
+    .select({
+      id: KbPageTable.id,
+      collectionId: KbPageTable.collectionId,
+      path: KbPageTable.path,
+      description: KbPageTable.description,
+      contentType: KbPageTable.contentType,
+      size: KbPageTable.size,
+      sourceRef: KbPageTable.sourceRef,
+      createdBy: KbPageTable.createdBy,
+      updatedBy: KbPageTable.updatedBy,
+      createdAt: KbPageTable.createdAt,
+      updatedAt: KbPageTable.updatedAt,
+    })
+    .from(KbPageTable)
+    .where(eq(KbPageTable.collectionId, collectionId))
+    .orderBy(asc(KbPageTable.path));
 
-  return {
-    groups: [...groups].sort((a, b) => alphabeticCompare(a.name, b.name)),
-    pages: [...pages].sort((a, b) => alphabeticCompare(a.name, b.name)),
-  };
+  return [...rows].sort((a, b) => alphabeticCompare(a.path, b.path));
 }
 
 /** One page with its body — the only read that returns `content`. */
 export async function getPage(
   collectionId: string,
-  pageId: number,
+  path: string,
 ): Promise<KbPageEntity> {
   const [row] = await db
     .select()
     .from(KbPageTable)
     .where(
-      and(eq(KbPageTable.id, pageId), eq(KbPageTable.collectionId, collectionId)),
+      and(eq(KbPageTable.collectionId, collectionId), eq(KbPageTable.path, path)),
     )
     .limit(1);
   if (!row) throw new ApiError("NOT_FOUND", 404, "Page not found.");
@@ -272,126 +215,13 @@ export async function updateCollection(
 }
 
 /**
- * Hard delete. `kb_group` / `kb_page` cascade and `builtin_agent_tool`
- * releases its binding; ownership columns are SET NULL so no user purge ever
- * reaches this path.
+ * Hard delete. `kb_page` cascades and `builtin_agent_tool` releases its binding;
+ * ownership columns are SET NULL so no user purge ever reaches this path.
  */
 export async function deleteCollection(collectionId: string): Promise<void> {
   await db
     .delete(KbCollectionTable)
     .where(eq(KbCollectionTable.id, collectionId));
-}
-
-// ────────────────────────── Group writes ─────────────────────────
-
-/** `kb_group` has no audit columns, so a group write carries no actor. */
-export async function createGroup(
-  collectionId: string,
-  input: CreateGroupInput,
-): Promise<KbGroupEntity> {
-  assertValidText("Group name", input.name);
-  assertValidText("Group description", input.description);
-  if (input.parentId != null) {
-    await requireLevelOneParent(collectionId, input.parentId);
-  }
-  await assertGroupLimit(collectionId);
-
-  try {
-    const [row] = await db
-      .insert(KbGroupTable)
-      .values({
-        collectionId,
-        parentId: input.parentId ?? null,
-        name: input.name,
-        description: input.description,
-      })
-      .returning();
-    return row;
-  } catch (err) {
-    throwIfNameTaken(err, input.name);
-    throw err;
-  }
-}
-
-export async function updateGroup(
-  collectionId: string,
-  groupId: number,
-  patch: UpdateGroupInput,
-): Promise<KbGroupEntity> {
-  const current: KbGroupEntity = await loadGroup(collectionId, groupId);
-  if (Object.keys(patch).length === 0) {
-    throw new ApiError("BAD_REQUEST", 400, "No fields to update.");
-  }
-  if (patch.name !== undefined) assertValidText("Group name", patch.name);
-  if (patch.description !== undefined) {
-    assertValidText("Group description", patch.description);
-  }
-
-  if (patch.parentId !== undefined && patch.parentId !== current.parentId) {
-    await assertMoveLegal(collectionId, current, patch.parentId);
-  }
-
-  try {
-    const [row] = await db
-      .update(KbGroupTable)
-      .set({
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.description !== undefined
-          ? { description: patch.description }
-          : {}),
-        ...(patch.parentId !== undefined ? { parentId: patch.parentId } : {}),
-      })
-      .where(eq(KbGroupTable.id, groupId))
-      .returning();
-    return row;
-  } catch (err) {
-    if (patch.name !== undefined) throwIfNameTaken(err, patch.name);
-    throw err;
-  }
-}
-
-/**
- * Delete a group **and every page under it**. Pages are content: a directory is
- * removed by removing what it holds, so nothing survives silently.
- *
- * A group that still has child groups is refused, because `parent_id` is
- * RESTRICT and silently promoting them would rewrite the author's structure.
- * That refusal is also what makes the page delete complete: with child groups
- * ruled out, the rows carrying this `group_id` are the whole subtree, so no
- * grandchild page can be left pointing at a vanished group.
- *
- * `kb_page.group_id` stays `ON DELETE SET NULL` in the schema — the DB keeps the
- * conservative behaviour for a hand-run `DELETE`, and this function is the only
- * path that turns "delete the group" into "delete its pages".
- */
-export async function deleteGroup(
-  collectionId: string,
-  groupId: number,
-): Promise<void> {
-  await loadGroup(collectionId, groupId);
-
-  const childCount: number = await countGroupsByParent(groupId);
-  if (childCount > 0) {
-    throw new ApiError(
-      "CONFLICT",
-      409,
-      `This group has ${childCount} nested group(s). Delete or move them first.`,
-      { reason: "GROUP_HAS_CHILDREN", childGroupCount: childCount },
-    );
-  }
-
-  await db.transaction(async (tx) => {
-    // `collection_id` is implied by the group's own collection but stated
-    // anyway: it is the leading column of the composite index, so the delete
-    // stays an index scan instead of a full read of `kb_page`.
-    await tx.delete(KbPageTable).where(
-      and(
-        eq(KbPageTable.collectionId, collectionId),
-        eq(KbPageTable.groupId, groupId),
-      ),
-    );
-    await tx.delete(KbGroupTable).where(eq(KbGroupTable.id, groupId));
-  });
 }
 
 // ─────────────────────────── Page writes ─────────────────────────
@@ -401,14 +231,14 @@ export async function createPage(
   input: CreatePageInput,
   actorId: string,
 ): Promise<KbPageEntity> {
-  assertValidText("Page name", input.name);
+  assertLegalPath(input.path);
   if (input.description != null) {
     assertValidText("Page description", input.description);
   }
-  if (input.groupId != null) {
-    await requirePayloadGroup(collectionId, input.groupId);
-  }
-  await assertPageLimit(collectionId);
+  const existing: string[] = await loadPagePaths(collectionId);
+  assertNoFolderClash(existing, input.path);
+  assertPageRoom(existing.length);
+  assertFolderBudget(existing, input.path);
   const size: number = assertContentFits(input.content);
   assertValidText("Page content", input.content);
 
@@ -417,8 +247,7 @@ export async function createPage(
       .insert(KbPageTable)
       .values({
         collectionId,
-        groupId: input.groupId ?? null,
-        name: input.name,
+        path: input.path,
         description: input.description ?? null,
         content: input.content,
         contentType: input.contentType ?? "text/markdown",
@@ -430,28 +259,28 @@ export async function createPage(
       .returning();
     return row;
   } catch (err) {
-    throwIfNameTaken(err, input.name);
+    throwIfPathTaken(err, input.path);
     throw err;
   }
 }
 
+/**
+ * Rename, move, or edit in place. `path` is both the address and the handle, so
+ * a rename and a move are the same field.
+ */
 export async function updatePage(
   collectionId: string,
-  pageId: number,
+  path: string,
   patch: UpdatePageInput,
   actorId: string,
 ): Promise<KbPageEntity> {
   if (Object.keys(patch).length === 0) {
     throw new ApiError("BAD_REQUEST", 400, "No fields to update.");
   }
-  // Throws 404 before any mutation, and gives the byte re-measure a baseline.
-  await getPage(collectionId, pageId);
+  // Throws 404 before any mutation, and gives the rewrite checks their baseline.
+  const current: KbPageEntity = await getPage(collectionId, path);
 
   const sets: Partial<KbPageEntity> = {};
-  if (patch.name !== undefined) {
-    assertValidText("Page name", patch.name);
-    sets.name = patch.name;
-  }
   if (patch.description !== undefined) {
     if (patch.description != null) {
       assertValidText("Page description", patch.description);
@@ -460,16 +289,23 @@ export async function updatePage(
   }
   if (patch.sourceRef !== undefined) sets.sourceRef = patch.sourceRef;
   if (patch.contentType !== undefined) sets.contentType = patch.contentType;
-  if (patch.groupId !== undefined) {
-    if (patch.groupId != null) {
-      await requirePayloadGroup(collectionId, patch.groupId);
-    }
-    sets.groupId = patch.groupId;
-  }
   if (patch.content !== undefined) {
     sets.content = patch.content;
     sets.size = assertContentFits(patch.content);
     assertValidText("Page content", patch.content);
+  }
+
+  const newPath: string | undefined = patch.path;
+  if (newPath !== undefined) {
+    assertLegalPath(newPath);
+    if (newPath !== current.path) {
+      const others: string[] = (await loadPagePaths(collectionId)).filter(
+        (p) => p !== current.path,
+      );
+      assertNoFolderClash(others, newPath);
+      assertFolderBudget(others, newPath);
+      sets.path = newPath;
+    }
   }
   sets.updatedBy = actorId;
   sets.updatedAt = new Date();
@@ -478,170 +314,202 @@ export async function updatePage(
     const [row] = await db
       .update(KbPageTable)
       .set(sets)
-      .where(eq(KbPageTable.id, pageId))
+      .where(eq(KbPageTable.id, current.id))
       .returning();
     return row;
   } catch (err) {
-    if (patch.name !== undefined) throwIfNameTaken(err, patch.name);
+    if (newPath !== undefined) throwIfPathTaken(err, newPath);
     throw err;
   }
 }
 
 export async function deletePage(
   collectionId: string,
-  pageId: number,
+  path: string,
 ): Promise<void> {
-  await getPage(collectionId, pageId);
-  await db.delete(KbPageTable).where(eq(KbPageTable.id, pageId));
+  const current: KbPageEntity = await getPage(collectionId, path);
+  await db.delete(KbPageTable).where(eq(KbPageTable.id, current.id));
+}
+
+// ──────────────────────── Folder operations ──────────────────────
+
+/**
+ * Rename or move a folder, which rewrites the path of every page under it.
+ *
+ * `newFolder` may be inside the folder itself (`a` → `a/b` nests it one level
+ * deeper) as long as the result stays within the depth cap; it may not land on
+ * top of other pages.
+ */
+export async function renameFolder(
+  collectionId: string,
+  folder: string,
+  newFolder: string,
+  actorId: string,
+): Promise<number> {
+  assertLegalFolder(newFolder);
+  const rows: Array<{ id: number; path: string }> = await loadPageRows(
+    collectionId,
+  );
+  const inside = rows.filter((row) => isUnderFolder(row.path, folder));
+  if (inside.length === 0) {
+    throw new ApiError("NOT_FOUND", 404, `Folder not found: ${folder}`);
+  }
+  const outside: string[] = rows
+    .filter((row) => !isUnderFolder(row.path, folder))
+    .map((row) => row.path);
+
+  const rewrites: Array<{ id: number; newPath: string }> = inside.map((row) => {
+    const newPath: string = rewriteFolderPrefix(row.path, folder, newFolder);
+    assertLegalPath(newPath);
+    assertNoFolderClash(outside, newPath);
+    return { id: row.id, newPath };
+  });
+  assertFolderBudget(outside, ...rewrites.map((row) => row.newPath));
+
+  await db.transaction(async (tx) => {
+    for (const page of rewrites) {
+      await tx
+        .update(KbPageTable)
+        .set({ path: page.newPath, updatedBy: actorId, updatedAt: new Date() })
+        .where(eq(KbPageTable.id, page.id));
+    }
+  });
+
+  return rewrites.length;
+}
+
+/**
+ * Delete a folder by deleting every page under it. Nothing survives a folder
+ * delete: a directory is a name its pages share, so removing the pages removes
+ * it — and a nested folder goes with its parent because it is only ever a longer
+ * prefix of those same pages.
+ */
+export async function deleteFolder(
+  collectionId: string,
+  folder: string,
+): Promise<number> {
+  const rows: Array<{ id: number; path: string }> = await loadPageRows(
+    collectionId,
+  );
+  const ids: number[] = rows
+    .filter((row) => isUnderFolder(row.path, folder))
+    .map((row) => row.id);
+  if (ids.length === 0) {
+    throw new ApiError("NOT_FOUND", 404, `Folder not found: ${folder}`);
+  }
+  await db.delete(KbPageTable).where(inArray(KbPageTable.id, ids));
+  return ids.length;
 }
 
 // ────────────────────────── Invariants ───────────────────────────
 
-/**
- * A move must keep the subtree inside the 2-level cap and must not create a
- * cycle. Depth and cycles are invisible to a single-row CHECK, so they live
- * here over the whole group set of the collection (capped by `kb.max_groups`,
- * so this is one small read).
- */
-async function assertMoveLegal(
+/** The collection's page rows — the address set every folder rule reads. */
+async function loadPageRows(
   collectionId: string,
-  current: KbGroupEntity,
-  nextParentId: number | null,
-): Promise<void> {
-  if (nextParentId === current.id) {
-    throw new ApiError("BAD_REQUEST", 400, "A group cannot be its own parent.");
-  }
-  if (nextParentId === null) return;
-
-  const groups: KbGroupEntity[] = await loadGroups(collectionId);
-  const byId: Map<number, KbGroupEntity> = new Map(groups.map((g) => [g.id, g]));
-  const target: KbGroupEntity | undefined = byId.get(nextParentId);
-  if (!target) {
-    throw new ApiError("NOT_FOUND", 404, "Target group is not in this collection.");
-  }
-
-  // Cycle: walking up from the target must not reach the moved node.
-  let cursor: KbGroupEntity | undefined = target;
-  while (cursor) {
-    if (cursor.id === current.id) {
-      throw new ApiError(
-        "BAD_REQUEST",
-        400,
-        "Cannot move a group inside itself.",
-        { reason: "CYCLE_REJECTED" },
-      );
-    }
-    cursor = cursor.parentId === null ? undefined : byId.get(cursor.parentId);
-  }
-
-  // Depth: the level the moved node lands on, plus the height of its own
-  // subtree, must stay within 2.
-  const newLevel: number = target.parentId === null ? 2 : 3;
-  const subtreeHeight: number = measureSubtreeHeight(groups, current.id);
-  if (newLevel + subtreeHeight > MAX_GROUP_DEPTH) {
-    throw new ApiError(
-      "BAD_REQUEST",
-      400,
-      "Groups are capped at two levels. Move the nested groups out first.",
-      { reason: "DEPTH_EXCEEDED", maxDepth: MAX_GROUP_DEPTH },
-    );
-  }
+): Promise<Array<{ id: number; path: string }>> {
+  const rows: Array<{ id: number; path: string }> = await db
+    .select({ id: KbPageTable.id, path: KbPageTable.path })
+    .from(KbPageTable)
+    .where(eq(KbPageTable.collectionId, collectionId));
+  return rows;
 }
 
-/** 0 for a leaf group, 1 if it has children. */
-function measureSubtreeHeight(
-  groups: KbGroupEntity[],
-  rootId: number,
-): number {
-  const childrenOf: Map<number, number[]> = new Map();
-  for (const group of groups) {
-    if (group.parentId === null) continue;
-    const list: number[] | undefined = childrenOf.get(group.parentId);
-    if (list) list.push(group.id);
-    else childrenOf.set(group.parentId, [group.id]);
-  }
-
-  let height: number = 0;
-  const stack: Array<{ id: number; depth: number }> = [{ id: rootId, depth: 0 }];
-  while (stack.length > 0) {
-    const node = stack.pop()!;
-    height = Math.max(height, node.depth);
-    for (const child of childrenOf.get(node.id) ?? []) {
-      stack.push({ id: child, depth: node.depth + 1 });
-    }
-  }
-  return height;
-}
-
-/** New groups attach under a level-1 group only. */
-async function requireLevelOneParent(
-  collectionId: string,
-  parentId: number,
-): Promise<KbGroupEntity> {
-  const parent: KbGroupEntity = await loadGroup(collectionId, parentId);
-  if (parent.parentId !== null) {
-    throw new ApiError(
-      "BAD_REQUEST",
-      400,
-      "Groups are capped at two levels; nest no further.",
-      { reason: "DEPTH_EXCEEDED", maxDepth: MAX_GROUP_DEPTH },
-    );
-  }
-  return parent;
+async function loadPagePaths(collectionId: string): Promise<string[]> {
+  return (await loadPageRows(collectionId)).map((row) => row.path);
 }
 
 /**
- * A `group_id` supplied in a request body that points at another collection is
- * a malformed payload → 400. The same id in a URL path segment is a wrong
- * address → 404 via {@link loadGroup}.
+ * Paths of many collections at once, for the panel's list.
+ *
+ * The tallies are derived in JS from these strings — the same helpers the
+ * editor header uses — because a folder only exists as a prefix, and one
+ * `count(DISTINCT split_part(...))` would be a second implementation of that
+ * rule the two surfaces could disagree with.
  */
-async function requirePayloadGroup(
-  collectionId: string,
-  groupId: number,
-): Promise<KbGroupEntity> {
-  const group: KbGroupEntity | undefined = await db
-    .select()
-    .from(KbGroupTable)
-    .where(eq(KbGroupTable.id, groupId))
-    .limit(1)
-    .then((rows) => rows[0]);
-  if (!group || group.collectionId !== collectionId) {
+async function loadPagePathsByCollection(
+  ids: string[],
+): Promise<Map<string, string[]>> {
+  const rows: Array<{ collectionId: string; path: string }> = await db
+    .select({ collectionId: KbPageTable.collectionId, path: KbPageTable.path })
+    .from(KbPageTable)
+    .where(inArray(KbPageTable.collectionId, ids));
+  const out = new Map<string, string[]>();
+  for (const row of rows) {
+    const bucket = out.get(row.collectionId);
+    if (bucket) bucket.push(row.path);
+    else out.set(row.collectionId, [row.path]);
+  }
+  return out;
+}
+
+function assertLegalPath(path: string): void {
+  const problem: string | null = pathProblem(path);
+  if (problem) {
+    throw new ApiError("BAD_REQUEST", 400, `Page path ${problem}.`, {
+      reason: "INVALID_PATH",
+      maxDepth: MAX_FOLDER_DEPTH,
+    });
+  }
+}
+
+function assertLegalFolder(folder: string): void {
+  const problem: string | null = folderProblem(folder);
+  if (problem) {
+    throw new ApiError("BAD_REQUEST", 400, `Folder path ${problem}.`, {
+      reason: "INVALID_PATH",
+      maxDepth: MAX_FOLDER_DEPTH,
+    });
+  }
+}
+
+/**
+ * A folder and a page cannot share one name: the tree, the index and the URL all
+ * read `a` as either a directory or a document, so a collection holding both is
+ * ambiguous rather than merely untidy.
+ */
+function assertNoFolderClash(existing: readonly string[], path: string): void {
+  for (const other of existing) {
+    if (other === path) throw folderClash(path);
+    if (isUnderFolder(other, path) || isUnderFolder(path, other)) {
+      throw folderClash(path);
+    }
+  }
+}
+
+function folderClash(path: string): ApiError {
+  return new ApiError(
+    "CONFLICT",
+    409,
+    `A page or folder already exists at "${path}".`,
+    { reason: "PATH_TAKEN", path },
+  );
+}
+
+/**
+ * A write may only imply a folder the collection does not already have while it
+ * is under the budget. Checked against the post-write path set, so a rename that
+ * frees one prefix and spends another never trips the limit.
+ */
+function assertFolderBudget(
+  existing: readonly string[],
+  ...added: string[]
+): void {
+  const before: Set<string> = new Set(distinctFolders(existing));
+  const after: Set<string> = new Set([
+    ...before,
+    ...added.flatMap((path) => ancestorFolders(path)),
+  ]);
+  const grown: number = after.size - before.size;
+  if (grown === 0) return;
+  const max: number = MAX_FOLDERS_PER_COLLECTION();
+  if (after.size > max) {
     throw new ApiError(
       "BAD_REQUEST",
       400,
-      "groupId does not belong to this collection.",
-      { reason: "GROUP_NOT_IN_COLLECTION" },
+      `This write would leave ${after.size} folders in the collection, over the limit of ${max}. Raise kb.max_folders, or put the page in a folder that already exists.`,
+      { reason: "LIMIT_REACHED", kind: "folder", count: after.size, max },
     );
   }
-  return group;
-}
-
-async function loadGroup(
-  collectionId: string,
-  groupId: number,
-): Promise<KbGroupEntity> {
-  const rows: KbGroupEntity[] = await loadGroups(collectionId, [groupId]);
-  const group: KbGroupEntity | undefined = rows[0];
-  if (!group) throw new ApiError("NOT_FOUND", 404, "Group not found.");
-  return group;
-}
-
-async function loadGroups(
-  collectionId: string,
-  ids?: number[],
-): Promise<KbGroupEntity[]> {
-  if (ids && ids.length === 0) return [];
-  return db
-    .select()
-    .from(KbGroupTable)
-    .where(
-      ids
-        ? and(
-            eq(KbGroupTable.collectionId, collectionId),
-            inArray(KbGroupTable.id, ids),
-          )
-        : eq(KbGroupTable.collectionId, collectionId),
-    );
 }
 
 /** Page `content` is UTF-8 text; the stored-byte ceiling is the config budget. */
@@ -683,21 +551,11 @@ function assertValidText(field: string, value: string): void {
   }
 }
 
-async function assertGroupLimit(collectionId: string): Promise<void> {
-  const count: number = await countGroups(collectionId);
-  const max: number = MAX_GROUPS_PER_COLLECTION();
-  if (count >= max) {
-    throw new ApiError(
-      "BAD_REQUEST",
-      400,
-      `This collection already holds ${max} groups (the configured limit). Raise kb.max_groups or remove some.`,
-      { reason: "LIMIT_REACHED", kind: "group", count, max },
-    );
-  }
-}
-
-async function assertPageLimit(collectionId: string): Promise<void> {
-  const count: number = await countPages(collectionId);
+/**
+ * The page ceiling, measured on the address set the caller already loaded — a
+ * create is the only write that can add a row.
+ */
+function assertPageRoom(count: number): void {
   const max: number = MAX_PAGES_PER_COLLECTION();
   if (count >= max) {
     throw new ApiError(
@@ -709,28 +567,10 @@ async function assertPageLimit(collectionId: string): Promise<void> {
   }
 }
 
-async function countGroups(collectionId: string): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(KbGroupTable)
-    .where(eq(KbGroupTable.collectionId, collectionId));
-  return row?.count ?? 0;
-}
-
-async function countPages(collectionId: string): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(KbPageTable)
-    .where(eq(KbPageTable.collectionId, collectionId));
-  return row?.count ?? 0;
-}
-
-async function countGroupsByParent(parentId: number): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(KbGroupTable)
-    .where(eq(KbGroupTable.parentId, parentId));
-  return row?.count ?? 0;
+function throwIfPathTaken(err: unknown, path: string): void {
+  if (isUniqueViolation(err)) {
+    throw folderClash(path);
+  }
 }
 
 function throwIfNameTaken(err: unknown, name: string): void {

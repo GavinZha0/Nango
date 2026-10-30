@@ -229,8 +229,9 @@ For the complete, authoritative list of keys, their default values, and descript
 
 ### kb (4)
 
-Knowledge-base storage and read budgets. Description caps are code constants in
-`src/lib/kb/limits.ts`, not keys here. `kb.max_groups` is also the only bound on
+Knowledge-base storage and read budgets. Description caps, the page-path length
+and the folder-depth cap are code constants in `src/lib/kb/limits.ts`, not keys
+here. `kb.max_folders` is also the only bound on
 how many index lines a mounted collection injects into every bound agent's
 prompt — there is no mount byte budget (see `docs/kb.md`).
 
@@ -239,7 +240,7 @@ prompt — there is no mount byte budget (see `docs/kb.md`).
 | `kb.page_max_bytes` | 262144 | number | Max stored bytes for one knowledge page's content (256 KB) |
 | `kb.read_max_bytes` | 65536 | number | Max bytes one `read_kb_page` call returns (64 KB) |
 | `kb.max_pages` | 50 | number | Max pages per knowledge collection |
-| `kb.max_groups` | 20 | number | Max groups per knowledge collection |
+| `kb.max_folders` | 20 | number | Max folders per knowledge collection. A folder is a path prefix its pages share, and each one costs an injected index line in every agent that binds the collection |
 
 ### host (3)
 

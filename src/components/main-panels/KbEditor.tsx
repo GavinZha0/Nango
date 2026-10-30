@@ -4,12 +4,11 @@
  * KbEditor — center workspace pane for one knowledge collection.
  *
  * Two columns: the structure tree on the left, the selected page's description
- * and body on the right. Nothing else is authored here. A group is pure
- * metadata and a page's name, group and source are metadata too, so both node
- * kinds are created and changed from the dialogs on their rows; a group row only
- * folds its subtree and never moves the detail pane. Pages are plain text:
- * the body is a plain textarea whatever `content_type` says, there is no
- * rendered view, and there is no file import — an author opens the source
+ * and body on the right. Nothing else is authored here. A page's path and source
+ * are metadata, so they are created and changed from the dialogs on their rows;
+ * a folder row only folds its subtree and never moves the detail pane. Pages are
+ * plain text: the body is a plain textarea whatever `content_type` says, there
+ * is no rendered view, and there is no file import — an author opens the source
  * themselves and pastes what an agent will read.
  *
  * No `useCopilotDraft` here: that mechanism lets an agent rewrite a resource,
@@ -36,64 +35,55 @@ import {
   selectionKey,
   type KbSelection,
 } from "@/components/main-panels/kb/KbTree";
-import { KbGroupDialog } from "@/components/main-panels/kb/KbGroupDialog";
+import { KbFolderDialog } from "@/components/main-panels/kb/KbFolderDialog";
 import {
   KbPageDialog,
   type KbPageIdentity,
 } from "@/components/main-panels/kb/KbPageDialog";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 import { cn, formatBytes } from "@/lib/utils";
+import { encodePathSegments, getParentPath } from "@/lib/paths";
+import { isUnderFolder, topLevelFolderCount } from "@/lib/kb/paths";
 import { MAX_DESCRIPTION_CHARS } from "@/lib/kb/limits";
 import {
   kbTopTally,
-  type KbGroupRow,
+  type KbCollectionDetail,
   type KbPageDetail,
   type KbPageSummary,
-  type KbTreeDetail,
 } from "@/lib/types/kb";
 
 /**
- * What the pane's draft holds. `name`, `groupId` and `sourceRef` are not fields
- * of this form — the identity dialog owns them — but a new page has to carry
- * them to the `POST`, and a saved page has to keep them out of its `PATCH` so a
- * dialog rename cannot be rolled back by a body save.
+ * What the pane's draft holds. `path` and `sourceRef` are not fields of this
+ * form — the identity dialog owns them — but a new page has to carry them to the
+ * `POST`, and a saved page has to keep them out of its `PATCH` so a dialog rename
+ * cannot be rolled back by a body save.
  */
 interface Draft {
-  name: string;
+  path: string;
   description: string;
-  /** The containing group; `null` = Top level. */
-  groupId: number | null;
   /** Human provenance, never shown to an agent. */
   sourceRef: string;
   content: string;
 }
 
 const BLANK_DRAFT: Draft = {
-  name: "",
+  path: "",
   description: "",
-  groupId: null,
   sourceRef: "",
   content: "",
 };
 
 function draftOfPage(page: KbPageDetail): Draft {
   return {
-    name: page.name,
+    path: page.path,
     description: page.description ?? "",
-    groupId: page.groupId,
     sourceRef: page.sourceRef ?? "",
     content: page.content,
   };
 }
 
-function identityPatch(
-  identity: KbPageIdentity,
-): Pick<Draft, "name" | "groupId" | "sourceRef"> {
-  return {
-    name: identity.name,
-    groupId: identity.groupId,
-    sourceRef: identity.sourceRef,
-  };
+function identityPatch(identity: KbPageIdentity): Pick<Draft, "path" | "sourceRef"> {
+  return { path: identity.path, sourceRef: identity.sourceRef };
 }
 
 /** A new page sends its whole row; the service defaults `content_type`. */
@@ -101,9 +91,8 @@ function createPayload(draft: Draft): Record<string, unknown> {
   const description = draft.description.trim();
   const sourceRef = draft.sourceRef.trim();
   return {
-    name: draft.name.trim(),
+    path: draft.path.trim(),
     description: description === "" ? null : description,
-    groupId: draft.groupId,
     content: draft.content,
     sourceRef: sourceRef === "" ? null : sourceRef,
   };
@@ -141,21 +130,25 @@ async function request<T = unknown>(
   return (await res.json()) as T;
 }
 
-async function fetchTree(collectionId: string): Promise<KbTreeDetail | null> {
+async function fetchCollection(id: string): Promise<KbCollectionDetail | null> {
   try {
-    const res = await fetch(`/api/kb/${collectionId}`);
+    const res = await fetch(`/api/kb/${id}`);
     if (!res.ok) return null;
-    return (await res.json()) as KbTreeDetail;
+    return (await res.json()) as KbCollectionDetail;
   } catch {
     return null;
   }
 }
 
 /** Which node a row's trash button is asking to remove. */
-type DeleteTarget = { kind: "group" | "page"; id: number } | "collection" | null;
+type DeleteTarget =
+  | { kind: "folder"; folder: string }
+  | { kind: "page"; id: number }
+  | "collection"
+  | null;
 
 export interface KbEditorProps {
-  initialDetail: KbTreeDetail;
+  initialDetail: KbCollectionDetail;
   onBack: () => void;
   /** Invalidate the left panel's list cache — counts move with every write. */
   onChanged: () => void;
@@ -168,12 +161,12 @@ export function KbEditor({
   onChanged,
   onDeleted,
 }: KbEditorProps): ReactNode {
-  const [detail, setDetail] = useState<KbTreeDetail>(initialDetail);
+  const [detail, setDetail] = useState<KbCollectionDetail>(initialDetail);
   const [selection, setSelection] = useState<KbSelection>({ kind: "none" });
   const [draft, setDraft] = useState<Draft>(BLANK_DRAFT);
   const [saved, setSaved] = useState<Draft>(BLANK_DRAFT);
 
-  /** Page bodies are not in the tree response, so they are fetched per node. */
+  /** Page bodies are not in the collection read, so they are fetched per node. */
   const [pageCache, setPageCache] = useState<Map<number, KbPageDetail>>(
     () => new Map(),
   );
@@ -182,10 +175,8 @@ export function KbEditor({
   const [deleting, setDeleting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
-  /** Which group dialog is open, and for which row. `null` = none. */
-  const [groupDialog, setGroupDialog] = useState<
-    { mode: "create" } | { mode: "edit"; group: KbGroupRow } | null
-  >(null);
+  /** Which folder row is being renamed. */
+  const [folderDialog, setFolderDialog] = useState<string | null>(null);
   const [pageDialog, setPageDialog] = useState<
     { mode: "create" } | { mode: "edit"; page: KbPageSummary } | null
   >(null);
@@ -224,41 +215,52 @@ export function KbEditor({
     [draft, saved],
   );
 
-  /**
-   * The header's number is the panel's, from the same helper: the tree endpoint
-   * ships no tallies, so both sides of the rule are counted here.
-   */
+  /** The header's number is the panel's, from the same helper: the tree is made
+   *  of these paths on both sides, so both count the same top level. */
   const headerTally: number = kbTopTally({
-    groups: detail.groups.reduce((n, g) => (g.parentId === null ? n + 1 : n), 0),
+    folders: topLevelFolderCount(detail.pages.map((page) => page.path)),
     pages: detail.pages.length,
   });
 
   const isNewNode: boolean = selection.kind === "new-page";
 
-  /** Only a page has a form here; a group row folds and its dialog edits it. */
+  /** Only a page has a form here; a folder row folds and its dialog renames it. */
   const showPageForm: boolean =
     selection.kind === "page" || selection.kind === "new-page";
 
-  /** Where the page dialog opens: the group of the page in view, else Top level. */
-  const pageGroupDefault: number | null =
-    selection.kind === "page"
-      ? (detail.pages.find((p) => p.id === selection.id)?.groupId ?? null)
-      : selection.kind === "new-page"
-        ? selection.identity.groupId
-        : null;
+  /** The row a page selection points at, so the path can outlive a rename. */
+  const pathOfSelection: string | null = useMemo(() => {
+    if (selection.kind !== "page") return null;
+    return (
+      detail.pages.find((page) => page.id === selection.id)?.path ??
+      pageCache.get(selection.id)?.path ??
+      null
+    );
+  }, [selection, detail, pageCache]);
+
+  /** Where the page dialog opens: the folder of the page in view, else root. */
+  const pageFolderDefault: string =
+    selection.kind === "new-page"
+      ? getParentPath(selection.identity.path)
+      : pathOfSelection === null
+        ? ""
+        : getParentPath(pathOfSelection);
 
   const labelOf = useCallback(
     (sel: KbSelection): string => {
       switch (sel.kind) {
         case "none":
           return "New page";
-        case "page":
-          return detail.pages.find((p) => p.id === sel.id)?.name ?? "Page";
+        case "page": {
+          const page =
+            detail.pages.find((p) => p.id === sel.id) ?? pageCache.get(sel.id);
+          return page?.path ?? "Page";
+        }
         case "new-page":
-          return sel.identity.name || "New page";
+          return sel.identity.path || "New page";
       }
     },
-    [detail],
+    [detail, pageCache],
   );
   const currentLabel: string = labelOf(selection);
 
@@ -295,6 +297,10 @@ export function KbEditor({
       adopt(sel, draftOfPage(cached));
       return;
     }
+    const path: string | undefined = detail.pages.find(
+      (page) => page.id === sel.id,
+    )?.path;
+    if (path === undefined) return;
     const previous = { selection, draft, saved };
     setSelection(sel);
     const ctrl = new AbortController();
@@ -304,7 +310,7 @@ export function KbEditor({
       try {
         const page = await request<KbPageDetail>(
           "GET",
-          `/api/kb/${detail.id}/pages/${sel.id}`,
+          `/api/kb/${detail.id}/pages/${encodePathSegments(path)}`,
           undefined,
           ctrl.signal,
         );
@@ -356,21 +362,6 @@ export function KbEditor({
 
   // ── Dialogs ──────────────────────────────────────────────────────
 
-  /** Opening a dialog leaves the pane untouched, so it needs no unsaved guard. */
-  function handleNewGroup(): void {
-    setGroupDialog({ mode: "create" });
-  }
-
-  function handleEditGroup(group: KbGroupRow): void {
-    setGroupDialog({ mode: "edit", group });
-  }
-
-  async function handleGroupSaved(): Promise<void> {
-    setGroupDialog(null);
-    onChanged();
-    await reloadTree();
-  }
-
   function handleNewPage(): void {
     setPageDialog({ mode: "create" });
   }
@@ -394,7 +385,7 @@ export function KbEditor({
     onChanged();
     setPageCache((prev) => new Map(prev).set(page.id, page));
     // Move the identity into both the draft and its baseline: the pane keeps
-    // those fields for the create path only, and leaving the old name behind
+    // those fields for the create path only, and leaving the old path behind
     // would read as a rename the author never made.
     if (selection.kind === "page" && selection.id === page.id) {
       setDraft((prev) => ({ ...prev, ...identityPatch(identity) }));
@@ -403,8 +394,14 @@ export function KbEditor({
     await reloadTree();
   }
 
+  async function handleFolderRenamed(): Promise<void> {
+    setFolderDialog(null);
+    onChanged();
+    await reloadTree();
+  }
+
   async function reloadTree(): Promise<void> {
-    const next = await fetchTree(detail.id);
+    const next = await fetchCollection(detail.id);
     if (next) setDetail(next);
   }
 
@@ -421,10 +418,10 @@ export function KbEditor({
     const base = `/api/kb/${detail.id}`;
     try {
       const row =
-        selection.kind === "page"
+        selection.kind === "page" && pathOfSelection !== null
           ? await request<KbPageDetail>(
               "PATCH",
-              `${base}/pages/${selection.id}`,
+              `${base}/pages/${encodePathSegments(pathOfSelection)}`,
               bodyPayload(draft),
             )
           : await request<KbPageDetail>("POST", `${base}/pages`, createPayload(draft));
@@ -471,18 +468,25 @@ export function KbEditor({
         onDeleted();
         return;
       }
-      const { kind, id } = deleteTarget;
-      // A deleted group takes its pages with it, so every body cached under one
-      // of them is stale — and the open form is reset when it held one of them.
-      const lostPageIds: number[] =
-        kind === "group"
-          ? detail.pages.filter((p) => p.groupId === id).map((p) => p.id)
-          : [id];
-      if (kind === "group") {
-        await request("DELETE", `${base}/groups/${id}`);
-      } else {
-        await request("DELETE", `${base}/pages/${id}`);
-      }
+      // A deleted folder takes its whole subtree with it, so every body cached
+      // under one of those paths is stale — and the open form is reset when it
+      // held one of them.
+      const lostPages: KbPageSummary[] =
+        deleteTarget.kind === "folder"
+          ? detail.pages.filter((page) =>
+              isUnderFolder(page.path, deleteTarget.folder),
+            )
+          : detail.pages.filter((page) => page.id === deleteTarget.id);
+      const targetPath: string =
+        deleteTarget.kind === "folder"
+          ? deleteTarget.folder
+          : lostPages[0]?.path ?? "";
+      const lostPageIds: number[] = lostPages.map((page) => page.id);
+      await request(
+        "DELETE",
+        `${base}/pages/${encodePathSegments(targetPath)}` +
+          (deleteTarget.kind === "folder" ? "?kind=folder" : ""),
+      );
       setDeleteTarget(null);
       onChanged();
       setPageCache((prev) => {
@@ -496,12 +500,13 @@ export function KbEditor({
         cancelPageLoad();
         adopt({ kind: "none" }, BLANK_DRAFT);
       } else if (
-        kind === "group" &&
+        deleteTarget.kind === "folder" &&
         selection.kind === "new-page" &&
-        selection.identity.groupId === id
+        isUnderFolder(selection.identity.path, deleteTarget.folder)
       ) {
-        // The draft's row would point at a group that no longer exists, so it
-        // loses its home along with the directory rather than rendering nowhere.
+        // The draft's row would be created inside a folder that no longer has
+        // any pages, so it loses its home along with the directory rather than
+        // rendering nowhere.
         adopt({ kind: "none" }, BLANK_DRAFT);
       }
       await reloadTree();
@@ -583,19 +588,16 @@ export function KbEditor({
 
       <div className="flex min-h-0 flex-1">
         <KbTree
-          pageCount={detail.pages.length}
-          groups={detail.groups}
           pages={detail.pages}
           selection={selection}
           onSelect={requestSelect}
           editable={editable}
-          onNewGroup={handleNewGroup}
-          onEditGroup={handleEditGroup}
           onNewPage={handleNewPage}
           onEditPage={handleEditPage}
-          onDeleteGroup={(group) => setDeleteTarget({ kind: "group", id: group.id })}
+          onRenameFolder={setFolderDialog}
+          onDeleteFolder={(folder) => setDeleteTarget({ kind: "folder", folder })}
           onDeletePage={(page) => setDeleteTarget({ kind: "page", id: page.id })}
-          dirtyLabel={isDirty ? currentLabel : null}
+          dirtyPath={isDirty ? draft.path : null}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -626,24 +628,25 @@ export function KbEditor({
         </div>
       </div>
 
-      {groupDialog && (
-        <KbGroupDialog
+      {folderDialog !== null && (
+        <KbFolderDialog
           collectionId={detail.id}
-          groups={detail.groups}
-          group={groupDialog.mode === "edit" ? groupDialog.group : undefined}
-          onClose={() => setGroupDialog(null)}
-          onSaved={() => void handleGroupSaved()}
+          folder={folderDialog}
+          pageCount={
+            detail.pages.filter((page) => isUnderFolder(page.path, folderDialog))
+              .length
+          }
+          onClose={() => setFolderDialog(null)}
+          onSaved={() => void handleFolderRenamed()}
         />
       )}
 
       {pageDialog && (
         <KbPageDialog
           collectionId={detail.id}
-          groups={detail.groups}
           page={pageDialog.mode === "edit" ? pageDialog.page : undefined}
-          defaultGroupId={
-            pageDialog.mode === "create" ? pageGroupDefault : null
-          }
+          defaultFolder={pageDialog.mode === "create" ? pageFolderDefault : ""}
+          existingPaths={detail.pages.map((page) => page.path)}
           onClose={() => setPageDialog(null)}
           onConfirmed={(identity, page) =>
             void handlePageConfirmed(identity, page)
@@ -655,8 +658,8 @@ export function KbEditor({
         title={
           deleteTarget === "collection"
             ? "Delete knowledge"
-            : deleteTarget?.kind === "group"
-              ? "Delete group"
+            : deleteTarget?.kind === "folder"
+              ? "Delete folder"
               : "Delete page"
         }
         description={
@@ -681,6 +684,7 @@ export function KbEditor({
       />
     </div>
   );
+
 }
 
 // ── Confirm body ───────────────────────────────────────────────────
@@ -695,40 +699,36 @@ function DeleteBody({
   detail,
 }: {
   target: DeleteTarget;
-  detail: KbTreeDetail;
+  detail: KbCollectionDetail;
 }): ReactNode {
   if (target === "collection") {
+    const folders = new Set(
+      detail.pages
+        .map((page) => getParentPath(page.path))
+        .filter((folder) => folder !== ""),
+    );
     return (
       <>
-        This permanently removes <strong>{detail.name}</strong>, its{" "}
-        {detail.groups.length} group{detail.groups.length === 1 ? "" : "s"} and{" "}
-        {detail.pages.length} page{detail.pages.length === 1 ? "" : "s"}. Agents
-        bound to it lose the mount — they cannot read it afterwards. This cannot
-        be undone.
+        This permanently removes <strong>{detail.name}</strong>, its {folders.size}{" "}
+        folder{folders.size === 1 ? "" : "s"} and {detail.pages.length} page
+        {detail.pages.length === 1 ? "" : "s"}. Agents bound to it lose the mount —
+        they cannot read it afterwards. This cannot be undone.
       </>
     );
   }
   if (target === null) return null;
-  if (target.kind === "group") {
-    const group = detail.groups.find((g) => g.id === target.id);
-    const pages = detail.pages.filter((p) => p.groupId === target.id);
-    const children = detail.groups.filter((g) => g.parentId === target.id);
+  if (target.kind === "folder") {
+    const pages = detail.pages.filter((page) =>
+      isUnderFolder(page.path, target.folder),
+    );
     return (
       <>
-        Permanently delete group <strong>{group?.name ?? "this group"}</strong>?
+        Permanently delete folder <strong>{target.folder}</strong>?
         {pages.length > 0 && (
           <>
             {" "}
-            Its {pages.length} page{pages.length === 1 ? "" : "s"} are deleted
-            with it. This cannot be undone.
-          </>
-        )}
-        {children.length > 0 && (
-          <>
-            {" "}
-            It still holds {children.length} nested group
-            {children.length === 1 ? "" : "s"}, so the delete will be refused
-            until they are moved or deleted.
+            Its {pages.length} page{pages.length === 1 ? "" : "s"}, including any
+            deeper folder, are deleted with it. This cannot be undone.
           </>
         )}
       </>
@@ -737,8 +737,8 @@ function DeleteBody({
   const page = detail.pages.find((p) => p.id === target.id);
   return (
     <>
-      Permanently delete page <strong>{page?.name ?? "this page"}</strong> and
-      its {formatBytes(page?.size ?? 0)} of content? An agent that asks for it
+      Permanently delete page <strong>{page?.path ?? "this page"}</strong> and its{" "}
+      {formatBytes(page?.size ?? 0)} of content? An agent that asks for it
       afterwards gets <code>NO_SUCH_PAGE</code>. This cannot be undone.
     </>
   );
@@ -754,8 +754,8 @@ interface PageFormProps {
 
 /**
  * The two things the pane owns: the line an agent sees in `list_kb_pages`, and
- * the body `read_kb_page` returns. Name, group and source are the identity
- * dialog's, so they are not repeated here.
+ * the body `read_kb_page` returns. Path and source are the identity dialog's, so
+ * they are not repeated here.
  */
 function PageForm({ draft, canEdit, onUpdate }: PageFormProps): ReactNode {
   return (

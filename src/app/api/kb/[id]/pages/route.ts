@@ -9,24 +9,25 @@ import { loadEditableCollection } from "@/lib/kb/access";
 import { createPage } from "@/lib/kb/service";
 import {
   contentTypeSchema,
-  labelSchema,
   optionalDescriptionSchema,
+  pagePathSchema,
   sourceRefSchema,
 } from "@/lib/kb/validation";
 
 const ROUTE = "/api/kb/[id]/pages";
 
 // POST /api/kb/[id]/pages
-// `content` is stored verbatim — deliberately not trimmed, because a CSV or
-// YAML page whose leading bytes change is a different artifact. The byte
-// ceiling (kb.page_max_bytes) is enforced by the service, not here, since the
-// message has to quote both the measured size and the configured limit.
+// `path` carries the folder prefixes with it — a page three levels deep is one
+// field, and the folders it implies exist as long as this row does. `content` is
+// stored verbatim, deliberately not trimmed, because a CSV or YAML page whose
+// leading bytes change is a different artifact. The byte ceiling
+// (kb.page_max_bytes) is enforced by the service, not here, since the message
+// has to quote both the measured size and the configured limit.
 
 const createSchema = z
   .object({
-    name: labelSchema,
+    path: pagePathSchema,
     description: optionalDescriptionSchema,
-    groupId: z.number().int().positive().nullable().optional(),
     content: z.string().min(1, "content must not be empty"),
     contentType: contentTypeSchema.optional(),
     sourceRef: sourceRefSchema,
@@ -41,9 +42,8 @@ export const POST = withEditor<{ id: string }>(
     const row = await createPage(
       collection.id,
       {
-        name: body.name,
+        path: body.path,
         description: body.description,
-        groupId: body.groupId,
         content: body.content,
         contentType: body.contentType,
         sourceRef: body.sourceRef,

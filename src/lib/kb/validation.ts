@@ -9,6 +9,7 @@
 import { z } from "zod";
 
 import type { KbContentType } from "@/lib/db/schema";
+import { folderProblem, pathProblem } from "@/lib/kb/paths";
 import {
   MAX_DESCRIPTION_CHARS,
   MAX_LABEL_CHARS,
@@ -27,9 +28,9 @@ export const collectionNameSchema = z
   );
 
 /**
- * Collection and group descriptions are injected verbatim into every bound
- * agent's prompt, so a present-but-empty one is a routing line that routes
- * nowhere: both bounds are enforced, not just the ceiling.
+ * The collection description is injected verbatim into every bound agent's
+ * prompt, so a present-but-empty one is a routing line that routes nowhere:
+ * both bounds are enforced, not just the ceiling.
  */
 export const requiredDescriptionSchema = z
   .string()
@@ -53,11 +54,37 @@ export const optionalDescriptionSchema = z
   .optional()
   .transform((s) => (s === "" ? null : s));
 
-export const labelSchema = z
+/**
+ * A page path, and so the agent's handle for the page. The rules are the
+ * service's — a folder prefix is prose, so it is validated by segment
+ * arithmetic rather than a character class (see `src/lib/kb/paths.ts`).
+ */
+export const pagePathSchema = z
   .string()
   .trim()
-  .min(1, "must not be empty")
-  .max(MAX_LABEL_CHARS, `must not exceed ${MAX_LABEL_CHARS} characters`);
+  .min(1, "path must not be empty")
+  .superRefine((path, ctx) => {
+    const problem: string | null = pathProblem(path);
+    if (problem) {
+      ctx.addIssue({ code: "custom", message: `path ${problem}` });
+    }
+  });
+
+/**
+ * A folder prefix on its own: a rename target, or the scope of a folder delete.
+ * The empty string is the collection root and is not addressable here — moving
+ * pages out to it is a per-page rename.
+ */
+export const folderPathSchema = z
+  .string()
+  .trim()
+  .min(1, "folder must not be empty")
+  .superRefine((folder, ctx) => {
+    const problem: string | null = folderProblem(folder);
+    if (problem) {
+      ctx.addIssue({ code: "custom", message: `folder ${problem}` });
+    }
+  });
 
 export const sourceRefSchema = z
   .string()
@@ -78,9 +105,3 @@ export const KB_CONTENT_TYPES = [
 ] as const satisfies readonly KbContentType[];
 
 export const contentTypeSchema = z.enum(KB_CONTENT_TYPES);
-
-/** Group and page rows use bigint identity keys; URL segments arrive as strings. */
-export function parseRowId(raw: string): number | null {
-  const id: number = Number(raw);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}

@@ -11,21 +11,30 @@ import {
   loadOwnedCollection,
   loadVisibleCollection,
 } from "@/lib/kb/access";
-import { deleteCollection, getTree, updateCollection, type UpdateCollectionInput } from "@/lib/kb/service";
-import { collectionNameSchema, requiredDescriptionSchema } from "@/lib/kb/validation";
+import {
+  deleteCollection,
+  getPages,
+  updateCollection,
+  type UpdateCollectionInput,
+} from "@/lib/kb/service";
+import {
+  collectionNameSchema,
+  requiredDescriptionSchema,
+} from "@/lib/kb/validation";
 
 const ROUTE = "/api/kb/[id]";
 
 // GET /api/kb/[id]
-// The collection row plus its whole tree (groups and page summaries, no page
-// bodies) in the order the agent-facing index uses.
+// The collection row plus every page summary (no page bodies), in the order the
+// agent-facing index uses. There is no folder payload: the editor derives its
+// tree from the page paths, so nothing in this response can disagree with them.
 
 export const GET = withSession<{ id: string }>(
   ROUTE,
   async ({ params, session }) => {
     const collection = await loadVisibleCollection(params.id, session);
-    const { groups, pages } = await getTree(collection.id);
-    return NextResponse.json({ ...collection, groups, pages });
+    const pages = await getPages(collection.id);
+    return NextResponse.json({ ...collection, pages });
   },
 );
 
@@ -83,7 +92,7 @@ export const PATCH = withEditor<{ id: string }>(
 );
 
 // DELETE /api/kb/[id]
-// Hard delete; groups and pages cascade and bound agents lose the mount block.
+// Hard delete; the pages cascade and bound agents lose the mount block.
 
 export const DELETE = withEditor<{ id: string }>(
   ROUTE,

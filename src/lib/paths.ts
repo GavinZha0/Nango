@@ -20,3 +20,14 @@ export function getExtension(name: string): string {
   const dot: number = base.lastIndexOf(".");
   return dot <= 0 || dot === base.length - 1 ? "" : base.slice(dot + 1).toLowerCase();
 }
+
+/**
+ * A stored path as a URL segment: every segment encoded, separators kept
+ * literal so the server's catch-all splits them back the same way.
+ *
+ * QUIRK: `encodeURI` is not enough — `#` and `?` are legal in a page or file
+ * name and would truncate the request at the server instead of naming it.
+ */
+export function encodePathSegments(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
