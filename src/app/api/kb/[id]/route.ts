@@ -19,7 +19,7 @@ import {
 } from "@/lib/kb/service";
 import {
   collectionNameSchema,
-  requiredDescriptionSchema,
+  optionalDescriptionSchema,
 } from "@/lib/kb/validation";
 
 const ROUTE = "/api/kb/[id]";
@@ -46,7 +46,7 @@ export const GET = withSession<{ id: string }>(
 const updateSchema = z
   .object({
     name: collectionNameSchema.optional(),
-    description: requiredDescriptionSchema.optional(),
+    description: optionalDescriptionSchema,
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
   })
@@ -70,7 +70,7 @@ export const PATCH = withEditor<{ id: string }>(
         throw new ApiError(
           "FORBIDDEN",
           403,
-          "Only the author or an admin can enable or disable this knowledge collection.",
+          "Only the author or an admin can enable or disable this KB.",
         );
       }
       patch.enabled = body.enabled;
@@ -80,7 +80,7 @@ export const PATCH = withEditor<{ id: string }>(
         throw new ApiError(
           "FORBIDDEN",
           403,
-          "Only the author or an admin can change the visibility of this knowledge collection.",
+          "Only the author or an admin can change the visibility of this KB.",
         );
       }
       patch.visibility = body.visibility;

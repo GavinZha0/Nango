@@ -31,10 +31,13 @@ import {
   deletePage,
   getPage,
   getPages,
+  importCollection,
   listCollections,
   renameFolder,
   updateCollection,
   updatePage,
+  type ImportCollectionInput,
+  type ImportPageInput,
 } from "@/lib/kb/service";
 
 const dbMock = db as unknown as MockDrizzleDb;
@@ -214,9 +217,35 @@ describe("kb/service — collection writes", () => {
     expect(dbMock._chain.values).toHaveBeenCalledWith(
       expect.objectContaining({
         visibility: "private",
+        // It has a routing line, so it may mount.
+        enabled: true,
         createdBy: ACTOR_ID,
         updatedBy: ACTOR_ID,
       }),
+    );
+  });
+
+  it("creates a description-less collection unpublished", async () => {
+    dbMock.$enqueue([{ id: COLLECTION_ID, name: "x-manual" }]);
+
+    await createCollection({ name: "x-manual", createdBy: ACTOR_ID });
+
+    expect(dbMock._chain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ description: null, enabled: false }),
+    );
+  });
+
+  it("treats whitespace as no description at all", async () => {
+    dbMock.$enqueue([{ id: COLLECTION_ID, name: "x-manual" }]);
+
+    await createCollection({
+      name: "x-manual",
+      description: "   ",
+      createdBy: ACTOR_ID,
+    });
+
+    expect(dbMock._chain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ description: null, enabled: false }),
     );
   });
 
@@ -255,6 +284,64 @@ describe("kb/service — collection writes", () => {
       { code: "BAD_REQUEST", status: 400, reason: "INVALID_TEXT" },
     );
     expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  describe("the enabled ⇒ description gate", () => {
+    it("refuses to mount a collection with no routing line", async () => {
+      dbMock.$enqueue([{ description: null, enabled: false }]);
+
+      const err = await expectApiError(
+        () => updateCollection(COLLECTION_ID, { enabled: true }, ACTOR_ID),
+        { code: "BAD_REQUEST", status: 400, reason: "DESCRIPTION_REQUIRED" },
+      );
+      expect(err.message).toContain("description");
+      expect(dbMock.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses to blank the description of a collection that is mounted", async () => {
+      dbMock.$enqueue([
+        { description: "Installation manual for product X.", enabled: true },
+      ]);
+
+      const err = await expectApiError(
+        () => updateCollection(COLLECTION_ID, { description: null }, ACTOR_ID),
+        { code: "BAD_REQUEST", status: 400, reason: "DESCRIPTION_REQUIRED" },
+      );
+      expect(err.message).toContain("Disable it first");
+      expect(dbMock.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses an all-whitespace description as no routing line", async () => {
+      dbMock.$enqueue([{ description: "   ", enabled: false }]);
+
+      await expectApiError(
+        () => updateCollection(COLLECTION_ID, { enabled: true }, ACTOR_ID),
+        { code: "BAD_REQUEST", status: 400, reason: "DESCRIPTION_REQUIRED" },
+      );
+      expect(dbMock.update).not.toHaveBeenCalled();
+    });
+
+    it("enables a collection once it has prose", async () => {
+      dbMock.$enqueue(
+        [{ description: "Installation manual for product X.", enabled: false }],
+        [{ id: COLLECTION_ID, enabled: true }],
+      );
+
+      const row = await updateCollection(
+        COLLECTION_ID,
+        { enabled: true },
+        ACTOR_ID,
+      );
+      expect(row.enabled).toBe(true);
+      expect(dbMock.update).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs no gate read for a patch that touches neither field", async () => {
+      dbMock.$enqueue([{ id: COLLECTION_ID, name: "x-handbook" }]);
+
+      await updateCollection(COLLECTION_ID, { name: "x-handbook" }, ACTOR_ID);
+      expect(dbMock.select).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses an empty patch before touching the database", async () => {
@@ -691,5 +778,155 @@ describe("kb/service — folder delete takes the subtree", () => {
       status: 404,
     });
     expect(dbMock.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("kb/service — folder import", () => {
+  const page = (
+    path: string,
+    content = "body",
+    extra: Partial<ImportPageInput> = {},
+  ): ImportPageInput => ({
+    path,
+    content,
+    contentType: "text/markdown",
+    ...extra,
+  });
+
+  function importInput(
+    pages: ImportPageInput[],
+    overrides: Partial<ImportCollectionInput> = {},
+  ): ImportCollectionInput {
+    return {
+      name: "x-manual",
+      createdBy: ACTOR_ID,
+      pages,
+      ...overrides,
+    };
+  }
+
+  /** The rows the second insert was handed — the pages, not the collection. */
+  function insertedPages(): Array<Record<string, unknown>> {
+    return dbMock._chain.values.mock.calls[1][0] as Array<Record<string, unknown>>;
+  }
+
+  /** The `kb_collection` row the import wrote. */
+  function insertedCollection(): Record<string, unknown> {
+    return dbMock._chain.values.mock.calls[0][0] as Record<string, unknown>;
+  }
+
+  it("writes one collection row and its pages inside a single transaction", async () => {
+    dbMock.$enqueue([{ id: COLLECTION_ID, name: "x-manual" }], []);
+
+    const row = await importCollection(
+      importInput([page("chapter-01/install", "# Install\n"), page("loose")]),
+    );
+
+    expect(row).toEqual({ id: COLLECTION_ID, name: "x-manual" });
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.insert).toHaveBeenCalledTimes(2);
+    // The import has no description to write and must not mount itself.
+    expect(insertedCollection()).toEqual(
+      expect.objectContaining({ name: "x-manual", description: null, enabled: false }),
+    );
+    expect(insertedPages()).toEqual([
+      expect.objectContaining({
+        collectionId: COLLECTION_ID,
+        path: "chapter-01/install",
+        description: null,
+        sourceRef: null,
+        createdBy: ACTOR_ID,
+        updatedBy: ACTOR_ID,
+      }),
+      expect.objectContaining({ collectionId: COLLECTION_ID, path: "loose" }),
+    ]);
+  });
+
+  it("measures `size` in UTF-8 bytes and keeps an author-supplied description", async () => {
+    dbMock.$enqueue([{ id: COLLECTION_ID }], []);
+
+    await importCollection(
+      importInput([
+        page("章节", "构建 说明", { description: "How to build.", contentType: "text/plain" }),
+      ]),
+    );
+
+    expect(insertedPages()[0]).toEqual(
+      expect.objectContaining({
+        content: "构建 说明",
+        size: Buffer.byteLength("构建 说明", "utf8"),
+        description: "How to build.",
+        contentType: "text/plain",
+      }),
+    );
+  });
+
+  it("refuses a page that nests inside another page's own path", async () => {
+    await expectApiError(
+      () => importCollection(importInput([page("a"), page("a/b")])),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a manifest that repeats one path", async () => {
+    await expectApiError(
+      () => importCollection(importInput([page("a/b"), page("a/b")])),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+  });
+
+  it("counts the folder budget on the whole set, not one page at a time", async () => {
+    mockConfig["kb.max_folders"] = "1";
+
+    await expectApiError(
+      () => importCollection(importInput([page("one/a"), page("two/b")])),
+      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("counts the page budget on the whole set", async () => {
+    mockConfig["kb.max_pages"] = "2";
+
+    await expectApiError(
+      () => importCollection(importInput([page("a"), page("b"), page("c")])),
+      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
+    );
+  });
+
+  it("refuses a body over the stored-byte ceiling before opening a transaction", async () => {
+    mockConfig["kb.page_max_bytes"] = "8";
+
+    await expectApiError(
+      () => importCollection(importInput([page("a", "way too long for eight bytes")])),
+      { code: "BAD_REQUEST", status: 400, reason: "PAGE_TOO_LARGE" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an illegal path from the imported tree", async () => {
+    await expectApiError(
+      () => importCollection(importInput([page("a/b/c/d")])),
+      { code: "BAD_REQUEST", status: 400, reason: "INVALID_PATH" },
+    );
+  });
+
+  it("refuses a set with no page instead of creating an empty collection", async () => {
+    await expectApiError(() => importCollection(importInput([])), {
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("turns a collection-name collision into 409 NAME_TAKEN", async () => {
+    dbMock._chain.returning.mockRejectedValueOnce(UNIQUE_VIOLATION);
+
+    await expectApiError(() => importCollection(importInput([page("a")])), {
+      code: "CONFLICT",
+      status: 409,
+      reason: "NAME_TAKEN",
+    });
   });
 });

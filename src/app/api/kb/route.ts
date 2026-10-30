@@ -6,7 +6,7 @@ import { z } from "zod";
 import { withEditor, withSession } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
 import { listCollections, createCollection } from "@/lib/kb/service";
-import { collectionNameSchema, requiredDescriptionSchema } from "@/lib/kb/validation";
+import { collectionNameSchema, optionalDescriptionSchema } from "@/lib/kb/validation";
 
 const ROUTE = "/api/kb";
 
@@ -20,14 +20,15 @@ export const GET = withSession(ROUTE, async ({ session }) => {
 });
 
 // POST /api/kb
-// A collection is an empty shell until its first page is added; `description`
-// is required because it is the routing line injected into every bound agent's
-// prompt.
+// A collection is an empty shell until its first page is added. The description
+// is optional here because it is the routing line injected into every bound
+// agent's prompt, and a brand-new shell has nothing to route to yet — the
+// service refuses to *enable* a collection that has no prose.
 
 const createSchema = z
   .object({
     name: collectionNameSchema,
-    description: requiredDescriptionSchema,
+    description: optionalDescriptionSchema,
     visibility: z.enum(["private", "public"]).optional(),
   })
   .strict();

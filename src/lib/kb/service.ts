@@ -51,16 +51,43 @@ export interface CollectionListItem extends KbCollectionEntity {
 
 export interface CreateCollectionInput {
   name: string;
-  description: string;
+  /**
+   * Optional, and a collection created without one is inserted disabled: see
+   * the `enabled ⇒ description` CONTRACT on {@link updateCollection}.
+   */
+  description?: string | null;
   visibility?: "private" | "public";
   createdBy: string;
 }
 
 export interface UpdateCollectionInput {
   name?: string;
-  description?: string;
+  description?: string | null;
   enabled?: boolean;
   visibility?: "private" | "public";
+}
+
+/** One page as a folder import hands it over — the body is already decoded text. */
+export interface ImportPageInput {
+  path: string;
+  content: string;
+  contentType?: KbContentType;
+  description?: string | null;
+  sourceRef?: string | null;
+}
+
+/**
+ * A folder of text files, already collected client-side.
+ *
+ * There is no `description`: the importer has not read the corpus yet, which is
+ * the whole reason it is importing it. The collection lands disabled with a NULL
+ * description and is published once the author has written its routing line.
+ */
+export interface ImportCollectionInput {
+  name: string;
+  visibility?: "private" | "public";
+  createdBy: string;
+  pages: ImportPageInput[];
 }
 
 export interface CreatePageInput {
@@ -166,14 +193,20 @@ export async function getPage(
 export async function createCollection(
   input: CreateCollectionInput,
 ): Promise<KbCollectionEntity> {
-  assertValidText("Collection name", input.name);
-  assertValidText("Collection description", input.description);
+  assertValidText("KB name", input.name);
+  // Whitespace is not prose: the edge trims, and this keeps a hand-run script
+  // from minting an invisible routing line.
+  const description = input.description?.trim() || null;
+  if (description !== null) assertValidText("KB description", description);
   try {
     const [row] = await db
       .insert(KbCollectionTable)
       .values({
         name: input.name,
-        description: input.description,
+        description,
+        // A collection with no routing line has nothing to route to, so it is
+        // not mounted. The author fills the description and flips `enabled`.
+        enabled: description !== null,
         visibility: input.visibility ?? "private",
         createdBy: input.createdBy,
         updatedBy: input.createdBy,
@@ -186,6 +219,89 @@ export async function createCollection(
   }
 }
 
+/**
+ * Create a collection and every page it imports in one transaction.
+ *
+ * CONTRACT: there is no half-imported collection. A page that trips an invariant
+ * rolls the `kb_collection` insert back with it, so this path needs no
+ * compensating delete and a retry starts from nothing — which is what makes a
+ * rejected import safe to fix and re-run.
+ *
+ * CONTRACT: the result is unpublished — `description` NULL, `enabled` false. A
+ * folder nobody has read yet has no routing line, and an import that silently
+ * mounted itself in every bound agent would be the one write path that could.
+ *
+ * The per-page rules are the same ones {@link createPage} enforces; only the
+ * budgets are measured differently, because an import adds a whole set at once
+ * (see {@link assertImportRoom}).
+ */
+export async function importCollection(
+  input: ImportCollectionInput,
+): Promise<KbCollectionEntity> {
+  assertValidText("KB name", input.name);
+  if (input.pages.length === 0) {
+    throw new ApiError("BAD_REQUEST", 400, "The folder held no importable page.");
+  }
+
+  const paths: string[] = [];
+  for (const page of input.pages) {
+    assertLegalPath(page.path);
+    if (page.description != null) {
+      assertValidText("Page description", page.description);
+    }
+    assertValidText("Page content", page.content);
+    assertContentFits(page.content);
+    // Every earlier path is the baseline: this catches a subtree that nests
+    // inside one of its own page names, and a manifest that repeats a path.
+    assertNoFolderClash(paths, page.path);
+    paths.push(page.path);
+  }
+  assertImportRoom(paths);
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [collection] = await tx
+        .insert(KbCollectionTable)
+        .values({
+          name: input.name,
+          description: null,
+          enabled: false,
+          visibility: input.visibility ?? "private",
+          createdBy: input.createdBy,
+          updatedBy: input.createdBy,
+        })
+        .returning();
+      await tx.insert(KbPageTable).values(
+        input.pages.map((page) => ({
+          collectionId: collection.id,
+          path: page.path,
+          description: page.description ?? null,
+          content: page.content,
+          contentType: page.contentType ?? "text/markdown",
+          size: Buffer.byteLength(page.content, "utf8"),
+          sourceRef: page.sourceRef ?? null,
+          createdBy: input.createdBy,
+          updatedBy: input.createdBy,
+        })),
+      );
+      return collection;
+    });
+  } catch (err) {
+    throwIfNameTaken(err, input.name);
+    throw err;
+  }
+}
+
+/**
+ * CONTRACT: `enabled ⇒ description` is enforced here, not at the API edge, so
+ * no caller can mount a collection whose routing line is empty. A prompt block
+ * naming a collection it cannot describe is worse than an unmounted one: the
+ * agent trusts the bullet and the author believes the corpus is live.
+ *
+ * Both directions are refused — enabling a collection with no prose, and
+ * blanking the prose of one that is mounted. Disabling first is the answer to
+ * the second, and it is a one-click change rather than a silent unmount.
+ */
 export async function updateCollection(
   collectionId: string,
   patch: UpdateCollectionInput,
@@ -194,9 +310,10 @@ export async function updateCollection(
   if (Object.keys(patch).length === 0) {
     throw new ApiError("BAD_REQUEST", 400, "No fields to update.");
   }
-  if (patch.name !== undefined) assertValidText("Collection name", patch.name);
-  if (patch.description !== undefined) {
-    assertValidText("Collection description", patch.description);
+  if (patch.name !== undefined) assertValidText("KB name", patch.name);
+  if (patch.description) assertValidText("KB description", patch.description);
+  if (patch.enabled !== undefined || patch.description !== undefined) {
+    await assertPublishable(collectionId, patch);
   }
   try {
     const [row] = await db
@@ -205,13 +322,42 @@ export async function updateCollection(
       .where(eq(KbCollectionTable.id, collectionId))
       .returning();
     if (!row) {
-      throw new ApiError("NOT_FOUND", 404, "Knowledge collection not found.");
+      throw new ApiError("NOT_FOUND", 404, "Knowledge base not found.");
     }
     return row;
   } catch (err) {
     if (patch.name !== undefined) throwIfNameTaken(err, patch.name);
     throw err;
   }
+}
+
+/** The merged post-patch state must satisfy `enabled ⇒ description`. */
+async function assertPublishable(
+  collectionId: string,
+  patch: UpdateCollectionInput,
+): Promise<void> {
+  const [current] = await db
+    .select({ description: KbCollectionTable.description, enabled: KbCollectionTable.enabled })
+    .from(KbCollectionTable)
+    .where(eq(KbCollectionTable.id, collectionId))
+    .limit(1);
+  if (!current) return; // the update below reports NOT_FOUND
+
+  const description =
+    patch.description !== undefined ? patch.description : current.description;
+  const enabled = patch.enabled !== undefined ? patch.enabled : current.enabled;
+  // Whitespace is not prose, and an invisible routing line is the failure this
+  // gate exists to prevent.
+  if (!enabled || (description ?? "").trim() !== "") return;
+
+  throw new ApiError(
+    "BAD_REQUEST",
+    400,
+    current.enabled
+      ? "This KB is enabled, so its description cannot be empty. Disable it first."
+      : "Set a description before enabling this KB.",
+    { reason: "DESCRIPTION_REQUIRED" },
+  );
 }
 
 /**
@@ -506,8 +652,38 @@ function assertFolderBudget(
     throw new ApiError(
       "BAD_REQUEST",
       400,
-      `This write would leave ${after.size} folders in the collection, over the limit of ${max}. Raise kb.max_folders, or put the page in a folder that already exists.`,
+      `This write would leave ${after.size} folders in this KB, over the limit of ${max}. Raise kb.max_folders, or put the page in a folder that already exists.`,
       { reason: "LIMIT_REACHED", kind: "folder", count: after.size, max },
+    );
+  }
+}
+
+/**
+ * The two budgets an import can blow on its own, measured on the set it brings.
+ *
+ * A fresh collection has no baseline to grow from, so — unlike a single write —
+ * the whole folder set and the whole page count are checked at once. `MAX_PAGES`
+ * also caps the upload at the transport edge, but the domain rule stays here so
+ * no caller can reach the insert without it.
+ */
+function assertImportRoom(paths: readonly string[]): void {
+  const maxPages: number = MAX_PAGES_PER_COLLECTION();
+  if (paths.length > maxPages) {
+    throw new ApiError(
+      "BAD_REQUEST",
+      400,
+      `This import brings ${paths.length} pages, over the limit of ${maxPages}. Raise kb.max_pages, or split the folder across more knowledge bases.`,
+      { reason: "LIMIT_REACHED", kind: "page", count: paths.length, max: maxPages },
+    );
+  }
+  const folders: string[] = distinctFolders(paths);
+  const maxFolders: number = MAX_FOLDERS_PER_COLLECTION();
+  if (folders.length > maxFolders) {
+    throw new ApiError(
+      "BAD_REQUEST",
+      400,
+      `This import would leave ${folders.length} folders in this KB, over the limit of ${maxFolders}. Raise kb.max_folders, or flatten the folder tree.`,
+      { reason: "LIMIT_REACHED", kind: "folder", count: folders.length, max: maxFolders },
     );
   }
 }
@@ -561,7 +737,7 @@ function assertPageRoom(count: number): void {
     throw new ApiError(
       "BAD_REQUEST",
       400,
-      `This collection already holds ${max} pages (the configured limit). Raise kb.max_pages or remove some.`,
+      `This KB already holds ${max} pages (the configured limit). Raise kb.max_pages or remove some.`,
       { reason: "LIMIT_REACHED", kind: "page", count, max },
     );
   }

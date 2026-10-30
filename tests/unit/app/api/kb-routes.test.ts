@@ -150,7 +150,7 @@ describe("POST /api/kb", () => {
   });
 
   it("refuses a slug an agent could not pass back as `kb_name`", async () => {
-    for (const name of ["X-Manual", "1-manual", "manual with space", "a".repeat(64)]) {
+    for (const name of ["X-Manual", "manual with space", "-manual", "a".repeat(64)]) {
       const res = await createKb(
         createMockRequest("/api/kb", {
           method: "POST",
@@ -164,16 +164,31 @@ describe("POST /api/kb", () => {
     expect(dbMock.insert).not.toHaveBeenCalled();
   });
 
-  it("refuses the routing description below its floor", async () => {
+  it("takes a folder-shaped slug that starts with a digit, as skill does", async () => {
+    dbMock.$enqueue([row({ name: "2024-notes", createdBy: OWNER_ID })]);
+
     const res = await createKb(
       createMockRequest("/api/kb", {
         method: "POST",
-        body: { name: "x-manual", description: "too short" },
+        body: { name: "2024-notes", description: "Meeting notes for 2024." },
       }),
       noParams,
     );
-    expect(res.status).toBe(400);
-    expect(dbMock.insert).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+  });
+
+  it("accepts an empty description, which the service stores as unpublished", async () => {
+    dbMock.$enqueue([row({ description: null, enabled: false })]);
+
+    const res = await createKb(
+      createMockRequest("/api/kb", { method: "POST", body: { name: "x-manual" } }),
+      noParams,
+    );
+
+    expect(res.status).toBe(201);
+    expect(dbMock._chain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ description: null, enabled: false }),
+    );
   });
 
   it("refuses a body field the schema does not declare", async () => {
@@ -260,6 +275,7 @@ describe("PATCH /api/kb/[id]", () => {
     dbMock.$enqueue(
       [row({ visibility: "public", createdBy: OWNER_ID })],
       [row({ visibility: "public", description: "Better routing prose." })],
+      [row({ visibility: "public", description: "Better routing prose." })],
     );
 
     const res = await patchKb(
@@ -288,7 +304,11 @@ describe("PATCH /api/kb/[id]", () => {
 
   it("lets an admin disable a collection", async () => {
     getSessionMock.mockResolvedValue(createMockSession(ADMIN_USER));
-    dbMock.$enqueue([row({ createdBy: OWNER_ID })], [row({ enabled: false })]);
+    dbMock.$enqueue(
+      [row({ createdBy: OWNER_ID })],
+      [row()],
+      [row({ enabled: false })],
+    );
 
     const res = await patchKb(
       createMockRequest(`/api/kb/${COLLECTION_ID}`, {
@@ -298,6 +318,48 @@ describe("PATCH /api/kb/[id]", () => {
       params(),
     );
     expect(res.status).toBe(200);
+  });
+
+  it("refuses to mount a collection that has no description", async () => {
+    dbMock.$enqueue(
+      [row({ description: null, enabled: false })],
+      [row({ description: null, enabled: false })],
+    );
+
+    const res = await patchKb(
+      createMockRequest(`/api/kb/${COLLECTION_ID}`, {
+        method: "PATCH",
+        body: { enabled: true },
+      }),
+      params(),
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await json(res)).details as Record<string, unknown>).reason).toBe(
+      "DESCRIPTION_REQUIRED",
+    );
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it("takes an empty description as a clear, not as a missing field", async () => {
+    dbMock.$enqueue(
+      [row({ enabled: false })],
+      [row({ enabled: false })],
+      [row({ enabled: false, description: null })],
+    );
+
+    const res = await patchKb(
+      createMockRequest(`/api/kb/${COLLECTION_ID}`, {
+        method: "PATCH",
+        body: { description: "" },
+      }),
+      params(),
+    );
+
+    expect(res.status).toBe(200);
+    expect(dbMock._chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ description: null }),
+    );
   });
 
   it("400s an empty patch without touching the database", async () => {

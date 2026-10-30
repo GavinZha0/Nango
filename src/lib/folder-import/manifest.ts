@@ -8,8 +8,10 @@
  * fixed 4/3 factor, bounded by the decoded-size caps the caller enforces.
  *
  * This module holds the rules every folder import shares (path legality, OS and
- * tool noise, text admission). The per-subsystem content allowlist lives with
- * the subsystem.
+ * tool noise, the text/image/blocked classification behind
+ * {@link classifyFolderPath}). A subsystem overrides only the difference it
+ * genuinely has: a knowledge base has no consumer for image bytes and drops them
+ * with the noise, a skill keeps them as reference assets.
  *
  * No server-only imports: both the API edge and the browser panel use these rules.
  */
@@ -130,4 +132,152 @@ export function noiseReason(path: string): string | null {
     return "generated build or tool artifact";
   }
   return null;
+}
+
+/**
+ * Text and code a folder import can carry, whatever lands on the other side of
+ * the `/`. Two subsystems read the same bytes as text, so the list is shared.
+ */
+const TEXT_EXTENSIONS = new Set([
+  "md",
+  "markdown",
+  "txt",
+  "json",
+  "jsonl",
+  "ipynb",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "csv",
+  "tsv",
+  "xml",
+  "sql",
+  "py",
+  "pyi",
+  "sh",
+  "bash",
+  "zsh",
+  "js",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "jsx",
+  "css",
+  "html",
+  "svg",
+  "rst",
+  "tex",
+]);
+
+/** Images — a reference asset where images are usable, noise where they are not. */
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico"]);
+
+/** Extension → rejection reason, for the formats no folder import admits. */
+const BLOCKED_REASONS: Record<string, string> = {
+  // Executables / native binaries
+  exe: "executable file",
+  dll: "native library",
+  so: "native library",
+  dylib: "native library",
+  bin: "binary file",
+  msi: "installer",
+  com: "executable file",
+  scr: "executable file",
+  bat: "Windows batch script",
+  cmd: "Windows command script",
+  ps1: "PowerShell script",
+  jar: "Java archive",
+  class: "Java bytecode",
+  apk: "Android package",
+  app: "application bundle",
+  dmg: "macOS disk image",
+  pkg: "installer package",
+  deb: "Debian package",
+  rpm: "RPM package",
+  iso: "disk image",
+  img: "disk image",
+  wasm: "WebAssembly binary",
+  // Audio / video
+  mp3: "audio file",
+  wav: "audio file",
+  ogg: "audio file",
+  opus: "audio file",
+  flac: "audio file",
+  aac: "audio file",
+  m4a: "audio file",
+  wma: "audio file",
+  mp4: "video file",
+  m4v: "video file",
+  mov: "video file",
+  avi: "video file",
+  mkv: "video file",
+  webm: "video file",
+  flv: "video file",
+  wmv: "video file",
+  // Archives
+  zip: "archive file",
+  tar: "archive file",
+  gz: "archive file",
+  tgz: "archive file",
+  bz2: "archive file",
+  xz: "archive file",
+  "7z": "archive file",
+  rar: "archive file",
+  // Fonts
+  woff: "font file",
+  woff2: "font file",
+  ttf: "font file",
+  otf: "font file",
+  eot: "font file",
+  // Binary documents
+  pdf: "PDF document",
+  doc: "Word document",
+  docx: "Word document",
+  xls: "Excel workbook",
+  xlsx: "Excel workbook",
+  ppt: "PowerPoint presentation",
+  pptx: "PowerPoint presentation",
+  // Binary design/data formats
+  psd: "design file",
+  ai: "design file",
+  sketch: "design file",
+  fig: "design file",
+  sqlite: "binary database",
+  sqlite3: "binary database",
+  parquet: "binary data",
+  feather: "binary data",
+  pkl: "binary data",
+  pickle: "binary data",
+  npy: "binary data",
+  npz: "binary data",
+  h5: "binary data",
+  onnx: "binary model",
+  pt: "binary model",
+  pth: "binary model",
+};
+
+/**
+ * The classification every folder import starts from: noise, then text, then
+ * image, then a named rejection, then an unnamed one.
+ *
+ * A path with no extension is treated as text (`LICENSE`, `Dockerfile`,
+ * `README`), because that is what extension-less files in a source tree are;
+ * the walker's NUL scan is what actually proves it.
+ */
+export function classifyFolderPath(path: string): FilePolicyResult {
+  const noise: string | null = noiseReason(path);
+  if (noise) return { action: "ignore", reason: noise };
+
+  const ext: string = getExtension(path);
+  if (ext.length === 0) return { action: "allow-text" };
+  if (TEXT_EXTENSIONS.has(ext)) return { action: "allow-text" };
+  if (IMAGE_EXTENSIONS.has(ext)) return { action: "allow-image" };
+  if (ext in BLOCKED_REASONS) {
+    return { action: "block", reason: BLOCKED_REASONS[ext] };
+  }
+  return { action: "block", reason: "unsupported file type" };
 }

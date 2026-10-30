@@ -1215,7 +1215,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                         }))}
                         selected={tools.knowledge}
                         onToggle={(id) => toggleTool("knowledge", id)}
-                        emptyText="No knowledge collections visible. Create one from the Knowledge panel."
+                        emptyText="No knowledge bases visible. Create one from the Knowledge panel."
                       />
                     )}
                   </div>

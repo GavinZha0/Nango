@@ -10,14 +10,6 @@
 /** Upper bound on one `description` (collection or page). */
 export const MAX_DESCRIPTION_CHARS = 512;
 
-/**
- * Lower bound for the collection description, which is injected verbatim into
- * every bound agent's prompt. A short-but-present one renders as a confident
- * routing line that routes nowhere, so it is refused at the write edge. Page
- * descriptions are optional and exempt.
- */
-export const MIN_DESCRIPTION_CHARS = 10;
-
 /** Upper bound on a page's free-form `source_ref` maintenance note. */
 export const MAX_LABEL_CHARS = 200;
 

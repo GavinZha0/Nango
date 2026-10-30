@@ -5,140 +5,20 @@
  * `.py` / `.sh` scripts and preview images. Everything else is either inert or
  * a storage/security liability, so the import pipeline uses an allowlist.
  *
- * OS/tool noise and the shared path rules live in `@/lib/folder-import/manifest`;
- * this module is the skills-specific content decision.
+ * The lists themselves — noise, text, image, blocked — are the shared
+ * {@link classifyFolderPath}, because a knowledge import reads exactly the same
+ * bytes as text and two copies of a rejection table only get to disagree. What
+ * is skills-specific is the consequence: an image is a real asset here (a
+ * preview, a script's fixture), and the editor's create/rename rules.
  *
  * Client-safe: the editor's Add/Rename dialogs use the same rules.
  */
 
 import { getExtension } from "@/lib/paths";
 import {
-  noiseReason,
+  classifyFolderPath,
   type FilePolicyResult,
 } from "@/lib/folder-import/manifest";
-
-/** Text/code/document extensions the agent or editor can actually use. */
-const TEXT_EXTENSIONS = new Set([
-  "md",
-  "markdown",
-  "txt",
-  "json",
-  "jsonl",
-  "ipynb",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  "cfg",
-  "conf",
-  "csv",
-  "tsv",
-  "xml",
-  "sql",
-  "py",
-  "pyi",
-  "sh",
-  "bash",
-  "zsh",
-  "js",
-  "mjs",
-  "cjs",
-  "ts",
-  "tsx",
-  "jsx",
-  "css",
-  "html",
-  "svg",
-  "rst",
-  "tex",
-]);
-
-/** Images are allowed as reference assets; the editor can preview them. */
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico"]);
-
-/** Extension → rejection reason. */
-const BLOCKED_REASONS: Record<string, string> = {
-  // Executables / native binaries
-  exe: "executable file",
-  dll: "native library",
-  so: "native library",
-  dylib: "native library",
-  bin: "binary file",
-  msi: "installer",
-  com: "executable file",
-  scr: "executable file",
-  bat: "Windows batch script",
-  cmd: "Windows command script",
-  ps1: "PowerShell script",
-  jar: "Java archive",
-  class: "Java bytecode",
-  apk: "Android package",
-  app: "application bundle",
-  dmg: "macOS disk image",
-  pkg: "installer package",
-  deb: "Debian package",
-  rpm: "RPM package",
-  iso: "disk image",
-  img: "disk image",
-  wasm: "WebAssembly binary",
-  // Audio / video
-  mp3: "audio file",
-  wav: "audio file",
-  ogg: "audio file",
-  opus: "audio file",
-  flac: "audio file",
-  aac: "audio file",
-  m4a: "audio file",
-  wma: "audio file",
-  mp4: "video file",
-  m4v: "video file",
-  mov: "video file",
-  avi: "video file",
-  mkv: "video file",
-  webm: "video file",
-  flv: "video file",
-  wmv: "video file",
-  // Archives
-  zip: "archive file",
-  tar: "archive file",
-  gz: "archive file",
-  tgz: "archive file",
-  bz2: "archive file",
-  xz: "archive file",
-  "7z": "archive file",
-  rar: "archive file",
-  // Fonts
-  woff: "font file",
-  woff2: "font file",
-  ttf: "font file",
-  otf: "font file",
-  eot: "font file",
-  // Binary documents
-  pdf: "PDF document",
-  doc: "Word document",
-  docx: "Word document",
-  xls: "Excel workbook",
-  xlsx: "Excel workbook",
-  ppt: "PowerPoint presentation",
-  pptx: "PowerPoint presentation",
-  // Binary design/data formats
-  psd: "design file",
-  ai: "design file",
-  sketch: "design file",
-  fig: "design file",
-  sqlite: "binary database",
-  sqlite3: "binary database",
-  parquet: "binary data",
-  feather: "binary data",
-  pkl: "binary data",
-  pickle: "binary data",
-  npy: "binary data",
-  npz: "binary data",
-  h5: "binary data",
-  onnx: "binary model",
-  pt: "binary model",
-  pth: "binary model",
-};
 
 /**
  * Classify a path entering a skill import.
@@ -148,20 +28,7 @@ const BLOCKED_REASONS: Record<string, string> = {
  * `block` entries reject the whole import with a reason.
  */
 export function classifyImportPath(path: string): FilePolicyResult {
-  const noise: string | null = noiseReason(path);
-  if (noise) return { action: "ignore", reason: noise };
-
-  const ext: string = getExtension(path);
-  if (ext.length === 0) {
-    // LICENSE, README, Dockerfile, Makefile, … — text is checked later.
-    return { action: "allow-text" };
-  }
-  if (TEXT_EXTENSIONS.has(ext)) return { action: "allow-text" };
-  if (IMAGE_EXTENSIONS.has(ext)) return { action: "allow-image" };
-  if (ext in BLOCKED_REASONS) {
-    return { action: "block", reason: BLOCKED_REASONS[ext] };
-  }
-  return { action: "block", reason: "unsupported file type" };
+  return classifyFolderPath(path);
 }
 
 /** Editor creation is text-only; binary assets must be imported. */

@@ -85,7 +85,7 @@ export function KbPageDialog({
     trimmedPath !== page?.path &&
     existingPaths.includes(trimmedPath);
   const problem: string | null =
-    pathProblem(trimmedPath) ?? (taken ? "already exists in this collection" : null);
+    pathProblem(trimmedPath) ?? (taken ? "already exists in this KB" : null);
   const dirty: boolean =
     page === undefined ||
     trimmedPath !== page.path ||
@@ -168,7 +168,7 @@ export function KbPageDialog({
               {trimmedPath === ""
                 ? "required"
                 : (problem ??
-                  `in ${folder === "" ? "the collection root" : folder}`)}
+                  `in ${folder === "" ? "the KB root" : folder}`)}
             </p>
           </div>
 

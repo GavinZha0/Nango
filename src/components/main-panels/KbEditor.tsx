@@ -573,7 +573,7 @@ export function KbEditor({
                 className="h-6 shrink-0 gap-1 bg-primary px-2 text-xs text-destructive hover:bg-primary/80 hover:text-destructive"
                 onClick={() => setDeleteTarget("collection")}
                 disabled={saving || deleting}
-                title="Delete this collection (cannot be undone)"
+                title="Delete this knowledge base (cannot be undone)"
               >
                 {deleting ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

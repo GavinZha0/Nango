@@ -63,7 +63,7 @@ export default function KbEditorPage() {
   if (!detail) {
     return (
       <p className="px-8 py-10 text-xs text-muted-foreground">
-        Knowledge collection not found.
+        Knowledge base not found.
       </p>
     );
   }

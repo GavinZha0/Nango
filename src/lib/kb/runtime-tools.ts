@@ -56,7 +56,7 @@ const KbFolderArg = z
   .optional()
   .describe(
     "Optional. Return only the pages under this folder prefix instead of the whole " +
-      "collection. Matched exactly and case-sensitively against the leading segments " +
+      "KB. Matched exactly and case-sensitively against the leading segments " +
       "of the paths in the index, and it covers every deeper folder below it, so " +
       "narrowing never hides content. A prefix that holds no page is not found.",
   );
@@ -92,7 +92,7 @@ export function buildListKbPagesTool(opts: {
       "Show the pages of one knowledge base: each path with its one-line " +
       "summary. This is how you find the path to pass to read_kb_page — page " +
       "bodies are never returned here. Call it before guessing a path, and " +
-      "again with `folder` if the collection is long.",
+      "again with `folder` if the KB is long.",
     parameters: ListKbPagesArgs,
     execute: async (args): Promise<ListKbPagesResult> => {
       const collection = await resolveKbCollectionForAgent(
@@ -119,7 +119,7 @@ export function buildListKbPagesTool(opts: {
           `Knowledge base '${args.kb_name}' has no folder named ` +
             `'${args.folder}'. Folder names are the leading segments of the ` +
             "paths the `## Available knowledge` block shows; call list_kb_pages " +
-            "without `folder` for the whole collection.",
+            "without `folder` for the whole KB.",
         );
       }
 
@@ -325,7 +325,7 @@ function notAvailable(kbName: string): KbToolFailure {
   return fail(
     "KB_NOT_AVAILABLE",
     `No knowledge base named '${kbName}' is available to this agent — the ` +
-      "slug is not bound here, or the collection is disabled. Use a slug from " +
+      "slug is not bound here, or the KB is disabled. Use a slug from " +
       "the `## Available knowledge` block in your prompt.",
   );
 }

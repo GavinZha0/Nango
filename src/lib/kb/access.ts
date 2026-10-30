@@ -42,14 +42,14 @@ async function loadCollection(id: string): Promise<KbCollectionEntity> {
   // A malformed segment can never match a uuid column, and letting Postgres
   // reject it would surface as a 500 instead of the 404 the client means.
   if (!UUID_RE.test(id)) {
-    throw new ApiError("NOT_FOUND", 404, "Knowledge collection not found.");
+    throw new ApiError("NOT_FOUND", 404, "Knowledge base not found.");
   }
   const [row] = await db
     .select()
     .from(KbCollectionTable)
     .where(eq(KbCollectionTable.id, id))
     .limit(1);
-  if (!row) throw new ApiError("NOT_FOUND", 404, "Knowledge collection not found.");
+  if (!row) throw new ApiError("NOT_FOUND", 404, "Knowledge base not found.");
   return row;
 }
 
@@ -60,7 +60,7 @@ export async function loadVisibleCollection(
 ): Promise<KbCollectionEntity> {
   const row: KbCollectionEntity = await loadCollection(id);
   if (!canViewResource(rbacOf(row), session)) {
-    throw new ApiError("NOT_FOUND", 404, "Knowledge collection not found.");
+    throw new ApiError("NOT_FOUND", 404, "Knowledge base not found.");
   }
   return row;
 }
@@ -72,7 +72,7 @@ export async function loadEditableCollection(
 ): Promise<KbCollectionEntity> {
   const row: KbCollectionEntity = await loadCollection(id);
   if (!canEditResource(rbacOf(row), session)) {
-    throw new ApiError("FORBIDDEN", 403, "You cannot edit this knowledge collection.");
+    throw new ApiError("FORBIDDEN", 403, "You cannot edit this knowledge base.");
   }
   return row;
 }
@@ -88,7 +88,7 @@ export async function loadOwnedCollection(
 ): Promise<KbCollectionEntity> {
   const row: KbCollectionEntity = await loadCollection(id);
   if (!canDeleteResource(rbacOf(row), session)) {
-    throw new ApiError("FORBIDDEN", 403, "You do not own this knowledge collection.");
+    throw new ApiError("FORBIDDEN", 403, "You do not own this knowledge base.");
   }
   return row;
 }

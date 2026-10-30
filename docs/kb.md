@@ -21,7 +21,7 @@ server and holds no state in Nango. It is unrelated to this subsystem.
 
 | In scope | Out of scope |
 |---|---|
-| Human-authored, agent-read text corpus in Postgres | Binary assets, file upload, in-app PDF ingest |
+| Human-authored, agent-read text corpus in Postgres, pasted page by page or imported as a folder of text files (§16) | Binary assets, in-app PDF/Office ingest, an import that merges into an existing collection |
 | Structural (name + path outline + count) disclosure, level by level | Semantic search (`kb_search`, tsvector, pgvector) |
 | Read-only tools auto-mounted by a collection binding | `kb_write` — agents never write knowledge |
 | Hard deletes with cascade | Soft delete / tombstones, versioning, history |
@@ -58,9 +58,9 @@ Role of each level:
   `read_kb_page`. The atom both the editor tree and the index address.
 
 Content form follows use, and the system never inspects content to classify it:
-a page-catalog CSV is stored verbatim, meeting notes are authored directly, and
-a converted manual is pasted in one page per chapter or topic. That judgement
-belongs to the author.
+a page-catalog CSV is stored verbatim, meeting notes are authored directly, and a
+converted manual is one page per chapter or topic — pasted in, or imported as a
+folder that already spells them out (§16). That judgement belongs to the author.
 
 **The index is derived, never authored.** There is no `kb_index` table, column or
 index page, and no folder table. The agent-facing index and the editor tree both
@@ -77,9 +77,9 @@ show a folder the other does not have.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid v4 | URL-exposed; FK target of `builtin_agent_tool.kb_collection_id`. |
-| `name` | text NOT NULL | Globally unique LLM-facing slug — the string agents pass as `kb_name`. Pattern `/^[a-z][a-z0-9_-]{0,62}$/` (`KB_COLLECTION_NAME_RE`), enforced at the API edge. Doubles as the panel label. |
-| `description` | text NULL | Level-1 routing signal. Required at the edge, ≥ `MIN_DESCRIPTION_CHARS`, ≤ `MAX_DESCRIPTION_CHARS`. |
-| `enabled` | boolean NOT NULL | A disabled collection is absent from the prompt block and refused by both tools — indistinguishable from unbound. |
+| `name` | text NOT NULL | Globally unique LLM-facing slug — the string agents pass as `kb_name`. Pattern `/^[a-z0-9][a-z0-9_-]{0,62}$/` (`KB_COLLECTION_NAME_RE`), the same character family a skill `name:` uses, enforced at the API edge. The 63 ceiling is the runtime argument's ceiling (`KbNameArg`), not a cosmetic one. Doubles as the panel label and as the import's whole naming step (§16). |
+| `description` | text NULL | Level-1 routing signal. Optional everywhere and at both levels, ≤ `MAX_DESCRIPTION_CHARS`, and an empty one is stored as NULL. What is *not* optional is having one while mounted: `enabled ⇒ description` is enforced in the service (§5). |
+| `enabled` | boolean NOT NULL | A disabled collection is absent from the prompt block and refused by both tools — indistinguishable from unbound. Never settable to `true` without a description, and a create or an import with no description is inserted `false`. |
 | `visibility` | text NOT NULL | `'private' \| 'public'`, same semantics and same `visibilitySql` as `skill`. |
 | `created_by` / `updated_by` | uuid → user, SET NULL | §3.4. |
 | `created_at` / `updated_at` | timestamp | `listCollections` orders newest first. |
@@ -150,7 +150,8 @@ see one row.
 | A folder and a page cannot share one name | Service | Needs the whole path set: `a` is illegal when `a/b` or `a` already exists. |
 | `kb.max_pages` / `kb.max_folders` / `kb.page_max_bytes` | Service | Config-backed budgets, and the refusal must quote the measured value and the limit. |
 | `content` is storable text — no NUL, no unpaired surrogate | Service | Postgres fails the row with `22021`, which would surface as an opaque 500. |
-| Slug pattern, description floor and ceiling, `content` non-empty, unknown body keys refused | API edge (Zod `.strict()`) | Typed `400 VALIDATION_FAILED` with the offending path, before any DB call. |
+| Slug pattern, description ceiling, `content` non-empty, unknown body keys refused | API edge (Zod `.strict()`) | Typed `400 VALIDATION_FAILED` with the offending path, before any DB call. There is no description floor at either level and a description-less create is legal. |
+| `enabled ⇒ description` | Service | A mounted collection must describe itself, or the prompt block hands every bound agent a routing line that routes nowhere. Both directions: enabling without prose, and blanking the prose of a mounted row. |
 | Visibility / edit / ownership | `src/lib/kb/access.ts` | §13. |
 
 **Text validation — NUL and unpaired surrogates.** `assertValidText` (§5) runs
@@ -185,12 +186,14 @@ knowledge.
 |---|---|
 | `src/lib/db/schema.ts` | The two tables + the junction column. |
 | `src/lib/kb/paths.ts` | Pure path algebra: legality (`pathProblem` / `folderProblem`), `folderOf`, `ancestorFolders`, `distinctFolders`, `topLevelFolderCount`, `isUnderFolder`, `rewriteFolderPrefix`. No `server-only` — the editor validates a path with the rules the service enforces. |
-| `src/lib/kb/limits.ts` | Authored-string constants (`MAX_DESCRIPTION_CHARS`, `MIN_DESCRIPTION_CHARS`, `MAX_LABEL_CHARS`, `MAX_PATH_CHARS`, `MAX_FOLDER_DEPTH`). Client-readable. |
+| `src/lib/kb/limits.ts` | Authored-string constants (`MAX_DESCRIPTION_CHARS`, `MAX_LABEL_CHARS`, `MAX_PATH_CHARS`, `MAX_FOLDER_DEPTH`). Client-readable. |
 | `src/lib/kb/budgets.ts` | Config-backed byte/count ceilings behind `import "server-only"`. |
-| `src/lib/kb/validation.ts` | Shared Zod edge schemas built on `paths.ts`. Imported by the client so it cannot be told a different limit than the server enforces. No `server-only`. |
+| `src/lib/kb/validation.ts` | Shared Zod edge schemas built on `paths.ts`, the name rule as one string (`KB_COLLECTION_NAME_RE` / `KB_COLLECTION_NAME_RULE`), and `kbSlugFromFolderName` — the fold a folder pick goes through before it becomes a collection. Imported by the client so it cannot be told a different limit than the server enforces. No `server-only`. |
 | `src/lib/kb/access.ts` | URL id → authorised collection row; the three authoring gates, the visibility+enabled filter (`filterVisibleKbCollectionIds`, used at bind time and dispatch time). |
-| `src/lib/kb/service.ts` | All structural invariants and budgets for the authoring surface; typed `ApiError`s; the single sort site for the tree. |
-| `src/app/api/kb/**` | Four route handlers (§14). |
+| `src/lib/kb/service.ts` | All structural invariants and budgets for the authoring surface; typed `ApiError`s; the single sort site for the tree. `importCollection` is a write path too (§16). |
+| `src/lib/kb/import-policy.ts` | What a file in a picked folder becomes: text-only admission on top of the shared classifier, the `content_type` hint, strict UTF-8. Client-readable. |
+| `src/lib/kb/digest.ts` | The description an imported page gets from its own first prose paragraph. Client-readable. |
+| `src/app/api/kb/**` | Five route handlers (§14). |
 | `src/lib/kb/lookup.ts` | Agent-side reads. **Deliberately RBAC-free** — the binding is the grant (§7.3). |
 | `src/lib/kb/prompt-block.server.ts` | `buildKbPromptBlock(collectionIds) → { promptBlock }`. |
 | `src/lib/kb/runtime-tools.ts` | `buildListKbPagesTool` / `buildReadKbPageTool` + line windowing. |
@@ -220,6 +223,17 @@ Service-side rules, all in `src/lib/kb/service.ts`:
 - **Names.** A collection unique violation (`23505`) becomes `409 NAME_TAKEN` with
   the name; any other constraint error is rethrown untouched, so a real DB fault
   never masquerades as a collision.
+- **Publish gate** (`enabled ⇒ description`). A mounted collection always carries a
+  description, because the description is the only thing a bound agent sees before
+  it decides to call `list_kb_pages` — a bullet naming a corpus it cannot describe
+  is a confident routing line that routes nowhere. `createCollection` therefore
+  inserts `enabled: false` when it gets no prose, and `updateCollection` refuses,
+  in `400 {reason: "DESCRIPTION_REQUIRED"}`, both an `enabled: true` patch on a
+  row with no description and a description-clearing patch on a row that is
+  mounted (disabling first is the repair, and it is one click). The check reads the
+  current row itself, so a script cannot bypass it, and it treats an all-whitespace
+  description as none — an invisible routing line is the same failure. It runs only
+  for a patch that touches `enabled` or `description`.
 - **Empty patch.** `updateCollection` / `updatePage` throw `400 No fields to
   update.` before touching the DB.
 - **Partial `set`.** Each writer sends only its own fields — the pane writes
@@ -269,7 +283,7 @@ Service-side rules, all in `src/lib/kb/service.ts`:
 - **Audit.** Collection and page writes stamp `updatedBy` + `updatedAt`. A folder
   write stamps the pages it rewrites; the folder itself has no row.
 
-There is no cache invalidation step: nothing is cached (§4, §16).
+There is no cache invalidation step: nothing is cached (§4).
 
 ## 6. Flow B — binding and mounting
 
@@ -357,7 +371,10 @@ from the lines below.
 Rules of the render:
 
 - Collections alphabetically by `name`; only `enabled` rows appear.
-- One line per collection: `- **<name>**: <description>`.
+- One line per collection: `- **<name>**: <description>`, and a NULL description
+  renders as the bare `- **<name>**` rather than as a trailing colon. The publish
+  gate (§5) means a mounted row always has prose, so the bare form is the renderer
+  tolerating a nullable column — not a state an authored collection reaches.
 - One line per **implied** folder: `- <folder> (<N> pages)`, indented two spaces
   per folder level (so a level-1 folder sits at four spaces, its child at six),
   ordered parent-before-child with siblings by `alphabeticCompare`.
@@ -527,10 +544,13 @@ a sharper `description`, not a new page. A path is also the only folder name an
 agent can see, so a folder that hides its content's subject makes the whole subtree
 unfindable from the block.
 
-Getting a large document in is an authoring action: convert externally
-(`pdftotext`, an exporter, or the user's own agent), then paste the result into the
-editor page by page. There is no file import — a page is plain text, so a picker
-would re-implement the clipboard for one step of a two-step job. An agent holding a
+Getting a large document in is still an authoring action: convert externally
+(`pdftotext`, an exporter, or the user's own agent), then either paste the result
+into the editor page by page or — when the corpus is already a directory tree of
+text files — import it as a new collection (§16). The import earns its place on that
+second case: a folder carries its own structure, and re-typing it one `POST` at a
+time is the work the manifest already describes. It earns no PDF ingest; the
+converter stays outside Nango because a page is plain text. An agent holding a
 `read_file` binding can read an already-converted text source from the
 `host.file.root` mount and the author pastes the condensed result back
 (`docs/host-files.md`); it cannot read a PDF.
@@ -549,8 +569,7 @@ prefix (`docs/config.md`), never `.env`, consistent with the `skill.*` and
 
 | Item | Value | Home | Bounds |
 |---|---|---|---|
-| `MAX_DESCRIPTION_CHARS` | 512 | `src/lib/kb/limits.ts` | One `description` (collection or page). KB descriptions are the only ones in this project injected *en masse*, so they sit below the 1000-char caps used by skill frontmatter and suite descriptions. |
-| `MIN_DESCRIPTION_CHARS` | 10 | same | The collection `description` only. A short-but-present one renders as a confident routing line that routes nowhere, so it is refused at the write edge (`trim()` first, then the min — whitespace-only fails). Page descriptions are optional and exempt; a folder has no description at all. |
+| `MAX_DESCRIPTION_CHARS` | 512 | `src/lib/kb/limits.ts` | One `description` (collection or page). KB descriptions are the only ones in this project injected *en masse*, so they sit below the 1000-char caps used by skill frontmatter and suite descriptions. There is no floor at either level and a folder has no description at all: what binds instead is `enabled ⇒ description` (§5), which is a state rule rather than a string bound. |
 | `MAX_LABEL_CHARS` | 200 | same | A page's free-form `source_ref`. |
 | `MAX_PATH_CHARS` | 256 | same | One `path`, which is also the agent's handle. Deliberately the same ceiling the folder-import transport puts on a manifest path (`IMPORT_PATH_MAX_CHARS`), so a corpus imported from a folder can never overflow the storage rule it lands in. |
 | `MAX_FOLDER_DEPTH` | 2 | same | Folder levels below a collection, so a page path is at most three segments. Stated in the runtime index, the tree UI and the service's path checks. Client-readable, unlike the budgets. |
@@ -560,8 +579,10 @@ prefix (`docs/config.md`), never `.env`, consistent with the `skill.*` and
 | `kb.max_folders` | 20 | same | Distinct prefixes the pages imply, and therefore the ceiling on injected index lines. |
 
 Not configurable: folder depth, text-only `content_type`, collection-level
-mount granularity. All values assume a personal / small-team corpus on one Node
-process, matching the project's runtime boundary.
+mount granularity, and the import route's 16 MB request / 10 MB decoded ceiling
+(§16) — the per-file and per-collection numbers an import actually needs are already
+`kb.page_max_bytes` and `kb.max_pages`. All values assume a personal / small-team
+corpus on one Node process, matching the project's runtime boundary.
 
 ## 12. Tool surface
 
@@ -671,9 +692,10 @@ rejected for the same reason as before.
 | Method + path | Wrapper | Behavior |
 |---|---|---|
 | `GET /api/kb` | `withSession` | Visible collections, newest first, each with `folderCount` (level-1 only) and `pageCount` — one collection query plus one path read for the whole set, tallies derived in JS. |
-| `POST /api/kb` | `withEditor` | `{name, description, visibility?}` `.strict()` → `201`. Private by default; `createdBy`/`updatedBy` from the session. |
+| `POST /api/kb` | `withEditor` | `{name, description?, visibility?}` `.strict()` → `201`. Private by default; `createdBy`/`updatedBy` from the session; no prose in the body inserts `enabled: false` (§5). |
+| `POST /api/kb/import` | `withEditor` | `{name, entries[]}` `.strict()` — the shared folder manifest (§16) and nothing else: the name is the folder's own, folded client-side, and a description an importer has not read yet would be a guess. `201` with `{...collection, pagesImported, skipped}`; the collection lands `description: null, enabled: false`, and one transaction means every refusal writes nothing. |
 | `GET /api/kb/[id]` | `withSession` | Collection row + every `pages` summary in agent order, no page bodies and no folder payload — the editor derives its tree from these paths. |
-| `PATCH /api/kb/[id]` | `withEditor` | Two gates: content (including the slug) under the edit gate; `enabled`/`visibility` under `canChangeVisibility`. `400` on an empty patch. |
+| `PATCH /api/kb/[id]` | `withEditor` | Two gates: content (including the slug) under the edit gate; `enabled`/`visibility` under `canChangeVisibility`. `400` on an empty patch, and `400 {reason: "DESCRIPTION_REQUIRED"}` from the service when the patch would leave a mounted row without prose (§5). An empty `description` in the body is a clear, not a no-op. |
 | `DELETE /api/kb/[id]` | `withEditor` | Strict gate → `204`. Hard delete with cascade. |
 | `POST /api/kb/[id]/pages` | `withEditor` | `{path, description?, content, contentType?, sourceRef?}`; `content` `min(1)` and untrimmed → `201` with computed `size`. The path carries its folder prefixes; the folders exist as long as this row does. |
 | `GET /api/kb/[id]/pages/[...path]` | `withSession` | The only human-facing read that returns `content`. |
@@ -697,13 +719,20 @@ resizable left-list / center-editor / right-chat group) and owns the center pane
 it does not build a third three-panel layout. Rows, header strips and dialogs reuse
 the Skills page's class strings.
 
+Copy says **KB** or **knowledge base**, never "knowledge collection": that is the
+row's shape, not its name, and the agent-facing prompt block already calls the same
+thing a knowledge base. `collection` stays in code and in this document where it
+names the table, the type or the query.
+
 | Pane | Contents |
 |---|---|
-| `KbPanel` | One row per collection: the slug, a muted `(N)` **outside** the name button so it survives a truncated name, the description at `line-clamp-2`, then pencil (metadata), visibility, enabled — in that order. `N` comes from `kbTopTally` (see below). Create and collection-metadata live in one dialog here; there is no `/kb/new` route and no collection row inside the editor. No mount byte size, no reverse lookup of binding agents, no delete in the row. |
+| `KbPanel` | One row per collection: the slug, a muted `(N)` **outside** the name button so it survives a truncated name, then the description at `line-clamp-2` — or, when there is none, the row says so in its place, because an unmounted collection with no explanation reads as a bug. Then pencil (metadata), visibility, enabled — in that order. `N` comes from `kbTopTally` (see below). Create and collection-metadata live in one dialog here; there is no `/kb/new` route and no collection row inside the editor. The header carries **New** (+), **Import folder** (`FolderUp`, the same hidden `webkitdirectory` input a skill panel uses) and refresh. A toggle refused by the server reverts *and* toasts the reason — a switch that springs back silently reads as a broken button. No mount byte size, no reverse lookup of binding agents, no delete in the row. |
+| `CollectionDialog` | Create and edit, two fields, no import mode. `name` is checked against `KB_COLLECTION_NAME_RE` before submit; `description` is a plain optional textarea with the ceiling as its `maxLength` and a hint that an empty one keeps the collection unmounted — no floor, so no counter that gates the button. A refusal from the server (a `400 DESCRIPTION_REQUIRED`, a `409 NAME_TAKEN`) renders inline. |
+| Folder import (no dialog) | Picking a folder is the whole gesture: `kbSlugFromFolderName` folds the folder's own name into the slug, the manifest posts straight to `POST /api/kb/import`, and the panel navigates to the new collection. A folder whose name folds to nothing legal is refused before a single file is read, with the rule quoted and the folder named — inventing a slug would hand the author a `kb_name` they never chose. The success toast is where the author learns the corpus is not mounted yet: page count, the files that cannot be a page ("Ignored 3 file(s) that cannot be a page: …" — images land here too, so a documentation folder with an `images/` tree imports), and "add a description to enable this KB". |
 | `KbEditor` | The header strip: back arrow, the collection's `name` and its `(<tally>)`, then **Save** (`canEdit`, disabled until the pane is submittable — dirty for an existing page, body filled for a new one) and **Delete** — the collection's own delete is the header's only destructive action, because node deletes belong to the rows they name. Below it, two fixed flex columns: the `w-80` tree and the detail pane, with no drag handle between them. |
 | `KbTree` | Its own `Pages (pageCount)` header carries the one create action (**New page**), absent rather than disabled for a viewer who cannot edit. **There is no "New folder" button**: a folder exists as soon as a page path names it, so the page dialog's path field is the only way to make one — and a folder cannot be created empty. Subdirectories render before files at every level, the root pages as bare rows at the tail with no heading (a heading would be a folder the server refuses). A folder row is a disclosure control only: its chevron folds the subtree and touches nothing in the detail pane, because a folder has no body; its `(N)` is the **subtree** count, so folding never hides a number the author is scanning for. Only a page row selects. Folds are held in a client *collapsed* set so a write that reloads the tree cannot undo what the author just folded; the set is keyed by prefix because a folder has no id. Tree starts expanded. Every row surfaces pencil + trash on hover; the trash describes **the row it sits on**. |
 | `KbFolderDialog` | Rename a folder, which is the same write as moving it: one path field, prefilled with the prefix, and a line stating how many pages it rewrites. Nothing to describe and nothing to create — a folder has no description and no row, so the dialog owns exactly the new spelling. Writes by itself (`?kind=folder`), renders the refusal inline, signals the editor to refetch. |
-| `KbPageDialog` | A page's identity only — **path** and **source**. One field says where a page lives, because a path is both its name and its folder: typing `onboarding/glossary` creates that folder for as long as the page keeps it. The help line echoes the derived folder (`in onboarding`, or `in the collection root`) and an in-collection collision is said here, not by a 409. In create mode it hands the answers to the pane instead of posting (`POST` refuses empty `content`, and an agent-visible empty page is worse than an extra click); in edit mode it sends the `PATCH` of its two fields — an unchanged path is not sent at all — and renders the refusal inline. |
+| `KbPageDialog` | A page's identity only — **path** and **source**. One field says where a page lives, because a path is both its name and its folder: typing `onboarding/glossary` creates that folder for as long as the page keeps it. The help line echoes the derived folder (`in onboarding`, or `in the KB root`) and an in-collection collision is said here, not by a 409. In create mode it hands the answers to the pane instead of posting (`POST` refuses empty `content`, and an agent-visible empty page is worse than an extra click); in edit mode it sends the `PATCH` of its two fields — an unchanged path is not sent at all — and renders the refusal inline. |
 | Detail pane | The selected page's `description` + body, nothing else — path and source are the dialog's, `content_type` has no control. Saved by the header **Save**. Opens with nothing selected and one line of prompt, because neither the collection nor a folder has a form here. |
 
 Cross-cutting UI rules:
@@ -728,10 +757,12 @@ Cross-cutting UI rules:
   reads, `content_type` is only a parse hint the server defaults, and a CSV or JSON
   page is an exported artifact of another system whose quoting and delimiter
   invariants freeform editing breaks — you change one by replacing the whole body.
-- **Description floors are shown, not spent.** The form that writes a collection
-  description carries a counter that turns destructive under
-  `MIN_DESCRIPTION_CHARS` and disables submit. Page descriptions are optional and
-  capped only, so `maxLength` enforces their bound and the pane prints no counter.
+- **A description is asked for, never demanded.** The collection form prints the
+  ceiling as `maxLength` and one hint line — an empty description keeps the row
+  unmounted — but it has no floor and its Save button is never disabled by prose.
+  Publishing is the gate instead (§5), so the author can save a stub, read the
+  corpus, and write the routing line last. Page descriptions are capped only, so
+  `maxLength` enforces their bound and the pane prints no counter.
 - Renaming is the dangerous corner: `kb_collection.name` and a page's `path` are
   strings agents already hold mid-conversation. The write edge enforces the slug
   rule, the dialogs state the failure, and nothing broadcasts a rename. A folder
@@ -754,22 +785,143 @@ Cross-cutting UI rules:
 - The center pane is **not** wired to `useCopilotDraft`: that mechanism exists so an
   agent can rewrite a resource, and agents cannot write knowledge.
 
-## 16. Tests
+## 16. Flow F — folder import
+
+A corpus that already exists as a directory of text files comes in as **one new
+collection**. The author picks a folder and the tree lands with its folders intact —
+no page is re-typed, no address is re-derived by hand, and nothing is asked of them
+in between: the folder names the collection and the import comes back unpublished so
+the description can be written after the corpus has been read.
+
+```
+folder picker (webkitdirectory) → collectFolderFiles → [{path, contentBase64}]
+  → kbSlugFromFolderName(folder) — refuse loudly if the fold leaves no legal slug
+  → POST /api/kb/import {name, entries}
+  → walkEntries: budgets, classifyKbImportPath, pathProblem, strict UTF-8
+  → assertNoBlocked · assertNoPathKindClash
+  → per file: kbContentType + derivePageDescription
+  → importCollection: one transaction (collection row + every page)
+  → 201 {...collection, pagesImported, skipped} → panel refresh → /kb/<id>
+```
+
+**The transport is shared, the knowledge rules are not.** `src/lib/folder-import/`
+supplies everything mechanical: the JSON manifest (a folder walk in the browser —
+no archive format, no decompression, no symlink surface), the noise classifier, the
+walker, the path/budget preflight, and the MIME table. Skills and KB both start from
+`classifyFolderPath`, and **the one divergence is what an image means**: the skill
+policy keeps images as previewable assets and proves the bytes behind the extension,
+while KB drops them with the noise — a knowledge page has no column for bytes and no
+agent path that renders one, so a 200 KB PNG would reach the model as 64 KB of base64
+prefix, which is the `kb.read_max_bytes` window spent entirely on mojibake. That
+branch, the `content_type` mapping, and strict UTF-8 are the whole of
+`src/lib/kb/import-policy.ts`.
+
+The line between the two failure tiers is **could this file have been a page**. An
+image never could, so it is ignored and reported and the rest of the folder imports.
+A `.pdf` or `.docx` is prose inside a wrapper the product cannot read, so losing one
+silently would hand the author a corpus missing the document they meant to import:
+that, an archive, an executable, an extension no list recognises, non-UTF-8 bytes, a
+NUL and an illegal path all stay `block`, which fails the whole upload and names the
+file. The common exported-document folder — markdown plus an `images/` tree — is the
+case this buys: before, one PNG refused the entire corpus.
+
+- **`source_ref` stays empty.** An imported folder carries no per-file provenance
+  line, and `source_ref` is exactly that kind of human note (§10). The author fills it
+  in the page dialog afterwards; the import invents nothing.
+- **UTF-8 is proven, not assumed.** `Buffer.toString("utf8")` substitutes U+FFFD for
+  every invalid sequence, so a Latin-1 or GBK corpus would import as
+  readable-looking garbage no agent can quote back. `textDecodeProblem` decodes with
+  `fatal: true` and the refusal names the file — re-save it as UTF-8. The walker's
+  NUL scan stays as the check for binary bytes that are valid UTF-8.
+- **Paths use the editor's own algebra.** `walkEntries` validates with
+  `pathProblem`, so an over-deep prefix or an empty segment from a foreign tree fails
+  with the offending path in the report instead of landing a row no agent can ever
+  address. `MAX_PATH_CHARS` and the transport's `IMPORT_PATH_MAX_CHARS` are the same
+  number on purpose (§11).
+- **`content_type` is a hint mapped, not guessed.** `kbContentType` takes the shared
+  MIME guess and narrows it to the DB CHECK set; anything outside it — a `.js` note,
+  an extension-less `README` — is stored `text/plain` rather than dropped or refused.
+  The six-value set mirrors the text subset of `CONTENT_TYPES` (§3.3), so a new text
+  extension needs one edit, in `src/lib/folder-import/mime.ts`.
+- **A page describes itself.** `derivePageDescription` (`src/lib/kb/digest.ts`) takes
+  the first prose paragraph — past any front matter, ATX heading, or rule line, cut on
+  a word boundary at `MAX_DESCRIPTION_CHARS` — and only for `text/markdown` /
+  `text/plain`. A CSV's first line is a header row, not a summary, so structured files
+  get the same `NULL` a hand-created page gets, and nothing is invented. This is what
+  makes `list_kb_pages` useful after an import of files written without the index in
+  mind.
+- **The hub page is a convention, not a branch.** Nothing sniffs for `README` /
+  `index` and nothing promotes a file to a folder's description — a folder has no
+  description field to write into (§3.1). A directory's `README` becomes an ordinary
+  page whose derived description stands for the subtree because the prose in it says
+  what the subtree is; `kb_page.description` is a per-page field, so a file has to be a
+  page to carry one. That is also why an import needs no manifest to read summaries
+  from: the summaries are inside the files.
+- **The corpus budgets *are* the upload caps.** `maxFiles` is `kb.max_pages` and
+  `maxFileBytes` is `kb.page_max_bytes`, both read from live config at request time, so
+  raising a budget raises the import with it. The route adds one number of its own — a
+  10 MB decoded ceiling behind the same 16 MB request cap a skill import uses (base64 is
+  a fixed 4/3 over the decoded figure, and the headroom has to be enforced before
+  `req.json()` buffers the body). It is deliberately **not** a config key:
+  `skill.max_total_bytes` is tunable because it also bounds the stored corpus on
+  ordinary writes, while a collection's stored size is already
+  `kb.max_pages × kb.page_max_bytes`. This constant only keeps the process from
+  buffering a foreign tree it is going to reject anyway.
+- **The client mirrors the defaults, not the values.** `IMPORT_CAPS` in `KbPanel`
+  quotes `kb.max_pages` / `kb.page_max_bytes` *as shipped* so an oversized folder fails
+  without a round trip. The route re-checks everything against live config, so the
+  mirror can delay a refusal and can never grant one.
+- **Nothing is half-imported.** `importCollection` validates every page against the
+  path set it is accumulating — `assertNoFolderClash` on that set catches a file nested
+  inside another file's name and a manifest that repeats a path — then applies
+  `assertImportRoom` to the finished set, then writes the collection row and all the
+  pages in one transaction. A rejected import leaves no orphan collection behind, so
+  there is no compensating `deleteCollection` to get wrong. `23505` on the name is
+  `409 NAME_TAKEN` like any other create.
+- **Both sides of the ignore tier are reported.** The picker drops dotfiles, generated
+  caches and every image locally — so an `images/` tree never costs a base64 encode or
+  an upload byte; the route can drop more, and the toast merges the two lists with the
+  page count and says they are files *that cannot be a page*. A folder whose every
+  file is ignored is stopped client-side as "nothing to import" rather than paying a
+  round trip for the `400` an empty page set would get.
+- **One new collection, never a merge.** There is no "add these files to collection X"
+  path: an import is one transaction creating a collection, and a corpus an agent is
+  already reading is not something a foreign tree should silently overwrite. Same
+  reasoning as §10's no-agent-write rule.
+- **The folder names the collection; nobody describes it.** A folder of notes has no
+  manifest to read either field from. `kbSlugFromFolderName` folds the folder's own
+  name into the slug — the character family a skill `name:` uses, capped at the 63
+  characters `KbNameArg` enforces at runtime — and a fold that leaves nothing legal is
+  refused before a single file is read, with the rule quoted and the folder named. The
+  slug is what the author will type into `list_kb_pages`, so one invented for them is a
+  handle they cannot find. `description` then stays NULL and `enabled` false: the
+  person who picked the folder has not read it yet, and this field is the routing line
+  every bound agent's prompt gets (§7). A README-derived guess would be an
+  unsanitised agent-visible string built from foreign files *and* a confident line that
+  routes nowhere, so the author writes it after seeing the tree (§5) — which is exactly
+  why there is no dialog standing between the pick and the import.
+
+## 17. Tests
 
 | File | Covers |
 |---|---|
 | `tests/unit/lib/kb/paths.test.ts` | The pure algebra, off the DB: legal prose paths (CJK, spaces, dots), every ambiguous form refused with its own message, control bytes, the `MAX_PATH_CHARS` boundary, the depth cap counted in folder levels, `folderOf` / `ancestorFolders` / `distinctFolders` (parent-before-child, pages never imply themselves) / `topLevelFolderCount`, `isUnderFolder` prefix boundaries and the never-claims-root rule, `rewriteFolderPrefix` including lift-to-root. |
-| `tests/unit/lib/kb/service.test.ts` | Write edges and budgets: one combined path read for the list tallies, natural sort, `404` guards that fire before a mutation, private-by-default and audit stamps, empty-patch `400` before any query, `NAME_TAKEN` only for `23505` (other errors rethrown untouched), illegal path before any select, page-inside-page and name-over-folder clashes as `PATH_TAKEN` (plus the `23505` mapping), `INVALID_TEXT` (NUL/unpaired surrogate in content, path and descriptions; `source_ref` exempt), `kb.max_pages` and `kb.max_folders` refusals with the budget evaluated on the post-rewrite set, byte-`size` re-measure, CJK `PAGE_TOO_LARGE`, `newPath` rename-and-move, folder rename rewriting exactly the subtree paths in one transaction, folder delete taking nested folders, `404` for a prefix that holds nothing. |
+| `tests/unit/lib/kb/validation.test.ts` | The name rule and the fold: the shapes a folder or an author actually produces (including a leading digit) versus what `kb_name` could never receive; case, punctuation and edge trimming; the 63-character cut; `null` for a name that folds away to nothing; and the invariant that every slug it returns passes the schema the API enforces. Plus the optional description: trim, ceiling, and `""` / whitespace / missing all storing as NULL. |
+| `tests/unit/lib/kb/service.test.ts` | Write edges and budgets: one combined path read for the list tallies, natural sort, `404` guards that fire before a mutation, private-by-default and audit stamps, a create with prose mounted and one without prose unpublished, the `enabled ⇒ description` gate in both directions plus the patches it stays out of, empty-patch `400` before any query, `NAME_TAKEN` only for `23505` (other errors rethrown untouched), illegal path before any select, page-inside-page and name-over-folder clashes as `PATH_TAKEN` (plus the `23505` mapping), `INVALID_TEXT` (NUL/unpaired surrogate in content, path and descriptions; `source_ref` exempt), `kb.max_pages` and `kb.max_folders` refusals with the budget evaluated on the post-rewrite set, byte-`size` re-measure, CJK `PAGE_TOO_LARGE`, `newPath` rename-and-move, folder rename rewriting exactly the subtree paths in one transaction, folder delete taking nested folders, `404` for a prefix that holds nothing, and `importCollection` (§16): one transaction for the collection and its pages, the collection row written with `description: null, enabled: false`, author descriptions kept, UTF-8 `size`, page-inside-page and repeated-path refusals, both budgets judged on the whole set, an oversized body refused before the transaction opens, an empty set refused instead of an empty collection created. |
+| `tests/unit/lib/kb/import-policy.test.ts` | Text-only admission built on the shared classifier (prose and data files in, extension-less files in, noise and images skipped, a `.pdf` refused with the *shared* reason, an unrecognised extension refused); the `content_type` hint (the six mapped, anything else `text/plain`, and the return value always satisfying the DB CHECK); strict UTF-8 (multi-byte prose accepted, a legacy-encoded file named instead of silently replaced, a NUL left to the walker that owns it). |
+| `tests/unit/lib/kb/digest.test.ts` | The derived description: first prose paragraph with its lines joined, front matter / ATX headings / horizontal rules skipped, a blank line ends the paragraph, CRLF, no paragraph → null, non-Latin prose, a data file with no sentence to describe, and a long paragraph cut on a word boundary inside the cap (one that exactly fits stays whole). |
 | `tests/unit/lib/kb/lookup.test.ts` | No query for an empty id set; natural order of mounted collections; unbound vs. disabled indistinguishable; the index and page reads project exactly what the agent may see (index omits `content`, page read omits `sourceRef`); one path read for the whole bound set. |
 | `tests/unit/lib/kb/runtime-tools.test.ts` | Whole-collection vs. `folder` subtree views; the subtree includes nested prefixes and an exact-miss prefix does not; case-sensitive misses; the three envelopes with no discovery payload; a folder prefix asked of `read_kb_page` is a page miss; line windowing under a byte budget, `nextOffset` continuation, mid-line cut + `note`; LF normalisation; partial code point dropped; `limit` vs. budget precedence; out-of-range offset → empty window; reads short-circuited when resolution fails. |
 | `tests/unit/lib/kb/prompt-block.test.ts` | Empty/disabled bindings render `""` with no reads; two queries per dispatch regardless of count; the top-level count line leads the folder bullets; indentation per folder level; direct-page counts only, `(0 pages)` for a folder of folders; leaf paths never printed; counts scoped per collection; legacy NULL description; whitespace flattening cannot mint a bullet; no trailing newline. |
-| `tests/unit/app/api/kb-routes.test.ts` | All four real route handlers end to end: role gates (`401`/`403`), malformed ids, slug and description refusals, `.strict()` unknown keys, two-gate PATCH, `204`/`409` deletes, the pages-only tree projection, path-addressed GET/PATCH/DELETE through the catch-all, `newPath` moves, `?kind=folder` rename (`{ ok, rewritten }`) and subtree delete, empty-scope `400`s, depth and ceiling refusals, verbatim `content` and computed `size`. |
+| `tests/unit/app/api/kb-routes.test.ts` | The four authoring route handlers end to end: role gates (`401`/`403`), malformed ids, slug refusals and a leading-digit slug accepted, a create with no description stored unpublished, `.strict()` unknown keys, two-gate PATCH, the `400 DESCRIPTION_REQUIRED` that keeps a description-less row unmounted, an empty `description` treated as a clear, `204`/`409` deletes, the pages-only tree projection, path-addressed GET/PATCH/DELETE through the catch-all, `newPath` moves, `?kind=folder` rename (`{ ok, rewritten }`) and subtree delete, empty-scope `400`s, depth and ceiling refusals, verbatim `content` and computed `size`. |
+| `tests/unit/app/api/kb-import-route.test.ts` | `POST /api/kb/import` end to end: role gates, a name that is not a legal slug and a leading-digit one that is, `.strict()` on a key the manifest does not carry (a smuggled `description` is one); the whole folder written as one private, unpublished collection with each page's hint, derived description and byte `size`; noise and a folder's `images/` tree dropped and reported with the prose still importing; the upload refused for a binary document, non-UTF-8 bytes, a NUL, a path the storage rules reject (named), a name that is both page and folder, a repeated path; the page cap enforced while walking, the folder and per-file byte budgets, and a collection-name collision as `409` with no pages left behind. |
 | `tests/unit/app/api/builtin-agents-route.test.ts`, `builtin-agent-id-route.test.ts` | The bind filter on create and on tool replacement: a deleted, hidden or disabled id is dropped while the save still succeeds; bindable ids in the same save survive; non-knowledge bindings are never dropped. |
 | `tests/unit/lib/runner/dispatch-builtin.test.ts` | Binding mounts both tools with the agent's id set and injects the block; unbound renders nothing and builds nothing; slot order Calendars → knowledge → Charts; dispatch-time visibility filter drops a bound collection the runner cannot see and fails closed without a runner ctx. |
 | `tests/unit/lib/agent-pipeline/risk-registry.test.ts` | Both tools evaluate `low` / `read` / no approval / headless-allowed. |
 
 ```bash
 pnpm test -- tests/unit/lib/kb tests/unit/app/api/kb-routes.test.ts \
+  tests/unit/app/api/kb-import-route.test.ts \
   tests/unit/app/api/builtin-agents-route.test.ts tests/unit/app/api/builtin-agent-id-route.test.ts \
   tests/unit/lib/runner/dispatch-builtin.test.ts
 pnpm check-types && pnpm lint && pnpm comments:check:all

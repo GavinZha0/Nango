@@ -354,11 +354,15 @@ bytes, and POSTs the manifest. **There is no archive format**: the server
 receives already-materialised file bytes, so there is no decompression step and
 no symlink entry to forge.
 
-The manifest shape, the path-legality rules, the OS/tool noise tables and the
-byte budgets are shared with every other folder import in
-`src/lib/folder-import/` (`manifest.ts` for the client-safe rules, `preflight.ts`
-for the server walk, `collect.ts` for the browser side, `mime.ts` for the stored
-content-type hint). Skills contributes only the content allowlist below.
+The manifest shape, the path-legality rules, the OS/tool noise tables, the
+text/image/blocked classification and the byte budgets are shared with every
+other folder import in `src/lib/folder-import/` (`manifest.ts` for the
+client-safe rules including `classifyFolderPath()`, `preflight.ts` for the
+server walk, `collect.ts` for the browser side, `mime.ts` for the stored
+content-type hint). Skills contributes only what is genuinely skills-specific:
+that an image is a usable asset, and the magic-byte proof behind it. The other
+reader of the same module is the knowledge import, which keeps every list as-is and
+changes only that consequence — a knowledge page is text-only (`docs/kb.md` §16).
 
 Client-side, before any byte is encoded: `collectFolderFiles` pre-filters each
 path with `classifyImportPath` (ignore → reported as skipped, block → toast and
@@ -410,9 +414,11 @@ requirement; pick the skill folder itself, not its parent.
 
 The open Agent Skills spec permits any file, but Nango can only execute
 `.py` / `.sh` scripts and preview images. Import therefore uses an allowlist
-(`src/lib/skills/import-policy.ts`); the noise half of the decision
-(dotfiles, caches, build metadata, OS junk) comes from the shared
-`noiseReason()` in `src/lib/folder-import/manifest.ts`.
+(`classifyImportPath` in `src/lib/skills/import-policy.ts`, which is the shared
+`classifyFolderPath()` from `src/lib/folder-import/manifest.ts` unchanged). The
+noise tables, the text/image lists and the rejection reasons live beside each
+other in that shared module, because a knowledge import reads exactly the same
+bytes as text and two copies of a rejection list only get to disagree.
 
 | Action | File types | Behavior |
 |---|---|---|
