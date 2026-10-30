@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.29.0](https://github.com/GavinZha0/Nango/compare/v0.28.0...v0.29.0) (2026-10-30)
+
+
+### Features
+
+* **host-files:** add download_file tool with SSRF guard and create_folder ([c245e3e](https://github.com/GavinZha0/Nango/commit/c245e3e23e62e91075c4874de4173e6e37b9c981))
+* **host-files:** add edit_file and enhance read_file/write_file ([c0173d5](https://github.com/GavinZha0/Nango/commit/c0173d59f7e9e6c2ea3dd7b186ac6ba997a24c19))
+* **kb:** add LLM-wiki knowledge base with progressive disclosure ([f869140](https://github.com/GavinZha0/Nango/commit/f869140b68c002d88f69f8919fdc3a368861cc6e))
+* **kb:** dialog-free folder import gated on a published description ([240de28](https://github.com/GavinZha0/Nango/commit/240de28b94c8b8249f9c2a9281bfacf00c50f070))
+
+
+### Bug Fixes
+
+* **kb:** close runtime visibility leak for private collections ([4c68362](https://github.com/GavinZha0/Nango/commit/4c683623e7633e9c6ec58c8d243d4f4ead0afbe1))
+* **kb:** floor read_max_bytes at 1 byte and add bind-time visibility gate ([a20e565](https://github.com/GavinZha0/Nango/commit/a20e565699306ce9a440b0208ff979b13b212418))
+* **kb:** resolve save deadlock, race conditions, and performance issues ([f944ef2](https://github.com/GavinZha0/Nango/commit/f944ef2b9c92a591c22a8ee0b43aa574ec43d288))
+
 ## [0.28.0](https://github.com/GavinZha0/Nango/compare/v0.27.0...v0.28.0) (2026-10-23)
 
 
