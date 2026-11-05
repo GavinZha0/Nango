@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star, Copy, Check } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star, Copy, Check, RefreshCw, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -134,6 +134,27 @@ function generateUiSchema(schema: Record<string, unknown>): Record<string, unkno
 
 type InputTab = "form" | "json" | "schema";
 
+type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
+
+interface TaskView {
+  taskId: string;
+  status: TaskStatus;
+  statusMessage?: string;
+  createdAt?: string;
+  lastUpdatedAt?: string;
+  retentionMs: number | null;
+  suggestedPollIntervalMs?: number;
+  ttl: number | null;
+  pollInterval?: number;
+  raw: Record<string, unknown>;
+  extensions: Record<string, unknown>;
+}
+
+interface TaskListPage {
+  tasks: TaskView[];
+  nextCursor?: string;
+}
+
 /** Consolidated input-editor state — reset together on tool switch. */
 interface InputState {
   activeTab: InputTab;
@@ -148,6 +169,105 @@ const EMPTY_INPUT: InputState = {
   jsonError: null,
   formData: {},
 };
+
+const TASK_STATUS_STYLES: Record<TaskStatus, string> = {
+  working: "bg-blue-500/20 text-blue-600 dark:text-blue-400",
+  input_required: "bg-amber-500/20 text-amber-600 dark:text-amber-400",
+  completed: "bg-green-500/20 text-green-600 dark:text-green-400",
+  failed: "bg-red-500/20 text-red-600 dark:text-red-400",
+  cancelled: "bg-muted text-muted-foreground",
+};
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  working: "Working",
+  input_required: "Input Required",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+function TaskStatusBadge({ status }: { status: TaskStatus }): ReactNode {
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold leading-none",
+        TASK_STATUS_STYLES[status],
+      )}
+    >
+      {TASK_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+function TaskDetail({ task, tz }: { task: TaskView; tz: ReturnType<typeof useDisplayTimezone> }): ReactNode {
+  return (
+    <div className="space-y-3">
+      {/* Status row */}
+      <div className="flex items-center gap-2">
+        <TaskStatusBadge status={task.status} />
+        <span className="font-mono text-xs text-muted-foreground">
+          {task.taskId}
+        </span>
+      </div>
+
+      {/* Status message */}
+      {task.statusMessage && (
+        <div className="rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5">
+          <p className="text-xs text-foreground">{task.statusMessage}</p>
+        </div>
+      )}
+
+      {/* Metadata table */}
+      <div className="space-y-1">
+        <DetailRow label="Status" value={TASK_STATUS_LABELS[task.status]} />
+        {task.createdAt && (
+          <DetailRow label="Created" value={formatTimestamp(new Date(task.createdAt), tz, "datetimePrecise")} />
+        )}
+        {task.lastUpdatedAt && (
+          <DetailRow label="Updated" value={formatTimestamp(new Date(task.lastUpdatedAt), tz, "datetimePrecise")} />
+        )}
+        {task.retentionMs !== null && (
+          <DetailRow label="Retention" value={`${(task.retentionMs / 1000).toFixed(0)}s`} />
+        )}
+        {(task.suggestedPollIntervalMs ?? task.pollInterval) && (
+          <DetailRow
+            label="Poll Interval"
+            value={`${(task.suggestedPollIntervalMs ?? task.pollInterval ?? 0) / 1000}s`}
+          />
+        )}
+      </div>
+
+      {/* Extensions */}
+      {Object.keys(task.extensions).length > 0 && (
+        <div>
+          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Extensions
+          </h4>
+          <JsonView data={task.extensions} defaultExpandDepth={2} />
+        </div>
+      )}
+
+      {/* Raw data */}
+      {Object.keys(task.raw).length > 0 && (
+        <div>
+          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Raw
+          </h4>
+          <JsonView data={task.raw} defaultExpandDepth={2} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }): ReactNode {
+  return (
+    <div className="flex items-baseline gap-2 text-xs">
+      <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
+      <span className="text-foreground">{value}</span>
+    </div>
+  );
+}
 
 /** Consolidated execution lifecycle state — reset together on tool switch and before each run. */
 interface ExecState {
@@ -263,7 +383,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   const [search, setSearch] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"tools" | "prompts" | "resources">("tools");
+  const [activeTab, setActiveTab] = useState<"tools" | "prompts" | "resources" | "tasks">("tools");
 
   // Selection is component-local (not in the URL) — fresh mount /
   // refresh always lands on the first tool. Keeps the URL shape
@@ -279,6 +399,15 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   /** Per-tool state cache so switching tools preserves input + result. */
   const toolStateCache = useRef<Map<string, { input: InputState; exec: ExecState }>>(new Map());
+
+  // Tasks tab state
+  const [tasks, setTasks] = useState<TaskView[]>([]);
+  const [tasksNextCursor, setTasksNextCursor] = useState<string | undefined>(undefined);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<TaskView | null>(null);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [cancellingTask, setCancellingTask] = useState(false);
 
   // Load once: serverId is fixed for this <ServerView> instance
   // (outer Page keys on it).
@@ -307,6 +436,113 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     void load();
     return () => { cancelled = true; };
   }, [serverId]);
+
+  // Task list fetching
+  const fetchTasks = useCallback(async (): Promise<TaskView[]> => {
+    setLoadingTasks(true);
+    setTasksError(null);
+    try {
+      const res = await fetch(`/api/mcp-servers/${serverId}/tasks`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setTasksError(data.message ?? `Failed to load tasks (${res.status})`);
+        return [];
+      }
+      const page: TaskListPage = await res.json();
+      const list = page.tasks ?? [];
+      setTasks(list);
+      setTasksNextCursor(page.nextCursor);
+      return list;
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : "Failed to load tasks");
+      return [];
+    } finally {
+      setLoadingTasks(false);
+    }
+  }, [serverId]);
+
+  // Fetch single task detail
+  const fetchTaskDetail = useCallback(async (taskId: string): Promise<TaskView | null> => {
+    try {
+      const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${taskId}`);
+      if (!res.ok) return null;
+      const detail: TaskView = await res.json();
+      setSelectedTask(detail);
+      return detail;
+    } catch { /* silent — detail refresh is best-effort */ return null; }
+  }, [serverId]);
+
+  // Fetch tasks when switching to tasks tab
+  useEffect(() => {
+    if (activeTab !== "tasks") return;
+    let cancelled = false;
+    void (async () => {
+      const list = await fetchTasks();
+      if (!cancelled && list.length > 0 && !selectedTaskId) {
+        setSelectedTaskId(list[0].taskId);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps -- selectedTaskId read only at fetch time
+
+  // Fetch selected task detail
+  useEffect(() => {
+    if (activeTab !== "tasks" || !selectedTaskId) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${selectedTaskId}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok || cancelled) return;
+        const detail: TaskView = await res.json();
+        if (!cancelled) setSelectedTask(detail);
+      } catch { /* silent — detail refresh is best-effort */ }
+    })();
+    return () => { cancelled = true; controller.abort(); };
+  }, [activeTab, selectedTaskId, serverId]);
+
+  // Auto-poll non-terminal tasks
+  useEffect(() => {
+    if (activeTab !== "tasks") return;
+    const hasActiveTasks = tasks.some((t) => t.status === "working" || t.status === "input_required");
+    if (!hasActiveTasks) return;
+
+    const intervalMs = tasks.reduce((min, t) => {
+      const suggested = t.suggestedPollIntervalMs ?? t.pollInterval ?? 2000;
+      return Math.min(min, Math.max(suggested, 500));
+    }, 2000);
+
+    const timer = setInterval(() => {
+      void fetchTasks();
+      if (selectedTaskId) void fetchTaskDetail(selectedTaskId);
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [activeTab, tasks, selectedTaskId, fetchTasks, fetchTaskDetail]);
+
+  // Cancel task
+  const handleCancelTask = useCallback(async (taskId: string) => {
+    setCancellingTask(true);
+    try {
+      const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${taskId}/cancel`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setTasksError(data.message ?? `Failed to cancel task (${res.status})`);
+      } else {
+        // Refresh after cancel
+        await fetchTasks();
+        if (selectedTaskId) await fetchTaskDetail(selectedTaskId);
+      }
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : "Failed to cancel task");
+    } finally {
+      setCancellingTask(false);
+    }
+  }, [serverId, selectedTaskId, fetchTasks, fetchTaskDetail]);
 
   // Active tool: picked one, else first available, else null.
   const tool: McpToolSnapshot | null = useMemo(() => {
@@ -354,6 +590,8 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   // Determine which tabs to show based on server capabilities
   const hasPrompts = serverCapabilities?.prompts === true || serverPrompts.length > 0;
   const hasResources = serverCapabilities?.resources === true || serverResources.length > 0;
+  const hasTasksCapability = serverCapabilities?.tasks === true
+    || (serverCapabilities?.extensions as Record<string, unknown>)?.["io.modelcontextprotocol/tasks"] !== undefined;
 
   // Execute tool
   const activeToolName: string | null = tool?.name ?? null;
@@ -623,7 +861,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={activeTab === "tools" ? "Search tools…" : activeTab === "prompts" ? "Search prompts…" : "Search resources…"}
+                placeholder={activeTab === "tools" ? "Search tools…" : activeTab === "prompts" ? "Search prompts…" : activeTab === "resources" ? "Search resources…" : "Filter tasks…"}
                 aria-label={`Search ${activeTab}`}
                 data-testid="mcp-tool-search-input"
                 className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
@@ -679,6 +917,20 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                   )}
                 >
                   Resources ({serverResources.length})
+                </button>
+              )}
+              {hasTasksCapability && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("tasks")}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    activeTab === "tasks"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+                  )}
+                >
+                  Tasks ({tasks.length})
                 </button>
               )}
             </div>
@@ -837,224 +1089,380 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 )}
               </>
             )}
+            {activeTab === "tasks" && (
+              <>
+                {/* Refresh button */}
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
+                  <span className="text-[10px] text-muted-foreground">
+                    {loadingTasks ? "Loading…" : `${tasks.length} task${tasks.length !== 1 ? "s" : ""}`}
+                    {tasksNextCursor && " (more available)"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchTasks()}
+                    disabled={loadingTasks}
+                    className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
+                    title="Refresh tasks"
+                  >
+                    <RefreshCw className={cn("h-3 w-3", loadingTasks && "animate-spin")} />
+                  </button>
+                </div>
+                {tasksError && (
+                  <div className="px-3 py-2 text-xs text-destructive bg-destructive/10 border-b border-destructive/20">
+                    {tasksError}
+                  </div>
+                )}
+                {tasks.length === 0 && !loadingTasks ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No active tasks on this server.
+                  </div>
+                ) : (
+                  <ul className="flex flex-col">
+                    {tasks.map((t) => {
+                      const active = t.taskId === selectedTaskId;
+                      return (
+                        <li key={t.taskId}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTaskId(t.taskId)}
+                            aria-pressed={active}
+                            className={cn(
+                              "block w-full border-b border-border/40 px-3 py-2 text-left transition-colors",
+                              active ? "bg-accent" : "hover:bg-muted/50",
+                            )}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <TaskStatusBadge status={t.status} />
+                              <span
+                                className={cn(
+                                  "truncate font-mono text-xs",
+                                  active ? "text-accent-foreground" : "text-foreground/90",
+                                )}
+                              >
+                                {t.taskId.length > 16 ? `${t.taskId.slice(0, 16)}…` : t.taskId}
+                              </span>
+                            </div>
+                            {t.statusMessage && (
+                              <div
+                                className={cn(
+                                  "mt-0.5 line-clamp-1 text-[11px]",
+                                  active ? "text-accent-foreground/70" : "text-muted-foreground",
+                                )}
+                              >
+                                {t.statusMessage}
+                              </div>
+                            )}
+                            {t.createdAt && (
+                              <div className="mt-0.5 text-[10px] text-muted-foreground/60">
+                                {formatTimestamp(new Date(t.createdAt), tz, "datetimePrecise")}
+                              </div>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </>
+            )}
           </ScrollArea>
         </div>
 
         {/* Input column */}
         <div className="flex flex-[3] flex-col border-r min-w-0">
-          {/* Input-mode tabs + Execute. */}
-          <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
-            <button
-              type="button"
-              onClick={() => setInput((prev) => ({ ...prev, activeTab: "form" }))}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                input.activeTab === "form"
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Form
-            </button>
-            <button
-              type="button"
-              onClick={() => setInput((prev) => ({ ...prev, activeTab: "json" }))}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                input.activeTab === "json"
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Json
-            </button>
-            <button
-              type="button"
-              onClick={() => setInput((prev) => ({ ...prev, activeTab: "schema" }))}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                input.activeTab === "schema"
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Schema
-            </button>
-            <div className="ml-auto flex items-center gap-1 relative z-10">
-              <Button
-                size="sm"
-                className="h-6 gap-1.5 px-2.5 text-xs"
-                onClick={handleExecute}
-                disabled={exec.executing || executeDisabled}
-                data-testid="mcp-run-button"
-              >
-                {exec.executing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
+          {activeTab === "tasks" ? (
+            <>
+              {/* Task detail header */}
+              <div className="flex items-center border-b bg-muted/40 px-3 py-1.5">
+                <span className="text-xs font-medium text-foreground">Task Detail</span>
+                {selectedTask && (selectedTask.status === "working" || selectedTask.status === "input_required") && (
+                  <div className="ml-auto">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-6 gap-1 px-2 text-xs"
+                      onClick={() => void handleCancelTask(selectedTask.taskId)}
+                      disabled={cancellingTask}
+                    >
+                      {cancellingTask ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Ban className="h-3 w-3" />
+                      )}
+                      Cancel
+                    </Button>
+                  </div>
                 )}
-                Run
-              </Button>
-            </div>
-          </div>
-
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3 h-full flex flex-col">
-              {tool === null ? (
-                <p className="text-xs text-muted-foreground">
-                  {serverTools.length === 0
-                    ? "This server has no discovered tools. Refresh it from the left panel to scan."
-                    : "Pick a tool from the list to start testing."}
-                </p>
-              ) : input.activeTab === "form" ? (
-                Object.keys(schema).length === 0 ? (
-                  <p className="text-xs text-muted-foreground">This tool takes no input parameters.</p>
-                ) : (
-                  <Form
-                    schema={schema}
-                    uiSchema={uiSchema}
-                    validator={validator}
-                    formData={input.formData}
-                    onChange={(e) => {
-                      const fd = e.formData ?? {};
-                      setInput((prev) => ({ ...prev, formData: fd, jsonInput: JSON.stringify(fd, null, 2) }));
-                    }}
-                    templates={{ FieldTemplate: CustomFieldTemplate }}
-                  >
-                    {/* Hide default submit button */}
-                    <></>
-                  </Form>
-                )
-              ) : input.activeTab === "json" ? (
-                <div className="flex flex-col flex-1 min-h-0 space-y-2">
-                  <Textarea
-                    value={input.jsonInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      let err: string | null = null;
-                      let parsed: Record<string, unknown> | undefined;
-                      try { parsed = JSON.parse(v); } catch { err = "Invalid JSON"; }
-                      setInput((prev) => ({
-                        ...prev,
-                        jsonInput: v,
-                        jsonError: err,
-                        ...(parsed !== undefined ? { formData: parsed } : {}),
-                      }));
-                    }}
-                    className="flex-1 resize-none font-mono text-xs"
-                    placeholder='{ "key": "value" }'
-                  />
-                  {input.jsonError && <p className="text-xs text-destructive shrink-0">{input.jsonError}</p>}
+              </div>
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="p-3">
+                  {selectedTask ? (
+                    <TaskDetail task={selectedTask} tz={tz} />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {loadingTasks ? "Loading task…" : "Select a task from the list."}
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <JsonView data={schema} defaultExpandDepth={4} />
-              )}
-            </div>
-          </ScrollArea>
+              </ScrollArea>
+            </>
+          ) : (
+            <>
+              {/* Input-mode tabs + Execute. */}
+              <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+                <button
+                  type="button"
+                  onClick={() => setInput((prev) => ({ ...prev, activeTab: "form" }))}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                    input.activeTab === "form"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Form
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInput((prev) => ({ ...prev, activeTab: "json" }))}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                    input.activeTab === "json"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Json
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInput((prev) => ({ ...prev, activeTab: "schema" }))}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                    input.activeTab === "schema"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Schema
+                </button>
+                <div className="ml-auto flex items-center gap-1 relative z-10">
+                  <Button
+                    size="sm"
+                    className="h-6 gap-1.5 px-2.5 text-xs"
+                    onClick={handleExecute}
+                    disabled={exec.executing || executeDisabled}
+                    data-testid="mcp-run-button"
+                  >
+                    {exec.executing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
+                    )}
+                    Run
+                  </Button>
+                </div>
+              </div>
+
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="p-3 h-full flex flex-col">
+                  {tool === null ? (
+                    <p className="text-xs text-muted-foreground">
+                      {serverTools.length === 0
+                        ? "This server has no discovered tools. Refresh it from the left panel to scan."
+                        : "Pick a tool from the list to start testing."}
+                    </p>
+                  ) : input.activeTab === "form" ? (
+                    Object.keys(schema).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">This tool takes no input parameters.</p>
+                    ) : (
+                      <Form
+                        schema={schema}
+                        uiSchema={uiSchema}
+                        validator={validator}
+                        formData={input.formData}
+                        onChange={(e) => {
+                          const fd = e.formData ?? {};
+                          setInput((prev) => ({ ...prev, formData: fd, jsonInput: JSON.stringify(fd, null, 2) }));
+                        }}
+                        templates={{ FieldTemplate: CustomFieldTemplate }}
+                      >
+                        {/* Hide default submit button */}
+                        <></>
+                      </Form>
+                    )
+                  ) : input.activeTab === "json" ? (
+                    <div className="flex flex-col flex-1 min-h-0 space-y-2">
+                      <Textarea
+                        value={input.jsonInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          let err: string | null = null;
+                          let parsed: Record<string, unknown> | undefined;
+                          try { parsed = JSON.parse(v); } catch { err = "Invalid JSON"; }
+                          setInput((prev) => ({
+                            ...prev,
+                            jsonInput: v,
+                            jsonError: err,
+                            ...(parsed !== undefined ? { formData: parsed } : {}),
+                          }));
+                        }}
+                        className="flex-1 resize-none font-mono text-xs"
+                        placeholder='{ "key": "value" }'
+                      />
+                      {input.jsonError && <p className="text-xs text-destructive shrink-0">{input.jsonError}</p>}
+                    </div>
+                  ) : (
+                    <JsonView data={schema} defaultExpandDepth={4} />
+                  )}
+                </div>
+              </ScrollArea>
+            </>
+          )}
         </div>
 
         {/* Right: Result */}
         <div className="flex flex-[4] flex-col min-w-0">
-          <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
-            {/* Left: Save as case */}
-            <div className="flex items-center">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 gap-1.5 rounded-sm px-2.5 text-xs"
-                onClick={() => setSaveDialogOpen(true)}
-                disabled={
-                  exec.executing ||
-                  exec.result === null ||
-                  exec.execError !== null ||
-                  exec.executedArgs === null ||
-                  activeToolName === null
-                }
-                title="Save this call as a verification case"
-              >
-                <Save className="h-3.5 w-3.5" />
-                Save as case
-              </Button>
-            </div>
-            
-            {/* Center: Tabs */}
-            <div className="flex-1 flex justify-center items-stretch">
-              <button
-                type="button"
-                onClick={() => setResultTab("view")}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                  resultTab === "view"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Result View
-              </button>
-              <button
-                type="button"
-                onClick={() => setResultTab("raw")}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                  resultTab === "raw"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Raw Json
-              </button>
-            </div>
-
-            {/* Right: Copy */}
-            <div className="flex items-center gap-2">
-              {(durationStr || resultSizeStr) && (
-                <span className="text-[10px] tabular-nums text-muted-foreground">
-                  {[durationStr, resultSizeStr].filter(Boolean).join(" | ")}
-                </span>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0 rounded-sm"
-                onClick={async () => {
-                  if (!exec.result) return;
-                  try {
-                    await navigator.clipboard.writeText(JSON.stringify(exec.result, null, 2));
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  } catch { /* clipboard unavailable */ }
-                }}
-                disabled={exec.result === null}
-                title="Copy JSON"
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
-          </div>
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3">
-              {exec.execError ? (
-                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
-                  <p className="text-xs text-destructive">{exec.execError}</p>
-                </div>
-              ) : exec.result !== null ? (
-                <>
-                  <div className={cn(resultTab !== "view" && "hidden")}>
-                    <JsonView data={exec.result} defaultExpandDepth={3} />
+          {activeTab === "tasks" ? (
+            <>
+              <div className="flex items-center border-b bg-muted/40 px-3 py-1.5">
+                <span className="text-xs font-medium text-foreground">Raw JSON</span>
+                {selectedTask && (
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 w-6 p-0 rounded-sm"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(JSON.stringify(selectedTask, null, 2));
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        } catch { /* clipboard unavailable */ }
+                      }}
+                      title="Copy JSON"
+                    >
+                      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
                   </div>
-                  <div className={cn(resultTab !== "raw" && "hidden")}>
+                )}
+              </div>
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="p-3">
+                  {selectedTask ? (
                     <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
-                      {JSON.stringify(exec.result, null, 2)}
+                      {JSON.stringify(selectedTask, null, 2)}
                     </pre>
-                  </div>
-                </>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Click Execute to run the tool.
-                </p>
-              )}
-            </div>
-          </ScrollArea>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Select a task to view raw data.</p>
+                  )}
+                </div>
+              </ScrollArea>
+            </>
+          ) : (
+            <>
+              <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+                {/* Left: Save as case */}
+                <div className="flex items-center">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 gap-1.5 rounded-sm px-2.5 text-xs"
+                    onClick={() => setSaveDialogOpen(true)}
+                    disabled={
+                      exec.executing ||
+                      exec.result === null ||
+                      exec.execError !== null ||
+                      exec.executedArgs === null ||
+                      activeToolName === null
+                    }
+                    title="Save this call as a verification case"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    Save as case
+                  </Button>
+                </div>
+                
+                {/* Center: Tabs */}
+                <div className="flex-1 flex justify-center items-stretch">
+                  <button
+                    type="button"
+                    onClick={() => setResultTab("view")}
+                    className={cn(
+                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                      resultTab === "view"
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Result View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResultTab("raw")}
+                    className={cn(
+                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                      resultTab === "raw"
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Raw Json
+                  </button>
+                </div>
+
+                {/* Right: Copy */}
+                <div className="flex items-center gap-2">
+                  {(durationStr || resultSizeStr) && (
+                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                      {[durationStr, resultSizeStr].filter(Boolean).join(" | ")}
+                    </span>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 w-6 p-0 rounded-sm"
+                    onClick={async () => {
+                      if (!exec.result) return;
+                      try {
+                        await navigator.clipboard.writeText(JSON.stringify(exec.result, null, 2));
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      } catch { /* clipboard unavailable */ }
+                    }}
+                    disabled={exec.result === null}
+                    title="Copy JSON"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="p-3">
+                  {exec.execError ? (
+                    <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                      <p className="text-xs text-destructive">{exec.execError}</p>
+                    </div>
+                  ) : exec.result !== null ? (
+                    <>
+                      <div className={cn(resultTab !== "view" && "hidden")}>
+                        <JsonView data={exec.result} defaultExpandDepth={3} />
+                      </div>
+                      <div className={cn(resultTab !== "raw" && "hidden")}>
+                        <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                          {JSON.stringify(exec.result, null, 2)}
+                        </pre>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Click Execute to run the tool.
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </>
+          )}
         </div>
       </div>
 
