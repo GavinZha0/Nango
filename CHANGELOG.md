@@ -5,8 +5,8 @@
 
 ### Bug Fixes
 
-* **mcp:** capability issue ([6c85916](https://github.com/GavinZha0/Nango/commit/6c859168f4ae1f66624deac923be384afb1f30f1))
-* **mcp:** task list ([8cae145](https://github.com/GavinZha0/Nango/commit/8cae14513d6c02c2192d8d0297967768329f906f))
+* **mcp:** capability issue ([6c85916](https://github.com/GavinZha0/Nango/commit/6c859168f4ae1f66624deac923be384afb1f30f1)) by @GavinZha0
+* **mcp:** task list ([8cae145](https://github.com/GavinZha0/Nango/commit/8cae14513d6c02c2192d8d0297967768329f906f)) by @GavinZha0
 
 ## [0.30.0](https://github.com/GavinZha0/Nango/compare/v0.29.0...v0.30.0) (2026-11-05)
 
