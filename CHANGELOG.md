@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/GavinZha0/Nango/compare/v0.29.0...v0.30.0) (2026-11-05)
+
+
+### Features
+
+* **mcp:** SDK v2 upgrade with version negotiation and expanded capabilities ([99c5fc8](https://github.com/GavinZha0/Nango/commit/99c5fc806da7bf2dd17c1c2b99e814d90e779711))
+
 ## [0.29.0](https://github.com/GavinZha0/Nango/compare/v0.28.0...v0.29.0) (2026-10-30)
 
 
