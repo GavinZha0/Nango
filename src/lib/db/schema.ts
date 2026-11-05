@@ -753,6 +753,16 @@ export const McpServerTable = pgTable("mcp_server", {
    *  LLMs how to use the server. Shown on the server detail view. */
   serverInstructions: text("server_instructions"),
 
+  // MCP protocol negotiation results (populated by /api/mcp-servers/[id]/discover).
+  // `protocolEra` is 'modern' for 2026-07-28+ servers, 'legacy' for 2025-era.
+  // `serverCapabilities` is the raw capabilities object from initialize.
+  // `prompts` and `resources` are snapshots from listPrompts/listResources.
+  protocolEra: text("protocol_era"),
+  protocolVersion: text("protocol_version"),
+  serverCapabilities: jsonb("server_capabilities").$type<Record<string, unknown>>(),
+  prompts: jsonb("prompts").$type<McpPromptSnapshot[]>(),
+  resources: jsonb("resources").$type<McpResourceSnapshot[]>(),
+
   /** Optional user-defined group name for categorization in the left panel. */
   group: text("group"),
 
@@ -1257,7 +1267,32 @@ export interface McpToolSnapshot {
   description?: string;
   /** Raw input_schema returned by the MCP server (JSON Schema object). */
   input_schema?: Record<string, unknown>;
+  /** Execution-related metadata (MCP V2). */
+  execution?: {
+    /** Task support mode: "optional" | "required" | "forbidden" */
+    taskSupport?: "optional" | "required" | "forbidden";
+  };
   enabled: boolean;
+}
+
+/** A single prompt entry from the MCP server's listPrompts response. */
+export interface McpPromptSnapshot {
+  name: string;
+  description?: string;
+  /** Prompt arguments as defined by the server. */
+  arguments?: Array<{
+    name: string;
+    description?: string;
+    required?: boolean;
+  }>;
+}
+
+/** A single resource entry from the MCP server's listResources response. */
+export interface McpResourceSnapshot {
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
 }
 
 export type McpServerEntity = typeof McpServerTable.$inferSelect;

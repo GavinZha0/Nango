@@ -41,7 +41,6 @@ export const POST = withEditor<{ id: string }>(
             name: body.toolName,
             arguments: body.args ?? {},
           },
-          undefined,
           { timeout: timeoutMs },
         ),
     });

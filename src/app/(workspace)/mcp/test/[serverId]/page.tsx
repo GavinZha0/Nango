@@ -33,7 +33,7 @@ import { withTheme } from "@rjsf/core";
 import { Theme as ShadcnTheme } from "@rjsf/shadcn";
 import validator from "@rjsf/validator-ajv8";
 import type { FieldTemplateProps } from "@rjsf/utils";
-import type { McpToolSnapshot } from "@/lib/db/schema";
+import type { McpToolSnapshot, McpPromptSnapshot, McpResourceSnapshot } from "@/lib/db/schema";
 
 const Form = withTheme(ShadcnTheme);
 
@@ -256,10 +256,14 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   // Tool metadata
   const [serverTools, setServerTools] = useState<McpToolSnapshot[]>([]);
+  const [serverPrompts, setServerPrompts] = useState<McpPromptSnapshot[]>([]);
+  const [serverResources, setServerResources] = useState<McpResourceSnapshot[]>([]);
+  const [serverCapabilities, setServerCapabilities] = useState<Record<string, unknown> | null>(null);
   const [serverName, setServerName] = useState("");
   const [loadingMeta, setLoadingMeta] = useState(true);
 
-  const [toolSearch, setToolSearch] = useState<string>("");
+  const [search, setSearch] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"tools" | "prompts" | "resources">("tools");
 
   // Selection is component-local (not in the URL) — fresh mount /
   // refresh always lands on the first tool. Keeps the URL shape
@@ -289,6 +293,14 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         if (!server || cancelled) return;
         setServerName(server.name);
         setServerTools(server.tools ?? []);
+        setServerPrompts(server.prompts ?? []);
+        setServerResources(server.resources ?? []);
+        setServerCapabilities(server.serverCapabilities ?? null);
+        // Default to tools tab, or prompts/resources if no tools
+        if ((server.tools?.length ?? 0) === 0) {
+          if ((server.prompts?.length ?? 0) > 0) setActiveTab("prompts");
+          else if ((server.resources?.length ?? 0) > 0) setActiveTab("resources");
+        }
       } catch { /* silent */ }
       if (!cancelled) setLoadingMeta(false);
     }
@@ -307,14 +319,41 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   // Case-insensitive substring search on name + description.
   const filteredTools: McpToolSnapshot[] = useMemo(() => {
-    const q: string = toolSearch.trim().toLowerCase();
+    const q: string = search.trim().toLowerCase();
     if (q.length === 0) return serverTools;
     return serverTools.filter((t) => {
       if (t.name.toLowerCase().includes(q)) return true;
       const desc: string = t.description ?? "";
       return desc.toLowerCase().includes(q);
     });
-  }, [serverTools, toolSearch]);
+  }, [serverTools, search]);
+
+  // Filter prompts by name + description
+  const filteredPrompts: McpPromptSnapshot[] = useMemo(() => {
+    const q: string = search.trim().toLowerCase();
+    if (q.length === 0) return serverPrompts;
+    return serverPrompts.filter((p) => {
+      if (p.name.toLowerCase().includes(q)) return true;
+      const desc: string = p.description ?? "";
+      return desc.toLowerCase().includes(q);
+    });
+  }, [serverPrompts, search]);
+
+  // Filter resources by name + uri + description
+  const filteredResources: McpResourceSnapshot[] = useMemo(() => {
+    const q: string = search.trim().toLowerCase();
+    if (q.length === 0) return serverResources;
+    return serverResources.filter((r) => {
+      if (r.uri.toLowerCase().includes(q)) return true;
+      if (r.name?.toLowerCase().includes(q)) return true;
+      const desc: string = r.description ?? "";
+      return desc.toLowerCase().includes(q);
+    });
+  }, [serverResources, search]);
+
+  // Determine which tabs to show based on server capabilities
+  const hasPrompts = serverCapabilities?.prompts === true || serverPrompts.length > 0;
+  const hasResources = serverCapabilities?.resources === true || serverResources.length > 0;
 
   // Execute tool
   const activeToolName: string | null = tool?.name ?? null;
@@ -575,24 +614,24 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
       {/* Three-column content (tool list + input + result). */}
       <div className="flex flex-1 min-h-0">
-        {/* Tool list — search box on top + scrollable list. */}
+        {/* Tool list — search box on top + tabs + scrollable list. */}
         <div className="flex flex-[3] flex-col border-r min-w-0">
-          <div className="border-b bg-muted/40 px-2 py-1.5">
+          <div className="border-b bg-muted/40 px-2 py-1.5 space-y-1.5">
             <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1">
               <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <input
                 type="text"
-                value={toolSearch}
-                onChange={(e) => setToolSearch(e.target.value)}
-                placeholder="Search tools…"
-                aria-label="Search tools"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={activeTab === "tools" ? "Search tools…" : activeTab === "prompts" ? "Search prompts…" : "Search resources…"}
+                aria-label={`Search ${activeTab}`}
                 data-testid="mcp-tool-search-input"
                 className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
               />
-              {toolSearch.length > 0 && (
+              {search.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setToolSearch("")}
+                  onClick={() => setSearch("")}
                   className="shrink-0 text-muted-foreground hover:text-foreground"
                   aria-label="Clear search"
                 >
@@ -600,58 +639,203 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 </button>
               )}
             </div>
+            {/* Dynamic tabs */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("tools")}
+                className={cn(
+                  "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                  activeTab === "tools"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+                )}
+              >
+                Tools ({serverTools.length})
+              </button>
+              {hasPrompts && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("prompts")}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    activeTab === "prompts"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+                  )}
+                >
+                  Prompts ({serverPrompts.length})
+                </button>
+              )}
+              {hasResources && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("resources")}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    activeTab === "resources"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+                  )}
+                >
+                  Resources ({serverResources.length})
+                </button>
+              )}
+            </div>
           </div>
           <ScrollArea className="flex-1 min-h-0">
-            {serverTools.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-muted-foreground">
-                No tools discovered yet. Refresh the server in the left panel to scan.
-              </div>
-            ) : filteredTools.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-muted-foreground">
-                No tools match &ldquo;{toolSearch}&rdquo;.
-              </div>
-            ) : (
-              <ul className="flex flex-col">
-                {filteredTools.map((t) => {
-                  const active: boolean = t.name === activeToolName;
-                  return (
-                    <li key={t.name}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectTool(t.name)}
-                        aria-pressed={active}
-                        data-testid="mcp-tool-item"
-                        data-tool-name={t.name}
-                        className={cn(
-                          "block w-full border-b border-border/40 px-3 py-2 text-left transition-colors",
-                          active
-                            ? "bg-accent"
-                            : "hover:bg-muted/50",
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "truncate font-mono text-sm font-medium",
-                            active ? "text-accent-foreground" : "text-foreground/90",
-                          )}
-                        >
-                          {t.name}
-                        </div>
-                        {t.description && (
-                          <div
+            {activeTab === "tools" && (
+              <>
+                {serverTools.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No tools discovered yet. Refresh the server in the left panel to scan.
+                  </div>
+                ) : filteredTools.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No tools match &ldquo;{search}&rdquo;.
+                  </div>
+                ) : (
+                  <ul className="flex flex-col">
+                    {filteredTools.map((t) => {
+                      const active: boolean = t.name === activeToolName;
+                      return (
+                        <li key={t.name}>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTool(t.name)}
+                            aria-pressed={active}
+                            data-testid="mcp-tool-item"
+                            data-tool-name={t.name}
                             className={cn(
-                              "mt-0.5 line-clamp-2 text-xs",
-                              active ? "text-accent-foreground/70" : "text-muted-foreground",
+                              "block w-full border-b border-border/40 px-3 py-2 text-left transition-colors",
+                              active
+                                ? "bg-accent"
+                                : "hover:bg-muted/50",
                             )}
                           >
-                            {t.description}
-                          </div>
-                        )}
-                      </button>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "truncate font-mono text-sm font-medium",
+                                  active ? "text-accent-foreground" : "text-foreground/90",
+                                )}
+                              >
+                                {t.name}
+                              </span>
+                              {t.execution?.taskSupport && t.execution.taskSupport !== "forbidden" && (
+                                <span
+                                  className="shrink-0 rounded bg-blue-500/20 px-1 py-0.5 text-[9px] font-semibold leading-none text-blue-600 dark:text-blue-400"
+                                  title={`Task support: ${t.execution.taskSupport}`}
+                                >
+                                  T
+                                </span>
+                              )}
+                            </div>
+                            {t.description && (
+                              <div
+                                className={cn(
+                                  "mt-0.5 line-clamp-2 text-xs",
+                                  active ? "text-accent-foreground/70" : "text-muted-foreground",
+                                )}
+                              >
+                                {t.description}
+                              </div>
+                            )}
+                          </button>
                     </li>
                   );
                 })}
               </ul>
+            )}
+              </>
+            )}
+            {activeTab === "prompts" && (
+              <>
+                {serverPrompts.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No prompts available.
+                  </div>
+                ) : filteredPrompts.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No prompts match &ldquo;{search}&rdquo;.
+                  </div>
+                ) : (
+                  <ul className="flex flex-col">
+                    {filteredPrompts.map((p) => (
+                      <li key={p.name}>
+                        <div
+                          className="block w-full border-b border-border/40 px-3 py-2 text-left"
+                        >
+                          <div className="truncate font-mono text-sm font-medium text-foreground/90">
+                            {p.name}
+                          </div>
+                          {p.description && (
+                            <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                              {p.description}
+                            </div>
+                          )}
+                          {p.arguments && p.arguments.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {p.arguments.map((arg) => (
+                                <span
+                                  key={arg.name}
+                                  className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground"
+                                >
+                                  {arg.name}{arg.required ? "*" : ""}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+            {activeTab === "resources" && (
+              <>
+                {serverResources.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No resources available.
+                  </div>
+                ) : filteredResources.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No resources match &ldquo;{search}&rdquo;.
+                  </div>
+                ) : (
+                  <ul className="flex flex-col">
+                    {filteredResources.map((r) => (
+                      <li key={r.uri}>
+                        <div
+                          className="block w-full border-b border-border/40 px-3 py-2 text-left"
+                        >
+                          <div className="truncate font-mono text-sm font-medium text-foreground/90">
+                            {r.name || r.uri}
+                          </div>
+                          {r.name && r.uri !== r.name && (
+                            <div className="mt-0.5 truncate text-[10px] font-mono text-muted-foreground/60">
+                              {r.uri}
+                            </div>
+                          )}
+                          {r.description && (
+                            <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                              {r.description}
+                            </div>
+                          )}
+                          {r.mimeType && (
+                            <div className="mt-1">
+                              <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                                {r.mimeType}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
           </ScrollArea>
         </div>

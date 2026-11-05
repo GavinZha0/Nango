@@ -29,6 +29,13 @@
       "when": 1793322965056,
       "tag": "0003_kb_path_model",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793838243730,
+      "tag": "0004_mcp_capabilities",
+      "breakpoints": true
     }
   ]
 }

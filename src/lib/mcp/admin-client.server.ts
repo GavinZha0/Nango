@@ -7,15 +7,18 @@
 import "server-only";
 
 import { eq } from "drizzle-orm";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  Client,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 
 import { db } from "@/lib/db";
 import { McpServerTable, type McpServerEntity } from "@/lib/db/schema";
 import { getCredentialFieldsById } from "@/lib/credentials/lookup";
 import { getOAuthAccessToken } from "@/lib/credentials/oauth-token-manager";
 import { logger } from "@/lib/observability/logger";
+import { getConfig } from "@/lib/config";
 import { ApiError } from "@/lib/http/route-handlers";
 
 /**
@@ -116,7 +119,11 @@ export async function withMcpAdminClient<T>(opts: {
 
   let client: Client | null = null;
   try {
-    client = new Client({ name: opts.clientName, version: "1.0.0" });
+    const negotiationMode = getConfig("mcp.version_negotiation", "auto");
+    client = new Client(
+      { name: opts.clientName, version: "1.0.0" },
+      { versionNegotiation: { mode: negotiationMode as "auto" | "legacy" } },
+    );
     await client.connect(transport);
     return await opts.fn({ client, server });
   } catch (err) {

@@ -35,7 +35,7 @@ const { clientConnectMock, clientCloseMock } = vi.hoisted(() => ({
   clientCloseMock: vi.fn(),
 }));
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
+vi.mock("@modelcontextprotocol/client", () => {
   return {
     Client: function MockClient() {
       return {
@@ -43,16 +43,10 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
         close: clientCloseMock,
       };
     },
+    SSEClientTransport: vi.fn(),
+    StreamableHTTPClientTransport: vi.fn(),
   };
 });
-
-vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
-  SSEClientTransport: vi.fn(),
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
-  StreamableHTTPClientTransport: vi.fn(),
-}));
 
 import { buildMcpHeaders, withMcpAdminClient } from "@/lib/mcp/admin-client.server";
 import { ApiError } from "@/lib/http/route-handlers";

@@ -5,26 +5,29 @@
  * CopilotKit's `mcpClients` integration can spread them into
  * `streamText.tools`.
  *
- * WARNING: do not "simplify" by swapping back to `@ai-sdk/mcp`. Its
- * 1.x line mutates `transport.protocolVersion` directly, which
- * `@modelcontextprotocol/sdk` >= 1.29 forbids (getter-only); the
- * 2.x line is ai-sdk-v4 only. The hand-rolled wrapper below sits on
- * the official MCP SDK and bypasses both traps.
+ * Uses `@modelcontextprotocol/client` (v2) for the upstream MCP
+ * connection. CopilotKit consumes only the `MCPClientProvider`
+ * interface (`tools()` → `ToolSet`) and is agnostic to the underlying
+ * SDK version — do NOT swap to `@ai-sdk/mcp`: its 1.x line mutates
+ * `transport.protocolVersion` directly, which the MCP SDK forbids
+ * (getter-only), and its 2.x line requires ai-sdk v4.
  *
  * See docs/builtin-runtime.md.
  */
 
 import "server-only";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  Client,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 
 import { normalizeAndDeduplicateMcpResult } from "@/lib/mcp/tool-result-utils";
 import { dynamicTool, jsonSchema } from "ai";
 import type { MCPClientProvider } from "@/lib/copilot/index.server";
 
-import { getConfigMs } from "@/lib/config";
+import { getConfig, getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 
 const DEFAULT_DISCOVERY_TIMEOUT_S = 5;
@@ -220,7 +223,11 @@ async function connectAndList(
           requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
         });
 
-  const client = new Client({ name: "nango-builtin-runtime", version: "1.0.0" });
+  const negotiationMode = getConfig("mcp.version_negotiation", "auto");
+  const client = new Client(
+    { name: "nango-builtin-runtime", version: "1.0.0" },
+    { versionNegotiation: { mode: negotiationMode as "auto" | "legacy" } },
+  );
   await client.connect(transport);
   try {
     const result = await client.listTools();
@@ -279,7 +286,6 @@ function wrapTools(
             name: raw.name,
             arguments: (args ?? {}) as Record<string, unknown>,
           },
-          undefined,
           { timeout: timeoutMs },
         );
 

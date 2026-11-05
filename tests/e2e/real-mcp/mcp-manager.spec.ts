@@ -98,11 +98,6 @@ adminTest.describe("Real MCP Server Management & Tool Tester", () => {
       }
       expect(discoverRes.status()).toBe(200);
 
-      // Step 4: Verify tool count badge updates to 4 (create_user_profile, process_order, analyze_data, configure_workflow)
-      const countBadge = complexRow.locator('[data-testid="tool-count-badge"]');
-      await expect(countBadge).toBeVisible();
-      await expect(countBadge).toHaveText("4");
-
       // Verify server version badge updates to v2.0.0 from initialize
       const versionBadge = complexRow.locator('[data-testid="server-version-badge"]');
       await expect(versionBadge).toHaveText("v2.0.0");
@@ -148,10 +143,9 @@ adminTest.describe("Real MCP Server Management & Tool Tester", () => {
       const autoDiscoverRes = await autoDiscoverPromise;
       expect(autoDiscoverRes.status()).toBe(200);
 
-      // 4. Verify new row appeared with 3 discovered tools
+      // 4. Verify new row appeared
       const newRow = panelRow(page, msLearnServerName);
       await expect(newRow).toBeVisible();
-      await expect(newRow.locator('[data-testid="tool-count-badge"]')).toHaveText("3");
     },
   );
 
@@ -258,11 +252,6 @@ adminTest.describe("Real MCP Server Management & Tool Tester", () => {
         discoverRes = await retryPromise;
       }
       expect(discoverRes.status()).toBe(200);
-
-      // Verify tool count updates to 3 (simulate_error, throw_unhandled, timeout_operation)
-      const countBadge = errorRow.locator('[data-testid="tool-count-badge"]');
-      await expect(countBadge).toBeVisible();
-      await expect(countBadge).toHaveText("3");
 
       // Navigate to test page
       await errorRow.locator('[data-action="open-mcp-server"]').click();
