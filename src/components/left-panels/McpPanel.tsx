@@ -62,6 +62,7 @@ import { getProviderLabel } from "@/lib/constants/providers";
 import type { McpToolSnapshot } from "@/lib/db/schema";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
 import { useStoredValue } from "@/hooks/useStoredValue";
+import { McpServerInfoDialog } from "./mcp/McpServerInfoDialog";
 
 // Types
 
@@ -675,212 +676,6 @@ function McpGroupHeader({ name, count, collapsed, onToggle }: McpGroupHeaderProp
   );
 }
 
-function CapabilitiesDialog({
-  server,
-  onClose,
-}: {
-  server: McpServerRow;
-  onClose: () => void;
-}): ReactNode {
-  const caps = server.serverCapabilities ?? {};
-  const toolCount = server.tools?.length ?? 0;
-  const promptCount = server.prompts?.length ?? 0;
-  const resourceCount = server.resources?.length ?? 0;
-
-  // Parse capability details according to MCP protocol structure
-  const toolsCap = caps.tools as { listChanged?: boolean } | undefined;
-  const promptsCap = caps.prompts as { listChanged?: boolean } | undefined;
-  const resourcesCap = caps.resources as { subscribe?: boolean; listChanged?: boolean } | undefined;
-  const completionsCap = caps.completions as Record<string, unknown> | undefined;
-  const loggingCap = caps.logging as Record<string, unknown> | undefined;
-  const extensionsCap = caps.extensions as Record<string, unknown> | undefined;
-  const experimentalCap = caps.experimental as Record<string, unknown> | undefined;
-
-  // Build details string for each capability
-  const getDetails = (cap: Record<string, unknown> | undefined, keys: string[]): string => {
-    if (!cap) return "";
-    const present = keys.filter((k) => cap[k] === true);
-    return present.length > 0 ? present.join(", ") : "";
-  };
-
-  // Extension names (strip the URI prefix for display)
-  const extensionNames = extensionsCap
-    ? Object.keys(extensionsCap).map((k) => k.replace(/^io\.modelcontextprotocol\//, ""))
-    : [];
-
-  // V2 protocol implies progress and cancelled support
-  const isV2 = server.protocolEra === "modern";
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Server Capabilities</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 py-2">
-          {/* Protocol info - single line */}
-          <div className="rounded-lg border bg-muted/30 px-3 py-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Protocol</span>
-              <span className="font-medium">
-                {server.protocolEra === "modern" ? "MCP V2 (2026-07-28)" : server.protocolEra === "legacy" ? "MCP V1 (2025)" : "Unknown"}
-              </span>
-            </div>
-          </div>
-
-          {/* Resource counts - single line */}
-          <div className="flex items-center justify-center gap-4 rounded-lg border bg-muted/30 px-3 py-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold">{toolCount}</span>
-              <span className="text-xs text-muted-foreground">Tools</span>
-            </div>
-            <span className="text-muted-foreground/40">·</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold">{promptCount}</span>
-              <span className="text-xs text-muted-foreground">Prompts</span>
-            </div>
-            <span className="text-muted-foreground/40">·</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold">{resourceCount}</span>
-              <span className="text-xs text-muted-foreground">Resources</span>
-            </div>
-          </div>
-
-          {/* Capability matrix - MCP protocol defined */}
-          <div className="space-y-1.5">
-            <h4 className="text-sm font-medium">Server Capabilities</h4>
-            <div className="rounded-lg border divide-y">
-              {/* Tools */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Tools</span>
-                <div className="flex items-center gap-2">
-                  {toolsCap && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {getDetails(toolsCap as Record<string, unknown>, ["listChanged"])}
-                    </span>
-                  )}
-                  <span className={cn(
-                    "text-xs",
-                    toolsCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                  )}>
-                    {toolsCap ? "✓" : "—"}
-                  </span>
-                </div>
-              </div>
-              {/* Prompts */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Prompts</span>
-                <div className="flex items-center gap-2">
-                  {promptsCap && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {getDetails(promptsCap as Record<string, unknown>, ["listChanged"])}
-                    </span>
-                  )}
-                  <span className={cn(
-                    "text-xs",
-                    promptsCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                  )}>
-                    {promptsCap ? "✓" : "—"}
-                  </span>
-                </div>
-              </div>
-              {/* Resources */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Resources</span>
-                <div className="flex items-center gap-2">
-                  {resourcesCap && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {getDetails(resourcesCap as Record<string, unknown>, ["subscribe", "listChanged"])}
-                    </span>
-                  )}
-                  <span className={cn(
-                    "text-xs",
-                    resourcesCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                  )}>
-                    {resourcesCap ? "✓" : "—"}
-                  </span>
-                </div>
-              </div>
-              {/* Completions */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Completions</span>
-                <span className={cn(
-                  "text-xs",
-                  completionsCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                )}>
-                  {completionsCap ? "✓" : "—"}
-                </span>
-              </div>
-              {/* Logging */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Logging</span>
-                <span className={cn(
-                  "text-xs",
-                  loggingCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                )}>
-                  {loggingCap ? "✓" : "—"}
-                </span>
-              </div>
-              {/* Extensions */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Extensions</span>
-                <div className="flex items-center gap-2">
-                  {extensionNames.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {extensionNames.join(", ")}
-                    </span>
-                  )}
-                  <span className={cn(
-                    "text-xs",
-                    extensionsCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                  )}>
-                    {extensionsCap ? "✓" : "—"}
-                  </span>
-                </div>
-              </div>
-              {/* Experimental */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Experimental</span>
-                <span className={cn(
-                  "text-xs",
-                  experimentalCap ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                )}>
-                  {experimentalCap ? "✓" : "—"}
-                </span>
-              </div>
-              {/* Progress Tracking - implied by V2 */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Progress Tracking</span>
-                <span className={cn(
-                  "text-xs",
-                  isV2 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                )}>
-                  {isV2 ? "✓" : "—"}
-                </span>
-              </div>
-              {/* Request Cancellation - implied by V2 */}
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm">
-                <span className="text-xs">Request Cancellation</span>
-                <span className={cn(
-                  "text-xs",
-                  isV2 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-                )}>
-                  {isV2 ? "✓" : "—"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function ServerHeader({
   active,
   server,
@@ -909,12 +704,14 @@ function ServerHeader({
   const subtitle = server.serverDescription ?? server.serverInstructions ?? null;
   const version = server.serverVersion ?? null;
 
-  // Protocol era badge: V2 for modern (2026-07-28+), V1 for legacy
-  const protocolBadge = server.protocolEra === "modern"
-    ? { label: "V2", color: "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" }
-    : server.protocolEra === "legacy"
-      ? { label: "V1", color: "bg-amber-500/20 text-amber-600 dark:text-amber-400" }
-      : null; // No discover yet
+  // Server version badge: shows version text, colored by protocol era
+  // Green = MCP V2, gray = V1 or unknown. Clickable to open capabilities dialog.
+  const isV2 = server.protocolEra === "modern";
+  const versionBadge = version
+    ? { label: `v${version}`, color: isV2 ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground" }
+    : server.protocolEra
+      ? { label: isV2 ? "V2" : "V1", color: isV2 ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground" }
+      : null;
 
   return (
     // Two rows so the description on line 2 can use the full panel
@@ -953,28 +750,19 @@ function ServerHeader({
           >
             {server.name}
           </button>
-          {protocolBadge && (
+          {versionBadge && (
             <button
               type="button"
               onClick={() => setShowCapabilities(true)}
-              data-testid="protocol-era-badge"
+              data-testid="version-badge"
               className={cn(
                 "ml-1 rounded-full px-1.5 py-0.5 text-[10px] leading-none shrink-0 cursor-pointer hover:opacity-80 transition-opacity",
-                protocolBadge.color,
+                versionBadge.color,
               )}
               title="Click to view server capabilities"
             >
-              {protocolBadge.label}
+              {versionBadge.label}
             </button>
-          )}
-          {version && (
-            <span
-              data-testid="server-version-badge"
-              className="text-xs font-normal text-muted-foreground/60 truncate min-w-0 shrink"
-              title={`v${version}`}
-            >
-              v{version}
-            </span>
           )}
         </div>
 
@@ -1089,9 +877,9 @@ function ServerHeader({
         {subtitle ?? "\u00A0"}
       </p>
 
-      {/* Capabilities dialog */}
+      {/* Server info dialog */}
       {showCapabilities && (
-        <CapabilitiesDialog
+        <McpServerInfoDialog
           server={server}
           onClose={() => setShowCapabilities(false)}
         />

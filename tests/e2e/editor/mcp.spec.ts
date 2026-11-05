@@ -24,7 +24,7 @@ editorTest.describe("MCP Page", () => {
     await expect(baseRow).toHaveAttribute("data-visibility", "public");
 
     // Version badge (v1.0.0)
-    await expect(baseRow.locator('[data-testid="server-version-badge"]')).toHaveText("v1.0.0");
+    await expect(baseRow.locator('[data-testid="version-badge"]')).toHaveText("v1.0.0");
 
     // Verify row actions for editor on public base server created by admin:
     // Editors can inspect and refresh public resources, but RBAC strictly forbids

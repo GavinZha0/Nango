@@ -20,3 +20,5 @@ allowBuilds:
 
   # Telemetry — explicitly refused.
   "@scarf/scarf": false
+minimumReleaseAgeExclude:
+  - '@modelcontextprotocol/ext-tasks@0.2.3'

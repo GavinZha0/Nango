@@ -44,6 +44,9 @@ importers:
       '@modelcontextprotocol/client':
         specifier: ^2.4.0
         version: 2.4.0
+      '@modelcontextprotocol/ext-tasks':
+        specifier: ^0.2.3
+        version: 0.2.3(@modelcontextprotocol/client@2.4.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(@cfworker/json-schema@4.1.6)(supports-color@7.2.0)(zod@4.6.7)
@@ -1849,6 +1852,14 @@ packages:
       react:
         optional: true
       react-dom:
+        optional: true
+
+  '@modelcontextprotocol/ext-tasks@0.2.3':
+    resolution: {integrity: sha512-MZKxyGKXDyZuc54GlnvzYBecBAlKNlYI/WgrTuIXLKV6h3ebDZU2sTpQpe7kKgKLJz0TTDIxmnM7HAmXL0GOcA==}
+    peerDependencies:
+      '@modelcontextprotocol/client': ^2.2.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/client':
         optional: true
 
   '@modelcontextprotocol/sdk@1.32.2':
@@ -9359,6 +9370,12 @@ snapshots:
     optionalDependencies:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
+
+  '@modelcontextprotocol/ext-tasks@0.2.3(@modelcontextprotocol/client@2.4.0)':
+    dependencies:
+      zod: 4.6.7
+    optionalDependencies:
+      '@modelcontextprotocol/client': 2.4.0
 
   '@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.6)(supports-color@7.2.0)(zod@3.25.76)':
     dependencies:

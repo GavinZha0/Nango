@@ -99,7 +99,7 @@ adminTest.describe("Real MCP Server Management & Tool Tester", () => {
       expect(discoverRes.status()).toBe(200);
 
       // Verify server version badge updates to v2.0.0 from initialize
-      const versionBadge = complexRow.locator('[data-testid="server-version-badge"]');
+      const versionBadge = complexRow.locator('[data-testid="version-badge"]');
       await expect(versionBadge).toHaveText("v2.0.0");
     },
   );
