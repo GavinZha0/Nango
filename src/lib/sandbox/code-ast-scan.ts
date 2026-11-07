@@ -14,6 +14,10 @@ import Parser from "web-tree-sitter";
 import type { StaticScanViolation } from "./static-scan";
 
 // QUIRK: web-tree-sitter WASM parsers are initialised lazily per process.
+// Keep web-tree-sitter pinned to 0.22.6: tree-sitter-wasms@0.1.13 ships
+// prebuilt .wasm grammars with the legacy Emscripten "dylink" custom section,
+// whereas web-tree-sitter >= 0.23 strictly requires "dylink.0" in
+// getDylinkMetadata() and fails to load them at runtime.
 let isParserInitialized = false;
 let pythonLanguage: Parser.Language | null = null;
 let jsLanguage: Parser.Language | null = null;

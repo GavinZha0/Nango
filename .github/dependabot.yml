@@ -49,6 +49,9 @@ updates:
       # bumping the Docker base image causes type-passes-but-runtime-crashes.
       # Upgrade in lockstep with Dockerfile node:N → docs/docker-deployment.md §3.4.
       - dependency-name: "@types/node"
+      # web-tree-sitter >= 0.23 requires the "dylink.0" WASM section and refuses
+      # the legacy "dylink" grammars shipped by tree-sitter-wasms@0.1.13.
+      - dependency-name: "web-tree-sitter"
     groups:
       drizzle:
         patterns:
