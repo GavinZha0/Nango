@@ -5,6 +5,8 @@ import {
   serializeCollapsedGroups,
   groupMcpServers,
   findExistingGroupMatch,
+  parseStdioArgs,
+  formatStdioArgs,
   SSR_EMPTY_SET,
 } from "@/components/left-panels/McpPanel";
 
@@ -149,5 +151,35 @@ describe("McpPanel - mcpGroupSchema validation (shared from validation.ts)", () 
   it("rejects group names exceeding 100 characters", () => {
     expect(() => mcpGroupSchema.parse("a".repeat(101))).toThrow("Group name must not exceed 100 characters");
     expect(mcpGroupSchema.parse("a".repeat(100))).toBe("a".repeat(100));
+  });
+});
+
+describe("McpPanel - parseStdioArgs & formatStdioArgs", () => {
+  it("returns null for empty or whitespace-only args", () => {
+    expect(parseStdioArgs("")).toBeNull();
+    expect(parseStdioArgs("   ")).toBeNull();
+  });
+
+  it("parses simple space-separated arguments and quoted paths", () => {
+    expect(parseStdioArgs("-y @playwright/mcp@latest --headless")).toEqual([
+      "-y",
+      "@playwright/mcp@latest",
+      "--headless",
+    ]);
+    expect(
+      parseStdioArgs('-y @modelcontextprotocol/server-filesystem "C:\\Users\\My User\\Docs"'),
+    ).toEqual([
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "C:\\Users\\My User\\Docs",
+    ]);
+  });
+
+  it("formats args array back into a display string", () => {
+    expect(formatStdioArgs(null)).toBe("");
+    expect(formatStdioArgs([])).toBe("");
+    expect(
+      formatStdioArgs(["-y", "@playwright/mcp@latest", "C:\\My Folder\\data"]),
+    ).toBe('-y @playwright/mcp@latest "C:\\My Folder\\data"');
   });
 });

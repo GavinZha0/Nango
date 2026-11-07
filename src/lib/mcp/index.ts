@@ -13,6 +13,7 @@ import { McpServerTable } from "@/lib/db/schema";
 
 import { buildMcpHeaders } from "./admin-client.server";
 import { McpProviderPool, type McpServerConfig } from "./provider-pool";
+import { buildMcpStdioEnv, isStdioMcpAllowed } from "./stdio-spawn.server";
 
 /**
  * Resolve an MCP server's config from DB, materializing auth headers.
@@ -43,6 +44,11 @@ async function loadMcpServerConfig(
       headers: McpServerTable.headers,
       credentialId: McpServerTable.credentialId,
       credentialHeader: McpServerTable.credentialHeader,
+      command: McpServerTable.command,
+      args: McpServerTable.args,
+      env: McpServerTable.env,
+      cwd: McpServerTable.cwd,
+      credentialEnvName: McpServerTable.credentialEnvName,
     })
     .from(McpServerTable)
     .where(
@@ -52,6 +58,27 @@ async function loadMcpServerConfig(
 
   const row = rows[0];
   if (!row) return null;
+
+  if (row.type === "stdio") {
+    if (!isStdioMcpAllowed() || !row.command?.trim()) {
+      return null;
+    }
+    const env = await buildMcpStdioEnv({
+      env: row.env,
+      credentialId: row.credentialId,
+      credentialEnvName: row.credentialEnvName,
+    });
+    return {
+      serverId: row.id,
+      label: row.name ?? row.id,
+      type: "stdio",
+      url: "",
+      command: row.command.trim(),
+      args: row.args ?? undefined,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      cwd: row.cwd ?? undefined,
+    };
+  }
 
   if (row.type !== "sse" && row.type !== "http") {
     return null;

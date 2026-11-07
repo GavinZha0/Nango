@@ -21,6 +21,11 @@ import { getOAuthAccessToken } from "@/lib/credentials/oauth-token-manager";
 import { logger } from "@/lib/observability/logger";
 import { getConfig } from "@/lib/config";
 import { ApiError } from "@/lib/http/route-handlers";
+import {
+  buildMcpStdioEnv,
+  createStdioTransport,
+  isStdioMcpAllowed,
+} from "@/lib/mcp/stdio-spawn.server";
 
 /**
  * Outbound header map for an MCP server connection. Header NAME is
@@ -111,12 +116,45 @@ export async function withMcpAdminClient<T>(opts: {
     throw new ApiError("NOT_FOUND", 404, "Server not found.");
   }
 
-  const headers = await buildMcpHeaders(server);
-  const transport = server.type === "sse"
-    ? new SSEClientTransport(new URL(server.url), { requestInit: { headers } })
-    : new StreamableHTTPClientTransport(new URL(server.url), {
-        requestInit: { headers },
-      });
+  let transport:
+    | SSEClientTransport
+    | StreamableHTTPClientTransport
+    | ReturnType<typeof createStdioTransport>;
+
+  if (server.type === "stdio") {
+    if (!isStdioMcpAllowed()) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "Stdio MCP servers are disabled in this environment (set NANGO_ALLOW_STDIO_MCP=true or run in Nango Desktop).",
+      );
+    }
+    if (!server.command?.trim()) {
+      throw new ApiError(
+        "VALIDATION_FAILED",
+        400,
+        "Stdio MCP server is missing an executable command.",
+      );
+    }
+    const env = await buildMcpStdioEnv(server);
+    transport = createStdioTransport({
+      label: server.name,
+      command: server.command.trim(),
+      args: server.args ?? undefined,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      cwd: server.cwd ?? undefined,
+    });
+  } else {
+    const headers = await buildMcpHeaders(server);
+    transport =
+      server.type === "sse"
+        ? new SSEClientTransport(new URL(server.url), {
+            requestInit: { headers },
+          })
+        : new StreamableHTTPClientTransport(new URL(server.url), {
+            requestInit: { headers },
+          });
+  }
 
   let client: Client | null = null;
   try {

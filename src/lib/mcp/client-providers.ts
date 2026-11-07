@@ -24,6 +24,7 @@ import {
 } from "@modelcontextprotocol/client";
 
 import { normalizeAndDeduplicateMcpResult } from "@/lib/mcp/tool-result-utils";
+import { createStdioTransport } from "@/lib/mcp/stdio-spawn.server";
 import { dynamicTool, jsonSchema } from "ai";
 import type { MCPClientProvider } from "@/lib/copilot/index.server";
 
@@ -31,15 +32,24 @@ import { getConfig, getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 
 const DEFAULT_DISCOVERY_TIMEOUT_S = 5;
+const DEFAULT_STDIO_DISCOVERY_TIMEOUT_S = 120;
 const DEFAULT_EXECUTION_TIMEOUT_S = 60;
 
 export interface GracefulMcpProviderConfig {
   /** Server display name used in log lines. */
   label: string;
-  type: "sse" | "http";
-  url: string;
-  /** Headers to attach to the upstream connection. */
+  type: "sse" | "http" | "stdio";
+  url?: string;
+  /** Headers to attach to the upstream connection (sse/http). */
   headers?: Record<string, string>;
+  /** Executable command when type === "stdio". */
+  command?: string;
+  /** Command arguments when type === "stdio". */
+  args?: string[];
+  /** Environment variables when type === "stdio". */
+  env?: Record<string, string>;
+  /** Working directory when type === "stdio". */
+  cwd?: string;
 }
 
 /**
@@ -96,11 +106,15 @@ export function createGracefulMcpProvider(
   // CONTRACT: `connectionPromise` must be retained so it can be
   // awaited / cleaned up by the timeout branch — see comment below.
   const connectionPromise = connectAndList(cfg);
+  const discoveryTimeoutMs =
+    cfg.type === "stdio"
+      ? getConfigMs("mcp.stdio_discovery_timeout", DEFAULT_STDIO_DISCOVERY_TIMEOUT_S)
+      : getConfigMs("mcp.discovery_timeout", DEFAULT_DISCOVERY_TIMEOUT_S);
   const warmup: Promise<void> = (async () => {
     try {
       const result = await Promise.race([
         connectionPromise,
-        timeout(getConfigMs("mcp.discovery_timeout", DEFAULT_DISCOVERY_TIMEOUT_S)),
+        timeout(discoveryTimeoutMs),
       ]);
       if (result === TIMEOUT) {
         health = "discovery-timed-out";
@@ -215,13 +229,21 @@ async function connectAndList(
   cfg: GracefulMcpProviderConfig,
 ): Promise<{ client: Client; tools: readonly RawMcpTool[] }> {
   const transport =
-    cfg.type === "sse"
-      ? new SSEClientTransport(new URL(cfg.url), {
-          requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
+    cfg.type === "stdio"
+      ? createStdioTransport({
+          label: cfg.label,
+          command: cfg.command ?? "",
+          args: cfg.args,
+          env: cfg.env,
+          cwd: cfg.cwd,
         })
-      : new StreamableHTTPClientTransport(new URL(cfg.url), {
-          requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
-        });
+      : cfg.type === "sse"
+        ? new SSEClientTransport(new URL(cfg.url ?? ""), {
+            requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
+          })
+        : new StreamableHTTPClientTransport(new URL(cfg.url ?? ""), {
+            requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
+          });
 
   const negotiationMode = getConfig("mcp.version_negotiation", "auto");
   const client = new Client(

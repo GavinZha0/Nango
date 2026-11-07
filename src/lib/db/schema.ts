@@ -712,8 +712,8 @@ export const McpServerTable = pgTable("mcp_server", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
-  type: text("type").notNull(),         // "sse" | "http"
-  url: text("url").notNull(),
+  type: text("type").notNull(),         // "sse" | "http" | "stdio"
+  url: text("url").notNull().default(""),
   /** Non-sensitive request headers forwarded to the MCP server,
    *  e.g. { "X-Tenant-Id": "acme" }.
    *  Do NOT put auth tokens here — use credentialId instead. */
@@ -727,6 +727,17 @@ export const McpServerTable = pgTable("mcp_server", {
    *  Defaults to "Authorization" at runtime when credentialId is set.
    *  Use a custom value for non-standard headers, e.g. "X-API-Key". */
   credentialHeader: text("credential_header"),
+  /** Executable command for "stdio" transport (e.g. "npx", "node", "uvx"). */
+  command: text("command"),
+  /** Command arguments array for "stdio" transport. */
+  args: jsonb("args").$type<string[]>(),
+  /** Non-sensitive environment variables passed to a "stdio" child process. */
+  env: jsonb("env").$type<Record<string, string>>(),
+  /** Optional working directory for a "stdio" child process. */
+  cwd: text("cwd"),
+  /** Environment variable name into which the credential token is injected
+   *  when type === "stdio" (defaults to "MCP_API_KEY" at runtime). */
+  credentialEnvName: text("credential_env_name"),
   /** Whether the entire server (and all its tools) is active. */
   enabled: boolean("enabled").notNull().default(true),
   /** Latest snapshot of tools returned by the server.

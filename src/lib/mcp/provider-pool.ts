@@ -14,10 +14,18 @@ import {
 export interface McpServerConfig {
   serverId: string;
   label: string;
-  type: "sse" | "http";
+  type: "sse" | "http" | "stdio";
   url: string;
   /** Resolved auth headers (Bearer / X-API-Key / …). */
   headers?: Record<string, string>;
+  /** Executable command when type === "stdio". */
+  command?: string;
+  /** Command arguments when type === "stdio". */
+  args?: string[];
+  /** Resolved environment variables when type === "stdio". */
+  env?: Record<string, string>;
+  /** Working directory when type === "stdio". */
+  cwd?: string;
 }
 
 /** CONTRACT: returning `null` indicates missing/disabled server. `borrow()` rejects to avoid caching the miss. */
@@ -101,6 +109,10 @@ export class McpProviderPool {
           type: cfg.type,
           url: cfg.url,
           headers: cfg.headers,
+          command: cfg.command,
+          args: cfg.args,
+          env: cfg.env,
+          cwd: cfg.cwd,
         }));
   }
 

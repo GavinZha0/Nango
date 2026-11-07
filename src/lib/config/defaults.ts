@@ -99,6 +99,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
 
   // ── mcp ───────────────────────────────────────────────────────────
   { key: "mcp.discovery_timeout", value: "5", valueType: "number", description: "Tool discovery timeout in seconds" },
+  { key: "mcp.stdio_discovery_timeout", value: "120", valueType: "number", description: "Stdio MCP tool discovery timeout in seconds (allows first-run npx/uvx package downloads)" },
   { key: "mcp.execution_timeout", value: "60", valueType: "number", description: "MCP tool execution timeout in seconds" },
   { key: "mcp.crop_image_for_llm", value: "true", valueType: "boolean", description: "Crop massive base64 image data in tool results before passing to LLM" },
   { key: "mcp.version_negotiation", value: "auto", valueType: "string", description: "MCP protocol version negotiation mode. 'auto' probes the server with server/discover and falls back to the legacy 2025 handshake; 'legacy' skips probing and uses the 2025 initialize sequence directly", options: ["auto", "legacy"] },

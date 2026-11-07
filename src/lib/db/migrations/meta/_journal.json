@@ -36,6 +36,13 @@
       "when": 1793838243730,
       "tag": "0004_mcp_capabilities",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794090279578,
+      "tag": "0005_mcp_server_stdio_support",
+      "breakpoints": true
     }
   ]
 }

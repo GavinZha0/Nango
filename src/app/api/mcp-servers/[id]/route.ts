@@ -20,6 +20,7 @@ import {
   uuidString,
 } from "@/lib/http/validation";
 import { invalidateForMcpServerChange } from "@/lib/cache/invalidation";
+import { isStdioMcpAllowed } from "@/lib/mcp/stdio-spawn.server";
 
 const ROUTE = "/api/mcp-servers/[id]";
 
@@ -36,11 +37,16 @@ const updateSchema = z
   .object({
     name: nonEmptyString.optional(),
     description: optionalTrimmedString.optional(),
-    type: z.enum(["sse", "http"]).optional(),
-    url: z.string().trim().url("must be a valid URL").optional(),
+    type: z.enum(["sse", "http", "stdio"]).optional(),
+    url: z.string().trim().optional(),
     headers: z.record(z.string(), z.string()).nullable().optional(),
+    command: optionalTrimmedString.optional(),
+    args: z.array(z.string()).nullable().optional(),
+    env: z.record(z.string(), z.string()).nullable().optional(),
+    cwd: optionalTrimmedString.optional(),
     credentialId: uuidString.nullable().optional(),
     credentialHeader: optionalTrimmedString.optional(),
+    credentialEnvName: optionalTrimmedString.optional(),
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),
     group: mcpGroupSchema.optional(),
@@ -56,6 +62,9 @@ export const PATCH = withEditor<{ id: string }>(
 
     const [existing] = await db
       .select({
+        type: McpServerTable.type,
+        url: McpServerTable.url,
+        command: McpServerTable.command,
         createdBy: McpServerTable.createdBy,
         visibility: McpServerTable.visibility,
       })
@@ -81,13 +90,65 @@ export const PATCH = withEditor<{ id: string }>(
       || body.type !== undefined
       || body.url !== undefined
       || body.headers !== undefined
+      || body.command !== undefined
+      || body.args !== undefined
+      || body.env !== undefined
+      || body.cwd !== undefined
       || body.credentialId !== undefined
       || body.credentialHeader !== undefined
+      || body.credentialEnvName !== undefined
       || body.group !== undefined
       || body.tools !== undefined;
     if (editsContent && !canEditResource(rbac, session)) {
       throw new ApiError("FORBIDDEN", 403, "You cannot edit this server.");
     }
+
+    const effectiveType = body.type ?? existing.type;
+
+    // SECURITY: stdio spawns a local child process on the host, so editing
+    // a stdio server or switching a server to stdio requires both the runtime
+    // environment allowlist and the admin role.
+    if ((existing.type === "stdio" || effectiveType === "stdio") && editsContent) {
+      if (!isStdioMcpAllowed()) {
+        throw new ApiError(
+          "FORBIDDEN",
+          403,
+          "Stdio MCP servers are disabled in this environment.",
+        );
+      }
+      if (session.user.role !== "admin") {
+        throw new ApiError(
+          "FORBIDDEN",
+          403,
+          "Only admins can configure stdio MCP servers.",
+        );
+      }
+    }
+
+    if (effectiveType === "stdio") {
+      const effectiveCommand =
+        body.command !== undefined ? body.command : existing.command;
+      if ((body.type === "stdio" || body.command !== undefined) && !effectiveCommand) {
+        throw new ApiError(
+          "BAD_REQUEST",
+          400,
+          "command is required for stdio MCP servers.",
+        );
+      }
+    } else {
+      const effectiveUrl = body.url !== undefined ? body.url : existing.url;
+      if (
+        (body.type !== undefined || body.url !== undefined)
+        && (!effectiveUrl || !z.string().url().safeParse(effectiveUrl).success)
+      ) {
+        throw new ApiError(
+          "BAD_REQUEST",
+          400,
+          "url must be a valid URL for HTTP/SSE MCP servers.",
+        );
+      }
+    }
+
     // Visibility / enabled — owner or admin only.
     if (
       (body.visibility !== undefined || body.enabled !== undefined)
@@ -109,8 +170,13 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.type !== undefined) updates.type = body.type;
     if (body.url !== undefined) updates.url = body.url;
     if (body.headers !== undefined) updates.headers = body.headers;
+    if (body.command !== undefined) updates.command = body.command;
+    if (body.args !== undefined) updates.args = body.args;
+    if (body.env !== undefined) updates.env = body.env;
+    if (body.cwd !== undefined) updates.cwd = body.cwd;
     if (body.credentialId !== undefined) updates.credentialId = body.credentialId;
     if (body.credentialHeader !== undefined) updates.credentialHeader = body.credentialHeader;
+    if (body.credentialEnvName !== undefined) updates.credentialEnvName = body.credentialEnvName;
     if (body.group !== undefined) updates.group = body.group;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;

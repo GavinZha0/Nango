@@ -74,8 +74,13 @@ interface McpServerRow {
   type: string;
   url: string;
   headers: Record<string, string> | null;
+  command?: string | null;
+  args?: string[] | null;
+  env?: Record<string, string> | null;
+  cwd?: string | null;
   credentialId: string | null;
   credentialHeader: string | null;
+  credentialEnvName?: string | null;
   enabled: boolean;
   visibility: string;
   tools: McpToolSnapshot[] | null;
@@ -116,11 +121,42 @@ interface ServerFormState {
   name: string;
   group: string;
   newGroupName: string;
-  type: "sse" | "http";
+  type: "sse" | "http" | "stdio";
   url: string;
+  command: string;
+  args: string;
+  cwd: string;
   credentialId: string;
+  credentialEnvName: string;
   headers: HeaderEntry[];
+  envEntries: HeaderEntry[];
   error: string;
+}
+
+export function parseStdioArgs(raw: string): string[] | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Support shell-like quoted tokens or whitespace-separated tokens
+  const tokens: string[] = [];
+  const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(trimmed)) !== null) {
+    if (match[1] !== undefined) {
+      tokens.push(match[1].replace(/\\"/g, '"'));
+    } else if (match[2] !== undefined) {
+      tokens.push(match[2].replace(/\\'/g, "'"));
+    } else if (match[3] !== undefined) {
+      tokens.push(match[3]);
+    }
+  }
+  return tokens.length > 0 ? tokens : null;
+}
+
+export function formatStdioArgs(args: string[] | null | undefined): string {
+  if (!args || args.length === 0) return "";
+  return args
+    .map((arg) => (/\s/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
+    .join(" ");
 }
 
 function headersToEntries(headers: Record<string, string> | null): HeaderEntry[] {
@@ -142,10 +178,15 @@ function initialFormState(editing?: McpServerRow): ServerFormState {
     name: editing?.name ?? "",
     group: currentGroup ? currentGroup : "__NONE__",
     newGroupName: "",
-    type: (editing?.type as "sse" | "http") ?? "http",
+    type: (editing?.type as "sse" | "http" | "stdio") ?? "http",
     url: editing?.url ?? "",
+    command: editing?.command ?? "",
+    args: formatStdioArgs(editing?.args),
+    cwd: editing?.cwd ?? "",
     credentialId: editing?.credentialId ?? "",
+    credentialEnvName: editing?.credentialEnvName ?? "",
     headers: headersToEntries(editing?.headers ?? null),
+    envEntries: headersToEntries(editing?.env ?? null),
     error: "",
   };
 }
@@ -200,6 +241,22 @@ function ServerFormDialog({
     setForm((f) => ({ ...f, headers: [...f.headers, { key: "", value: "" }] }));
   }
 
+  function updateEnvEntry(index: number, field: "key" | "value", val: string) {
+    setForm((f) => {
+      const next = [...f.envEntries];
+      next[index] = { ...next[index], [field]: val };
+      return { ...f, envEntries: next };
+    });
+  }
+
+  function removeEnvEntry(index: number) {
+    setForm((f) => ({ ...f, envEntries: f.envEntries.filter((_, i) => i !== index) }));
+  }
+
+  function addEnvEntry() {
+    setForm((f) => ({ ...f, envEntries: [...f.envEntries, { key: "", value: "" }] }));
+  }
+
   const existingGroupMatch = useMemo(() => {
     if (form.group !== "__NEW_GROUP__") return null;
     return findExistingGroupMatch(form.newGroupName, existingGroups);
@@ -209,7 +266,12 @@ function ServerFormDialog({
     e.preventDefault();
     setField("error", "");
 
-    if (!form.name.trim() || !form.url.trim()) {
+    if (form.type === "stdio") {
+      if (!form.name.trim() || !form.command.trim()) {
+        setField("error", "Name and Command are required.");
+        return;
+      }
+    } else if (!form.name.trim() || !form.url.trim()) {
       setField("error", "Name and URL are required.");
       return;
     }
@@ -235,14 +297,28 @@ function ServerFormDialog({
 
     setSubmitting(true);
     try {
-      const body: Record<string, unknown> = {
-        name: form.name.trim(),
-        type: form.type,
-        url: form.url.trim(),
-        credentialId: form.credentialId || null,
-        headers: entriesToHeaders(form.headers),
-        group: finalGroup,
-      };
+      const body: Record<string, unknown> =
+        form.type === "stdio"
+          ? {
+              name: form.name.trim(),
+              type: "stdio",
+              url: "",
+              command: form.command.trim(),
+              args: parseStdioArgs(form.args),
+              cwd: form.cwd.trim() || null,
+              env: entriesToHeaders(form.envEntries),
+              credentialId: form.credentialId || null,
+              credentialEnvName: form.credentialEnvName.trim() || null,
+              group: finalGroup,
+            }
+          : {
+              name: form.name.trim(),
+              type: form.type,
+              url: form.url.trim(),
+              credentialId: form.credentialId || null,
+              headers: entriesToHeaders(form.headers),
+              group: finalGroup,
+            };
 
       const url = isEdit
         ? `/api/mcp-servers/${editing!.id}`
@@ -379,8 +455,9 @@ function ServerFormDialog({
               items={[
                 { value: "http", label: "HTTP" },
                 { value: "sse", label: "SSE" },
+                { value: "stdio", label: "STDIO" },
               ]}
-              onValueChange={(v) => { if (v) setField("type", v as "http" | "sse"); }}
+              onValueChange={(v) => { if (v) setField("type", v as "http" | "sse" | "stdio"); }}
             >
               <SelectTrigger
                 className="w-full"
@@ -392,23 +469,65 @@ function ServerFormDialog({
               <SelectContent>
                 <SelectItem value="http">HTTP</SelectItem>
                 <SelectItem value="sse">SSE</SelectItem>
+                <SelectItem value="stdio">STDIO</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* URL */}
-          <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-            <Label htmlFor="mcp-url">URL <span className="text-destructive">*</span></Label>
-            <Input
-              id="mcp-url"
-              data-testid="mcp-url-input"
-              type="url"
-              value={form.url}
-              onChange={(e) => setField("url", e.target.value)}
-              required
-              placeholder="http://localhost:1234/mcp"
-            />
-          </div>
+          {form.type === "stdio" ? (
+            <>
+              {/* Command */}
+              <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+                <Label htmlFor="mcp-command">Command <span className="text-destructive">*</span></Label>
+                <Input
+                  id="mcp-command"
+                  data-testid="mcp-command-input"
+                  value={form.command}
+                  onChange={(e) => setField("command", e.target.value)}
+                  required
+                  placeholder="e.g. npx, uvx, node"
+                />
+              </div>
+
+              {/* Args */}
+              <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+                <Label htmlFor="mcp-args">Arguments</Label>
+                <Input
+                  id="mcp-args"
+                  data-testid="mcp-args-input"
+                  value={form.args}
+                  onChange={(e) => setField("args", e.target.value)}
+                  placeholder="e.g. -y @playwright/mcp@latest"
+                />
+              </div>
+
+              {/* Working Directory */}
+              <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+                <Label htmlFor="mcp-cwd">CWD</Label>
+                <Input
+                  id="mcp-cwd"
+                  data-testid="mcp-cwd-input"
+                  value={form.cwd}
+                  onChange={(e) => setField("cwd", e.target.value)}
+                  placeholder="Optional working directory"
+                />
+              </div>
+            </>
+          ) : (
+            /* URL */
+            <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+              <Label htmlFor="mcp-url">URL <span className="text-destructive">*</span></Label>
+              <Input
+                id="mcp-url"
+                data-testid="mcp-url-input"
+                type="url"
+                value={form.url}
+                onChange={(e) => setField("url", e.target.value)}
+                required
+                placeholder="http://localhost:1234/mcp"
+              />
+            </div>
+          )}
 
           {/* Credential */}
           <div className="grid grid-cols-[80px_1fr] items-center gap-2">
@@ -443,53 +562,116 @@ function ServerFormDialog({
             </Select>
           </div>
 
-          {/* Headers */}
-          <div className="space-y-2 rounded-md border p-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Headers
-              </p>
-              <button
-                type="button"
-                onClick={addHeader}
-                className="cursor-pointer inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <Plus className="h-3 w-3" />
-                Add
-              </button>
+          {form.type === "stdio" && form.credentialId && (
+            <div className="grid grid-cols-[80px_1fr] items-center gap-2">
+              <Label htmlFor="mcp-credential-env-name">Env Name</Label>
+              <Input
+                id="mcp-credential-env-name"
+                data-testid="mcp-credential-env-name-input"
+                value={form.credentialEnvName}
+                onChange={(e) => setField("credentialEnvName", e.target.value)}
+                placeholder="MCP_API_KEY (default)"
+              />
             </div>
-            <p className="text-xs text-red-600 dark:text-red-400">
-              Do NOT put API keys or tokens here. Use a Credential instead.
-            </p>
-            {form.headers.length > 0 && (
-              <div className="space-y-1.5">
-                {form.headers.map((h, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <Input
-                      value={h.key}
-                      onChange={(e) => updateHeader(i, "key", e.target.value)}
-                      placeholder="Header name"
-                      className="h-7 text-xs flex-1"
-                    />
-                    <Input
-                      value={h.value}
-                      onChange={(e) => updateHeader(i, "value", e.target.value)}
-                      placeholder="Value"
-                      className="h-7 text-xs flex-1"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeHeader(i)}
-                      className="cursor-pointer shrink-0 rounded p-0.5 text-muted-foreground/40 hover:text-destructive"
-                      aria-label="Remove header"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
+          )}
+
+          {form.type === "stdio" ? (
+            /* Environment Variables */
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Environment Variables
+                </p>
+                <button
+                  type="button"
+                  onClick={addEnvEntry}
+                  className="cursor-pointer inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add
+                </button>
               </div>
-            )}
-          </div>
+              <p className="text-xs text-red-600 dark:text-red-400">
+                Do NOT put API keys or tokens here. Bind a Credential above instead.
+              </p>
+              {form.envEntries.length > 0 && (
+                <div className="space-y-1.5">
+                  {form.envEntries.map((entry, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <Input
+                        value={entry.key}
+                        onChange={(e) => updateEnvEntry(i, "key", e.target.value)}
+                        placeholder="ENV_NAME"
+                        className="h-7 text-xs flex-1"
+                      />
+                      <Input
+                        value={entry.value}
+                        onChange={(e) => updateEnvEntry(i, "value", e.target.value)}
+                        placeholder="Value"
+                        className="h-7 text-xs flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeEnvEntry(i)}
+                        className="cursor-pointer shrink-0 rounded p-0.5 text-muted-foreground/40 hover:text-destructive"
+                        aria-label="Remove environment variable"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Headers */
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Headers
+                </p>
+                <button
+                  type="button"
+                  onClick={addHeader}
+                  className="cursor-pointer inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add
+                </button>
+              </div>
+              <p className="text-xs text-red-600 dark:text-red-400">
+                Do NOT put API keys or tokens here. Use a Credential instead.
+              </p>
+              {form.headers.length > 0 && (
+                <div className="space-y-1.5">
+                  {form.headers.map((h, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <Input
+                        value={h.key}
+                        onChange={(e) => updateHeader(i, "key", e.target.value)}
+                        placeholder="Header name"
+                        className="h-7 text-xs flex-1"
+                      />
+                      <Input
+                        value={h.value}
+                        onChange={(e) => updateHeader(i, "value", e.target.value)}
+                        placeholder="Value"
+                        className="h-7 text-xs flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeHeader(i)}
+                        className="cursor-pointer shrink-0 rounded p-0.5 text-muted-foreground/40 hover:text-destructive"
+                        aria-label="Remove header"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {form.error && <p className="text-sm text-destructive">{form.error}</p>}
 
@@ -701,7 +883,10 @@ function ServerHeader({
   // `serverInstructions` (longer-form) for the secondary header
   // line; fall back when only one is present. Both null on servers
   // running an older MCP spec / before the first discover scan.
-  const subtitle = server.serverDescription ?? server.serverInstructions ?? null;
+  const subtitle =
+    refreshing && server.type === "stdio"
+      ? "Starting local process (first run may take 10–60s)…"
+      : (server.serverDescription ?? server.serverInstructions ?? null);
   const version = server.serverVersion ?? null;
 
   // Server version badge: shows version text, colored by protocol era
