@@ -396,6 +396,7 @@ export async function runWebAutoCase(
     const expectations = outcome.llmAssertions.map((item) => {
       const customSpec = item.spec.type === "llm_custom" ? item.spec : undefined;
       return {
+        issue: customSpec?.issue,
         expectation: customSpec?.expectation,
         unexpectation: customSpec?.unexpectation,
         reference: customSpec?.reference,
@@ -432,6 +433,7 @@ export async function runWebAutoCase(
             score: 0,
             reason: `LLM evaluation failed: ${errorMsg}`,
             feedback: `LLM evaluation failed: ${errorMsg}`,
+            issue: exp.issue,
             expectation: exp.expectation,
             unexpectation: exp.unexpectation,
             reference: exp.reference,

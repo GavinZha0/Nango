@@ -26,6 +26,18 @@ export function formatAssertionResultItem(
       description = `${spec.metric} ${spec.operator} ${spec.threshold}`;
     else if (spec.type === "tool_call") description = `Tool: ${spec.toolName}`;
     else if ("expectation" in spec && spec.expectation) description = spec.expectation;
+    else if ("issue" in spec && spec.issue) description = `[Issue] ${spec.issue}`;
+    else if ("unexpectation" in spec && spec.unexpectation)
+      description = `[Unexpectation] ${spec.unexpectation}`;
+    else if ("reference" in spec && spec.reference) description = `[Reference] ${spec.reference}`;
+  } else if (result.expectation) {
+    description = result.expectation;
+  } else if (result.issue) {
+    description = `[Issue] ${result.issue}`;
+  } else if (result.unexpectation) {
+    description = `[Unexpectation] ${result.unexpectation}`;
+  } else if (result.reference) {
+    description = `[Reference] ${result.reference}`;
   } else if (result.path) {
     description = `${result.path} == ${JSON.stringify(result.expected)}`;
   } else if (result.message) {

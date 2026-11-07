@@ -183,6 +183,9 @@ export function evaluateAssertions(
 
       const resolvedSpec: LlmCustomAssertion = {
         ...customSpec,
+        issue: customSpec.issue
+          ? String(substituteInputTemplates(customSpec.issue, mergedOptions.input, mergedContext))
+          : undefined,
         expectation: customSpec.expectation
           ? String(substituteInputTemplates(customSpec.expectation, mergedOptions.input, mergedContext))
           : undefined,

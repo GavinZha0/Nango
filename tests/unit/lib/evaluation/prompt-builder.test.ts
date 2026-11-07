@@ -5,11 +5,15 @@ const { buildSubmitEvaluationScoresTool } = await import("@/lib/evaluation/runti
 type AssertionSpec = import("@/lib/assertions").AssertionSpec;
 
 describe("buildEvaluationBrief — Dynamic LLM Checklist", () => {
-  it("formats expectation, unexpectation, and reference checklist items", () => {
+  it("formats expectation, issue, unexpectation, and reference checklist items", () => {
     const assertions: AssertionSpec[] = [
       {
         type: "llm_custom",
         expectation: "Accurately name the poem as 望庐山瀑布",
+      },
+      {
+        type: "llm_custom",
+        issue: "Previously hallucinated the author as 杜甫 instead of 李白",
       },
       {
         type: "llm_custom",
@@ -30,10 +34,13 @@ describe("buildEvaluationBrief — Dynamic LLM Checklist", () => {
     expect(brief).toContain("[CHECK ITEM 0] CUSTOM SPECIFICATION:");
     expect(brief).toContain('Expectation (Required): "Accurately name the poem as 望庐山瀑布"');
     expect(brief).toContain("[CHECK ITEM 1] CUSTOM SPECIFICATION:");
-    expect(brief).toContain('Forbidden (Must Avoid): "Mention unrelated poems like 静夜思"');
+    expect(brief).toContain('Reported Issue / Defect (Must Be Resolved & Must NOT Recur): "Previously hallucinated the author as 杜甫 instead of 李白"');
+    expect(brief).toContain("Understand the reported issue/defect above and inspect the agent's response");
     expect(brief).toContain("[CHECK ITEM 2] CUSTOM SPECIFICATION:");
+    expect(brief).toContain('Forbidden (Must Avoid): "Mention unrelated poems like 静夜思"');
+    expect(brief).toContain("[CHECK ITEM 3] CUSTOM SPECIFICATION:");
     expect(brief).toContain('Ground Truth Reference: "日照香炉生紫烟，遥看瀑布挂前川。飞流直下三千尺，疑是银河落九天。"');
-    expect(brief).toContain("item_scores: Array with one entry for each of the 3 check items above");
+    expect(brief).toContain("item_scores: Array with one entry for each of the 4 check items above");
     expect(brief).toContain("call `submit_evaluation_scores` EXACTLY ONCE");
   });
 

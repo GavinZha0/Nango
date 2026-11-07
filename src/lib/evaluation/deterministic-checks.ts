@@ -89,6 +89,7 @@ function getAssertionDescription(spec: AssertionSpec): string {
     case "llm_custom": {
       const label =
         spec.expectation ? spec.expectation :
+        spec.issue ? `[Issue] ${spec.issue}` :
         spec.unexpectation ? `[Unexpectation] ${spec.unexpectation}` :
         spec.reference ? `[Reference] ${spec.reference}` :
         "LLM Custom";

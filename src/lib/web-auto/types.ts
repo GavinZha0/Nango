@@ -83,6 +83,7 @@ export interface WebAutoVerdict {
       score: number;
       reason?: string;
       feedback?: string;
+      issue?: string;
       expectation?: string;
       unexpectation?: string;
       reference?: string;

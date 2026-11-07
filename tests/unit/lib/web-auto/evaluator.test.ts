@@ -230,4 +230,22 @@ describe("buildWebAutoEvaluationPrompt", () => {
     expect(prompt).not.toContain("score 90-100");
     expect(prompt).not.toContain("score 70-100");
   });
+
+  it("includes both expectation and issue when combined in a single item", async () => {
+    const { buildWebAutoEvaluationPrompt } = await import("@/lib/web-auto/evaluator");
+    const prompt = buildWebAutoEvaluationPrompt(
+      { text: "sample output" },
+      [
+        {
+          expectation: "Price table is rendered",
+          issue: "Previously showed NaN in discount column",
+        },
+      ],
+    );
+
+    expect(prompt).toContain("[CHECK ITEM 0] [EXPECTATION]:");
+    expect(prompt).toContain('Target: "Price table is rendered"');
+    expect(prompt).toContain("[REPORTED ISSUE / REGRESSION CHECK]:");
+    expect(prompt).toContain('Reported Issue: "Previously showed NaN in discount column"');
+  });
 });

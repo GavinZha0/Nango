@@ -1121,7 +1121,7 @@ export function UniversalAssertionsEditor({
           </div>
         )}
 
-        {/* 7. Custom Semantic Tab (llm_custom: expectation, unexpectation, or reference) */}
+        {/* 7. Custom Semantic Tab (llm_custom: expectation, issue, unexpectation, or reference) */}
         {activeTab === "llm_custom" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-4">
@@ -1149,18 +1149,22 @@ export function UniversalAssertionsEditor({
 
                 const customSpec = spec as LlmCustomAssertion;
                 const kind =
-                  customSpec.unexpectation !== undefined
-                    ? "unexpectation"
-                    : customSpec.reference !== undefined && !customSpec.expectation
-                      ? "reference"
-                      : "expectation";
+                  customSpec.issue !== undefined
+                    ? "issue"
+                    : customSpec.unexpectation !== undefined
+                      ? "unexpectation"
+                      : customSpec.reference !== undefined && !customSpec.expectation
+                        ? "reference"
+                        : "expectation";
 
                 const currentValue =
-                  kind === "unexpectation"
-                    ? customSpec.unexpectation ?? ""
-                    : kind === "reference"
-                      ? customSpec.reference ?? ""
-                      : customSpec.expectation ?? "";
+                  kind === "issue"
+                    ? customSpec.issue ?? ""
+                    : kind === "unexpectation"
+                      ? customSpec.unexpectation ?? ""
+                      : kind === "reference"
+                        ? customSpec.reference ?? ""
+                        : customSpec.expectation ?? "";
 
                 return (
                   <div
@@ -1172,8 +1176,13 @@ export function UniversalAssertionsEditor({
                       disabled={readOnly}
                       onValueChange={(val: string | null) => {
                         if (!val) return;
-                        const { expectation: _e, unexpectation: _u, reference: _r, ...rest } =
-                          customSpec as Record<string, unknown>;
+                        const {
+                          issue: _i,
+                          expectation: _e,
+                          unexpectation: _u,
+                          reference: _r,
+                          ...rest
+                        } = customSpec as Record<string, unknown>;
                         updateAssertionAt(idx, {
                           ...rest,
                           type: "llm_custom",
@@ -1186,19 +1195,23 @@ export function UniversalAssertionsEditor({
                           <span
                             className={cn(
                               "h-2 w-2 rounded-full shrink-0 shadow-xs",
-                              kind === "unexpectation"
-                                ? "bg-rose-500"
-                                : kind === "reference"
-                                  ? "bg-sky-500"
-                                  : "bg-emerald-500"
+                              kind === "issue"
+                                ? "bg-amber-500"
+                                : kind === "unexpectation"
+                                  ? "bg-rose-500"
+                                  : kind === "reference"
+                                    ? "bg-sky-500"
+                                    : "bg-emerald-500"
                             )}
                           />
                           <span>
-                            {kind === "unexpectation"
-                              ? "Unexpectation"
-                              : kind === "reference"
-                                ? "Reference"
-                                : "Expectation"}
+                            {kind === "issue"
+                              ? "Issue"
+                              : kind === "unexpectation"
+                                ? "Unexpectation"
+                                : kind === "reference"
+                                  ? "Reference"
+                                  : "Expectation"}
                           </span>
                         </SelectValue>
                       </SelectTrigger>
@@ -1206,6 +1219,10 @@ export function UniversalAssertionsEditor({
                         <SelectItem value="expectation">
                           <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 shadow-xs" />
                           <span>Expectation</span>
+                        </SelectItem>
+                        <SelectItem value="issue">
+                          <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0 shadow-xs" />
+                          <span>Issue</span>
                         </SelectItem>
                         <SelectItem value="unexpectation">
                           <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 shadow-xs" />
@@ -1222,8 +1239,13 @@ export function UniversalAssertionsEditor({
                       value={currentValue}
                       onChange={(e) => {
                         const val = e.target.value;
-                        const { expectation: _e, unexpectation: _u, reference: _r, ...rest } =
-                          customSpec as Record<string, unknown>;
+                        const {
+                          issue: _i,
+                          expectation: _e,
+                          unexpectation: _u,
+                          reference: _r,
+                          ...rest
+                        } = customSpec as Record<string, unknown>;
                         updateAssertionAt(idx, {
                           ...rest,
                           type: "llm_custom",
@@ -1231,11 +1253,13 @@ export function UniversalAssertionsEditor({
                         } as AssertionSpec);
                       }}
                       placeholder={
-                        kind === "unexpectation"
-                          ? "Prohibited behavior (e.g. Must not mention competitors or leak secrets)"
-                          : kind === "reference"
-                            ? "Ground truth context (e.g. Standard turnaround is 1-3 business days)"
-                            : "Expected outcome (e.g. Output should explain refund steps clearly)"
+                        kind === "issue"
+                          ? "Observed defect to check (e.g. Agent hallucinated the price or skipped search)"
+                          : kind === "unexpectation"
+                            ? "Prohibited behavior (e.g. Must not mention competitors or leak secrets)"
+                            : kind === "reference"
+                              ? "Ground truth context (e.g. Standard turnaround is 1-3 business days)"
+                              : "Expected outcome (e.g. Output should explain refund steps clearly)"
                       }
                       disabled={readOnly}
                       className="h-7 text-xs flex-1 bg-muted/20 border-muted-foreground/20 focus:border-amber-500/30"

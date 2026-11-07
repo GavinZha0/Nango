@@ -84,6 +84,9 @@ export function buildEvaluationBrief(input: PromptBuilderInput): string {
       checkIndex++;
 
       const parts: string[] = [`${itemHeader} CUSTOM SPECIFICATION:`];
+      if (customSpec.issue) {
+        parts.push(`  Reported Issue / Defect (Must Be Resolved & Must NOT Recur): "${customSpec.issue}"`);
+      }
       if (customSpec.expectation) {
         parts.push(`  Expectation (Required): "${customSpec.expectation}"`);
       }
@@ -97,14 +100,26 @@ export function buildEvaluationBrief(input: PromptBuilderInput): string {
         parts.push(`  Context: ${customSpec.context.join("; ")}`);
       }
 
-      parts.push(
-        `\n  SCORING RUBRIC (1-5 Likert scale):\n` +
-        `  • 5 (Excellent): Fully and accurately satisfies the expectation with zero flaws or fully avoided forbidden behavior.\n` +
-        `  • 4 (Good): Meets the core expectation with only minor, harmless omissions.\n` +
-        `  • 3 (Acceptable - Pass): Essential requirement satisfied adequately, though minor rough spots exist.\n` +
-        `  • 2 (Poor): Notable defects, substantial omissions, or partial failure.\n` +
-        `  • 1 (Complete Failure): Wholly fails the requirement, generates contrary statements, or violates forbidden rule.`,
-      );
+      if (customSpec.issue && !customSpec.expectation && !customSpec.unexpectation && !customSpec.reference) {
+        parts.push(
+          `\n  EVALUATION RULE & SCORING RUBRIC (1-5 Likert scale):\n` +
+          `  Understand the reported issue/defect above and inspect the agent's response and tool trajectory to verify whether this issue still exists:\n` +
+          `  • 5 (Resolved - Excellent): The reported issue is completely absent; the agent handled the scenario cleanly without exhibiting this defect.\n` +
+          `  • 4 (Resolved - Good): The reported issue no longer occurs, with only minor, harmless imperfections.\n` +
+          `  • 3 (Acceptable - Pass): The reported issue did not recur, though minor unrelated rough spots exist.\n` +
+          `  • 2 (Issue Partially Persists - Fail): Symptoms of the reported issue still partially appear in the result.\n` +
+          `  • 1 (Issue Still Present - Complete Failure): The reported issue recurred or still exists in the agent's output or behavior.`,
+        );
+      } else {
+        parts.push(
+          `\n  SCORING RUBRIC (1-5 Likert scale):\n` +
+          `  • 5 (Excellent): Fully and accurately satisfies the expectation with zero flaws or fully avoided forbidden behavior.\n` +
+          `  • 4 (Good): Meets the core expectation with only minor, harmless omissions.\n` +
+          `  • 3 (Acceptable - Pass): Essential requirement satisfied adequately, though minor rough spots exist.\n` +
+          `  • 2 (Poor): Notable defects, substantial omissions, or partial failure.\n` +
+          `  • 1 (Complete Failure): Wholly fails the requirement, generates contrary statements, or violates forbidden rule.`,
+        );
+      }
 
       checklistBlocks.push(parts.join("\n"));
     }

@@ -171,10 +171,16 @@ function formatVerdictTitle(verdict: AssertionResult, spec?: AssertionSpec): str
       const friendlyName = dimId ? (BUILTIN_EVAL_DIMENSIONS.find((d) => d.id === dimId)?.name ?? dimId) : undefined;
       return friendlyName ? `Dim: ${friendlyName}` : "LLM Dimension";
     }
-    const verdictText = verdict.expectation || verdict.unexpectation || verdict.reference;
+    const verdictIssue = verdict.issue || (spec && "issue" in spec ? spec.issue : undefined);
+    const hasExpectation = Boolean(verdict.expectation || (spec && "expectation" in spec && spec.expectation));
+    if (verdictIssue && !hasExpectation) {
+      return `Issue: ${verdictIssue}`;
+    }
+    const verdictText = verdict.expectation || verdict.issue || verdict.unexpectation || verdict.reference;
     if (verdictText) return verdictText;
     if (spec) {
       if ("expectation" in spec && spec.expectation) return spec.expectation;
+      if ("issue" in spec && spec.issue) return `Issue: ${spec.issue}`;
       if ("unexpectation" in spec && spec.unexpectation) return spec.unexpectation;
       if ("reference" in spec && spec.reference) return spec.reference;
     }

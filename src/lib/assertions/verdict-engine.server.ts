@@ -146,6 +146,7 @@ export function determineCaseVerdict(options: DetermineVerdictOptions): CaseVerd
         type: spec.type,
         ok: false,
         dim: dimSpec?.dim,
+        issue: customSpec?.issue,
         expectation: customSpec?.expectation,
         unexpectation: customSpec?.unexpectation,
         reference: customSpec?.reference,

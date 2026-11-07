@@ -121,6 +121,7 @@ export type LlmDimAssertion = z.infer<typeof llmDimAssertionSchema>;
 
 export const llmCustomAssertionSchema = z.object({
   type: z.literal("llm_custom"),
+  issue: z.string().min(1).optional().describe("Previously observed issue or defect that must be resolved and must not recur"),
   expectation: z.string().min(1).optional().describe("Natural language expected behavior or outcome"),
   unexpectation: z.string().min(1).optional().describe("Natural language prohibited or unexpected behavior"),
   reference: z.string().min(1).optional().describe("Ground truth reference context"),
@@ -196,6 +197,7 @@ export interface AssertionResult {
   feedback?: string;
   llmScore?: number;
   llmFeedback?: string;
+  issue?: string;
   expectation?: string;
   unexpectation?: string;
   reference?: string;

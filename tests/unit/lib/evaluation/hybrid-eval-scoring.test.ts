@@ -25,6 +25,10 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
       },
       {
         type: "llm_custom",
+        issue: "Agent previously skipped calling lookup tool",
+      },
+      {
+        type: "llm_custom",
         unexpectation: "Mentioning sensitive internal credentials",
       },
       {
@@ -45,7 +49,7 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
     expect(result.passRate).toBe(1);
     expect(result.assertionResults).toHaveLength(1);
     expect(result.assertionResults[0].ok).toBe(true);
-    expect(result.llmAssertions).toHaveLength(3);
+    expect(result.llmAssertions).toHaveLength(4);
   });
 
   it("determines passed verdict when all deterministic pass and min(LLM scores) >= threshold", () => {
@@ -203,5 +207,36 @@ describe("Evaluation Hybrid Assertions Scoring", () => {
 
     expect(verdict.status).toBe("errored");
     expect(verdict.assertionResults[0].errored).toBe(true);
+  });
+
+  it("fails case when an issue assertion still recurs (score < threshold) and preserves issue snapshot", () => {
+    const assertions: AssertionSpec[] = [
+      {
+        type: "llm_custom",
+        issue: "Agent hallucinated the price without searching",
+      },
+      {
+        type: "llm_custom",
+        expectation: "Should call the search tool first",
+      },
+    ];
+
+    const verdict = determineCaseVerdict({
+      assertions,
+      deterministicResults: [],
+      llmScores: [
+        { index: 0, score: 1, reason: "The agent still hallucinated the price without calling search." },
+        { index: 1, score: 4, reason: "Search tool was called on turn 2." },
+      ],
+      threshold: 3,
+    });
+
+    expect(verdict.status).toBe("failed");
+    expect(verdict.assertionResults).toHaveLength(2);
+    expect(verdict.assertionResults[0].ok).toBe(false);
+    expect(verdict.assertionResults[0].issue).toBe("Agent hallucinated the price without searching");
+    expect(verdict.assertionResults[0].score).toBe(1);
+    expect(verdict.assertionResults[1].ok).toBe(true);
+    expect(verdict.assertionResults[1].expectation).toBe("Should call the search tool first");
   });
 });

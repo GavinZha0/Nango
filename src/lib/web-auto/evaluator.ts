@@ -16,6 +16,7 @@ import { executeJudge, isLikertScoreValid } from "@/lib/evaluation/judge.server"
 // ─── Input / Output ─────────────────────────────────────────────────
 
 export interface WebAutoExpectationItem {
+  issue?: string;
   expectation?: string;
   unexpectation?: string;
   reference?: string;
@@ -43,6 +44,7 @@ export interface WebAutoExpectationResult {
   score: number;
   reason: string;
   feedback?: string;
+  issue?: string;
   expectation?: string;
   unexpectation?: string;
   reference?: string;
@@ -88,28 +90,35 @@ export function buildWebAutoEvaluationPrompt(
   for (let i = 0; i < expectations.length; i++) {
     const item = expectations[i];
     const itemHeader = `[CHECK ITEM ${i}]`;
+    const parts: string[] = [];
 
     if (item.expectation) {
-      let block = `${itemHeader} [EXPECTATION]:\n  Target: "${item.expectation}"\n  Rule: PASS (score 3-5) if the UI output affirmatively delivers this requirement; FAIL (score 1-2) if missing, contradicted, or failed.`;
+      let block = `${parts.length === 0 ? `${itemHeader} ` : "  "}[EXPECTATION]:\n  Target: "${item.expectation}"\n  Rule: PASS (score 3-5) if the UI output affirmatively delivers this requirement; FAIL (score 1-2) if missing, contradicted, or failed.`;
       if (item.referenceImage) {
         block += `\n  Visual reference: [reference screenshot attached: ${item.referenceImage}]`;
       }
+      parts.push(block);
+    }
+    if (item.issue) {
+      parts.push(
+        `${parts.length === 0 ? `${itemHeader} ` : "  "}[REPORTED ISSUE / REGRESSION CHECK]:\n  Reported Issue: "${item.issue}"\n  Rule: Understand the reported defect above and inspect the output to check whether it still exists. PASS (score 3-5) if the reported issue is resolved and does NOT occur; FAIL (score 1-2) if the reported issue still exists or recurred.`,
+      );
+    }
+    if (item.unexpectation) {
+      parts.push(
+        `${parts.length === 0 ? `${itemHeader} ` : "  "}[UNEXPECTATION / FORBIDDEN]:\n  Target: "${item.unexpectation}"\n  Rule: PASS (score 4-5) if the UI strictly AVOIDED this prohibited content/behavior; FAIL (score 1-2) if it appeared in the output.`,
+      );
+    }
+    if (item.reference) {
+      parts.push(
+        `${parts.length === 0 ? `${itemHeader} ` : "  "}[REFERENCE CONTEXT]:\n  Ground Truth: "${item.reference}"\n  Rule: PASS (score 3-5) if the UI state matches or faithfully aligns with this ground truth; FAIL (score 1-2) if it factually contradicts or replaces it.`,
+      );
+    }
+    if (parts.length > 0) {
       if (item.context && item.context.length > 0) {
-        block += `\n  Context notes: ${item.context.join("; ")}`;
+        parts.push(`  Context notes: ${item.context.join("; ")}`);
       }
-      checklistBlocks.push(block);
-    } else if (item.unexpectation) {
-      let block = `${itemHeader} [UNEXPECTATION / FORBIDDEN]:\n  Target: "${item.unexpectation}"\n  Rule: PASS (score 4-5) if the UI strictly AVOIDED this prohibited content/behavior; FAIL (score 1-2) if it appeared in the output.`;
-      if (item.context && item.context.length > 0) {
-        block += `\n  Context notes: ${item.context.join("; ")}`;
-      }
-      checklistBlocks.push(block);
-    } else if (item.reference) {
-      let block = `${itemHeader} [REFERENCE CONTEXT]:\n  Ground Truth: "${item.reference}"\n  Rule: PASS (score 3-5) if the UI state matches or faithfully aligns with this ground truth; FAIL (score 1-2) if it factually contradicts or replaces it.`;
-      if (item.context && item.context.length > 0) {
-        block += `\n  Context notes: ${item.context.join("; ")}`;
-      }
-      checklistBlocks.push(block);
+      checklistBlocks.push(parts.join("\n"));
     }
   }
 
@@ -181,6 +190,7 @@ export async function runWebAutoEvaluation(
         index: idx,
         score: 0,
         reason: errorMsg,
+        issue: exp.issue,
         expectation: exp.expectation,
         unexpectation: exp.unexpectation,
         reference: exp.reference,
@@ -213,6 +223,7 @@ export async function runWebAutoEvaluation(
         score: 0,
         reason: "Evaluator failed to submit score for this item",
         feedback: "Evaluator failed to submit score for this item",
+        issue: exp.issue,
         expectation: exp.expectation,
         unexpectation: exp.unexpectation,
         reference: exp.reference,
@@ -238,6 +249,7 @@ export async function runWebAutoEvaluation(
       score: itemScore,
       reason: itemReason,
       feedback: itemReason,
+      issue: exp.issue,
       expectation: exp.expectation,
       unexpectation: exp.unexpectation,
       reference: exp.reference,

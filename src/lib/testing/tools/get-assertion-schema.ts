@@ -164,10 +164,11 @@ function buildSchemaItem(
       return {
         type: "llm_custom",
         description:
-          "Evaluates conversational responses or visual UI states using custom natural language semantic criteria. Specify expected behavior (expectation), prohibited behavior (unexpectation), and ground truth reference.",
+          "Evaluates conversational responses or visual UI states using custom natural language semantic criteria. Specify expected behavior (expectation), previously observed defect that must not recur (issue), prohibited behavior (unexpectation), and ground truth reference.",
         jsonSchema: cleanSchema,
         example: {
           type: "llm_custom",
+          issue: "Previously hallucinated non-existent pricing tiers without calling search.",
           expectation: "The assistant must provide a concise 3-step explanation without hallucinating internal APIs.",
           unexpectation: "Must not expose internal database connection strings or passwords.",
         },

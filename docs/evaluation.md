@@ -48,7 +48,7 @@ Each dimension contains a tailored prompt template following DeepEval/RAGAS best
 - **`tool_call`**: evaluates tool execution counts, arguments subset matching, or failure/blocked frequencies (`calls`, `failed`, `blocked`).
 - **`metric`**: checks multi-turn conversation and performance metrics (`duration_s`, `output_chars`, `total_tool_calls`, `tool_failures`, `tool_blocked`).
 - **`llm_dim`**: evaluates against one of the predefined dimension rubrics above.
-- **`llm_custom`**: natural language semantic criteria (`expectation`, `unexpectation`, `reference`, `context`).
+- **`llm_custom`**: natural language semantic criteria (`expectation`, `issue`, `unexpectation`, `reference`, `context`).
 
 *Note on structured Agent output*: When an Agent outputs JSON (direct JSON payload or formatted in a markdown ` ```json ` code block), the runner automatically deserializes it so `jsonpath` and `js_expression` can inspect object properties directly alongside `text`.
 

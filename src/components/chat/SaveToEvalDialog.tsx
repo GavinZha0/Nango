@@ -92,9 +92,13 @@ export function SaveToEvalDialog({
         ? turns[0].userMessage.slice(0, 40) + (turns[0].userMessage.length > 40 ? "..." : "")
         : "Draft Case " + new Date().toISOString().slice(0, 10);
 
-      const assertions = expectedOutcome.trim()
-        ? [{ type: "llm_custom", expectation: expectedOutcome.trim() }]
-        : [];
+      const assertions: Array<Record<string, unknown>> = [];
+      if (issue.trim()) {
+        assertions.push({ type: "llm_custom", issue: issue.trim() });
+      }
+      if (expectedOutcome.trim()) {
+        assertions.push({ type: "llm_custom", expectation: expectedOutcome.trim() });
+      }
 
       const input: CreateCaseInput = {
         name: caseName,
