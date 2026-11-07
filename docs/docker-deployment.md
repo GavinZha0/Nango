@@ -38,7 +38,7 @@ The app image is multi-stage:
 ```
 docker/Dockerfile
 ├── builder stage  (node:24-bookworm-slim)
-│   ├── corepack enable pnpm   (default isolated linker — NOT hoisted, see §6.5)
+│   ├── npm install -g pnpm@${PNPM_VERSION}   (default isolated linker — NOT hoisted, see §5)
 │   ├── COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 │   ├── pnpm install --frozen-lockfile
 │   ├── COPY . .
@@ -137,7 +137,7 @@ ignores it.
 ## 3. Upgrade Guidelines
 
 When upgrading dependencies, follow these checks:
-- **pnpm**: Review release notes for lockfile schema changes. Ensure `pnpm-workspace.yaml` is copied in the Dockerfile if required. Test locally with `--frozen-lockfile`.
+- **pnpm**: Review release notes for lockfile schema changes. Keep `package.json#packageManager` and `ARG PNPM_VERSION` in `docker/Dockerfile` in sync. Ensure `pnpm-workspace.yaml` is copied in the Dockerfile if required. Test locally with `--frozen-lockfile`.
 - **Next.js**: Read migration guides for config key changes. Watch build logs for schema warnings. Verify the standalone output bundle and the `.pnpm` closure repair step.
 - **PostgreSQL**: Check upstream image release notes for volume layout changes. Plan data migration if necessary.
 - **Node Base Image**: Ensure builder and runner stages share the same major version. Verify native bindings build correctly.

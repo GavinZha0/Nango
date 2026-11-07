@@ -5,8 +5,11 @@ FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install pnpm via corepack
-RUN corepack enable pnpm
+# Install pnpm via npm. QUIRK: corepack (through 0.36) cannot launch pnpm 12's
+# native Rust binary — it still expects the old bin/pnpm.cjs JS entry and dies
+# with MODULE_NOT_FOUND. Keep in sync with package.json#packageManager.
+ARG PNPM_VERSION=12.18.0
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Copy package files. pnpm 11+ reads `overrides` / `allowBuilds` from
 # pnpm-workspace.yaml, NOT package.json, so the install layer must see

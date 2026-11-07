@@ -2,7 +2,7 @@
   "name": "nango",
   "version": "0.30.1",
   "private": true,
-  "packageManager": "pnpm@11.26.0",
+  "packageManager": "pnpm@12.18.0",
   "engines": {
     "node": ">=24"
   },

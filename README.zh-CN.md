@@ -146,14 +146,14 @@ docker compose pull && docker compose up -d
 | 工具 | 版本 |
 |---|---|
 | Node.js | **≥ 24** (LTS) |
-| pnpm    | **≥ 11**（通过 `packageManager` 固定；`corepack enable` 足够） |
+| pnpm    | **≥ 12**（通过 `packageManager` 固定） |
 | Docker  | 需要用于捆绑的 Postgres **以及**代码执行工具使用的 Python 沙盒镜像 |
 | PostgreSQL | 18（或使用捆绑的 `pnpm docker:db`） |
 
 ### 运行它
 
 ```bash
-corepack enable          # 从 package.json 获取固定的 pnpm
+npm install -g pnpm@12   # corepack ≤ 0.36 暂不支持 pnpm 12 原生二进制
 pnpm install
 
 cp .env.example .env     # 设置 CREDENTIAL_ENCRYPTION_KEYRING、

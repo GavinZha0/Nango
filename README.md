@@ -163,12 +163,12 @@ Open **http://localhost:9300**. The first user to sign up becomes the admin auto
 | Tool | Version |
 |---|---|
 | Node.js | **≥ 24** (LTS) |
-| pnpm    | **≥ 11** (pinned via `packageManager`) |
+| pnpm    | **≥ 12** (pinned via `packageManager`) |
 | Docker  | Needed for bundled Postgres + Python sandbox |
 | PostgreSQL | 18 (or `pnpm docker:db`) |
 
 ```bash
-corepack enable          # picks up pinned pnpm
+npm install -g pnpm@12   # corepack ≤ 0.36 lacks pnpm 12 native binary support
 pnpm install
 cp .env.example .env     # set encryption + auth secrets
 pnpm docker:db           # Postgres 18 on localhost:5433

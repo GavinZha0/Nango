@@ -74,7 +74,7 @@ bug-fix example and what happens inside GitHub after you push), see
 3. **Install dependencies** (this also installs husky hooks):
 
    ```bash
-   corepack enable
+   npm install -g pnpm@12   # corepack ≤ 0.36 cannot launch pnpm 12's native binary
    pnpm install
    ```
 
