@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0](https://github.com/GavinZha0/Nango/compare/v0.30.1...v0.31.0) (2026-11-07)
+
+
+### Features
+
+* **eval:** add issue criterion to llm_custom assertions for regression checks ([09e5d00](https://github.com/GavinZha0/Nango/commit/09e5d00c0cb56c8615674df8b6398dea62a1c5e8))
+* **mcp:** enhance task execution, polling tree UI, and inspector UX ([080d38c](https://github.com/GavinZha0/Nango/commit/080d38c447ba0a5c63f47187e5d09fa006b4c024))
+
+
+### Bug Fixes
+
+* **mcp:** harden V2 task client, bound poll history, and refine test inspector UX ([3c21abe](https://github.com/GavinZha0/Nango/commit/3c21abedc0e08249720a27b28292563a8ed381ad))
+* **package:** build warning and update dependencies ([5874ae6](https://github.com/GavinZha0/Nango/commit/5874ae6b766f1201d21060b43067e85d67c0d54f))
+
 ## [0.30.1](https://github.com/GavinZha0/Nango/compare/v0.30.0...v0.30.1) (2026-11-05)
 
 
