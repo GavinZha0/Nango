@@ -30,14 +30,16 @@ vi.mock("@/lib/db", () => ({
   db: dbMock,
 }));
 
-const { clientConnectMock, clientCloseMock } = vi.hoisted(() => ({
+const { clientConnectMock, clientCloseMock, clientCtorMock } = vi.hoisted(() => ({
   clientConnectMock: vi.fn(),
   clientCloseMock: vi.fn(),
+  clientCtorMock: vi.fn(),
 }));
 
 vi.mock("@modelcontextprotocol/client", () => {
   return {
-    Client: function MockClient() {
+    Client: function MockClient(info: unknown, opts: unknown) {
+      clientCtorMock(info, opts);
       return {
         connect: clientConnectMock,
         close: clientCloseMock,
@@ -147,13 +149,32 @@ describe("MCP Admin Client & Header Resolution", () => {
         serverId: "server-1",
         clientName: "admin-test",
         errorPrefix: "Discovery failed",
-        fn: async ({ client: _client, server }) => {
+        fn: async ({ client: _client, server, clientInfo, clientCapabilities }) => {
           expect(server.id).toBe("server-1");
+          expect(clientInfo).toEqual({ name: "admin-test", version: "1.0.0" });
+          expect(clientCapabilities).toEqual({
+            extensions: {
+              "io.modelcontextprotocol/tasks": {},
+            },
+          });
           return { tools: ["tool_a", "tool_b"] };
         },
       });
 
       expect(result).toEqual({ tools: ["tool_a", "tool_b"] });
+      expect(clientCtorMock).toHaveBeenCalledWith(
+        { name: "admin-test", version: "1.0.0" },
+        {
+          versionNegotiation: { mode: "auto" },
+          capabilities: {
+            extensions: {
+              "io.modelcontextprotocol/tasks": {},
+            },
+          },
+        },
+      );
+      const [, ctorOptions] = clientCtorMock.mock.calls[0] as [unknown, Record<string, unknown>];
+      expect(ctorOptions.jsonSchemaValidator).toBeUndefined();
       expect(clientConnectMock).toHaveBeenCalledTimes(1);
       expect(clientCloseMock).toHaveBeenCalledTimes(1);
     });

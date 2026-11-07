@@ -102,6 +102,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "mcp.execution_timeout", value: "60", valueType: "number", description: "MCP tool execution timeout in seconds" },
   { key: "mcp.crop_image_for_llm", value: "true", valueType: "boolean", description: "Crop massive base64 image data in tool results before passing to LLM" },
   { key: "mcp.version_negotiation", value: "auto", valueType: "string", description: "MCP protocol version negotiation mode. 'auto' probes the server with server/discover and falls back to the legacy 2025 handshake; 'legacy' skips probing and uses the 2025 initialize sequence directly", options: ["auto", "legacy"] },
+  { key: "mcp.task_poll_history_limit", value: "5", valueType: "number", description: "Max number of recent polling snapshots retained and displayed per MCP task in the test inspector" },
 
   // ── infrastructure ────────────────────────────────────────────────
   { key: "datasource.cache_root", value: "", valueType: "string", description: "Dataset cache root path (empty = <repoRoot>/.cache/datasource — under the project root for easy inspection / cleanup)" },

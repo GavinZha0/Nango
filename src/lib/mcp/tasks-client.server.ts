@@ -1,15 +1,12 @@
 /**
- * Server-side task queries for the MCP Test page.
+ * Server-side task session and query helpers for the MCP Test page.
  *
- * Wraps `@modelcontextprotocol/ext-tasks` to list / inspect / cancel
- * tasks on an upstream MCP server. Each call opens a short-lived
- * connection via `withMcpAdminClient`, creates a task-enabled session,
- * performs one operation, and tears down — no long-lived session held
- * in the Node process.
- *
- * Phase 1: read-only task inventory for the admin test page. Does NOT
- * touch `client-providers.ts` or the agent/verification/web-auto
- * runtime paths.
+ * Wraps `@modelcontextprotocol/ext-tasks` to invoke task-capable tools and
+ * list / inspect / cancel tasks on an upstream MCP server. Each call opens a
+ * short-lived connection via `withMcpAdminClient`, creates a task-enabled
+ * session, performs one operation, and tears down — no long-lived session held
+ * in the Node process. Does NOT touch `client-providers.ts` or the
+ * agent/verification/web-auto runtime paths.
  */
 
 import "server-only";
@@ -68,11 +65,10 @@ export function buildTaskSessionOptions(
     return undefined;
   }
 
-  // For V2 servers, ext-tasks requires raw dispatch and framing metadata.
-  // We MUST bypass client.request() because SDK Client wire codecs strip
-  // `resultType: "complete"` and reject `resultType: "task"` with UnsupportedResultType.
-  // Instead, dispatch directly through client.transport and client._responseHandlers
-  // to preserve full V2 wire results intact.
+  // QUIRK: SDK Client wire codecs strip `resultType: "complete"` and reject
+  // `resultType: "task"` with UnsupportedResultType on V2 responses. Bypass
+  // `client.request()` via `client.transport` and `client._responseHandlers`
+  // so `@modelcontextprotocol/ext-tasks` receives the full V2 wire envelope.
   const rawDispatch: RawClientDispatch = async (request, options) => {
     if (!isRecord(request) || typeof request["method"] !== "string") {
       throw new TypeError("MCP request must be a JSON object with a string method");
@@ -89,10 +85,10 @@ export function buildTaskSessionOptions(
       throw new Error("MCP client response handlers map is not available");
     }
 
-    // Allocate next message ID using client's internal counter to avoid ID collision
-    const messageId = typeof internalClient._requestMessageId === "number"
-      ? internalClient._requestMessageId++
-      : 1;
+    if (typeof internalClient._requestMessageId !== "number") {
+      throw new Error("MCP client request message ID counter is not available");
+    }
+    const messageId = internalClient._requestMessageId++;
 
     const jsonrpcRequest = {
       ...request,
@@ -102,6 +98,7 @@ export function buildTaskSessionOptions(
 
     return new Promise<import("@modelcontextprotocol/ext-tasks/client").JsonRpcResponse>((resolve, reject) => {
       let timer: NodeJS.Timeout | undefined;
+      const requestAbort = new AbortController();
 
       const cleanup = (): void => {
         if (timer !== undefined) {
@@ -112,11 +109,14 @@ export function buildTaskSessionOptions(
       };
 
       if (options?.signal?.aborted) {
+        requestAbort.abort(options.signal.reason);
         return reject(options.signal.reason);
       }
       const onAbort = (): void => {
         cleanup();
-        reject(options?.signal?.reason ?? new Error("MCP rawDispatch request was aborted"));
+        const reason = options?.signal?.reason ?? new Error("MCP rawDispatch request was aborted");
+        requestAbort.abort(reason);
+        reject(reason);
       };
       options?.signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -124,7 +124,9 @@ export function buildTaskSessionOptions(
       timer = setTimeout(() => {
         cleanup();
         options?.signal?.removeEventListener("abort", onAbort);
-        reject(new Error(`MCP rawDispatch timed out after ${timeoutMs}ms for ${String(request["method"])}`));
+        const timeoutErr = new Error(`MCP rawDispatch timed out after ${timeoutMs}ms for ${String(request["method"])}`);
+        requestAbort.abort(timeoutErr);
+        reject(timeoutErr);
       }, timeoutMs);
 
       // Register raw response handler directly in client._responseHandlers.
@@ -193,7 +195,7 @@ export function buildTaskSessionOptions(
         jsonrpcRequest as unknown as import("@modelcontextprotocol/client").JSONRPCMessage,
         {
           headers: options?.context?.headers as Record<string, string> | undefined,
-          requestSignal: options?.signal,
+          requestSignal: requestAbort.signal,
         },
       ).catch((err: unknown) => {
         cleanup();

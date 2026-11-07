@@ -12,8 +12,6 @@ import {
   SSEClientTransport,
   StreamableHTTPClientTransport,
   type ClientCapabilities,
-  type jsonSchemaValidator,
-  type JsonSchemaType,
 } from "@modelcontextprotocol/client";
 
 import { db } from "@/lib/db";
@@ -23,21 +21,6 @@ import { getOAuthAccessToken } from "@/lib/credentials/oauth-token-manager";
 import { logger } from "@/lib/observability/logger";
 import { getConfig } from "@/lib/config";
 import { ApiError } from "@/lib/http/route-handlers";
-
-/**
- * Lenient JSON Schema validator that skips strict validation.
- * Used for V2 MCP servers that send _meta fields the SDK's default
- * validator rejects as schema violations.
- */
-const lenientValidator: jsonSchemaValidator = {
-  getValidator<T>(_schema: JsonSchemaType) {
-    return (value: unknown): { valid: true; data: T; errorMessage: undefined } | { valid: false; data: undefined; errorMessage: string } => ({
-      valid: true,
-      data: value as T,
-      errorMessage: undefined,
-    });
-  },
-};
 
 /**
  * Outbound header map for an MCP server connection. Header NAME is
@@ -140,13 +123,11 @@ export async function withMcpAdminClient<T>(opts: {
     const negotiationMode = getConfig("mcp.version_negotiation", "auto");
     const clientInfo = { name: opts.clientName, version: "1.0.0" };
 
-    // Declare comprehensive client capabilities to satisfy V2 servers that
-    // require sampling/roots/elicitation/extensions support. Even if we don't implement
-    // full handlers, declaring the capability prevents capability-check failures.
+    // Only advertise capabilities we actually handle. Declaring sampling,
+    // roots, or elicitation without registered request handlers causes
+    // upstream servers to send requests that fail with MethodNotFound
+    // instead of taking their no-capability fallback path.
     const capabilities: ClientCapabilities = {
-      sampling: {},
-      roots: { listChanged: true },
-      elicitation: {},
       extensions: {
         "io.modelcontextprotocol/tasks": {},
       },
@@ -157,9 +138,6 @@ export async function withMcpAdminClient<T>(opts: {
       {
         versionNegotiation: { mode: negotiationMode as "auto" | "legacy" },
         capabilities,
-        // Use lenient validator to avoid "Protocol value failed schema validation"
-        // errors from V2 servers that send _meta fields in responses.
-        jsonSchemaValidator: lenientValidator,
       },
     );
     await client.connect(transport);

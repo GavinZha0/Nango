@@ -28,6 +28,19 @@ import {
   togglePin,
   type ToolExecutionSnapshot,
 } from "@/lib/mcp/snapshots";
+import {
+  appendTaskPollRecord,
+  buildFailedTaskViewFromPollError,
+  DEFAULT_TASK_POLL_HISTORY_LIMIT,
+  getTotalPollCount,
+  isTerminalTaskStatus,
+  MAX_TASK_POLL_ATTEMPTS,
+  normalizePollHistoryLimit,
+  shouldStopPollingOnFailure,
+  type TaskPollRecord,
+  type TaskStatus,
+  type TaskView,
+} from "@/lib/mcp/task-poll-utils";
 
 import { withTheme } from "@rjsf/core";
 import { Theme as ShadcnTheme } from "@rjsf/shadcn";
@@ -134,37 +147,10 @@ function generateUiSchema(schema: Record<string, unknown>): Record<string, unkno
 
 type InputTab = "form" | "json" | "schema";
 
-type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
-
-interface TaskView {
-  taskId: string;
-  status: TaskStatus;
-  statusMessage?: string;
-  createdAt?: string;
-  lastUpdatedAt?: string;
-  retentionMs: number | null;
-  suggestedPollIntervalMs?: number;
-  ttl: number | null;
-  pollInterval?: number;
-  pollCount?: number;
-  result?: unknown;
-  raw: Record<string, unknown>;
-  extensions: Record<string, unknown>;
-}
-
 interface TaskListPage {
   tasks: TaskView[];
   nextCursor?: string;
-}
-
-interface TaskPollRecord {
-  seq: number;
-  timestamp: string;
-  status: TaskStatus;
-  statusMessage?: string;
-  suggestedPollIntervalMs?: number;
-  retentionMs?: number | null;
-  data: TaskView;
+  pollHistoryLimit?: number;
 }
 
 /** Consolidated input-editor state — reset together on tool switch. */
@@ -392,6 +378,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   // Tasks tab state
   const [tasks, setTasks] = useState<TaskView[]>([]);
+  const tasksRef = useRef<TaskView[]>(tasks);
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
   const [, setTasksNextCursor] = useState<string | undefined>(undefined);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskView | null>(null);
@@ -401,6 +391,15 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   }, [selectedTaskId]);
 
   const [pollHistory, setPollHistory] = useState<Record<string, TaskPollRecord[]>>({});
+  const [pollHistoryLimit, setPollHistoryLimit] = useState<number>(DEFAULT_TASK_POLL_HISTORY_LIMIT);
+  const pollHistoryLimitRef = useRef<number>(DEFAULT_TASK_POLL_HISTORY_LIMIT);
+  const updatePollHistoryLimit = useCallback((rawLimit: unknown): void => {
+    if (rawLimit === undefined) return;
+    const normalized = normalizePollHistoryLimit(rawLimit);
+    pollHistoryLimitRef.current = normalized;
+    setPollHistoryLimit(normalized);
+  }, []);
+
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
   const [selectedSnapshotSeq, setSelectedSnapshotSeq] = useState<number | null>(null);
   const selectedSnapshotSeqRef = useRef<number | null>(selectedSnapshotSeq);
@@ -409,6 +408,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   }, [selectedSnapshotSeq]);
 
   const inFlightPollsRef = useRef<Set<string>>(new Set());
+  const pollFailuresRef = useRef<Map<string, number>>(new Map());
 
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -454,6 +454,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         return [];
       }
       const page: TaskListPage = await res.json();
+      updatePollHistoryLimit(page.pollHistoryLimit);
       const remoteTasks = page.tasks ?? [];
       setTasks((prev) => {
         const map = new Map<string, TaskView>();
@@ -465,10 +466,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
             map.set(t.taskId, t);
           } else {
             const remote = map.get(t.taskId)!;
-            if (
-              (t.status === "completed" || t.status === "failed" || t.status === "cancelled") &&
-              remote.status === "working"
-            ) {
+            if (isTerminalTaskStatus(t.status) && remote.status === "working") {
               map.set(t.taskId, { ...remote, ...t });
             }
           }
@@ -483,7 +481,31 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     } finally {
       setLoadingTasks(false);
     }
-  }, [serverId]);
+  }, [serverId, updatePollHistoryLimit]);
+
+  const markTaskPollFailed = useCallback((taskId: string, errorMessage: string): void => {
+    pollFailuresRef.current.delete(taskId);
+    const existing = tasksRef.current.find((t) => t.taskId === taskId);
+    const failedTask = buildFailedTaskViewFromPollError(existing, taskId, errorMessage);
+    setTasksError(errorMessage);
+    setTasks((prev) =>
+      prev.some((t) => t.taskId === taskId)
+        ? prev.map((t) => (t.taskId === taskId ? failedTask : t))
+        : [failedTask, ...prev],
+    );
+    if (taskId === selectedTaskIdRef.current) {
+      setSelectedSnapshotSeq(null);
+      setSelectedTask(failedTask);
+    }
+    setPollHistory((prev) => ({
+      ...prev,
+      [taskId]: appendTaskPollRecord(
+        prev[taskId] ?? [],
+        failedTask,
+        pollHistoryLimitRef.current,
+      ),
+    }));
+  }, [setSelectedSnapshotSeq, setSelectedTask]);
 
   // Fetch single task detail (guarded against concurrent in-flight requests for the same taskId)
   const fetchTaskDetail = useCallback(async (taskId: string): Promise<TaskView | null> => {
@@ -492,45 +514,81 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     }
     inFlightPollsRef.current.add(taskId);
     try {
-      const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${taskId}`);
-      if (!res.ok) return null;
-      const detail: TaskView = await res.json();
-      if (detail.taskId === selectedTaskIdRef.current) {
-        if (selectedSnapshotSeqRef.current === null) {
-          setSelectedTask(detail);
+      // taskId is an opaque server-issued string and may contain URL-reserved chars.
+      const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${encodeURIComponent(taskId)}`);
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+        const errMsg =
+          typeof errBody.message === "string" && errBody.message.length > 0
+            ? errBody.message
+            : `Failed to poll task (${res.status})`;
+        const failures = (pollFailuresRef.current.get(taskId) ?? 0) + 1;
+        pollFailuresRef.current.set(taskId, failures);
+        if (shouldStopPollingOnFailure(res.status, failures)) {
+          markTaskPollFailed(taskId, errMsg);
+        }
+        return null;
+      }
+
+      pollFailuresRef.current.delete(taskId);
+      const rawJson = (await res.json()) as TaskView & { pollHistoryLimit?: number };
+      const { pollHistoryLimit: responseLimit, ...detail } = rawJson;
+      updatePollHistoryLimit(responseLimit);
+
+      let effectiveDetail: TaskView = detail;
+      let evictedSelectedSnapshot = false;
+      setPollHistory((prev) => {
+        const list = prev[taskId] ?? [];
+        const nextSeq = (list[list.length - 1]?.seq ?? 0) + 1;
+        if (!isTerminalTaskStatus(detail.status) && nextSeq >= MAX_TASK_POLL_ATTEMPTS) {
+          effectiveDetail = buildFailedTaskViewFromPollError(
+            detail,
+            taskId,
+            `Polling stopped after reaching ${MAX_TASK_POLL_ATTEMPTS} attempts`,
+          );
+        }
+        const nextList = appendTaskPollRecord(
+          list,
+          effectiveDetail,
+          pollHistoryLimitRef.current,
+        );
+        if (
+          taskId === selectedTaskIdRef.current &&
+          selectedSnapshotSeqRef.current !== null &&
+          !nextList.some((r) => r.seq === selectedSnapshotSeqRef.current)
+        ) {
+          evictedSelectedSnapshot = true;
+        }
+        return {
+          ...prev,
+          [taskId]: nextList,
+        };
+      });
+
+      if (effectiveDetail.taskId === selectedTaskIdRef.current) {
+        if (evictedSelectedSnapshot) {
+          setSelectedSnapshotSeq(null);
+          setSelectedTask(effectiveDetail);
+        } else if (selectedSnapshotSeqRef.current === null) {
+          setSelectedTask(effectiveDetail);
         }
       }
       setTasks((prev) =>
-        prev.map((t) => (t.taskId === detail.taskId ? { ...t, ...detail } : t)),
+        prev.map((t) => (t.taskId === effectiveDetail.taskId ? { ...t, ...effectiveDetail } : t)),
       );
-      setPollHistory((prev) => {
-        const list = prev[taskId] ?? [];
-        const last = list[list.length - 1];
-        // Prevent recording duplicate terminal snapshots if already terminal
-        if (last && (last.status === "completed" || last.status === "failed" || last.status === "cancelled")) {
-          return prev;
-        }
-        const nextSeq = list.length + 1;
-        const rec: TaskPollRecord = {
-          seq: nextSeq,
-          timestamp: new Date().toISOString(),
-          status: detail.status,
-          statusMessage: detail.statusMessage,
-          suggestedPollIntervalMs: detail.suggestedPollIntervalMs ?? detail.pollInterval,
-          retentionMs: detail.retentionMs,
-          data: detail,
-        };
-        return {
-          ...prev,
-          [taskId]: [...list, rec],
-        };
-      });
-      return detail;
-    } catch { /* silent — detail refresh is best-effort */ return null; }
-    finally {
+      return effectiveDetail;
+    } catch (err) {
+      const failures = (pollFailuresRef.current.get(taskId) ?? 0) + 1;
+      pollFailuresRef.current.set(taskId, failures);
+      if (shouldStopPollingOnFailure(null, failures)) {
+        const errMsg = err instanceof Error ? err.message : "Network error while polling task";
+        markTaskPollFailed(taskId, errMsg);
+      }
+      return null;
+    } finally {
       inFlightPollsRef.current.delete(taskId);
     }
-  }, [serverId, setSelectedTask]);
+  }, [serverId, markTaskPollFailed, updatePollHistoryLimit, setSelectedSnapshotSeq, setSelectedTask]);
 
   // Fetch tasks when switching to tasks tab
   useEffect(() => {
@@ -594,23 +652,24 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   const handleCancelTask = useCallback(async (taskId: string) => {
     setCancellingTask(true);
     try {
-      const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${taskId}/cancel`, {
+      const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${encodeURIComponent(taskId)}/cancel`, {
         method: "POST",
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setTasksError(data.message ?? `Failed to cancel task (${res.status})`);
       } else {
-        // Refresh after cancel
+        // Refresh the cancelled task itself — it need not be the selected one
+        // (the list row's Cancel button targets any active task).
         await fetchTasks();
-        if (selectedTaskId) await fetchTaskDetail(selectedTaskId);
+        await fetchTaskDetail(taskId);
       }
     } catch (err) {
       setTasksError(err instanceof Error ? err.message : "Failed to cancel task");
     } finally {
       setCancellingTask(false);
     }
-  }, [serverId, selectedTaskId, fetchTasks, fetchTaskDetail]);
+  }, [serverId, fetchTasks, fetchTaskDetail]);
 
   // Active tool: picked one, else first available, else null.
   const tool: McpToolSnapshot | null = useMemo(() => {
@@ -707,17 +766,9 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         const execError = data.code ? `[${data.code}] ${baseErr}` : baseErr;
         setExec({ executing: false, result: null, execError, executedArgs: null, durationMs });
       } else if (data.mode === "task") {
+        updatePollHistoryLimit(data.pollHistoryLimit);
+        pollFailuresRef.current.delete(data.taskId);
         setExec({ executing: false, result: data, execError: null, executedArgs: args, durationMs });
-        saveSnapshot(
-          serverId,
-          activeToolName,
-          formatTimestamp(new Date(), tz, "datetimePrecise"),
-          args,
-          data,
-          durationMs,
-          data.snapshotMaxBytes,
-        );
-        setSnapshotTrigger((prev) => prev + 1);
         const initialTask = data.initialTask as TaskView | undefined;
         const optimisticTask: TaskView = {
           taskId: data.taskId,
@@ -775,7 +826,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         durationMs,
       });
     }
-  }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz, setSelectedTaskId, setSelectedTask, setSelectedSnapshotSeq]);
+  }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz, setSelectedTaskId, setSelectedTask, setSelectedSnapshotSeq, updatePollHistoryLimit]);
 
   const schema = useMemo(() => {
     const raw = (tool?.input_schema as Record<string, unknown>) ?? {};
@@ -943,13 +994,6 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   const displayError = useMemo(() => {
     if (displayTask) {
-      if (displayTask.status === "failed") {
-        const err = (displayTask.raw as Record<string, unknown>)?.error as Record<string, unknown> | undefined;
-        return (typeof err?.message === "string" ? err.message : null) ?? displayTask.statusMessage ?? "Task failed";
-      }
-      if (displayTask.status === "cancelled") {
-        return "Task was cancelled";
-      }
       return null;
     }
     return exec.execError;
@@ -963,15 +1007,8 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
   }, [activeTab, exec.durationMs]);
 
   const resultSizeStr = useMemo(() => {
-    const target = resultTab === "raw" ? displayRawJson : displayResult;
+    const target = resultTab === "raw" ? displayRawJson : (displayResult ?? displayTask);
     if (target === null || target === undefined) return null;
-    if (
-      typeof target === "object" &&
-      (target as Record<string, unknown>).mode === "task" &&
-      (!displayTask || displayTask.status !== "completed")
-    ) {
-      return null;
-    }
     try {
       const str = JSON.stringify(target);
       const bytes = new TextEncoder().encode(str).length;
@@ -997,17 +1034,30 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         activeTaskResult.result ??
         (activeTaskResult.raw as Record<string, unknown>)?.result ??
         activeTaskResult.raw;
+      const createdMs = activeTaskResult.createdAt ? Date.parse(activeTaskResult.createdAt) : NaN;
+      const updatedMs = activeTaskResult.lastUpdatedAt ? Date.parse(activeTaskResult.lastUpdatedAt) : NaN;
+      const taskDurationMs =
+        Number.isFinite(createdMs) && Number.isFinite(updatedMs) && updatedMs >= createdMs
+          ? Math.round(updatedMs - createdMs)
+          : (exec.durationMs ?? undefined);
+      const snapshotMaxBytes =
+        typeof exec.result === "object" &&
+        exec.result !== null &&
+        typeof (exec.result as Record<string, unknown>).snapshotMaxBytes === "number"
+          ? ((exec.result as Record<string, unknown>).snapshotMaxBytes as number)
+          : undefined;
       saveSnapshot(
         serverId,
         activeToolName,
         formatTimestamp(new Date(), tz, "datetimePrecise"),
         exec.executedArgs,
         finalResult,
-        exec.durationMs ?? undefined,
+        taskDurationMs,
+        snapshotMaxBytes,
       );
       setSnapshotTrigger((prev) => prev + 1);
     }
-  }, [activeTaskResult, activeToolName, exec.executedArgs, exec.durationMs, serverId, tz]);
+  }, [activeTaskResult, activeToolName, exec.executedArgs, exec.durationMs, exec.result, serverId, tz]);
 
   /** Save current tool state to cache, then restore (or reset) the target tool's state. */
   function handleSelectTool(name: string): void {
@@ -1362,6 +1412,8 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                               data: t,
                             },
                           ];
+                      const totalPollCount = getTotalPollCount(pollHistory[t.taskId]);
+                      const visibleHistory = history.slice(-pollHistoryLimit);
 
                       return (
                         <li key={t.taskId} className="border-b border-border/40">
@@ -1402,18 +1454,19 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    const willExpand = !expandedTaskIds.has(t.taskId);
                                     setExpandedTaskIds((prev) => {
                                       const next = new Set(prev);
                                       if (next.has(t.taskId)) {
                                         next.delete(t.taskId);
                                       } else {
                                         next.add(t.taskId);
-                                        if ((pollHistory[t.taskId]?.length ?? 0) === 0) {
-                                          void fetchTaskDetail(t.taskId);
-                                        }
                                       }
                                       return next;
                                     });
+                                    if (willExpand && (pollHistory[t.taskId]?.length ?? 0) === 0) {
+                                      void fetchTaskDetail(t.taskId);
+                                    }
                                   }}
                                   className="p-1 -ml-1 text-muted-foreground hover:text-foreground rounded transition-colors"
                                   aria-label={isExpanded ? "Collapse task" : "Expand task"}
@@ -1441,7 +1494,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                                         : "text-muted-foreground",
                                     )}
                                   >
-                                    ({history.length})
+                                    ({totalPollCount})
                                   </span>
                                 </span>
                               </div>
@@ -1491,10 +1544,10 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                             </div>
                           </div>
 
-                          {/* Sub-tree: Polling history snapshots */}
+                          {/* Sub-tree: Polling history snapshots (capped at pollHistoryLimit) */}
                           {isExpanded && (
                             <div className="border-t border-border/20 bg-muted/15">
-                              {history.map((rec) => {
+                              {visibleHistory.map((rec) => {
                                 const isSnapshotSelected =
                                   isTaskSelected && selectedSnapshotSeq === rec.seq;
                                 const recIntervalSec = Math.max(
@@ -1696,10 +1749,8 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 onClick={() => setSaveDialogOpen(true)}
                 disabled={
                   exec.executing ||
-                  (displayTask
-                    ? displayTask.status !== "completed"
-                    : exec.result === null) ||
-                  displayError !== null ||
+                  exec.result === null ||
+                  exec.execError !== null ||
                   exec.executedArgs === null ||
                   activeToolName === null
                 }
@@ -1761,7 +1812,7 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                 disabled={
                   resultTab === "raw"
                     ? !displayRawJson
-                    : (!displayResult && !displayTask) || (displayTask !== null && displayTask.status === "working")
+                    : !displayResult && !displayTask
                 }
                 title="Copy JSON"
               >
@@ -1825,13 +1876,24 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                       </div>
                     </>
                   ) : (
-                    <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
-                      <p className="text-xs text-destructive">
-                        {((displayTask.raw as Record<string, unknown>)?.error as Record<string, unknown>)?.message as string ??
-                          displayTask.statusMessage ??
-                          "The task did not complete successfully."}
-                      </p>
-                    </div>
+                    <>
+                      <div className={cn(resultTab !== "view" && "hidden")}>
+                        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                          <p className="text-xs text-destructive">
+                            {((displayTask.raw as Record<string, unknown>)?.error as Record<string, unknown>)?.message as string ??
+                              displayTask.statusMessage ??
+                              (displayTask.status === "cancelled"
+                                ? "Task was cancelled."
+                                : "The task did not complete successfully.")}
+                          </p>
+                        </div>
+                      </div>
+                      <div className={cn(resultTab !== "raw" && "hidden")}>
+                        <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                          {JSON.stringify(displayRawJson, null, 2)}
+                        </pre>
+                      </div>
+                    </>
                   )}
                 </>
               ) : exec.result !== null ? (
