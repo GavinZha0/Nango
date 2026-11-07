@@ -11,6 +11,9 @@ import {
   Client,
   SSEClientTransport,
   StreamableHTTPClientTransport,
+  type ClientCapabilities,
+  type jsonSchemaValidator,
+  type JsonSchemaType,
 } from "@modelcontextprotocol/client";
 
 import { db } from "@/lib/db";
@@ -20,6 +23,21 @@ import { getOAuthAccessToken } from "@/lib/credentials/oauth-token-manager";
 import { logger } from "@/lib/observability/logger";
 import { getConfig } from "@/lib/config";
 import { ApiError } from "@/lib/http/route-handlers";
+
+/**
+ * Lenient JSON Schema validator that skips strict validation.
+ * Used for V2 MCP servers that send _meta fields the SDK's default
+ * validator rejects as schema violations.
+ */
+const lenientValidator: jsonSchemaValidator = {
+  getValidator<T>(_schema: JsonSchemaType) {
+    return (value: unknown): { valid: true; data: T; errorMessage: undefined } | { valid: false; data: undefined; errorMessage: string } => ({
+      valid: true,
+      data: value as T,
+      errorMessage: undefined,
+    });
+  },
+};
 
 /**
  * Outbound header map for an MCP server connection. Header NAME is
@@ -97,7 +115,7 @@ export async function withMcpAdminClient<T>(opts: {
   serverId: string;
   clientName: string;
   errorPrefix: string;
-  fn: (ctx: { client: Client; server: McpServerEntity }) => Promise<T>;
+  fn: (ctx: { client: Client; server: McpServerEntity; clientInfo: { name: string; version: string }; clientCapabilities: ClientCapabilities }) => Promise<T>;
 }): Promise<T> {
   // Fetch the server row first — no point opening any sockets when
   // the id is bogus. NOT_FOUND must precede any transport work so
@@ -120,12 +138,32 @@ export async function withMcpAdminClient<T>(opts: {
   let client: Client | null = null;
   try {
     const negotiationMode = getConfig("mcp.version_negotiation", "auto");
+    const clientInfo = { name: opts.clientName, version: "1.0.0" };
+
+    // Declare comprehensive client capabilities to satisfy V2 servers that
+    // require sampling/roots/elicitation/extensions support. Even if we don't implement
+    // full handlers, declaring the capability prevents capability-check failures.
+    const capabilities: ClientCapabilities = {
+      sampling: {},
+      roots: { listChanged: true },
+      elicitation: {},
+      extensions: {
+        "io.modelcontextprotocol/tasks": {},
+      },
+    };
+
     client = new Client(
-      { name: opts.clientName, version: "1.0.0" },
-      { versionNegotiation: { mode: negotiationMode as "auto" | "legacy" } },
+      clientInfo,
+      {
+        versionNegotiation: { mode: negotiationMode as "auto" | "legacy" },
+        capabilities,
+        // Use lenient validator to avoid "Protocol value failed schema validation"
+        // errors from V2 servers that send _meta fields in responses.
+        jsonSchemaValidator: lenientValidator,
+      },
     );
     await client.connect(transport);
-    return await opts.fn({ client, server });
+    return await opts.fn({ client, server, clientInfo, clientCapabilities: capabilities });
   } catch (err) {
     if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : String(err);

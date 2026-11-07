@@ -18,12 +18,225 @@ import {
   createTaskSessionFromClient,
   type TaskListPage,
   type TaskView,
+  type V2RequestFraming,
+  type RawClientDispatch,
 } from "@modelcontextprotocol/ext-tasks/client";
 import { taskId as toTaskId } from "@modelcontextprotocol/ext-tasks/core";
+import type { Client } from "@modelcontextprotocol/client";
 
 import { withMcpAdminClient } from "@/lib/mcp/admin-client.server";
+import { normalizeMcpToolResult } from "@/lib/mcp/tool-result-utils";
+import { isJsonValue } from "@modelcontextprotocol/ext-tasks/core";
 
 export type { TaskView, TaskListPage };
+export type { V2RequestFraming, RawClientDispatch } from "@modelcontextprotocol/ext-tasks/client";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface ClientInternal {
+  _transport?: {
+    send(
+      message: import("@modelcontextprotocol/client").JSONRPCMessage,
+      options?: { headers?: Record<string, string>; requestSignal?: AbortSignal },
+    ): Promise<void>;
+  };
+  _requestMessageId?: number;
+  _responseHandlers?: Map<number, (response: unknown) => void>;
+}
+
+/**
+ * Builds V2 session options when the server negotiates modern era.
+ * Returns undefined for legacy servers that don't need V2 framing.
+ *
+ * Exported for reuse by the call-tool route and any future ext-tasks
+ * integration points.
+ */
+export function buildTaskSessionOptions(
+  client: Client,
+  clientInfo: { name: string; version: string },
+  clientCapabilities: import("@modelcontextprotocol/client").ClientCapabilities,
+): { rawDispatch: RawClientDispatch; v2RequestFraming: V2RequestFraming } | undefined {
+  const protocolEra = client.getProtocolEra();
+  if (protocolEra !== "modern") {
+    return undefined;
+  }
+
+  const protocolVersion = client.getNegotiatedProtocolVersion();
+  if (!protocolVersion) {
+    return undefined;
+  }
+
+  // For V2 servers, ext-tasks requires raw dispatch and framing metadata.
+  // We MUST bypass client.request() because SDK Client wire codecs strip
+  // `resultType: "complete"` and reject `resultType: "task"` with UnsupportedResultType.
+  // Instead, dispatch directly through client.transport and client._responseHandlers
+  // to preserve full V2 wire results intact.
+  const rawDispatch: RawClientDispatch = async (request, options) => {
+    if (!isRecord(request) || typeof request["method"] !== "string") {
+      throw new TypeError("MCP request must be a JSON object with a string method");
+    }
+
+    const transport = client.transport;
+    if (!transport) {
+      throw new Error("MCP client transport is not connected");
+    }
+
+    const internalClient = client as unknown as ClientInternal;
+    const responseHandlers = internalClient._responseHandlers;
+    if (!responseHandlers) {
+      throw new Error("MCP client response handlers map is not available");
+    }
+
+    // Allocate next message ID using client's internal counter to avoid ID collision
+    const messageId = typeof internalClient._requestMessageId === "number"
+      ? internalClient._requestMessageId++
+      : 1;
+
+    const jsonrpcRequest = {
+      ...request,
+      jsonrpc: "2.0" as const,
+      id: messageId,
+    };
+
+    return new Promise<import("@modelcontextprotocol/ext-tasks/client").JsonRpcResponse>((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+
+      const cleanup = (): void => {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        responseHandlers.delete(messageId);
+      };
+
+      if (options?.signal?.aborted) {
+        return reject(options.signal.reason);
+      }
+      const onAbort = (): void => {
+        cleanup();
+        reject(options?.signal?.reason ?? new Error("MCP rawDispatch request was aborted"));
+      };
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+
+      const timeoutMs = options?.context?.requestTimeoutMs ?? 60_000;
+      timer = setTimeout(() => {
+        cleanup();
+        options?.signal?.removeEventListener("abort", onAbort);
+        reject(new Error(`MCP rawDispatch timed out after ${timeoutMs}ms for ${String(request["method"])}`));
+      }, timeoutMs);
+
+      // Register raw response handler directly in client._responseHandlers.
+      // This receives the unmodified JSON-RPC response before SDK wire codecs
+      // strip resultType: "complete" or reject resultType: "task".
+      responseHandlers.set(messageId, (response: unknown) => {
+        cleanup();
+        options?.signal?.removeEventListener("abort", onAbort);
+
+        if (response instanceof Error) {
+          const code = isRecord(response) && typeof response["code"] === "number"
+            ? response["code"]
+            : -32603;
+          const data = isRecord(response) && isJsonValue(response["data"])
+            ? response["data"]
+            : undefined;
+          return resolve({
+            kind: "error",
+            error: {
+              code,
+              message: response.message,
+              ...(data !== undefined ? { data } : {}),
+            },
+          });
+        }
+
+        if (isRecord(response)) {
+          if ("result" in response && isJsonValue(response["result"])) {
+            return resolve({
+              kind: "result",
+              result: response["result"],
+            });
+          }
+          if ("error" in response && isRecord(response["error"])) {
+            const errCode = typeof response["error"]["code"] === "number"
+              ? response["error"]["code"]
+              : -32603;
+            const errMsg = typeof response["error"]["message"] === "string"
+              ? response["error"]["message"]
+              : "Unknown error";
+            const data = isJsonValue(response["error"]["data"])
+              ? response["error"]["data"]
+              : undefined;
+            return resolve({
+              kind: "error",
+              error: {
+                code: errCode,
+                message: errMsg,
+                ...(data !== undefined ? { data } : {}),
+              },
+            });
+          }
+        }
+
+        if (isJsonValue(response)) {
+          return resolve({
+            kind: "result",
+            result: response,
+          });
+        }
+
+        reject(new TypeError("Invalid JSON-RPC response format received from server"));
+      });
+
+      transport.send(
+        jsonrpcRequest as unknown as import("@modelcontextprotocol/client").JSONRPCMessage,
+        {
+          headers: options?.context?.headers as Record<string, string> | undefined,
+          requestSignal: options?.signal,
+        },
+      ).catch((err: unknown) => {
+        cleanup();
+        options?.signal?.removeEventListener("abort", onAbort);
+        reject(err);
+      });
+    });
+  };
+
+  // Convert SDK ClientCapabilities to the ext-tasks framing format.
+  // We preserve all declared capabilities and add the tasks extension.
+  const framingCapabilities: Record<string, import("@modelcontextprotocol/ext-tasks/core").JsonValue> = {
+    ...clientCapabilities as unknown as Record<string, import("@modelcontextprotocol/ext-tasks/core").JsonValue>,
+    extensions: {
+      ...(clientCapabilities.extensions as Record<string, import("@modelcontextprotocol/ext-tasks/core").JsonValue> ?? {}),
+      "io.modelcontextprotocol/tasks": {},
+    },
+  };
+
+  const v2RequestFraming: V2RequestFraming = {
+    protocolVersion,
+    clientInfo,
+    clientCapabilities: framingCapabilities,
+  };
+
+  return { rawDispatch, v2RequestFraming };
+}
+
+/**
+ * Creates a task-enabled session from a connected MCP client.
+ * Automatically provides V2 options when the server negotiates modern era.
+ */
+export function createTaskSession(
+  client: Client,
+  clientInfo: { name: string; version: string },
+  clientCapabilities: import("@modelcontextprotocol/client").ClientCapabilities,
+  endpointId: string,
+): ReturnType<typeof createTaskSessionFromClient> {
+  const v2Options = buildTaskSessionOptions(client, clientInfo, clientCapabilities);
+  return v2Options
+    ? createTaskSessionFromClient(client, { endpointId, ...v2Options })
+    : createTaskSessionFromClient(client, { endpointId });
+}
 
 export async function listServerTasks(
   serverId: string,
@@ -33,11 +246,12 @@ export async function listServerTasks(
     serverId,
     clientName: "nango-tasks-list",
     errorPrefix: "Failed to list tasks",
-    fn: async ({ client }) => {
-      const session = createTaskSessionFromClient(client, {
-        endpointId: `nango-tasks-${serverId}`,
-      });
+    fn: async ({ client, clientInfo, clientCapabilities }) => {
+      const session = createTaskSession(client, clientInfo, clientCapabilities, `nango-tasks-${serverId}`);
       try {
+        if (session.capabilities.inventory !== "server-list") {
+          return { tasks: [] };
+        }
         return await session.listTasks(cursor);
       } finally {
         await session.close();
@@ -49,18 +263,42 @@ export async function listServerTasks(
 export async function getServerTask(
   serverId: string,
   taskId: string,
-): Promise<TaskView> {
+): Promise<TaskView & { result?: unknown }> {
   return withMcpAdminClient({
     serverId,
     clientName: "nango-tasks-get",
     errorPrefix: "Failed to get task",
-    fn: async ({ client }) => {
-      const session = createTaskSessionFromClient(client, {
-        endpointId: `nango-tasks-${serverId}`,
-      });
+    fn: async ({ client, clientInfo, clientCapabilities }) => {
+      const session = createTaskSession(client, clientInfo, clientCapabilities, `nango-tasks-${serverId}`);
       try {
         const controller = session.task(toTaskId(taskId));
-        return await controller.snapshot();
+        const snapshot = await controller.snapshot();
+        if (snapshot.status === "completed") {
+          const rawRecord = snapshot.raw as Record<string, unknown>;
+          let result = rawRecord.result;
+          if (result === undefined) {
+            try {
+              const outcome = await controller.result();
+              if (outcome.status === "completed") {
+                result = outcome.result as import("@modelcontextprotocol/ext-tasks/core").JsonValue;
+              }
+            } catch {
+              // Best-effort fallback
+            }
+          }
+          if (result !== undefined) {
+            const normalized = normalizeMcpToolResult(result, { parseForUi: true });
+            return {
+              ...snapshot,
+              result: normalized,
+              raw: {
+                ...snapshot.raw,
+                result: normalized as import("@modelcontextprotocol/ext-tasks/core").JsonValue,
+              },
+            };
+          }
+        }
+        return snapshot;
       } finally {
         await session.close();
       }
@@ -76,10 +314,8 @@ export async function cancelServerTask(
     serverId,
     clientName: "nango-tasks-cancel",
     errorPrefix: "Failed to cancel task",
-    fn: async ({ client }) => {
-      const session = createTaskSessionFromClient(client, {
-        endpointId: `nango-tasks-${serverId}`,
-      });
+    fn: async ({ client, clientInfo, clientCapabilities }) => {
+      const session = createTaskSession(client, clientInfo, clientCapabilities, `nango-tasks-${serverId}`);
       try {
         await session.cancelTask(toTaskId(taskId));
       } finally {

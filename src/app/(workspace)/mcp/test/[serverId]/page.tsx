@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, Star, Copy, Check, RefreshCw, Ban } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Search, Save, ChevronDown, ChevronRight, Star, Copy, Check, Ban, Clock, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -146,6 +146,8 @@ interface TaskView {
   suggestedPollIntervalMs?: number;
   ttl: number | null;
   pollInterval?: number;
+  pollCount?: number;
+  result?: unknown;
   raw: Record<string, unknown>;
   extensions: Record<string, unknown>;
 }
@@ -153,6 +155,16 @@ interface TaskView {
 interface TaskListPage {
   tasks: TaskView[];
   nextCursor?: string;
+}
+
+interface TaskPollRecord {
+  seq: number;
+  timestamp: string;
+  status: TaskStatus;
+  statusMessage?: string;
+  suggestedPollIntervalMs?: number;
+  retentionMs?: number | null;
+  data: TaskView;
 }
 
 /** Consolidated input-editor state — reset together on tool switch. */
@@ -199,72 +211,50 @@ function TaskStatusBadge({ status }: { status: TaskStatus }): ReactNode {
   );
 }
 
-function TaskDetail({ task, tz }: { task: TaskView; tz: ReturnType<typeof useDisplayTimezone> }): ReactNode {
+function TaskBannerCard({
+  task,
+  snapshotSeq,
+  onSelectTask,
+}: {
+  task: TaskView;
+  snapshotSeq?: number | null;
+  onSelectTask: (taskId: string) => void;
+}): ReactNode {
+  const isCompleted = task.status === "completed";
+  const isFailed = task.status === "failed";
+  const isCancelled = task.status === "cancelled";
+  const isSnapshot = snapshotSeq !== undefined && snapshotSeq !== null;
+
   return (
-    <div className="space-y-3">
-      {/* Status row */}
-      <div className="flex items-center gap-2">
-        <TaskStatusBadge status={task.status} />
-        <span className="font-mono text-xs text-muted-foreground">
+    <div className="mb-3 flex items-center justify-between rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 text-xs text-foreground">
+      <div className="flex items-center gap-1.5 min-w-0">
+        {isCompleted ? (
+          <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : isFailed || isCancelled ? (
+          <Ban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : isSnapshot ? (
+          <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0 text-muted-foreground" />
+        )}
+        <span className="font-medium shrink-0 text-muted-foreground">Task:</span>
+        <button
+          type="button"
+          onClick={() => onSelectTask(task.taskId)}
+          className="cursor-pointer rounded bg-background/60 px-1 font-mono text-[10px] text-foreground hover:bg-background hover:underline transition-colors truncate max-w-[240px]"
+          title="View Task"
+        >
           {task.taskId}
-        </span>
-      </div>
-
-      {/* Status message */}
-      {task.statusMessage && (
-        <div className="rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5">
-          <p className="text-xs text-foreground">{task.statusMessage}</p>
-        </div>
-      )}
-
-      {/* Metadata table */}
-      <div className="space-y-1">
-        <DetailRow label="Status" value={TASK_STATUS_LABELS[task.status]} />
-        {task.createdAt && (
-          <DetailRow label="Created" value={formatTimestamp(new Date(task.createdAt), tz, "datetimePrecise")} />
-        )}
-        {task.lastUpdatedAt && (
-          <DetailRow label="Updated" value={formatTimestamp(new Date(task.lastUpdatedAt), tz, "datetimePrecise")} />
-        )}
-        {task.retentionMs !== null && (
-          <DetailRow label="Retention" value={`${(task.retentionMs / 1000).toFixed(0)}s`} />
-        )}
-        {(task.suggestedPollIntervalMs ?? task.pollInterval) && (
-          <DetailRow
-            label="Poll Interval"
-            value={`${(task.suggestedPollIntervalMs ?? task.pollInterval ?? 0) / 1000}s`}
-          />
+        </button>
+        {isSnapshot && (
+          <span className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
+            #{snapshotSeq}
+          </span>
         )}
       </div>
-
-      {/* Extensions */}
-      {Object.keys(task.extensions).length > 0 && (
-        <div>
-          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Extensions
-          </h4>
-          <JsonView data={task.extensions} defaultExpandDepth={2} />
-        </div>
-      )}
-
-      {/* Raw data */}
-      {Object.keys(task.raw).length > 0 && (
-        <div>
-          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Raw
-          </h4>
-          <JsonView data={task.raw} defaultExpandDepth={2} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }): ReactNode {
-  return (
-    <div className="flex items-baseline gap-2 text-xs">
-      <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
-      <span className="text-foreground">{value}</span>
+      <div className="shrink-0 ml-2">
+        <TaskStatusBadge status={task.status} />
+      </div>
     </div>
   );
 }
@@ -402,9 +392,24 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
   // Tasks tab state
   const [tasks, setTasks] = useState<TaskView[]>([]);
-  const [tasksNextCursor, setTasksNextCursor] = useState<string | undefined>(undefined);
+  const [, setTasksNextCursor] = useState<string | undefined>(undefined);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskView | null>(null);
+  const selectedTaskIdRef = useRef<string | null>(selectedTaskId);
+  useEffect(() => {
+    selectedTaskIdRef.current = selectedTaskId;
+  }, [selectedTaskId]);
+
+  const [pollHistory, setPollHistory] = useState<Record<string, TaskPollRecord[]>>({});
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
+  const [selectedSnapshotSeq, setSelectedSnapshotSeq] = useState<number | null>(null);
+  const selectedSnapshotSeqRef = useRef<number | null>(selectedSnapshotSeq);
+  useEffect(() => {
+    selectedSnapshotSeqRef.current = selectedSnapshotSeq;
+  }, [selectedSnapshotSeq]);
+
+  const inFlightPollsRef = useRef<Set<string>>(new Set());
+
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [cancellingTask, setCancellingTask] = useState(false);
@@ -449,10 +454,29 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         return [];
       }
       const page: TaskListPage = await res.json();
-      const list = page.tasks ?? [];
-      setTasks(list);
+      const remoteTasks = page.tasks ?? [];
+      setTasks((prev) => {
+        const map = new Map<string, TaskView>();
+        for (const t of remoteTasks) {
+          map.set(t.taskId, t);
+        }
+        for (const t of prev) {
+          if (!map.has(t.taskId)) {
+            map.set(t.taskId, t);
+          } else {
+            const remote = map.get(t.taskId)!;
+            if (
+              (t.status === "completed" || t.status === "failed" || t.status === "cancelled") &&
+              remote.status === "working"
+            ) {
+              map.set(t.taskId, { ...remote, ...t });
+            }
+          }
+        }
+        return Array.from(map.values());
+      });
       setTasksNextCursor(page.nextCursor);
-      return list;
+      return remoteTasks;
     } catch (err) {
       setTasksError(err instanceof Error ? err.message : "Failed to load tasks");
       return [];
@@ -461,16 +485,52 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     }
   }, [serverId]);
 
-  // Fetch single task detail
+  // Fetch single task detail (guarded against concurrent in-flight requests for the same taskId)
   const fetchTaskDetail = useCallback(async (taskId: string): Promise<TaskView | null> => {
+    if (inFlightPollsRef.current.has(taskId)) {
+      return null;
+    }
+    inFlightPollsRef.current.add(taskId);
     try {
       const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${taskId}`);
       if (!res.ok) return null;
       const detail: TaskView = await res.json();
-      setSelectedTask(detail);
+      if (detail.taskId === selectedTaskIdRef.current) {
+        if (selectedSnapshotSeqRef.current === null) {
+          setSelectedTask(detail);
+        }
+      }
+      setTasks((prev) =>
+        prev.map((t) => (t.taskId === detail.taskId ? { ...t, ...detail } : t)),
+      );
+      setPollHistory((prev) => {
+        const list = prev[taskId] ?? [];
+        const last = list[list.length - 1];
+        // Prevent recording duplicate terminal snapshots if already terminal
+        if (last && (last.status === "completed" || last.status === "failed" || last.status === "cancelled")) {
+          return prev;
+        }
+        const nextSeq = list.length + 1;
+        const rec: TaskPollRecord = {
+          seq: nextSeq,
+          timestamp: new Date().toISOString(),
+          status: detail.status,
+          statusMessage: detail.statusMessage,
+          suggestedPollIntervalMs: detail.suggestedPollIntervalMs ?? detail.pollInterval,
+          retentionMs: detail.retentionMs,
+          data: detail,
+        };
+        return {
+          ...prev,
+          [taskId]: [...list, rec],
+        };
+      });
       return detail;
     } catch { /* silent — detail refresh is best-effort */ return null; }
-  }, [serverId]);
+    finally {
+      inFlightPollsRef.current.delete(taskId);
+    }
+  }, [serverId, setSelectedTask]);
 
   // Fetch tasks when switching to tasks tab
   useEffect(() => {
@@ -480,47 +540,55 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       const list = await fetchTasks();
       if (!cancelled && list.length > 0 && !selectedTaskId) {
         setSelectedTaskId(list[0].taskId);
+        setSelectedTask(list[0]);
+        setSelectedSnapshotSeq(null);
       }
     })();
     return () => { cancelled = true; };
   }, [activeTab, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps -- selectedTaskId read only at fetch time
 
-  // Fetch selected task detail
-  useEffect(() => {
-    if (activeTab !== "tasks" || !selectedTaskId) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const res = await fetch(`/api/mcp-servers/${serverId}/tasks/${selectedTaskId}`, {
-          signal: controller.signal,
-        });
-        if (!res.ok || cancelled) return;
-        const detail: TaskView = await res.json();
-        if (!cancelled) setSelectedTask(detail);
-      } catch { /* silent — detail refresh is best-effort */ }
-    })();
-    return () => { cancelled = true; controller.abort(); };
-  }, [activeTab, selectedTaskId, serverId]);
+  // If the current tool execution is tied to a task, resolve the latest task state
+  const activeTaskResult = useMemo((): TaskView | null => {
+    if (
+      typeof exec.result === "object" &&
+      exec.result !== null &&
+      (exec.result as Record<string, unknown>).mode === "task"
+    ) {
+      const tid = (exec.result as Record<string, unknown>).taskId;
+      if (typeof tid !== "string") return null;
+      return tasks.find((t) => t.taskId === tid) ?? null;
+    }
+    return null;
+  }, [exec.result, tasks]);
 
-  // Auto-poll non-terminal tasks
+  // Auto-poll non-terminal tasks (runs in background across tabs until all active tasks complete)
   useEffect(() => {
-    if (activeTab !== "tasks") return;
-    const hasActiveTasks = tasks.some((t) => t.status === "working" || t.status === "input_required");
-    if (!hasActiveTasks) return;
+    // Only poll tasks whose live status in `tasks` is active.
+    // Never inspect `selectedTask` because it can be an immutable historical snapshot.
+    const activeTasks = tasks.filter(
+      (t) => t.status === "working" || t.status === "input_required",
+    );
+    if (activeTasks.length === 0) return;
 
-    const intervalMs = tasks.reduce((min, t) => {
-      const suggested = t.suggestedPollIntervalMs ?? t.pollInterval ?? 2000;
-      return Math.min(min, Math.max(suggested, 500));
-    }, 2000);
+    // Calculate poll interval from server hints (suggestedPollIntervalMs or pollInterval)
+    let intervalMs = 5000;
+    const intervals = activeTasks
+      .map((t) => t.suggestedPollIntervalMs ?? t.pollInterval)
+      .filter((v): v is number => typeof v === "number" && v > 0);
+    if (intervals.length > 0) {
+      intervalMs = Math.min(...intervals);
+    }
+    // Respect server interval, with 1s minimum safety bound
+    intervalMs = Math.max(intervalMs, 1000);
 
     const timer = setInterval(() => {
-      void fetchTasks();
-      if (selectedTaskId) void fetchTaskDetail(selectedTaskId);
+      for (const t of activeTasks) {
+        void fetchTaskDetail(t.taskId);
+      }
     }, intervalMs);
 
     return () => clearInterval(timer);
-  }, [activeTab, tasks, selectedTaskId, fetchTasks, fetchTaskDetail]);
+  }, [tasks, fetchTaskDetail]);
 
   // Cancel task
   const handleCancelTask = useCallback(async (taskId: string) => {
@@ -587,6 +655,18 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     });
   }, [serverResources, search]);
 
+  // Filter tasks by taskId + status + statusMessage
+  const filteredTasks: TaskView[] = useMemo(() => {
+    const q: string = search.trim().toLowerCase();
+    if (q.length === 0) return tasks;
+    return tasks.filter((t) => {
+      if (t.taskId.toLowerCase().includes(q)) return true;
+      if (t.status.toLowerCase().includes(q)) return true;
+      const msg: string = t.statusMessage ?? "";
+      return msg.toLowerCase().includes(q);
+    });
+  }, [tasks, search]);
+
   // Determine which tabs to show based on server capabilities
   const hasPrompts = serverCapabilities?.prompts === true || serverPrompts.length > 0;
   const hasResources = serverCapabilities?.resources === true || serverResources.length > 0;
@@ -626,6 +706,51 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         const baseErr = data.message ?? data.error ?? "Execution failed";
         const execError = data.code ? `[${data.code}] ${baseErr}` : baseErr;
         setExec({ executing: false, result: null, execError, executedArgs: null, durationMs });
+      } else if (data.mode === "task") {
+        setExec({ executing: false, result: data, execError: null, executedArgs: args, durationMs });
+        saveSnapshot(
+          serverId,
+          activeToolName,
+          formatTimestamp(new Date(), tz, "datetimePrecise"),
+          args,
+          data,
+          durationMs,
+          data.snapshotMaxBytes,
+        );
+        setSnapshotTrigger((prev) => prev + 1);
+        const initialTask = data.initialTask as TaskView | undefined;
+        const optimisticTask: TaskView = {
+          taskId: data.taskId,
+          status: initialTask?.status ?? "working",
+          statusMessage: initialTask?.statusMessage ?? `Started by ${activeToolName}`,
+          createdAt: initialTask?.createdAt ?? new Date().toISOString(),
+          retentionMs: initialTask?.retentionMs ?? null,
+          suggestedPollIntervalMs: initialTask?.suggestedPollIntervalMs ?? initialTask?.pollInterval,
+          pollInterval: initialTask?.pollInterval,
+          ttl: initialTask?.ttl ?? null,
+          raw: initialTask?.raw ?? {},
+          extensions: initialTask?.extensions ?? {},
+        };
+        const initialRecord: TaskPollRecord = {
+          seq: 1,
+          timestamp: new Date().toISOString(),
+          status: optimisticTask.status,
+          statusMessage: optimisticTask.statusMessage,
+          suggestedPollIntervalMs: optimisticTask.suggestedPollIntervalMs,
+          retentionMs: optimisticTask.retentionMs,
+          data: optimisticTask,
+        };
+        setPollHistory((prev) => ({
+          ...prev,
+          [data.taskId]: [initialRecord],
+        }));
+        setTasks((prev) => {
+          if (prev.some((t) => t.taskId === data.taskId)) return prev;
+          return [optimisticTask, ...prev];
+        });
+        setSelectedTask(optimisticTask);
+        setSelectedTaskId(data.taskId);
+        setSelectedSnapshotSeq(null);
       } else {
         setExec({ executing: false, result: data.result, execError: null, executedArgs: args, durationMs });
         // Auto-save input args, result, and durationMs to history on successful execution.
@@ -650,13 +775,37 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         durationMs,
       });
     }
-  }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz]);
+  }, [input.activeTab, input.jsonInput, input.formData, serverId, activeToolName, tz, setSelectedTaskId, setSelectedTask, setSelectedSnapshotSeq]);
 
   const schema = useMemo(() => {
     const raw = (tool?.input_schema as Record<string, unknown>) ?? {};
     return sanitizeSchema(raw);
   }, [tool]);
   const uiSchema = generateUiSchema(schema);
+
+  // Effective result resolves task outcome if this was a task-mode execution
+  const effectiveResult = useMemo(() => {
+    if (activeTaskResult && activeTaskResult.status === "completed") {
+      return (
+        activeTaskResult.result ??
+        (activeTaskResult.raw as Record<string, unknown>)?.result ??
+        activeTaskResult.raw
+      );
+    }
+    return exec.result;
+  }, [activeTaskResult, exec.result]);
+
+  const taskError = useMemo(() => {
+    if (!activeTaskResult) return null;
+    if (activeTaskResult.status === "failed") {
+      const err = (activeTaskResult.raw as Record<string, unknown>)?.error as Record<string, unknown> | undefined;
+      return (typeof err?.message === "string" ? err.message : null) ?? activeTaskResult.statusMessage ?? "Task failed";
+    }
+    if (activeTaskResult.status === "cancelled") {
+      return "Task was cancelled";
+    }
+    return null;
+  }, [activeTaskResult]);
 
   // Copilot shared-state: expose test page context so the agent can
   // help build tool params or analyse execution results.
@@ -677,14 +826,18 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       execution: {
         status: exec.executing
           ? "executing"
-          : exec.execError
+          : exec.execError || taskError
             ? "failed"
-            : exec.result !== null
-              ? "succeeded"
-              : "idle",
+            : activeTaskResult
+              ? activeTaskResult.status === "completed"
+                ? "succeeded"
+                : "executing"
+              : exec.result !== null
+                ? "succeeded"
+                : "idle",
         durationMs: exec.durationMs,
-        result: exec.result,
-        error: exec.execError,
+        result: effectiveResult,
+        error: exec.execError ?? taskError,
       },
     }) as Record<string, unknown>,
     [
@@ -698,6 +851,9 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
       exec.execError,
       exec.result,
       exec.durationMs,
+      taskError,
+      activeTaskResult,
+      effectiveResult,
     ],
   );
   const applyDraft = useCallback((draft: Record<string, unknown>) => {
@@ -753,23 +909,105 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
     applyDraft,
   });
 
+  // Active task and payload resolution for the right pane
+  const displayTask: TaskView | null = useMemo(() => {
+    if (activeTab === "tasks") {
+      return selectedTask;
+    }
+    return activeTaskResult;
+  }, [activeTab, selectedTask, activeTaskResult]);
+
+  const displayResult = useMemo(() => {
+    if (displayTask) {
+      if (displayTask.status === "completed") {
+        return (
+          displayTask.result ??
+          (displayTask.raw as Record<string, unknown>)?.result ??
+          displayTask.raw
+        );
+      }
+      return (
+        (displayTask.raw as Record<string, unknown>)?.result ??
+        displayTask.raw
+      );
+    }
+    return exec.result;
+  }, [displayTask, exec.result]);
+
+  const displayRawJson = useMemo(() => {
+    if (displayTask) {
+      return Object.keys(displayTask.raw).length > 0 ? displayTask.raw : displayTask;
+    }
+    return exec.result;
+  }, [displayTask, exec.result]);
+
+  const displayError = useMemo(() => {
+    if (displayTask) {
+      if (displayTask.status === "failed") {
+        const err = (displayTask.raw as Record<string, unknown>)?.error as Record<string, unknown> | undefined;
+        return (typeof err?.message === "string" ? err.message : null) ?? displayTask.statusMessage ?? "Task failed";
+      }
+      if (displayTask.status === "cancelled") {
+        return "Task was cancelled";
+      }
+      return null;
+    }
+    return exec.execError;
+  }, [displayTask, exec.execError]);
+
   const durationStr = useMemo(() => {
+    if (activeTab === "tasks") return null;
     if (exec.durationMs === null) return null;
     if (exec.durationMs < 1000) return `${exec.durationMs} ms`;
     return `${(exec.durationMs / 1000).toFixed(2)} s`;
-  }, [exec.durationMs]);
+  }, [activeTab, exec.durationMs]);
 
   const resultSizeStr = useMemo(() => {
-    if (exec.result === null) return null;
+    const target = resultTab === "raw" ? displayRawJson : displayResult;
+    if (target === null || target === undefined) return null;
+    if (
+      typeof target === "object" &&
+      (target as Record<string, unknown>).mode === "task" &&
+      (!displayTask || displayTask.status !== "completed")
+    ) {
+      return null;
+    }
     try {
-      const str = JSON.stringify(exec.result);
+      const str = JSON.stringify(target);
       const bytes = new TextEncoder().encode(str).length;
       if (bytes < 1024) return `${bytes} B`;
       return `${(bytes / 1024).toFixed(1)} KB`;
     } catch {
       return null;
     }
-  }, [exec.result]);
+  }, [resultTab, displayRawJson, displayResult, displayTask]);
+
+  // Auto-save completed task result to snapshot history
+  const savedCompletedTasksRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (
+      activeTaskResult &&
+      activeTaskResult.status === "completed" &&
+      activeToolName &&
+      exec.executedArgs &&
+      !savedCompletedTasksRef.current.has(activeTaskResult.taskId)
+    ) {
+      savedCompletedTasksRef.current.add(activeTaskResult.taskId);
+      const finalResult =
+        activeTaskResult.result ??
+        (activeTaskResult.raw as Record<string, unknown>)?.result ??
+        activeTaskResult.raw;
+      saveSnapshot(
+        serverId,
+        activeToolName,
+        formatTimestamp(new Date(), tz, "datetimePrecise"),
+        exec.executedArgs,
+        finalResult,
+        exec.durationMs ?? undefined,
+      );
+      setSnapshotTrigger((prev) => prev + 1);
+    }
+  }, [activeTaskResult, activeToolName, exec.executedArgs, exec.durationMs, serverId, tz]);
 
   /** Save current tool state to cache, then restore (or reset) the target tool's state. */
   function handleSelectTool(name: string): void {
@@ -855,25 +1093,25 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
         {/* Tool list — search box on top + tabs + scrollable list. */}
         <div className="flex flex-[3] flex-col border-r min-w-0">
           <div className="border-b bg-muted/40 px-2 py-1.5 space-y-1.5">
-            <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1">
+            <div className="flex h-7 items-center gap-1.5 rounded-md border bg-background px-2">
               <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={activeTab === "tools" ? "Search tools…" : activeTab === "prompts" ? "Search prompts…" : activeTab === "resources" ? "Search resources…" : "Filter tasks…"}
+                placeholder="Search …"
                 aria-label={`Search ${activeTab}`}
                 data-testid="mcp-tool-search-input"
-                className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+                className="h-full flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60 min-w-0"
               />
               {search.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setSearch("")}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  className="shrink-0 p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors"
                   aria-label="Clear search"
                 >
-                  ×
+                  <X className="h-3 w-3" />
                 </button>
               )}
             </div>
@@ -1091,22 +1329,6 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
             )}
             {activeTab === "tasks" && (
               <>
-                {/* Refresh button */}
-                <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
-                  <span className="text-[10px] text-muted-foreground">
-                    {loadingTasks ? "Loading…" : `${tasks.length} task${tasks.length !== 1 ? "s" : ""}`}
-                    {tasksNextCursor && " (more available)"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchTasks()}
-                    disabled={loadingTasks}
-                    className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
-                    title="Refresh tasks"
-                  >
-                    <RefreshCw className={cn("h-3 w-3", loadingTasks && "animate-spin")} />
-                  </button>
-                </div>
                 {tasksError && (
                   <div className="px-3 py-2 text-xs text-destructive bg-destructive/10 border-b border-destructive/20">
                     {tasksError}
@@ -1116,48 +1338,229 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
                   <div className="px-3 py-3 text-xs text-muted-foreground">
                     No active tasks on this server.
                   </div>
+                ) : filteredTasks.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    No tasks match &ldquo;{search}&rdquo;.
+                  </div>
                 ) : (
                   <ul className="flex flex-col">
-                    {tasks.map((t) => {
-                      const active = t.taskId === selectedTaskId;
+                    {filteredTasks.map((t) => {
+                      const isTaskSelected = t.taskId === selectedTaskId;
+                      const isExpanded = expandedTaskIds.has(t.taskId);
+                      const isActive = t.status === "working" || t.status === "input_required";
+
+                      const history = pollHistory[t.taskId] && pollHistory[t.taskId].length > 0
+                        ? pollHistory[t.taskId]
+                        : [
+                            {
+                              seq: 1,
+                              timestamp: t.lastUpdatedAt || t.createdAt || new Date().toISOString(),
+                              status: t.status,
+                              statusMessage: t.statusMessage,
+                              suggestedPollIntervalMs: t.suggestedPollIntervalMs ?? t.pollInterval,
+                              retentionMs: t.retentionMs,
+                              data: t,
+                            },
+                          ];
+
                       return (
-                        <li key={t.taskId}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTaskId(t.taskId)}
-                            aria-pressed={active}
+                        <li key={t.taskId} className="border-b border-border/40">
+                          {/* Parent Task Card */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              setSelectedTaskId(t.taskId);
+                              setSelectedTask(t);
+                              setSelectedSnapshotSeq(null);
+                              if ((pollHistory[t.taskId]?.length ?? 0) === 0) {
+                                void fetchTaskDetail(t.taskId);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setSelectedTaskId(t.taskId);
+                                setSelectedTask(t);
+                                setSelectedSnapshotSeq(null);
+                                if ((pollHistory[t.taskId]?.length ?? 0) === 0) {
+                                  void fetchTaskDetail(t.taskId);
+                                }
+                              }
+                            }}
                             className={cn(
-                              "block w-full border-b border-border/40 px-3 py-2 text-left transition-colors",
-                              active ? "bg-accent" : "hover:bg-muted/50",
+                              "block w-full px-3 py-2 text-left transition-colors cursor-pointer select-none",
+                              isTaskSelected && selectedSnapshotSeq === null
+                                ? "bg-accent"
+                                : "hover:bg-muted/50",
                             )}
                           >
-                            <div className="flex items-center gap-1.5">
-                              <TaskStatusBadge status={t.status} />
+                            {/* Row 1: [Chevron] [task id] [Cancel button if active] [status] */}
+                            <div className="flex items-center justify-between gap-1.5 min-w-0">
+                              <div className="flex items-center gap-1 min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedTaskIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(t.taskId)) {
+                                        next.delete(t.taskId);
+                                      } else {
+                                        next.add(t.taskId);
+                                        if ((pollHistory[t.taskId]?.length ?? 0) === 0) {
+                                          void fetchTaskDetail(t.taskId);
+                                        }
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="p-1 -ml-1 text-muted-foreground hover:text-foreground rounded transition-colors"
+                                  aria-label={isExpanded ? "Collapse task" : "Expand task"}
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                                  )}
+                                </button>
+                                <span
+                                  className={cn(
+                                    "truncate font-mono text-xs",
+                                    isTaskSelected && selectedSnapshotSeq === null
+                                      ? "text-accent-foreground font-semibold"
+                                      : "text-foreground/90 font-medium",
+                                  )}
+                                >
+                                  {t.taskId.length > 16 ? `${t.taskId.slice(0, 16)}...` : t.taskId}{" "}
+                                  <span
+                                    className={cn(
+                                      "font-sans font-normal text-[11px]",
+                                      isTaskSelected && selectedSnapshotSeq === null
+                                        ? "text-accent-foreground/70"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    ({history.length})
+                                  </span>
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                {isActive && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-5 px-1.5 text-[10px] font-medium text-destructive border-destructive/40 bg-destructive/5 hover:bg-destructive/15 hover:text-destructive hover:border-destructive/60 cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void handleCancelTask(t.taskId);
+                                    }}
+                                    disabled={cancellingTask}
+                                  >
+                                    Cancel
+                                  </Button>
+                                )}
+                                <TaskStatusBadge status={t.status} />
+                              </div>
+                            </div>
+
+                            {/* Row 2: statusMessage (left) + time (right) */}
+                            <div
+                              className={cn(
+                                "mt-0.5 flex items-center justify-between gap-1 text-[11px] min-h-[16px]",
+                                isTaskSelected && selectedSnapshotSeq === null
+                                  ? "text-accent-foreground/70"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              <span className="truncate flex-1 min-w-0">
+                                {t.statusMessage || "—"}
+                              </span>
                               <span
                                 className={cn(
-                                  "truncate font-mono text-xs",
-                                  active ? "text-accent-foreground" : "text-foreground/90",
+                                  "shrink-0 text-[10px] tabular-nums ml-2",
+                                  isTaskSelected && selectedSnapshotSeq === null
+                                    ? "text-accent-foreground/60"
+                                    : "text-muted-foreground/60",
                                 )}
                               >
-                                {t.taskId.length > 16 ? `${t.taskId.slice(0, 16)}…` : t.taskId}
+                                {t.createdAt
+                                  ? formatTimestamp(new Date(t.createdAt), tz, "datetimePrecise")
+                                  : "—"}
                               </span>
                             </div>
-                            {t.statusMessage && (
-                              <div
-                                className={cn(
-                                  "mt-0.5 line-clamp-1 text-[11px]",
-                                  active ? "text-accent-foreground/70" : "text-muted-foreground",
-                                )}
-                              >
-                                {t.statusMessage}
-                              </div>
-                            )}
-                            {t.createdAt && (
-                              <div className="mt-0.5 text-[10px] text-muted-foreground/60">
-                                {formatTimestamp(new Date(t.createdAt), tz, "datetimePrecise")}
-                              </div>
-                            )}
-                          </button>
+                          </div>
+
+                          {/* Sub-tree: Polling history snapshots */}
+                          {isExpanded && (
+                            <div className="border-t border-border/20 bg-muted/15">
+                              {history.map((rec) => {
+                                const isSnapshotSelected =
+                                  isTaskSelected && selectedSnapshotSeq === rec.seq;
+                                const recIntervalSec = Math.max(
+                                  1,
+                                  Math.round((rec.suggestedPollIntervalMs ?? t.suggestedPollIntervalMs ?? t.pollInterval ?? 2000) / 1000),
+                                );
+
+                                return (
+                                  <button
+                                    key={rec.seq}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedTaskId(t.taskId);
+                                      setSelectedTask(rec.data);
+                                      setSelectedSnapshotSeq(rec.seq);
+                                    }}
+                                    className={cn(
+                                      "w-full text-left pl-6 pr-3 py-1.5 border-t border-border/10 transition-colors block",
+                                      isSnapshotSelected ? "bg-accent/80" : "hover:bg-muted/40",
+                                    )}
+                                  >
+                                    {/* Snapshot Row 1: [#seq] [time] [status] */}
+                                    <div className="flex items-center justify-between gap-1.5">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <span
+                                          className={cn(
+                                            "font-mono text-[11px] font-semibold",
+                                            isSnapshotSelected ? "text-accent-foreground" : "text-foreground",
+                                          )}
+                                        >
+                                          #{rec.seq}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground tabular-nums">
+                                          {formatTimestamp(new Date(rec.timestamp), tz, "timePrecise")}
+                                        </span>
+                                      </div>
+                                      <div className="shrink-0 ml-2">
+                                        <TaskStatusBadge status={rec.status} />
+                                      </div>
+                                    </div>
+
+                                    {/* Snapshot Row 2: message (left) + poll interval 'xs' (right) */}
+                                    <div
+                                      className={cn(
+                                        "mt-0.5 flex items-center justify-between gap-1 text-[11px] min-h-[16px]",
+                                        isSnapshotSelected ? "text-accent-foreground/70" : "text-muted-foreground",
+                                      )}
+                                    >
+                                      <span className="truncate flex-1 min-w-0">
+                                        {rec.statusMessage || "—"}
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "shrink-0 text-[10px] tabular-nums ml-2",
+                                          isSnapshotSelected ? "text-accent-foreground/60" : "text-muted-foreground/60",
+                                        )}
+                                      >
+                                        {recIntervalSec}s
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </li>
                       );
                     })}
@@ -1170,299 +1573,285 @@ function ServerView({ serverId }: { serverId: string }): ReactNode {
 
         {/* Input column */}
         <div className="flex flex-[3] flex-col border-r min-w-0">
-          {activeTab === "tasks" ? (
-            <>
-              {/* Task detail header */}
-              <div className="flex items-center border-b bg-muted/40 px-3 py-1.5">
-                <span className="text-xs font-medium text-foreground">Task Detail</span>
-                {selectedTask && (selectedTask.status === "working" || selectedTask.status === "input_required") && (
-                  <div className="ml-auto">
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="h-6 gap-1 px-2 text-xs"
-                      onClick={() => void handleCancelTask(selectedTask.taskId)}
-                      disabled={cancellingTask}
-                    >
-                      {cancellingTask ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Ban className="h-3 w-3" />
-                      )}
-                      Cancel
-                    </Button>
-                  </div>
+          {/* Input-mode tabs + Execute. */}
+          <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+            <button
+              type="button"
+              onClick={() => setInput((prev) => ({ ...prev, activeTab: "form" }))}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                input.activeTab === "form"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Form
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput((prev) => ({ ...prev, activeTab: "json" }))}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                input.activeTab === "json"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Json
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput((prev) => ({ ...prev, activeTab: "schema" }))}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                input.activeTab === "schema"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Schema
+            </button>
+            <div className="ml-auto flex items-center gap-1 relative z-10">
+              <Button
+                size="sm"
+                className="h-6 gap-1.5 px-2.5 text-xs"
+                onClick={handleExecute}
+                disabled={exec.executing || executeDisabled}
+                data-testid="mcp-run-button"
+              >
+                {exec.executing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
                 )}
-              </div>
-              <ScrollArea className="flex-1 min-h-0">
-                <div className="p-3">
-                  {selectedTask ? (
-                    <TaskDetail task={selectedTask} tz={tz} />
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {loadingTasks ? "Loading task…" : "Select a task from the list."}
-                    </p>
-                  )}
-                </div>
-              </ScrollArea>
-            </>
-          ) : (
-            <>
-              {/* Input-mode tabs + Execute. */}
-              <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
-                <button
-                  type="button"
-                  onClick={() => setInput((prev) => ({ ...prev, activeTab: "form" }))}
-                  className={cn(
-                    "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                    input.activeTab === "form"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  Form
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInput((prev) => ({ ...prev, activeTab: "json" }))}
-                  className={cn(
-                    "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                    input.activeTab === "json"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  Json
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInput((prev) => ({ ...prev, activeTab: "schema" }))}
-                  className={cn(
-                    "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                    input.activeTab === "schema"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  Schema
-                </button>
-                <div className="ml-auto flex items-center gap-1 relative z-10">
-                  <Button
-                    size="sm"
-                    className="h-6 gap-1.5 px-2.5 text-xs"
-                    onClick={handleExecute}
-                    disabled={exec.executing || executeDisabled}
-                    data-testid="mcp-run-button"
-                  >
-                    {exec.executing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5 fill-green-500 text-green-500" />
-                    )}
-                    Run
-                  </Button>
-                </div>
-              </div>
+                Run
+              </Button>
+            </div>
+          </div>
 
-              <ScrollArea className="flex-1 min-h-0">
-                <div className="p-3 h-full flex flex-col">
-                  {tool === null ? (
-                    <p className="text-xs text-muted-foreground">
-                      {serverTools.length === 0
-                        ? "This server has no discovered tools. Refresh it from the left panel to scan."
-                        : "Pick a tool from the list to start testing."}
-                    </p>
-                  ) : input.activeTab === "form" ? (
-                    Object.keys(schema).length === 0 ? (
-                      <p className="text-xs text-muted-foreground">This tool takes no input parameters.</p>
-                    ) : (
-                      <Form
-                        schema={schema}
-                        uiSchema={uiSchema}
-                        validator={validator}
-                        formData={input.formData}
-                        onChange={(e) => {
-                          const fd = e.formData ?? {};
-                          setInput((prev) => ({ ...prev, formData: fd, jsonInput: JSON.stringify(fd, null, 2) }));
-                        }}
-                        templates={{ FieldTemplate: CustomFieldTemplate }}
-                      >
-                        {/* Hide default submit button */}
-                        <></>
-                      </Form>
-                    )
-                  ) : input.activeTab === "json" ? (
-                    <div className="flex flex-col flex-1 min-h-0 space-y-2">
-                      <Textarea
-                        value={input.jsonInput}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          let err: string | null = null;
-                          let parsed: Record<string, unknown> | undefined;
-                          try { parsed = JSON.parse(v); } catch { err = "Invalid JSON"; }
-                          setInput((prev) => ({
-                            ...prev,
-                            jsonInput: v,
-                            jsonError: err,
-                            ...(parsed !== undefined ? { formData: parsed } : {}),
-                          }));
-                        }}
-                        className="flex-1 resize-none font-mono text-xs"
-                        placeholder='{ "key": "value" }'
-                      />
-                      {input.jsonError && <p className="text-xs text-destructive shrink-0">{input.jsonError}</p>}
-                    </div>
-                  ) : (
-                    <JsonView data={schema} defaultExpandDepth={4} />
-                  )}
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-3 h-full flex flex-col">
+              {tool === null ? (
+                <p className="text-xs text-muted-foreground">
+                  {serverTools.length === 0
+                    ? "This server has no discovered tools. Refresh it from the left panel to scan."
+                    : "Pick a tool from the list to start testing."}
+                </p>
+              ) : input.activeTab === "form" ? (
+                Object.keys(schema).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">This tool takes no input parameters.</p>
+                ) : (
+                  <Form
+                    schema={schema}
+                    uiSchema={uiSchema}
+                    validator={validator}
+                    formData={input.formData}
+                    onChange={(e) => {
+                      const fd = e.formData ?? {};
+                      setInput((prev) => ({ ...prev, formData: fd, jsonInput: JSON.stringify(fd, null, 2) }));
+                    }}
+                    templates={{ FieldTemplate: CustomFieldTemplate }}
+                  >
+                    {/* Hide default submit button */}
+                    <></>
+                  </Form>
+                )
+              ) : input.activeTab === "json" ? (
+                <div className="flex flex-col flex-1 min-h-0 space-y-2">
+                  <Textarea
+                    value={input.jsonInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      let err: string | null = null;
+                      let parsed: Record<string, unknown> | undefined;
+                      try { parsed = JSON.parse(v); } catch { err = "Invalid JSON"; }
+                      setInput((prev) => ({
+                        ...prev,
+                        jsonInput: v,
+                        jsonError: err,
+                        ...(parsed !== undefined ? { formData: parsed } : {}),
+                      }));
+                    }}
+                    className="flex-1 resize-none font-mono text-xs"
+                    placeholder='{ "key": "value" }'
+                  />
+                  {input.jsonError && <p className="text-xs text-destructive shrink-0">{input.jsonError}</p>}
                 </div>
-              </ScrollArea>
-            </>
-          )}
+              ) : (
+                <JsonView data={schema} defaultExpandDepth={4} />
+              )}
+            </div>
+          </ScrollArea>
         </div>
 
         {/* Right: Result */}
         <div className="flex flex-[4] flex-col min-w-0">
-          {activeTab === "tasks" ? (
-            <>
-              <div className="flex items-center border-b bg-muted/40 px-3 py-1.5">
-                <span className="text-xs font-medium text-foreground">Raw JSON</span>
-                {selectedTask && (
-                  <div className="ml-auto flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 w-6 p-0 rounded-sm"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(JSON.stringify(selectedTask, null, 2));
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 1500);
-                        } catch { /* clipboard unavailable */ }
-                      }}
-                      title="Copy JSON"
-                    >
-                      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
-                )}
-              </div>
-              <ScrollArea className="flex-1 min-h-0">
-                <div className="p-3">
-                  {selectedTask ? (
-                    <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
-                      {JSON.stringify(selectedTask, null, 2)}
-                    </pre>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Select a task to view raw data.</p>
-                  )}
-                </div>
-              </ScrollArea>
-            </>
-          ) : (
-            <>
-              <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
-                {/* Left: Save as case */}
-                <div className="flex items-center">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 gap-1.5 rounded-sm px-2.5 text-xs"
-                    onClick={() => setSaveDialogOpen(true)}
-                    disabled={
-                      exec.executing ||
-                      exec.result === null ||
-                      exec.execError !== null ||
-                      exec.executedArgs === null ||
-                      activeToolName === null
-                    }
-                    title="Save this call as a verification case"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                    Save as case
-                  </Button>
-                </div>
-                
-                {/* Center: Tabs */}
-                <div className="flex-1 flex justify-center items-stretch">
-                  <button
-                    type="button"
-                    onClick={() => setResultTab("view")}
-                    className={cn(
-                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                      resultTab === "view"
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    Result View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setResultTab("raw")}
-                    className={cn(
-                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                      resultTab === "raw"
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    Raw Json
-                  </button>
-                </div>
+          <div className="flex items-stretch border-b bg-muted/40 pr-1.5">
+            {/* Left: Save as case */}
+            <div className="flex items-center">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 gap-1.5 rounded-sm px-2.5 text-xs"
+                onClick={() => setSaveDialogOpen(true)}
+                disabled={
+                  exec.executing ||
+                  (displayTask
+                    ? displayTask.status !== "completed"
+                    : exec.result === null) ||
+                  displayError !== null ||
+                  exec.executedArgs === null ||
+                  activeToolName === null
+                }
+                title="Save this call as a verification case"
+              >
+                <Save className="h-3.5 w-3.5" />
+                Save as case
+              </Button>
+            </div>
 
-                {/* Right: Copy */}
-                <div className="flex items-center gap-2">
-                  {(durationStr || resultSizeStr) && (
-                    <span className="text-[10px] tabular-nums text-muted-foreground">
-                      {[durationStr, resultSizeStr].filter(Boolean).join(" | ")}
-                    </span>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 w-6 p-0 rounded-sm"
-                    onClick={async () => {
-                      if (!exec.result) return;
-                      try {
-                        await navigator.clipboard.writeText(JSON.stringify(exec.result, null, 2));
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
-                      } catch { /* clipboard unavailable */ }
-                    }}
-                    disabled={exec.result === null}
-                    title="Copy JSON"
-                  >
-                    {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>
+            {/* Center: Tabs */}
+            <div className="flex-1 flex justify-center items-stretch">
+              <button
+                type="button"
+                onClick={() => setResultTab("view")}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                  resultTab === "view"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Result View
+              </button>
+              <button
+                type="button"
+                onClick={() => setResultTab("raw")}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                  resultTab === "raw"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Raw Json
+              </button>
+            </div>
+
+            {/* Right: Copy */}
+            <div className="flex items-center gap-2">
+              {(durationStr || resultSizeStr) && (
+                <span className="text-[10px] tabular-nums text-muted-foreground">
+                  {[durationStr, resultSizeStr].filter(Boolean).join(" | ")}
+                </span>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0 rounded-sm"
+                onClick={async () => {
+                  const target = resultTab === "raw" ? displayRawJson : (displayResult ?? displayTask);
+                  if (!target) return;
+                  try {
+                    await navigator.clipboard.writeText(JSON.stringify(target, null, 2));
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  } catch { /* clipboard unavailable */ }
+                }}
+                disabled={
+                  resultTab === "raw"
+                    ? !displayRawJson
+                    : (!displayResult && !displayTask) || (displayTask !== null && displayTask.status === "working")
+                }
+                title="Copy JSON"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+          </div>
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-3">
+              {displayError ? (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <p className="text-xs text-destructive">{displayError}</p>
                 </div>
-              </div>
-              <ScrollArea className="flex-1 min-h-0">
-                <div className="p-3">
-                  {exec.execError ? (
-                    <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
-                      <p className="text-xs text-destructive">{exec.execError}</p>
-                    </div>
-                  ) : exec.result !== null ? (
+              ) : displayTask ? (
+                <>
+                  <TaskBannerCard
+                    task={displayTask}
+                    snapshotSeq={selectedSnapshotSeq}
+                    onSelectTask={(tid) => {
+                      setSelectedTaskId(tid);
+                      const found = tasks.find((t) => t.taskId === tid) ?? (selectedTask?.taskId === tid ? selectedTask : null);
+                      if (found) setSelectedTask(found);
+                      setSelectedSnapshotSeq(null);
+                      setActiveTab("tasks");
+                    }}
+                  />
+                  {displayTask.status === "completed" ? (
                     <>
                       <div className={cn(resultTab !== "view" && "hidden")}>
-                        <JsonView data={exec.result} defaultExpandDepth={3} />
+                        {displayResult !== null && displayResult !== undefined ? (
+                          typeof displayResult === "object" ? (
+                            <JsonView data={displayResult as Record<string, unknown>} defaultExpandDepth={3} />
+                          ) : (
+                            <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                              {String(displayResult)}
+                            </pre>
+                          )
+                        ) : (
+                          <p className="text-xs text-muted-foreground">No result data.</p>
+                        )}
                       </div>
                       <div className={cn(resultTab !== "raw" && "hidden")}>
                         <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
-                          {JSON.stringify(exec.result, null, 2)}
+                          {JSON.stringify(displayRawJson, null, 2)}
+                        </pre>
+                      </div>
+                    </>
+                  ) : displayTask.status === "working" || displayTask.status === "input_required" ? (
+                    <>
+                      <div className={cn(resultTab !== "view" && "hidden")}>
+                        {Object.keys(displayTask.raw).length > 0 ? (
+                          <JsonView data={displayTask.raw} defaultExpandDepth={2} />
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Task is currently {TASK_STATUS_LABELS[displayTask.status].toLowerCase()}…</p>
+                        )}
+                      </div>
+                      <div className={cn(resultTab !== "raw" && "hidden")}>
+                        <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                          {JSON.stringify(displayRawJson, null, 2)}
                         </pre>
                       </div>
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Click Execute to run the tool.
-                    </p>
+                    <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                      <p className="text-xs text-destructive">
+                        {((displayTask.raw as Record<string, unknown>)?.error as Record<string, unknown>)?.message as string ??
+                          displayTask.statusMessage ??
+                          "The task did not complete successfully."}
+                      </p>
+                    </div>
                   )}
-                </div>
-              </ScrollArea>
-            </>
-          )}
+                </>
+              ) : exec.result !== null ? (
+                <>
+                  <div className={cn(resultTab !== "view" && "hidden")}>
+                    <JsonView data={exec.result as Record<string, unknown>} defaultExpandDepth={3} />
+                  </div>
+                  <div className={cn(resultTab !== "raw" && "hidden")}>
+                    <pre className="font-mono text-xs text-foreground bg-muted/30 p-2 rounded-md whitespace-pre-wrap break-all">
+                      {JSON.stringify(exec.result, null, 2)}
+                    </pre>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Click Run to execute the tool.
+                </p>
+              )}
+            </div>
+          </ScrollArea>
         </div>
       </div>
 
