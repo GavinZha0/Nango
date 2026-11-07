@@ -170,7 +170,7 @@ export function buildReadFileTool(): ToolDefinition {
 
       let st: Stats;
       try {
-        st = await stat(resolved.absPath);
+        st = await stat(/*turbopackIgnore: true*/ resolved.absPath);
       } catch {
         return err(
           "NOT_FOUND",
@@ -535,7 +535,7 @@ export function buildWriteFileTool(): ToolDefinition {
 
       let st: Stats;
       try {
-        st = await stat(resolved.absPath);
+        st = await stat(/*turbopackIgnore: true*/ resolved.absPath);
       } catch {
         return err("WRITE_FAILED", `Wrote "${resolved.relPath}" but could not verify it.`);
       }
@@ -610,7 +610,7 @@ export function buildEditFileTool(): ToolDefinition {
 
       let buf: Buffer;
       try {
-        buf = await readFile(resolved.absPath);
+        buf = await readFile(/*turbopackIgnore: true*/ resolved.absPath);
       } catch (e) {
         return editErr(
           "READ_FAILED",
@@ -668,7 +668,7 @@ export function buildEditFileTool(): ToolDefinition {
 
       let after: Stats;
       try {
-        after = await stat(resolved.absPath);
+        after = await stat(/*turbopackIgnore: true*/ resolved.absPath);
       } catch {
         return editErr(
           "WRITE_FAILED",

@@ -118,7 +118,11 @@ function neutralizeInput(
     rel = ".";
   }
 
-  return { ok: true, absPath: path.resolve(root, rel), trimmed };
+  return {
+    ok: true,
+    absPath: path.resolve(/*turbopackIgnore: true*/ root, rel),
+    trimmed,
+  };
 }
 
 /** Reject a symlinked final component; missing or regular is fine. */
@@ -245,7 +249,7 @@ export async function resolveCreateInJail(
   // only fires for a path that was re-rooted into a sibling of the
   // original argument. Without it, the ancestor walk below could accept
   // a candidate that never lived under the root.
-  if (!isWithin(realRoot, path.resolve(absPath))) {
+  if (!isWithin(realRoot, path.resolve(/*turbopackIgnore: true*/ absPath))) {
     return {
       ok: false,
       error: "PATH_ESCAPE",
@@ -306,7 +310,7 @@ export function isWithin(parent: string, child: string): boolean {
 }
 
 function normalizeForCompare(value: string): string {
-  const resolved = path.resolve(value);
+  const resolved = path.resolve(/*turbopackIgnore: true*/ value);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
