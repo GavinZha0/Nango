@@ -9,7 +9,7 @@
 
 import "server-only";
 
-import ical, { type VEvent } from "node-ical";
+import ical, { type CalendarResponse, type VEvent } from "node-ical";
 import { LRUCache } from "lru-cache";
 
 export interface CalendarEvent {
@@ -22,7 +22,7 @@ export interface CalendarEvent {
 }
 
 interface CachedCalendar {
-  events: ical.CalendarResponse;
+  events: CalendarResponse;
   fetchedAt: number;
 }
 
@@ -42,7 +42,7 @@ export async function fetchIcsEvents(
   startDate: string,
   endDate: string,
 ): Promise<CalendarEvent[]> {
-  let parsed: ical.CalendarResponse;
+  let parsed: CalendarResponse;
 
   // SECURITY: only allow HTTPS URLs to prevent SSRF via file:// / http://internal etc.
   if (!icsUrl.startsWith("https://")) {
@@ -59,7 +59,7 @@ export async function fetchIcsEvents(
     parsed = await (ical.async.fromURL as (
       url: string,
       opts: RequestInit,
-    ) => Promise<ical.CalendarResponse>)(icsUrl, {
+    ) => Promise<CalendarResponse>)(icsUrl, {
       signal: AbortSignal.timeout(ICS_FETCH_TIMEOUT_MS),
     });
     cache.set(icsUrl, { events: parsed, fetchedAt: Date.now() });
