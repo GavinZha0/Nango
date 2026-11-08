@@ -50,7 +50,7 @@ export async function extractViaDuckdb(
     );
   }
 
-  const { db, conn } = await openDuckdbConnection();
+  const { db, conn, isRemoteQuack } = await openDuckdbConnection();
 
   try {
     // Race DuckDB work against wall-clock timer (no native AbortSignal support).
@@ -72,7 +72,7 @@ export async function extractViaDuckdb(
 
     await raceWithTimeoutAndAbort(work, input.timeoutMs, input.signal);
 
-    const schema = await introspectParquet(conn, input.outputPath);
+    const schema = await introspectParquet(conn, input.outputPath, isRemoteQuack);
     if (schema.rowCount > input.maxRows) {
       throw new Error(
         `Extracted ${schema.rowCount} rows exceeds maxRows=${input.maxRows}.`,
@@ -186,7 +186,27 @@ async function raceWithTimeoutAndAbort<T>(
 async function introspectParquet(
   conn: Awaited<ReturnType<DuckDBInstance["connect"]>>,
   outputPath: string,
+  isRemoteQuack = false,
 ): Promise<DatasetSchema> {
+  // CONTRACT: Verify that the Parquet file actually landed on the local
+  // cache filesystem before committing the write slot. When `isRemoteQuack`
+  // is true (`CONNECT remote_db`), DuckDB executes `COPY ... TO` on the
+  // remote server's filesystem; unless both hosts share the cache directory
+  // mount at the identical path, local `fs.stat` fails with ENOENT and we
+  // fail fast with an actionable error instead of committing an empty slot.
+  let byteSize = 0;
+  try {
+    const stat = await fs.stat(outputPath);
+    byteSize = stat.size;
+  } catch {
+    if (isRemoteQuack) {
+      throw new Error(
+        `Parquet output not found on local filesystem at "${outputPath}" after remote Quack COPY. ` +
+          `Remote DuckDB Server (Mode B) writes COPY output to the remote server's filesystem and requires a shared cache directory mounted at the identical path on both hosts (or disable the duckdb-server credential to use in-process Mode A).`,
+      );
+    }
+  }
+
   const cols = await conn.runAndReadAll(
     `DESCRIBE SELECT * FROM read_parquet('${escapeSingleQuotes(outputPath)}')`,
   );
@@ -206,14 +226,6 @@ async function introspectParquet(
   );
   const countRows = counts.getRowObjectsJson() as Array<{ n: number | bigint | string }>;
   const rowCount = Number(countRows[0]?.n ?? 0);
-
-  let byteSize = 0;
-  try {
-    const stat = await fs.stat(outputPath);
-    byteSize = stat.size;
-  } catch {
-    /* ignore */
-  }
 
   return { columns, rowCount, byteSize };
 }

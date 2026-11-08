@@ -20,12 +20,13 @@ export const dynamic = "force-dynamic";
  */
 export const POST = withEditor<{ id: string }>(
   "/api/mcp-servers/[id]/discover",
-  async ({ params }) => {
+  async ({ params, session }) => {
     const updated = await withMcpAdminClient({
       serverId: params.id,
       clientName: "nango-discover",
       errorPrefix: "Failed to discover tools",
-      fn: async ({ client, server }) => {
+      callerRole: session.user.role,
+      fn: async ({ client, server, discoveryTimeoutMs }) => {
         // Server metadata observed during the `initialize` handshake
         // (already completed by client.connect). The SDK exposes it
         // via these methods — fields may be undefined on older
@@ -36,7 +37,9 @@ export const POST = withEditor<{ id: string }>(
         const protocolEra = client.getProtocolEra();
         const protocolVersion = client.getNegotiatedProtocolVersion();
 
-        const result = await client.listTools();
+        const result = await client.listTools(undefined, {
+          timeout: discoveryTimeoutMs,
+        });
 
         // Preserve the existing per-tool `enabled` flag across re-discovery
         // so admins do not have to re-tick after every refresh.
@@ -59,7 +62,9 @@ export const POST = withEditor<{ id: string }>(
         let prompts: McpPromptSnapshot[] | null = null;
         if (capabilities?.prompts) {
           try {
-            const promptsResult = await client.listPrompts();
+            const promptsResult = await client.listPrompts(undefined, {
+              timeout: discoveryTimeoutMs,
+            });
             prompts = (promptsResult.prompts ?? []).map((p) => ({
               name: p.name,
               description: p.description,
@@ -74,7 +79,9 @@ export const POST = withEditor<{ id: string }>(
         let resources: McpResourceSnapshot[] | null = null;
         if (capabilities?.resources) {
           try {
-            const resourcesResult = await client.listResources();
+            const resourcesResult = await client.listResources(undefined, {
+              timeout: discoveryTimeoutMs,
+            });
             resources = (resourcesResult.resources ?? []).map((r) => ({
               uri: r.uri,
               name: r.name,

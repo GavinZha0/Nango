@@ -19,7 +19,7 @@ import { McpServerTable, type McpServerEntity } from "@/lib/db/schema";
 import { getCredentialFieldsById } from "@/lib/credentials/lookup";
 import { getOAuthAccessToken } from "@/lib/credentials/oauth-token-manager";
 import { logger } from "@/lib/observability/logger";
-import { getConfig } from "@/lib/config";
+import { getConfig, getConfigMs } from "@/lib/config";
 import { ApiError } from "@/lib/http/route-handlers";
 import {
   buildMcpStdioEnv,
@@ -103,7 +103,14 @@ export async function withMcpAdminClient<T>(opts: {
   serverId: string;
   clientName: string;
   errorPrefix: string;
-  fn: (ctx: { client: Client; server: McpServerEntity; clientInfo: { name: string; version: string }; clientCapabilities: ClientCapabilities }) => Promise<T>;
+  callerRole?: string | null;
+  fn: (ctx: {
+    client: Client;
+    server: McpServerEntity;
+    clientInfo: { name: string; version: string };
+    clientCapabilities: ClientCapabilities;
+    discoveryTimeoutMs: number;
+  }) => Promise<T>;
 }): Promise<T> {
   // Fetch the server row first — no point opening any sockets when
   // the id is bogus. NOT_FOUND must precede any transport work so
@@ -127,6 +134,13 @@ export async function withMcpAdminClient<T>(opts: {
         "FORBIDDEN",
         403,
         "Stdio MCP servers are disabled in this environment (set NANGO_ALLOW_STDIO_MCP=true or run in Nango Desktop).",
+      );
+    }
+    if (opts.callerRole !== "admin") {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "Only admins can discover or invoke tools on stdio MCP servers.",
       );
     }
     if (!server.command?.trim()) {
@@ -156,6 +170,11 @@ export async function withMcpAdminClient<T>(opts: {
           });
   }
 
+  const discoveryTimeoutMs =
+    server.type === "stdio"
+      ? getConfigMs("mcp.stdio_discovery_timeout", 120)
+      : getConfigMs("mcp.discovery_timeout", 5);
+
   let client: Client | null = null;
   try {
     const negotiationMode = getConfig("mcp.version_negotiation", "auto");
@@ -178,8 +197,14 @@ export async function withMcpAdminClient<T>(opts: {
         capabilities,
       },
     );
-    await client.connect(transport);
-    return await opts.fn({ client, server, clientInfo, clientCapabilities: capabilities });
+    await client.connect(transport, { timeout: discoveryTimeoutMs });
+    return await opts.fn({
+      client,
+      server,
+      clientInfo,
+      clientCapabilities: capabilities,
+      discoveryTimeoutMs,
+    });
   } catch (err) {
     if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : String(err);

@@ -106,6 +106,27 @@ function computeDirectorySizeBytes(dir) {
   return total;
 }
 
+/**
+ * Classify a `cpSync` error during standalone `.pnpm` closure repair.
+ * Only `EEXIST` (benign race when a symlink/file already exists at destination)
+ * is ignored; all other errors (`EPERM`, `EACCES`, `ENOSPC`, etc.) are counted
+ * and reported so broken closures never pass the build silently.
+ */
+export function handleCopyError(err, stats, contextLabel = "") {
+  const code = err && typeof err === "object" && "code" in err ? err.code : undefined;
+  if (code === "EEXIST") {
+    return;
+  }
+  stats.failedCount++;
+  if (code === "EPERM" && process.platform === "win32") {
+    stats.sawWin32Eperm = true;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(
+    `[repair-standalone] ERROR copying ${contextLabel}: ${code ? `(${code}) ` : ""}${msg}`,
+  );
+}
+
 export function repairStandaloneClosure() {
   if (!existsSync(standaloneStoreDir)) {
     console.error(
@@ -120,6 +141,11 @@ export function repairStandaloneClosure() {
     );
     process.exit(1);
   }
+
+  const copyStats = {
+    failedCount: 0,
+    sawWin32Eperm: false,
+  };
 
   let iteration = 0;
   while (true) {
@@ -139,8 +165,8 @@ export function repairStandaloneClosure() {
             errorOnExist: false,
             verbatimSymlinks: true,
           });
-        } catch {
-          // Ignore benign copy races on already-existing symlinks
+        } catch (err) {
+          handleCopyError(err, copyStats, dirName);
         }
       }
     }
@@ -166,8 +192,8 @@ export function repairStandaloneClosure() {
             errorOnExist: false,
             verbatimSymlinks: true,
           });
-        } catch {
-          // Ignore benign copy races
+        } catch (err) {
+          handleCopyError(err, copyStats, comp);
         }
       }
     }
@@ -179,6 +205,18 @@ export function repairStandaloneClosure() {
     if (afterCount === beforeCount) {
       break;
     }
+  }
+
+  if (copyStats.failedCount > 0) {
+    if (copyStats.sawWin32Eperm) {
+      console.error(
+        "[repair-standalone] HINT: Windows EPERM encountered while copying symlinks. Enable Windows Developer Mode (Settings -> System -> For developers) or run the build in an elevated terminal with SeCreateSymbolicLinkPrivilege.",
+      );
+    }
+    console.error(
+      `[repair-standalone] ERROR: ${copyStats.failedCount} copy operation(s) failed during .pnpm closure repair.`,
+    );
+    process.exit(1);
   }
 
   const sizeBytes = computeDirectorySizeBytes(standaloneNodeModules);

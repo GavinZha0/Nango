@@ -95,12 +95,12 @@ export async function openDuckdbConnection(
         const hostPort = normalizeAndValidateQuackHost(cred.host);
         const tokenClause =
           cred.apiKey && cred.apiKey.trim().length > 0
-            ? `, TOKEN '${validateQuackToken(cred.apiKey)}'`
+            ? ` (TOKEN '${validateQuackToken(cred.apiKey)}')`
             : "";
 
         try {
           await conn.run(
-            `ATTACH 'quack:${hostPort}' AS remote_db (TYPE quack${tokenClause});`,
+            `ATTACH 'quack:${hostPort}' AS remote_db${tokenClause};`,
           );
           await conn.run("CONNECT remote_db;");
         } catch (err) {

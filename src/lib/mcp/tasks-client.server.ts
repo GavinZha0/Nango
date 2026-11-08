@@ -243,11 +243,13 @@ export function createTaskSession(
 export async function listServerTasks(
   serverId: string,
   cursor?: string,
+  callerRole?: string | null,
 ): Promise<TaskListPage> {
   return withMcpAdminClient({
     serverId,
     clientName: "nango-tasks-list",
     errorPrefix: "Failed to list tasks",
+    callerRole,
     fn: async ({ client, clientInfo, clientCapabilities }) => {
       const session = createTaskSession(client, clientInfo, clientCapabilities, `nango-tasks-${serverId}`);
       try {
@@ -265,11 +267,13 @@ export async function listServerTasks(
 export async function getServerTask(
   serverId: string,
   taskId: string,
+  callerRole?: string | null,
 ): Promise<TaskView & { result?: unknown }> {
   return withMcpAdminClient({
     serverId,
     clientName: "nango-tasks-get",
     errorPrefix: "Failed to get task",
+    callerRole,
     fn: async ({ client, clientInfo, clientCapabilities }) => {
       const session = createTaskSession(client, clientInfo, clientCapabilities, `nango-tasks-${serverId}`);
       try {
@@ -311,11 +315,13 @@ export async function getServerTask(
 export async function cancelServerTask(
   serverId: string,
   taskId: string,
+  callerRole?: string | null,
 ): Promise<void> {
   return withMcpAdminClient({
     serverId,
     clientName: "nango-tasks-cancel",
     errorPrefix: "Failed to cancel task",
+    callerRole,
     fn: async ({ client, clientInfo, clientCapabilities }) => {
       const session = createTaskSession(client, clientInfo, clientCapabilities, `nango-tasks-${serverId}`);
       try {

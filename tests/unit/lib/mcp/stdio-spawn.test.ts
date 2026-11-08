@@ -21,7 +21,10 @@ import {
   DEFAULT_STDIO_CREDENTIAL_ENV_NAME,
   isStdioMcpAllowed,
 } from "@/lib/mcp/stdio-spawn.server";
-import { extractPnpmStoreComponent } from "../../../../scripts/repair-standalone.mjs";
+import {
+  extractPnpmStoreComponent,
+  handleCopyError,
+} from "../../../../scripts/repair-standalone.mjs";
 
 describe("stdio-spawn.server — isStdioMcpAllowed", () => {
   const originalEnv = { ...process.env };
@@ -149,7 +152,7 @@ describe("stdio-spawn.server — buildMcpStdioEnv", () => {
   });
 });
 
-describe("repair-standalone — extractPnpmStoreComponent", () => {
+describe("repair-standalone — extractPnpmStoreComponent & handleCopyError", () => {
   it("extracts package store component from POSIX and Windows relative symlink targets", () => {
     expect(
       extractPnpmStoreComponent(
@@ -164,5 +167,31 @@ describe("repair-standalone — extractPnpmStoreComponent", () => {
     ).toBe("@duckdb+node-bindings-win32-x64@2.0.0-r.1");
 
     expect(extractPnpmStoreComponent("./unrelated-file.js")).toBeNull();
+  });
+
+  it("ignores EEXIST copy races but counts EPERM / EACCES failures", () => {
+    const stats = { failedCount: 0, sawWin32Eperm: false };
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      handleCopyError(
+        Object.assign(new Error("file already exists"), { code: "EEXIST" }),
+        stats,
+        "pkg-a@1.0.0",
+      );
+      expect(stats.failedCount).toBe(0);
+
+      handleCopyError(
+        Object.assign(new Error("operation not permitted"), { code: "EPERM" }),
+        stats,
+        "pkg-b@1.0.0",
+      );
+      expect(stats.failedCount).toBe(1);
+      if (process.platform === "win32") {
+        expect(stats.sawWin32Eperm).toBe(true);
+      }
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });

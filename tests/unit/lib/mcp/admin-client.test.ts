@@ -179,6 +179,63 @@ describe("MCP Admin Client & Header Resolution", () => {
       expect(clientCloseMock).toHaveBeenCalledTimes(1);
     });
 
+    it("enforces admin callerRole and uses mcp.stdio_discovery_timeout (120s) for stdio MCP servers", async () => {
+      const prevAllow = process.env.NANGO_ALLOW_STDIO_MCP;
+      process.env.NANGO_ALLOW_STDIO_MCP = "true";
+      try {
+        const stdioServer = {
+          id: "server-stdio",
+          url: "",
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@playwright/mcp@latest"],
+          env: null,
+          cwd: null,
+          credentialId: null,
+          credentialEnvName: null,
+        };
+
+        // 1. Non-admin editor is rejected with 403 FORBIDDEN before spawning
+        dbMock._queryMock.where.mockResolvedValueOnce([stdioServer]);
+        await expect(
+          withMcpAdminClient({
+            serverId: "server-stdio",
+            clientName: "admin-test",
+            errorPrefix: "Discovery failed",
+            callerRole: "editor",
+            fn: async () => {},
+          }),
+        ).rejects.toThrow(
+          /Only admins can discover or invoke tools on stdio MCP servers/,
+        );
+        expect(clientConnectMock).not.toHaveBeenCalled();
+
+        // 2. Admin connects with mcp.stdio_discovery_timeout (120_000ms)
+        dbMock._queryMock.where.mockResolvedValueOnce([stdioServer]);
+        let observedTimeoutMs = 0;
+        await withMcpAdminClient({
+          serverId: "server-stdio",
+          clientName: "admin-test",
+          errorPrefix: "Discovery failed",
+          callerRole: "admin",
+          fn: async ({ discoveryTimeoutMs }) => {
+            observedTimeoutMs = discoveryTimeoutMs;
+          },
+        });
+        expect(observedTimeoutMs).toBe(120_000);
+        expect(clientConnectMock).toHaveBeenCalledWith(
+          expect.anything(),
+          { timeout: 120_000 },
+        );
+      } finally {
+        if (prevAllow === undefined) {
+          delete process.env.NANGO_ALLOW_STDIO_MCP;
+        } else {
+          process.env.NANGO_ALLOW_STDIO_MCP = prevAllow;
+        }
+      }
+    });
+
     it("wraps transport connection errors as 502 BAD_GATEWAY", async () => {
       const mockServer = {
         id: "server-2",

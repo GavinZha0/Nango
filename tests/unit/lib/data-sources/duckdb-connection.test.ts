@@ -29,6 +29,7 @@ import {
   openDuckdbConnection,
   validateQuackToken,
 } from "@/lib/data-sources/duckdb-connection.server";
+import { extractViaDuckdb } from "@/lib/data-sources/duckdb-extension.server";
 
 describe("duckdb-connection.server — validation helpers", () => {
   it("normalizes and validates Quack host:port strings", () => {
@@ -116,9 +117,53 @@ describe("duckdb-connection.server — openDuckdbConnection", () => {
     expect(handle.isRemoteQuack).toBe(true);
     expect(mockRun).toHaveBeenNthCalledWith(
       1,
-      "ATTACH 'quack:127.0.0.1:9494' AS remote_db (TYPE quack, TOKEN 'super_secret_quack_token');",
+      "ATTACH 'quack:127.0.0.1:9494' AS remote_db (TOKEN 'super_secret_quack_token');",
     );
     expect(mockRun).toHaveBeenNthCalledWith(2, "CONNECT remote_db;");
+  });
+
+  it("omits TOKEN clause in Mode B when duckdb-server apiKey is empty", async () => {
+    mockGetEnabledInfrastructureCredentialByProvider.mockResolvedValueOnce({
+      id: "cred-duck",
+      provider: "duckdb-server",
+      host: "127.0.0.1:9494",
+      apiKey: "",
+    });
+
+    const handle = await openDuckdbConnection();
+
+    expect(handle.isRemoteQuack).toBe(true);
+    expect(mockRun).toHaveBeenNthCalledWith(
+      1,
+      "ATTACH 'quack:127.0.0.1:9494' AS remote_db;",
+    );
+    expect(mockRun).toHaveBeenNthCalledWith(2, "CONNECT remote_db;");
+  });
+
+  it("fails fast in extractViaDuckdb when Mode B COPY output is missing from local filesystem", async () => {
+    mockGetEnabledInfrastructureCredentialByProvider.mockResolvedValueOnce({
+      id: "cred-duck",
+      provider: "duckdb-server",
+      host: "127.0.0.1:9494",
+      apiKey: "super_secret_quack_token",
+    });
+
+    await expect(
+      extractViaDuckdb({
+        extension: "postgres",
+        attachString: "host=localhost port=5432 dbname=app",
+        input: {
+          datasetName: "ds_remote_missing",
+          query: "SELECT 1 AS id",
+          outputPath: "/nonexistent/remote-only-cache/part-001.parquet",
+          timeoutMs: 5000,
+          maxRows: 1000,
+          signal: new AbortController().signal,
+        },
+      }),
+    ).rejects.toThrow(
+      /Remote DuckDB Server \(Mode B\) writes COPY output to the remote server's filesystem and requires a shared cache directory/,
+    );
   });
 
   it("bypasses remote Quack routing when forceLocal: true is passed (Vertica path)", async () => {

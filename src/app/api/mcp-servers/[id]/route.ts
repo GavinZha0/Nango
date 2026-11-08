@@ -105,10 +105,11 @@ export const PATCH = withEditor<{ id: string }>(
 
     const effectiveType = body.type ?? existing.type;
 
-    // SECURITY: stdio spawns a local child process on the host, so editing
-    // a stdio server or switching a server to stdio requires both the runtime
-    // environment allowlist and the admin role.
-    if ((existing.type === "stdio" || effectiveType === "stdio") && editsContent) {
+    // SECURITY: stdio spawns a local child process on the host, so any
+    // modification to a stdio server (including enabling/disabling or
+    // visibility changes) or switching a server to stdio requires both the
+    // runtime environment allowlist and the admin role.
+    if (existing.type === "stdio" || effectiveType === "stdio") {
       if (!isStdioMcpAllowed()) {
         throw new ApiError(
           "FORBIDDEN",
@@ -212,6 +213,7 @@ export const DELETE = withEditor<{ id: string }>(
     const [existing] = await db
       .select({
         id: McpServerTable.id,
+        type: McpServerTable.type,
         createdBy: McpServerTable.createdBy,
         visibility: McpServerTable.visibility,
       })
@@ -221,6 +223,13 @@ export const DELETE = withEditor<{ id: string }>(
 
     if (!existing) {
       throw new ApiError("NOT_FOUND", 404, "Server not found.");
+    }
+    if (existing.type === "stdio" && session.user.role !== "admin") {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "Only admins can delete stdio MCP servers.",
+      );
     }
     if (
       !canDeleteResource(

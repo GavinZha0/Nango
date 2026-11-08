@@ -19,8 +19,8 @@ export const dynamic = "force-dynamic";
  */
 export const GET = withEditor<{ id: string; taskId: string }>(
   "/api/mcp-servers/[id]/tasks/[taskId]",
-  async ({ params }) => {
-    const task = await getServerTask(params.id, params.taskId);
+  async ({ params, session }) => {
+    const task = await getServerTask(params.id, params.taskId, session.user.role);
     const pollHistoryLimit = normalizePollHistoryLimit(
       getConfigNumber("mcp.task_poll_history_limit", DEFAULT_TASK_POLL_HISTORY_LIMIT),
     );

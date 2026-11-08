@@ -143,6 +143,73 @@ function killWindowsProcessTree(pid: number): Promise<void> {
 }
 
 /**
+ * List direct child PIDs of `parentPid` on POSIX (macOS / Linux) via `pgrep -P`.
+ */
+function listPosixChildPids(parentPid: number): Promise<number[]> {
+  return new Promise((resolve) => {
+    execFile("pgrep", ["-P", String(parentPid)], (err, stdout) => {
+      if (err || !stdout) {
+        resolve([]);
+        return;
+      }
+      const pids = stdout
+        .split(/\r?\n/)
+        .map((line) => Number.parseInt(line.trim(), 10))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      resolve(pids);
+    });
+  });
+}
+
+/**
+ * Recursively collect all descendant PIDs bottom-up (grandchildren before children)
+ * and terminate them on POSIX (macOS / Linux).
+ */
+async function killPosixProcessTree(
+  rootPid: number,
+  signal: NodeJS.Signals = "SIGTERM",
+): Promise<number[]> {
+  const visited = new Set<number>();
+  const postOrder: number[] = [];
+
+  async function walk(pid: number): Promise<void> {
+    if (visited.has(pid)) return;
+    visited.add(pid);
+    const children = await listPosixChildPids(pid);
+    for (const childPid of children) {
+      await walk(childPid);
+    }
+    postOrder.push(pid);
+  }
+
+  await walk(rootPid);
+
+  for (const pid of postOrder) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Ignore ESRCH if process already exited
+    }
+  }
+  return postOrder;
+}
+
+/**
+ * Cross-platform recursive process-tree termination for a spawned stdio MCP server.
+ */
+export async function killProcessTree(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (platform === "win32") {
+    await killWindowsProcessTree(pid);
+    return;
+  }
+  await killPosixProcessTree(pid, "SIGTERM");
+}
+
+/**
  * Create a `StdioClientTransport` with stderr logging and recursive
  * process-tree termination on `close()`.
  */
@@ -176,11 +243,12 @@ export function createStdioTransport(
     });
   }
 
-  // QUIRK: `@modelcontextprotocol/client/stdio` uses `cross-spawn`, which on
-  // Windows wraps `.cmd` launchers (`npx`, `pnpm`, `uvx`) in `cmd.exe /d /s /c`.
-  // `StdioClientTransport.close()` only sends SIGTERM to that outer `cmd.exe`,
-  // stranding child `node.exe` and browser processes. Override `close()` to
-  // reap the full process tree on win32 before/after closing the transport.
+  // QUIRK: `@modelcontextprotocol/client/stdio` uses `cross-spawn` without
+  // process-group detachment. On Windows it wraps `.cmd` launchers (`npx`,
+  // `pnpm`, `uvx`) in `cmd.exe /d /s /c`, and on macOS/Linux `npx`/`uvx`
+  // spawn child `node` and browser processes. `StdioClientTransport.close()`
+  // only sends SIGTERM to the top-level wrapper PID, stranding descendants.
+  // Override `close()` to reap the entire descendant tree on both win32 and POSIX.
   const originalClose = transport.close.bind(transport);
   let closingPromise: Promise<void> | null = null;
 
@@ -188,10 +256,24 @@ export function createStdioTransport(
     if (closingPromise) return closingPromise;
     closingPromise = (async () => {
       const pid = transport.pid;
-      if (process.platform === "win32" && typeof pid === "number" && pid > 0) {
-        await killWindowsProcessTree(pid);
+      let posixDescendants: number[] = [];
+      if (typeof pid === "number" && pid > 0) {
+        if (process.platform === "win32") {
+          await killWindowsProcessTree(pid);
+        } else {
+          posixDescendants = await killPosixProcessTree(pid, "SIGTERM");
+        }
       }
       await originalClose();
+      if (posixDescendants.length > 0) {
+        for (const childPid of posixDescendants) {
+          try {
+            process.kill(childPid, "SIGKILL");
+          } catch {
+            // Already exited
+          }
+        }
+      }
     })();
     return closingPromise;
   };

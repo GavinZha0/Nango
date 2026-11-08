@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
  */
 export const POST = withEditor<{ id: string; taskId: string }>(
   "/api/mcp-servers/[id]/tasks/[taskId]/cancel",
-  async ({ params }) => {
-    await cancelServerTask(params.id, params.taskId);
+  async ({ params, session }) => {
+    await cancelServerTask(params.id, params.taskId, session.user.role);
     return new NextResponse(null, { status: 204 });
   },
 );

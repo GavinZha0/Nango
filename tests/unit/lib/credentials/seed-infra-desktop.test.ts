@@ -21,6 +21,7 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
     delete process.env.NANGO_SEED_SENSEVOICE_URL;
     delete process.env.NANGO_BUNDLED_NODE_EXE;
     delete process.env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI;
+    delete process.env.NANGO_ALLOW_STDIO_MCP;
   });
 
   afterEach(() => {
@@ -73,6 +74,14 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
         "chrome",
       ],
     });
+  });
+
+  it("skips seeding stdio Playwright MCP in Desktop mode when NANGO_ALLOW_STDIO_MCP=false", () => {
+    process.env.NANGO_DESKTOP = "1";
+    process.env.NANGO_ALLOW_STDIO_MCP = "false";
+
+    const seed = resolveBuiltinInfraSeedValues();
+    expect(seed.playwrightMcp).toBeNull();
   });
 
   it("honours NANGO_DEFAULT_HOST_FILE_ROOT and NANGO_DEFAULT_CACHE_ROOT in config defaults and resolveCacheRoot", () => {

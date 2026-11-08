@@ -13,6 +13,7 @@ import { CredentialTable, McpServerTable } from "@/lib/db/schema";
 import { encrypt } from "./crypto";
 import { eq } from "drizzle-orm";
 import { invalidateCredentialCache } from "@/lib/credentials/lookup";
+import { isStdioMcpAllowed } from "@/lib/mcp/stdio-spawn.server";
 
 export interface BuiltinInfraSeedValues {
   sandboxUrl: string;
@@ -22,7 +23,7 @@ export interface BuiltinInfraSeedValues {
     url: string;
     command: string | null;
     args: string[] | null;
-  };
+  } | null;
 }
 
 export function resolveBuiltinInfraSeedValues(): BuiltinInfraSeedValues {
@@ -44,6 +45,16 @@ export function resolveBuiltinInfraSeedValues(): BuiltinInfraSeedValues {
         command: null,
         args: null,
       },
+    };
+  }
+
+  // Respect explicit `NANGO_ALLOW_STDIO_MCP=false` in desktop mode so we never
+  // seed a `stdio` MCP server row that the runtime refuses to spawn.
+  if (!isStdioMcpAllowed()) {
+    return {
+      sandboxUrl,
+      senseVoiceUrl,
+      playwrightMcp: null,
     };
   }
 
@@ -131,26 +142,28 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
     }
 
     // 3. Seed Playwright MCP Server
-    const existingPlaywright = await db
-      .select({ id: McpServerTable.id })
-      .from(McpServerTable)
-      .where(eq(McpServerTable.name, "Playwright"))
-      .limit(1);
+    if (seedValues.playwrightMcp) {
+      const existingPlaywright = await db
+        .select({ id: McpServerTable.id })
+        .from(McpServerTable)
+        .where(eq(McpServerTable.name, "Playwright"))
+        .limit(1);
 
-    if (existingPlaywright.length === 0) {
-      await db.insert(McpServerTable).values({
-        name: "Playwright",
-        description: "Built-in Playwright Browser Automation MCP Server",
-        type: seedValues.playwrightMcp.type,
-        url: seedValues.playwrightMcp.url,
-        command: seedValues.playwrightMcp.command,
-        args: seedValues.playwrightMcp.args,
-        visibility: "public",
-        enabled: true,
-        credentialId: null,
-        createdBy: null,
-      });
-      console.log("[bootstrap] Seeded default Playwright MCP server");
+      if (existingPlaywright.length === 0) {
+        await db.insert(McpServerTable).values({
+          name: "Playwright",
+          description: "Built-in Playwright Browser Automation MCP Server",
+          type: seedValues.playwrightMcp.type,
+          url: seedValues.playwrightMcp.url,
+          command: seedValues.playwrightMcp.command,
+          args: seedValues.playwrightMcp.args,
+          visibility: "public",
+          enabled: true,
+          credentialId: null,
+          createdBy: null,
+        });
+        console.log("[bootstrap] Seeded default Playwright MCP server");
+      }
     }
 
     // Invalidate credential cache so newly seeded credentials are immediately visible to in-process callers

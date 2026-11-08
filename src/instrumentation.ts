@@ -122,14 +122,16 @@ export async function register(): Promise<void> {
   // of recovery — a scheduler boot failure shouldn't prevent the app
   // from serving requests; the next restart tries again.
   const { bootstrapScheduler, shutdownScheduler } = await import("@/lib/runner/scheduler");
+  const { mcpProviderPool } = await import("@/lib/mcp");
   try {
     await bootstrapScheduler();
   } catch (err) {
     console.error("[nango] scheduler bootstrap failed:", err);
   }
 
-  // Graceful shutdown: clear all scheduler timers so the process can
-  // exit without waiting for pending setTimeout callbacks.
+  // Graceful shutdown: clear all scheduler timers and close pooled MCP
+  // providers (including stdio child process trees) so the process can
+  // exit cleanly without stranding orphan child processes.
   // Guard against HMR double-registration in dev mode.
   // NOTE: `nodeProcess` indirection avoids Turbopack's static
   // `process.on` → Edge-incompatible warning (false positive —
@@ -138,9 +140,13 @@ export async function register(): Promise<void> {
   if (!g.__nango_shutdown_registered) {
     g.__nango_shutdown_registered = true;
     const nodeProcess: NodeJS.Process = globalThis.process;
-    const onShutdown = (): void => { shutdownScheduler(); };
+    const onShutdown = (): void => {
+      shutdownScheduler();
+      void mcpProviderPool.shutdown();
+    };
     nodeProcess.on("SIGTERM", onShutdown);
     nodeProcess.on("SIGINT", onShutdown);
+    nodeProcess.on("beforeExit", onShutdown);
   }
 
   // Sandbox: resolve the active adapter eagerly so an unreachable

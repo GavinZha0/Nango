@@ -132,8 +132,8 @@ export async function openDuckdbConnection(opts?: { forceLocal?: boolean }) {
       if (cred.apiKey && !SAFE_TOKEN_RE.test(cred.apiKey)) {
         throw new Error("Invalid duckdb-server token characters");
       }
-      const tokenClause = cred.apiKey ? `, TOKEN '${cred.apiKey}'` : "";
-      await conn.run(`ATTACH 'quack:${cred.host}' AS remote_db (TYPE quack${tokenClause});`);
+      const tokenClause = cred.apiKey ? ` (TOKEN '${cred.apiKey}')` : "";
+      await conn.run(`ATTACH 'quack:${cred.host}' AS remote_db${tokenClause};`);
       await conn.run("CONNECT remote_db;");
     }
   }
@@ -150,7 +150,7 @@ DuckDB 的 `postgres`、`mysql`、`quack` 扩展默认在首次调用 `INSTALL` 
 | 模式 | 触发条件 | 运作机制与适用场景 |
 | :--- | :--- | :--- |
 | **模式 A：In-Process 嵌入式模式（默认稳定版）** | 未启用 `duckdb-server` 凭据（或数据源为 Vertica） | 在本地进程内 `:memory:` 直接执行抽取，Parquet 落盘至本地 `<userData>/cache/datasource`。适合个人桌面端单机开箱即用。 |
-| **模式 B：Quack 远程路由模式（Opt-in 实验特性）** | 在 Admin → Credentials 中配置并启用了 `duckdb-server`（`host:port` + `token`） | 本地 `:memory:` 仅作轻量协议桥，通过 `CONNECT remote_db;` 将 Postgres/MySQL 抽取与 `readPreview()` 路由至远程 `duckdb -serve` 执行，计算下推且支持与远端 `dify-sandbox` 跨机共享数据。 |
+| **模式 B：Quack 远程路由模式（Opt-in 实验特性）** | 在 Admin → Credentials 中配置并启用了 `duckdb-server`（`host:port` + `token`） | 本地 `:memory:` 仅作轻量协议桥，通过 `CONNECT remote_db;` 将 Postgres/MySQL 抽取路由至远程 `duckdb -serve` 执行。**注意**：由于 `COPY ... TO '<outputPath>'` 在远程 DuckDB Server 所在文件系统执行，Nango 与远程 DuckDB Server 必须在相同路径挂载共享缓存目录（`datasource.cache_root`）；抽取完成后 `introspectParquet()` 会通过本地 `fs.stat(outputPath)` 校验文件存在性，若未挂载共享目录则立即显式报错拒绝提交缓存槽。 |
 
 ---
 
@@ -172,8 +172,9 @@ DuckDB 的 `postgres`、`mysql`、`quack` 扩展默认在首次调用 `INSTALL` 
      }
      ```
    - **理由**：在多租户 Docker 部署中，`runner` 镜像为精简版且不应允许在容器内任意 `spawn` 子进程；而在桌面端（`NANGO_DESKTOP=1`），用户本身即为宿主机所有者，默认开启。
-2. **Admin 角色强制校验**：
-   - 即使在允许 `stdio` 的环境中，创建、修改或删除 `type === "stdio"` 的 MCP Server 仍强制要求 `session.user.role === "admin"`。
+2. **Admin 角色强制校验与字段脱敏**：
+   - 即使在允许 `stdio` 的环境中，创建、修改（含启停/可见性切换）、删除 `type === "stdio"` 的 MCP Server，以及对其触发 `discover`、`call-tool`、`tasks` 管理操作，均在路由与 `withMcpAdminClient()` 层强制要求 `session.user.role === "admin"`；
+   - `GET /api/mcp-servers` 对非 `admin` 的 `editor` 角色自动脱敏 `stdio` 行的宿主机进程配置字段（`command`、`args`、`env`、`cwd`、`credentialEnvName` 均置为 `null`）。
 3. **环境变量白名单隔离（严禁泄漏主进程密钥）**：
    - 构建 `StdioClientTransport` 的 `env` 时，**严禁**传入 `process.env`（防止 `CREDENTIAL_ENCRYPTION_KEYRING`、`BETTER_AUTH_SECRET`、`POSTGRES_PASSWORD` 泄漏给子进程）。
    - 仅以 `getDefaultEnvironment()`（包含 `PATH`, `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `PATHEXT`, `TEMP` 等安全系统变量）为基底，再合并用户为该 Server 配置的 `env` 字典。
@@ -224,9 +225,12 @@ export const McpServerTable = pgTable("mcp_server", {
    - 桌面应用的目标用户（个人或业务人员）电脑上往往没有安装 Node.js 或 `npx`。
    - Electron 主进程启动 `server.js` 时注入 `NANGO_BUNDLED_NODE_BIN_DIR=<resourcesPath>/node/bin`（Windows 下为 `<resourcesPath>/node`）；
    - `stdio-spawn.server.ts` 在组装子进程 `env.PATH`（Windows 下兼容 `Path` 大小写键名）时，自动将 `NANGO_BUNDLED_NODE_BIN_DIR` 前置拼接到 `PATH` 最前面，确保任何 `node` / `npx` 类 `stdio` MCP Server 在纯净裸机上也能直接运行。
-2. **包装 `close()` 实现递归进程树清理**：
+2. **包装 `close()` 实现跨平台递归进程树清理与进程退出钩子**：
    - 在 `createStdioTransport()` 返回的 Transport 包装器中记录 `transport.pid`；
-   - 当调用 `close()` 时，先执行原生的 `transport.close()`，随后在 `process.platform === "win32"` 且 `pid` 存在时，调用 `execFile("taskkill", ["/PID", String(pid), "/T", "/F"])` 确保递归杀死整棵子进程树（包括 `npx` 拉起的 `node` 和浏览器进程）。
+   - 当调用 `close()` 时：
+     - 在 Windows (`win32`) 上，先执行原生的 `transport.close()`，随后调用 `execFile("taskkill", ["/PID", String(pid), "/T", "/F"])` 递归终止整棵子进程树；
+     - 在 macOS / Linux (`darwin` / `linux`) 上，由于 `npx` 会派生多层子进程且默认 `kill("SIGTERM")` 仅作用于父 PID，在调用原生 `transport.close()` 前先通过 `pgrep -P` 自底向上递归收集所有后代 PID 发送 `SIGTERM`，并在 `close()` 完成后发送 `SIGKILL` 兜底清理；
+   - 在 [`src/instrumentation.ts`](../src/instrumentation.ts) 的 `SIGTERM` / `SIGINT` / `beforeExit` 退出钩子中统一调用 `mcpProviderPool.shutdown()`，确保服务停止或桌面应用退出时不遗留任何长驻 `stdio` 子进程。
 3. **`stderr: "pipe"` 日志采集**：
    - 将子进程的 `stderr` 重定向至 Pino 结构化日志（`component: "mcp-stdio"`），便于观察 `npx` 下载进度或启动报错。
 4. **独立的 `stdio` 探测超时配置与前端提示**：

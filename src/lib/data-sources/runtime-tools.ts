@@ -408,7 +408,11 @@ async function readPreview(
 
   let handle: Awaited<ReturnType<typeof openDuckdbConnection>> | null = null;
   try {
-    handle = await openDuckdbConnection(opts);
+    // Cached Parquet files reside on the local cache filesystem (`datasetDir`),
+    // so default `forceLocal: true` to read them directly in-process.
+    handle = await openDuckdbConnection({
+      forceLocal: opts?.forceLocal ?? true,
+    });
     const { conn } = handle;
     const previewRel = await conn.runAndReadAll(
       `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}') LIMIT ${limit}`,
@@ -421,7 +425,11 @@ async function readPreview(
       rows.pop();
     }
     return rows;
-  } catch {
+  } catch (err) {
+    log.warn(
+      { err, datasetName: name, glob },
+      "readPreview failed to read cached Parquet snapshot",
+    );
     return [];
   } finally {
     if (handle) {

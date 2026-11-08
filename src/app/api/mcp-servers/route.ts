@@ -35,7 +35,26 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
     )
     .orderBy(desc(McpServerTable.createdAt));
 
-  return NextResponse.json(rows);
+  // SECURITY: Redact host-process spawn fields (command, args, env, cwd,
+  // credentialEnvName) for non-admin editors so host filesystem paths and
+  // environment variables are only visible to administrators.
+  const isAdmin = session.user.role === "admin";
+  const sanitizedRows = isAdmin
+    ? rows
+    : rows.map((row) =>
+        row.type === "stdio"
+          ? {
+              ...row,
+              command: null,
+              args: null,
+              env: null,
+              cwd: null,
+              credentialEnvName: null,
+            }
+          : row,
+      );
+
+  return NextResponse.json(sanitizedRows);
 });
 
 // POST /api/mcp-servers

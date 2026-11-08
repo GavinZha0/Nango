@@ -65,7 +65,7 @@ function hasServerTasksCapability(
  */
 export const POST = withEditor<{ id: string }>(
   "/api/mcp-servers/[id]/call-tool",
-  async ({ req, params }) => {
+  async ({ req, params, session }) => {
     const body = await parseBody(req, callToolSchema);
     const timeoutMs = getConfigMs(
       "mcp.execution_timeout",
@@ -80,6 +80,7 @@ export const POST = withEditor<{ id: string }>(
       serverId: params.id,
       clientName: "nango-tool-call",
       errorPrefix: "Tool call failed",
+      callerRole: session.user.role,
       fn: async ({ client, clientInfo, clientCapabilities, server }) => {
         const protocolEra = client.getProtocolEra();
         const isV2 = protocolEra === "modern";
