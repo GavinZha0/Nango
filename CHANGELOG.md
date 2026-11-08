@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.32.0](https://github.com/GavinZha0/Nango/compare/v0.31.0...v0.32.0) (2026-11-08)
+
+
+### Features
+
+* **desktop:** add binary fetcher, macOS signing, updater, and CI (Phase 4) ([2cf64e0](https://github.com/GavinZha0/Nango/commit/2cf64e092e14c07010ce61b56d267da1e7e8f5c2))
+* **desktop:** add Electron process supervisor and lifecycle modules (Phase 3) ([005a18e](https://github.com/GavinZha0/Nango/commit/005a18e34293df76f616b2c74484fcf76dc0c477))
+* **desktop:** add Electron process supervisor and lifecycle modules (Phase 3) ([95dcbda](https://github.com/GavinZha0/Nango/commit/95dcbdae8cbe984fa88507d64b91e309ae5af035))
+* **desktop:** add runtime path overrides, infra seed adaptation, and DuckDB Quack factory ([3216756](https://github.com/GavinZha0/Nango/commit/321675654141e0f0b7389f345847f23240bf5ae1))
+* **desktop:** implement zero-loss standalone archive & runtime junction materializer ([d9a3f90](https://github.com/GavinZha0/Nango/commit/d9a3f903e30ef6105a2858ec966c6365ed92887e))
+* **desktop:** upgrade to Electron 45, add build-standalone script, and set app icons ([5938e85](https://github.com/GavinZha0/Nango/commit/5938e852ce2dd5eda6286d494bfa7628b7e426eb))
+* **mcp:** add stdio transport support and desktop architecture spec ([53d1aab](https://github.com/GavinZha0/Nango/commit/53d1aab4b6996a71145417c313ac3b85542fe76c))
+
+
+### Bug Fixes
+
+* **desktop:** address Phase 1 & 2 review findings for stdio MCP and DuckDB ([cf4eec1](https://github.com/GavinZha0/Nango/commit/cf4eec1b06a4290c116df16ff8d2a50119f52e4b))
+* **desktop:** harden macOS notarization, binary verification, and build pipeline ([0aedf33](https://github.com/GavinZha0/Nango/commit/0aedf3341b2bd0c278bcddfd3cfcb1f3f365b9b3))
+* **desktop:** Internal Server Error when start Nano ([fb025d7](https://github.com/GavinZha0/Nango/commit/fb025d7c431efdd1a857e244144c38a901a8dc68))
+* **desktop:** stage complete updater closure, enforce release signing, and add CI permissions ([196d215](https://github.com/GavinZha0/Nango/commit/196d21562b2c809f8b304a9b50e847b534cf4b02))
+
 ## [0.31.0](https://github.com/GavinZha0/Nango/compare/v0.30.1...v0.31.0) (2026-11-07)
 
 
