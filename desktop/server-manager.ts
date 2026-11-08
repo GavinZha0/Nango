@@ -97,6 +97,7 @@ export function buildDesktopServerEnv(
   env.BETTER_AUTH_URL = input.betterAuthUrl;
   env.BETTER_AUTH_SECRET = input.secrets.betterAuthSecret;
   env.CREDENTIAL_ENCRYPTION_KEYRING = input.secrets.credentialEncryptionKeyring;
+  env.CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID = "k1";
 
   env.POSTGRES_HOST = "127.0.0.1";
   env.POSTGRES_PORT = String(input.pgPort);
@@ -209,6 +210,12 @@ export class ServerManager {
     });
     this.proc = child;
     let ready = false;
+
+    // Stream Next.js server logs into userData/logs/server.log for runtime forensics.
+    const serverLogPath = path.join(this.opts.userDataDir, "logs", "server.log");
+    const logStream = fs.createWriteStream(serverLogPath, { flags: "a" });
+    child.stdout?.pipe(logStream);
+    child.stderr?.pipe(logStream);
 
     child.on("exit", (code, signal) => {
       this.proc = null;

@@ -98,7 +98,7 @@ describe("desktop/keyring", () => {
 
     const first = loadOrCreateDesktopSecrets(tmpDir, fakeSafeStorage);
     expect(isValidDesktopSecrets(first)).toBe(true);
-    expect(first.credentialEncryptionKeyring).toMatch(/^v1:[0-9a-f]{64}$/);
+    expect(first.credentialEncryptionKeyring).toMatch(/^k1=[0-9a-f]{64}$/);
 
     // Verify secrets.bin on disk does not contain plaintext keyring
     const rawDisk = fs.readFileSync(path.join(tmpDir, "secrets.bin"), "utf8");
@@ -107,6 +107,30 @@ describe("desktop/keyring", () => {
     // Second call reloads identical secrets
     const second = loadOrCreateDesktopSecrets(tmpDir, fakeSafeStorage);
     expect(second).toEqual(first);
+  });
+
+  it("migrates legacy secrets.bin with v1: prefix to k1= format cleanly", () => {
+    const fakeSafeStorage: SafeStorageAdapter = {
+      isEncryptionAvailable: () => true,
+      encryptString: (plain) => Buffer.from(plain, "utf8"),
+      decryptString: (buf) => buf.toString("utf8"),
+    };
+
+    const legacyPayload = {
+      credentialEncryptionKeyring: `v1:${"a".repeat(64)}`,
+      betterAuthSecret: "b".repeat(32),
+      postgresPassword: "c".repeat(16),
+    };
+    const envelope = {
+      version: 1,
+      encrypted: true,
+      payloadBase64: Buffer.from(JSON.stringify(legacyPayload), "utf8").toString("base64"),
+    };
+    fs.writeFileSync(path.join(tmpDir, "secrets.bin"), JSON.stringify(envelope));
+
+    const loaded = loadOrCreateDesktopSecrets(tmpDir, fakeSafeStorage);
+    expect(loaded.credentialEncryptionKeyring).toBe(`k1=${"a".repeat(64)}`);
+    expect(isValidDesktopSecrets(loaded)).toBe(true);
   });
 
   it("fails closed if secrets.bin was encrypted with safeStorage but decryption is unavailable", () => {
@@ -245,6 +269,7 @@ describe("desktop/server-manager helpers", () => {
     expect(env.CREDENTIAL_ENCRYPTION_KEYRING).toBe(
       secrets.credentialEncryptionKeyring,
     );
+    expect(env.CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID).toBe("k1");
     expect(env.NANGO_DEFAULT_HOST_FILE_ROOT).toBe(workspaceDir);
     expect(env.NANGO_DEFAULT_CACHE_ROOT).toBe(dirs.datasourceCacheDir);
     expect(env.NANGO_PLAYWRIGHT_STORAGE_DIR).toBe(dirs.playwrightStorageDir);

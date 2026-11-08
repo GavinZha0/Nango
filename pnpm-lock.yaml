@@ -381,7 +381,7 @@ importers:
         specifier: ^0.31.10
         version: 0.31.11
       electron:
-        specifier: ^45.2.0
+        specifier: ^45.2.3
         version: 45.2.3(supports-color@7.2.0)
       electron-builder:
         specifier: ^26.18.0

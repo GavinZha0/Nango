@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export interface DesktopSecrets {
-  /** Versioned AES-256-GCM keyring (`"v1:<64-hex-chars>"`). */
+  /** Versioned AES-256-GCM keyring (`"k1=<64-hex-chars>"`). */
   credentialEncryptionKeyring: string;
   /** 32-byte hex secret for better-auth session signing. */
   betterAuthSecret: string;
@@ -44,7 +44,7 @@ export function generateDesktopSecrets(): DesktopSecrets {
   const pgPasswordHex = crypto.randomBytes(24).toString("hex");
 
   return {
-    credentialEncryptionKeyring: `v1:${aesKeyHex}`,
+    credentialEncryptionKeyring: `k1=${aesKeyHex}`,
     betterAuthSecret: authSecretHex,
     postgresPassword: pgPasswordHex,
   };
@@ -58,7 +58,7 @@ export function isValidDesktopSecrets(candidate: unknown): candidate is DesktopS
   const rec = candidate as Record<string, unknown>;
   return (
     typeof rec.credentialEncryptionKeyring === "string" &&
-    /^v1:[0-9a-fA-F]{64}$/.test(rec.credentialEncryptionKeyring) &&
+    /^k1=[0-9a-fA-F]{64}$/.test(rec.credentialEncryptionKeyring) &&
     typeof rec.betterAuthSecret === "string" &&
     rec.betterAuthSecret.length >= 32 &&
     typeof rec.postgresPassword === "string" &&
@@ -121,6 +121,17 @@ export function loadOrCreateDesktopSecrets(
     }
 
     const parsed: unknown = JSON.parse(jsonString);
+    // QUIRK: Migrate legacy desktop secrets generated with "v1:<hex>" prefix
+    // to the standard "k1=<hex>" key-value format expected by crypto.ts.
+    if (parsed && typeof parsed === "object") {
+      const rec = parsed as Record<string, unknown>;
+      if (
+        typeof rec.credentialEncryptionKeyring === "string" &&
+        rec.credentialEncryptionKeyring.startsWith("v1:")
+      ) {
+        rec.credentialEncryptionKeyring = `k1=${rec.credentialEncryptionKeyring.slice(3)}`;
+      }
+    }
     if (!isValidDesktopSecrets(parsed)) {
       throw new Error("Stored desktop secrets failed integrity validation.");
     }
