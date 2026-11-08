@@ -21,7 +21,7 @@ const argv = process.argv.slice(2);
 const sweepAll = argv.includes("--all");
 
 // Roots scanned by `--all`. Tests and migrations stay out via SKIP_PATHS.
-const SWEEP_ROOTS = ["src", "scripts"];
+const SWEEP_ROOTS = ["src", "scripts", "desktop"];
 // Match what lint-staged scans: same extensions, exclude binaries.
 const SWEEP_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 // Directories we never recurse into during a sweep.
