@@ -19,8 +19,6 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
     delete process.env.PLAYWRIGHT_OUTPUT_DIR;
     delete process.env.NANGO_SEED_SANDBOX_URL;
     delete process.env.NANGO_SEED_SENSEVOICE_URL;
-    delete process.env.NANGO_BUNDLED_NODE_EXE;
-    delete process.env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI;
     delete process.env.NANGO_ALLOW_STDIO_MCP;
   });
 
@@ -54,25 +52,6 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
         command: "npx",
         args: ["-y", "@playwright/mcp@latest", "--browser", "chrome"],
       },
-    });
-  });
-
-  it("uses bundled Node and pre-installed Playwright CLI in Desktop mode when provided", () => {
-    process.env.NANGO_DESKTOP = "1";
-    process.env.NANGO_BUNDLED_NODE_EXE = "C:\\Nango\\resources\\node\\node.exe";
-    process.env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI =
-      "C:\\Nango\\resources\\mcp-playwright\\node_modules\\@playwright\\mcp\\cli.js";
-
-    const seed = resolveBuiltinInfraSeedValues();
-    expect(seed.playwrightMcp).toEqual({
-      type: "stdio",
-      url: "",
-      command: "C:\\Nango\\resources\\node\\node.exe",
-      args: [
-        "C:\\Nango\\resources\\mcp-playwright\\node_modules\\@playwright\\mcp\\cli.js",
-        "--browser",
-        "chrome",
-      ],
     });
   });
 

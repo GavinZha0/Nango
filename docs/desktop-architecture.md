@@ -282,12 +282,11 @@ export const McpServerTable = pgTable("mcp_server", {
 
 - **Dify Sandbox**：默认 `host` / `restUrl` 设为 `process.env.NANGO_SEED_SANDBOX_URL ?? (isDesktop ? "http://127.0.0.1:8194" : "http://sandbox:8194")`。
 - **SenseVoice**：默认 `host` / `restUrl` 设为 `process.env.NANGO_SEED_SENSEVOICE_URL ?? (isDesktop ? "http://127.0.0.1:10085" : "http://sensevoice:8000")`。
-- **Playwright MCP Server（消除对用户机器 Node/npx 及 Chromium 下载的依赖）**：
+- **Playwright MCP Server（复用捆绑 Node/npx 与本机浏览器）**：
   - Docker 模式：保持 `type: "http", url: "http://playwright:8931/mcp"`；
   - 桌面模式（`isDesktop`）：
-    - 在构建期将 `@playwright/mcp` 预装进 `extraResources/mcp-playwright/`；
-    - 种子命令直接指向捆绑的 Node 与预装的 CLI 入口：`type: "stdio", command: process.env.NANGO_BUNDLED_NODE_EXE ?? "node", args: [process.env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI ?? "npx", "--browser", "chrome"]`；
-    - **浏览器策略**：默认使用 `--browser chrome`（Windows 下若未装 Chrome 可在 MCP 参数中改为 `msedge`），直接驱动用户本机已安装的 Chrome/Edge 有头浏览器，既免去了首次运行下载 300MB Chromium 的等待，又能零配置在没有安装 Node.js 的用户电脑上开箱运行！
+    - 无需在安装包中预装 `@playwright/mcp`：由于 `stdio-spawn.server.ts` 已将随包捆绑的 Node 24 LTS 目录（`NANGO_BUNDLED_NODE_BIN_DIR`，内含 `node` 与 `npx`）前置注入子进程 `PATH`，即使目标用户电脑未安装 Node.js，也能直接通过捆绑的 `npx` 按需拉起：`type: "stdio", command: "npx", args: ["-y", "@playwright/mcp@latest", "--browser", "chrome"]`；
+    - **浏览器策略**：默认使用 `--browser chrome`（Windows 下若未装 Chrome 可在 MCP 参数中改为 `msedge`），直接驱动用户本机已安装的 Chrome/Edge 有头浏览器，免去下载 300MB Chromium。
 
 ---
 
@@ -378,6 +377,6 @@ macOS Gatekeeper 会扫描 `.app` Bundle 内的**所有** Mach-O 可执行文件
 - [ ] **Step 3.3（托盘与原生交互）**：实现 `tray.ts`（关闭窗口最小化到托盘，保障后台 `schedule` 定时任务运行）与 `preload.ts`（文件夹选择 IPC）。
 
 ### Phase 4：多平台打包、macOS 签名公证与自动更新流水线
-- [ ] **Step 4.1（二进制拉取与打包配置）**：编写 `desktop/scripts/fetch-binaries.mjs`（按目标架构拉取官方 Node 24 LTS、精简版 PG 18 二进制、预置 DuckDB 离线扩展包 `postgres`/`mysql`/`quack` 以及预装 `@playwright/mcp`）及 `electron-builder.yml`（支持 `win-x64` NSIS 安装包、`mac-arm64` / `mac-x64` DMG）。
+- [ ] **Step 4.1（二进制拉取与打包配置）**：编写 `desktop/scripts/fetch-binaries.mjs`（按目标架构拉取官方 Node 24 LTS、精简版 PG 18 二进制以及预置 DuckDB 离线扩展包 `postgres`/`mysql`/`quack`）及 `electron-builder.yml`（支持 `win-x64` NSIS 安装包、`mac-arm64` / `mac-x64` DMG）。
 - [ ] **Step 4.2（macOS 深度签名与公证）**：实现 `desktop/scripts/after-sign.mjs` 与 `entitlements.mac.plist`，覆盖 PG 18、Node 24、`duckdb.node` / `libduckdb.dylib` 及 `.duckdb_extension` 的 Inside-Out 签名与 Apple Notarization 验收。
 - [ ] **Step 4.3（自动更新、桌面端冒烟 E2E 与 CI 发布）**：集成 `electron-updater`，编写基于 Playwright `_electron.launch()` 的桌面端启动冒烟测试（验证内置 PG 初始化 → 迁移 → Next.js 就绪 → 主窗口渲染闭环），并新增 `.github/workflows/desktop-release.yml` 自动化构建流水线。

@@ -21,6 +21,7 @@ import type { DesktopSecrets } from "./keyring";
 const execFileAsync = promisify(execFile);
 
 export const MAX_SERVER_CRASH_RESTARTS = 3;
+export const DEFAULT_SERVER_READY_TIMEOUT_MS = 60_000;
 
 export interface DesktopWritableDirs {
   workspaceDir: string;
@@ -63,7 +64,6 @@ export interface DesktopServerEnvInput {
   workspaceDir: string;
   bundledNodeExe: string;
   bundledNodeBinDir: string;
-  bundledPlaywrightMcpCli?: string;
   duckdbExtensionDir?: string;
   pgUser?: string;
   pgDatabase?: string;
@@ -104,7 +104,6 @@ export function buildDesktopServerEnv(
   env.POSTGRES_PASSWORD = input.secrets.postgresPassword;
   env.POSTGRES_DB = pgDatabase;
 
-  env.NANGO_PGDATA_DIR = path.join(input.userDataDir, "pgdata");
   env.NANGO_DEFAULT_HOST_FILE_ROOT = input.workspaceDir;
   env.NANGO_DEFAULT_CACHE_ROOT = path.join(
     input.userDataDir,
@@ -120,9 +119,6 @@ export function buildDesktopServerEnv(
   env.NANGO_BUNDLED_NODE_EXE = input.bundledNodeExe;
   env.NANGO_BUNDLED_NODE_BIN_DIR = input.bundledNodeBinDir;
 
-  if (input.bundledPlaywrightMcpCli) {
-    env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI = input.bundledPlaywrightMcpCli;
-  }
   if (input.duckdbExtensionDir) {
     env.NANGO_DUCKDB_EXTENSION_DIR = input.duckdbExtensionDir;
   }
@@ -144,18 +140,29 @@ export function computeBackoffDelayMs(
 export interface ServerManagerOptions extends DesktopServerEnvInput {
   /** Root directory of the repaired Next.js standalone bundle (contains `server.js` and `docker/migrate.mjs`). */
   standaloneDir: string;
+  /** Readiness timeout in milliseconds (default 60_000ms). */
+  readyTimeoutMs?: number;
   /** Optional callback invoked when consecutive crash restarts are exhausted. */
   onFatalExit?: (err: Error) => void;
 }
 
 export class ServerManager {
   private readonly opts: ServerManagerOptions;
+  private readonly readyTimeoutMs: number;
   private proc: ChildProcess | null = null;
   private stopping = false;
   private consecutiveCrashes = 0;
 
   constructor(opts: ServerManagerOptions) {
     this.opts = opts;
+    const envTimeout = Number(
+      process.env.NANGO_DESKTOP_SERVER_READY_TIMEOUT_MS,
+    );
+    this.readyTimeoutMs =
+      opts.readyTimeoutMs ??
+      (Number.isFinite(envTimeout) && envTimeout > 0
+        ? envTimeout
+        : DEFAULT_SERVER_READY_TIMEOUT_MS);
   }
 
   /**
@@ -201,22 +208,68 @@ export class ServerManager {
       windowsHide: true,
     });
     this.proc = child;
+    let ready = false;
 
     child.on("exit", (code, signal) => {
       this.proc = null;
-      if (this.stopping) return;
+      if (!ready || this.stopping) return;
       void this.handleUnexpectedExit(code, signal, env);
     });
 
-    await this.waitForHttpReady(30_000);
-    this.consecutiveCrashes = 0;
+    try {
+      await this.waitForHttpReady(this.readyTimeoutMs, child);
+      ready = true;
+      this.consecutiveCrashes = 0;
+    } catch (err) {
+      // CONTRACT: Terminate the spawned server.js process if readiness
+      // probing times out or fails so no orphan Node server remains bound.
+      await this.terminateChildProcess(child);
+      if (this.proc === child) {
+        this.proc = null;
+      }
+      throw err;
+    }
   }
 
-  private async waitForHttpReady(timeoutMs: number): Promise<void> {
+  private async terminateChildProcess(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Process already exited
+        }
+        resolve();
+      }, 5_000);
+
+      child.once("exit", () => {
+        clearTimeout(killTimer);
+        resolve();
+      });
+
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        clearTimeout(killTimer);
+        resolve();
+      }
+    });
+  }
+
+  private async waitForHttpReady(
+    timeoutMs: number,
+    child?: ChildProcess,
+  ): Promise<void> {
     const probeUrl = `http://127.0.0.1:${this.opts.appPort}/api/auth/get-session`;
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
+      if (child && child.exitCode !== null) {
+        throw new Error(
+          `Next.js standalone server exited prematurely during startup with code ${child.exitCode}.`,
+        );
+      }
       try {
         const res = await fetch(probeUrl, {
           signal: AbortSignal.timeout(2_000),

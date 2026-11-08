@@ -21,6 +21,7 @@ import {
 } from "../../../desktop/port-finder";
 import {
   cleanStalePostmasterPid,
+  DEFAULT_PG_READY_TIMEOUT_MS,
   parsePostmasterPid,
   verifyPgVersion,
 } from "../../../desktop/postgres-manager";
@@ -31,6 +32,7 @@ import {
 import {
   buildDesktopServerEnv,
   computeBackoffDelayMs,
+  DEFAULT_SERVER_READY_TIMEOUT_MS,
   ensureDesktopWritableDirs,
 } from "../../../desktop/server-manager";
 import {
@@ -125,6 +127,31 @@ describe("desktop/keyring", () => {
       loadOrCreateDesktopSecrets(tmpDir, unavailableStorage),
     ).toThrow(/safeStorage decryption is currently unavailable/);
   });
+
+  it("refuses plaintext keyring creation by default when safeStorage is unavailable, and warns when opted in", () => {
+    const unavailableStorage: SafeStorageAdapter = {
+      isEncryptionAvailable: () => false,
+      encryptString: () => Buffer.alloc(0),
+      decryptString: () => "",
+    };
+
+    expect(() =>
+      loadOrCreateDesktopSecrets(tmpDir, unavailableStorage),
+    ).toThrow(/Refusing to persist plaintext desktop secrets/);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const secrets = loadOrCreateDesktopSecrets(tmpDir, unavailableStorage, {
+        allowPlaintextFallback: true,
+      });
+      expect(isValidDesktopSecrets(secrets)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("OS safeStorage encryption is unavailable"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe("desktop/postgres-manager helpers", () => {
@@ -206,8 +233,6 @@ describe("desktop/server-manager helpers", () => {
       workspaceDir,
       bundledNodeExe: "/resources/node/bin/node",
       bundledNodeBinDir: "/resources/node/bin",
-      bundledPlaywrightMcpCli:
-        "/resources/mcp-playwright/node_modules/@playwright/mcp/cli.js",
       duckdbExtensionDir: "/resources/duckdb-extensions",
       baseEnv: { PATH: "/usr/bin" },
     });
@@ -225,10 +250,10 @@ describe("desktop/server-manager helpers", () => {
     expect(env.NANGO_PLAYWRIGHT_STORAGE_DIR).toBe(dirs.playwrightStorageDir);
     expect(env.NANGO_BUNDLED_NODE_EXE).toBe("/resources/node/bin/node");
     expect(env.NANGO_BUNDLED_NODE_BIN_DIR).toBe("/resources/node/bin");
-    expect(env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI).toBe(
-      "/resources/mcp-playwright/node_modules/@playwright/mcp/cli.js",
-    );
     expect(env.NANGO_DUCKDB_EXTENSION_DIR).toBe("/resources/duckdb-extensions");
+    expect(env.NANGO_PGDATA_DIR).toBeUndefined();
+    expect(DEFAULT_PG_READY_TIMEOUT_MS).toBe(45_000);
+    expect(DEFAULT_SERVER_READY_TIMEOUT_MS).toBe(60_000);
   });
 
   it("computes exponential crash backoff delays (1s -> 2s -> 4s)", () => {
@@ -349,5 +374,53 @@ describe("desktop/preload, tray & main coordinator", () => {
     const started = await coordinator.bootstrap();
     expect(started).toBe(false);
     expect(quitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("catches startup errors in bootstrap(), displays showErrorBox, and shuts down cleanly", async () => {
+    const tmpUserData = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nango-desktop-boot-err-"),
+    );
+    try {
+      const quitMock = vi.fn();
+      const showErrorBoxMock = vi.fn();
+      const coordinator = new DesktopAppCoordinator({
+        resourcesPath: "/resources",
+        electron: {
+          app: {
+            requestSingleInstanceLock: () => true,
+            quit: quitMock,
+            getVersion: () => "1.0.0",
+            getPath: () => tmpUserData,
+            whenReady: async () => {},
+            on: vi.fn(),
+          },
+          BrowserWindow: vi.fn() as unknown as never,
+          Tray: vi.fn() as unknown as never,
+          Menu: { buildFromTemplate: vi.fn() },
+          dialog: {
+            showOpenDialog: vi.fn(),
+            showErrorBox: showErrorBoxMock,
+          },
+          shell: { openPath: vi.fn(async () => "") },
+          ipcMain: { handle: vi.fn() },
+          safeStorage: {
+            // Unavailable safeStorage causes loadOrCreateDesktopSecrets to throw during startup
+            isEncryptionAvailable: () => false,
+            encryptString: () => Buffer.alloc(0),
+            decryptString: () => "",
+          },
+        },
+      });
+
+      const started = await coordinator.bootstrap();
+      expect(started).toBe(false);
+      expect(showErrorBoxMock).toHaveBeenCalledWith(
+        "Nango 启动失败",
+        expect.stringContaining("Refusing to persist plaintext desktop secrets"),
+      );
+      expect(quitMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(tmpUserData, { recursive: true, force: true });
+    }
   });
 });

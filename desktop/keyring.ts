@@ -66,21 +66,34 @@ export function isValidDesktopSecrets(candidate: unknown): candidate is DesktopS
   );
 }
 
+export interface KeyringOptions {
+  /**
+   * When true, allow falling back to mode-0600 unencrypted storage if OS
+   * `safeStorage` is unavailable (e.g. headless Linux without libsecret).
+   * Defaults to `process.env.NANGO_ALLOW_PLAINTEXT_KEYRING === "true"`.
+   */
+  allowPlaintextFallback?: boolean;
+}
+
 /**
  * Load existing desktop secrets from `<userDataDir>/secrets.bin`, or generate
  * and persist new secrets atomically on first boot.
  *
- * SECURITY: File permissions are restricted to `0o600` and writes go through
- * a temporary sibling file + atomic rename so a power loss never leaves a
- * half-written keyring file.
+ * SECURITY: Requires OS `safeStorage` encryption by default; plaintext fallback
+ * is refused unless explicitly opted in via `allowPlaintextFallback` or
+ * `NANGO_ALLOW_PLAINTEXT_KEYRING=true`, and logs a prominent warning when used.
  */
 export function loadOrCreateDesktopSecrets(
   userDataDir: string,
   safeStorage?: SafeStorageAdapter,
+  opts?: KeyringOptions,
 ): DesktopSecrets {
   fs.mkdirSync(userDataDir, { recursive: true });
   const secretsPath = path.join(userDataDir, SECRETS_FILENAME);
   const canEncrypt = Boolean(safeStorage?.isEncryptionAvailable());
+  const allowPlaintext =
+    opts?.allowPlaintextFallback ??
+    process.env.NANGO_ALLOW_PLAINTEXT_KEYRING === "true";
 
   if (fs.existsSync(secretsPath)) {
     const rawText = fs.readFileSync(secretsPath, "utf8");
@@ -96,6 +109,14 @@ export function loadOrCreateDesktopSecrets(
       }
       jsonString = safeStorage.decryptString(rawBuffer);
     } else {
+      if (!allowPlaintext) {
+        throw new Error(
+          "Desktop secrets file is unencrypted and plaintext keyring fallback is disabled (set NANGO_ALLOW_PLAINTEXT_KEYRING=true to allow).",
+        );
+      }
+      console.warn(
+        "[desktop/keyring] WARNING: Loading unencrypted secrets.bin fallback (OS safeStorage not used).",
+      );
       jsonString = rawBuffer.toString("utf8");
     }
 
@@ -104,6 +125,18 @@ export function loadOrCreateDesktopSecrets(
       throw new Error("Stored desktop secrets failed integrity validation.");
     }
     return parsed;
+  }
+
+  if (!canEncrypt && !allowPlaintext) {
+    throw new Error(
+      "OS safeStorage encryption (DPAPI/Keychain/libsecret) is unavailable. Refusing to persist plaintext desktop secrets (set NANGO_ALLOW_PLAINTEXT_KEYRING=true to override).",
+    );
+  }
+
+  if (!canEncrypt) {
+    console.warn(
+      "[desktop/keyring] WARNING: OS safeStorage encryption is unavailable; persisting secrets.bin with mode-0600 plaintext fallback.",
+    );
   }
 
   const secrets = generateDesktopSecrets();

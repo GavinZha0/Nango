@@ -3,7 +3,7 @@
  *
  * Orchestrates:
  * 1. Single-instance lock (`requestSingleInstanceLock`) to prevent dual-boot `pgdata` corruption
- * 2. Bundled resource path resolution (`pg`, `node`, `standalone`, `duckdb-extensions`, `mcp-playwright`)
+ * 2. Bundled resource path resolution (`pg`, `node`, `standalone`, `duckdb-extensions`)
  * 3. OS-encrypted secret loading (`keyring.ts`) and dynamic port allocation (`port-finder.ts`)
  * 4. Portable PostgreSQL 18 startup -> Drizzle migration -> Next.js standalone startup
  * 5. Native folder-picker IPC (`dialog:selectFolder`), system tray, and ordered graceful shutdown
@@ -34,7 +34,6 @@ export interface BundledResourcePaths {
   bundledNodeExe: string;
   standaloneDir: string;
   duckdbExtensionDir: string;
-  bundledPlaywrightMcpCli: string;
   trayIconPath: string;
 }
 
@@ -60,14 +59,6 @@ export function resolveBundledResourcePaths(
     bundledNodeExe,
     standaloneDir: path.join(resourcesPath, "standalone"),
     duckdbExtensionDir: path.join(resourcesPath, "duckdb-extensions"),
-    bundledPlaywrightMcpCli: path.join(
-      resourcesPath,
-      "mcp-playwright",
-      "node_modules",
-      "@playwright",
-      "mcp",
-      "cli.js",
-    ),
     trayIconPath: path.join(
       resourcesPath,
       "icons",
@@ -140,8 +131,20 @@ export class DesktopAppCoordinator {
     });
 
     await app.whenReady();
-    await this.startServicesAndCreateWindow();
-    return true;
+    try {
+      await this.startServicesAndCreateWindow();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const userDataDir = app.getPath("userData");
+      const logsDir = path.join(userDataDir, "logs");
+      this.electron.dialog.showErrorBox(
+        "Nango 启动失败",
+        `${msg}\n\n日志目录：${logsDir}`,
+      );
+      await this.shutdownAndQuit();
+      return false;
+    }
   }
 
   private async startServicesAndCreateWindow(): Promise<void> {
@@ -152,7 +155,8 @@ export class DesktopAppCoordinator {
     const documentsDir = app.getPath("documents");
     const workspaceDir = path.join(documentsDir, "NangoWorkspace");
     const logsDir = path.join(userDataDir, "logs");
-    const pgDataDir = path.join(userDataDir, "pgdata");
+    const pgDataDir =
+      process.env.NANGO_PGDATA_DIR?.trim() || path.join(userDataDir, "pgdata");
 
     const bundled = resolveBundledResourcePaths(this.resourcesPath);
     const secrets = loadOrCreateDesktopSecrets(userDataDir, safeStorage);
@@ -186,7 +190,6 @@ export class DesktopAppCoordinator {
       workspaceDir,
       bundledNodeExe: bundled.bundledNodeExe,
       bundledNodeBinDir: bundled.bundledNodeBinDir,
-      bundledPlaywrightMcpCli: bundled.bundledPlaywrightMcpCli,
       duckdbExtensionDir: bundled.duckdbExtensionDir,
       onFatalExit: handleFatalServiceError,
     });

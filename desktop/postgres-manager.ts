@@ -21,6 +21,7 @@ const execFileAsync = promisify(execFile);
 
 export const EXPECTED_PG_MAJOR_VERSION = "18";
 export const MAX_PG_CRASH_RESTARTS = 3;
+export const DEFAULT_PG_READY_TIMEOUT_MS = 45_000;
 
 /**
  * Parse the postmaster PID from the first line of a PostgreSQL `postmaster.pid` file.
@@ -116,6 +117,8 @@ export interface PostgresManagerOptions {
   pgPassword: string;
   /** Application database name (default `"nango"`). */
   pgDatabase?: string;
+  /** Readiness timeout in milliseconds (default 45_000ms). */
+  readyTimeoutMs?: number;
   /** Optional callback invoked when consecutive crash restarts are exhausted. */
   onFatalExit?: (err: Error) => void;
 }
@@ -127,6 +130,7 @@ export class PostgresManager {
   private readonly pgUser: string;
   private readonly pgPassword: string;
   private readonly pgDatabase: string;
+  private readonly readyTimeoutMs: number;
   private readonly onFatalExit?: (err: Error) => void;
 
   private proc: ChildProcess | null = null;
@@ -141,6 +145,12 @@ export class PostgresManager {
     this.pgUser = opts.pgUser ?? "nango";
     this.pgPassword = opts.pgPassword;
     this.pgDatabase = opts.pgDatabase ?? "nango";
+    const envTimeout = Number(process.env.NANGO_DESKTOP_PG_READY_TIMEOUT_MS);
+    this.readyTimeoutMs =
+      opts.readyTimeoutMs ??
+      (Number.isFinite(envTimeout) && envTimeout > 0
+        ? envTimeout
+        : DEFAULT_PG_READY_TIMEOUT_MS);
     this.onFatalExit = opts.onFatalExit;
   }
 
@@ -200,8 +210,13 @@ export class PostgresManager {
     await this.spawnAndWaitReady();
 
     if (this.newlyInitialized) {
-      await this.ensureDatabaseCreated();
-      this.newlyInitialized = false;
+      try {
+        await this.ensureDatabaseCreated();
+        this.newlyInitialized = false;
+      } catch (err) {
+        await this.stop();
+        throw err;
+      }
     }
   }
 
@@ -223,22 +238,68 @@ export class PostgresManager {
       },
     );
     this.proc = child;
+    let ready = false;
 
     child.on("exit", (code, signal) => {
       this.proc = null;
-      if (this.stopping) return;
+      if (!ready || this.stopping) return;
       void this.handleUnexpectedExit(code, signal);
     });
 
-    await this.waitForReady(15_000);
-    this.consecutiveCrashes = 0;
+    try {
+      await this.waitForReady(this.readyTimeoutMs, child);
+      ready = true;
+      this.consecutiveCrashes = 0;
+    } catch (err) {
+      // CONTRACT: Never leak an unready child process or postmaster.pid lock
+      // when readiness polling fails or times out.
+      await this.terminateChildProcess(child);
+      if (this.proc === child) {
+        this.proc = null;
+      }
+      throw err;
+    }
   }
 
-  private async waitForReady(timeoutMs: number): Promise<void> {
+  private async terminateChildProcess(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Process already exited
+        }
+        resolve();
+      }, 3_000);
+
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  }
+
+  private async waitForReady(
+    timeoutMs: number,
+    child?: ChildProcess,
+  ): Promise<void> {
     const pgIsReadyBin = this.binPath("pg_isready");
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
+      if (child && child.exitCode !== null) {
+        throw new Error(
+          `PostgreSQL exited prematurely during startup with code ${child.exitCode}.`,
+        );
+      }
       try {
         await execFileAsync(
           pgIsReadyBin,

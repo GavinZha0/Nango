@@ -58,21 +58,6 @@ export function resolveBuiltinInfraSeedValues(): BuiltinInfraSeedValues {
     };
   }
 
-  const bundledCli = process.env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI?.trim();
-  const bundledNode = process.env.NANGO_BUNDLED_NODE_EXE?.trim() || "node";
-  if (bundledCli) {
-    return {
-      sandboxUrl,
-      senseVoiceUrl,
-      playwrightMcp: {
-        type: "stdio",
-        url: "",
-        command: bundledNode,
-        args: [bundledCli, "--browser", "chrome"],
-      },
-    };
-  }
-
   return {
     sandboxUrl,
     senseVoiceUrl,
