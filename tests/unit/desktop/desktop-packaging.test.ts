@@ -13,6 +13,7 @@ import {
 } from "../../../desktop/scripts/after-sign.mjs";
 import {
   collectDependencyTree,
+  ensureDesktopIcons,
   stageUpdaterRuntimeDependencies,
 } from "../../../desktop/scripts/stage-updater-runtime.mjs";
 import {
@@ -31,7 +32,10 @@ import {
   type AutoUpdaterLike,
   type UpdateState,
 } from "../../../desktop/updater";
-import { stageStandaloneRuntimeAssets } from "../../../scripts/repair-standalone.mjs";
+import {
+  handleCopyError,
+  stageStandaloneRuntimeAssets,
+} from "../../../scripts/repair-standalone.mjs";
 
 describe("desktop/scripts/fetch-binaries.mjs", () => {
   it("resolves win32-x64, darwin-arm64, and darwin-x64 binary and DuckDB extension URLs", () => {
@@ -500,6 +504,28 @@ describe("scripts/repair-standalone.mjs — stageStandaloneRuntimeAssets", () =>
       fs.rmSync(tmpProject, { recursive: true, force: true });
     }
   });
+
+  it("handleCopyError ignores benign EEXIST and Windows native already-exists messages", () => {
+    const stats = { failedCount: 0, sawWin32Eperm: false };
+
+    // 1. Standard EEXIST code
+    handleCopyError({ code: "EEXIST" }, stats, "sample");
+    expect(stats.failedCount).toBe(0);
+
+    // 2. Windows native message without error code
+    handleCopyError(
+      new Error(
+        "Cannot create a file when that file already exists. '\\\\?\\D:\\AI\\nango\\.next\\standalone\\node_modules\\.pnpm\\pkg\\node_modules'",
+      ),
+      stats,
+      "windows-symlink",
+    );
+    expect(stats.failedCount).toBe(0);
+
+    // 3. Genuine fatal error (e.g. EACCES or ENOSPC) must increment failedCount
+    handleCopyError({ code: "EACCES", message: "Permission denied" }, stats, "fatal");
+    expect(stats.failedCount).toBe(1);
+  });
 });
 
 describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging", () => {
@@ -570,6 +596,38 @@ describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging
       expect(detected).toBe("Developer ID Application: Auto Detected (TEAM123)");
     } else {
       expect(detected).toBeNull();
+    }
+  });
+
+  it("ensureDesktopIcons generates icon.ico, icon.png, tray.ico, and trayTemplate.png from public/logo.png", () => {
+    const tmpProject = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nango-test-icons-"),
+    );
+    try {
+      const publicDir = path.join(tmpProject, "public");
+      fs.mkdirSync(publicDir, { recursive: true });
+
+      // Create a dummy 1x1 PNG file
+      const dummyPng = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      fs.writeFileSync(path.join(publicDir, "logo.png"), dummyPng);
+
+      ensureDesktopIcons(tmpProject);
+
+      const iconsDir = path.join(tmpProject, "desktop", "resources", "icons");
+      expect(fs.existsSync(path.join(iconsDir, "icon.png"))).toBe(true);
+      expect(fs.existsSync(path.join(iconsDir, "trayTemplate.png"))).toBe(true);
+      expect(fs.existsSync(path.join(iconsDir, "icon.ico"))).toBe(true);
+      expect(fs.existsSync(path.join(iconsDir, "tray.ico"))).toBe(true);
+
+      const icoBuf = fs.readFileSync(path.join(iconsDir, "icon.ico"));
+      expect(icoBuf.readUInt16LE(0)).toBe(0); // reserved
+      expect(icoBuf.readUInt16LE(2)).toBe(1); // type 1 = icon
+      expect(icoBuf.readUInt16LE(4)).toBe(1); // count = 1
+    } finally {
+      fs.rmSync(tmpProject, { recursive: true, force: true });
     }
   });
 });

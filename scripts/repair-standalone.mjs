@@ -16,6 +16,7 @@ import {
   lstatSync,
   readdirSync,
   readlinkSync,
+  rmSync,
   statSync,
 } from "node:fs";
 import path from "node:path";
@@ -114,14 +115,19 @@ function computeDirectorySizeBytes(dir) {
  */
 export function handleCopyError(err, stats, contextLabel = "") {
   const code = err && typeof err === "object" && "code" in err ? err.code : undefined;
-  if (code === "EEXIST") {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    code === "EEXIST" ||
+    code === "ERR_FS_CP_EEXIST" ||
+    msg.includes("already exists") ||
+    msg.includes("EEXIST")
+  ) {
     return;
   }
   stats.failedCount++;
   if (code === "EPERM" && process.platform === "win32") {
     stats.sawWin32Eperm = true;
   }
-  const msg = err instanceof Error ? err.message : String(err);
   console.error(
     `[repair-standalone] ERROR copying ${contextLabel}: ${code ? `(${code}) ` : ""}${msg}`,
   );
@@ -266,6 +272,20 @@ export function stageStandaloneRuntimeAssets(projectRoot, standaloneDir) {
       recursive: true,
       force: true,
     });
+  }
+
+  // Remove temporary Next.js build cache and dangling tracing symlinks
+  // (`.next/node_modules/` and `.next/cache/`) inside standalone so
+  // archive tools (such as 7-Zip during NSIS packaging) never fail on dead links.
+  for (const dirName of ["node_modules", "cache"]) {
+    const candidate = path.join(standaloneDir, ".next", dirName);
+    if (existsSync(candidate)) {
+      try {
+        rmSync(candidate, { recursive: true, force: true });
+      } catch {
+        // Ignore removal error
+      }
+    }
   }
 }
 

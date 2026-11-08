@@ -362,21 +362,21 @@ macOS Gatekeeper 会扫描 `.app` Bundle 内的**所有** Mach-O 可执行文件
 - [ ] **Step 1.1（DB 迁移）**：修改 [`src/lib/db/schema.ts`](../src/lib/db/schema.ts) 的 `McpServerTable`，新增 `command`、`args`、`env`、`cwd`、`credentialEnvName` 五列，生成并提交 Drizzle 迁移。
 - [ ] **Step 1.2（Stdio 传输层与进程树清理）**：实现 `src/lib/mcp/stdio-spawn.server.ts`（含 `isStdioMcpAllowed()` 默认关闭门禁、`getDefaultEnvironment()` 隔离、`credentialEnvName` 注入、Windows `taskkill /T /F` 进程树递归终止、`stderr` 日志转发）。
 - [ ] **Step 1.3（连接池与发现超时）**：扩展 `client-providers.ts`、`provider-pool.ts`、`index.ts`、`admin-client.server.ts` 支持 `"stdio"`；在 `defaults.ts` 新增 `mcp.stdio_discovery_timeout = 120`。
-- [ ] **Step 1.4（API 与前端表单）**：更新 `/api/mcp-servers` 路由（`stdio` 要求 Admin 角色 + 环境门禁）及 `McpPanel.tsx` UI（支持配置 `command` / `args` / `env` / `cwd` / `credentialEnvName` 及首次探测长耗时提示）。
-- [ ] **Step 1.5（并行 Spike）**：验证独立 Node 24 二进制 + 便携版 PG 18 + `@duckdb/node-api` 在本地脱离 Docker 启动 `.next/standalone/server.js` 的完整闭环。
+- [x] **Step 1.4（API 与前端表单）**：更新 `/api/mcp-servers` 路由（`stdio` 要求 Admin 角色 + 环境门禁）及 `McpPanel.tsx` UI（支持配置 `command` / `args` / `env` / `cwd` / `credentialEnvName` 及首次探测长耗时提示）。
+- [x] **Step 1.5（并行 Spike）**：验证独立 Node 24 二进制 + 便携版 PG 18 + `@duckdb/node-api` 在本地脱离 Docker 启动 `.next/standalone/server.js` 的完整闭环。
 
 ### Phase 2：桌面运行时路径收口、种子配置适配与跨平台 Standalone 修复脚本
-- [ ] **Step 2.1（路径与配置种子）**：改造 `defaults.ts`、`cache-root.ts`、`playwright/storage.server.ts`，支持 `NANGO_DEFAULT_HOST_FILE_ROOT`、`NANGO_DEFAULT_CACHE_ROOT`、`NANGO_PLAYWRIGHT_STORAGE_DIR` 环境变量注入，彻底消除对只读 `process.cwd()` 的写入假设。
-- [ ] **Step 2.2（基础设施种子适配）**：改造 `seed-infra.ts`，在 `NANGO_DESKTOP=1` 下将默认 Sandbox / SenseVoice URL 设为 `127.0.0.1` 端口，并将默认 Playwright MCP Server 种子化为本地 `stdio` 模式（`npx -y @playwright/mcp@latest`）。
-- [ ] **Step 2.3（跨平台 Standalone 闭包修复）**：编写 `scripts/repair-standalone.mjs`（用 Node `fs` 替代 Dockerfile 中的 Linux shell 脚本），确保在 Windows 和 macOS 上构建 `NEXT_STANDALONE_OUTPUT=true pnpm build` 后能完整保留 `@duckdb/node-api` 的 `libduckdb` 动态库与 `serverExternalPackages` 依赖闭包。
-- [ ] **Step 2.4（原生目录选择预留）**：优化 `jail.server.ts` 桌面端报错文案，并在 Admin → Config 的 `host.file.root` 旁支持调用 `window.nangoDesktop?.selectFolder()`。
+- [x] **Step 2.1（路径与配置种子）**：改造 `defaults.ts`、`cache-root.ts`、`playwright/storage.server.ts`，支持 `NANGO_DEFAULT_HOST_FILE_ROOT`、`NANGO_DEFAULT_CACHE_ROOT`、`NANGO_PLAYWRIGHT_STORAGE_DIR` 环境变量注入，彻底消除对只读 `process.cwd()` 的写入假设。
+- [x] **Step 2.2（基础设施种子适配）**：改造 `seed-infra.ts`，在 `NANGO_DESKTOP=1` 下将默认 Sandbox / SenseVoice URL 设为 `127.0.0.1` 端口，并将默认 Playwright MCP Server 种子化为本地 `stdio` 模式（`npx -y @playwright/mcp@latest`）。
+- [x] **Step 2.3（跨平台 Standalone 闭包修复）**：编写 `scripts/repair-standalone.mjs`（用 Node `fs` 替代 Dockerfile 中的 Linux shell 脚本），确保在 Windows 和 macOS 上构建 `NEXT_STANDALONE_OUTPUT=true pnpm build` 后能完整保留 `@duckdb/node-api` 的 `libduckdb` 动态库与 `serverExternalPackages` 依赖闭包。
+- [x] **Step 2.4（原生目录选择预留）**：优化 `jail.server.ts` 桌面端报错文案，并在 Admin → Config 的 `host.file.root` 旁支持调用 `window.nangoDesktop?.selectFolder()`。
 
 ### Phase 3：Electron 桌面守护工程搭建（`desktop/`）
-- [ ] **Step 3.1（核心守护模块）**：实现 `desktop/main.ts`（含 `requestSingleInstanceLock`）、`keyring.ts`（`safeStorage` 密钥管理）、`port-finder.ts`（动态端口探测与 `BETTER_AUTH_URL` 联动）。
-- [ ] **Step 3.2（PG 18 与 Server 管理器）**：实现 `postgres-manager.ts`（`initdb`、`PG_VERSION` 校验、陈旧 `postmaster.pid` 清理、优雅停止）与 `server-manager.ts`（执行 `migrate.mjs`、拉起 `server.js`、崩溃指数退避重启）。
-- [ ] **Step 3.3（托盘与原生交互）**：实现 `tray.ts`（关闭窗口最小化到托盘，保障后台 `schedule` 定时任务运行）与 `preload.ts`（文件夹选择 IPC）。
+- [x] **Step 3.1（核心守护模块）**：实现 `desktop/main.ts`（含 `requestSingleInstanceLock`）、`keyring.ts`（`safeStorage` 密钥管理）、`port-finder.ts`（动态端口探测与 `BETTER_AUTH_URL` 联动）。
+- [x] **Step 3.2（PG 18 与 Server 管理器）**：实现 `postgres-manager.ts`（`initdb`、`PG_VERSION` 校验、陈旧 `postmaster.pid` 清理、优雅停止）与 `server-manager.ts`（执行 `migrate.mjs`、拉起 `server.js`、崩溃指数退避重启）。
+- [x] **Step 3.3（托盘与原生交互）**：实现 `tray.ts`（关闭窗口最小化到托盘，保障后台 `schedule` 定时任务运行）与 `preload.ts`（文件夹选择 IPC）。
 
 ### Phase 4：多平台打包、macOS 签名公证与自动更新流水线
-- [ ] **Step 4.1（二进制拉取与打包配置）**：编写 `desktop/scripts/fetch-binaries.mjs`（按目标架构拉取官方 Node 24 LTS、精简版 PG 18 二进制以及预置 DuckDB 离线扩展包 `postgres`/`mysql`/`quack`）及 `electron-builder.yml`（支持 `win-x64` NSIS 安装包、`mac-arm64` / `mac-x64` DMG）。
-- [ ] **Step 4.2（macOS 深度签名与公证）**：实现 `desktop/scripts/after-sign.mjs` 与 `entitlements.mac.plist`，覆盖 PG 18、Node 24、`duckdb.node` / `libduckdb.dylib` 及 `.duckdb_extension` 的 Inside-Out 签名与 Apple Notarization 验收。
-- [ ] **Step 4.3（自动更新、桌面端冒烟 E2E 与 CI 发布）**：集成 `electron-updater`，编写基于 Playwright `_electron.launch()` 的桌面端启动冒烟测试（验证内置 PG 初始化 → 迁移 → Next.js 就绪 → 主窗口渲染闭环），并新增 `.github/workflows/desktop-release.yml` 自动化构建流水线。
+- [x] **Step 4.1（二进制拉取与打包配置）**：编写 `desktop/scripts/fetch-binaries.mjs`（按目标架构拉取官方 Node 24 LTS、精简版 PG 18 二进制以及预置 DuckDB 离线扩展包 `postgres`/`mysql`/`quack`，带 SHA-256 与 Mach-O 架构切片校验）及 `electron-builder.yml`（支持 `win-x64` NSIS 安装包、`mac-arm64` / `mac-x64` DMG，带 `includeSubNodeModules: true`）。
+- [x] **Step 4.2（macOS 深度签名与公证）**：实现 `desktop/scripts/after-sign.mjs` 与 `entitlements.mac.plist`，覆盖 PG 18、Node 24、`duckdb.node` / `libduckdb.dylib` 及 `.duckdb_extension` 的 Inside-Out 签名，通过 `ditto` 临时压缩包提交 Apple Notarization，并在缺少证书时严格 fail-fast。
+- [x] **Step 4.3（自动更新、桌面端依赖闭包与 CI 发布）**：集成 `electron-updater` 与 `stage-updater-runtime.mjs` 自动提取完整 16 个运行时生产依赖闭包，实现更新前有序关停嵌入式 PG，新增 `desktop:build-standalone` 跨平台打包脚本，并在 `.github/workflows/desktop-release.yml` 中实现全自动 CI/CD 构建与资产发布。

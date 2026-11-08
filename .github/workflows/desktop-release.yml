@@ -44,14 +44,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Next.js standalone bundle
-        env:
-          NEXT_STANDALONE_OUTPUT: "true"
-          NEXT_TELEMETRY_DISABLED: "1"
-        run: pnpm build
-
-      - name: Repair standalone .pnpm symlink closure and stage runtime assets
-        run: node scripts/repair-standalone.mjs
+      - name: Build Next.js standalone bundle and repair .pnpm closure
+        run: pnpm desktop:build-standalone
 
       - name: Fetch bundled Node 24 LTS, Portable PG 18 & DuckDB offline extensions
         run: node desktop/scripts/fetch-binaries.mjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
@@ -63,7 +57,7 @@ jobs:
         run: pnpm vitest run tests/unit/desktop/
 
       - name: Install Electron packaging toolchain
-        run: pnpm add -D electron@^36.0.0 electron-builder@^26.0.0
+        run: pnpm add -D electron@^45.0.0 electron-builder@^26.0.0
 
       - name: Validate release signing secrets before packaging
         if: startsWith(github.ref, 'refs/tags/v')

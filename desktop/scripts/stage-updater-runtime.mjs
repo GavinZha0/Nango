@@ -62,12 +62,49 @@ export function collectDependencyTree(
 }
 
 /**
+ * Ensure `desktop/resources/icons/` contains `icon.ico`, `icon.png`, `tray.ico`,
+ * and `trayTemplate.png` generated from `public/logo.png`.
+ */
+export function ensureDesktopIcons(rootDir = process.cwd()) {
+  const logoPath = path.join(rootDir, "public", "logo.png");
+  if (!fs.existsSync(logoPath)) {
+    return;
+  }
+
+  const iconsDir = path.join(rootDir, "desktop", "resources", "icons");
+  fs.mkdirSync(iconsDir, { recursive: true });
+
+  const pngBuf = fs.readFileSync(logoPath);
+
+  // Standard 256x256+ PNG-in-ICO header (6-byte ICONDIR + 16-byte ICONDIRENTRY)
+  const header = Buffer.from([0, 0, 1, 0, 1, 0]);
+  const entry = Buffer.alloc(16);
+  entry.writeUInt8(0, 0); // width: 0 represents 256 or larger
+  entry.writeUInt8(0, 1); // height: 0 represents 256 or larger
+  entry.writeUInt8(0, 2);
+  entry.writeUInt8(0, 3);
+  entry.writeUInt16LE(1, 4); // color planes
+  entry.writeUInt16LE(32, 6); // bits per pixel
+  entry.writeUInt32LE(pngBuf.length, 8); // image size
+  entry.writeUInt32LE(22, 12); // image data offset (6 + 16 = 22)
+
+  const icoBuf = Buffer.concat([header, entry, pngBuf]);
+
+  fs.writeFileSync(path.join(iconsDir, "icon.png"), pngBuf);
+  fs.writeFileSync(path.join(iconsDir, "trayTemplate.png"), pngBuf);
+  fs.writeFileSync(path.join(iconsDir, "icon.ico"), icoBuf);
+  fs.writeFileSync(path.join(iconsDir, "tray.ico"), icoBuf);
+}
+
+/**
  * Stage all resolved dependency directories into `targetNodeModulesDir`.
  */
 export function stageUpdaterRuntimeDependencies({
   rootDir = process.cwd(),
   targetNodeModulesDir = path.join(process.cwd(), "desktop", "dist", "node_modules"),
 } = {}) {
+  ensureDesktopIcons(rootDir);
+
   const deps = collectDependencyTree("electron-updater", rootDir);
   if (!deps.has("electron-updater")) {
     throw new Error(

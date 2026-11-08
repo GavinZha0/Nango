@@ -10,7 +10,6 @@ directories:
   buildResources: desktop/resources/icons
 
 asar: true
-includeSubNodeModules: true
 
 files:
   - desktop/dist/**/*
@@ -25,6 +24,10 @@ extraResources:
     to: standalone
     filter:
       - "**/*"
+      - "!.next/node_modules"
+      - "!.next/node_modules/**/*"
+      - "!.next/cache"
+      - "!.next/cache/**/*"
   - from: desktop/resources/pg
     to: pg
     filter:
@@ -43,6 +46,7 @@ extraResources:
       - "**/*"
 
 win:
+  icon: desktop/resources/icons/icon.ico
   target:
     - target: nsis
       arch:
@@ -58,6 +62,7 @@ nsis:
   shortcutName: Nango
 
 mac:
+  icon: desktop/resources/icons/icon.png
   category: public.app-category.developer-tools
   hardenedRuntime: true
   gatekeeperAssess: false

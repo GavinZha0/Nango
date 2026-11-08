@@ -1,24 +1,10 @@
-# pnpm 11+ workspace configuration.
-#
-# As of pnpm 11, settings (other than auth/registry) live HERE rather than in
-# package.json#pnpm or .npmrc. See https://pnpm.io/11.x/migration.
-
-# Build-script policy. With pnpm 11's `strictDepBuilds: true` default, any
-# package not listed here that wants to run a build / postinstall script will
-# fail `pnpm install`. Keep this list tight — every `true` is an explicit
-# decision to let third-party code execute on install.
 allowBuilds:
-  # Required — these install/build steps are essential.
-  esbuild: true # platform binary for Next.js / vitest bundling
-  msw: true # Mock Service Worker test harness CLI init
-
-  # Optional native bindings — pure-JS fallback is sufficient.
-  sharp: false # advanced image transforms (unused)
-  unrs-resolver: false # ESLint experimental native resolver
-  ssh2: false # node-ssh falls back to Node's crypto
-  cpu-features: false # paired with ssh2; CPU feature detection
-
-  # Telemetry — explicitly refused.
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  msw: true
+  ssh2: false
+  cpu-features: false
   "@scarf/scarf": false
-minimumReleaseAgeExclude:
-  - '@modelcontextprotocol/ext-tasks@0.2.3'
+  sharp: false
+  unrs-resolver: false
