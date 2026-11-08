@@ -20,14 +20,8 @@ files:
 # directly and native shared libraries (`libduckdb`, `.duckdb_extension`) can
 # be loaded by the OS dynamic linker (`dlopen` / `LoadLibrary`).
 extraResources:
-  - from: .next/standalone
-    to: standalone
-    filter:
-      - "**/*"
-      - "!.next/node_modules"
-      - "!.next/node_modules/**/*"
-      - "!.next/cache"
-      - "!.next/cache/**/*"
+  - from: desktop/resources/standalone.tar
+    to: standalone.tar
   - from: desktop/resources/pg
     to: pg
     filter:

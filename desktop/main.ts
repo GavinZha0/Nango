@@ -22,6 +22,7 @@ import { resolveDesktopPorts } from "./port-finder";
 import { PostgresManager } from "./postgres-manager";
 import { IPC_CHANNELS } from "./preload";
 import { ServerManager } from "./server-manager";
+import { ensureStandaloneExtracted } from "./standalone-extractor";
 import {
   bindCloseToTray,
   createSystemTray,
@@ -173,6 +174,11 @@ export class DesktopAppCoordinator {
     const bundled = resolveBundledResourcePaths(this.resourcesPath);
     const secrets = loadOrCreateDesktopSecrets(userDataDir, safeStorage);
     const ports = await resolveDesktopPorts();
+    const standaloneDir = await ensureStandaloneExtracted({
+      userDataDir,
+      resourcesPath: this.resourcesPath,
+      appVersion: app.getVersion(),
+    });
 
     const handleFatalServiceError = (err: Error) => {
       dialog.showErrorBox(
@@ -193,7 +199,7 @@ export class DesktopAppCoordinator {
     await this.pgManager.start();
 
     this.serverManager = new ServerManager({
-      standaloneDir: bundled.standaloneDir,
+      standaloneDir,
       appPort: ports.appPort,
       pgPort: ports.pgPort,
       betterAuthUrl: ports.betterAuthUrl,
@@ -223,6 +229,8 @@ export class DesktopAppCoordinator {
         sandbox: true,
       },
     });
+    // Remove the default application menu bar (File/Edit/View/Window) on Windows/Linux
+    win.removeMenu?.();
     this.mainWindow = win;
     bindCloseToTray(win, () => this.isQuitting);
 

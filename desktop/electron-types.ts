@@ -49,6 +49,7 @@ export interface ElectronBrowserWindow {
   isMinimized(): boolean;
   restore(): void;
   isDestroyed(): boolean;
+  removeMenu?: () => void;
   on(
     event: "close" | "closed",
     listener: (event: { preventDefault(): void }) => void,

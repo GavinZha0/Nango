@@ -30,6 +30,7 @@
   <p>
     <a href="#quick-start-docker"><strong>Quick Start</strong></a> ·
     <a href="#development-setup">Development</a> ·
+    <a href="#desktop-packaging-electron">Desktop</a> ·
     <a href="#architecture-overview">Architecture</a> ·
     <a href="#documentation">Docs</a>
   </p>
@@ -175,6 +176,55 @@ pnpm docker:db           # Postgres 18 on localhost:5433
 pnpm db:migrate          # apply schema
 pnpm dev                 # Turbopack on http://localhost:9300
 ```
+
+---
+
+## Desktop Packaging (Electron)
+
+Nango can be packaged as a completely self-contained, offline-first desktop application for Windows (NSIS x64) and macOS (DMG arm64/x64) with embedded Portable PostgreSQL 18 and bundled Node.js 24 LTS.
+
+### 1. Fetch Bundled Runtime Binaries
+
+Download standalone portable PostgreSQL 18, Node.js 24 LTS, and offline DuckDB 2.0 extension binaries for your target platform:
+
+```bash
+# Auto-detects current OS (or use --platform=win32|darwin --arch=x64|arm64)
+pnpm desktop:fetch-binaries
+```
+
+Downloads are placed under `desktop/resources/` (`pg/`, `node/`, `duckdb-extensions/`).
+
+### 2. Build Standalone Runtime Bundle & Archive
+
+Compile Next.js in standalone mode, repair the `.pnpm` transitive dependency closure, and archive `.next/standalone` into `desktop/resources/standalone.tar`:
+
+```bash
+pnpm desktop:build-standalone
+```
+
+This generates `desktop/resources/standalone.tar` containing `server.js`, migrations, assets, and the verified runtime `node_modules` closure.
+
+### 3. Compile Desktop Process & Prepare Runtime
+
+Compile the TypeScript main process, generate tray and application icons from `public/logo.png`, and stage runtime production dependencies:
+
+```bash
+pnpm desktop:compile
+```
+
+### 4. Package Application Installer
+
+Package the distribution-ready installer using `electron-builder`:
+
+```bash
+pnpm desktop:dist
+```
+
+Output artifacts:
+- **Windows**: `dist/desktop/Nango Setup <version>.exe`
+- **macOS**: `dist/desktop/Nango-<version>.dmg`
+
+On first launch, Nango automatically extracts the standalone runtime to the user's data directory (`%APPDATA%/nango` on Windows or `~/Library/Application Support/nango` on macOS), initializes embedded PostgreSQL 18, runs migrations, and launches the application without requiring administrator privileges.
 
 ---
 

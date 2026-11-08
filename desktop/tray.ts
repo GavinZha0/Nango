@@ -70,7 +70,7 @@ export function buildTrayMenuTemplate(
 ): ElectronMenuItemConstructorOptions[] {
   return [
     {
-      label: "显示 Nango 主窗口",
+      label: "Open Nango",
       click: () => {
         showAndFocusMainWindow(opts.getMainWindow());
       },
@@ -79,13 +79,13 @@ export function buildTrayMenuTemplate(
       type: "separator",
     },
     {
-      label: "打开工作区文件夹 (NangoWorkspace)",
+      label: "Open Workspace Folder",
       click: () => {
         void opts.shell.openPath(opts.workspaceDir);
       },
     },
     {
-      label: "打开运行日志目录",
+      label: "Open Logs Folder",
       click: () => {
         void opts.shell.openPath(opts.logsDir);
       },
@@ -94,7 +94,7 @@ export function buildTrayMenuTemplate(
       type: "separator",
     },
     {
-      label: "退出 Nango",
+      label: "Quit Nango",
       click: () => {
         opts.onRequestQuit();
       },

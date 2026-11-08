@@ -168,6 +168,55 @@ pnpm dev                 # http://localhost:9300 上的 Next.js with Turbopack
 
 ---
 
+## 桌面端打包 (Electron)
+
+Nango 支持打包为完全自包含、离线可用的本地桌面应用程序（支持 Windows NSIS x64 及 macOS DMG arm64/x64），内置便携版 PostgreSQL 18 与独立 Node.js 24 LTS 运行时。
+
+### 1. 获取预置运行时二进制文件
+
+下载当前平台对应的便携版 PostgreSQL 18、Node.js 24 LTS 以及 DuckDB 2.0 离线扩展文件：
+
+```bash
+# 自动检测当前操作系统与架构（亦可显式指定 --platform=win32|darwin --arch=x64|arm64）
+pnpm desktop:fetch-binaries
+```
+
+下载产物将存放在 `desktop/resources/` 目录下（`pg/`、`node/`、`duckdb-extensions/`）。
+
+### 2. 构建独立运行时并打包归档
+
+以独立模式（Standalone）编译 Next.js，自动修补补全 `.pnpm` 运行时依赖闭包，并将 `.next/standalone` 打包归档为 `desktop/resources/standalone.tar`：
+
+```bash
+pnpm desktop:build-standalone
+```
+
+该命令将生成 `desktop/resources/standalone.tar`（包含 `server.js`、数据库迁移脚本、静态资源及完整的 `node_modules` 运行时闭包）。
+
+### 3. 编译桌面主进程与运行时预处理
+
+编译 TypeScript 主进程源码，基于 `public/logo.png` 生成托盘与应用图标，并预处理运行时依赖闭包：
+
+```bash
+pnpm desktop:compile
+```
+
+### 4. 生成安装程序
+
+使用 `electron-builder` 生成最终的桌面安装程序：
+
+```bash
+pnpm desktop:dist
+```
+
+打包产物位于 `dist/desktop/` 目录下：
+- **Windows**: `dist/desktop/Nango Setup <version>.exe`
+- **macOS**: `dist/desktop/Nango-<version>.dmg`
+
+终端用户首次启动时，应用会自动解压运行时至用户数据目录（Windows 为 `%APPDATA%\nango`，macOS 为 `~/Library/Application Support/nango`），自动就地实体化依赖联接并启动内置 PostgreSQL 18 完成数据库迁移，**全程无需管理员提权**。
+
+---
+
 ## 架构概览
 
 ![Nango 架构图](docs/diagrams/architecture-diagram.png)

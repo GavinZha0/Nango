@@ -36,6 +36,7 @@ import {
   handleCopyError,
   stageStandaloneRuntimeAssets,
 } from "../../../scripts/repair-standalone.mjs";
+import { ensureStandaloneExtracted } from "../../../desktop/standalone-extractor";
 
 describe("desktop/scripts/fetch-binaries.mjs", () => {
   it("resolves win32-x64, darwin-arm64, and darwin-x64 binary and DuckDB extension URLs", () => {
@@ -529,12 +530,14 @@ describe("scripts/repair-standalone.mjs — stageStandaloneRuntimeAssets", () =>
 });
 
 describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging", () => {
-  it("collects and stages all 16 transitive production dependencies of electron-updater", () => {
+  it("collects and stages all transitive production dependencies of electron-updater and tar", () => {
     const tmpTarget = fs.mkdtempSync(
       path.join(os.tmpdir(), "nango-stage-updater-"),
     );
     try {
-      const deps = collectDependencyTree("electron-updater");
+      const updaterDeps = collectDependencyTree("electron-updater");
+      const tarDeps = collectDependencyTree("tar");
+      const deps = new Map([...updaterDeps, ...tarDeps]);
       expect(deps.size).toBeGreaterThanOrEqual(16);
 
       // Verify specific transitive modules named in review
@@ -550,6 +553,7 @@ describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging
       expect(deps.has("jsonfile")).toBe(true);
       expect(deps.has("lodash.escaperegexp")).toBe(true);
       expect(deps.has("sax")).toBe(true);
+      expect(deps.has("tar")).toBe(true);
 
       const result = stageUpdaterRuntimeDependencies({
         targetNodeModulesDir: tmpTarget,
@@ -558,6 +562,7 @@ describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging
       expect(result.packageCount).toBe(deps.size);
       for (const reqDep of [
         "electron-updater",
+        "tar",
         "fs-extra",
         "lodash.isequal",
         "semver",
@@ -628,6 +633,64 @@ describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging
       expect(icoBuf.readUInt16LE(4)).toBe(1); // count = 1
     } finally {
       fs.rmSync(tmpProject, { recursive: true, force: true });
+    }
+  });
+
+  it("stages tar runtime dependencies alongside electron-updater", () => {
+    const tmpTarget = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nango-stage-tar-"),
+    );
+    try {
+      const result = stageUpdaterRuntimeDependencies({
+        targetNodeModulesDir: tmpTarget,
+      });
+      expect(result.stagedPackages).toContain("tar");
+      expect(fs.existsSync(path.join(tmpTarget, "tar", "package.json"))).toBe(true);
+    } finally {
+      fs.rmSync(tmpTarget, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("desktop/standalone-extractor.ts", () => {
+  it("fast-paths when runtime .version matches appVersion without re-extracting", async () => {
+    const tmpUser = fs.mkdtempSync(path.join(os.tmpdir(), "nango-extractor-fast-"));
+    const tmpResources = fs.mkdtempSync(path.join(os.tmpdir(), "nango-extractor-res-"));
+    try {
+      const runtimeDir = path.join(tmpUser, "runtime", "standalone");
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      fs.writeFileSync(path.join(runtimeDir, ".version"), "0.31.0", "utf8");
+
+      const resolved = await ensureStandaloneExtracted({
+        userDataDir: tmpUser,
+        resourcesPath: tmpResources,
+        appVersion: "0.31.0",
+      });
+
+      expect(resolved).toBe(runtimeDir);
+    } finally {
+      fs.rmSync(tmpUser, { recursive: true, force: true });
+      fs.rmSync(tmpResources, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to standalone directory if standalone.tar is absent (dev mode)", async () => {
+    const tmpUser = fs.mkdtempSync(path.join(os.tmpdir(), "nango-extractor-dev-"));
+    const tmpResources = fs.mkdtempSync(path.join(os.tmpdir(), "nango-extractor-dev-res-"));
+    try {
+      const devStandalone = path.join(tmpResources, "standalone");
+      fs.mkdirSync(devStandalone, { recursive: true });
+
+      const resolved = await ensureStandaloneExtracted({
+        userDataDir: tmpUser,
+        resourcesPath: tmpResources,
+        appVersion: "0.31.0",
+      });
+
+      expect(resolved).toBe(devStandalone);
+    } finally {
+      fs.rmSync(tmpUser, { recursive: true, force: true });
+      fs.rmSync(tmpResources, { recursive: true, force: true });
     }
   });
 });

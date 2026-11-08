@@ -105,10 +105,12 @@ export function stageUpdaterRuntimeDependencies({
 } = {}) {
   ensureDesktopIcons(rootDir);
 
-  const deps = collectDependencyTree("electron-updater", rootDir);
-  if (!deps.has("electron-updater")) {
+  const updaterDeps = collectDependencyTree("electron-updater", rootDir);
+  const tarDeps = collectDependencyTree("tar", rootDir);
+  const deps = new Map([...updaterDeps, ...tarDeps]);
+  if (!deps.has("electron-updater") || !deps.has("tar")) {
     throw new Error(
-      "[stage-updater-runtime] Could not resolve 'electron-updater' dependency tree. Ensure 'pnpm install' has run.",
+      "[stage-updater-runtime] Could not resolve runtime dependency tree ('electron-updater' and 'tar'). Ensure 'pnpm install' has run.",
     );
   }
 

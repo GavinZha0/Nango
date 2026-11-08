@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   experimental: {
     // authInterrupts allows forbidden()/unauthorized() in Server Components
     authInterrupts: true,
+    turbopackPluginRuntimeStrategy: "workerThreads",
   },
 
   // pino transports are loaded via worker + dynamic require() — nft

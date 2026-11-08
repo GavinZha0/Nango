@@ -10,7 +10,42 @@
  */
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import * as tar from "tar";
 import { repairStandaloneClosure } from "./repair-standalone.mjs";
+
+/**
+ * Archive `.next/standalone` into `desktop/resources/standalone.tar` preserving
+ * all internal symlinks for zero-loss electron-builder packaging.
+ */
+export function archiveStandaloneBundle(rootDir = process.cwd()) {
+  const standaloneDir = path.join(rootDir, ".next", "standalone");
+  const resourcesDir = path.join(rootDir, "desktop", "resources");
+  const tarPath = path.join(resourcesDir, "standalone.tar");
+  fs.mkdirSync(resourcesDir, { recursive: true });
+
+  console.log(`[build-standalone] Archiving ${standaloneDir} to ${tarPath}...`);
+  try {
+    fs.unlinkSync(tarPath);
+  } catch {
+    // Ignored
+  }
+
+  tar.c(
+    {
+      sync: true,
+      file: tarPath,
+      cwd: standaloneDir,
+    },
+    ["."],
+  );
+
+  const sizeMb = Math.round(fs.statSync(tarPath).size / (1024 * 1024));
+  console.log(
+    `[build-standalone] Archived standalone.tar successfully (${sizeMb} MB).`,
+  );
+}
 
 console.log("[build-standalone] Building Next.js standalone output (NEXT_STANDALONE_OUTPUT=true)...");
 
@@ -45,4 +80,5 @@ if (buildResult.status !== 0) {
 
 console.log("[build-standalone] Build succeeded. Repairing standalone closure and staging runtime assets...");
 repairStandaloneClosure();
+archiveStandaloneBundle();
 console.log("[build-standalone] Standalone bundle ready for Nango Desktop packaging.");
