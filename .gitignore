@@ -64,3 +64,8 @@ next-env.d.ts
 # Bind-mounted folder for the host-file tools (read_file / write_file).
 # Created by docker compose; its contents are the user's, not the repo's.
 /shared_folder/
+
+# Desktop build artifacts and downloaded bundled binaries
+/desktop/resources/
+/desktop/dist/
+/dist/desktop/

@@ -59,3 +59,25 @@ export function registerPreloadBridge(
   );
   return bridge;
 }
+
+// QUIRK: Electron's sandboxed preload environment (`sandbox: true`) only
+// permits `require("electron")` and forbids relative filesystem `require("./...")`.
+// Keeping `preload.ts` free of runtime imports ensures `desktop/dist/preload.js`
+// is self-contained and executes directly inside the sandboxed renderer preload.
+if (
+  typeof process !== "undefined" &&
+  (process as NodeJS.Process & { type?: string }).type === "renderer"
+) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require("electron") as {
+      contextBridge?: ElectronContextBridge;
+      ipcRenderer?: ElectronIpcRenderer;
+    };
+    if (electron?.contextBridge && electron?.ipcRenderer) {
+      registerPreloadBridge(electron.contextBridge, electron.ipcRenderer);
+    }
+  } catch {
+    // Ignore when imported outside an Electron preload context
+  }
+}

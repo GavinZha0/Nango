@@ -27,6 +27,10 @@ import {
   createSystemTray,
   showAndFocusMainWindow,
 } from "./tray";
+import {
+  type AutoUpdaterLike,
+  DesktopUpdateController,
+} from "./updater";
 
 export interface BundledResourcePaths {
   pgBinDir: string;
@@ -71,17 +75,20 @@ export interface DesktopCoordinatorDeps {
   electron: ElectronMainModule;
   resourcesPath: string;
   preloadPath?: string;
+  autoUpdater?: AutoUpdaterLike;
 }
 
 export class DesktopAppCoordinator {
   private readonly electron: ElectronMainModule;
   private readonly resourcesPath: string;
   private readonly preloadPath: string;
+  private readonly autoUpdater?: AutoUpdaterLike;
 
   private mainWindow: ElectronBrowserWindow | null = null;
   private tray: ElectronTray | null = null;
   private pgManager: PostgresManager | null = null;
   private serverManager: ServerManager | null = null;
+  private updateController: DesktopUpdateController | null = null;
   private isQuitting = false;
   private shutdownPromise: Promise<void> | null = null;
 
@@ -90,6 +97,11 @@ export class DesktopAppCoordinator {
     this.resourcesPath = deps.resourcesPath;
     this.preloadPath =
       deps.preloadPath ?? path.join(__dirname, "preload.js");
+    this.autoUpdater = deps.autoUpdater;
+  }
+
+  getUpdateController(): DesktopUpdateController | null {
+    return this.updateController;
   }
 
   /**
@@ -230,6 +242,14 @@ export class DesktopAppCoordinator {
     await win.loadURL(ports.betterAuthUrl);
     win.show();
     win.focus();
+
+    if (this.autoUpdater) {
+      this.updateController = new DesktopUpdateController({
+        updater: this.autoUpdater,
+        prepareForInstall: () => this.shutdownServicesOnly(),
+      });
+      void this.updateController.checkForUpdatesSafely();
+    }
   }
 
   private registerIpcHandlers(defaultWorkspaceDir: string): void {
@@ -253,12 +273,10 @@ export class DesktopAppCoordinator {
   }
 
   /**
-   * Ordered graceful shutdown sequence:
-   * 1. Stop Next.js `server.js` (triggers `mcpProviderPool.shutdown()` & `shutdownScheduler()`)
-   * 2. Stop PostgreSQL 18 via `pg_ctl stop -D <pgdata> -m fast` so WAL flushes cleanly
-   * 3. Destroy tray and quit Electron
+   * Stop `server.js` and `postgres` cleanly and destroy the tray without calling
+   * `app.quit()` (used by both `shutdownAndQuit` and `DesktopUpdateController.prepareForInstall`).
    */
-  async shutdownAndQuit(): Promise<void> {
+  async shutdownServicesOnly(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;
     }
@@ -285,10 +303,19 @@ export class DesktopAppCoordinator {
         this.tray.destroy();
         this.tray = null;
       }
-
-      this.electron.app.quit();
     })();
 
     return this.shutdownPromise;
+  }
+
+  /**
+   * Ordered graceful shutdown sequence:
+   * 1. Stop Next.js `server.js` (triggers `mcpProviderPool.shutdown()` & `shutdownScheduler()`)
+   * 2. Stop PostgreSQL 18 via `pg_ctl stop -D <pgdata> -m fast` so WAL flushes cleanly
+   * 3. Destroy tray and quit Electron
+   */
+  async shutdownAndQuit(): Promise<void> {
+    await this.shutdownServicesOnly();
+    this.electron.app.quit();
   }
 }

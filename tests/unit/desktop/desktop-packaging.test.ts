@@ -6,12 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   classifyMacSignTier,
   collectMacSignTargets,
+  hasMachOMagic,
+  notarizeAndStapleAppBundle,
+  runMacAfterSign,
 } from "../../../desktop/scripts/after-sign.mjs";
 import {
+  computeSha256Hex,
   DUCKDB_BUNDLED_EXTENSIONS,
+  inspectMachOArchs,
+  parseShasums256,
   pruneExtractedPostgresDir,
   resolveBinaryManifest,
+  verifyMacBinaryArch,
+  verifySha256,
 } from "../../../desktop/scripts/fetch-binaries.mjs";
+import { DesktopAppCoordinator } from "../../../desktop/main";
 import {
   DesktopUpdateController,
   type AutoUpdaterLike,
@@ -92,6 +101,69 @@ describe("desktop/scripts/fetch-binaries.mjs", () => {
       fs.rmSync(tmpPg, { recursive: true, force: true });
     }
   });
+
+  it("parses SHASUMS256.txt and verifies archive SHA-256 digests", () => {
+    const payload = Buffer.from("nango-node-binary-payload", "utf8");
+    const actualHex = computeSha256Hex(payload);
+
+    const shasumsText = [
+      `0000000000000000000000000000000000000000000000000000000000000000  node-v24.22.2-linux-x64.tar.xz`,
+      `${actualHex} *node-v24.22.2-win-x64.zip`,
+    ].join("\n");
+
+    expect(
+      parseShasums256(shasumsText, "node-v24.22.2-win-x64.zip"),
+    ).toBe(actualHex);
+    expect(parseShasums256(shasumsText, "nonexistent.zip")).toBeNull();
+
+    expect(() =>
+      verifySha256(payload, actualHex.toUpperCase(), "node.zip"),
+    ).not.toThrow();
+    expect(() =>
+      verifySha256(
+        payload,
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "node.zip",
+      ),
+    ).toThrow(/SHA-256 checksum mismatch/);
+  });
+
+  it("inspects single-arch and Universal/Fat Mach-O headers to guard macOS binary architecture", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nango-macho-arch-"));
+    try {
+      // 64-bit little-endian Mach-O (0xfeedfacf -> cf fa ed fe) with CPU_TYPE_ARM64 (0x0100000c)
+      const arm64Buf = Buffer.alloc(16);
+      arm64Buf.writeUInt32BE(0xcffaedfe, 0);
+      arm64Buf.writeUInt32LE(0x0100000c, 4);
+      expect(inspectMachOArchs(arm64Buf)).toEqual(["arm64"]);
+
+      // 64-bit little-endian Mach-O with CPU_TYPE_X86_64 (0x01000007)
+      const x64Buf = Buffer.alloc(16);
+      x64Buf.writeUInt32BE(0xcffaedfe, 0);
+      x64Buf.writeUInt32LE(0x01000007, 4);
+      expect(inspectMachOArchs(x64Buf)).toEqual(["x64"]);
+
+      // Universal/Fat Mach-O (0xcafebabe) containing both x64 and arm64 slices
+      const fatBuf = Buffer.alloc(8 + 2 * 20);
+      fatBuf.writeUInt32BE(0xcafebabe, 0);
+      fatBuf.writeUInt32BE(2, 4); // nfat_arch = 2
+      fatBuf.writeUInt32BE(0x01000007, 8); // slice 0: x64
+      fatBuf.writeUInt32BE(0x0100000c, 28); // slice 1: arm64
+      expect(inspectMachOArchs(fatBuf)).toEqual(["x64", "arm64"]);
+
+      const arm64Bin = path.join(tmpDir, "postgres-arm64");
+      const x64Bin = path.join(tmpDir, "postgres-x64");
+      fs.writeFileSync(arm64Bin, arm64Buf);
+      fs.writeFileSync(x64Bin, x64Buf);
+
+      expect(() => verifyMacBinaryArch(arm64Bin, "arm64")).not.toThrow();
+      expect(() => verifyMacBinaryArch(x64Bin, "arm64")).toThrow(
+        /do not include target arch "arm64"/,
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("desktop/scripts/after-sign.mjs — Inside-Out Mach-O ordering", () => {
@@ -122,11 +194,28 @@ describe("desktop/scripts/after-sign.mjs — Inside-Out Mach-O ordering", () => 
     expect(classifyMacSignTier("/Resources/pg/bin/postgres")).toBe(2);
     expect(classifyMacSignTier("/Resources/pg/bin/initdb")).toBe(2);
     expect(classifyMacSignTier("/Resources/node/bin/node")).toBe(2);
+    expect(
+      classifyMacSignTier("/Resources/pg/bin/pg_dump", {
+        isExecutableMachO: true,
+      }),
+    ).toBe(2);
 
     expect(classifyMacSignTier("/Resources/standalone/server.js")).toBeNull();
   });
 
-  it("collects all Tier 1 libraries before Tier 2 executables (Inside-Out order)", () => {
+  it("detects Mach-O magic bytes (32-bit, 64-bit, Universal/Fat) while rejecting Java .class files", () => {
+    const machO64 = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]);
+    expect(hasMachOMagic(machO64)).toBe(true);
+
+    const fatMachO = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x02]);
+    expect(hasMachOMagic(fatMachO)).toBe(true);
+
+    // Java .class file has 0xcafebabe followed by minor=0, major=52 (Java 8)
+    const javaClass = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x34]);
+    expect(hasMachOMagic(javaClass)).toBe(false);
+  });
+
+  it("collects all Tier 1 libraries before Tier 2 executables (including arbitrary Mach-O binaries in pg/bin)", () => {
     const filesToCreate = [
       "pg/bin/postgres",
       "pg/bin/initdb",
@@ -144,13 +233,115 @@ describe("desktop/scripts/after-sign.mjs — Inside-Out Mach-O ordering", () => 
       fs.writeFileSync(full, "binary", "utf8");
     }
 
+    // Write additional Mach-O binaries in pg/bin/ (pg_dump, pg_basebackup, pg_config)
+    const machOHeader = Buffer.from([
+      0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01,
+    ]);
+    for (const extraBin of ["pg/bin/pg_dump", "pg/bin/pg_basebackup", "pg/bin/pg_config"]) {
+      const full = path.join(tmpResources, extraBin);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, machOHeader);
+    }
+
     const result = collectMacSignTargets(tmpResources);
     expect(result.tier1Libraries).toHaveLength(4);
-    expect(result.tier2Executables).toHaveLength(3);
+    expect(result.tier2Executables).toHaveLength(6);
     expect(result.orderedTargets).toEqual([
       ...result.tier1Libraries,
       ...result.tier2Executables,
     ]);
+  });
+
+  it("archives .app via ditto into a .zip before calling xcrun notarytool submit and staples the .app", () => {
+    const appDir = path.join(tmpResources, "Nango.app");
+    const notarizeZipPath = path.join(tmpResources, "Nango-notarize.zip");
+    fs.mkdirSync(appDir, { recursive: true });
+
+    const invocations: Array<{ cmd: string; args: string[] }> = [];
+    const fakeExecFile = (cmd: string, args: string[]) => {
+      invocations.push({ cmd, args });
+      if (cmd === "ditto") {
+        const zipTarget = args[args.length - 1];
+        if (zipTarget) {
+          fs.writeFileSync(zipTarget, "fake-zip-bytes", "utf8");
+        }
+      }
+      return Buffer.alloc(0);
+    };
+
+    notarizeAndStapleAppBundle({
+      appBundlePath: appDir,
+      notarizeZipPath,
+      appleId: "dev@nango.ai",
+      appleIdPassword: "app-specific-password",
+      teamId: "TEAM123456",
+      execSyncFn: fakeExecFile as unknown as typeof import("node:child_process").execFileSync,
+    });
+
+    expect(invocations).toHaveLength(3);
+    expect(invocations[0]?.cmd).toBe("ditto");
+    expect(invocations[0]?.args).toEqual([
+      "-c",
+      "-k",
+      "--keepParent",
+      appDir,
+      notarizeZipPath,
+    ]);
+
+    expect(invocations[1]?.cmd).toBe("xcrun");
+    expect(invocations[1]?.args).toContain("notarytool");
+    expect(invocations[1]?.args).toContain("submit");
+    expect(invocations[1]?.args).toContain(notarizeZipPath);
+    expect(invocations[1]?.args).not.toContain(appDir);
+
+    expect(invocations[2]?.cmd).toBe("xcrun");
+    expect(invocations[2]?.args).toEqual(["stapler", "staple", appDir]);
+
+    // Temporary notarization zip is cleaned up after submission
+    expect(fs.existsSync(notarizeZipPath)).toBe(false);
+  });
+
+  it("fails fast on release builds when signing identity or notarization credentials are missing", async () => {
+    const fakeContext = {
+      electronPlatformName: "darwin",
+      appOutDir: tmpResources,
+      packager: {
+        appInfo: {
+          productFilename: "Nango",
+        },
+      },
+    };
+
+    // 1. Missing identity on release build (NANGO_REQUIRE_SIGNING="true") must throw
+    await expect(
+      runMacAfterSign({
+        context: fakeContext,
+        env: {
+          NANGO_REQUIRE_SIGNING: "true",
+        } as unknown as NodeJS.ProcessEnv,
+      }),
+    ).rejects.toThrow(/macOS release build requires code signing identity/);
+
+    // 2. Missing identity on non-release build should gracefully skip
+    await expect(
+      runMacAfterSign({
+        context: fakeContext,
+        env: {} as unknown as NodeJS.ProcessEnv,
+      }),
+    ).resolves.toBeUndefined();
+
+    // 3. Valid identity but missing Apple Notarization credentials on release build must throw
+    const fakeCodesign = vi.fn();
+    await expect(
+      runMacAfterSign({
+        context: fakeContext,
+        env: {
+          NANGO_REQUIRE_SIGNING: "true",
+          CSC_NAME: "Developer ID Application: Nango Inc.",
+        } as unknown as NodeJS.ProcessEnv,
+        codesignFn: fakeCodesign,
+      }),
+    ).rejects.toThrow(/macOS release build requires Apple Notarization credentials/);
   });
 });
 
@@ -196,6 +387,43 @@ describe("desktop/updater.ts — DesktopUpdateController", () => {
 
     await controller.installDownloadedUpdate();
     expect(callOrder).toEqual(["prepareForInstall", "quitAndInstall"]);
+  });
+
+  it("DesktopAppCoordinator exposes shutdownServicesOnly() for update pre-install without calling app.quit()", async () => {
+    const quitFn = vi.fn();
+    const coordinator = new DesktopAppCoordinator({
+      electron: {
+        app: {
+          requestSingleInstanceLock: () => true,
+          quit: quitFn,
+          whenReady: async () => {},
+          getPath: () => os.tmpdir(),
+          getVersion: () => "0.31.0",
+          on: () => {},
+        },
+        BrowserWindow: class {} as unknown as import("../../../desktop/electron-types").ElectronMainModule["BrowserWindow"],
+        Tray: class {} as unknown as import("../../../desktop/electron-types").ElectronMainModule["Tray"],
+        Menu: { buildFromTemplate: () => ({}) },
+        dialog: {
+          showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+          showErrorBox: () => {},
+        },
+        ipcMain: { handle: () => {} },
+        shell: { openPath: async () => "" },
+        safeStorage: {
+          isEncryptionAvailable: () => true,
+          encryptString: (s) => Buffer.from(s),
+          decryptString: (b) => b.toString(),
+        },
+      },
+      resourcesPath: os.tmpdir(),
+    });
+
+    await coordinator.shutdownServicesOnly();
+    expect(quitFn).not.toHaveBeenCalled();
+
+    await coordinator.shutdownAndQuit();
+    expect(quitFn).toHaveBeenCalledTimes(1);
   });
 });
 

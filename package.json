@@ -2,6 +2,7 @@
   "name": "nango",
   "version": "0.31.0",
   "private": true,
+  "main": "desktop/dist/index.js",
   "packageManager": "pnpm@12.18.0",
   "engines": {
     "node": ">=24"
@@ -34,6 +35,8 @@
     "docker:logs": "docker compose logs -f nango-app",
     "desktop:repair-standalone": "node scripts/repair-standalone.mjs",
     "desktop:fetch-binaries": "node desktop/scripts/fetch-binaries.mjs",
+    "desktop:compile": "tsc -p desktop/tsconfig.json",
+    "desktop:dist": "pnpm desktop:compile && electron-builder --config desktop/electron-builder.yml",
     "prepare": "husky",
     "check": "pnpm lint && pnpm check-types && pnpm comments:check:all && pnpm test && pnpm test:e2e"
   },
@@ -66,6 +69,7 @@
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.4",
     "echarts": "^6.1.0",
+    "electron-updater": "^6.8.11",
     "emoji-picker-react": "^5.1.4",
     "jsonpath-plus": "^11.3.0",
     "langfuse": "^3.38.20",

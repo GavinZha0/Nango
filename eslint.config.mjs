@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "coverage/**",
     "next-env.d.ts",
+    "desktop/dist/**",
+    "desktop/resources/**",
   ]),
   {
     // Project-wide rules.
