@@ -78,8 +78,9 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   // (mounted folders today, local CLIs later) rather than the network
   // or the DB. The root is a CONTAINER path — compose bind-mounts
   // ./shared_folder at /shared_folder, so the default works out of the
-  // box; blank disables host-file access.
-  { key: "host.file.root", value: "/shared_folder", valueType: "string", description: "Container path that read_file / write_file / edit_file / create_folder / download_file may touch; docker-compose mounts ./shared_folder here. Empty or unmounted fails every call. Use a dedicated directory — never a home folder." },
+  // box; in desktop mode NANGO_DEFAULT_HOST_FILE_ROOT overrides the
+  // initial seed value; blank disables host-file access.
+  { key: "host.file.root", value: process.env.NANGO_DEFAULT_HOST_FILE_ROOT?.trim() || "/shared_folder", valueType: "string", description: "Container or desktop host path that read_file / write_file / edit_file / create_folder / download_file may touch; docker-compose mounts ./shared_folder here. Empty or unmounted fails every call. Use a dedicated directory — never a home folder." },
   { key: "host.file.read_max_bytes", value: "1048576", valueType: "number", description: "Max bytes read_file returns per call (1 MiB), raw reads included. Larger files are streamed in line windows instead of buffered whole; a raw read pages by byte from this budget. edit_file is capped by it too. Floors at 1 byte." },
   { key: "host.file.write_max_bytes", value: "1048576", valueType: "number", description: "Max bytes one write_file call accepts — a whole file body or an appended chunk (1 MiB). edit_file checks its result against it. Floors at 1 byte." },
 
@@ -106,7 +107,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "mcp.task_poll_history_limit", value: "5", valueType: "number", description: "Max number of recent polling snapshots retained and displayed per MCP task in the test inspector" },
 
   // ── infrastructure ────────────────────────────────────────────────
-  { key: "datasource.cache_root", value: "", valueType: "string", description: "Dataset cache root path (empty = <repoRoot>/.cache/datasource — under the project root for easy inspection / cleanup)" },
+  { key: "datasource.cache_root", value: process.env.NANGO_DEFAULT_CACHE_ROOT?.trim() || "", valueType: "string", description: "Dataset cache root path (empty = NANGO_DEFAULT_CACHE_ROOT or <repoRoot>/.cache/datasource)" },
 
   // ── supervisor ──────────────────────────────────────────────────
   { key: "supervisor.catalog_excerpt_chars", value: "300", valueType: "number", description: "Max characters of each specialist's system prompt shown in the supervisor catalog (the 'about' field). Longer prompts are truncated with an ellipsis." },
@@ -151,3 +152,20 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
 export const CONFIG_DEFAULTS_MAP: ReadonlyMap<string, ConfigDefault> = new Map(
   CONFIG_DEFAULTS.map((d) => [d.key, d]),
 );
+
+/**
+ * Resolve the effective default value for a config entry, taking into
+ * account desktop environment overrides (`NANGO_DEFAULT_HOST_FILE_ROOT`,
+ * `NANGO_DEFAULT_CACHE_ROOT`) that may be set after module load in tests.
+ */
+export function resolveDefaultConfigValue(key: string): string | undefined {
+  if (key === "host.file.root") {
+    const fromEnv = process.env.NANGO_DEFAULT_HOST_FILE_ROOT?.trim();
+    if (fromEnv && fromEnv.length > 0) return fromEnv;
+  }
+  if (key === "datasource.cache_root") {
+    const fromEnv = process.env.NANGO_DEFAULT_CACHE_ROOT?.trim();
+    if (fromEnv && fromEnv.length > 0) return fromEnv;
+  }
+  return CONFIG_DEFAULTS_MAP.get(key)?.value;
+}

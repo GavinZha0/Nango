@@ -7,12 +7,12 @@
 import "server-only";
 
 import * as path from "node:path";
-import { DuckDBInstance } from "@duckdb/node-api";
 
 import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 import { childLogger } from "@/lib/observability/logger";
 import { z } from "zod";
+import { openDuckdbConnection } from "./duckdb-connection.server";
 
 import {
   abortWriteSlot,
@@ -235,7 +235,9 @@ export async function extractDatasetForAgent(
   ) {
     const preview =
       rowLimit > 0 && status.meta.rowCount > 0
-        ? await readPreview(args.datasetName, rowLimit)
+        ? await readPreview(args.datasetName, rowLimit, {
+            forceLocal: resolved.provider === "vertica",
+          })
         : [];
     return {
       cache_hit: true,
@@ -399,13 +401,15 @@ export function buildExtractDatasetTool(
 async function readPreview(
   name: string,
   requestedRows: number,
+  opts?: { forceLocal?: boolean },
 ): Promise<Array<Record<string, unknown>>> {
   const limit = Math.min(requestedRows, PREVIEW_HARD_CAP_ROWS());
   const glob = path.join(datasetDir(name), "**", "*.parquet");
 
-  const db = await DuckDBInstance.create(":memory:");
-  const conn = await db.connect();
+  let handle: Awaited<ReturnType<typeof openDuckdbConnection>> | null = null;
   try {
+    handle = await openDuckdbConnection(opts);
+    const { conn } = handle;
     const previewRel = await conn.runAndReadAll(
       `SELECT * FROM read_parquet('${escapeSingleQuotes(glob)}') LIMIT ${limit}`,
     );
@@ -420,8 +424,10 @@ async function readPreview(
   } catch {
     return [];
   } finally {
-    conn.closeSync();
-    db.closeSync();
+    if (handle) {
+      handle.conn.closeSync();
+      handle.db.closeSync();
+    }
   }
 }
 

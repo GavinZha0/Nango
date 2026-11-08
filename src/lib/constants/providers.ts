@@ -81,6 +81,7 @@ export const PROVIDERS: ProviderEntry[] = [
   { value: "mcp",           label: "MCP Server",    service: "integration" },
   { value: "ssh",           label: "SSH Server",    service: "integration" },
   { value: "dify-sandbox",  label: "Dify Sandbox",  service: "integration", defaultRestUrl: "http://dify-sandbox:8194" },
+  { value: "duckdb-server", label: "DuckDB Server (Experimental)", service: "integration", defaultRestUrl: "127.0.0.1:9494" },
   { value: "testing",       label: "Testing",       service: "integration" },
 
   // Data sources

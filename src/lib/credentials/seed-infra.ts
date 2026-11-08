@@ -14,8 +14,70 @@ import { encrypt } from "./crypto";
 import { eq } from "drizzle-orm";
 import { invalidateCredentialCache } from "@/lib/credentials/lookup";
 
+export interface BuiltinInfraSeedValues {
+  sandboxUrl: string;
+  senseVoiceUrl: string;
+  playwrightMcp: {
+    type: "http" | "stdio";
+    url: string;
+    command: string | null;
+    args: string[] | null;
+  };
+}
+
+export function resolveBuiltinInfraSeedValues(): BuiltinInfraSeedValues {
+  const isDesktop = process.env.NANGO_DESKTOP === "1";
+  const sandboxUrl =
+    process.env.NANGO_SEED_SANDBOX_URL?.trim() ||
+    (isDesktop ? "http://127.0.0.1:8194" : "http://sandbox:8194");
+  const senseVoiceUrl =
+    process.env.NANGO_SEED_SENSEVOICE_URL?.trim() ||
+    (isDesktop ? "http://127.0.0.1:10085" : "http://sensevoice:8000");
+
+  if (!isDesktop) {
+    return {
+      sandboxUrl,
+      senseVoiceUrl,
+      playwrightMcp: {
+        type: "http",
+        url: "http://playwright:8931/mcp",
+        command: null,
+        args: null,
+      },
+    };
+  }
+
+  const bundledCli = process.env.NANGO_BUNDLED_PLAYWRIGHT_MCP_CLI?.trim();
+  const bundledNode = process.env.NANGO_BUNDLED_NODE_EXE?.trim() || "node";
+  if (bundledCli) {
+    return {
+      sandboxUrl,
+      senseVoiceUrl,
+      playwrightMcp: {
+        type: "stdio",
+        url: "",
+        command: bundledNode,
+        args: [bundledCli, "--browser", "chrome"],
+      },
+    };
+  }
+
+  return {
+    sandboxUrl,
+    senseVoiceUrl,
+    playwrightMcp: {
+      type: "stdio",
+      url: "",
+      command: "npx",
+      args: ["-y", "@playwright/mcp@latest", "--browser", "chrome"],
+    },
+  };
+}
+
 export async function seedBuiltinInfrastructure(): Promise<void> {
   try {
+    const seedValues = resolveBuiltinInfraSeedValues();
+
     // 1. Seed Dify Sandbox Credential
     const existingSandbox = await db
       .select({ id: CredentialTable.id })
@@ -25,7 +87,7 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
 
     if (existingSandbox.length === 0) {
       const payload = {
-        host: "http://sandbox:8194",
+        host: seedValues.sandboxUrl,
         apiKey: "dify-sandbox",
       };
       await db.insert(CredentialTable).values({
@@ -33,7 +95,7 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
         type: "api_key",
         serviceType: "integration",
         provider: "dify-sandbox",
-        restUrl: "http://sandbox:8194",
+        restUrl: seedValues.sandboxUrl,
         encryptedPayload: encrypt(payload),
         metadata: { keyPreview: "dify-sandbox" },
         enabled: true,
@@ -51,7 +113,7 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
 
     if (existingSenseVoice.length === 0) {
       const payload = {
-        host: "http://sensevoice:8000",
+        host: seedValues.senseVoiceUrl,
         apiKey: "MySuperSafeApiKey",
       };
       await db.insert(CredentialTable).values({
@@ -59,7 +121,7 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
         type: "api_key",
         serviceType: "voice",
         provider: "sensevoice",
-        restUrl: "http://sensevoice:8000",
+        restUrl: seedValues.senseVoiceUrl,
         encryptedPayload: encrypt(payload),
         metadata: { keyPreview: "MySuperSafeApiKey" },
         enabled: true,
@@ -79,8 +141,10 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
       await db.insert(McpServerTable).values({
         name: "Playwright",
         description: "Built-in Playwright Browser Automation MCP Server",
-        type: "http",
-        url: "http://playwright:8931/mcp",
+        type: seedValues.playwrightMcp.type,
+        url: seedValues.playwrightMcp.url,
+        command: seedValues.playwrightMcp.command,
+        args: seedValues.playwrightMcp.args,
         visibility: "public",
         enabled: true,
         credentialId: null,

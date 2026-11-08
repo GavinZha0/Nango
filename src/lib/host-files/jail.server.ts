@@ -73,6 +73,16 @@ function invalidPath(detail: string): JailPathErr {
 
 /** Escape when the configured root is itself missing from the fs. */
 function rootUnreachable(root: string): JailPathErr {
+  if (process.env.NANGO_DESKTOP === "1") {
+    return {
+      ok: false,
+      error: "ROOT_NOT_CONFIGURED",
+      message:
+        `Cannot reach the host-file root "${root}". The configured local workspace folder ` +
+        "does not exist or is inaccessible. Ask the user to create the folder or select a " +
+        "valid local directory for `host.file.root` in Admin → Config — do not retry.",
+    };
+  }
   // CONTRACT: this is the only place the operator's mount layout is
   // explained, so it names both fix sites instead of guessing which one
   // is wrong.

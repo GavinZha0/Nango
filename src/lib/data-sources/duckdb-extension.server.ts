@@ -6,10 +6,11 @@
 import "server-only";
 
 import * as fs from "node:fs/promises";
-import { DuckDBInstance } from "@duckdb/node-api";
+import type { DuckDBInstance } from "@duckdb/node-api";
 
 import type { ExtractInput, ExtractResult, DatasetSchema } from "./types";
 import { hashQuery } from "./cache";
+import { openDuckdbConnection } from "./duckdb-connection.server";
 
 export type DuckdbExtensionName = "postgres" | "mysql";
 
@@ -49,8 +50,7 @@ export async function extractViaDuckdb(
     );
   }
 
-  const db = await DuckDBInstance.create(":memory:");
-  const conn = await db.connect();
+  const { db, conn } = await openDuckdbConnection();
 
   try {
     // Race DuckDB work against wall-clock timer (no native AbortSignal support).
@@ -104,8 +104,7 @@ export async function testConnectionViaDuckdb(args: {
   signal: AbortSignal;
 }): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
   const startedAt = Date.now();
-  const db = await DuckDBInstance.create(":memory:");
-  const conn = await db.connect();
+  const { db, conn } = await openDuckdbConnection();
   try {
     const work = (async () => {
       await conn.run(`INSTALL ${args.extension};`);

@@ -13,12 +13,15 @@ import { logger } from "@/lib/observability/logger";
 
 /**
  * Resolve the Playwright output directory on the host/container.
- * Defaults to <cwd>/.cache/playwright, overridable via PLAYWRIGHT_OUTPUT_DIR.
+ * Defaults to <cwd>/.cache/playwright, overridable via PLAYWRIGHT_OUTPUT_DIR
+ * or NANGO_PLAYWRIGHT_STORAGE_DIR (desktop mode).
  */
 export function resolvePlaywrightOutputDir(): string {
-  const envPath = process.env.PLAYWRIGHT_OUTPUT_DIR;
-  if (envPath && envPath.trim().length > 0) {
-    return path.resolve(envPath.trim());
+  const envPath =
+    process.env.PLAYWRIGHT_OUTPUT_DIR?.trim() ||
+    process.env.NANGO_PLAYWRIGHT_STORAGE_DIR?.trim();
+  if (envPath && envPath.length > 0) {
+    return path.resolve(envPath);
   }
   return path.join(process.cwd(), ".cache", "playwright");
 }

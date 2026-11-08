@@ -10,7 +10,11 @@
 import { db } from "@/lib/db";
 import { ConfigTable } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { CONFIG_DEFAULTS, CONFIG_DEFAULTS_MAP } from "./defaults";
+import {
+  CONFIG_DEFAULTS,
+  CONFIG_DEFAULTS_MAP,
+  resolveDefaultConfigValue,
+} from "./defaults";
 
 /**
  * In-memory config cache: key → value string.
@@ -83,7 +87,7 @@ export async function seedDefaults(): Promise<void> {
     for (const def of missing) {
       await db.insert(ConfigTable).values({
         key: def.key,
-        value: def.value,
+        value: resolveDefaultConfigValue(def.key) ?? def.value,
         valueType: def.valueType,
         description: def.description,
         options: def.options ?? null,
@@ -136,7 +140,7 @@ function resolve(key: string): string | undefined {
     const dbVal = state.cache.get(key);
     if (dbVal !== undefined) return dbVal;
   }
-  return CONFIG_DEFAULTS_MAP.get(key)?.value;
+  return resolveDefaultConfigValue(key);
 }
 
 /** Get a string config value. */

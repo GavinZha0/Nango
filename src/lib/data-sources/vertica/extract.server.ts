@@ -13,8 +13,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { DuckDBInstance } from "@duckdb/node-api";
-
 import type {
   ConnectionTestResult,
   ExtractInput,
@@ -22,6 +20,7 @@ import type {
   ResolvedDataSource,
 } from "../types";
 import { hashQuery } from "../cache";
+import { openDuckdbConnection } from "../duckdb-connection.server";
 
 // Minimal type slice for vertica-nodejs (no upstream .d.ts)
 
@@ -107,8 +106,9 @@ export async function extractFromVertica(
     })();
     await raceWithTimeoutAndAbort(work, input.timeoutMs, input.signal);
 
-    const db = await DuckDBInstance.create(":memory:");
-    const conn = await db.connect();
+    // CONTRACT: Vertica writes a local temporary NDJSON file and therefore
+    // always runs in local in-process DuckDB mode (forceLocal: true).
+    const { db, conn } = await openDuckdbConnection({ forceLocal: true });
     try {
       const copySql =
         `COPY (SELECT * FROM read_json_auto('${escapeSingleQuotes(tmpJson)}', format='newline_delimited')) ` +
@@ -125,8 +125,9 @@ export async function extractFromVertica(
 
     let previewRows: Array<Record<string, unknown>> = [];
     if (input.previewRows && input.previewRows > 0 && schema.rowCount > 0) {
-      const dbPreview = await DuckDBInstance.create(":memory:");
-      const connPreview = await dbPreview.connect();
+      const { db: dbPreview, conn: connPreview } = await openDuckdbConnection({
+        forceLocal: true,
+      });
       try {
         const previewRel = await connPreview.runAndReadAll(
           `SELECT * FROM read_parquet('${escapeSingleQuotes(input.outputPath)}') LIMIT ${input.previewRows}`,
@@ -209,8 +210,7 @@ async function raceWithTimeoutAndAbort<T>(
 async function introspectFromDuckdb(
   outputPath: string,
 ): Promise<import("../types").DatasetSchema> {
-  const db = await DuckDBInstance.create(":memory:");
-  const conn = await db.connect();
+  const { db, conn } = await openDuckdbConnection({ forceLocal: true });
   try {
     const cols = await conn.runAndReadAll(
       `DESCRIBE SELECT * FROM read_parquet('${escapeSingleQuotes(outputPath)}')`,

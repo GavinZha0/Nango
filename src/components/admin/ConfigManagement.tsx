@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   ChevronRight,
+  FolderOpen,
   Loader2,
   SquarePen,
   RefreshCw,
@@ -41,6 +42,14 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 // Types
+
+declare global {
+  interface Window {
+    nangoDesktop?: {
+      selectFolder?: () => Promise<string | null>;
+    };
+  }
+}
 
 interface ConfigRow {
   id: string;
@@ -112,6 +121,27 @@ function ValueCell({
     );
   }
 
+  const canBrowseFolder =
+    row.key === "host.file.root" &&
+    typeof window !== "undefined" &&
+    typeof window.nangoDesktop?.selectFolder === "function";
+
+  const handleBrowseFolder = async (): Promise<void> => {
+    const picker = window.nangoDesktop?.selectFolder;
+    if (!picker) return;
+    setSaving(true);
+    try {
+      const selected = await picker();
+      if (selected && selected.trim().length > 0 && selected !== row.value) {
+        setDraft(selected);
+        await onSave(row.key, selected);
+      }
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Default: inline text editing
   if (!editing) {
     return (
@@ -127,6 +157,20 @@ function ValueCell({
         >
           <SquarePen className="h-3 w-3 text-muted-foreground" />
         </button>
+        {canBrowseFolder && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px] gap-1"
+            onClick={() => void handleBrowseFolder()}
+            disabled={saving}
+            data-testid="browse-host-file-root-button"
+          >
+            <FolderOpen className="h-3 w-3" />
+            Browse…
+          </Button>
+        )}
       </div>
     );
   }
