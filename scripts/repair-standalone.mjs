@@ -231,6 +231,42 @@ export function repairStandaloneClosure() {
     );
     process.exit(1);
   }
+
+  stageStandaloneRuntimeAssets(rootDir, path.join(rootDir, ".next", "standalone"));
+}
+
+/**
+ * Copy `public/`, `.next/static/`, `src/lib/db/migrations/`, and `docker/migrate.mjs`
+ * into `.next/standalone/` so the standalone bundle is self-contained for both
+ * local validation and Nango Desktop `extraResources` packaging.
+ */
+export function stageStandaloneRuntimeAssets(projectRoot, standaloneDir) {
+  const pairs = [
+    {
+      src: path.join(projectRoot, "public"),
+      dst: path.join(standaloneDir, "public"),
+    },
+    {
+      src: path.join(projectRoot, ".next", "static"),
+      dst: path.join(standaloneDir, ".next", "static"),
+    },
+    {
+      src: path.join(projectRoot, "src", "lib", "db", "migrations"),
+      dst: path.join(standaloneDir, "src", "lib", "db", "migrations"),
+    },
+    {
+      src: path.join(projectRoot, "docker", "migrate.mjs"),
+      dst: path.join(standaloneDir, "docker", "migrate.mjs"),
+    },
+  ];
+
+  for (const { src, dst } of pairs) {
+    if (!existsSync(src)) continue;
+    cpSync(src, dst, {
+      recursive: true,
+      force: true,
+    });
+  }
 }
 
 if (

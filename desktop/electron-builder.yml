@@ -1,0 +1,79 @@
+# electron-builder configuration for Nango Desktop (Windows x64 NSIS & macOS arm64/x64 DMG).
+# See docs/desktop-architecture.md.
+
+appId: com.nango.desktop
+productName: Nango
+copyright: Copyright © 2026 Nango Contributors
+
+directories:
+  output: dist/desktop
+  buildResources: desktop/resources/icons
+
+asar: true
+
+files:
+  - desktop/dist/**/*
+  - package.json
+
+# Bundled runtime binaries and Next.js standalone bundle live outside the
+# read-only ASAR archive so child processes (`postgres`, `node`) can be spawned
+# directly and native shared libraries (`libduckdb`, `.duckdb_extension`) can
+# be loaded by the OS dynamic linker (`dlopen` / `LoadLibrary`).
+extraResources:
+  - from: .next/standalone
+    to: standalone
+    filter:
+      - "**/*"
+  - from: desktop/resources/pg
+    to: pg
+    filter:
+      - "**/*"
+  - from: desktop/resources/node
+    to: node
+    filter:
+      - "**/*"
+  - from: desktop/resources/duckdb-extensions
+    to: duckdb-extensions
+    filter:
+      - "**/*"
+  - from: desktop/resources/icons
+    to: icons
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Nango
+
+mac:
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: desktop/entitlements.mac.plist
+  entitlementsInherit: desktop/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+
+afterSign: desktop/scripts/after-sign.mjs
+
+publish:
+  provider: github
+  releaseType: release

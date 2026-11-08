@@ -1,0 +1,58 @@
+name: Desktop Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_desktop:
+    name: Build Nango Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js standalone bundle
+        env:
+          NEXT_STANDALONE_OUTPUT: "true"
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm build
+
+      - name: Repair standalone .pnpm symlink closure and stage runtime assets
+        run: node scripts/repair-standalone.mjs
+
+      - name: Fetch bundled Node 24 LTS, Portable PG 18 & DuckDB offline extensions
+        run: node desktop/scripts/fetch-binaries.mjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+
+      - name: Run desktop unit and packaging tests
+        run: pnpm vitest run tests/unit/desktop/

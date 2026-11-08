@@ -32,6 +32,8 @@
     "docker:up:build": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f nango-app",
+    "desktop:repair-standalone": "node scripts/repair-standalone.mjs",
+    "desktop:fetch-binaries": "node desktop/scripts/fetch-binaries.mjs",
     "prepare": "husky",
     "check": "pnpm lint && pnpm check-types && pnpm comments:check:all && pnpm test && pnpm test:e2e"
   },
