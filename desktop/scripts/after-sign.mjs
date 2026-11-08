@@ -264,6 +264,37 @@ export function notarizeAndStapleAppBundle({
 }
 
 /**
+ * Resolve the macOS Developer ID code signing identity string.
+ * Checks `CSC_NAME` / `APPLE_SIGNING_IDENTITY` first, then falls back to querying
+ * the macOS Keychain (`security find-identity -v -p codesigning`) if available.
+ */
+export function resolveMacSigningIdentity(
+  env = process.env,
+  execSyncFn = execFileSync,
+) {
+  if (env.CSC_NAME?.trim()) return env.CSC_NAME.trim();
+  if (env.APPLE_SIGNING_IDENTITY?.trim()) return env.APPLE_SIGNING_IDENTITY.trim();
+
+  if (process.platform === "darwin") {
+    try {
+      const output = execSyncFn(
+        "security",
+        ["find-identity", "-v", "-p", "codesigning"],
+        { encoding: "utf8" },
+      );
+      const match = output.match(/"(Developer ID Application: [^"]+)"/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    } catch {
+      // Ignore keychain inspection errors
+    }
+  }
+
+  return null;
+}
+
+/**
  * electron-builder `afterSign` hook logic with strict fail-fast validation
  * for release builds.
  */
@@ -272,6 +303,7 @@ export async function runMacAfterSign({
   env = process.env,
   codesignFn = codesignFile,
   notarizeFn = notarizeAndStapleAppBundle,
+  execSyncFn = execFileSync,
 }) {
   const { electronPlatformName, appOutDir, packager } = context;
   if (electronPlatformName !== "darwin") {
@@ -290,11 +322,11 @@ export async function runMacAfterSign({
   const requireSigning =
     env.NANGO_REQUIRE_SIGNING === "true" ||
     env.GITHUB_REF?.startsWith("refs/tags/v");
-  const identity = env.CSC_NAME || env.APPLE_SIGNING_IDENTITY;
+  const identity = resolveMacSigningIdentity(env, execSyncFn);
   if (!identity) {
     if (requireSigning) {
       throw new Error(
-        "[after-sign] FATAL: macOS release build requires code signing identity (CSC_NAME / APPLE_SIGNING_IDENTITY), but none was configured. Refusing to produce an unsigned bundle.",
+        "[after-sign] FATAL: macOS release build requires code signing identity (CSC_NAME / APPLE_SIGNING_IDENTITY), but none was configured and no Developer ID certificate was found in Keychain. Refusing to produce an unsigned bundle.",
       );
     }
     console.log(

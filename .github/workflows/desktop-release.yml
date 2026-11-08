@@ -63,7 +63,7 @@ jobs:
         run: pnpm vitest run tests/unit/desktop/
 
       - name: Install Electron packaging toolchain
-        run: pnpm add -D electron@^35.0.0 electron-builder@^26.0.0
+        run: pnpm add -D electron@^36.0.0 electron-builder@^26.0.0
 
       - name: Validate release signing secrets before packaging
         if: startsWith(github.ref, 'refs/tags/v')
@@ -76,8 +76,12 @@ jobs:
               exit 1
             fi
           elif [ "${{ matrix.platform }}" = "darwin" ]; then
-            if [ -z "${{ secrets.CSC_LINK_MAC || secrets.MAC_CSC_LINK || secrets.CSC_LINK }}" ] && [ -z "${{ secrets.CSC_NAME }}" ]; then
-              echo "::error::Release build on macOS requires CSC_LINK_MAC / CSC_NAME to sign application bundle."
+            if [ -z "${{ secrets.CSC_LINK_MAC || secrets.MAC_CSC_LINK || secrets.CSC_LINK }}" ]; then
+              echo "::error::Release build on macOS requires CSC_LINK_MAC to sign application bundle."
+              exit 1
+            fi
+            if [ -z "${{ secrets.CSC_NAME }}" ] && [ -z "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
+              echo "::error::Release build on macOS requires CSC_NAME (or APPLE_SIGNING_IDENTITY) to sign bundled Mach-O binaries in afterSign."
               exit 1
             fi
             if [ -z "${{ secrets.APPLE_ID }}" ] || [ -z "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ] || [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then

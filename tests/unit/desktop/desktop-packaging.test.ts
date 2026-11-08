@@ -8,8 +8,13 @@ import {
   collectMacSignTargets,
   hasMachOMagic,
   notarizeAndStapleAppBundle,
+  resolveMacSigningIdentity,
   runMacAfterSign,
 } from "../../../desktop/scripts/after-sign.mjs";
+import {
+  collectDependencyTree,
+  stageUpdaterRuntimeDependencies,
+} from "../../../desktop/scripts/stage-updater-runtime.mjs";
 import {
   computeSha256Hex,
   DUCKDB_BUNDLED_EXTENSIONS,
@@ -493,6 +498,78 @@ describe("scripts/repair-standalone.mjs — stageStandaloneRuntimeAssets", () =>
       ).toBe(true);
     } finally {
       fs.rmSync(tmpProject, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging", () => {
+  it("collects and stages all 16 transitive production dependencies of electron-updater", () => {
+    const tmpTarget = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nango-stage-updater-"),
+    );
+    try {
+      const deps = collectDependencyTree("electron-updater");
+      expect(deps.size).toBeGreaterThanOrEqual(16);
+
+      // Verify specific transitive modules named in review
+      expect(deps.has("fs-extra")).toBe(true);
+      expect(deps.has("lodash.isequal")).toBe(true);
+      expect(deps.has("semver")).toBe(true);
+      expect(deps.has("argparse")).toBe(true);
+      expect(deps.has("builder-util-runtime")).toBe(true);
+      expect(deps.has("lazy-val")).toBe(true);
+      expect(deps.has("tiny-typed-emitter")).toBe(true);
+      expect(deps.has("universalify")).toBe(true);
+      expect(deps.has("graceful-fs")).toBe(true);
+      expect(deps.has("jsonfile")).toBe(true);
+      expect(deps.has("lodash.escaperegexp")).toBe(true);
+      expect(deps.has("sax")).toBe(true);
+
+      const result = stageUpdaterRuntimeDependencies({
+        targetNodeModulesDir: tmpTarget,
+      });
+
+      expect(result.packageCount).toBe(deps.size);
+      for (const reqDep of [
+        "electron-updater",
+        "fs-extra",
+        "lodash.isequal",
+        "semver",
+        "argparse",
+      ]) {
+        expect(fs.existsSync(path.join(tmpTarget, reqDep, "package.json"))).toBe(
+          true,
+        );
+      }
+    } finally {
+      fs.rmSync(tmpTarget, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves signing identity from CSC_NAME or security find-identity fallback", () => {
+    expect(
+      resolveMacSigningIdentity({
+        CSC_NAME: "Developer ID Application: Nango Inc.",
+      } as unknown as NodeJS.ProcessEnv),
+    ).toBe("Developer ID Application: Nango Inc.");
+
+    const fakeSecurityExec = vi.fn(() =>
+      [
+        '1) 1234567890ABCDEF "Developer ID Application: Auto Detected (TEAM123)"',
+        "     1 valid identities found",
+      ].join("\n"),
+    );
+
+    const detected = resolveMacSigningIdentity(
+      {} as unknown as NodeJS.ProcessEnv,
+      fakeSecurityExec as unknown as typeof import("node:child_process").execFileSync,
+    );
+
+    // On non-darwin OS it returns null unless on darwin, but passing fakeSecurityExec on darwin parses
+    if (process.platform === "darwin") {
+      expect(detected).toBe("Developer ID Application: Auto Detected (TEAM123)");
+    } else {
+      expect(detected).toBeNull();
     }
   });
 });

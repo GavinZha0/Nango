@@ -10,19 +10,11 @@ directories:
   buildResources: desktop/resources/icons
 
 asar: true
+includeSubNodeModules: true
 
 files:
   - desktop/dist/**/*
   - package.json
-  - node_modules/electron-updater/**/*
-  - node_modules/builder-util-runtime/**/*
-  - node_modules/lazy-val/**/*
-  - node_modules/semver/**/*
-  - node_modules/js-yaml/**/*
-  - node_modules/fs-extra/**/*
-  - node_modules/tiny-typed-emitter/**/*
-  - node_modules/.pnpm/electron-updater*/**/*
-  - node_modules/.pnpm/builder-util-runtime*/**/*
 
 # Bundled runtime binaries and Next.js standalone bundle live outside the
 # read-only ASAR archive so child processes (`postgres`, `node`) can be spawned

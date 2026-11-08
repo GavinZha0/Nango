@@ -35,7 +35,7 @@
     "docker:logs": "docker compose logs -f nango-app",
     "desktop:repair-standalone": "node scripts/repair-standalone.mjs",
     "desktop:fetch-binaries": "node desktop/scripts/fetch-binaries.mjs",
-    "desktop:compile": "tsc -p desktop/tsconfig.json",
+    "desktop:compile": "tsc -p desktop/tsconfig.json && node desktop/scripts/stage-updater-runtime.mjs",
     "desktop:dist": "pnpm desktop:compile && electron-builder --config desktop/electron-builder.yml",
     "prepare": "husky",
     "check": "pnpm lint && pnpm check-types && pnpm comments:check:all && pnpm test && pnpm test:e2e"
