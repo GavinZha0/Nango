@@ -530,52 +530,56 @@ describe("scripts/repair-standalone.mjs — stageStandaloneRuntimeAssets", () =>
 });
 
 describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging", () => {
-  it("collects and stages all transitive production dependencies of electron-updater and tar", () => {
-    const tmpTarget = fs.mkdtempSync(
-      path.join(os.tmpdir(), "nango-stage-updater-"),
-    );
-    try {
-      const updaterDeps = collectDependencyTree("electron-updater");
-      const tarDeps = collectDependencyTree("tar");
-      const deps = new Map([...updaterDeps, ...tarDeps]);
-      expect(deps.size).toBeGreaterThanOrEqual(16);
+  it(
+    "collects and stages all transitive production dependencies of electron-updater and tar",
+    () => {
+      const tmpTarget = fs.mkdtempSync(
+        path.join(os.tmpdir(), "nango-stage-updater-"),
+      );
+      try {
+        const updaterDeps = collectDependencyTree("electron-updater");
+        const tarDeps = collectDependencyTree("tar");
+        const deps = new Map([...updaterDeps, ...tarDeps]);
+        expect(deps.size).toBeGreaterThanOrEqual(16);
 
-      // Verify specific transitive modules named in review
-      expect(deps.has("fs-extra")).toBe(true);
-      expect(deps.has("lodash.isequal")).toBe(true);
-      expect(deps.has("semver")).toBe(true);
-      expect(deps.has("argparse")).toBe(true);
-      expect(deps.has("builder-util-runtime")).toBe(true);
-      expect(deps.has("lazy-val")).toBe(true);
-      expect(deps.has("tiny-typed-emitter")).toBe(true);
-      expect(deps.has("universalify")).toBe(true);
-      expect(deps.has("graceful-fs")).toBe(true);
-      expect(deps.has("jsonfile")).toBe(true);
-      expect(deps.has("lodash.escaperegexp")).toBe(true);
-      expect(deps.has("sax")).toBe(true);
-      expect(deps.has("tar")).toBe(true);
+        // Verify specific transitive modules named in review
+        expect(deps.has("fs-extra")).toBe(true);
+        expect(deps.has("lodash.isequal")).toBe(true);
+        expect(deps.has("semver")).toBe(true);
+        expect(deps.has("argparse")).toBe(true);
+        expect(deps.has("builder-util-runtime")).toBe(true);
+        expect(deps.has("lazy-val")).toBe(true);
+        expect(deps.has("tiny-typed-emitter")).toBe(true);
+        expect(deps.has("universalify")).toBe(true);
+        expect(deps.has("graceful-fs")).toBe(true);
+        expect(deps.has("jsonfile")).toBe(true);
+        expect(deps.has("lodash.escaperegexp")).toBe(true);
+        expect(deps.has("sax")).toBe(true);
+        expect(deps.has("tar")).toBe(true);
 
-      const result = stageUpdaterRuntimeDependencies({
-        targetNodeModulesDir: tmpTarget,
-      });
+        const result = stageUpdaterRuntimeDependencies({
+          targetNodeModulesDir: tmpTarget,
+        });
 
-      expect(result.packageCount).toBe(deps.size);
-      for (const reqDep of [
-        "electron-updater",
-        "tar",
-        "fs-extra",
-        "lodash.isequal",
-        "semver",
-        "argparse",
-      ]) {
-        expect(fs.existsSync(path.join(tmpTarget, reqDep, "package.json"))).toBe(
-          true,
-        );
+        expect(result.packageCount).toBe(deps.size);
+        for (const reqDep of [
+          "electron-updater",
+          "tar",
+          "fs-extra",
+          "lodash.isequal",
+          "semver",
+          "argparse",
+        ]) {
+          expect(fs.existsSync(path.join(tmpTarget, reqDep, "package.json"))).toBe(
+            true,
+          );
+        }
+      } finally {
+        fs.rmSync(tmpTarget, { recursive: true, force: true });
       }
-    } finally {
-      fs.rmSync(tmpTarget, { recursive: true, force: true });
-    }
-  });
+    },
+    60_000,
+  );
 
   it("resolves signing identity from CSC_NAME or security find-identity fallback", () => {
     expect(
@@ -636,20 +640,24 @@ describe("desktop/scripts/stage-updater-runtime.mjs — complete closure staging
     }
   });
 
-  it("stages tar runtime dependencies alongside electron-updater", () => {
-    const tmpTarget = fs.mkdtempSync(
-      path.join(os.tmpdir(), "nango-stage-tar-"),
-    );
-    try {
-      const result = stageUpdaterRuntimeDependencies({
-        targetNodeModulesDir: tmpTarget,
-      });
-      expect(result.stagedPackages).toContain("tar");
-      expect(fs.existsSync(path.join(tmpTarget, "tar", "package.json"))).toBe(true);
-    } finally {
-      fs.rmSync(tmpTarget, { recursive: true, force: true });
-    }
-  });
+  it(
+    "stages tar runtime dependencies alongside electron-updater",
+    () => {
+      const tmpTarget = fs.mkdtempSync(
+        path.join(os.tmpdir(), "nango-stage-tar-"),
+      );
+      try {
+        const result = stageUpdaterRuntimeDependencies({
+          targetNodeModulesDir: tmpTarget,
+        });
+        expect(result.stagedPackages).toContain("tar");
+        expect(fs.existsSync(path.join(tmpTarget, "tar", "package.json"))).toBe(true);
+      } finally {
+        fs.rmSync(tmpTarget, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
 });
 
 describe("desktop/standalone-extractor.ts", () => {

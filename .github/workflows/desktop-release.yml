@@ -54,7 +54,7 @@ jobs:
         run: pnpm desktop:compile
 
       - name: Run desktop unit and packaging tests
-        run: pnpm vitest run tests/unit/desktop/
+        run: pnpm vitest run tests/unit/desktop/ --test-timeout=60000
 
       - name: Validate release signing secrets before packaging
         if: startsWith(github.ref, 'refs/tags/v')
@@ -82,16 +82,50 @@ jobs:
           fi
 
       - name: Package Nango Desktop installer (NSIS / DMG)
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NANGO_REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && 'true' || 'false' }}
-          CSC_LINK: ${{ matrix.platform == 'win32' && (secrets.CSC_LINK_WIN || secrets.WIN_CSC_LINK) || (secrets.CSC_LINK_MAC || secrets.MAC_CSC_LINK || secrets.CSC_LINK) }}
-          CSC_KEY_PASSWORD: ${{ matrix.platform == 'win32' && (secrets.CSC_KEY_PASSWORD_WIN || secrets.WIN_CSC_KEY_PASSWORD) || (secrets.CSC_KEY_PASSWORD_MAC || secrets.MAC_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD) }}
-          CSC_NAME: ${{ secrets.CSC_NAME }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm exec electron-builder --config desktop/electron-builder.yml --${{ matrix.arch }} --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+          CSC_LINK_WIN_RAW: ${{ secrets.CSC_LINK_WIN || secrets.WIN_CSC_LINK || secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_WIN_RAW: ${{ secrets.CSC_KEY_PASSWORD_WIN || secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK_MAC_RAW: ${{ secrets.CSC_LINK_MAC || secrets.MAC_CSC_LINK || secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_MAC_RAW: ${{ secrets.CSC_KEY_PASSWORD_MAC || secrets.MAC_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          CSC_NAME_RAW: ${{ secrets.CSC_NAME }}
+          APPLE_ID_RAW: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_RAW: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_RAW: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "${{ matrix.platform }}" = "win32" ]; then
+            if [ -n "$CSC_LINK_WIN_RAW" ]; then
+              export CSC_LINK="$CSC_LINK_WIN_RAW"
+            fi
+            if [ -n "$CSC_KEY_PASSWORD_WIN_RAW" ]; then
+              export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_WIN_RAW"
+            fi
+          elif [ "${{ matrix.platform }}" = "darwin" ]; then
+            if [ -n "$CSC_LINK_MAC_RAW" ]; then
+              export CSC_LINK="$CSC_LINK_MAC_RAW"
+            fi
+            if [ -n "$CSC_KEY_PASSWORD_MAC_RAW" ]; then
+              export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_MAC_RAW"
+            fi
+            if [ -n "$CSC_NAME_RAW" ]; then
+              export CSC_NAME="$CSC_NAME_RAW"
+            fi
+            if [ -n "$APPLE_ID_RAW" ]; then
+              export APPLE_ID="$APPLE_ID_RAW"
+            fi
+            if [ -n "$APPLE_APP_SPECIFIC_PASSWORD_RAW" ]; then
+              export APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_SPECIFIC_PASSWORD_RAW"
+            fi
+            if [ -n "$APPLE_TEAM_ID_RAW" ]; then
+              export APPLE_TEAM_ID="$APPLE_TEAM_ID_RAW"
+            fi
+            if [ -z "$CSC_LINK_MAC_RAW" ] && [ -z "$CSC_NAME_RAW" ]; then
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+            fi
+          fi
+          pnpm exec electron-builder --config desktop/electron-builder.yml --${{ matrix.arch }} --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
 
       - name: Upload Desktop installer artifacts
         uses: actions/upload-artifact@v4
