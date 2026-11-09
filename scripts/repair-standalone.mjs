@@ -257,10 +257,6 @@ export function stageStandaloneRuntimeAssets(projectRoot, standaloneDir) {
       dst: path.join(standaloneDir, ".next", "static"),
     },
     {
-      src: path.join(projectRoot, ".next", "node_modules"),
-      dst: path.join(standaloneDir, ".next", "node_modules"),
-    },
-    {
       src: path.join(projectRoot, "src", "lib", "db", "migrations"),
       dst: path.join(standaloneDir, "src", "lib", "db", "migrations"),
     },
@@ -278,13 +274,17 @@ export function stageStandaloneRuntimeAssets(projectRoot, standaloneDir) {
     });
   }
 
-  // Remove temporary Next.js build cache inside standalone so archive tools never fail on dead cache files.
-  const cacheDir = path.join(standaloneDir, ".next", "cache");
-  if (existsSync(cacheDir)) {
-    try {
-      rmSync(cacheDir, { recursive: true, force: true });
-    } catch {
-      // Ignore removal error
+  // Remove temporary Next.js build cache and dangling tracing symlinks
+  // (`.next/node_modules/` and `.next/cache/`) inside standalone so
+  // archive tools (such as 7-Zip during NSIS packaging) never fail on dead links.
+  for (const dirName of ["node_modules", "cache"]) {
+    const candidate = path.join(standaloneDir, ".next", dirName);
+    if (existsSync(candidate)) {
+      try {
+        rmSync(candidate, { recursive: true, force: true });
+      } catch {
+        // Ignore removal error
+      }
     }
   }
 }

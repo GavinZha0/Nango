@@ -56,9 +56,6 @@ jobs:
       - name: Run desktop unit and packaging tests
         run: pnpm vitest run tests/unit/desktop/
 
-      - name: Install Electron packaging toolchain
-        run: pnpm add -D electron@^45.0.0 electron-builder@^26.0.0
-
       - name: Validate release signing secrets before packaging
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
