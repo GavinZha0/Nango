@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.1](https://github.com/GavinZha0/Nango/compare/v0.32.0...v0.32.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **desktop:** increase packaging test timeouts and prevent empty CSC_LINK ([a2875a4](https://github.com/GavinZha0/Nango/commit/a2875a4888012664a5680058b1b3566fc4a647a9))
+* **desktop:** resolve pnpm exotic subdep and macOS standalone symlink staging ([80ad452](https://github.com/GavinZha0/Nango/commit/80ad45237349c725a4bba5afc543f5546cbc8f4e))
+
 ## [0.32.0](https://github.com/GavinZha0/Nango/compare/v0.31.0...v0.32.0) (2026-11-08)
 
 
