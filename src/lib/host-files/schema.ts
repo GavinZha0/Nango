@@ -300,6 +300,7 @@ export interface DownloadOk {
   path: string;
   sizeBytes: number;
   contentType: string | null;
+  sha256: string;
 }
 
 export type DownloadEnvelope = DownloadOk | DownloadErr;

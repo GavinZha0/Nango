@@ -28,6 +28,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
 const { kernelMock } = vi.hoisted(() => ({ kernelMock: vi.fn() }));
 vi.mock("@/lib/host-files/download.server", () => ({ downloadToPath: kernelMock }));
 
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -47,16 +48,19 @@ async function download(args: {
   return (await tool.execute!(args)) as DownloadEnvelope;
 }
 
+const WIRE_SHA256 = createHash("sha256").update("real bytes from the wire").digest("hex");
+
 /** The kernel's side of a success: the bytes land, and only then. */
 async function kernelWrites({ absPath }: { absPath: string }): Promise<DownloadKernelShape> {
   await writeFile(absPath, "real bytes from the wire");
-  return { ok: true, sizeBytes: 24, contentType: "text/plain" };
+  return { ok: true, sizeBytes: 24, contentType: "text/plain", sha256: WIRE_SHA256 };
 }
 
 interface DownloadKernelShape {
   ok: true;
   sizeBytes: number;
   contentType: string | null;
+  sha256: string;
 }
 
 beforeEach(async () => {
@@ -129,15 +133,27 @@ describe("download_file — gates before the network", () => {
   });
 
   it("refuses a destination type that is not allowlisted", async () => {
-    const res = await download({
-      url: "https://example.com/payload",
-      target_path: "payload.tar.gz",
-    });
-    expect(!res.ok && res.error === "TYPE_DENIED").toBe(true);
-    // CONTRACT: the guard is on the destination name, and the message
-    // closes the "just rename it" door.
-    if (!res.ok) expect(res.message).toMatch(/[Rr]enaming/);
+    for (const target of ["payload.exe", "libfoo.so", "pkg.rpm", "disk.iso"]) {
+      const res = await download({
+        url: "https://example.com/payload",
+        target_path: target,
+      });
+      expect(!res.ok && res.error === "TYPE_DENIED").toBe(true);
+      // CONTRACT: the guard is on the destination name, and the message
+      // closes the "just rename it" door.
+      if (!res.ok) expect(res.message).toMatch(/[Rr]enaming/);
+    }
     expect(kernelMock).not.toHaveBeenCalled();
+  });
+
+  it("allows newly added source, patch, checksum, and signature extensions by default", async () => {
+    for (const target of ["src.tar.gz", "src.zip", "fix.patch", "pkg.src.rpm", "SUMS.sha256", "rel.asc"]) {
+      const res = await download({
+        url: `https://example.com/${target}`,
+        target_path: target,
+      });
+      expect(res.ok).toBe(true);
+    }
   });
 
   it("refuses a directory target", async () => {
@@ -210,12 +226,21 @@ describe("download_file — result shape", () => {
     const res = await download({ url: "https://example.com/a.txt", target_path: "a.txt" });
     expect(res.ok).toBe(true);
     if (res.ok) {
-      // CONTRACT: exactly these four keys — a `content`/`body` field would
+      // CONTRACT: exactly these five keys — a `content`/`body` field would
       // put the file into the conversation.
-      expect(Object.keys(res).sort()).toEqual(["contentType", "ok", "path", "sizeBytes"]);
+      expect(Object.keys(res).sort()).toEqual(["contentType", "ok", "path", "sha256", "sizeBytes"]);
       expect(res.path).toBe("a.txt");
       expect(res.sizeBytes).toBe(24);
+      expect(res.sha256).toBe(WIRE_SHA256);
     }
+  });
+
+  it("uses 200 MiB and 600s default budgets when config is unset", async () => {
+    const res = await download({ url: "https://example.com/a.txt", target_path: "a.txt" });
+    expect(res.ok).toBe(true);
+    const arg = kernelMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.maxBytes).toBe(209_715_200);
+    expect(arg.timeoutMs).toBe(600_000);
   });
 
   it("passes the config budgets and the jailed path to the kernel", async () => {

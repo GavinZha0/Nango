@@ -104,7 +104,11 @@ export function buildSkillsRuntime(args: BuildSkillsRuntimeArgs): SkillsRuntime 
   const getSkill = defineTool({
     name: "get_skill",
     description:
-      "Load the full SKILL.md instructions for a named skill.  Call this when the user's request matches a skill listed in the system prompt's 'Available Skills' section.  The returned text contains the procedure, when-to-use rules, and pointers to helper files reachable via get_skill_file.",
+      "Load the full SKILL.md instructions for a named skill.  Call this when " +
+      "the user's request matches a skill listed in the system prompt's 'Available Skills' section.  " +
+      "If this conversation already has the `get_skill` / `get_skill_file` result for that skill, " +
+      "reuse it directly; only reload if a prior call failed, the user says the skill changed, or needed details are missing.  " +
+      "The returned text contains the procedure, when-to-use rules, and pointers to helper files reachable via get_skill_file.",
     parameters: z.object({
       name: z
         .string()
@@ -501,7 +505,7 @@ function renderPromptBlock(
   const lines: string[] = [];
   lines.push("## Available Skills");
   lines.push(
-    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting.  Helper files inside a skill live in author-defined folders (commonly references/, scripts/, assets/, evals/) and are reachable via `get_skill_file(name, filename)`.  Scripts (.py and .sh) can be executed with `run_skill_script(name, filename)` — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd." +
+    "When a user request matches one of these skills, call `get_skill(name)` to load its full instructions before acting (if `get_skill` / `get_skill_file` results for that skill are already in this conversation, reuse them unless a call failed, the user says the skill changed, or needed details are missing).  Helper files inside a skill live in author-defined folders (commonly references/, scripts/, assets/, evals/) and are reachable via `get_skill_file(name, filename)`.  Scripts (.py and .sh) can be executed with `run_skill_script(name, filename)` — pass `datasets: [...]` for cached Parquet input at ./tmp/data/<name>/ in the sandbox cwd." +
       // Only name a tool when it is actually mounted; otherwise the model
       // would be instructed to call a tool that does not exist.
       (sshToolAvailable

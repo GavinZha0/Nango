@@ -301,3 +301,45 @@ describe("evaluateToolRisk — run_skill_script_on_ssh", () => {
     }
   });
 });
+
+describe("evaluateToolRisk — run_ssh_command patterns (A.2)", () => {
+  it("keeps non-destructive commands with --format, --rm, --cap-drop, or plain compose down at high", () => {
+    const safeCmds = [
+      "podman ps --format '{{.Names}}'",
+      "docker run --rm alpine echo ok",
+      "docker run --cap-drop=ALL alpine id",
+      "podman compose down",
+      "kubectl get pods --format=json",
+    ];
+    for (const command of safeCmds) {
+      const res = evaluateToolRisk("run_ssh_command", { serverName: "prod-01", command });
+      expect(res.riskLevel).toBe("high");
+    }
+  });
+
+  it("escalates destructive commands to critical", () => {
+    const destructiveCmds = [
+      "rm -rf /tmp/data",
+      "docker rmi my-image:latest",
+      "unlink /var/run/app.sock",
+      "shred -u secret.key",
+      "docker system prune -af",
+      "podman compose down -v",
+      "podman compose down --volumes",
+      "git reset --hard HEAD~1",
+      "git clean -fd",
+      "git checkout -- .",
+      "git push -f origin main",
+      "kubectl scale deploy/web --replicas=0",
+      "mkfs.ext4 /dev/sdb",
+      "dd if=/dev/zero of=/dev/sdb bs=1M",
+      "poweroff",
+    ];
+    for (const command of destructiveCmds) {
+      const res = evaluateToolRisk("run_ssh_command", { serverName: "prod-01", command });
+      expect(res.riskLevel).toBe("critical");
+      expect(res.sideEffects).toBe("destructive");
+      expect(res.headlessAllowed).toBe(false);
+    }
+  });
+});

@@ -258,8 +258,8 @@ Budgets for the `download_file` tool. The destination jail is `host.file.root` (
 
 | Key | Default | Type | Description |
 |---|---|---|---|
-| `download.max_bytes` | 52428800 | number | Max response body in bytes (50 MB) |
-| `download.timeout` | 60 | number | Deadline in seconds for the whole transfer, redirects included |
+| `download.max_bytes` | 209715200 | number | Max response body in bytes (200 MiB) |
+| `download.timeout` | 600 | number | Deadline in seconds for the whole transfer, redirects included |
 | `download.max_redirects` | 5 | number | Redirect hops to follow before refusing |
 | `download.allowed_extensions` | dsc,txt,md,… | string | Comma-separated file suffixes the destination name may end in |
 | `download.allow_private_network` | false | boolean | Escape hatch: permit private/loopback targets, disabling the SSRF guard |

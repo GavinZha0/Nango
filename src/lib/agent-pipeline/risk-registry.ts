@@ -208,15 +208,31 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
 ]);
 
 const DANGEROUS_SSH_PATTERNS = [
-  /\brm\b/i,
-  /\bdelete\b/i,
-  /\bdrop\b/i,
+  /(?<![\w-])rm\b/i,
+  /(?<![\w-])rmi\b/i,
+  /\bdelete\b/i, // Unbounded on the left to catch flags like `rsync --delete`
+  /(?<![\w-])drop\b/i,
   /\bmv\b/i,
   /\btruncate\b/i,
-  /\bformat\b/i,
+  /\bunlink\b/i,
+  /\bshred\b/i,
+  /\bprune\b/i,
+  /\bdown\b[^\n;|&]*(?:--volumes\b|-[a-zA-Z]*v\b)/i,
+  /\bgit\s+reset\s+--hard\b/i,
+  /\bgit\s+clean\b/i,
+  /\bgit\s+checkout\s+--(?:\s|$)/i,
+  /\bgit\s+push\b[^\n;|&]*(?:--force(?:-with-lease)?\b|-f\b)/i,
+  /\bscale\b[^\n;|&]*--replicas=0\b/i,
+  /\bmkfs(?:\.[a-z0-9]+)?\b/i,
+  /\bwipefs\b/i,
+  /\bfdisk\b/i,
+  /\bparted\b/i,
+  /\bdd\b[^\n;|&]*\bof=/i,
   /\bshutdown\b/i,
+  /\bpoweroff\b/i,
+  /\bhalt\b/i,
   /\breboot\b/i,
-  /\bkill\b/i,
+  /(?<![\w-])kill\b/i,
 ];
 
 const WRITE_SQL_PATTERNS = [

@@ -33,9 +33,9 @@ import {
 } from "./schema";
 
 /** Defaults; all admin-tunable in Admin → Config. */
-const DEFAULT_MAX_BYTES = 52_428_800; // 50 MiB
+const DEFAULT_MAX_BYTES = 209_715_200; // 200 MiB
 const DEFAULT_MAX_REDIRECTS = 5;
-const DEFAULT_TIMEOUT_SECONDS = 60;
+const DEFAULT_TIMEOUT_SECONDS = 600;
 const DEFAULT_ALLOWED_EXTENSIONS = [
   "dsc",
   "txt",
@@ -59,6 +59,21 @@ const DEFAULT_ALLOWED_EXTENSIONS = [
   "sh",
   "html",
   "htm",
+  "tar.gz",
+  "tgz",
+  "tar.xz",
+  "txz",
+  "tar.bz2",
+  "tbz2",
+  "tar.zst",
+  "tar.lz",
+  "zip",
+  "diff.gz",
+  "patch",
+  "src.rpm",
+  "asc",
+  "sig",
+  "sha256",
 ].join(",");
 
 function fail(error: DownloadError, message: string): DownloadEnvelope {
@@ -95,7 +110,7 @@ export function buildDownloadFileTool(): ToolDefinition {
       "the server, so always end it with an explicit file name. The parent " +
       "directory must already exist — create it with `create_folder` first. " +
       "The bytes do NOT enter this conversation: you get " +
-      "`{ok, path, sizeBytes, contentType}` and nothing else. To use what " +
+      "`{ok, path, sizeBytes, contentType, sha256}` and nothing else. To use what " +
       "you downloaded, call `read_file` on the returned `path` (text only; " +
       "a binary comes back NOT_TEXT). " +
       "Each gate is a hard refusal: https only and the host must resolve " +
@@ -176,6 +191,7 @@ export function buildDownloadFileTool(): ToolDefinition {
         path: resolved.relPath,
         sizeBytes: outcome.sizeBytes,
         contentType: outcome.contentType,
+        sha256: outcome.sha256,
       };
     },
   });

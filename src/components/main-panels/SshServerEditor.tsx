@@ -313,7 +313,9 @@ export function SshServerEditor({
       port: Number(form.port),
       // Omit the field entirely when blank.
       ...(fp ? { knownHostFingerprint: fp } : {}),
-      commandAllow: allowParsed,
+      // CONTRACT: An empty allowlist means unrestricted (`null`), whereas `[]`
+      // means deny-all at runtime. Never submit `[]` from a blank textarea.
+      commandAllow: allowParsed.length > 0 ? allowParsed : null,
       commandApprove: approveParsed,
       commandDeny: denyParsed,
       loginShell: form.loginShell,

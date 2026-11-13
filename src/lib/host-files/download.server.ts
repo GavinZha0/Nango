@@ -13,7 +13,7 @@
 
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { rename, rm, unlink } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
@@ -40,7 +40,7 @@ export type DownloadKernelErrorCode =
   | "WRITE_FAILED";
 
 export type DownloadKernelResult =
-  | { ok: true; sizeBytes: number; contentType: string | null }
+  | { ok: true; sizeBytes: number; contentType: string | null; sha256: string }
   | { ok: false; error: DownloadKernelErrorCode; message: string };
 
 export interface DownloadRequest {
@@ -185,6 +185,7 @@ async function streamToDisk(
       ok: true,
       sizeBytes: budget.totalBytes,
       contentType: res.headers.get("content-type"),
+      sha256: budget.digestHex(),
     };
   } catch (e) {
     return transferFailure(e, req);
@@ -199,9 +200,11 @@ async function streamToDisk(
   }
 }
 
-/** Counts bytes in flight and aborts the pipeline once the cap is crossed. */
+/** Counts bytes in flight, hashes accepted chunks, and aborts once the cap is crossed. */
 class ByteBudget extends Transform {
   totalBytes = 0;
+  private readonly hash = createHash("sha256");
+
   constructor(private readonly maxBytes: number) {
     super();
   }
@@ -212,8 +215,13 @@ class ByteBudget extends Transform {
       done(new OverBudgetError(this.totalBytes));
       return;
     }
+    this.hash.update(chunk);
     this.push(chunk);
     done();
+  }
+
+  digestHex(): string {
+    return this.hash.digest("hex");
   }
 }
 

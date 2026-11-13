@@ -41,8 +41,8 @@ Both budgets floor at 1 byte: a zero, negative or fractional value is treated as
 mis-configuration, not as a switch. A read budget of 0 would otherwise return an empty page that
 still claims there is more to come — a refusal the agent cannot escape — and a write budget of 0
 would accept nothing while the tool stayed mounted.
-| `download.max_bytes` | 52428800 | Bytes `download_file` may save (50 MB). Enforced on the stream, not just on `Content-Length`. |
-| `download.timeout` | 60 | Seconds for the whole transfer — redirects, headers and body included. One deadline, no per-call override. |
+| `download.max_bytes` | 209715200 | Bytes `download_file` may save (200 MiB). Enforced on the stream, not just on `Content-Length`. |
+| `download.timeout` | 600 | Seconds for the whole transfer — redirects, headers and body included. One deadline, no per-call override. |
 | `download.max_redirects` | 5 | Redirect hops to follow before refusing. |
 | `download.allowed_extensions` | `dsc,txt,md,…` | Comma-separated suffixes the **destination** name may end in. Matched against the whole file name, so `tar.gz` is a valid entry. |
 | `download.allow_private_network` | `false` | Escape hatch that lets `download_file` reach loopback/private/link-local addresses. Turning it on removes the SSRF guard entirely. |
@@ -170,9 +170,9 @@ Envelope: `{ ok: true, kind: "file", path, content, sizeBytes, modifiedAt, start
 
 ## 8. Download semantics
 
-`download_file` takes `url`, `target_path` and optional `overwrite`, and returns `{ ok: true, path, sizeBytes, contentType }`.
+`download_file` takes `url`, `target_path` and optional `overwrite`, and returns `{ ok: true, path, sizeBytes, contentType, sha256 }`.
 
-**The bytes never enter the conversation.** That envelope is the contract (`DownloadOk` in `schema.ts` carries no content field): the file lands on disk and `read_file` is the only way to look at it, which keeps a 50 MB download out of the context window and makes a binary payload a non-event. `target_path` is always chosen by the agent — the file name is never taken from the URL or from `Content-Disposition`, so a server cannot steer where or what gets written.
+**The bytes never enter the conversation.** That envelope is the contract (`DownloadOk` in `schema.ts` carries no content field): the file lands on disk and `read_file` is the only way to look at it, which keeps a 200 MiB download out of the context window and makes a binary payload a non-event. `target_path` is always chosen by the agent — the file name is never taken from the URL or from `Content-Disposition`, so a server cannot steer where or what gets written.
 
 Gate order in `download-runtime-tools.ts` is deliberate: every refusal that can be decided statically happens **before** the first packet leaves the process.
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const lookupMock = vi.fn();
@@ -91,8 +92,14 @@ describe("downloadToPath — success", () => {
     fetchMock.mockResolvedValue(response({ chunks: ["abc", "def"] }));
 
     const out = await downloadToPath(req());
+    const expectedHash = createHash("sha256").update("abcdef").digest("hex");
 
-    expect(out).toEqual({ ok: true, sizeBytes: 6, contentType: "text/plain" });
+    expect(out).toEqual({
+      ok: true,
+      sizeBytes: 6,
+      contentType: "text/plain",
+      sha256: expectedHash,
+    });
     expect(await readFile(absPath, "utf8")).toBe("abcdef");
   });
 

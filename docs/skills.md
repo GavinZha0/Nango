@@ -54,7 +54,10 @@ the read tools are not. Script failures follow the same rule (`SCRIPT_NOT_FOUND`
 for the identical KB contract.
 
 Token cost is bounded by the description list, not by the full skill
-bodies. `run_skill_script_on_ssh` is mounted only when **both** at least
+bodies. Both `get_skill` and the `## Available Skills` block instruct the
+model to reuse `get_skill` / `get_skill_file` results already present in
+the conversation unless a prior call failed, the user states the skill
+changed, or required details are missing. `run_skill_script_on_ssh` is mounted only when **both** at least
 one bound skill declares `scripts-on-ssh` **and** the agent has at least
 one bound `ssh_server`. `run_skill_sql_script` is mounted only when
 **both** at least one bound skill declares `scripts-on-db` **and** the
