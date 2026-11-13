@@ -11,7 +11,8 @@ import { recordEvent, readEvents } from "@/lib/runner/event-store";
 import { subscribe, publish, type RunnerEvent } from "@/lib/runner/event-bus";
 import { RunSequenceRegistry } from "./sequence-registry";
 import { getConfigMs } from "@/lib/config";
-import { evaluateToolRisk } from "@/lib/agent-pipeline/risk-registry";
+import { buildMcpRiskMeta, evaluateToolRisk } from "@/lib/agent-pipeline/risk-registry";
+import type { McpToolCallMeta } from "@/lib/agent-pipeline/types";
 import { childLogger } from "@/lib/observability/logger";
 
 const log = childLogger({ component: "tool-approval" });
@@ -66,13 +67,14 @@ async function resolveToolCallId(runId: string, toolName: string): Promise<strin
 async function evaluateApprovalNeeded(
   toolName: string,
   args: unknown,
-  approvalMode: "always" | "auto" | "never"
+  approvalMode: "always" | "auto" | "never",
+  mcp?: McpToolCallMeta,
 ): Promise<boolean> {
   if (approvalMode === "never") return false;
   if (approvalMode === "always") return true;
 
   // Auto mode evaluation via Tool Risk Registry
-  const evalResult = evaluateToolRisk(toolName, args, undefined, "lenient");
+  const evalResult = evaluateToolRisk(toolName, args, buildMcpRiskMeta(mcp), "lenient");
   if (evalResult.requiresApproval) {
     log.info({ toolName, reason: evalResult.reason, riskLevel: evalResult.riskLevel }, "auto approval triggered: tool risk registry evaluation");
     return true;
@@ -183,14 +185,15 @@ export async function runToolApprovalGate(params: {
   /** AI SDK toolCallId (execute's args[1].toolCallId) — preferred over
    *  event lookup to avoid retry race conditions. */
   toolCallId?: string;
+  mcp?: McpToolCallMeta;
   approvalMode: "always" | "auto" | "never";
   runId: string;
   userId: string;
 }): Promise<ApprovalGateResult> {
-  const { toolName, args: toolArgs, approvalMode, runId, userId } = params;
+  const { toolName, args: toolArgs, approvalMode, runId, userId, mcp } = params;
   if (approvalMode === "never") return { proceed: true };
 
-  const needsApproval = await evaluateApprovalNeeded(toolName, toolArgs, approvalMode);
+  const needsApproval = await evaluateApprovalNeeded(toolName, toolArgs, approvalMode, mcp);
   if (!needsApproval) return { proceed: true };
 
   const approvalId = crypto.randomUUID();

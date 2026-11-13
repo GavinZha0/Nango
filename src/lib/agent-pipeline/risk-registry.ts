@@ -11,12 +11,35 @@
 import "server-only";
 
 import { getToolRiskOverride } from "./guardrail-service";
+import type { McpToolCallMeta } from "./types";
+
+export function buildMcpRiskMeta(mcp?: McpToolCallMeta): ToolRiskMeta | undefined {
+  if (!mcp) return undefined;
+  return {
+    source: "mcp",
+    mcpServerId: mcp.mcpServerId,
+    rawToolName: mcp.rawToolName,
+    ...(mcp.annotations?.readOnlyHint !== undefined
+      ? { readOnlyHint: mcp.annotations.readOnlyHint }
+      : {}),
+    ...(mcp.annotations?.destructiveHint !== undefined
+      ? { destructiveHint: mcp.annotations.destructiveHint }
+      : {}),
+    ...(mcp.annotations?.idempotentHint !== undefined
+      ? { idempotentHint: mcp.annotations.idempotentHint }
+      : {}),
+  };
+}
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type SideEffects = "none" | "read" | "write" | "destructive";
 export type McpDefaultPolicy = "lenient" | "annotation" | "require";
 
 export interface ToolRiskMeta {
+  /** Explicit origin so MCP tools never collide with built-in risk entries */
+  readonly source?: "builtin" | "mcp";
+  /** Original MCP tool name before agent namespacing */
+  readonly rawToolName?: string;
   /** MCP Server ID for scoped risk evaluation */
   readonly mcpServerId?: string;
   /** MCP Standard Annotation: Read-only operation without side-effects */
@@ -226,8 +249,9 @@ export function evaluateToolRisk(
   meta?: ToolRiskMeta,
   mcpDefaultPolicy: McpDefaultPolicy = "lenient",
 ): ToolRiskEvaluation {
-  // 1. Built-in tool lookup
-  const builtinMeta = BUILTIN_TOOL_RISK_MAP.get(toolName);
+  const isMcp = meta?.source === "mcp" || Boolean(meta?.mcpServerId);
+  // 1. Built-in tool lookup (never match MCP tools against built-in names)
+  const builtinMeta = isMcp ? undefined : BUILTIN_TOOL_RISK_MAP.get(toolName);
   const effectiveMeta: ToolRiskMeta = {
     ...builtinMeta,
     ...meta,
@@ -264,8 +288,8 @@ export function evaluateToolRisk(
     }
   }
 
-  // 3. Dynamic parameter analysis (assessArgs) for SSH & SQL
-  if (toolName === "run_ssh_command" && args && typeof args === "object") {
+  // 3. Dynamic parameter analysis (assessArgs) for built-in SSH/SQL/slides tools
+  if (!isMcp && toolName === "run_ssh_command" && args && typeof args === "object") {
     const cmd = (args as { command?: unknown }).command;
     if (typeof cmd === "string" && DANGEROUS_SSH_PATTERNS.some((p) => p.test(cmd))) {
       riskLevel = "critical";
@@ -273,7 +297,7 @@ export function evaluateToolRisk(
       headlessAllowed = false;
       reason = "SSH command contains dangerous operation";
     }
-  } else if (toolName === "run_skill_script_on_ssh" && args && typeof args === "object") {
+  } else if (!isMcp && toolName === "run_skill_script_on_ssh" && args && typeof args === "object") {
     // SECURITY: Only scan the LLM-supplied `args` array, never the reviewed
     // script text. Reviewed scripts legitimately contain words like `rm`
     // (e.g. removing scratch containers) that DANGEROUS_SSH_PATTERNS would match.
@@ -289,14 +313,14 @@ export function evaluateToolRisk(
       headlessAllowed = false;
       reason = "SSH skill script argument contains dangerous operation";
     }
-  } else if (toolName === "extract_dataset_by_sql" && args && typeof args === "object") {
+  } else if (!isMcp && toolName === "extract_dataset_by_sql" && args && typeof args === "object") {
     const sql = (args as { sql_text?: unknown }).sql_text;
     if (typeof sql === "string" && WRITE_SQL_PATTERNS.some((p) => p.test(sql))) {
       riskLevel = "high";
       sideEffects = "write";
       reason = "SQL query contains write operation";
     }
-  } else if (toolName === "edit_bento_slides") {
+  } else if (!isMcp && toolName === "edit_bento_slides") {
     let action: unknown;
     if (args && typeof args === "object") {
       action = (args as { action?: unknown }).action;
@@ -319,8 +343,9 @@ export function evaluateToolRisk(
 
   // 4. Apply DB tool risk overrides if present
   // SECURITY: Override cannot lower dynamically-escalated risk from parameter analysis
-  const source = builtinMeta ? "builtin" : "mcp";
-  const override = getToolRiskOverride(source, meta?.mcpServerId, toolName);
+  const source = isMcp ? "mcp" : builtinMeta ? "builtin" : "mcp";
+  const overrideToolName = isMcp && meta?.rawToolName ? meta.rawToolName : toolName;
+  const override = getToolRiskOverride(source, meta?.mcpServerId, overrideToolName);
   if (override && override.enabled) {
     if (override.riskLevel) {
       // Only allow override if it does not lower the current risk level

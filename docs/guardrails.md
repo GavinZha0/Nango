@@ -165,7 +165,7 @@ An admin-only single-page workbench (`src/app/(workspace)/admin/guardrails/page.
 4. **Interception Audit Logs**: Real-time stream of blocked or warned actions.
 
 ### 5.2 Database Tables
-- **`tool_risk_override`**: Stores manual admin overrides keyed by `(source, mcp_server_id, tool_name)`.
+- **`tool_risk_override`**: Stores manual admin overrides keyed by `(source, mcp_server_id, tool_name)`. At runtime, MCP tool calls carry `mcpServerId` and `rawToolName` via `ToolCall.mcp` so overrides match `("mcp", mcpServerId, rawToolName)` regardless of the agent-facing namespace prefix, and MCP tools never match `BUILTIN_TOOL_RISK_MAP` or `APPROVAL_EXEMPT_TOOLS`.
 - **`safety_policy`**: Stores rule definitions (pattern, category, severity, action, scope).
 - **`safety_interception_log`**: Append-only security audit log recording intercepted actions, run ID, user ID, and matched policy.
 

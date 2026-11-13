@@ -6,8 +6,12 @@
 
 import "server-only";
 
+import { inArray } from "drizzle-orm";
+
 import { BuiltInAgent } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
+import { db } from "@/lib/db";
+import { McpServerTable } from "@/lib/db/schema";
 
 import { agentPool } from "@/lib/builtin-agents";
 import { resolveLanguageModel } from "@/lib/builtin-agents/model-resolver";
@@ -24,6 +28,11 @@ import {
   buildBentoSlidesPromptBlock,
 } from "@/lib/outcomes/prompt-block.server";
 import { mcpProviderPool } from "@/lib/mcp";
+import {
+  buildMcpToolPrefix,
+  namespaceMcpProvider,
+  resolveAgentMcpPrefixes,
+} from "@/lib/mcp/tool-namespace";
 import { buildSshHostsPromptBlock } from "@/lib/ssh/prompt-block.server";
 import { buildKbPromptBlock } from "@/lib/kb/prompt-block.server";
 import { filterVisibleKbCollectionIds } from "@/lib/kb/access";
@@ -238,6 +247,25 @@ export async function buildBuiltinAgents(
     const runnableKbIds = kbCollectionIds.filter((id) => visibleKbIds.has(id));
 
     // Phase 3 — borrow MCP providers for the still-visible servers.
+    const mcpMetaRows =
+      runnableMcpIds.length > 0
+        ? await db
+            .select({
+              id: McpServerTable.id,
+              name: McpServerTable.name,
+              group: McpServerTable.group,
+            })
+            .from(McpServerTable)
+            .where(inArray(McpServerTable.id, runnableMcpIds))
+        : [];
+    const mcpPrefixMap = resolveAgentMcpPrefixes(
+      mcpMetaRows.map((row) => ({
+        serverId: row.id,
+        group: row.group,
+        name: row.name,
+      })),
+    );
+
     const providers: GracefulMcpProvider[] = [];
     for (const mcpServerId of runnableMcpIds) {
       try {
@@ -245,7 +273,12 @@ export async function buildBuiltinAgents(
           mcpServerId,
         );
         borrowed.push({ serverId: mcpServerId, provider });
-        providers.push(provider);
+        const prefix =
+          mcpPrefixMap.get(mcpServerId) ??
+          buildMcpToolPrefix({ serverId: mcpServerId, name: provider.label });
+        providers.push(
+          namespaceMcpProvider(provider, { serverId: mcpServerId, prefix }),
+        );
 
         // Borrow can succeed while discovery latched earlier as
         // failed. Inspect health on every borrow so the user-visible

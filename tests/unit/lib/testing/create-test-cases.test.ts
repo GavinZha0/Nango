@@ -179,6 +179,7 @@ describe("create_test_cases tool", () => {
             createdBy: "user-123",
           },
         ],
+        [],
         [
           {
             id: 101,
@@ -399,7 +400,7 @@ describe("create_test_cases tool", () => {
       (uniqueError as unknown as { code: string }).code = "23505";
       dbMock._chain.returning.mockRejectedValueOnce(uniqueError);
 
-      dbMock.$enqueue([{ name: "Existing Case 1" }]);
+      dbMock.$enqueue([], [{ name: "Existing Case 1" }]);
 
       await expect(
         tool.execute!({

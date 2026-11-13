@@ -302,3 +302,13 @@ calls — not a shared cache.
 
 ---
 
+## 6. MCP Tool Namespacing (`src/lib/mcp/tool-namespace.ts`)
+
+**CONTRACT**: Every MCP tool exposed to a Built-in agent is renamed to `<prefix>_<rawToolName>` in `dispatch/builtin.ts` via `namespaceMcpProvider`, while upstream `client.callTool` calls and `McpProviderPool` continue using `rawToolName`.
+
+- **Prefix derivation**: `buildMcpToolPrefix({ group, name, serverId })` joins trimmed non-empty `group` and `name` with `_`, sanitizes to `[A-Za-z0-9_-]`, falls back to `mcp-<serverId[:6]>` when empty, and truncates to 24 chars (`17 + '-' + 6-char sha1 base36`). Collisions within the same agent are disambiguated by `resolveAgentMcpPrefixes` (sorted by `serverId`, appending `-${serverId[:4]}` from the second server onward).
+- **Length cap**: `toAgentToolName` enforces `<= 64` chars by truncating `rawToolName` and appending `-${6-char sha1 base36}`.
+- **Origin metadata**: `namespaceMcpProvider` attaches `MCP_TOOL_META` (`{ source: "mcp", mcpServerId, rawToolName, annotations }`) so downstream middlewares never confuse MCP tools with built-in tools. Modifying a server's `group` or `name` changes its agent-facing tool names; historical run records retain the old names.
+
+---
+

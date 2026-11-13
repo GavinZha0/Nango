@@ -20,7 +20,7 @@ import { getConfigBoolean, getConfigNumber } from "@/lib/config";
 import { defineToolMiddleware } from "./compose";
 import { loopDetectionMiddleware } from "./loop-detection";
 import { toolSafetyPolicyMiddleware } from "./tool-safety";
-import { evaluateToolRisk } from "./risk-registry";
+import { buildMcpRiskMeta, evaluateToolRisk } from "./risk-registry";
 import { toolResultSanitizationMiddleware } from "./sanitizer";
 import { getGuardrailConfigCache, recordInterceptionLog } from "./guardrail-service";
 import type { ToolMiddleware } from "./types";
@@ -57,11 +57,13 @@ export function toolApprovalMiddleware(opts: {
     name: "tool-approval",
     order: 40,
     beforeToolCall: async (ctx, call) => {
-      if (opts.exemptTools.has(call.toolName)) return { action: "pass" };
+      // SECURITY: MCP tools are never exempt from approval, even if a raw
+      // tool name happens to collide with a built-in exempt tool.
+      if (!call.mcp && opts.exemptTools.has(call.toolName)) return { action: "pass" };
 
       // G20 Headless Deny — immediately reject tools requiring manual approval in no-user runs
       if (ctx.isHeadless) {
-        const risk = evaluateToolRisk(call.toolName, call.args);
+        const risk = evaluateToolRisk(call.toolName, call.args, buildMcpRiskMeta(call.mcp));
         if (risk.requiresApproval || !risk.headlessAllowed) {
           // Log the Headless Deny event
           if (ctx.runId) {
@@ -75,7 +77,13 @@ export function toolApprovalMiddleware(opts: {
               toolName: call.toolName,
               action: "block",
               severity: risk.riskLevel === "critical" || risk.riskLevel === "high" ? risk.riskLevel : "medium",
-              payload: { reason: "Tool requires manual approval but was executed headlessly", riskLevel: risk.riskLevel },
+              payload: {
+                reason: "Tool requires manual approval but was executed headlessly",
+                riskLevel: risk.riskLevel,
+                ...(call.mcp
+                  ? { mcpServerId: call.mcp.mcpServerId, rawToolName: call.mcp.rawToolName }
+                  : {}),
+              },
             });
           }
 
@@ -96,6 +104,7 @@ export function toolApprovalMiddleware(opts: {
         toolName: call.toolName,
         args: call.args,
         toolCallId: call.toolCallId,
+        mcp: call.mcp,
         approvalMode: opts.approvalMode,
         runId: ctx.runId,
         userId: ctx.userId,

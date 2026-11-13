@@ -13,6 +13,7 @@ import {
   WebAutoCaseTable,
 } from "@/lib/db/schema";
 import { canEditResource } from "@/lib/auth/permissions";
+import { loadMcpPrefixStripper } from "./mcp-tool-name";
 import { isUniqueViolation } from "@/lib/http/validation";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
@@ -177,16 +178,22 @@ export function buildCreateTestCasesTool(ctx: TesterToolContext): ToolDefinition
           throw new Error(`Permission denied: You cannot create cases in this suite.`);
         }
 
+        const stripPrefix = await loadMcpPrefixStripper(suiteRow.mcpServerId);
+        const normalizedCases = cases.map((c) => ({
+          ...c,
+          toolName: c.toolName ? stripPrefix(c.toolName) : null,
+        }));
+
         let inserted: Array<{ id: number; name: string; toolName: string | null; assertions: unknown }>;
         try {
           inserted = await db.transaction(async (tx) => {
             return tx
               .insert(VerificationCaseTable)
               .values(
-                cases.map((c) => ({
+                normalizedCases.map((c) => ({
                   suiteId,
                   name: c.name,
-                  toolName: c.toolName ?? null,
+                  toolName: c.toolName,
                   input: c.input ?? {},
                   assertions: normalizeAndValidateAssertions(
                     c.assertions ?? [],

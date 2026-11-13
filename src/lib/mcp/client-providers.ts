@@ -25,6 +25,10 @@ import {
 
 import { normalizeAndDeduplicateMcpResult } from "@/lib/mcp/tool-result-utils";
 import { createStdioTransport } from "@/lib/mcp/stdio-spawn.server";
+import {
+  MCP_TOOL_ANNOTATIONS,
+  type McpToolAnnotations,
+} from "@/lib/mcp/tool-namespace";
 import { dynamicTool, jsonSchema } from "ai";
 import type { MCPClientProvider } from "@/lib/copilot/index.server";
 
@@ -219,6 +223,7 @@ interface RawMcpTool {
   name: string;
   description?: string;
   inputSchema?: Record<string, unknown>;
+  annotations?: McpToolAnnotations;
 }
 
 /**
@@ -314,7 +319,10 @@ function wrapTools(
         return normalizeAndDeduplicateMcpResult(result, { parseForUi: false });
       },
     });
-    Object.assign(baseTool, { name: raw.name });
+    Object.assign(baseTool, {
+      name: raw.name,
+      ...(raw.annotations ? { [MCP_TOOL_ANNOTATIONS]: raw.annotations } : {}),
+    });
     wrapped[raw.name] = baseTool;
   }
   return wrapped;

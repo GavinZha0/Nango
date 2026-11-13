@@ -7,6 +7,7 @@
 import "server-only";
 
 import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
+import { getMcpToolMeta } from "@/lib/mcp/tool-namespace";
 import type {
   MiddlewareContext,
   ToolCall,
@@ -76,12 +77,22 @@ export function composeToolPipeline(
 
     const original = tool.execute.bind(tool);
     const toolName = tool.name ?? fallbackName ?? "unknown_tool";
+    const mcpMeta = getMcpToolMeta(tool);
 
     const wrappedExecute = async (...rawArgs: unknown[]): Promise<unknown> => {
       const call: ToolCall = {
         toolName,
         args: rawArgs[0],
         toolCallId: (rawArgs[1] as { toolCallId?: string } | undefined)?.toolCallId,
+        ...(mcpMeta
+          ? {
+              mcp: {
+                mcpServerId: mcpMeta.mcpServerId,
+                rawToolName: mcpMeta.rawToolName,
+                ...(mcpMeta.annotations ? { annotations: mcpMeta.annotations } : {}),
+              },
+            }
+          : {}),
       };
       // Innermost continuation → original execute with the original args,
       // EXCEPT the first arg is replaced by the potentially mutated args.

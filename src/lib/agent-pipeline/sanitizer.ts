@@ -104,11 +104,14 @@ function processImageContent(
   });
 }
 
+import type { McpToolCallMeta } from "./types";
+
 /**
  * Determine if a tool is external (Web search, external MCP server)
  * vs a local trusted system tool (SQL, local bash, file read).
  */
-export function isExternalTool(toolName: string): boolean {
+export function isExternalTool(toolName: string, mcp?: McpToolCallMeta): boolean {
+  if (mcp) return true;
   if (toolName === "web_search" || toolName === "web_fetch") return true;
   // If it's not a known built-in tool, treat as external MCP tool
   if (!BUILTIN_TOOL_RISK_MAP.has(toolName)) return true;
@@ -138,7 +141,7 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
             call.toolCallId,
           );
 
-          if (isExternalTool(call.toolName)) {
+          if (isExternalTool(call.toolName, call.mcp)) {
             const sanitizedContent = processedContent.map((entry) => {
               if (entry.type === "text" && typeof entry.text === "string") {
                 // Temporarily bypass wrapUntrustedContext to prevent breaking structured JSON data
@@ -153,7 +156,7 @@ export function toolResultSanitizationMiddleware(): ToolMiddleware {
       }
 
       // Only sanitize external tools
-      if (!isExternalTool(call.toolName)) {
+      if (!isExternalTool(call.toolName, call.mcp)) {
         return rawResult;
       }
 

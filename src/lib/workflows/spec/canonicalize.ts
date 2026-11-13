@@ -93,6 +93,8 @@ export const SUPPORTED_EXECUTOR_KEYS: ReadonlySet<string> = new Set<string>([
  */
 export interface ToolMetadata {
   source?: string;
+  /** Optional canonical name to rewrite `inputs.name` (e.g. namespaced MCP tool -> `mcp__<server>__<raw>`). */
+  canonicalName?: string;
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
   outputs?: readonly string[];
@@ -186,17 +188,19 @@ async function canonicalizeToolNode(
     }
   }
 
+  const effectiveName = meta.canonicalName ?? toolName;
   const canonical: CanonicalToolNode = {
     ...n,
     schema_version: NODE_SCHEMA_VERSIONS.tool,
     inputs: {
       ...n.inputs,
+      name: effectiveName,
       ...(source ? { source } : {}),
     },
   };
   // Build input_schema describing the wrapper shape:
   //   { name: const, arguments: <registry-provided args schema> }
-  canonical.input_schema = buildToolInputSchema(toolName, meta.input_schema);
+  canonical.input_schema = buildToolInputSchema(effectiveName, meta.input_schema);
   if (meta.output_schema !== undefined) canonical.output_schema = meta.output_schema;
   const outputs = deriveToolOutputs(meta);
   if (outputs !== undefined) canonical.outputs = outputs;

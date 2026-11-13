@@ -23,6 +23,10 @@ import type { AgentRole } from "@/lib/db/schema";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { computeDisplayName } from "@/lib/orchestration/display-name";
 import { buildUserToolCatalog } from "@/lib/builtin-tools/build-user-catalog";
+import {
+  resolveAgentMcpPrefixes,
+  toAgentToolName,
+} from "@/lib/mcp/tool-namespace";
 import { childLogger } from "@/lib/observability/logger";
 import type { ToolMetadata } from "@/lib/workflows";
 import type { SaveArtifactDeps } from "./save-artifact";
@@ -43,6 +47,16 @@ export function buildProductionSaveDeps(ownerId: string): SaveArtifactDeps {
   // the same save invocation).
   let toolCatalogP: Promise<Map<string, { parameters: unknown }>> | undefined;
   let agentCatalogP: Promise<Map<string, string>> | undefined;
+  let mcpServersP:
+    | Promise<
+        Array<{
+          id: string;
+          name: string;
+          group: string | null;
+          tools: Array<{ name: string; input_schema?: unknown }> | null;
+        }>
+      >
+    | undefined;
 
   return {
     async getToolMetadata(toolName: string): Promise<ToolMetadata | null> {
@@ -57,10 +71,11 @@ export function buildProductionSaveDeps(ownerId: string): SaveArtifactDeps {
       }
 
       // Check active MCP servers accessible by ownerId
-      const mcpServers = await db
+      mcpServersP ??= db
         .select({
           id: McpServerTable.id,
           name: McpServerTable.name,
+          group: McpServerTable.group,
           tools: McpServerTable.tools,
         })
         .from(McpServerTable)
@@ -73,13 +88,49 @@ export function buildProductionSaveDeps(ownerId: string): SaveArtifactDeps {
             ),
           ),
         );
+      const mcpServers = await mcpServersP;
+      const prefixMap = resolveAgentMcpPrefixes(
+        mcpServers.map((s) => ({
+          serverId: s.id,
+          group: s.group,
+          name: s.name,
+        })),
+      );
 
+      // 1. Match namespaced agent tool name (`<prefix>_<raw>` or 64-char truncated)
+      //    or canonical `mcp__<serverName>__<raw>` first to avoid collisions.
+      for (const server of mcpServers) {
+        if (!server.tools || !Array.isArray(server.tools)) continue;
+        const prefix = prefixMap.get(server.id);
+        const canonicalPrefix = `mcp__${server.name}__`;
+        const match = server.tools.find((t) => {
+          if (!t?.name) return false;
+          if (prefix && toAgentToolName(prefix, t.name) === toolName) return true;
+          if (toolName.startsWith(canonicalPrefix)) {
+            return t.name === toolName.slice(canonicalPrefix.length);
+          }
+          return false;
+        });
+        if (match) {
+          return {
+            source: `mcp:${server.id}`,
+            canonicalName: `${canonicalPrefix}${match.name}`,
+            input_schema: (match.input_schema as Record<string, unknown>) ?? {
+              type: "object",
+              additionalProperties: true,
+            },
+          };
+        }
+      }
+
+      // 2. Legacy fallback: raw tool name without prefix
       for (const server of mcpServers) {
         if (server.tools && Array.isArray(server.tools)) {
           const match = server.tools.find((t) => t && t.name === toolName);
           if (match) {
             return {
               source: `mcp:${server.id}`,
+              canonicalName: `mcp__${server.name}__${match.name}`,
               input_schema: (match.input_schema as Record<string, unknown>) ?? {
                 type: "object",
                 additionalProperties: true,

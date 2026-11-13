@@ -354,6 +354,7 @@ Defined in `verification_suite.variables`:
 
 ### 8.4 Case Dialog (`NewCaseDialog.tsx`)
 - **Field order**: `MCP Server` -> `MCP Tool` -> `Suite Name` -> `Case Name`.
+- **Two-layer prefix separation**: Verification suites always store and execute the MCP server's raw `toolName` (with suite `toolPrefixRule` handling any upstream server-side prefixing). Agent-side MCP namespace prefixes (`<prefix>_<rawToolName>`) apply only to Built-in agent dispatches; Tester tools (`create_test_cases` / `update_test_case`) automatically strip any agent-side server prefix before persisting Verification cases.
 
 ### 8.5 MCP "Save As Case" Integration (`SaveAsCaseDialog.tsx`)
 - Capturing a tool call from the MCP management/test page automatically routes to `Ungrouped` -> `Drafts (${serverName})`, computing the next prefix (e.g. `010_toolName`).

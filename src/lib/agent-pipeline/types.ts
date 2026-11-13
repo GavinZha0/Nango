@@ -14,6 +14,7 @@
 import "server-only";
 
 import type { AgentRole } from "@/lib/db/schema";
+import type { McpToolAnnotations } from "@/lib/mcp/tool-namespace";
 
 /**
  * Per-run context shared across middlewares. `metadata` is the mutable
@@ -31,6 +32,12 @@ export interface MiddlewareContext {
   readonly metadata: Record<string, unknown>;
 }
 
+export interface McpToolCallMeta {
+  readonly mcpServerId: string;
+  readonly rawToolName: string;
+  readonly annotations?: McpToolAnnotations;
+}
+
 /**
  * The tool invocation the pipeline mediates. `args` is the tool's
  * execute argument (execute's `args[0]`); `toolCallId` is the AI SDK
@@ -40,6 +47,7 @@ export interface ToolCall {
   readonly toolName: string;
   readonly args: unknown;
   readonly toolCallId?: string;
+  readonly mcp?: McpToolCallMeta;
 }
 
 /** Inner continuation — the next middleware, or finally the tool's execute. */

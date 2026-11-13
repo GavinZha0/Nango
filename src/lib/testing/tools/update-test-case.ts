@@ -13,6 +13,7 @@ import {
   WebAutoCaseTable,
 } from "@/lib/db/schema";
 import { canEditResource } from "@/lib/auth/permissions";
+import { stripMcpServerToolPrefix } from "./mcp-tool-name";
 import { isUniqueViolation } from "@/lib/http/validation";
 import { defineTool, type ToolDefinition } from "@/lib/copilot/index.server";
 import {
@@ -143,7 +144,12 @@ export function buildUpdateTestCaseTool(ctx: TesterToolContext): ToolDefinition 
         };
         if (name !== undefined) updates.name = name;
         if (enabled !== undefined) updates.enabled = enabled;
-        if (toolName !== undefined) updates.toolName = toolName;
+        if (toolName !== undefined) {
+          updates.toolName = await stripMcpServerToolPrefix(
+            existing.suite.mcpServerId,
+            toolName,
+          );
+        }
         if (input !== undefined) updates.input = input;
         if (assertions !== undefined) {
           updates.assertions = normalizeAndValidateAssertions(

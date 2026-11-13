@@ -88,6 +88,16 @@ vi.mock("@/lib/runner/event-store", () => ({
   recordEvent: recordEventMock,
 }));
 
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: async () => [],
+      }),
+    }),
+  },
+}));
+
 vi.mock("@/lib/mcp", () => ({
   mcpProviderPool: {
     release: mcpReleaseMock,
@@ -1572,8 +1582,18 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
 
         expect(composePipelinedMcpProviderMock).toHaveBeenCalledTimes(2);
-        expect(composePipelinedMcpProviderMock).toHaveBeenNthCalledWith(1, p1, [], expect.any(Object));
-        expect(composePipelinedMcpProviderMock).toHaveBeenNthCalledWith(2, p2, [], expect.any(Object));
+        expect(composePipelinedMcpProviderMock).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({ label: "A", health: "ready" }),
+          [],
+          expect.any(Object),
+        );
+        expect(composePipelinedMcpProviderMock).toHaveBeenNthCalledWith(
+          2,
+          expect.objectContaining({ label: "B", health: "ready" }),
+          [],
+          expect.any(Object),
+        );
       });
 
       it("marks headless true when ctx.mode is async", async () => {
