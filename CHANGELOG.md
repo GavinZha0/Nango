@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* **desktop:** make release signing opt-in via NANGO_REQUIRE_SIGNING ([a9f14af](https://github.com/GavinZha0/Nango/commit/a9f14afbc6800d23e4c05999df43e3a8befdb324))
+* **desktop:** make release signing opt-in via NANGO_REQUIRE_SIGNING ([a9f14af](https://github.com/GavinZha0/Nango/commit/a9f14afbc6800d23e4c05999df43e3a8befdb324)) by @GavinZha0
 
 ## [0.33.0](https://github.com/GavinZha0/Nango/compare/v0.32.1...v0.33.0) (2026-11-13)
 
