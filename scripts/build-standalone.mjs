@@ -12,8 +12,33 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as tar from "tar";
 import { repairStandaloneClosure } from "./repair-standalone.mjs";
+
+/**
+ * Rewrite any Windows junction / absolute symlink target inside `standaloneDir`
+ * into a POSIX relative path so `standalone.tar` is portable across machines.
+ */
+export function normalizeTarSymlinkTarget(entryAbsolute, linkpath, standaloneDir) {
+  if (!linkpath) return linkpath;
+  // Strip Windows extended-length path prefix (`\\?\` or `//?/`) if present
+  const stripped = linkpath.replace(/^(?:\\\\\?\\|\/\/\?\/)/, "");
+  if (!path.isAbsolute(stripped)) {
+    return stripped.replace(/\\/g, "/");
+  }
+  const absStandalone = path.resolve(standaloneDir);
+  const absTarget = path.resolve(stripped);
+  const relFromStandalone = path.relative(absStandalone, absTarget);
+  const isInsideStandalone =
+    relFromStandalone === "" ||
+    (!relFromStandalone.startsWith("..") && !path.isAbsolute(relFromStandalone));
+  if (!isInsideStandalone) {
+    return stripped.replace(/\\/g, "/");
+  }
+  const relFromEntry = path.relative(path.dirname(entryAbsolute), absTarget);
+  return (relFromEntry || ".").replace(/\\/g, "/");
+}
 
 /**
  * Archive `.next/standalone` into `desktop/resources/standalone.tar` preserving
@@ -37,6 +62,15 @@ export function archiveStandaloneBundle(rootDir = process.cwd()) {
       sync: true,
       file: tarPath,
       cwd: standaloneDir,
+      onWriteEntry(entry) {
+        if (entry.type === "SymbolicLink" && entry.linkpath) {
+          entry.linkpath = normalizeTarSymlinkTarget(
+            entry.absolute,
+            entry.linkpath,
+            standaloneDir,
+          );
+        }
+      },
     },
     ["."],
   );
@@ -47,38 +81,44 @@ export function archiveStandaloneBundle(rootDir = process.cwd()) {
   );
 }
 
-console.log("[build-standalone] Building Next.js standalone output (NEXT_STANDALONE_OUTPUT=true)...");
+const isMain =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-const buildResult =
-  process.platform === "win32"
-    ? spawnSync("cmd.exe", ["/d", "/s", "/c", "pnpm", "build"], {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          NEXT_STANDALONE_OUTPUT: "true",
-          NEXT_TELEMETRY_DISABLED: "1",
-        },
-      })
-    : spawnSync("pnpm", ["build"], {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          NEXT_STANDALONE_OUTPUT: "true",
-          NEXT_TELEMETRY_DISABLED: "1",
-        },
-      });
+if (isMain) {
+  console.log("[build-standalone] Building Next.js standalone output (NEXT_STANDALONE_OUTPUT=true)...");
 
-if (buildResult.error) {
-  console.error("[build-standalone] Failed to spawn Next.js build process:", buildResult.error);
-  process.exit(1);
+  const buildResult =
+    process.platform === "win32"
+      ? spawnSync("cmd.exe", ["/d", "/s", "/c", "pnpm", "build"], {
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            NEXT_STANDALONE_OUTPUT: "true",
+            NEXT_TELEMETRY_DISABLED: "1",
+          },
+        })
+      : spawnSync("pnpm", ["build"], {
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            NEXT_STANDALONE_OUTPUT: "true",
+            NEXT_TELEMETRY_DISABLED: "1",
+          },
+        });
+
+  if (buildResult.error) {
+    console.error("[build-standalone] Failed to spawn Next.js build process:", buildResult.error);
+    process.exit(1);
+  }
+
+  if (buildResult.status !== 0) {
+    console.error(`[build-standalone] Next.js build failed with exit code ${buildResult.status}.`);
+    process.exit(buildResult.status ?? 1);
+  }
+
+  console.log("[build-standalone] Build succeeded. Repairing standalone closure and staging runtime assets...");
+  repairStandaloneClosure();
+  archiveStandaloneBundle();
+  console.log("[build-standalone] Standalone bundle ready for Nango Desktop packaging.");
 }
-
-if (buildResult.status !== 0) {
-  console.error(`[build-standalone] Next.js build failed with exit code ${buildResult.status}.`);
-  process.exit(buildResult.status ?? 1);
-}
-
-console.log("[build-standalone] Build succeeded. Repairing standalone closure and staging runtime assets...");
-repairStandaloneClosure();
-archiveStandaloneBundle();
-console.log("[build-standalone] Standalone bundle ready for Nango Desktop packaging.");

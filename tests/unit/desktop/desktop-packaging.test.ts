@@ -2,6 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as tar from "tar";
+
+import {
+  archiveStandaloneBundle,
+  normalizeTarSymlinkTarget,
+} from "../../../scripts/build-standalone.mjs";
 
 import {
   classifyMacSignTier,
@@ -789,6 +795,104 @@ describe("desktop/standalone-extractor.ts", () => {
     } finally {
       fs.rmSync(tmpUser, { recursive: true, force: true });
       fs.rmSync(tmpResources, { recursive: true, force: true });
+    }
+  });
+
+  it("rewrites absolute junction/symlink targets inside standalone.tar to relative POSIX paths", async () => {
+    expect(
+      normalizeTarSymlinkTarget(
+        path.join("D:", "a", "Nango", ".next", "standalone", ".next", "node_modules", "pino-123"),
+        "//?/D:/a/Nango/.next/standalone/node_modules/.pnpm/pino@10.4.0/node_modules/pino",
+        path.join("D:", "a", "Nango", ".next", "standalone"),
+      ),
+    ).toBe("../../node_modules/.pnpm/pino@10.4.0/node_modules/pino");
+
+    expect(
+      normalizeTarSymlinkTarget(
+        path.join("D:", "AI", "nango", ".next", "standalone", ".next", "node_modules", "pg-456"),
+        "D:/AI/nango/.next/standalone/node_modules/.pnpm/pg@8.23.1/node_modules/pg",
+        path.join("D:", "AI", "nango", ".next", "standalone"),
+      ),
+    ).toBe("../../node_modules/.pnpm/pg@8.23.1/node_modules/pg");
+
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nango-archive-rel-"));
+    const tmpExtract = fs.mkdtempSync(path.join(os.tmpdir(), "nango-extract-rel-"));
+    try {
+      const standaloneDir = path.join(tmpRoot, ".next", "standalone");
+      const targetPkgDir = path.join(
+        standaloneDir,
+        "node_modules",
+        ".pnpm",
+        "pino@10.4.0",
+        "node_modules",
+        "pino",
+      );
+      const nextNmDir = path.join(standaloneDir, ".next", "node_modules");
+      fs.mkdirSync(targetPkgDir, { recursive: true });
+      fs.mkdirSync(nextNmDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(targetPkgDir, "package.json"),
+        JSON.stringify({ name: "pino", version: "10.4.0" }),
+        "utf8",
+      );
+
+      const linkPath = path.join(nextNmDir, "pino-e1ba1cd6d7f2678a");
+      try {
+        if (process.platform === "win32") {
+          fs.symlinkSync(targetPkgDir, linkPath, "junction");
+        } else {
+          fs.symlinkSync(targetPkgDir, linkPath);
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === "EPERM") {
+          // Sandboxed environments without symlink privilege still verify normalizeTarSymlinkTarget above
+          return;
+        }
+        throw err;
+      }
+
+      archiveStandaloneBundle(tmpRoot);
+
+      const tarPath = path.join(tmpRoot, "desktop", "resources", "standalone.tar");
+      const symlinks: Array<{ path: string; linkpath: string | undefined }> = [];
+      tar.t({
+        sync: true,
+        file: tarPath,
+        onReadEntry(entry) {
+          if (entry.type === "SymbolicLink") {
+            symlinks.push({ path: entry.path, linkpath: entry.linkpath });
+          }
+        },
+      });
+
+      const pinoEntry = symlinks.find((s) =>
+        s.path.includes("pino-e1ba1cd6d7f2678a"),
+      );
+      expect(pinoEntry).toBeDefined();
+      expect(pinoEntry?.linkpath).toBe(
+        "../../node_modules/.pnpm/pino@10.4.0/node_modules/pino",
+      );
+
+      // Verify extraction on a completely different directory resolves pino/package.json
+      const extractedDir = await ensureStandaloneExtracted({
+        userDataDir: tmpExtract,
+        resourcesPath: path.join(tmpRoot, "desktop", "resources"),
+        appVersion: "0.31.0-test",
+      });
+      expect(
+        fs.existsSync(
+          path.join(
+            extractedDir,
+            ".next",
+            "node_modules",
+            "pino-e1ba1cd6d7f2678a",
+            "package.json",
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      fs.rmSync(tmpExtract, { recursive: true, force: true });
     }
   });
 });
