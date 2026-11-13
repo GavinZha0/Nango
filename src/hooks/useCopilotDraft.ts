@@ -117,15 +117,6 @@ export function useCopilotDraft<T extends Record<string, unknown>>({
     return () => clearTimeout(timer);
   }, [getCurrentData, setActiveResourceData]);
 
-  // Clean up activeResourceData on unmount if this instance owns the active editor
-  useEffect(() => {
-    return () => {
-      if (useCopilotStateStore.getState().activeEditor?.instanceId === instanceId) {
-        setActiveResourceData(null);
-      }
-    };
-  }, [instanceId, setActiveResourceData]);
-
   return {
     draftApplied,
     discardDraft,

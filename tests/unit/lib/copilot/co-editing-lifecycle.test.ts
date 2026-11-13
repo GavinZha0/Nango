@@ -381,5 +381,24 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
       expect(agentSchema.safeParse({ temperature: 0.7, maxSteps: 10 }).success).toBe(true);
     });
   });
+
+  it("clears activeResourceData when the last active editor unregisters", () => {
+    const store = useCopilotStateStore.getState();
+    store.registerEditor({
+      instanceId: "inst-only",
+      resourceType: "agent",
+      resourceId: "agent-1",
+      isReadOnly: false,
+      applyDraft: () => [],
+      getCurrentData: () => ({ name: "Nango" }),
+      discardDraft: () => {},
+    });
+    store.setActiveResourceData({ name: "Nango" });
+    expect(useCopilotStateStore.getState().activeResourceData).toEqual({ name: "Nango" });
+
+    store.unregisterEditor("inst-only");
+    expect(useCopilotStateStore.getState().activeEditor).toBeNull();
+    expect(useCopilotStateStore.getState().activeResourceData).toBeNull();
+  });
 });
 

@@ -26,6 +26,8 @@ import { useSidebarStore } from "@/store/sidebar";
 import { useStoredValue } from "@/hooks/useStoredValue";
 import type { RightTab } from "@/store/sidebar";
 import { useWorkspaceStore } from "@/store/workspace";
+import { useCopilotStateStore } from "@/store/copilot";
+import { resolveSharedStateEnabled } from "@/lib/types/builtin-agent";
 import type { EntityKind } from "@/lib/backends/types";
 import { useOutcomeTools } from "@/hooks/useOutcomeTools";
 import { ChatPanelBody } from "@/components/right-panels/ChatPanel";
@@ -123,6 +125,15 @@ function RightPanelToolbar(): ReactNode {
   const setActiveAgent = useWorkspaceStore((s) => s.setActiveAgent);
   const startFreshChat = useWorkspaceStore((s) => s.startFreshChat);
   const bumpHistoryRevision = useSidebarStore((s) => s.bumpHistoryRevision);
+  const activeResourceData = useCopilotStateStore((s) => s.activeResourceData);
+
+  const activeBuiltinAgent =
+    activeAgentSource === "builtin" && activeAgentId
+      ? builtinAgents.find((a) => a.id === activeAgentId)
+      : undefined;
+  const isSharedStateEnabled =
+    activeAgentSource === "builtin" &&
+    resolveSharedStateEnabled(activeBuiltinAgent);
 
 
   // Disabled-backend set — derived from localStorage via the shared
@@ -181,6 +192,26 @@ function RightPanelToolbar(): ReactNode {
       />
 
       <div className="flex-1" />
+
+      {/* ── Shared state indicator (only shown when enabled) ────────── */}
+      {isSharedStateEnabled && (
+        <span
+          data-testid="shared-state-indicator"
+          data-state={activeResourceData !== null ? "active" : "route-only"}
+          title="Shared state"
+          aria-label="Shared state"
+          className="inline-flex h-7 items-center px-1.5"
+        >
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              activeResourceData !== null
+                ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]"
+                : "bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.6)]",
+            )}
+          />
+        </span>
+      )}
 
       {/* ── New chat (text button for discoverability) ────────────── */}
       <Button

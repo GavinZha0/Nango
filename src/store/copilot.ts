@@ -38,10 +38,12 @@ export const useCopilotStateStore = create<CopilotStateStore>((set) => ({
     }),
   unregisterEditor: (instanceId) =>
     set((s) => {
+      const wasActive = s.activeEditor?.instanceId === instanceId;
       const next = s.editors.filter((e) => e.instanceId !== instanceId);
       return {
         editors: next,
         activeEditor: next.length > 0 ? next[next.length - 1] : null,
+        ...(wasActive && next.length === 0 ? { activeResourceData: null } : {}),
       };
     }),
 }));
