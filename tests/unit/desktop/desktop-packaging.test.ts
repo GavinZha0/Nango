@@ -32,7 +32,10 @@ import {
   verifyMacBinaryArch,
   verifySha256,
 } from "../../../desktop/scripts/fetch-binaries.mjs";
-import { DesktopAppCoordinator } from "../../../desktop/main";
+import {
+  bindReloadShortcuts,
+  DesktopAppCoordinator,
+} from "../../../desktop/main";
 import {
   DesktopUpdateController,
   type AutoUpdaterLike,
@@ -799,21 +802,31 @@ describe("desktop/standalone-extractor.ts", () => {
   });
 
   it("rewrites absolute junction/symlink targets inside standalone.tar to relative POSIX paths", async () => {
-    expect(
-      normalizeTarSymlinkTarget(
-        path.join("D:", "a", "Nango", ".next", "standalone", ".next", "node_modules", "pino-123"),
-        "//?/D:/a/Nango/.next/standalone/node_modules/.pnpm/pino@10.4.0/node_modules/pino",
-        path.join("D:", "a", "Nango", ".next", "standalone"),
-      ),
-    ).toBe("../../node_modules/.pnpm/pino@10.4.0/node_modules/pino");
+    if (process.platform === "win32") {
+      expect(
+        normalizeTarSymlinkTarget(
+          path.join("D:", "a", "Nango", ".next", "standalone", ".next", "node_modules", "pino-123"),
+          "//?/D:/a/Nango/.next/standalone/node_modules/.pnpm/pino@10.4.0/node_modules/pino",
+          path.join("D:", "a", "Nango", ".next", "standalone"),
+        ),
+      ).toBe("../../node_modules/.pnpm/pino@10.4.0/node_modules/pino");
 
-    expect(
-      normalizeTarSymlinkTarget(
-        path.join("D:", "AI", "nango", ".next", "standalone", ".next", "node_modules", "pg-456"),
-        "D:/AI/nango/.next/standalone/node_modules/.pnpm/pg@8.23.1/node_modules/pg",
-        path.join("D:", "AI", "nango", ".next", "standalone"),
-      ),
-    ).toBe("../../node_modules/.pnpm/pg@8.23.1/node_modules/pg");
+      expect(
+        normalizeTarSymlinkTarget(
+          path.join("D:", "AI", "nango", ".next", "standalone", ".next", "node_modules", "pg-456"),
+          "D:/AI/nango/.next/standalone/node_modules/.pnpm/pg@8.23.1/node_modules/pg",
+          path.join("D:", "AI", "nango", ".next", "standalone"),
+        ),
+      ).toBe("../../node_modules/.pnpm/pg@8.23.1/node_modules/pg");
+    } else {
+      expect(
+        normalizeTarSymlinkTarget(
+          "/Users/runner/work/Nango/.next/standalone/.next/node_modules/pino-123",
+          "/Users/runner/work/Nango/.next/standalone/node_modules/.pnpm/pino@10.4.0/node_modules/pino",
+          "/Users/runner/work/Nango/.next/standalone",
+        ),
+      ).toBe("../../node_modules/.pnpm/pino@10.4.0/node_modules/pino");
+    }
 
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nango-archive-rel-"));
     const tmpExtract = fs.mkdtempSync(path.join(os.tmpdir(), "nango-extract-rel-"));
@@ -894,5 +907,69 @@ describe("desktop/standalone-extractor.ts", () => {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
       fs.rmSync(tmpExtract, { recursive: true, force: true });
     }
+  });
+});
+
+describe("desktop/main.ts — bindReloadShortcuts", () => {
+  it("handles F5, Ctrl+R, Ctrl+F5, and Ctrl+Shift+R while ignoring plain typing", () => {
+    let listener:
+      | ((event: { preventDefault(): void }, input: {
+          type: string;
+          key: string;
+          control?: boolean;
+          meta?: boolean;
+          shift?: boolean;
+          alt?: boolean;
+        }) => void)
+      | undefined;
+    const reload = vi.fn();
+    const reloadIgnoringCache = vi.fn();
+
+    bindReloadShortcuts({
+      loadURL: vi.fn(),
+      show: vi.fn(),
+      hide: vi.fn(),
+      focus: vi.fn(),
+      isMinimized: () => false,
+      restore: vi.fn(),
+      isDestroyed: () => false,
+      on: vi.fn(),
+      webContents: {
+        reload,
+        reloadIgnoringCache,
+        on(_event, cb) {
+          listener = cb;
+        },
+      },
+    });
+
+    expect(listener).toBeDefined();
+
+    const dispatch = (input: {
+      type: string;
+      key: string;
+      control?: boolean;
+      shift?: boolean;
+    }) => {
+      const preventDefault = vi.fn();
+      listener?.({ preventDefault }, input);
+      return preventDefault;
+    };
+
+    // Plain 'r' while typing must not reload
+    expect(dispatch({ type: "keyDown", key: "r" })).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+
+    // F5 and Ctrl+R -> reload()
+    expect(dispatch({ type: "keyDown", key: "F5" })).toHaveBeenCalledTimes(1);
+    expect(dispatch({ type: "keyDown", key: "r", control: true })).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    // Ctrl+F5 and Ctrl+Shift+R -> reloadIgnoringCache()
+    expect(dispatch({ type: "keyDown", key: "F5", control: true })).toHaveBeenCalledTimes(1);
+    expect(
+      dispatch({ type: "keyDown", key: "r", control: true, shift: true }),
+    ).toHaveBeenCalledTimes(1);
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(2);
   });
 });

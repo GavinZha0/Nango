@@ -41,6 +41,24 @@ export interface ElectronContextBridge {
   exposeInMainWorld(apiKey: string, api: Record<string, unknown>): void;
 }
 
+export interface ElectronInputEvent {
+  type: string;
+  key: string;
+  control?: boolean;
+  meta?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+}
+
+export interface ElectronWebContents {
+  reload(): void;
+  reloadIgnoringCache(): void;
+  on(
+    event: "before-input-event",
+    listener: (event: { preventDefault(): void }, input: ElectronInputEvent) => void,
+  ): void;
+}
+
 export interface ElectronBrowserWindow {
   loadURL(url: string): Promise<void>;
   show(): void;
@@ -50,6 +68,7 @@ export interface ElectronBrowserWindow {
   restore(): void;
   isDestroyed(): boolean;
   removeMenu?: () => void;
+  webContents?: ElectronWebContents;
   on(
     event: "close" | "closed",
     listener: (event: { preventDefault(): void }) => void,

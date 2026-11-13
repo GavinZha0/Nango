@@ -231,6 +231,7 @@ export class DesktopAppCoordinator {
     });
     // Remove the default application menu bar (File/Edit/View/Window) on Windows/Linux
     win.removeMenu?.();
+    bindReloadShortcuts(win);
     this.mainWindow = win;
     bindCloseToTray(win, () => this.isQuitting);
 
@@ -326,4 +327,39 @@ export class DesktopAppCoordinator {
     await this.shutdownServicesOnly();
     this.electron.app.quit();
   }
+}
+
+/**
+ * Restore standard browser reload shortcuts (`F5`, `Ctrl+F5`, `Ctrl/Cmd+R`,
+ * `Ctrl/Cmd+Shift+R`) after `win.removeMenu()` strips the default Electron menu.
+ */
+export function bindReloadShortcuts(win: ElectronBrowserWindow): void {
+  const wc = win.webContents;
+  if (!wc) return;
+
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+
+    const key = input.key.toLowerCase();
+    const hasPrimaryModifier = Boolean(input.control || input.meta);
+
+    // Hard reload (ignore cache): Ctrl+F5 or Ctrl/Cmd+Shift+R
+    if (
+      (key === "f5" && hasPrimaryModifier && !input.alt) ||
+      (key === "r" && hasPrimaryModifier && input.shift && !input.alt)
+    ) {
+      event.preventDefault();
+      wc.reloadIgnoringCache();
+      return;
+    }
+
+    // Standard reload: F5 or Ctrl/Cmd+R
+    if (
+      (key === "f5" && !hasPrimaryModifier && !input.shift && !input.alt) ||
+      (key === "r" && hasPrimaryModifier && !input.shift && !input.alt)
+    ) {
+      event.preventDefault();
+      wc.reload();
+    }
+  });
 }
