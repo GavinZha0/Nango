@@ -506,6 +506,85 @@ describe("scripts/repair-standalone.mjs — stageStandaloneRuntimeAssets", () =>
     }
   });
 
+  it("preserves and rewrites .next/node_modules proxy symlinks to standalone store while removing .next/cache", () => {
+    const tmpProject = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nango-stage-next-nm-"),
+    );
+    try {
+      const standaloneDir = path.join(tmpProject, ".next", "standalone");
+      const realPkgDir = path.join(
+        tmpProject,
+        "node_modules",
+        ".pnpm",
+        "pino@10.4.0",
+        "node_modules",
+        "pino",
+      );
+      fs.mkdirSync(realPkgDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(realPkgDir, "package.json"),
+        '{"name":"pino"}',
+      );
+
+      const standalonePkgDir = path.join(
+        standaloneDir,
+        "node_modules",
+        ".pnpm",
+        "pino@10.4.0",
+        "node_modules",
+        "pino",
+      );
+      fs.mkdirSync(standalonePkgDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(standalonePkgDir, "package.json"),
+        '{"name":"pino"}',
+      );
+
+      const nextNodeModulesDir = path.join(tmpProject, ".next", "node_modules");
+      fs.mkdirSync(nextNodeModulesDir, { recursive: true });
+      const proxyPath = path.join(nextNodeModulesDir, "pino-abc123");
+      let createdSymlink = true;
+      try {
+        fs.symlinkSync(
+          realPkgDir,
+          proxyPath,
+          process.platform === "win32" ? "junction" : "dir",
+        );
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EPERM") throw err;
+        createdSymlink = false;
+        // Fallback for restricted sandbox environments that disallow reparse points
+        fs.mkdirSync(proxyPath, { recursive: true });
+        fs.writeFileSync(
+          path.join(proxyPath, "package.json"),
+          '{"name":"pino"}',
+        );
+      }
+
+      const staleCacheDir = path.join(standaloneDir, ".next", "cache");
+      fs.mkdirSync(staleCacheDir, { recursive: true });
+      fs.writeFileSync(path.join(staleCacheDir, "tmp.bin"), "cache");
+
+      stageStandaloneRuntimeAssets(tmpProject, standaloneDir);
+
+      const stagedProxy = path.join(
+        standaloneDir,
+        ".next",
+        "node_modules",
+        "pino-abc123",
+      );
+      expect(fs.existsSync(path.join(stagedProxy, "package.json"))).toBe(true);
+      if (createdSymlink) {
+        expect(fs.lstatSync(stagedProxy).isSymbolicLink()).toBe(true);
+        const resolved = fs.realpathSync(stagedProxy);
+        expect(resolved).toBe(fs.realpathSync(standalonePkgDir));
+      }
+      expect(fs.existsSync(staleCacheDir)).toBe(false);
+    } finally {
+      fs.rmSync(tmpProject, { recursive: true, force: true });
+    }
+  });
+
   it("handleCopyError ignores benign EEXIST and Windows native already-exists messages", () => {
     const stats = { failedCount: 0, sawWin32Eperm: false };
 

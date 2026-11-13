@@ -14,10 +14,12 @@ import {
   cpSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   readdirSync,
   readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -242,7 +244,75 @@ export function repairStandaloneClosure() {
 }
 
 /**
- * Copy `public/`, `.next/static/`, `src/lib/db/migrations/`, and `docker/migrate.mjs`
+ * Stage `.next/node_modules/` into `.next/standalone/.next/node_modules/`, rewriting
+ * Turbopack external proxy symlinks/junctions to target `.next/standalone/node_modules/`.
+ * Preserving symlinks (instead of dereferencing) keeps Node's realpath resolution
+ * inside `.pnpm/<pkg>@<ver>/node_modules/` so sibling peer dependencies resolve.
+ */
+function stageNextNodeModules(projectRoot, standaloneDir) {
+  const absProjectRoot = path.resolve(projectRoot);
+  const absStandaloneDir = path.resolve(standaloneDir);
+  const srcRoot = path.join(absProjectRoot, ".next", "node_modules");
+  if (!existsSync(srcRoot)) return;
+
+  const dstRoot = path.join(absStandaloneDir, ".next", "node_modules");
+  const projectNodeModules = path.join(absProjectRoot, "node_modules");
+  const standaloneNodeModulesDir = path.join(absStandaloneDir, "node_modules");
+
+  rmSync(dstRoot, { recursive: true, force: true });
+  mkdirSync(dstRoot, { recursive: true });
+
+  function walk(srcDir, dstDir) {
+    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+      const srcEntry = path.join(srcDir, entry.name);
+      const dstEntry = path.join(dstDir, entry.name);
+      const stat = lstatSync(srcEntry);
+
+      if (stat.isSymbolicLink()) {
+        const rawTarget = readlinkSync(srcEntry);
+        const absTarget = path.resolve(path.dirname(srcEntry), rawTarget);
+        const relFromNm = path.relative(projectNodeModules, absTarget);
+        const isInsideProjectNm =
+          relFromNm &&
+          !relFromNm.startsWith("..") &&
+          !path.isAbsolute(relFromNm);
+
+        if (isInsideProjectNm) {
+          const standaloneTarget = path.join(standaloneNodeModulesDir, relFromNm);
+          if (existsSync(standaloneTarget)) {
+            mkdirSync(path.dirname(dstEntry), { recursive: true });
+            if (process.platform === "win32") {
+              symlinkSync(standaloneTarget, dstEntry, "junction");
+            } else {
+              const relLink = path.relative(
+                path.dirname(dstEntry),
+                standaloneTarget,
+              );
+              symlinkSync(relLink, dstEntry);
+            }
+            continue;
+          }
+        }
+
+        cpSync(srcEntry, dstEntry, {
+          recursive: true,
+          force: true,
+          dereference: true,
+        });
+      } else if (stat.isDirectory()) {
+        mkdirSync(dstEntry, { recursive: true });
+        walk(srcEntry, dstEntry);
+      } else {
+        cpSync(srcEntry, dstEntry, { force: true });
+      }
+    }
+  }
+
+  walk(srcRoot, dstRoot);
+}
+
+/**
+ * Copy `public/`, `.next/static/`, `.next/node_modules/`, `src/lib/db/migrations/`, and `docker/migrate.mjs`
  * into `.next/standalone/` so the standalone bundle is self-contained for both
  * local validation and Nango Desktop `extraResources` packaging.
  */
@@ -274,17 +344,16 @@ export function stageStandaloneRuntimeAssets(projectRoot, standaloneDir) {
     });
   }
 
-  // Remove temporary Next.js build cache and dangling tracing symlinks
-  // (`.next/node_modules/` and `.next/cache/`) inside standalone so
-  // archive tools (such as 7-Zip during NSIS packaging) never fail on dead links.
-  for (const dirName of ["node_modules", "cache"]) {
-    const candidate = path.join(standaloneDir, ".next", dirName);
-    if (existsSync(candidate)) {
-      try {
-        rmSync(candidate, { recursive: true, force: true });
-      } catch {
-        // Ignore removal error
-      }
+  stageNextNodeModules(projectRoot, standaloneDir);
+
+  // Remove temporary Next.js build cache inside standalone so archive tools
+  // never fail on stale cache files, while preserving `.next/node_modules/`.
+  const cacheDir = path.join(standaloneDir, ".next", "cache");
+  if (existsSync(cacheDir)) {
+    try {
+      rmSync(cacheDir, { recursive: true, force: true });
+    } catch {
+      // Ignore removal error
     }
   }
 }
