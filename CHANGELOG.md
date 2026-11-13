@@ -5,12 +5,12 @@
 
 ### Features
 
-* **chat:** add shared state indicator and clear stale page context on unmount ([1a15eb7](https://github.com/GavinZha0/Nango/commit/1a15eb7ce2254ef27d89e9c8047656d13c88027b))
+* **chat:** add shared state indicator and clear stale page context on unmount ([1a15eb7](https://github.com/GavinZha0/Nango/commit/1a15eb7ce2254ef27d89e9c8047656d13c88027b)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **desktop:** restore reload keyboard shortcuts when application menu is removed ([d716eb7](https://github.com/GavinZha0/Nango/commit/d716eb75f7228d46290b306a3eec8e5ddee7b736))
+* **desktop:** restore reload keyboard shortcuts when application menu is removed ([d716eb7](https://github.com/GavinZha0/Nango/commit/d716eb75f7228d46290b306a3eec8e5ddee7b736)) by @GavinZha0
 
 ## [0.33.2](https://github.com/GavinZha0/Nango/compare/v0.33.1...v0.33.2) (2026-11-13)
 
