@@ -5,14 +5,14 @@
 
 ### Features
 
-* **mcp:** namespace agent-facing MCP tools and fix guardrail origin checks ([4efa605](https://github.com/GavinZha0/Nango/commit/4efa605d7ace210cc02275d9641c9e80f6d4d236))
-* **skills:** add overwrite and rename conflict resolution on skill import ([b30b8c0](https://github.com/GavinZha0/Nango/commit/b30b8c0c179e82f664b1caf5236c42337eadbf84))
+* **mcp:** namespace agent-facing MCP tools and fix guardrail origin checks ([4efa605](https://github.com/GavinZha0/Nango/commit/4efa605d7ace210cc02275d9641c9e80f6d4d236)) by @GavinZha0
+* **skills:** add overwrite and rename conflict resolution on skill import ([b30b8c0](https://github.com/GavinZha0/Nango/commit/b30b8c0c179e82f664b1caf5236c42337eadbf84)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **desktop:** preserve and rewrite .next/node_modules symlinks in standalone ([93e90dd](https://github.com/GavinZha0/Nango/commit/93e90dda34bd9ac17942d09521e0b6a8ee728736))
-* **tools:** update download budgets/sha256, SSH risk patterns, allowlist, and skill hints ([4ad33c8](https://github.com/GavinZha0/Nango/commit/4ad33c8664bb2d629c3ecf540e9fdc95c57ed17d))
+* **desktop:** preserve and rewrite .next/node_modules symlinks in standalone ([93e90dd](https://github.com/GavinZha0/Nango/commit/93e90dda34bd9ac17942d09521e0b6a8ee728736)) by @GavinZha0
+* **tools:** update download budgets/sha256, SSH risk patterns, allowlist, and skill hints ([4ad33c8](https://github.com/GavinZha0/Nango/commit/4ad33c8664bb2d629c3ecf540e9fdc95c57ed17d)) by @GavinZha0
 
 ## [0.32.1](https://github.com/GavinZha0/Nango/compare/v0.32.0...v0.32.1) (2026-11-09)
 
