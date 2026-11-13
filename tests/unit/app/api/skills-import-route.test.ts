@@ -17,6 +17,7 @@ vi.mock("@/lib/db", async () => {
 const { storageMock } = vi.hoisted(() => ({
   storageMock: {
     createCustom: vi.fn(),
+    overwriteCustom: vi.fn(),
     putFile: vi.fn(),
   },
 }));
@@ -43,6 +44,7 @@ async function upload(
   entries: Array<{ path: string; content: string | Buffer }>,
   decl: string | null = 'scripts-on-ssh: ["probe.sh"]',
   skillMd?: string,
+  extra?: { conflictStrategy?: "fail" | "overwrite" | "rename"; customName?: string },
 ): Promise<Response> {
   const payload = {
     entries: [
@@ -55,6 +57,7 @@ async function upload(
         contentBase64: Buffer.from(e.content).toString("base64"),
       })),
     ],
+    ...(extra ?? {}),
   };
   const req = new Request("http://localhost/api/skills/import", {
     method: "POST",
@@ -436,5 +439,104 @@ body
     );
 
     expect(res.status).toBe(201);
+  });
+});
+
+describe("POST /api/skills/import — name conflict resolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.$reset();
+    getSessionMock.mockResolvedValue(createMockSession(me));
+    storageMock.createCustom.mockResolvedValue({ id: "skill-new" });
+    storageMock.overwriteCustom.mockResolvedValue(undefined);
+  });
+
+  it("returns 409 with existingId, existingName, and boundAgentCount by default", async () => {
+    dbMock.$enqueue(
+      [{ id: "skill-existing" }],
+      [{ id: "tool-row-1" }, { id: "tool-row-2" }],
+    );
+
+    const res = await upload(
+      [{ path: "references/guide.md", content: "# Guide\n" }],
+      null,
+    );
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.details).toEqual({
+      existingId: "skill-existing",
+      existingName: "probe-skill",
+      boundAgentCount: 2,
+    });
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
+    expect(storageMock.overwriteCustom).not.toHaveBeenCalled();
+  });
+
+  it("overwrites existing skill in place when conflictStrategy is 'overwrite'", async () => {
+    dbMock.$enqueue(
+      [{ id: "skill-existing" }],
+      [{ id: "skill-existing", name: "probe-skill", createdBy: "user-1" }],
+    );
+
+    const res = await upload(
+      [{ path: "references/guide.md", content: "# Updated\n" }],
+      null,
+      undefined,
+      { conflictStrategy: "overwrite" },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe("skill-existing");
+    expect(body.overwritten).toBe(true);
+    expect(storageMock.overwriteCustom).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillId: "skill-existing",
+        updatedBy: "user-1",
+      }),
+    );
+    expect(storageMock.createCustom).not.toHaveBeenCalled();
+  });
+
+  it("renames SKILL.md frontmatter when conflictStrategy is 'rename' with customName", async () => {
+    dbMock.$enqueue(
+      [{ id: "skill-existing" }],
+      [], // customName availability check
+      [{ id: "skill-new", name: "probe-skill_999", createdBy: "user-1" }],
+    );
+
+    const res = await upload(
+      [{ path: "references/guide.md", content: "# Guide\n" }],
+      null,
+      undefined,
+      { conflictStrategy: "rename", customName: "probe-skill_999" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(storageMock.createCustom).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillMd: expect.stringContaining("name: probe-skill_999"),
+      }),
+    );
+  });
+
+  it("auto-generates a _NNN suffix when conflictStrategy is 'rename' without customName", async () => {
+    dbMock.$enqueue(
+      [{ id: "skill-existing" }],
+      [], // first random candidate check passes
+      [{ id: "skill-new", name: "probe-skill_123", createdBy: "user-1" }],
+    );
+
+    const res = await upload(
+      [{ path: "references/guide.md", content: "# Guide\n" }],
+      null,
+      undefined,
+      { conflictStrategy: "rename" },
+    );
+
+    expect(res.status).toBe(201);
+    const callArg = storageMock.createCustom.mock.calls[0]![0] as { skillMd: string };
+    expect(callArg.skillMd).toMatch(/^---\nname: probe-skill_\d{3}\n/);
   });
 });

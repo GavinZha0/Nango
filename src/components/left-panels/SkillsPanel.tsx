@@ -27,6 +27,16 @@ import { useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
@@ -178,6 +188,22 @@ function SkillItem({
 
 // Main component
 
+interface PendingImportConflict {
+  entries: Array<{ path: string; contentBase64: string }>;
+  clientSkipped: string[];
+  existingName: string;
+  boundAgentCount: number;
+  renameValue: string;
+  submitting: boolean;
+}
+
+function suggestRenamedSkill(baseName: string): string {
+  const digits = String(100 + Math.floor(Math.random() * 900));
+  const suffix = `_${digits}`;
+  const head = baseName.slice(0, 64 - suffix.length).replace(/[_-]+$/, "") || baseName.slice(0, 64 - suffix.length);
+  return `${head}${suffix}`;
+}
+
 export function SkillsPanel(): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
@@ -190,6 +216,7 @@ export function SkillsPanel(): ReactNode {
     skillsMatch && skillsMatch[1] !== "new" ? skillsMatch[1] : null;
 
   const [importing, setImporting] = useState<boolean>(false);
+  const [pendingConflict, setPendingConflict] = useState<PendingImportConflict | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // CONTRACT: the SWR cache is the only source of truth for this list. The
@@ -244,6 +271,73 @@ export function SkillsPanel(): ReactNode {
     return patchSkill(row, { visibility });
   }
 
+  async function submitSkillImport(
+    entries: Array<{ path: string; contentBase64: string }>,
+    clientSkipped: string[],
+    opts?: { conflictStrategy: "overwrite" | "rename"; customName?: string },
+  ): Promise<boolean> {
+    const res = await fetch("/api/skills/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entries,
+        ...(opts ? { conflictStrategy: opts.conflictStrategy } : {}),
+        ...(opts?.customName ? { customName: opts.customName } : {}),
+      }),
+    });
+
+    if (res.status === 409 && !opts) {
+      const body = (await res.json().catch(() => ({}))) as {
+        details?: { existingName?: string; boundAgentCount?: number };
+      };
+      const existingName = body.details?.existingName ?? "skill";
+      setPendingConflict({
+        entries,
+        clientSkipped,
+        existingName,
+        boundAgentCount: body.details?.boundAgentCount ?? 0,
+        renameValue: suggestRenamedSkill(existingName),
+        submitting: false,
+      });
+      return false;
+    }
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      toast.error("Import failed", {
+        description: body.message ?? `Import failed (${res.status})`,
+        duration: 10_000,
+      });
+      return false;
+    }
+
+    const created = (await res.json()) as {
+      id: string;
+      name?: string;
+      filesImported?: number;
+      skipped?: string[];
+      overwritten?: boolean;
+    };
+    const allSkipped = [...clientSkipped, ...(created.skipped ?? [])];
+    if (allSkipped.length > 0) {
+      const preview = allSkipped.slice(0, 3).join(", ");
+      toast.warning(
+        `Imported ${created.filesImported ?? 0} file(s); skipped ${allSkipped.length}`,
+        {
+          description: `${preview}${allSkipped.length > 3 ? "…" : ""}`,
+        },
+      );
+    } else if (created.overwritten) {
+      toast.success(`Overwrote skill "${created.name ?? ""}"`, {
+        description: "Existing skill ID and agent bindings were preserved.",
+      });
+    }
+    await mutate();
+    router.push(`/skills/${created.id}`);
+    router.refresh();
+    return true;
+  }
+
   async function handleImportFiles(files: File[]): Promise<void> {
     setImporting(true);
     try {
@@ -261,36 +355,7 @@ export function SkillsPanel(): ReactNode {
         return;
       }
 
-      const res = await fetch("/api/skills/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entries: collected.entries }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        toast.error("Import failed", {
-          description: body.message ?? `Import failed (${res.status})`,
-          duration: 10_000,
-        });
-        return;
-      }
-      const created = (await res.json()) as {
-        id: string;
-        filesImported?: number;
-        skipped?: string[];
-      };
-      const allSkipped = [...collected.skipped, ...(created.skipped ?? [])];
-      if (allSkipped.length > 0) {
-        const preview = allSkipped.slice(0, 3).join(", ");
-        toast.warning(
-          `Imported ${created.filesImported ?? 0} file(s); skipped ${allSkipped.length}`,
-          {
-            description: `${preview}${allSkipped.length > 3 ? "…" : ""}`,
-          },
-        );
-      }
-      await mutate();
-      router.push(`/skills/${created.id}`);
+      await submitSkillImport(collected.entries, collected.skipped);
     } catch (err) {
       toast.error("Import failed", {
         description: err instanceof Error ? err.message : "Import failed",
@@ -299,6 +364,30 @@ export function SkillsPanel(): ReactNode {
     } finally {
       setImporting(false);
       if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }
+
+  async function handleResolveConflict(strategy: "overwrite" | "rename"): Promise<void> {
+    if (!pendingConflict || pendingConflict.submitting) return;
+    setPendingConflict((prev) => (prev ? { ...prev, submitting: true } : null));
+    try {
+      const ok = await submitSkillImport(pendingConflict.entries, pendingConflict.clientSkipped, {
+        conflictStrategy: strategy,
+        ...(strategy === "rename" && pendingConflict.renameValue.trim()
+          ? { customName: pendingConflict.renameValue.trim() }
+          : {}),
+      });
+      if (ok) {
+        setPendingConflict(null);
+      } else {
+        setPendingConflict((prev) => (prev ? { ...prev, submitting: false } : null));
+      }
+    } catch (err) {
+      toast.error("Import failed", {
+        description: err instanceof Error ? err.message : "Import failed",
+        duration: 10_000,
+      });
+      setPendingConflict((prev) => (prev ? { ...prev, submitting: false } : null));
     }
   }
 
@@ -383,6 +472,72 @@ export function SkillsPanel(): ReactNode {
           ))
         )}
       </ScrollArea>
+
+      <Dialog
+        open={pendingConflict !== null}
+        onOpenChange={(open) => {
+          if (!open && !pendingConflict?.submitting) setPendingConflict(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Skill already exists</DialogTitle>
+            <DialogDescription>
+              A skill named{" "}
+              <span className="font-mono font-medium text-foreground">
+                {pendingConflict?.existingName}
+              </span>{" "}
+              already exists.
+              {(pendingConflict?.boundAgentCount ?? 0) > 0
+                ? ` Currently bound to ${pendingConflict?.boundAgentCount} agent(s).`
+                : ""}{" "}
+              Overwriting updates its content and files while keeping the same skill ID and agent
+              bindings.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label htmlFor="skill-import-rename">New name (if renaming)</Label>
+            <Input
+              id="skill-import-rename"
+              value={pendingConflict?.renameValue ?? ""}
+              disabled={pendingConflict?.submitting}
+              onChange={(e) =>
+                setPendingConflict((prev) =>
+                  prev ? { ...prev, renameValue: e.target.value } : null,
+                )
+              }
+              placeholder="my-skill_123"
+            />
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pendingConflict?.submitting}
+              onClick={() => setPendingConflict(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pendingConflict?.submitting || !pendingConflict?.renameValue.trim()}
+              onClick={() => void handleResolveConflict("rename")}
+            >
+              Rename &amp; Import
+            </Button>
+            <Button
+              type="button"
+              disabled={pendingConflict?.submitting}
+              onClick={() => void handleResolveConflict("overwrite")}
+            >
+              Overwrite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

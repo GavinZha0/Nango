@@ -63,6 +63,70 @@ export class SkillParseError extends Error {
 const MAX_DESCRIPTION_LEN = 1_024;
 /** Skill names are slug-like; matches Claude's published examples. */
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const MAX_NAME_LEN = 64;
+
+export function isValidSkillName(name: string): boolean {
+  return NAME_PATTERN.test(name);
+}
+
+/**
+ * Append a suffix (e.g. `"_123"`) to `baseName` while staying within the
+ * 64-char `NAME_PATTERN` limit.
+ */
+export function buildSuffixedSkillName(baseName: string, suffix: string): string {
+  const maxBase = Math.max(1, MAX_NAME_LEN - suffix.length);
+  const head = baseName.slice(0, maxBase).replace(/[_-]+$/, "") || baseName.slice(0, maxBase);
+  return `${head}${suffix}`;
+}
+
+/**
+ * Rewrite the top-level `name:` scalar in a `SKILL.md` YAML frontmatter block
+ * while preserving the rest of the document verbatim.
+ */
+export function rewriteSkillNameInSkillMd(text: string, nextName: string): string {
+  if (!isValidSkillName(nextName)) {
+    throw new SkillParseError(
+      `frontmatter \`name\` must be a kebab-case slug (a-z, 0-9, -, _; up to 64 chars). Got: ${nextName}`,
+    );
+  }
+  const normalized = text.startsWith("\ufeff") ? text.slice(1) : text;
+  const lines = normalized.split("\n");
+  const openLine = lines[0]?.endsWith("\r") ? lines[0].slice(0, -1) : lines[0];
+  if (openLine !== "---") {
+    throw new SkillParseError("SKILL.md must begin with YAML frontmatter (`---`).");
+  }
+
+  let closeIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    const trimmed = lines[i].endsWith("\r") ? lines[i].slice(0, -1) : lines[i];
+    if (trimmed === "---") {
+      closeIdx = i;
+      break;
+    }
+  }
+  if (closeIdx === -1) {
+    throw new SkillParseError("SKILL.md frontmatter is missing closing `---`.");
+  }
+
+  let targetIdx = -1;
+  for (let i = 1; i < closeIdx; i++) {
+    if (frontmatterLineKey(lines[i]) === "name") {
+      targetIdx = i;
+      break;
+    }
+  }
+  if (targetIdx === -1) {
+    throw new SkillParseError("frontmatter `name` is required.");
+  }
+
+  const line = lines[targetIdx];
+  const carriageReturn = line.endsWith("\r") ? "\r" : "";
+  const content = carriageReturn ? line.slice(0, -1) : line;
+  const leadingMatch = content.match(/^(\s*)/);
+  const leading = leadingMatch ? leadingMatch[1] : "";
+  lines[targetIdx] = `${leading}name: ${nextName}${carriageReturn}`;
+  return lines.join("\n");
+}
 
 /**
  * CONTRACT: throws {@link SkillParseError} on any structural or

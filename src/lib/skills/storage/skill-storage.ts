@@ -60,6 +60,20 @@ export interface CreateCustomSkillInput {
   createdBy: string;
 }
 
+export interface OverwriteCustomSkillInput {
+  skillId: string;
+  /** Verbatim SKILL.md text. */
+  skillMd: string;
+  /** Caller's user id; persisted as `updatedBy`. */
+  updatedBy: string;
+  /** Full replacement helper-file set (existing helper files are removed). */
+  files: Array<{
+    path: string;
+    content: Buffer;
+    contentType?: string;
+  }>;
+}
+
 export interface UpdateSkillContentInput {
   skillId: string;
   skillMd: string;
@@ -125,6 +139,7 @@ export interface SkillStorage {
 
   // Write (RBAC and path/caps validation are enforced at the API edge)
   createCustom(input: CreateCustomSkillInput): Promise<{ id: string }>;
+  overwriteCustom(input: OverwriteCustomSkillInput): Promise<void>;
   updateContent(input: UpdateSkillContentInput): Promise<void>;
   updateFlags(input: UpdateSkillFlagsInput): Promise<void>;
   delete(skillId: string): Promise<void>;

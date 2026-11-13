@@ -21,6 +21,7 @@ import {
   validateSkillFilePath,
   type CreateCustomSkillInput,
   type DeleteFolderInput,
+  type OverwriteCustomSkillInput,
   type PutSkillFileInput,
   type RenameFolderInput,
   type SkillFileMeta,
@@ -156,6 +157,39 @@ export class DbSkillStorage implements SkillStorage {
       })
       .returning({ id: SkillTable.id });
     return { id: row.id };
+  }
+
+  async overwriteCustom(input: OverwriteCustomSkillInput): Promise<void> {
+    const parsed = parseSkillMd(input.skillMd);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(SkillTable)
+        .set({
+          name: parsed.frontmatter.name,
+          description: parsed.frontmatter.description,
+          version: parsed.frontmatter.version,
+          skillMd: input.skillMd,
+          updatedBy: input.updatedBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(SkillTable.id, input.skillId));
+
+      await tx
+        .delete(SkillFileTable)
+        .where(eq(SkillFileTable.skillId, input.skillId));
+
+      if (input.files.length > 0) {
+        await tx.insert(SkillFileTable).values(
+          input.files.map((f) => ({
+            skillId: input.skillId,
+            path: f.path,
+            content: f.content,
+            size: f.content.byteLength,
+            contentType: f.contentType ?? null,
+          })),
+        );
+      }
+    });
   }
 
   async updateContent(input: UpdateSkillContentInput): Promise<void> {

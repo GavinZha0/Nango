@@ -12,9 +12,10 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { SkillTable } from "@/lib/db/schema";
+import { BuiltinAgentToolTable, SkillTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
 import { invalidateForSkillChange } from "@/lib/cache/invalidation";
@@ -32,6 +33,9 @@ import { guessContentType } from "@/lib/folder-import/mime";
 import {
   parseSkillMd,
   SkillParseError,
+  buildSuffixedSkillName,
+  isValidSkillName,
+  rewriteSkillNameInSkillMd,
   findMissingSshScripts,
   describeMissingSshScripts,
   findMissingDeclaredScripts,
@@ -58,11 +62,31 @@ const ROUTE = "/api/skills/import";
 // still rejecting a hostile multi-hundred-MB body before `req.json()` reads it.
 const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 
+const skillImportSchema = folderManifestSchema.extend({
+  conflictStrategy: z.enum(["fail", "overwrite", "rename"]).optional().default("fail"),
+  customName: z.string().trim().min(1).optional(),
+});
+
+function randomDigits(len: number): string {
+  const min = 10 ** (len - 1);
+  const span = 9 * min;
+  return String(min + Math.floor(Math.random() * span));
+}
+
+async function findOwnedSkillByName(userId: string, name: string): Promise<string | null> {
+  const rows = await db
+    .select({ id: SkillTable.id })
+    .from(SkillTable)
+    .where(and(eq(SkillTable.name, name), eq(SkillTable.createdBy, userId)))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   // 1. Reject an oversized body before buffering it.
   assertBodyWithinCap(req, MAX_REQUEST_BYTES);
 
-  const body = await parseBody(req, folderManifestSchema);
+  const body = await parseBody(req, skillImportSchema);
 
   // 2. SKILL.md is the skill's main document, stored on the row rather than as a
   //    helper file, so it leaves the manifest before the walker — which applies
@@ -173,27 +197,98 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     }
   }
 
-  // 7. Name collision check (per-creator uniqueness).
-  const existing = await db
-    .select({ id: SkillTable.id })
-    .from(SkillTable)
-    .where(
-      and(
-        eq(SkillTable.name, parsed.frontmatter.name),
-        eq(SkillTable.createdBy, session.user.id),
-      ),
-    )
-    .limit(1);
-  if (existing.length > 0) {
+  // 7. Name collision check (per-creator uniqueness) + conflict resolution.
+  const conflictStrategy = body.conflictStrategy;
+  const existingId = await findOwnedSkillByName(session.user.id, parsed.frontmatter.name);
+  const storage = getDbSkillStorage();
+
+  if (existingId && conflictStrategy === "overwrite") {
+    await storage.overwriteCustom({
+      skillId: existingId,
+      skillMd: skillMdText,
+      updatedBy: session.user.id,
+      files: files.map((f) => ({
+        path: f.path,
+        content: f.content,
+        contentType: guessContentType(f.path) ?? undefined,
+      })),
+    });
+
+    await invalidateForSkillChange(existingId);
+
+    const [updated] = await db
+      .select()
+      .from(SkillTable)
+      .where(eq(SkillTable.id, existingId))
+      .limit(1);
+
+    return NextResponse.json(
+      { ...updated, filesImported: files.length, skipped, overwritten: true },
+      { status: 200 },
+    );
+  }
+
+  if (conflictStrategy === "rename") {
+    let targetName = body.customName;
+    if (targetName) {
+      if (!isValidSkillName(targetName)) {
+        throw new ApiError(
+          "VALIDATION_FAILED",
+          400,
+          `Skill name must be a kebab-case slug (a-z, 0-9, -, _; up to 64 chars). Got: ${targetName}`,
+        );
+      }
+      const takenId = await findOwnedSkillByName(session.user.id, targetName);
+      if (takenId) {
+        throw new ApiError(
+          "CONFLICT",
+          409,
+          `You already own a skill named "${targetName}".`,
+          { existingId: takenId, existingName: targetName },
+        );
+      }
+    } else if (existingId) {
+      let candidate: string | null = null;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const suffix = `_${randomDigits(attempt < 8 ? 3 : 5)}`;
+        const next = buildSuffixedSkillName(parsed.frontmatter.name, suffix);
+        if (!(await findOwnedSkillByName(session.user.id, next))) {
+          candidate = next;
+          break;
+        }
+      }
+      if (!candidate) {
+        throw new ApiError(
+          "CONFLICT",
+          409,
+          `Could not allocate a unique name for "${parsed.frontmatter.name}".`,
+        );
+      }
+      targetName = candidate;
+    }
+
+    if (targetName && targetName !== parsed.frontmatter.name) {
+      skillMdText = rewriteSkillNameInSkillMd(skillMdText, targetName);
+      parsed = parseSkillMd(skillMdText);
+    }
+  } else if (existingId) {
+    const boundRows = await db
+      .select({ id: BuiltinAgentToolTable.id })
+      .from(BuiltinAgentToolTable)
+      .where(eq(BuiltinAgentToolTable.skillId, existingId));
     throw new ApiError(
       "CONFLICT",
       409,
       `You already own a skill named "${parsed.frontmatter.name}".`,
+      {
+        existingId,
+        existingName: parsed.frontmatter.name,
+        boundAgentCount: boundRows.length,
+      },
     );
   }
 
-  // 8. Persist skill row + helper files.
-  const storage = getDbSkillStorage();
+  // 8. Persist new skill row + helper files.
   const { id } = await storage.createCustom({
     skillMd: skillMdText,
     visibility: "private",
