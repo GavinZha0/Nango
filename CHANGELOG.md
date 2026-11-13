@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.2](https://github.com/GavinZha0/Nango/compare/v0.33.1...v0.33.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **desktop:** normalize absolute Windows junction targets in standalone.tar ([3ae2717](https://github.com/GavinZha0/Nango/commit/3ae271778f2ea98c6f4fb09b05ad8d9769dff5eb))
+
 ## [0.33.1](https://github.com/GavinZha0/Nango/compare/v0.33.0...v0.33.1) (2026-11-13)
 
 
