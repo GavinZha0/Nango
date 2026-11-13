@@ -321,7 +321,8 @@ export async function runMacAfterSign({
 
   const requireSigning =
     env.NANGO_REQUIRE_SIGNING === "true" ||
-    env.GITHUB_REF?.startsWith("refs/tags/v");
+    (env.NANGO_REQUIRE_SIGNING !== "false" &&
+      env.GITHUB_REF?.startsWith("refs/tags/v"));
   const identity = resolveMacSigningIdentity(env, execSyncFn);
   if (!identity) {
     if (requireSigning) {

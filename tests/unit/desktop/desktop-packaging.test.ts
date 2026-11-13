@@ -340,6 +340,17 @@ describe("desktop/scripts/after-sign.mjs — Inside-Out Mach-O ordering", () => 
       }),
     ).resolves.toBeUndefined();
 
+    // 2b. Explicit NANGO_REQUIRE_SIGNING="false" skips even on tag refs
+    await expect(
+      runMacAfterSign({
+        context: fakeContext,
+        env: {
+          NANGO_REQUIRE_SIGNING: "false",
+          GITHUB_REF: "refs/tags/v1.0.0",
+        } as unknown as NodeJS.ProcessEnv,
+      }),
+    ).resolves.toBeUndefined();
+
     // 3. Valid identity but missing Apple Notarization credentials on release build must throw
     const fakeCodesign = vi.fn();
     await expect(

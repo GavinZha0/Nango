@@ -57,7 +57,7 @@ jobs:
         run: pnpm vitest run tests/unit/desktop/ --test-timeout=60000
 
       - name: Validate release signing secrets before packaging
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && vars.NANGO_REQUIRE_SIGNING == 'true'
         shell: bash
         run: |
           echo "Validating release signing credentials for ${{ matrix.platform }}..."
@@ -85,7 +85,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NANGO_REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && 'true' || 'false' }}
+          NANGO_REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && vars.NANGO_REQUIRE_SIGNING == 'true' && 'true' || 'false' }}
           CSC_LINK_WIN_RAW: ${{ secrets.CSC_LINK_WIN || secrets.WIN_CSC_LINK || secrets.CSC_LINK }}
           CSC_KEY_PASSWORD_WIN_RAW: ${{ secrets.CSC_KEY_PASSWORD_WIN || secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
           CSC_LINK_MAC_RAW: ${{ secrets.CSC_LINK_MAC || secrets.MAC_CSC_LINK || secrets.CSC_LINK }}
