@@ -21,7 +21,7 @@ import { getEnabledInfrastructureCredentialByProvider } from "@/lib/credentials/
 
 const DEFAULT_SERVICE_URL = "http://sandbox:8194";
 const DEFAULT_API_KEY = "dify-sandbox";
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_S = 60;
 
 export class ServiceSandboxAdapter implements ISandboxAdapter {
   readonly backend: SandboxBackend = "service";
@@ -53,7 +53,7 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
     const cred = await getEnabledInfrastructureCredentialByProvider("dify-sandbox");
     const baseUrl = (cred?.host ?? DEFAULT_SERVICE_URL).replace(/\/+$/, "");
     const apiKey = cred?.apiKey ?? DEFAULT_API_KEY;
-    const timeoutMs = input.timeoutMs ?? getConfigMs("sandbox.timeout", DEFAULT_TIMEOUT_MS);
+    const timeoutMs = input.timeoutMs ?? getConfigMs("sandbox.timeout", DEFAULT_TIMEOUT_S);
 
     // Determine language and main script payload (prefer explicit input.language)
     const language = input.language ?? this.determineLanguage(input.command);

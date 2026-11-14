@@ -35,7 +35,7 @@ import type { MCPClientProvider } from "@/lib/copilot/index.server";
 import { getConfig, getConfigMs } from "@/lib/config";
 import { childLogger } from "@/lib/observability/logger";
 
-const DEFAULT_DISCOVERY_TIMEOUT_S = 5;
+const DEFAULT_DISCOVERY_TIMEOUT_S = 10;
 const DEFAULT_STDIO_DISCOVERY_TIMEOUT_S = 120;
 const DEFAULT_EXECUTION_TIMEOUT_S = 60;
 

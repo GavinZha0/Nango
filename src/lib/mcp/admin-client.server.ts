@@ -166,7 +166,7 @@ export async function withMcpAdminClient<T>(opts: {
   const discoveryTimeoutMs =
     server.type === "stdio"
       ? getConfigMs("mcp.stdio_discovery_timeout", 120)
-      : getConfigMs("mcp.discovery_timeout", 5);
+      : getConfigMs("mcp.discovery_timeout", 10);
 
   let client: Client | null = null;
   try {

@@ -43,7 +43,7 @@ export type {
 /** Wall-clock budget per call. Config value is in seconds; converted
  *  to milliseconds here. */
 const requestTimeoutMs = (): number =>
-  getConfigMs("web_search.timeout", 30);
+  getConfigMs("web_search.timeout", 60);
 
 export function buildWebSearchTool(): ToolDefinition {
   return defineTool({

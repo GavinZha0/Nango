@@ -67,7 +67,7 @@ export interface SandboxInput {
    */
   env?: Record<string, string>;
 
-  /** Hard timeout. SIGKILL on overshoot. Default: 30 000. */
+  /** Hard timeout. SIGKILL on overshoot. Default: 60 000. */
   timeoutMs?: number;
 
   /** Memory cap in MB. Default: 256. */

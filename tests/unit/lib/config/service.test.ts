@@ -69,7 +69,7 @@ beforeEach(() => {
 describe("getConfig — before load (code defaults only)", () => {
   it("returns code default for a predefined key", () => {
     const result = getConfig("sandbox.timeout", "99");
-    expect(result).toBe("30"); // from CONFIG_DEFAULTS
+    expect(result).toBe("60"); // from CONFIG_DEFAULTS
   });
 
   it("returns the defaultValue param for an unknown key", () => {
@@ -104,8 +104,8 @@ describe("getConfigNumber", () => {
 
 describe("getConfigMs", () => {
   it("multiplies seconds by 1000", () => {
-    // sandbox.timeout default = "30" seconds
-    expect(getConfigMs("sandbox.timeout", 30)).toBe(30_000);
+    // sandbox.timeout default = "60" seconds
+    expect(getConfigMs("sandbox.timeout", 60)).toBe(60_000);
   });
 
   it("uses defaultSeconds param for unknown key", () => {
@@ -132,7 +132,7 @@ describe("loadAllConfigs", () => {
   it("populates cache from DB rows", async () => {
     vi.mocked((await import("@/lib/db")).db.select).mockReturnValueOnce({
       from: vi.fn().mockResolvedValue([
-        { key: "sandbox.timeout", value: "60" },
+        { key: "sandbox.timeout", value: "90" },
         { key: "sandbox.stdout_max_chars", value: "30000" },
       ]),
     } as never);
@@ -142,7 +142,7 @@ describe("loadAllConfigs", () => {
     expect(_isLoaded()).toBe(true);
     expect(_cacheSize()).toBe(2);
     // DB value overrides code default
-    expect(getConfig("sandbox.timeout", "30")).toBe("60");
+    expect(getConfig("sandbox.timeout", "60")).toBe("90");
     expect(getConfigNumber("sandbox.stdout_max_chars", 20000)).toBe(30000);
   });
 
@@ -155,7 +155,7 @@ describe("loadAllConfigs", () => {
 
     expect(_isLoaded()).toBe(false);
     // Still works via code defaults
-    expect(getConfig("sandbox.timeout", "30")).toBe("30");
+    expect(getConfig("sandbox.timeout", "60")).toBe("60");
   });
 });
 

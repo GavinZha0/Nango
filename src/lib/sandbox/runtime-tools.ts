@@ -80,7 +80,7 @@ const RunInSandboxArgs = z.object({
     .optional()
     .describe(
       "Wall-clock timeout in SECONDS (integer 1-300). NOT milliseconds. " +
-        "Default is 30 seconds.",
+        "Default is 60 seconds.",
     ),
 });
 
@@ -111,7 +111,7 @@ export function buildRunInSandboxTool(): ToolDefinition {
       "tool handles the argv internally (python → `python3 -`, " +
       "javascript → `node -`). " +
       "Optional `timeout_seconds` is in SECONDS (NOT milliseconds), " +
-      "integer 1-300, default 30. Pass typed runtime parameters via " +
+      "integer 1-300, default 60. Pass typed runtime parameters via " +
       "`params` (env vars; read with `os.environ['<KEY>']` in " +
       "Python or `process.env['<KEY>']` in JavaScript); do not " +
       "embed secrets there. Each name passed in `datasets` appears " +

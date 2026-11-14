@@ -339,7 +339,7 @@ const RunSkillScriptOnSshArgs = z.object({
     .max(300)
     .optional()
     .describe(
-      "Wall-clock timeout in SECONDS (1-300). NOT milliseconds. Default 30.",
+      "Wall-clock timeout in SECONDS (1-300). NOT milliseconds. Default 60.",
     ),
 });
 
@@ -372,7 +372,7 @@ export function buildRunSkillScriptOnSshTool(
       "declared in the skill's scripts-on-ssh frontmatter. Pass `name` (skill name), " +
       "`filename` (e.g. 'probe.sh'), `serverName` (SSH server slug from list_ssh_hosts), " +
       "and optional `args` (positional arguments: $1, $2, ... for .sh; sys.argv[1:] for .py) " +
-      "and `timeoutSeconds` (1-300 seconds, default 30). Returns { ok, serverName, host, " +
+      "and `timeoutSeconds` (1-300 seconds, default 60). Returns { ok, serverName, host, " +
       "skill, script, scriptSha256, stdout, stderr, exitCode, signal, durationMs, truncated }.",
     parameters: RunSkillScriptOnSshArgs,
     execute: async (rawArgs, ctx?: { abortSignal?: AbortSignal }) => {

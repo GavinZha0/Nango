@@ -29,7 +29,7 @@
  *   `web_search.searxng.include_thumbnails`.
  *
  * KNOBS (Admin -> Config):
- *   - web_search.timeout                     (shared call budget, default 30 s)
+ *   - web_search.timeout                     (shared call budget, default 60 s)
  *   - web_search.exa.snippet_max_chars       (shared UI budget)
  *   - web_search.searxng.language            (empty = instance default)
  *   - web_search.searxng.categories          (default "general")

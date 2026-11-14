@@ -43,6 +43,13 @@
       "when": 1794090279578,
       "tag": "0005_mcp_server_stdio_support",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794694176751,
+      "tag": "0006_builtin_agent_max_steps_default_30",
+      "breakpoints": true
     }
   ]
 }

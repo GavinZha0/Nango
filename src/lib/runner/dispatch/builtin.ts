@@ -776,12 +776,7 @@ export async function buildBuiltinAgents(
       ...(spec.temperature !== null ? { temperature: spec.temperature } : {}),
       ...(spec.maxTokens !== null ? { maxTokens: spec.maxTokens } : {}),
       toolChoice: "auto",
-      // maxSteps MUST be > 1 when tools are bound; otherwise the agent
-      // calls a tool with no step left to generate a reply. With the
-      // ambient get_current_datetime making `hasTools` effectively
-      // always-true, clamp to >= 2 so a user-set spec.maxSteps=1 can't
-      // strand a tool call on the result.
-      maxSteps: hasTools ? Math.max(spec.maxSteps, 2) : 1,
+      maxSteps: hasTools ? spec.maxSteps : 1,
       // mcpClients (user-managed lifecycle) — pool owns connections.
       // Pipeline wraps MCP tools identically to serverTools.
       ...(pipelinedProviders.length > 0

@@ -1071,7 +1071,7 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   maxTokens: integer("max_tokens"),
 
   /** Maximum number of tool-call steps per run (default 20). */
-  maxSteps: integer("max_steps").notNull().default(20),
+  maxSteps: integer("max_steps").notNull().default(30),
 
   /** Tool execution approval mode: "always" | "auto" | "never". Default "auto". */
   toolApprovalMode: text("tool_approval_mode").notNull().default("auto"),

@@ -89,7 +89,7 @@ export interface WebSearchAuth {
  *     tool's outer wrapper turns those throws into the standard
  *     `{ ok: false, error, message }` envelope (see `tool-failure.ts`).
  *   - Honours `signal` for cancellation (the runtime sets a
- *     `web_search.timeout` wall-clock budget, default 30 s).
+ *     `web_search.timeout` wall-clock budget, default 60 s).
  *   - Returns ≤ `topK` results; may return fewer if the upstream had
  *     fewer matches.
  */

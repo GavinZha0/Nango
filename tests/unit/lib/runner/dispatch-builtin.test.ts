@@ -512,7 +512,7 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         const args = agentArgs();
         expect(args.model).toBe("openai:gpt-4o");
         expect(args.toolChoice).toBe("auto");
-        // hasTools true (ambient) → max(spec.maxSteps, 2)
+        // hasTools true (ambient) → passes spec.maxSteps directly
         expect(args.maxSteps).toBe(5);
         expect(args.prompt).toEqual(expect.stringContaining("You are helpful."));
         expect(args.prompt).toEqual(expect.stringContaining(SAFETY_POLICY_BLOCK));
@@ -559,12 +559,12 @@ describe("Runner Dispatch — Builtin Agents Dispatcher", () => {
         expect(agentArgs().maxTokens).toBeUndefined();
       });
 
-      it("clamps maxSteps to at least 2 when tools are bound", async () => {
-        agentPoolGetMock.mockResolvedValue(makeSpec({ maxSteps: 1 }));
+      it("passes spec.maxSteps directly when tools are bound", async () => {
+        agentPoolGetMock.mockResolvedValue(makeSpec({ maxSteps: 12 }));
 
         await buildBuiltinAgents(["agent-1"], mockLogger, { userId: "user-1" });
 
-        expect(agentArgs().maxSteps).toBe(2);
+        expect(agentArgs().maxSteps).toBe(12);
       });
 
       it("builds multiple agents preserving order in the returned map", async () => {

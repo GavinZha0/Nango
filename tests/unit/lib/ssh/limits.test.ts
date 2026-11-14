@@ -14,7 +14,7 @@ const { getSshLimits } = await import("@/lib/ssh/limits");
 describe("getSshLimits", () => {
   it("returns sensible defaults from config service", () => {
     const limits = getSshLimits();
-    expect(limits.execTimeoutMs).toBe(30_000);
+    expect(limits.execTimeoutMs).toBe(60_000);
     expect(limits.connectTimeoutMs).toBe(10_000);
     expect(limits.maxOutputBytes).toBe(1_048_576);
   });

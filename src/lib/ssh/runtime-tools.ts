@@ -43,7 +43,7 @@ const RunSshArgs = z.object({
     .optional()
     .describe(
       "Wall-clock timeout in SECONDS (integer 1-300). NOT milliseconds. " +
-        "Default is 30 seconds.",
+        "Default is 60 seconds.",
     ),
 });
 
@@ -212,7 +212,7 @@ export function buildRunSshCommandTool(opts: {
       "Execute a single shell command on a remote SSH host. Pass " +
       "`serverName` (the ssh_server's slug — see list_ssh_hosts) and " +
       "the shell command. Optional `timeoutSeconds` is in SECONDS " +
-      "(NOT milliseconds), integer 1-300, default 30. Returns " +
+      "(NOT milliseconds), integer 1-300, default 60. Returns " +
       "{ stdout, stderr, exitCode, signal, durationMs, truncated }. " +
       "By default the command runs in a login bash (`bash -lc`) so " +
       "the host's profile scripts (`/etc/profile`, " +

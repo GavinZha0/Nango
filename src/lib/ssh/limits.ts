@@ -8,7 +8,7 @@ import "server-only";
 
 import { getConfigMs, getConfigNumber } from "@/lib/config";
 
-const DEFAULT_EXEC_TIMEOUT_S = 30;
+const DEFAULT_EXEC_TIMEOUT_S = 60;
 const DEFAULT_CONNECT_TIMEOUT_S = 10;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576; // 1 MiB per stream
 

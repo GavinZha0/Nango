@@ -1,0 +1,1 @@
+ALTER TABLE "builtin_agent" ALTER COLUMN "max_steps" SET DEFAULT 30;

@@ -139,7 +139,7 @@ const updateSchema = z
     prompt: optionalTrimmedString.optional(),
     temperature: z.number().min(0).max(1).nullable().optional(),
     maxTokens: z.number().int().positive().nullable().optional(),
-    maxSteps: z.number().int().positive().optional(),
+    maxSteps: z.number().int().min(5).optional(),
     toolApprovalMode: z.enum(["always", "auto", "never"]).optional(),
     sharedStateEnabled: z.boolean().optional(),
     memoryEnabled: z.boolean().optional(),

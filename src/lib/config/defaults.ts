@@ -20,7 +20,7 @@ export interface ConfigDefault {
 
 export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   // ── sandbox ───────────────────────────────────────────────────────
-  { key: "sandbox.timeout", value: "30", valueType: "number", description: "Execution timeout in seconds" },
+  { key: "sandbox.timeout", value: "60", valueType: "number", description: "Execution timeout in seconds" },
   { key: "sandbox.stdout_max_chars", value: "20000", valueType: "number", description: "Max stdout chars before truncation" },
   { key: "sandbox.stderr_max_chars", value: "10000", valueType: "number", description: "Max stderr chars before truncation" },
 
@@ -54,7 +54,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "sql.inline_max_bytes_mb", value: "20", valueType: "number", description: "Byte cap (MB) alongside `sql.inline_max_rows`. Reserved for future bytes-aware truncation; not yet enforced." },
 
   // ── ssh ────────────────────────────────────────────────────────────
-  { key: "ssh.exec_timeout", value: "30", valueType: "number", description: "Command timeout in seconds" },
+  { key: "ssh.exec_timeout", value: "60", valueType: "number", description: "Command timeout in seconds" },
   { key: "ssh.connect_timeout", value: "10", valueType: "number", description: "Connection timeout in seconds" },
   { key: "ssh.max_output_bytes", value: "1048576", valueType: "number", description: "Max output per stream in bytes (1 MiB)" },
 
@@ -99,7 +99,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "auth.session_refresh", value: "86400", valueType: "number", description: "Session refresh interval in seconds (1 day)" },
 
   // ── mcp ───────────────────────────────────────────────────────────
-  { key: "mcp.discovery_timeout", value: "5", valueType: "number", description: "Tool discovery timeout in seconds" },
+  { key: "mcp.discovery_timeout", value: "10", valueType: "number", description: "Tool discovery timeout in seconds" },
   { key: "mcp.stdio_discovery_timeout", value: "120", valueType: "number", description: "Stdio MCP tool discovery timeout in seconds (allows first-run npx/uvx package downloads)" },
   { key: "mcp.execution_timeout", value: "60", valueType: "number", description: "MCP tool execution timeout in seconds" },
   { key: "mcp.crop_image_for_llm", value: "true", valueType: "boolean", description: "Crop massive base64 image data in tool results before passing to LLM" },
@@ -135,7 +135,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "backend.entity_fetch.timeout", value: "5", valueType: "number", description: "Backend entity discovery timeout in seconds" },
 
   // ── web search ─────────────────────────────────────────────────────
-  { key: "web_search.timeout", value: "30", valueType: "number", description: "Wall-clock budget for one web_search call in seconds (all providers)" },
+  { key: "web_search.timeout", value: "60", valueType: "number", description: "Wall-clock budget for one web_search call in seconds (all providers)" },
   { key: "web_search.searxng.language", value: "", valueType: "string", description: "SearXNG language code (empty = instance default, e.g. zh-CN)" },
   { key: "web_search.searxng.categories", value: "general", valueType: "string", description: "SearXNG categories, comma-separated (e.g. general,news)" },
   { key: "web_search.searxng.safesearch", value: "0", valueType: "string", options: ["0", "1", "2"], description: "SearXNG safe search: 0 off, 1 moderate, 2 strict" },

@@ -9,8 +9,8 @@
 
 import { useEffect, useState } from "react";
 
-/** One entry per `toolCallId`. `completedAt` set once on the first
- *  render after `running` flips to false; never reset. */
+/** One entry per `toolCallId`. `completedAt` is set when `running` flips to
+ *  false, and cleared if `running` later resumes (e.g. after user approval). */
 interface TimingEntry {
   startedAt: number;
   completedAt?: number;
@@ -58,30 +58,42 @@ export function useElapsedSeconds(
   running: boolean,
 ): string {
   const timing = getOrInitTiming(toolCallId);
-  const { startedAt } = timing;
-
-  // Capture completion timestamp on the first render after `running`
-  // flips to false. `useEffect` keeps the render itself pure; the
-  // lazy-initialised state below reads any previously persisted
-  // completion timestamp on remount.
-  useEffect(() => {
-    if (!running) markCompleted(toolCallId);
-  }, [running, toolCallId]);
 
   const [seconds, setSeconds] = useState<number>(() => {
+    if (running && timing.completedAt !== undefined) {
+      return 0;
+    }
     const end = timing.completedAt ?? Date.now();
-    return Math.max(0, Math.floor((end - startedAt) / 1000));
+    return Math.max(0, Math.floor((end - timing.startedAt) / 1000));
   });
 
+  const [prevRunning, setPrevRunning] = useState(running);
+  if (running !== prevRunning) {
+    setPrevRunning(running);
+    if (running && timing.completedAt !== undefined) {
+      setSeconds(0);
+    }
+  }
+
   useEffect(() => {
-    // Only tick while running — once `completedAt` is set, the value
-    // is frozen and no further interval is needed.
-    if (!running) return;
+    if (!running) {
+      markCompleted(toolCallId);
+      return;
+    }
+
+    const entry = getOrInitTiming(toolCallId);
+    if (entry.completedAt !== undefined) {
+      // Resumed from a paused/waiting state (e.g. after user approval):
+      // restart timing from 0s so approval wait time is excluded.
+      entry.startedAt = Date.now();
+      delete entry.completedAt;
+    }
+
     const interval = setInterval(() => {
-      setSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+      setSeconds(Math.max(0, Math.floor((Date.now() - entry.startedAt) / 1000)));
     }, 1000);
     return () => clearInterval(interval);
-  }, [running, startedAt]);
+  }, [running, toolCallId]);
 
   return formatElapsed(seconds);
 }

@@ -514,7 +514,7 @@ export const WORKFLOW_AMBIENT_TOOLS: readonly BuiltinToolDescriptor[] = [
         },
         timeoutSeconds: {
           type: "number",
-          description: "Wall-clock timeout in SECONDS (1-300). Default 30.",
+          description: "Wall-clock timeout in SECONDS (1-300). Default 60.",
         },
       },
       required: ["name", "filename", "serverName"],

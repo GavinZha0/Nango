@@ -207,7 +207,7 @@ const EMPTY_FORM: FormState = {
   credentialId: null,
   prompt: "",
   toolApprovalMode: "auto",
-  maxSteps: 20,
+  maxSteps: 30,
   temperature: 0.3,
   role: null,
   sharedStateEnabled: false,
@@ -223,7 +223,7 @@ function formFromDetail(data: AgentDetail): FormState {
     credentialId: data.credentialId ?? null,
     prompt: data.prompt ?? "",
     toolApprovalMode: data.toolApprovalMode ?? "auto",
-    maxSteps: data.maxSteps ?? 20,
+    maxSteps: data.maxSteps ?? 30,
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
     sharedStateEnabled: resolveSharedStateEnabled(data),
@@ -1014,10 +1014,10 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 <Label className="w-20 shrink-0 text-xs">Max Steps</Label>
                 <Input
                   type="number"
-                  min={1}
+                  min={5}
                   max={50}
                   value={form.maxSteps}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("maxSteps", Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => update("maxSteps", Math.max(5, parseInt(e.target.value) || 5))}
                   className="h-8 flex-1 text-xs"
                 />
               </div>
