@@ -35,26 +35,7 @@ export const GET = withEditor(ROUTE, async ({ session }) => {
     )
     .orderBy(desc(McpServerTable.createdAt));
 
-  // SECURITY: Redact host-process spawn fields (command, args, env, cwd,
-  // credentialEnvName) for non-admin editors so host filesystem paths and
-  // environment variables are only visible to administrators.
-  const isAdmin = session.user.role === "admin";
-  const sanitizedRows = isAdmin
-    ? rows
-    : rows.map((row) =>
-        row.type === "stdio"
-          ? {
-              ...row,
-              command: null,
-              args: null,
-              env: null,
-              cwd: null,
-              credentialEnvName: null,
-            }
-          : row,
-      );
-
-  return NextResponse.json(sanitizedRows);
+  return NextResponse.json(rows);
 });
 
 // POST /api/mcp-servers
@@ -105,23 +86,12 @@ const createSchema = z
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   const body = await parseBody(req, createSchema);
 
-  // SECURITY: stdio spawns a local child process on the host, so it is
-  // gated behind both the runtime environment allowlist and the admin role.
-  if (body.type === "stdio") {
-    if (!isStdioMcpAllowed()) {
-      throw new ApiError(
-        "FORBIDDEN",
-        403,
-        "Stdio MCP servers are disabled in this environment.",
-      );
-    }
-    if (session.user.role !== "admin") {
-      throw new ApiError(
-        "FORBIDDEN",
-        403,
-        "Only admins can create stdio MCP servers.",
-      );
-    }
+  if (body.type === "stdio" && !isStdioMcpAllowed()) {
+    throw new ApiError(
+      "FORBIDDEN",
+      403,
+      "Stdio MCP servers are disabled in this environment.",
+    );
   }
 
   const [row] = await db

@@ -19,7 +19,15 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
+  Search,
+  Download,
+  Check,
 } from "lucide-react";
+import {
+  MCP_MARKET_CATALOG,
+  filterMarketCatalog,
+  type McpMarketItem,
+} from "@/lib/mcp/market-catalog";
 import {
   type ReactNode,
   useState,
@@ -172,8 +180,25 @@ function entriesToHeaders(entries: HeaderEntry[]): Record<string, string> | null
   return result;
 }
 
-function initialFormState(editing?: McpServerRow): ServerFormState {
+function initialFormState(editing?: McpServerRow, prefill?: McpMarketItem): ServerFormState {
   const currentGroup = editing?.group?.trim();
+  if (!editing && prefill) {
+    return {
+      name: prefill.name,
+      group: "__NONE__",
+      newGroupName: "",
+      type: prefill.type,
+      url: prefill.url ?? "",
+      command: prefill.command ?? "",
+      args: formatStdioArgs(prefill.args),
+      cwd: "",
+      credentialId: "",
+      credentialEnvName: prefill.credentialEnvName ?? "",
+      headers: [],
+      envEntries: headersToEntries(prefill.env ?? null),
+      error: "",
+    };
+  }
   return {
     name: editing?.name ?? "",
     group: currentGroup ? currentGroup : "__NONE__",
@@ -196,6 +221,7 @@ interface ServerFormDialogProps {
   onOpenChange: (open: boolean) => void;
   onSuccess: (server: McpServerRow) => void;
   editing?: McpServerRow;
+  prefill?: McpMarketItem;
   credentials: CredentialOption[];
   existingGroups: string[];
 }
@@ -205,20 +231,21 @@ function ServerFormDialog({
   onOpenChange,
   onSuccess,
   editing,
+  prefill,
   credentials,
   existingGroups,
 }: ServerFormDialogProps): ReactNode {
   const isEdit = Boolean(editing);
-  const [form, setForm] = useState<ServerFormState>(initialFormState(editing));
+  const [form, setForm] = useState<ServerFormState>(initialFormState(editing, prefill));
   const [submitting, setSubmitting] = useState(false);
 
-  // Reset form when dialog opens/closes or editing target changes.
+  // Reset form when dialog opens/closes or editing/prefill target changes.
   // Use a ref to detect prop changes without triggering the lint rule.
-  const formKey = `${editing?.id ?? "new"}::${open}`;
+  const formKey = `${editing?.id ?? prefill?.id ?? "new"}::${open}`;
   const [lastKey, setLastKey] = useState(formKey);
   if (formKey !== lastKey) {
     setLastKey(formKey);
-    setForm(initialFormState(editing));
+    setForm(initialFormState(editing, prefill));
   }
 
   function setField<K extends keyof ServerFormState>(key: K, value: ServerFormState[K]) {
@@ -354,10 +381,17 @@ function ServerFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit MCP Server" : "New MCP Server"}</DialogTitle>
+          <DialogTitle>
+            {isEdit ? "Edit MCP Server" : prefill ? `Install ${prefill.name}` : "New MCP Server"}
+          </DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-3 py-2">
+          {!isEdit && prefill?.setupHint && (
+            <p className="rounded-md border border-border/60 bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
+              {prefill.setupHint}
+            </p>
+          )}
           {/* Name */}
           <div className="grid grid-cols-[80px_1fr] items-center gap-2">
             <Label htmlFor="mcp-name">Name <span className="text-destructive">*</span></Label>
@@ -1080,6 +1114,46 @@ function ServerHeader({
 // column with search, so it's no longer needed here — see
 // `src/app/(workspace)/mcp/test/[serverId]/[toolName]/page.tsx`.)
 
+function McpTabButton({
+  label,
+  count,
+  active,
+  testId,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  testId: string;
+  onClick: () => void;
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      data-testid={testId}
+      onClick={onClick}
+      className={cn(
+        "flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-b-2 transition-colors",
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+      <span
+        className={cn(
+          "rounded-full px-1.5 py-0.5 text-[10px] leading-none",
+          active ? "bg-primary/20 text-foreground" : "bg-muted text-muted-foreground",
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
 export function McpPanel(): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
@@ -1095,9 +1169,14 @@ export function McpPanel(): ReactNode {
   const [currentUserId, setCurrentUserId] = useState("");
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
 
+  // Tab & Market state
+  const [activeTab, setActiveTab] = useState<"installed" | "market">("installed");
+  const [marketQuery, setMarketQuery] = useState("");
+
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<McpServerRow | undefined>(undefined);
+  const [marketPrefill, setMarketPrefill] = useState<McpMarketItem | undefined>(undefined);
   // Per-server refreshing state
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
 
@@ -1200,11 +1279,19 @@ export function McpPanel(): ReactNode {
 
   function handleNewServer() {
     setEditingServer(undefined);
+    setMarketPrefill(undefined);
     setDialogOpen(true);
   }
 
   function handleEditServer(server: McpServerRow) {
     setEditingServer(server);
+    setMarketPrefill(undefined);
+    setDialogOpen(true);
+  }
+
+  function handleInstallFromMarket(item: McpMarketItem) {
+    setEditingServer(undefined);
+    setMarketPrefill(item);
     setDialogOpen(true);
   }
 
@@ -1215,6 +1302,7 @@ export function McpPanel(): ReactNode {
     } else {
       // Add new
       setServers((prev) => [server, ...prev]);
+      setActiveTab("installed");
     }
     void discoverTools(server.id);
   }
@@ -1322,6 +1410,16 @@ export function McpPanel(): ReactNode {
     );
   }, [servers]);
 
+  const installedNames = useMemo(
+    () => new Set(servers.map((s) => s.name.trim().toLowerCase())),
+    [servers],
+  );
+
+  const filteredMarketItems = useMemo(
+    () => filterMarketCatalog(MCP_MARKET_CATALOG, marketQuery),
+    [marketQuery],
+  );
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ServerFormDialog
@@ -1329,15 +1427,27 @@ export function McpPanel(): ReactNode {
         onOpenChange={setDialogOpen}
         onSuccess={handleDialogSuccess}
         editing={editingServer}
+        prefill={marketPrefill}
         credentials={credentials}
         existingGroups={existingGroups}
       />
 
-      {/* Header */}
-      <div className="flex h-9 items-center justify-between border-b bg-muted/40 px-3 py-1.5">
-        <h2 className="text-xs font-semibold tracking-tight text-foreground truncate">
-          MCP Servers
-        </h2>
+      {/* Header — tab strip + global actions on a single row (mirrors AgentPanel) */}
+      <div className="flex items-stretch border-b bg-muted/40 pr-1.5" role="tablist" aria-label="MCP views">
+        <McpTabButton
+          label="Installed"
+          count={servers.length}
+          active={activeTab === "installed"}
+          testId="mcp-tab-installed"
+          onClick={() => setActiveTab("installed")}
+        />
+        <McpTabButton
+          label="Market"
+          count={MCP_MARKET_CATALOG.length}
+          active={activeTab === "market"}
+          testId="mcp-tab-market"
+          onClick={() => setActiveTab("market")}
+        />
         <div className="ml-auto flex items-center gap-1">
           <Button
             variant="ghost"
@@ -1360,11 +1470,87 @@ export function McpPanel(): ReactNode {
             title="Refresh all servers"
             data-testid="refresh-mcp-servers-button"
           >
-            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
           </Button>
         </div>
       </div>
 
+      {activeTab === "market" ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="border-b px-3 py-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={marketQuery}
+                onChange={(e) => setMarketQuery(e.target.value)}
+                placeholder="Search MCP market…"
+                className="h-7 pl-7 text-xs"
+                data-testid="mcp-market-search"
+              />
+            </div>
+          </div>
+
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="divide-y divide-border/40">
+              {filteredMarketItems.length === 0 ? (
+                <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  No matching MCP servers found.
+                </p>
+              ) : (
+                filteredMarketItems.map((item) => {
+                  const isInstalled = installedNames.has(item.name.trim().toLowerCase());
+                  return (
+                    <div
+                      key={item.id}
+                      data-testid={`mcp-market-item-${item.id}`}
+                      className="flex items-start justify-between gap-2 px-3 py-2.5 hover:bg-muted/30"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-xs font-medium text-foreground">
+                            {item.name}
+                          </span>
+                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {item.category}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                          {item.description}
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0"
+                        title={isInstalled ? "Installed" : "Install"}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={isInstalled}
+                          className={cn(
+                            "h-6 w-6",
+                            isInstalled
+                              ? "text-emerald-600 opacity-100 dark:text-emerald-400"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                          onClick={() => handleInstallFromMarket(item)}
+                          aria-label={isInstalled ? "Installed" : `Install ${item.name}`}
+                          data-testid={`mcp-market-install-${item.id}`}
+                        >
+                          {isInstalled ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      ) : (
         <ScrollArea className="min-h-0 flex-1">
           <div className="py-1">
             {loading && servers.length === 0 ? (
@@ -1436,6 +1622,7 @@ export function McpPanel(): ReactNode {
             )}
           </div>
         </ScrollArea>
+      )}
 
         {/* ── Delete confirmation dialog ──────────────────────────────── */}
         <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>

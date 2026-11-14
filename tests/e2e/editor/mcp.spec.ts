@@ -8,12 +8,13 @@ import { uniqueName } from "../helpers/data";
 editorTest.describe("MCP Page", () => {
   editorTest.beforeEach(async ({ page }) => {
     // /mcp opens McpPanel in the left sidebar and WelcomePage in the center
-    await gotoSettled(page, "/mcp", page.getByRole("heading", { name: "MCP Servers" }));
+    await gotoSettled(page, "/mcp", page.getByTestId("mcp-tab-installed"));
   });
 
   // 1. Read-only base inspection in the panel
   editorTest("should display the MCP panel, controls, and seeded base server", async ({ page }) => {
-    await expect(page.getByRole("heading", { name: "MCP Servers" })).toBeVisible();
+    await expect(page.getByTestId("mcp-tab-installed")).toBeVisible();
+    await expect(page.getByTestId("mcp-tab-market")).toBeVisible();
     await expect(page.getByTestId("new-mcp-server-button")).toBeVisible();
     await expect(page.getByTestId("refresh-mcp-servers-button")).toBeVisible();
 
@@ -63,7 +64,7 @@ editorTest.describe("MCP Page", () => {
     // Navigate back to /mcp
     await page.getByTestId("mcp-test-back-button").click();
     await page.waitForURL(/\/mcp$/);
-    await expect(page.getByRole("heading", { name: "MCP Servers" })).toBeVisible();
+    await expect(page.getByTestId("mcp-tab-installed")).toBeVisible();
   });
 
   // 3. Ephemeral CRUD lifecycle (Create -> Toggle -> Edit -> Delete)

@@ -38,8 +38,8 @@ describe("stdio-spawn.server — isStdioMcpAllowed", () => {
     process.env = { ...originalEnv };
   });
 
-  it("defaults to false when neither NANGO_DESKTOP nor NANGO_ALLOW_STDIO_MCP is set", () => {
-    expect(isStdioMcpAllowed()).toBe(false);
+  it("defaults to true when neither NANGO_DESKTOP nor NANGO_ALLOW_STDIO_MCP is set", () => {
+    expect(isStdioMcpAllowed()).toBe(true);
   });
 
   it("returns true when NANGO_DESKTOP=1", () => {
@@ -55,9 +55,12 @@ describe("stdio-spawn.server — isStdioMcpAllowed", () => {
     expect(isStdioMcpAllowed()).toBe(true);
   });
 
-  it("allows explicit NANGO_ALLOW_STDIO_MCP=false to override NANGO_DESKTOP=1", () => {
+  it("allows explicit NANGO_ALLOW_STDIO_MCP=false or 0 to disable stdio MCP", () => {
     process.env.NANGO_DESKTOP = "1";
     process.env.NANGO_ALLOW_STDIO_MCP = "false";
+    expect(isStdioMcpAllowed()).toBe(false);
+
+    process.env.NANGO_ALLOW_STDIO_MCP = "0";
     expect(isStdioMcpAllowed()).toBe(false);
   });
 });

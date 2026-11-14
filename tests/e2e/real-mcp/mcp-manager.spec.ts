@@ -40,7 +40,7 @@ adminTest.describe("Real MCP Server Management & Tool Tester", () => {
 
   adminTest.beforeEach(async ({ page }) => {
     // Navigate to /mcp which mounts McpPanel in the left sidebar
-    await gotoSettled(page, "/mcp", page.getByRole("heading", { name: "MCP Servers" }));
+    await gotoSettled(page, "/mcp", page.getByTestId("mcp-tab-installed"));
   });
 
   let msLearnServerName = "";

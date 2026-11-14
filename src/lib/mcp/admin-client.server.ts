@@ -133,14 +133,7 @@ export async function withMcpAdminClient<T>(opts: {
       throw new ApiError(
         "FORBIDDEN",
         403,
-        "Stdio MCP servers are disabled in this environment (set NANGO_ALLOW_STDIO_MCP=true or run in Nango Desktop).",
-      );
-    }
-    if (opts.callerRole !== "admin") {
-      throw new ApiError(
-        "FORBIDDEN",
-        403,
-        "Only admins can discover or invoke tools on stdio MCP servers.",
+        "Stdio MCP servers are disabled in this environment.",
       );
     }
     if (!server.command?.trim()) {

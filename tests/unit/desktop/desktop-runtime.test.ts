@@ -263,6 +263,7 @@ describe("desktop/server-manager helpers", () => {
 
     expect(env.NANGO_DESKTOP).toBe("1");
     expect(env.NANGO_ALLOW_STDIO_MCP).toBe("true");
+    expect(env.NO_HTTPS).toBe("1");
     expect(env.PORT).toBe("9305");
     expect(env.BETTER_AUTH_URL).toBe("http://127.0.0.1:9305");
     expect(env.POSTGRES_PORT).toBe("15433");

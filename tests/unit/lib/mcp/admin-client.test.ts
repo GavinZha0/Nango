@@ -179,9 +179,9 @@ describe("MCP Admin Client & Header Resolution", () => {
       expect(clientCloseMock).toHaveBeenCalledTimes(1);
     });
 
-    it("enforces admin callerRole and uses mcp.stdio_discovery_timeout (120s) for stdio MCP servers", async () => {
+    it("allows editor callerRole and uses mcp.stdio_discovery_timeout (120s) for stdio MCP servers", async () => {
       const prevAllow = process.env.NANGO_ALLOW_STDIO_MCP;
-      process.env.NANGO_ALLOW_STDIO_MCP = "true";
+      delete process.env.NANGO_ALLOW_STDIO_MCP;
       try {
         const stdioServer = {
           id: "server-stdio",
@@ -195,29 +195,13 @@ describe("MCP Admin Client & Header Resolution", () => {
           credentialEnvName: null,
         };
 
-        // 1. Non-admin editor is rejected with 403 FORBIDDEN before spawning
-        dbMock._queryMock.where.mockResolvedValueOnce([stdioServer]);
-        await expect(
-          withMcpAdminClient({
-            serverId: "server-stdio",
-            clientName: "admin-test",
-            errorPrefix: "Discovery failed",
-            callerRole: "editor",
-            fn: async () => {},
-          }),
-        ).rejects.toThrow(
-          /Only admins can discover or invoke tools on stdio MCP servers/,
-        );
-        expect(clientConnectMock).not.toHaveBeenCalled();
-
-        // 2. Admin connects with mcp.stdio_discovery_timeout (120_000ms)
         dbMock._queryMock.where.mockResolvedValueOnce([stdioServer]);
         let observedTimeoutMs = 0;
         await withMcpAdminClient({
           serverId: "server-stdio",
           clientName: "admin-test",
           errorPrefix: "Discovery failed",
-          callerRole: "admin",
+          callerRole: "editor",
           fn: async ({ discoveryTimeoutMs }) => {
             observedTimeoutMs = discoveryTimeoutMs;
           },

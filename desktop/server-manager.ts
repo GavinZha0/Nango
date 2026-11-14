@@ -92,6 +92,7 @@ export function buildDesktopServerEnv(
 
   env.NANGO_DESKTOP = "1";
   env.NANGO_ALLOW_STDIO_MCP = "true";
+  env.NO_HTTPS = "1";
   env.HOSTNAME = "127.0.0.1";
   env.PORT = String(input.appPort);
   env.BETTER_AUTH_URL = input.betterAuthUrl;

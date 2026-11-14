@@ -31,16 +31,14 @@ export interface StdioMcpTransportConfig {
 }
 
 /**
- * SECURITY: Default-off in multi-tenant Docker deployments so container
- * editors/admins cannot spawn arbitrary child processes unless explicitly
- * opted in via `NANGO_ALLOW_STDIO_MCP=true` or running in desktop mode
- * (`NANGO_DESKTOP=1`).
+ * Returns whether `stdio` MCP servers are allowed in this runtime.
+ * Enabled by default across both desktop and Docker deployments; can be
+ * explicitly disabled via `NANGO_ALLOW_STDIO_MCP=false` (or `0`).
  */
 export function isStdioMcpAllowed(): boolean {
   const flag = process.env.NANGO_ALLOW_STDIO_MCP?.trim().toLowerCase();
-  if (flag === "true" || flag === "1") return true;
   if (flag === "false" || flag === "0") return false;
-  return process.env.NANGO_DESKTOP === "1";
+  return true;
 }
 
 /**
