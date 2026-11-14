@@ -131,4 +131,65 @@ editorTest.describe("MCP Page", () => {
     // Verify row detached from panel
     await expect(ephemeralRow).not.toBeVisible();
   });
+
+  // 4. Market Tab: search, prefill install, installed state, and cleanup
+  editorTest("should browse, search, install from Market tab, and mark as installed", async ({ page }) => {
+    await page.getByTestId("mcp-tab-market").click();
+
+    const searchInput = page.getByTestId("mcp-market-search");
+    await expect(searchInput).toBeVisible();
+    await expect(page.getByTestId("mcp-market-item-playwright")).toBeVisible();
+
+    // Filter by search query
+    await searchInput.fill("sequential");
+    await expect(page.getByTestId("mcp-market-item-sequential-thinking")).toBeVisible();
+    await expect(page.getByTestId("mcp-market-item-playwright")).not.toBeVisible();
+
+    // Clear search and pick the first uninstalled market item so the test is resilient to pre-existing DB state
+    await searchInput.fill("");
+    const firstInstallBtn = page.locator('[data-testid^="mcp-market-install-"]:not([disabled])').first();
+    await expect(firstInstallBtn).toBeVisible();
+    const installTestId = (await firstInstallBtn.getAttribute("data-testid"))!;
+    const itemName = ((await firstInstallBtn.getAttribute("aria-label")) ?? "").replace(/^Install\s+/, "");
+
+    // Click Install icon -> opens prefilled ServerFormDialog
+    await firstInstallBtn.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: `Install ${itemName}` })).toBeVisible();
+    await expect(page.getByTestId("mcp-name-input")).toHaveValue(itemName);
+
+    const createPromise = page.waitForResponse(
+      (r) => r.url().endsWith("/api/mcp-servers") && r.request().method() === "POST",
+      { timeout: 10_000 },
+    );
+    await page.getByTestId("mcp-submit-button").click();
+    const createRes = await createPromise;
+    expect(createRes.status()).toBe(201);
+    await expect(dialog).not.toBeVisible();
+
+    // Switches back to Installed tab and shows the newly installed server
+    const installedRow = panelRow(page, itemName);
+    await expect(installedRow).toBeVisible();
+
+    // Switch back to Market tab -> item button is now disabled with "Installed" tooltip
+    await page.getByTestId("mcp-tab-market").click();
+    await searchInput.fill(itemName);
+    const installedMarketBtn = page.getByTestId(installTestId);
+    await expect(installedMarketBtn).toBeDisabled();
+    await expect(installedMarketBtn.locator("..")).toHaveAttribute("title", "Installed");
+
+    // Clean up: switch to Installed and delete the ephemeral server
+    await page.getByTestId("mcp-tab-installed").click();
+    await installedRow.locator('[data-action="delete-server"]').click();
+    const deletePromise = page.waitForResponse(
+      (r) => r.url().includes("/api/mcp-servers/") && r.request().method() === "DELETE",
+      { timeout: 10_000 },
+    );
+    await page.getByTestId("mcp-confirm-delete-button").click();
+    const deleteRes = await deletePromise;
+    expect(deleteRes.ok()).toBeTruthy();
+    await expect(installedRow).not.toBeVisible();
+  });
 });

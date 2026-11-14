@@ -367,5 +367,57 @@
     "env": {},
     "credentialEnvName": null,
     "setupHint": "Ready to use out of the box with no extra configuration."
+  },
+  {
+    "id": "desktop-commander",
+    "name": "Desktop Commander",
+    "category": "Dev",
+    "description": "Execute long-running terminal commands, manage processes, and edit files with search/replace.",
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@wonderwhy-er/desktop-commander@latest"],
+    "env": {},
+    "credentialEnvName": null,
+    "setupHint": "Ready to use out of the box with no extra configuration."
+  },
+  {
+    "id": "vercel",
+    "name": "Vercel",
+    "category": "Dev",
+    "description": "Manage Vercel projects, deployments, logs, and documentation via remote MCP.",
+    "type": "http",
+    "url": "https://mcp.vercel.com",
+    "command": null,
+    "args": null,
+    "env": {},
+    "credentialEnvName": null,
+    "setupHint": "Remote Vercel MCP server. Bind an OAuth or Bearer token Credential if prompted."
+  },
+  {
+    "id": "mongodb",
+    "name": "MongoDB",
+    "category": "Data",
+    "description": "Query and manage MongoDB databases and MongoDB Atlas clusters.",
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mongodb-mcp-server@latest", "--readOnly"],
+    "env": {
+      "MDB_MCP_CONNECTION_STRING": "mongodb://localhost:27017/myDatabase"
+    },
+    "credentialEnvName": null,
+    "setupHint": "Update MDB_MCP_CONNECTION_STRING in Env (or use MDB_MCP_API_CLIENT_ID and MDB_MCP_API_CLIENT_SECRET for Atlas). Remove --readOnly from Args if write access is needed."
+  },
+  {
+    "id": "gitlab",
+    "name": "GitLab",
+    "category": "Dev",
+    "description": "Interact with GitLab repositories, issues, merge requests, and CI/CD pipelines.",
+    "type": "http",
+    "url": "https://gitlab.com/api/v4/mcp",
+    "command": null,
+    "args": null,
+    "env": {},
+    "credentialEnvName": null,
+    "setupHint": "Defaults to gitlab.com; replace with your self-managed GitLab URL if applicable, and bind an OAuth or Bearer token Credential."
   }
 ]
