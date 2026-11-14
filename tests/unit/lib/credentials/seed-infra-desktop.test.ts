@@ -40,27 +40,14 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
     });
   });
 
-  it("resolves Desktop infrastructure seed values when NANGO_DESKTOP=1", () => {
+  it("resolves Desktop infrastructure seed values without auto-seeding Playwright MCP when NANGO_DESKTOP=1", () => {
     process.env.NANGO_DESKTOP = "1";
     const seed = resolveBuiltinInfraSeedValues();
     expect(seed).toEqual({
       sandboxUrl: "http://127.0.0.1:8194",
       senseVoiceUrl: "http://127.0.0.1:10085",
-      playwrightMcp: {
-        type: "stdio",
-        url: "",
-        command: "npx",
-        args: ["-y", "@playwright/mcp@latest", "--browser", "chrome"],
-      },
+      playwrightMcp: null,
     });
-  });
-
-  it("skips seeding stdio Playwright MCP in Desktop mode when NANGO_ALLOW_STDIO_MCP=false", () => {
-    process.env.NANGO_DESKTOP = "1";
-    process.env.NANGO_ALLOW_STDIO_MCP = "false";
-
-    const seed = resolveBuiltinInfraSeedValues();
-    expect(seed.playwrightMcp).toBeNull();
   });
 
   it("honours NANGO_DEFAULT_HOST_FILE_ROOT and NANGO_DEFAULT_CACHE_ROOT in config defaults and resolveCacheRoot", () => {

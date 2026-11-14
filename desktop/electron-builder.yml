@@ -14,6 +14,7 @@ asar: true
 files:
   - desktop/dist/**/*
   - package.json
+  - "!node_modules/**/*"
 
 # Bundled runtime binaries and Next.js standalone bundle live outside the
 # read-only ASAR archive so child processes (`postgres`, `node`) can be spawned
@@ -72,6 +73,7 @@ mac:
         - arm64
         - x64
 
+afterPack: desktop/scripts/after-pack.mjs
 afterSign: desktop/scripts/after-sign.mjs
 
 publish:

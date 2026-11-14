@@ -13,7 +13,6 @@ import { CredentialTable, McpServerTable } from "@/lib/db/schema";
 import { encrypt } from "./crypto";
 import { eq } from "drizzle-orm";
 import { invalidateCredentialCache } from "@/lib/credentials/lookup";
-import { isStdioMcpAllowed } from "@/lib/mcp/stdio-spawn.server";
 
 export interface BuiltinInfraSeedValues {
   sandboxUrl: string;
@@ -48,25 +47,11 @@ export function resolveBuiltinInfraSeedValues(): BuiltinInfraSeedValues {
     };
   }
 
-  // Respect explicit `NANGO_ALLOW_STDIO_MCP=false` in desktop mode so we never
-  // seed a `stdio` MCP server row that the runtime refuses to spawn.
-  if (!isStdioMcpAllowed()) {
-    return {
-      sandboxUrl,
-      senseVoiceUrl,
-      playwrightMcp: null,
-    };
-  }
-
+  // Desktop users configure their own MCP servers; do not auto-seed Playwright.
   return {
     sandboxUrl,
     senseVoiceUrl,
-    playwrightMcp: {
-      type: "stdio",
-      url: "",
-      command: "npx",
-      args: ["-y", "@playwright/mcp@latest", "--browser", "chrome"],
-    },
+    playwrightMcp: null,
   };
 }
 

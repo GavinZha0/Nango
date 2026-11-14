@@ -10,6 +10,10 @@ import {
 } from "../../../scripts/build-standalone.mjs";
 
 import {
+  resolveTargetNodeDir,
+  restoreBundledNodeModules,
+} from "../../../desktop/scripts/after-pack.mjs";
+import {
   classifyMacSignTier,
   collectMacSignTargets,
   hasMachOMagic,
@@ -971,5 +975,76 @@ describe("desktop/main.ts — bindReloadShortcuts", () => {
       dispatch({ type: "keyDown", key: "r", control: true, shift: true }),
     ).toHaveBeenCalledTimes(1);
     expect(reloadIgnoringCache).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("desktop/scripts/after-pack.mjs", () => {
+  it("resolves target node directory for win32 and darwin", () => {
+    const tmpOut = fs.mkdtempSync(path.join(os.tmpdir(), "nango-afterpack-"));
+    try {
+      expect(
+        resolveTargetNodeDir({
+          appOutDir: tmpOut,
+          electronPlatformName: "win32",
+        }),
+      ).toBe(path.join(tmpOut, "resources", "node"));
+
+      const macAppDir = path.join(tmpOut, "Nango.app");
+      fs.mkdirSync(macAppDir, { recursive: true });
+      expect(
+        resolveTargetNodeDir({
+          appOutDir: tmpOut,
+          electronPlatformName: "darwin",
+          productFilename: "Nango",
+        }),
+      ).toBe(path.join(macAppDir, "Contents", "Resources", "node"));
+    } finally {
+      fs.rmSync(tmpOut, { recursive: true, force: true });
+    }
+  });
+
+  it("restores node_modules and lib/node_modules into targetNodeDir", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nango-node-restore-"));
+    try {
+      const srcNode = path.join(tmpRoot, "src-node");
+      const dstNode = path.join(tmpRoot, "dst-node");
+
+      const winNpx = path.join(srcNode, "node_modules", "npm", "bin", "npx-cli.js");
+      const macNpx = path.join(
+        srcNode,
+        "lib",
+        "node_modules",
+        "npm",
+        "bin",
+        "npx-cli.js",
+      );
+      fs.mkdirSync(path.dirname(winNpx), { recursive: true });
+      fs.mkdirSync(path.dirname(macNpx), { recursive: true });
+      fs.writeFileSync(winNpx, "// win npx", "utf8");
+      fs.writeFileSync(macNpx, "// mac npx", "utf8");
+      fs.mkdirSync(dstNode, { recursive: true });
+
+      const restored = restoreBundledNodeModules({
+        sourceNodeDir: srcNode,
+        targetNodeDir: dstNode,
+      });
+
+      expect(restored).toEqual([
+        "node_modules",
+        path.join("lib", "node_modules"),
+      ]);
+      expect(
+        fs.existsSync(
+          path.join(dstNode, "node_modules", "npm", "bin", "npx-cli.js"),
+        ),
+      ).toBe(true);
+      expect(
+        fs.existsSync(
+          path.join(dstNode, "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+        ),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });
