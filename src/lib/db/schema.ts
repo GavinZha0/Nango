@@ -664,6 +664,8 @@ export interface CredentialMetadata {
   headerName?: string;
   /** ISO-8601 expiry date, if the credential has a known TTL. */
   expiresAt?: string;
+  /** Multi-agent IDs for `{agentId}` URL templates (e.g. A2A endpoints). */
+  agentIds?: string[];
   /** Any other provider-specific display hints. */
   extra?: Record<string, string>;
 }

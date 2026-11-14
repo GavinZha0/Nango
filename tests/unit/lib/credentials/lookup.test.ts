@@ -123,6 +123,7 @@ describe("getCredentialConfigById", () => {
       restUrl: "http://localhost:7878",
       aguiUrl: "http://localhost:7878/agui/{agentId}/agui",
       provider: "agno",
+      metadata: null,
     });
   });
 
@@ -145,6 +146,7 @@ describe("getCredentialConfigById", () => {
       restUrl: "http://localhost:7878",
       aguiUrl: null,
       provider: "agno",
+      metadata: null,
     });
   });
 

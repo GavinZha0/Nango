@@ -4,6 +4,8 @@
  * See docs/backend-integration.md.
  */
 
+import type { CredentialMetadata } from "@/lib/db/schema";
+
 /** CONTRACT: adapters never throw; they return `{ data }` or `{ error }`. */
 export type FetchResult<T> =
   | { data: T; error: null }
@@ -214,6 +216,7 @@ export function describeFetchStatus(status: number): string {
 export interface EntityFetchOptions {
   type?: string;
   headerName?: string | null;
+  metadata?: CredentialMetadata | null;
 }
 
 /** Server-only entity-discovery fetcher used by `EntityCatalog`. */

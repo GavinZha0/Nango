@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import {
   CredentialTable,
   CREDENTIAL_TYPES,
+  type CredentialMetadata,
   type CredentialType,
 } from "@/lib/db/schema";
 import { decrypt } from "./crypto";
@@ -47,6 +48,7 @@ export interface CredentialFullConfig {
   aguiUrl: string | null;
   /** Provider slug (e.g. "agno", "mastra", "openai"). */
   provider: string | null;
+  metadata?: CredentialMetadata | null;
 }
 
 /**
@@ -314,6 +316,7 @@ export async function getCredentialConfigById(credentialId: string): Promise<Cre
       restUrl: CredentialTable.restUrl,
       aguiUrl: CredentialTable.aguiUrl,
       provider: CredentialTable.provider,
+      metadata: CredentialTable.metadata,
     })
     .from(CredentialTable)
     .where(
@@ -336,6 +339,7 @@ export async function getCredentialConfigById(credentialId: string): Promise<Cre
     restUrl: row.restUrl ?? null,
     aguiUrl: row.aguiUrl ?? null,
     provider: row.provider ?? null,
+    metadata: row.metadata ?? null,
   };
 
   configByIdCache.set(credentialId, config);
@@ -362,6 +366,7 @@ export async function getAgentCredentialConfigById(
       restUrl: CredentialTable.restUrl,
       aguiUrl: CredentialTable.aguiUrl,
       provider: CredentialTable.provider,
+      metadata: CredentialTable.metadata,
     })
     .from(CredentialTable)
     .where(
@@ -387,6 +392,7 @@ export async function getAgentCredentialConfigById(
     restUrl: row.restUrl ?? null,
     aguiUrl: row.aguiUrl ?? null,
     provider: row.provider,
+    metadata: row.metadata ?? null,
   };
 
   configByIdCache.set(credentialId, config);
@@ -407,6 +413,7 @@ export async function getAllAgentCredentials(): Promise<CredentialFullConfig[]> 
       restUrl: CredentialTable.restUrl,
       aguiUrl: CredentialTable.aguiUrl,
       provider: CredentialTable.provider,
+      metadata: CredentialTable.metadata,
     })
     .from(CredentialTable)
     .where(
@@ -427,6 +434,7 @@ export async function getAllAgentCredentials(): Promise<CredentialFullConfig[]> 
       restUrl: row.restUrl ?? null,
       aguiUrl: row.aguiUrl ?? null,
       provider: row.provider ?? null,
+      metadata: row.metadata ?? null,
     };
   });
 

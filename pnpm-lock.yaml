@@ -166,6 +166,9 @@ importers:
 
   .:
     dependencies:
+      '@a2a-js/sdk':
+        specifier: ^1.3.0
+        version: 1.3.0(@bufbuild/protobuf@2.17.0)(express@5.3.0(supports-color@7.2.0))(kysely@0.29.8)(pg@8.23.1)
       '@ag-ui/client':
         specifier: 1.0.2
         version: 1.0.2
@@ -422,6 +425,34 @@ packages:
       graphql: ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0
     peerDependenciesMeta:
       graphql:
+        optional: true
+
+  '@a2a-js/sdk@1.3.0':
+    resolution: {integrity: sha512-OpK4nygUnLKlpTFZlM2IrYu7f3c/B7c4u4Z14+vgMq24lEINTVCxH/BqZx+GL92rNf7CoBL5oTP5UhNsl75yyg==}
+    engines: {node: '>=20'}
+    hasBin: true
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.10.2
+      '@grpc/grpc-js': ^1.11.0
+      better-sqlite3: ^12.0.0 || ^13.0.0
+      express: ^4.21.2 || ^5.1.0
+      kysely: ^0.28.17 || ^0.29.0
+      mysql2: ^3.0.0
+      pg: ^8.0.0
+    peerDependenciesMeta:
+      '@bufbuild/protobuf':
+        optional: true
+      '@grpc/grpc-js':
+        optional: true
+      better-sqlite3:
+        optional: true
+      express:
+        optional: true
+      kysely:
+        optional: true
+      mysql2:
+        optional: true
+      pg:
         optional: true
 
   '@a2ui/web_core@0.15.0':
@@ -8481,6 +8512,15 @@ snapshots:
   '@0no-co/graphql.web@1.3.4(graphql@16.15.0)':
     optionalDependencies:
       graphql: 16.15.0
+
+  '@a2a-js/sdk@1.3.0(@bufbuild/protobuf@2.17.0)(express@5.3.0(supports-color@7.2.0))(kysely@0.29.8)(pg@8.23.1)':
+    dependencies:
+      jose: 6.2.17
+    optionalDependencies:
+      '@bufbuild/protobuf': 2.17.0
+      express: 5.3.0(supports-color@7.2.0)
+      kysely: 0.29.8
+      pg: 8.23.1
 
   '@a2ui/web_core@0.15.0':
     dependencies:

@@ -39,7 +39,12 @@ export interface CredentialRow {
   provider: string | null;
   restUrl: string | null;
   aguiUrl: string | null;
-  metadata: { keyPreview?: string; expiresAt?: string; headerName?: string } | null;
+  metadata: {
+    keyPreview?: string;
+    expiresAt?: string;
+    headerName?: string;
+    agentIds?: string[];
+  } | null;
   enabled: boolean;
   createdAt: string | Date;
   updatedAt: string | Date;
@@ -138,8 +143,20 @@ interface FormState {
   provider: string;
   restUrl: string;
   aguiUrl: string;
+  agentIdsText: string;
   payload: Record<string, string>;
   error: string;
+}
+
+function parseAgentIds(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function initialFormState(editing?: CredentialRow): FormState {
@@ -150,6 +167,7 @@ function initialFormState(editing?: CredentialRow): FormState {
     provider: editing?.provider ?? "",
     restUrl: editing?.restUrl ?? "",
     aguiUrl: editing?.aguiUrl ?? "",
+    agentIdsText: editing?.metadata?.agentIds?.join(", ") ?? "",
     payload: getInitialPayloadForType(type, editing),
     error: "",
   };
@@ -167,12 +185,14 @@ export function CredentialFormDialog({
     (editing?.serviceType as CredentialServiceType) || serviceType || "llm";
 
   const [form, setForm] = useState<FormState>(() => initialFormState(editing));
+  const [showAguiUrl, setShowAguiUrl] = useState(() => Boolean(editing?.aguiUrl));
   const [submitting, setSubmitting] = useState(false);
 
   // Reset form whenever the dialog opens or the editing target changes
   useEffect(() => {
     function reset() {
       setForm(initialFormState(editing));
+      setShowAguiUrl(Boolean(editing?.aguiUrl));
     }
     reset();
   }, [editing, open]);
@@ -225,6 +245,10 @@ export function CredentialFormDialog({
       return;
     }
 
+    const supportsAguiFastPath =
+      currentServiceType === "agent" &&
+      (form.provider === "agno" || form.provider === "dify");
+
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
@@ -232,10 +256,12 @@ export function CredentialFormDialog({
         serviceType: currentServiceType,
         provider: form.provider,
         restUrl: form.restUrl.trim() || null,
-        // Only persist AG-UI URL for agent-platform providers.
-        aguiUrl:
-          currentServiceType === "agent" ? form.aguiUrl.trim() || null : null,
+        // Only persist AG-UI URL for platforms supporting the AG-UI fast-path.
+        aguiUrl: supportsAguiFastPath ? form.aguiUrl.trim() || null : null,
       };
+      if (form.provider === "a2a") {
+        body.agentIds = parseAgentIds(form.agentIdsText);
+      }
       if (!isEdit) body.type = form.type;
       if (hasPayloadInput) {
         const builtPayload: Record<string, string> = {};
@@ -278,12 +304,15 @@ export function CredentialFormDialog({
   const fields = PAYLOAD_FIELDS[form.type];
   // SSH servers hide URL inputs.
   const isSsh = form.provider === "ssh";
+  const isA2a = form.provider === "a2a";
   // SearXNG is keyless, but the shared form requires a non-empty
   // secret — the provider treats the value as an anonymous placeholder
   // and sends no auth header.
   const isSearxng = form.provider === "searxng";
-  // AG-UI URL is only meaningful for `agent` providers.
-  const isAgent = currentServiceType === "agent";
+  // AG-UI fast-path URL is only meaningful for agno / dify agent platforms.
+  const supportsAguiFastPath =
+    currentServiceType === "agent" &&
+    (form.provider === "agno" || form.provider === "dify");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -324,69 +353,76 @@ export function CredentialFormDialog({
             />
           </div>
 
-          {/* Endpoint URLs — the Base URL row is always shown so admins
-              can keep a reference URL on every credential (informational
-              for SSH; the actual host/port/fingerprint live on the
-              ssh_server row created via /ssh-server/[id]).
-              The AG-UI URL is meaningful only for `agent` providers
-              (agno / Mastra / Dify) and stays hidden otherwise so
-              the form for plain LLM / search / observability /
-              datasource credentials reads as a single URL row.
-
-              Inline label+input rows: `w-32` (128 px) is the smallest
-              column that fits "Base URL or Host" without wrapping at
-              text-sm; "AG-UI URL" sits comfortably inside the same
-              column for visual alignment. */}
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="flex items-center gap-3">
-              <Label htmlFor="cred-rest-url" className="w-32 shrink-0">
-                Base URL or Host
-              </Label>
-              <Input
-                id="cred-rest-url"
-                // Plain `text` (not `url`) so SSH admins can enter
-                // bare hostnames like `prod.example.com` without
-                // tripping HTML5 URL validation. Backend stores as text.
-                type="text"
-                value={form.restUrl}
-                onChange={(e) => setField("restUrl", e.target.value)}
-                // Placeholder hierarchy:
-                //  1. SSH → bespoke hint (URL field is informational
-                //     only; host/port live on the ssh_server row).
-                //  2. Provider declares a public default URL
-                //     (search providers do — see providers.ts) →
-                //     show that URL so admins know they can leave
-                //     the field empty.
-                //  3. Generic fallback for providers with no
-                //     well-known default (self-hosted agent
-                //     platforms, MCP, …).
-                placeholder={
-                  isSsh
-                    ? "Optional reference (e.g. prod.example.com) — not used at runtime"
-                    : isSearxng
-                      ? "http://127.0.0.1:8680 (pnpm dev) / http://searxng:8080 (nango-app in Docker)"
-                      : (PROVIDER_MAP.get(form.provider)?.defaultRestUrl ??
-                          "http://localhost:7878")
-                }
-                className="flex-1"
-              />
-            </div>
-            {isAgent && (
+          {/* Endpoint URLs — hidden for SSH (host/port live on ssh_server).
+              Every other provider starts with a single primary URL row;
+              A2A adds optional multi-agent IDs for `{agentId}` templates,
+              and Agno/Dify expose an optional AG-UI fast-path toggle. */}
+          {!isSsh && (
+            <div className="space-y-3 rounded-md border p-3">
               <div className="flex items-center gap-3">
-                <Label htmlFor="cred-agui-url" className="w-32 shrink-0">
-                  AG-UI URL
+                <Label htmlFor="cred-rest-url" className="w-32 shrink-0">
+                  {isA2a ? "A2A Endpoint URL" : "Base URL"}
                 </Label>
                 <Input
-                  id="cred-agui-url"
-                  type="url"
-                  value={form.aguiUrl}
-                  onChange={(e) => setField("aguiUrl", e.target.value)}
-                  placeholder="http://localhost:7878/agui/{agentId}/agui"
+                  id="cred-rest-url"
+                  type="text"
+                  value={form.restUrl}
+                  onChange={(e) => setField("restUrl", e.target.value)}
+                  placeholder={
+                    isA2a
+                      ? "http://localhost:7878/agents/{agentId}/a2a"
+                      : isSearxng
+                        ? "http://127.0.0.1:8680 (pnpm dev) / http://searxng:8080 (nango-app in Docker)"
+                        : (PROVIDER_MAP.get(form.provider)?.defaultRestUrl ??
+                            "http://localhost:7878")
+                  }
                   className="flex-1"
                 />
               </div>
-            )}
-          </div>
+              {isA2a && (
+                <div className="flex items-center gap-3">
+                  <Label htmlFor="cred-agent-ids" className="w-32 shrink-0">
+                    Agent IDs
+                  </Label>
+                  <Input
+                    id="cred-agent-ids"
+                    type="text"
+                    value={form.agentIdsText}
+                    onChange={(e) => setField("agentIdsText", e.target.value)}
+                    placeholder="comma-separated IDs"
+                    className="flex-1"
+                  />
+                </div>
+              )}
+              {supportsAguiFastPath && (
+                showAguiUrl || Boolean(form.aguiUrl.trim()) ? (
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="cred-agui-url" className="w-32 shrink-0">
+                      AG-UI URL
+                    </Label>
+                    <Input
+                      id="cred-agui-url"
+                      type="url"
+                      value={form.aguiUrl}
+                      onChange={(e) => setField("aguiUrl", e.target.value)}
+                      placeholder="Optional: http://localhost:7878/agui/{agentId}/agui"
+                      className="flex-1"
+                    />
+                  </div>
+                ) : (
+                  <div className="pl-[140px]">
+                    <button
+                      type="button"
+                      onClick={() => setShowAguiUrl(true)}
+                      className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      + Add optional AG-UI fast-path URL
+                    </button>
+                  </div>
+                )
+              )}
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <Label htmlFor="cred-type" className="w-[140px] shrink-0">Credential Type</Label>

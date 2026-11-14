@@ -62,6 +62,14 @@ export const GET = withAdmin(ROUTE, async () => {
 const credentialTypeEnum = z.enum(CREDENTIAL_TYPES);
 const credentialServiceTypeEnum = z.enum(CREDENTIAL_SERVICE_TYPES);
 
+const agentIdsSchema = z.array(z.string().trim().min(1).max(128)).max(100).optional();
+
+function normalizeAgentIds(ids?: string[]): string[] | undefined {
+  if (!ids) return undefined;
+  const unique = Array.from(new Set(ids.map((s) => s.trim()).filter(Boolean)));
+  return unique.length > 0 ? unique : undefined;
+}
+
 const createSchema = z.object({
   name: nonEmptyString,
   type: credentialTypeEnum,
@@ -69,6 +77,7 @@ const createSchema = z.object({
   provider: optionalTrimmedString.optional(),
   restUrl: optionalTrimmedString.optional(),
   aguiUrl: optionalTrimmedString.optional(),
+  agentIds: agentIdsSchema,
   payload: z.record(z.string(), z.unknown()),
 });
 
@@ -93,6 +102,7 @@ export const POST = withAdmin(ROUTE, async ({ req, session }) => {
     typeof body.payload.headerName === "string" && body.payload.headerName.trim()
       ? body.payload.headerName.trim()
       : undefined;
+  const agentIds = normalizeAgentIds(body.agentIds);
 
   const [row] = await db
     .insert(CredentialTable)
@@ -107,6 +117,7 @@ export const POST = withAdmin(ROUTE, async ({ req, session }) => {
       metadata: {
         keyPreview,
         ...(headerName ? { headerName } : {}),
+        ...(agentIds ? { agentIds } : {}),
       },
       enabled: true,
       createdBy: session.user.id,

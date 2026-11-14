@@ -55,7 +55,7 @@ const cache: LRUCache<string, CatalogEntry> = (globalThis.__nangoEntityCatalogCa
       credentialId,
       cfg.restUrl.replace(/\/+$/, ""),
       cfg.token,
-      { type: cfg.type, headerName: cfg.headerName },
+      { type: cfg.type, headerName: cfg.headerName, metadata: cfg.metadata },
     );
   },
 }));

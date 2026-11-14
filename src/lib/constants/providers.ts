@@ -44,10 +44,11 @@ export const PROVIDERS: ProviderEntry[] = [
   // Backends whose models / apps are *agents* (LLM already bound to
   // tools / KB / workflow upstream). For raw LLM endpoints use the LLM
   // category + a Built-in agent.
-  { value: "agno",        label: "Agno",        service: "agent" },
-  { value: "mastra",      label: "Mastra",      service: "agent" },
-  { value: "dify",        label: "Dify",        service: "agent" },
-  { value: "crewai",      label: "CrewAI",      service: "agent" },
+  { value: "agno",        label: "Agno",                   service: "agent" },
+  { value: "mastra",      label: "Mastra",                 service: "agent" },
+  { value: "dify",        label: "Dify",                   service: "agent" },
+  { value: "a2a",         label: "A2A", service: "agent" },
+  { value: "crewai",      label: "CrewAI",                 service: "agent" },
   { value: "deepagents",  label: "DeepAgents",  service: "agent" },
 
   // Search providers

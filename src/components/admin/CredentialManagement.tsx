@@ -416,8 +416,15 @@ export function CredentialManagement(): ReactNode {
                       <div className="flex flex-col gap-0.5">
                         {row.restUrl && (
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <span className="shrink-0 font-medium text-foreground/60">REST</span>
+                            <span className="shrink-0 font-medium text-foreground/60">
+                              {row.provider === "a2a" ? "A2A" : "REST"}
+                            </span>
                             <span className="truncate" title={row.restUrl}>{row.restUrl}</span>
+                            {row.provider === "a2a" && row.metadata?.agentIds?.length ? (
+                              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground/80">
+                                {row.metadata.agentIds.length} agents
+                              </span>
+                            ) : null}
                           </span>
                         )}
                         {row.aguiUrl && (

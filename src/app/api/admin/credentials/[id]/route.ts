@@ -33,6 +33,7 @@ const updateSchema = z
     provider: optionalTrimmedString.optional(),
     restUrl: optionalTrimmedString.optional(),
     aguiUrl: optionalTrimmedString.optional(),
+    agentIds: z.array(z.string().trim().min(1).max(128)).max(100).optional(),
     enabled: z.boolean().optional(),
     /** If provided, the payload is re-encrypted and keyPreview is refreshed. */
     payload: z.record(z.string(), z.unknown()).optional(),
@@ -61,7 +62,7 @@ export const PATCH = withAdmin<{ id: string }>(
     if (body.enabled !== undefined) updates.enabled = body.enabled;
 
     const row = await db.transaction(async (tx) => {
-      if (body.payload) {
+      if (body.payload || body.agentIds !== undefined) {
         const [existing] = await tx
           .select({
             encryptedPayload: CredentialTable.encryptedPayload,
@@ -75,32 +76,48 @@ export const PATCH = withAdmin<{ id: string }>(
           throw new ApiError("NOT_FOUND", 404, "Credential not found.");
         }
 
-        let mergedPayload = body.payload;
+        const nextMetadata = { ...(existing.metadata ?? {}) };
 
-        if (existing.encryptedPayload) {
-          try {
-            const oldPayload = decrypt(existing.encryptedPayload);
-            mergedPayload = { ...oldPayload, ...body.payload };
-          } catch {
-            throw new ApiError(
-              "INTERNAL",
-              500,
-              "Failed to decrypt existing credential payload. Please verify CREDENTIAL_ENCRYPTION_KEYRING configuration.",
-            );
+        if (body.payload) {
+          let mergedPayload = body.payload;
+
+          if (existing.encryptedPayload) {
+            try {
+              const oldPayload = decrypt(existing.encryptedPayload);
+              mergedPayload = { ...oldPayload, ...body.payload };
+            } catch {
+              throw new ApiError(
+                "INTERNAL",
+                500,
+                "Failed to decrypt existing credential payload. Please verify CREDENTIAL_ENCRYPTION_KEYRING configuration.",
+              );
+            }
+          }
+
+          updates.encryptedPayload = encrypt(mergedPayload);
+          const headerName =
+            typeof mergedPayload.headerName === "string" && mergedPayload.headerName.trim()
+              ? mergedPayload.headerName.trim()
+              : existing.metadata?.headerName;
+
+          nextMetadata.keyPreview = extractKeyPreview(mergedPayload);
+          if (headerName) {
+            nextMetadata.headerName = headerName;
           }
         }
 
-        updates.encryptedPayload = encrypt(mergedPayload);
-        const headerName =
-          typeof mergedPayload.headerName === "string" && mergedPayload.headerName.trim()
-            ? mergedPayload.headerName.trim()
-            : existing.metadata?.headerName;
+        if (body.agentIds !== undefined) {
+          const unique = Array.from(
+            new Set(body.agentIds.map((s) => s.trim()).filter(Boolean)),
+          );
+          if (unique.length > 0) {
+            nextMetadata.agentIds = unique;
+          } else {
+            delete nextMetadata.agentIds;
+          }
+        }
 
-        updates.metadata = {
-          ...existing.metadata,
-          keyPreview: extractKeyPreview(mergedPayload),
-          ...(headerName ? { headerName } : {}),
-        };
+        updates.metadata = nextMetadata;
       }
 
       const [updatedRow] = await tx
