@@ -22,11 +22,10 @@
  *                that move under their feet
  */
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  RefreshCw,
   Bot,
   Users,
   Workflow as WorkflowIcon,
@@ -39,7 +38,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { getProviderLabel } from "@/lib/constants/providers";
-import { getEntities } from "@/lib/backends/facade";
 import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
 import { useWorkspaceStore } from "@/store/workspace";
 
@@ -50,12 +48,6 @@ interface ExternalAgentDetailViewProps {
 }
 
 // Kind ↔ visuals
-
-const KIND_LABEL: Record<EntityKind, string> = {
-  agent: "agent",
-  team: "team",
-  workflow: "workflow",
-};
 
 function KindIcon({ kind, className }: { kind: EntityKind; className?: string }): ReactNode {
   if (kind === "team") return <Users className={className} />;
@@ -91,6 +83,22 @@ function NumberValue({ value }: { value?: number }): ReactNode {
   );
 }
 
+function CapabilityMark({ supported }: { supported?: boolean }): ReactNode {
+  return (
+    <span
+      className={cn(
+        "text-xs font-medium",
+        supported
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "text-red-500 dark:text-red-400",
+      )}
+      aria-label={supported ? "Supported" : "Not supported"}
+    >
+      {supported ? "✓" : "✗"}
+    </span>
+  );
+}
+
 // Collapsible section heading (matches BuiltinAgentEditor's `Section`
 // minus the toggle, since read-only content is always shown).
 
@@ -123,36 +131,9 @@ function Section({
 
 export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps): ReactNode {
   const router = useRouter();
-  const { agents, teams, workflows, replaceEntitiesForCredentials } = useWorkspaceStore();
+  const { agents, teams, workflows } = useWorkspaceStore();
 
-  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
-
-  /**
-   * Pull the latest entities for this credential and update the
-   * workspace store. The store update will re-render any panel
-   * showing the same entity. We don't local-refetch the detail
-   * because the route page reads from the same store on next render.
-   */
-  const handleRefresh = useCallback(async () => {
-    if (entity.credentialId == null || entity.provider == null) return;
-    setRefreshing(true);
-    try {
-      const result = await getEntities(
-        [{ credentialId: entity.credentialId}],
-        { force: true },
-      );
-      const refreshed = result.credentials.find((credential) => credential.credentialId === entity.credentialId);
-      if (result.data && refreshed?.ok) {
-        replaceEntitiesForCredentials(
-          new Set([entity.credentialId]),
-          result.data,
-        );
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  }, [entity.credentialId, entity.provider, replaceEntitiesForCredentials]);
 
   // After refresh, the route's lookup will pick up the new entity by
   // (credentialId, id) — so we don't need a local entity state copy.
@@ -163,9 +144,14 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
       (e) => e.credentialId === entity.credentialId && e.id === entity.id,
     ) ?? entity;
 
-  function handleCopyPrompt(): void {
-    if (!live.prompt) return;
-    void navigator.clipboard.writeText(live.prompt).then(() => {
+  const isA2a = live.provider === "a2a";
+  const rightPanelText = isA2a
+    ? (live.raw ? JSON.stringify(live.raw, null, 2) : "")
+    : (live.prompt ?? "");
+
+  function handleCopyRightPanel(): void {
+    if (!rightPanelText) return;
+    void navigator.clipboard.writeText(rightPanelText).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -197,22 +183,6 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
             v{live.version}
           </span>
         )}
-        <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase leading-none text-muted-foreground">
-          {KIND_LABEL[live.kind]}
-        </span>
-        <div className="ml-auto">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => void handleRefresh()}
-            disabled={refreshing}
-            aria-label="Refresh from upstream"
-            title="Refresh from upstream"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-          </Button>
-        </div>
       </div>
 
       {/* Two-column body — same lg breakpoint + sticky-right pattern
@@ -230,44 +200,110 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
               {live.kind === "team" && (
                 <FieldRow label="Members" value={<NumberValue value={live.memberCount} />} />
               )}
-            </Section>
-
-            <Section title="Model">
-              <FieldRow label="Model ID" value={<TextValue value={live.model?.id} mono />} />
-              {modelDisplay && (
-                <FieldRow label="Display name" value={<TextValue value={modelDisplay} />} />
+              {isA2a && live.providerInfo?.organization && (
+                <FieldRow
+                  label="Provider"
+                  value={
+                    <TextValue
+                      value={
+                        live.providerInfo.url
+                          ? `${live.providerInfo.organization} (${live.providerInfo.url})`
+                          : live.providerInfo.organization
+                      }
+                    />
+                  }
+                />
               )}
-              <FieldRow
-                label="Provider"
-                value={<TextValue value={live.model?.provider ? getProviderLabel(live.model.provider) : undefined} />}
-              />
             </Section>
 
-            <Section title="Capabilities">
-              <FieldRow label="Tools" value={<NumberValue value={live.toolCount} />} />
-              <FieldRow label="Skills" value={<NumberValue value={live.skillCount} />} />
-              <FieldRow label="Knowledge" value={<NumberValue value={live.kbCount} />} />
-            </Section>
+            {isA2a ? (
+              <>
+                <Section title="Interface Capabilities">
+                  <FieldRow
+                    label="Streaming"
+                    value={<CapabilityMark supported={live.capabilities?.streaming} />}
+                  />
+                  <FieldRow
+                    label="Notifications"
+                    value={<CapabilityMark supported={live.capabilities?.pushNotifications} />}
+                  />
+                  <FieldRow
+                    label="Extended Card"
+                    value={<CapabilityMark supported={live.capabilities?.extendedAgentCard} />}
+                  />
+                </Section>
+
+                <Section title="Skills">
+                  {live.skills && live.skills.length > 0 ? (
+                    <div className="space-y-2">
+                      {live.skills.map((skill) => (
+                        <div key={skill.id} className="rounded-md border border-border/50 p-2.5">
+                          {skill.description && (
+                            <p className="text-xs text-muted-foreground">{skill.description}</p>
+                          )}
+                          {skill.tags && skill.tags.length > 0 && (
+                            <div className={cn("flex flex-wrap justify-end gap-1", skill.description && "mt-1.5")}>
+                              {skill.tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/60">—</span>
+                  )}
+                </Section>
+              </>
+            ) : (
+              <>
+                <Section title="Model">
+                  <FieldRow label="Model ID" value={<TextValue value={live.model?.id} mono />} />
+                  {modelDisplay && (
+                    <FieldRow label="Display name" value={<TextValue value={modelDisplay} />} />
+                  )}
+                  <FieldRow
+                    label="Provider"
+                    value={<TextValue value={live.model?.provider ? getProviderLabel(live.model.provider) : undefined} />}
+                  />
+                </Section>
+
+                <Section title="Capabilities">
+                  <FieldRow label="Tools" value={<NumberValue value={live.toolCount} />} />
+                  <FieldRow label="Skills" value={<NumberValue value={live.skillCount} />} />
+                  <FieldRow label="Knowledge" value={<NumberValue value={live.kbCount} />} />
+                </Section>
+              </>
+            )}
 
             <Section title="Source">
               <FieldRow label="Backend" value={<TextValue value={providerLabel} />} />
+              {isA2a && live.protocolVersion && (
+                <FieldRow label="Protocol" value={<TextValue value={live.protocolVersion} mono />} />
+              )}
               <FieldRow label="Credential" value={<TextValue value={live.credentialName} />} />
             </Section>
           </div>
 
-          {/* RIGHT column — System Prompt (sticky) */}
+          {/* RIGHT column — System Prompt or A2A Agent Card (sticky) */}
           <div className="lg:sticky lg:top-0 lg:self-start lg:border-l lg:border-border/40 lg:pl-3">
             <div className="border-b border-border/40 px-4 py-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  System Prompt
+                  {isA2a ? "Agent Card" : "System Prompt"}
                 </span>
-                {live.prompt && (
+                {rightPanelText && (
                   <button
                     type="button"
-                    onClick={handleCopyPrompt}
+                    onClick={handleCopyRightPanel}
                     className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label="Copy prompt to clipboard"
+                    aria-label={isA2a ? "Copy agent card to clipboard" : "Copy prompt to clipboard"}
                   >
                     {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                     {copied ? "Copied" : "Copy"}
@@ -276,19 +312,20 @@ export function ExternalAgentDetailView({ entity }: ExternalAgentDetailViewProps
               </div>
             </div>
             <div className="px-4 py-3">
-              {live.prompt ? (
+              {rightPanelText ? (
                 <Textarea
-                  value={live.prompt}
+                  value={rightPanelText}
                   readOnly
                   // Same sizing strategy as the BuiltinAgentEditor
                   // prompt textarea: fixed viewport-relative height,
-                  // internal scroll for long prompts, no resize handle
-                  // (read-only — there's nothing for the user to grow).
+                  // internal scroll for long content, no resize handle.
                   className="!field-sizing-fixed h-[calc(100vh-12rem)] min-h-64 resize-none overflow-y-auto font-mono text-xs leading-relaxed"
                 />
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  This backend doesn&apos;t expose the agent&apos;s system prompt.
+                  {isA2a
+                    ? "No Agent Card payload available."
+                    : "This backend doesn\u0027t expose the agent\u0027s system prompt."}
                 </p>
               )}
             </div>

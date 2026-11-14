@@ -4,6 +4,11 @@
  * See docs/backend-integration.md.
  */
 
+import type {
+  AgentCapabilities,
+  AgentProvider,
+  AgentSkill,
+} from "@a2a-js/sdk";
 import type { CredentialMetadata } from "@/lib/db/schema";
 
 /** CONTRACT: adapters never throw; they return `{ data }` or `{ error }`. */
@@ -85,6 +90,15 @@ export interface EntityDescriptor {
   kbCount?: number;
   /** Members count — populated when `kind === "team"`. */
   memberCount?: number;
+
+  /** A2A AgentCard metadata (only populated for `provider === "a2a"`). */
+  providerInfo?: AgentProvider;
+  /** A2A interface-level capabilities (streaming, pushNotifications, extendedAgentCard). */
+  capabilities?: AgentCapabilities;
+  /** A2A advertised capability contract (distinct from Nango's internal Agent Skills). */
+  skills?: AgentSkill[];
+  /** Negotiated A2A protocol version and transport binding (e.g. "1.0 (JSONRPC)"). */
+  protocolVersion?: string;
 
   /** Opaque per-entity handle for some backends. See docs/backend-integration.md. */
   dbId?: string;

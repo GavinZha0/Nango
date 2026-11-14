@@ -14,6 +14,7 @@ import {
   type EntityFetchResult,
 } from "../types";
 import {
+  createA2AClientFromCard,
   createA2AFetch,
   fetchAgentCard,
   resolveA2AEndpointUrl,
@@ -42,13 +43,25 @@ async function fetchSingleAgentDescriptor(
   fallbackName: string,
 ): Promise<EntityDescriptor> {
   const card = await fetchAgentCard(endpointUrl, fetchImpl);
+  let protocolVersion: string | undefined;
+  try {
+    const client = await createA2AClientFromCard(card, endpointUrl, fetchImpl);
+    protocolVersion = `${client.protocolVersion} (${client.transport.protocolName})`;
+  } catch {
+    // Keep discovery resilient if the card only advertises unsupported transports.
+  }
+
   return {
     id: agentId,
     kind: "agent",
     name: card.name?.trim() || fallbackName,
     description: card.description?.trim() || undefined,
     version: card.version?.trim() || undefined,
-    skillCount: Array.isArray(card.skills) ? card.skills.length : undefined,
+    providerInfo: card.provider,
+    capabilities: card.capabilities,
+    skills: Array.isArray(card.skills) ? card.skills : undefined,
+    protocolVersion,
+    raw: card as unknown as Record<string, unknown>,
     provider: "a2a",
     credentialId,
   };
