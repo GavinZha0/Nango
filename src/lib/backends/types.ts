@@ -14,7 +14,7 @@ export type FetchResult<T> =
 // Provider registry
 
 /** Single source of truth for BackendId. Both registries `satisfy Record<BackendId, X>`. */
-export const BACKEND_IDS = ["agno", "mastra", "dify"] as const;
+export const BACKEND_IDS = ["agno", "mastra", "dify", "a2a"] as const;
 
 export type BackendId = (typeof BACKEND_IDS)[number];
 

@@ -13,11 +13,13 @@ import { isSupportedBackend } from "./types";
 import { agnoBackend } from "./agno/index.server";
 import { difyBackend } from "./dify/index.server";
 import { mastraBackend } from "./mastra/index.server";
+import { a2aBackend } from "./a2a/index.server";
 
 export const BACKENDS = {
   agno: agnoBackend,
   mastra: mastraBackend,
   dify: difyBackend,
+  a2a: a2aBackend,
 } as const satisfies Record<BackendId, BackendModule>;
 
 export function getBackend(id: BackendId): BackendModule {
