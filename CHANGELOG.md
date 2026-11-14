@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.35.0](https://github.com/GavinZha0/Nango/compare/v0.34.0...v0.35.0) (2026-11-14)
+
+
+### Features
+
+* **a2a:** refine A2A agent detail view and expose negotiated protocol ([72eff48](https://github.com/GavinZha0/Nango/commit/72eff48535a9bd7d2146a34ad72fc9aabce68046))
+* **backends:** add A2A backend adapter for discovery and chat ([412383f](https://github.com/GavinZha0/Nango/commit/412383f0ed7ed2544108d3cba8b1323a6d872a1e))
+* **credentials:** add A2A provider and multi-agent IDs support ([83837f0](https://github.com/GavinZha0/Nango/commit/83837f04dd0fe01062bf56ccc9e2b371469610bb))
+
 ## [0.34.0](https://github.com/GavinZha0/Nango/compare/v0.33.2...v0.34.0) (2026-11-13)
 
 
