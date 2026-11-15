@@ -415,8 +415,8 @@ export class PostgresManager {
     try {
       await execFileAsync(
         pgCtlBin,
-        ["stop", "-D", this.pgDataDir, "-m", "fast", "-w", "-t", "10"],
-        { timeout: 12_000 },
+        ["stop", "-D", this.pgDataDir, "-m", "fast", "-w", "-t", "5"],
+        { timeout: 7_000 },
       );
     } catch {
       if (this.proc && this.proc.pid) {

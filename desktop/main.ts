@@ -254,7 +254,7 @@ export class DesktopAppCoordinator {
       const logsDir = path.join(userDataDir, "logs");
       this.electron.dialog.showErrorBox(
         "Nango 启动失败",
-        `${msg}\n\n日志目录：${logsDir}`,
+        `${msg}\n\n若服务意外退出，可能是本地端口被占用或数据目录权限受限。\n日志目录：${logsDir}`,
       );
       await this.shutdownAndQuit();
       return false;
@@ -331,6 +331,11 @@ export class DesktopAppCoordinator {
         appVersion,
         forceMigrate: this.pgManager.wasNewlyInitialized(),
         onFatalExit: handleFatalServiceError,
+        onRestarted: () => {
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents?.reload();
+          }
+        },
       });
       await this.serverManager.start();
       if (this.isQuitting) return;
@@ -354,6 +359,24 @@ export class DesktopAppCoordinator {
       // Remove the default application menu bar (File/Edit/View/Window) on Windows/Linux
       win.removeMenu?.();
       bindReloadShortcuts(win);
+      // SECURITY: Confine renderer navigation to the local app origin; open
+      // external HTTP(S) links in the OS browser instead of an in-app window.
+      const isHttpUrl = (url: string): boolean =>
+        url.startsWith("http://") || url.startsWith("https://");
+      win.webContents?.setWindowOpenHandler?.(({ url }) => {
+        if (isHttpUrl(url)) {
+          void shell.openExternal?.(url);
+        }
+        return { action: "deny" };
+      });
+      win.webContents?.on("will-navigate", (event, url) => {
+        if (!url.startsWith(ports.betterAuthUrl)) {
+          event.preventDefault();
+          if (isHttpUrl(url)) {
+            void shell.openExternal?.(url);
+          }
+        }
+      });
       this.mainWindow = win;
       bindCloseToTray(win, () => this.isQuitting);
 
@@ -427,6 +450,11 @@ export class DesktopAppCoordinator {
     }
 
     this.isQuitting = true;
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      // Show indeterminate taskbar progress so the user gets immediate feedback
+      // while server.js and PostgreSQL flush and exit.
+      this.mainWindow.setProgressBar?.(2);
+    }
     this.shutdownPromise = (async () => {
       try {
         if (this.serverManager) {

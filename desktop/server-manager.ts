@@ -4,7 +4,7 @@
  *
  * Responsibilities:
  * - Ensure all writable desktop directories exist under `userData` and `Documents/NangoWorkspace`
- * - Assemble the desktop environment variables (without leaking raw host secrets to untrusted children)
+ * - Assemble the desktop environment variables (explicitly overriding auth, DB, and loopback proxy bypass)
  * - Execute `docker/migrate.mjs` idempotently before booting Next.js
  * - Supervise `.next/standalone/server.js` with readiness probing and exponential backoff crash recovery
  * - Gracefully terminate `server.js` on shutdown so `instrumentation.ts` reaps all `stdio` MCP trees
@@ -96,6 +96,21 @@ export function buildDesktopServerEnv(
   env.NO_HTTPS = "1";
   env.HOSTNAME = "127.0.0.1";
   env.PORT = String(input.appPort);
+
+  // Ensure loopback traffic (healthchecks, local DB/auth) bypasses any inherited host HTTP proxy.
+  const existingNoProxy = env.NO_PROXY ?? env.no_proxy ?? "";
+  const noProxyEntries = existingNoProxy
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const host of ["127.0.0.1", "localhost"]) {
+    if (!noProxyEntries.includes(host)) {
+      noProxyEntries.push(host);
+    }
+  }
+  const mergedNoProxy = noProxyEntries.join(",");
+  env.NO_PROXY = mergedNoProxy;
+  env.no_proxy = mergedNoProxy;
   env.BETTER_AUTH_URL = input.betterAuthUrl;
   env.BETTER_AUTH_SECRET = input.secrets.betterAuthSecret;
   env.CREDENTIAL_ENCRYPTION_KEYRING = input.secrets.credentialEncryptionKeyring;
@@ -151,6 +166,8 @@ export interface ServerManagerOptions extends DesktopServerEnvInput {
   readyTimeoutMs?: number;
   /** Optional callback invoked when consecutive crash restarts are exhausted. */
   onFatalExit?: (err: Error) => void;
+  /** Optional callback invoked after an unexpected exit recovers and becomes ready again. */
+  onRestarted?: () => void;
 }
 
 export class ServerManager {
@@ -397,6 +414,9 @@ export class ServerManager {
 
     try {
       await this.spawnAndWaitReady(env);
+      if (!this.stopping) {
+        this.opts.onRestarted?.();
+      }
     } catch (err) {
       this.opts.onFatalExit?.(
         err instanceof Error ? err : new Error(String(err)),

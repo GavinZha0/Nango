@@ -24,6 +24,7 @@ export interface ElectronDialog {
 
 export interface ElectronShell {
   openPath(path: string): Promise<string>;
+  openExternal?: (url: string) => Promise<void>;
 }
 
 export interface ElectronIpcMain {
@@ -54,9 +55,16 @@ export interface ElectronWebContents {
   reload(): void;
   reloadIgnoringCache(): void;
   executeJavaScript?: (code: string) => Promise<unknown>;
+  setWindowOpenHandler?: (
+    handler: (details: { url: string }) => { action: "allow" | "deny" },
+  ) => void;
   on(
     event: "before-input-event",
     listener: (event: { preventDefault(): void }, input: ElectronInputEvent) => void,
+  ): void;
+  on(
+    event: "will-navigate",
+    listener: (event: { preventDefault(): void }, url: string) => void,
   ): void;
 }
 
@@ -70,6 +78,7 @@ export interface ElectronBrowserWindow {
   restore(): void;
   isDestroyed(): boolean;
   removeMenu?: () => void;
+  setProgressBar?: (progress: number) => void;
   webContents?: ElectronWebContents;
   on(
     event: "close" | "closed",

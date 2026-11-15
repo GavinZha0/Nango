@@ -941,8 +941,10 @@ describe("desktop/main.ts — bindReloadShortcuts", () => {
       webContents: {
         reload,
         reloadIgnoringCache,
-        on(_event, cb) {
-          listener = cb;
+        on(event, cb) {
+          if (event === "before-input-event") {
+            listener = cb as typeof listener;
+          }
         },
       },
     });

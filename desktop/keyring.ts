@@ -75,6 +75,32 @@ export interface KeyringOptions {
   allowPlaintextFallback?: boolean;
 }
 
+function persistDesktopSecrets(
+  secretsPath: string,
+  secrets: DesktopSecrets,
+  safeStorage: SafeStorageAdapter | undefined,
+  useEncryption: boolean,
+): void {
+  const serialized = JSON.stringify(secrets);
+  const payloadBuffer =
+    useEncryption && safeStorage
+      ? safeStorage.encryptString(serialized)
+      : Buffer.from(serialized, "utf8");
+
+  const envelope: StoredEnvelope = {
+    version: 1,
+    encrypted: useEncryption,
+    payloadBase64: payloadBuffer.toString("base64"),
+  };
+
+  const tmpPath = `${secretsPath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  fs.renameSync(tmpPath, secretsPath);
+}
+
 /**
  * Load existing desktop secrets from `<userDataDir>/secrets.bin`, or generate
  * and persist new secrets atomically on first boot.
@@ -96,8 +122,23 @@ export function loadOrCreateDesktopSecrets(
     process.env.NANGO_ALLOW_PLAINTEXT_KEYRING === "true";
 
   if (fs.existsSync(secretsPath)) {
-    const rawText = fs.readFileSync(secretsPath, "utf8");
-    const envelope = JSON.parse(rawText) as StoredEnvelope;
+    let envelope: StoredEnvelope;
+    try {
+      const rawText = fs.readFileSync(secretsPath, "utf8");
+      envelope = JSON.parse(rawText) as StoredEnvelope;
+      if (
+        !envelope ||
+        typeof envelope !== "object" ||
+        typeof envelope.payloadBase64 !== "string"
+      ) {
+        throw new Error("Invalid envelope");
+      }
+    } catch {
+      throw new Error(
+        `Desktop secrets file is corrupted or unreadable (${secretsPath}). Deleting this file will regenerate all master keys and invalidate previously stored integration credentials.`,
+      );
+    }
+
     const rawBuffer = Buffer.from(envelope.payloadBase64, "base64");
 
     let jsonString: string;
@@ -120,9 +161,18 @@ export function loadOrCreateDesktopSecrets(
       jsonString = rawBuffer.toString("utf8");
     }
 
-    const parsed: unknown = JSON.parse(jsonString);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonString);
+    } catch {
+      throw new Error(
+        `Desktop secrets file is corrupted or unreadable (${secretsPath}). Deleting this file will regenerate all master keys and invalidate previously stored integration credentials.`,
+      );
+    }
+
     // QUIRK: Migrate legacy desktop secrets generated with "v1:<hex>" prefix
     // to the standard "k1=<hex>" key-value format expected by crypto.ts.
+    let migrated = false;
     if (parsed && typeof parsed === "object") {
       const rec = parsed as Record<string, unknown>;
       if (
@@ -130,10 +180,25 @@ export function loadOrCreateDesktopSecrets(
         rec.credentialEncryptionKeyring.startsWith("v1:")
       ) {
         rec.credentialEncryptionKeyring = `k1=${rec.credentialEncryptionKeyring.slice(3)}`;
+        migrated = true;
       }
     }
     if (!isValidDesktopSecrets(parsed)) {
-      throw new Error("Stored desktop secrets failed integrity validation.");
+      throw new Error(
+        `Stored desktop secrets failed integrity validation (${secretsPath}). Deleting this file will regenerate all master keys and invalidate previously stored integration credentials.`,
+      );
+    }
+    if (migrated) {
+      try {
+        persistDesktopSecrets(
+          secretsPath,
+          parsed,
+          safeStorage,
+          envelope.encrypted && canEncrypt,
+        );
+      } catch {
+        // Non-fatal: in-memory migration still applies for this boot
+      }
     }
     return parsed;
   }
@@ -151,24 +216,7 @@ export function loadOrCreateDesktopSecrets(
   }
 
   const secrets = generateDesktopSecrets();
-  const serialized = JSON.stringify(secrets);
-  const payloadBuffer =
-    canEncrypt && safeStorage
-      ? safeStorage.encryptString(serialized)
-      : Buffer.from(serialized, "utf8");
-
-  const envelope: StoredEnvelope = {
-    version: 1,
-    encrypted: canEncrypt,
-    payloadBase64: payloadBuffer.toString("base64"),
-  };
-
-  const tmpPath = `${secretsPath}.tmp.${process.pid}`;
-  fs.writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  fs.renameSync(tmpPath, secretsPath);
+  persistDesktopSecrets(secretsPath, secrets, safeStorage, canEncrypt);
 
   return secrets;
 }
