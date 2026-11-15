@@ -40,6 +40,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-nango}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nango}
       POSTGRES_DB: ${POSTGRES_DB:-nango}
+      # Pre-seed the bundled compose services so Docker deployments work out of the box
+      # without hardcoding container hostnames or keys in application source.
+      NANGO_SEED_SANDBOX_URL: ${NANGO_SEED_SANDBOX_URL:-http://sandbox:8194}
+      NANGO_SEED_SANDBOX_API_KEY: ${NANGO_SEED_SANDBOX_API_KEY:-dify-sandbox}
+      NANGO_SEED_SENSEVOICE_URL: ${NANGO_SEED_SENSEVOICE_URL:-http://sensevoice:8000}
+      NANGO_SEED_SENSEVOICE_API_KEY: ${NANGO_SEED_SENSEVOICE_API_KEY:-MySuperSafeApiKey}
+      NANGO_SEED_PLAYWRIGHT_MCP_URL: ${NANGO_SEED_PLAYWRIGHT_MCP_URL:-http://playwright:8931/mcp}
     depends_on:
       nango-db:
         condition: service_healthy

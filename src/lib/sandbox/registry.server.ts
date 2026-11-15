@@ -9,6 +9,7 @@ import "server-only";
 
 import type { ISandboxAdapter } from "./types";
 import { BackendUnavailableError } from "./errors";
+import { getEnabledInfrastructureCredentialByProvider } from "@/lib/credentials/lookup";
 
 import { ServiceSandboxAdapter } from "./adapters/service/adapter.server";
 
@@ -34,10 +35,23 @@ export async function getActiveAdapter(): Promise<ISandboxAdapter> {
 
   const adapter = ADAPTERS.service;
   if (!(await adapter.isAvailable())) {
+    let hasCred = false;
+    try {
+      const cred = await getEnabledInfrastructureCredentialByProvider("dify-sandbox");
+      hasCred = Boolean(cred?.host?.trim());
+    } catch {
+      // DB/lookup unavailable in unit tests or early boot; fall through to generic message.
+      hasCred = true;
+    }
+    if (!hasCred) {
+      throw new BackendUnavailableError(
+        "service",
+        "Sandbox service is not configured. Add an enabled 'Dify Sandbox' credential with its service URL in Admin → Credentials.",
+      );
+    }
     throw new BackendUnavailableError(
       "service",
-      `Sandbox service is not reachable. ` +
-        `Ensure the external sandbox service is running (e.g. docker compose up -d dify-sandbox).`,
+      "Sandbox service is not reachable. Ensure the external sandbox service is running and verify its URL in Admin → Credentials.",
     );
   }
   cachedActive = adapter;

@@ -19,8 +19,6 @@ import { buildMapping } from "../../path-mapper";
 import { getConfigMs } from "@/lib/config";
 import { getEnabledInfrastructureCredentialByProvider } from "@/lib/credentials/lookup";
 
-const DEFAULT_SERVICE_URL = "http://sandbox:8194";
-const DEFAULT_API_KEY = "dify-sandbox";
 const DEFAULT_TIMEOUT_S = 60;
 
 export class ServiceSandboxAdapter implements ISandboxAdapter {
@@ -28,12 +26,16 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
   readonly displayName = "Service Sandbox (dify)";
 
   /**
-   * Probe whether the external sandbox service is reachable.
+   * Probe whether the external sandbox service is configured and reachable.
    */
   async isAvailable(): Promise<boolean> {
     try {
       const cred = await getEnabledInfrastructureCredentialByProvider("dify-sandbox");
-      const baseUrl = (cred?.host ?? DEFAULT_SERVICE_URL).replace(/\/+$/, "");
+      const rawHost = cred?.host?.trim();
+      if (!rawHost) {
+        return false;
+      }
+      const baseUrl = rawHost.replace(/\/+$/, "");
       const res = await fetch(`${baseUrl}/v1/sandbox/run`, {
         method: "GET",
         signal: AbortSignal.timeout(3000),
@@ -51,8 +53,14 @@ export class ServiceSandboxAdapter implements ISandboxAdapter {
     const mapping = buildMapping(tmpHostDir, input.datasets ?? []);
 
     const cred = await getEnabledInfrastructureCredentialByProvider("dify-sandbox");
-    const baseUrl = (cred?.host ?? DEFAULT_SERVICE_URL).replace(/\/+$/, "");
-    const apiKey = cred?.apiKey ?? DEFAULT_API_KEY;
+    const rawHost = cred?.host?.trim();
+    if (!rawHost) {
+      throw new Error(
+        "Sandbox service is not configured. Add an enabled 'Dify Sandbox' credential with its service URL in Admin → Credentials.",
+      );
+    }
+    const baseUrl = rawHost.replace(/\/+$/, "");
+    const apiKey = cred?.apiKey ?? "";
     const timeoutMs = input.timeoutMs ?? getConfigMs("sandbox.timeout", DEFAULT_TIMEOUT_S);
 
     // Determine language and main script payload (prefer explicit input.language)

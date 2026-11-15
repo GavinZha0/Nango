@@ -41,7 +41,11 @@ export const POST = withSession(ROUTE, async ({req, session}) => {
     const transcriptionService = await resolveTranscriptionService(session.user.id);
 
     if (!transcriptionService) {
-        throw new ApiError("UNAUTHENTICATED", 401, "No valid STT credential found.");
+        throw new ApiError(
+            "UNAUTHENTICATED",
+            401,
+            "No valid STT credential configured. Add a voice credential (e.g. SenseVoice, Whisper, FunASR, or Deepgram) in Admin → Credentials and select it in Voice Settings.",
+        );
     }
 
     try {

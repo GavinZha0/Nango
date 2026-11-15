@@ -1,9 +1,10 @@
 /**
  * Built-in Infrastructure Seeder.
  *
- * Seeds default credentials (`Dify Sandbox`, `SenseVoice`) and default
- * MCP servers (`Playwright`) during server bootstrap so built-in
- * infrastructure is zero-config ready out of the box.
+ * Seeds infrastructure credentials (`Dify Sandbox`, `SenseVoice`) and
+ * MCP servers (`Playwright`) during server bootstrap ONLY when explicitly
+ * requested via `NANGO_SEED_*` environment variables (e.g. from docker-compose.yaml).
+ * Without those variables, no default endpoints or credentials are assumed.
  */
 
 import "server-only";
@@ -14,104 +15,123 @@ import { encrypt } from "./crypto";
 import { eq } from "drizzle-orm";
 import { invalidateCredentialCache } from "@/lib/credentials/lookup";
 
+export interface BuiltinInfraCredentialSeed {
+  url: string;
+  apiKey: string;
+}
+
 export interface BuiltinInfraSeedValues {
-  sandboxUrl: string;
-  senseVoiceUrl: string;
+  sandbox: BuiltinInfraCredentialSeed | null;
+  senseVoice: BuiltinInfraCredentialSeed | null;
   playwrightMcp: {
-    type: "http" | "stdio";
+    type: "http";
     url: string;
-    command: string | null;
-    args: string[] | null;
+    command: null;
+    args: null;
   } | null;
 }
 
 export function resolveBuiltinInfraSeedValues(): BuiltinInfraSeedValues {
-  const isDesktop = process.env.NANGO_DESKTOP === "1";
-  const sandboxUrl =
-    process.env.NANGO_SEED_SANDBOX_URL?.trim() ||
-    (isDesktop ? "http://127.0.0.1:8194" : "http://sandbox:8194");
-  const senseVoiceUrl =
-    process.env.NANGO_SEED_SENSEVOICE_URL?.trim() ||
-    (isDesktop ? "http://127.0.0.1:10085" : "http://sensevoice:8000");
+  const sandboxUrl = process.env.NANGO_SEED_SANDBOX_URL?.trim();
+  const senseVoiceUrl = process.env.NANGO_SEED_SENSEVOICE_URL?.trim();
+  const playwrightMcpUrl = process.env.NANGO_SEED_PLAYWRIGHT_MCP_URL?.trim();
 
-  if (!isDesktop) {
-    return {
-      sandboxUrl,
-      senseVoiceUrl,
-      playwrightMcp: {
-        type: "http",
-        url: "http://playwright:8931/mcp",
-        command: null,
-        args: null,
-      },
-    };
-  }
-
-  // Desktop users configure their own MCP servers; do not auto-seed Playwright.
   return {
-    sandboxUrl,
-    senseVoiceUrl,
-    playwrightMcp: null,
+    sandbox: sandboxUrl
+      ? {
+          url: sandboxUrl,
+          apiKey: process.env.NANGO_SEED_SANDBOX_API_KEY?.trim() || "",
+        }
+      : null,
+    senseVoice: senseVoiceUrl
+      ? {
+          url: senseVoiceUrl,
+          apiKey: process.env.NANGO_SEED_SENSEVOICE_API_KEY?.trim() || "",
+        }
+      : null,
+    playwrightMcp: playwrightMcpUrl
+      ? {
+          type: "http",
+          url: playwrightMcpUrl,
+          command: null,
+          args: null,
+        }
+      : null,
   };
 }
 
 export async function seedBuiltinInfrastructure(): Promise<void> {
   try {
     const seedValues = resolveBuiltinInfraSeedValues();
-
-    // 1. Seed Dify Sandbox Credential
-    const existingSandbox = await db
-      .select({ id: CredentialTable.id })
-      .from(CredentialTable)
-      .where(eq(CredentialTable.provider, "dify-sandbox"))
-      .limit(1);
-
-    if (existingSandbox.length === 0) {
-      const payload = {
-        host: seedValues.sandboxUrl,
-        apiKey: "dify-sandbox",
-      };
-      await db.insert(CredentialTable).values({
-        name: "Dify Sandbox",
-        type: "api_key",
-        serviceType: "integration",
-        provider: "dify-sandbox",
-        restUrl: seedValues.sandboxUrl,
-        encryptedPayload: encrypt(payload),
-        metadata: { keyPreview: "dify-sandbox" },
-        enabled: true,
-        createdBy: null,
-      });
-      console.log("[bootstrap] Seeded default Dify Sandbox credential");
+    if (!seedValues.sandbox && !seedValues.senseVoice && !seedValues.playwrightMcp) {
+      return;
     }
 
-    // 2. Seed SenseVoice Credential
-    const existingSenseVoice = await db
-      .select({ id: CredentialTable.id })
-      .from(CredentialTable)
-      .where(eq(CredentialTable.provider, "sensevoice"))
-      .limit(1);
+    let seededAnyCredential = false;
 
-    if (existingSenseVoice.length === 0) {
-      const payload = {
-        host: seedValues.senseVoiceUrl,
-        apiKey: "MySuperSafeApiKey",
-      };
-      await db.insert(CredentialTable).values({
-        name: "SenseVoice",
-        type: "api_key",
-        serviceType: "voice",
-        provider: "sensevoice",
-        restUrl: seedValues.senseVoiceUrl,
-        encryptedPayload: encrypt(payload),
-        metadata: { keyPreview: "MySuperSafeApiKey" },
-        enabled: true,
-        createdBy: null,
-      });
-      console.log("[bootstrap] Seeded default SenseVoice credential");
+    // 1. Seed Dify Sandbox Credential (only when NANGO_SEED_SANDBOX_URL is set)
+    if (seedValues.sandbox) {
+      const existingSandbox = await db
+        .select({ id: CredentialTable.id })
+        .from(CredentialTable)
+        .where(eq(CredentialTable.provider, "dify-sandbox"))
+        .limit(1);
+
+      if (existingSandbox.length === 0) {
+        const payload = {
+          host: seedValues.sandbox.url,
+          apiKey: seedValues.sandbox.apiKey,
+        };
+        await db.insert(CredentialTable).values({
+          name: "Dify Sandbox",
+          type: "api_key",
+          serviceType: "integration",
+          provider: "dify-sandbox",
+          restUrl: seedValues.sandbox.url,
+          encryptedPayload: encrypt(payload),
+          metadata: seedValues.sandbox.apiKey
+            ? { keyPreview: seedValues.sandbox.apiKey }
+            : null,
+          enabled: true,
+          createdBy: null,
+        });
+        seededAnyCredential = true;
+        console.log("[bootstrap] Seeded Dify Sandbox credential from NANGO_SEED_SANDBOX_URL");
+      }
     }
 
-    // 3. Seed Playwright MCP Server
+    // 2. Seed SenseVoice Credential (only when NANGO_SEED_SENSEVOICE_URL is set)
+    if (seedValues.senseVoice) {
+      const existingSenseVoice = await db
+        .select({ id: CredentialTable.id })
+        .from(CredentialTable)
+        .where(eq(CredentialTable.provider, "sensevoice"))
+        .limit(1);
+
+      if (existingSenseVoice.length === 0) {
+        const payload = {
+          host: seedValues.senseVoice.url,
+          apiKey: seedValues.senseVoice.apiKey,
+        };
+        await db.insert(CredentialTable).values({
+          name: "SenseVoice",
+          type: "api_key",
+          serviceType: "voice",
+          provider: "sensevoice",
+          restUrl: seedValues.senseVoice.url,
+          encryptedPayload: encrypt(payload),
+          metadata: seedValues.senseVoice.apiKey
+            ? { keyPreview: seedValues.senseVoice.apiKey }
+            : null,
+          enabled: true,
+          createdBy: null,
+        });
+        seededAnyCredential = true;
+        console.log("[bootstrap] Seeded SenseVoice credential from NANGO_SEED_SENSEVOICE_URL");
+      }
+    }
+
+    // 3. Seed Playwright MCP Server (only when NANGO_SEED_PLAYWRIGHT_MCP_URL is set)
     if (seedValues.playwrightMcp) {
       const existingPlaywright = await db
         .select({ id: McpServerTable.id })
@@ -132,12 +152,14 @@ export async function seedBuiltinInfrastructure(): Promise<void> {
           credentialId: null,
           createdBy: null,
         });
-        console.log("[bootstrap] Seeded default Playwright MCP server");
+        console.log("[bootstrap] Seeded Playwright MCP server from NANGO_SEED_PLAYWRIGHT_MCP_URL");
       }
     }
 
     // Invalidate credential cache so newly seeded credentials are immediately visible to in-process callers
-    invalidateCredentialCache();
+    if (seededAnyCredential) {
+      invalidateCredentialCache();
+    }
   } catch (err) {
     console.error(`[bootstrap] Failed to seed infrastructure: ${err instanceof Error ? err.message : String(err)}`);
   }
