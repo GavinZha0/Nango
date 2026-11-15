@@ -64,7 +64,7 @@
     "@rjsf/utils": "^6.11.1",
     "@rjsf/validator-ajv8": "^6.11.1",
     "@xyflow/react": "^12.12.1",
-    "ai": "^6.0.204",
+    "ai": "^6.0.331",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "better-auth": "^1.7.25",
