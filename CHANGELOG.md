@@ -5,12 +5,12 @@
 
 ### Features
 
-* **copilot:** add opt-in Native Generative UI (A2UI) for built-in agents ([98726bf](https://github.com/GavinZha0/Nango/commit/98726bf97d80fe0491b1b98f41a5ffc4de87b9c4))
+* **copilot:** add opt-in Native Generative UI (A2UI) for built-in agents ([98726bf](https://github.com/GavinZha0/Nango/commit/98726bf97d80fe0491b1b98f41a5ffc4de87b9c4)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **copilot:** run inner agent middlewares and refine Generative UI UX ([e20c32b](https://github.com/GavinZha0/Nango/commit/e20c32b80f4d234fc9e0a98296d6b2ed93d24df9))
+* **copilot:** run inner agent middlewares and refine Generative UI UX ([e20c32b](https://github.com/GavinZha0/Nango/commit/e20c32b80f4d234fc9e0a98296d6b2ed93d24df9)) by @GavinZha0
 
 ## [0.36.0](https://github.com/GavinZha0/Nango/compare/v0.35.0...v0.36.0) (2026-11-15)
 
