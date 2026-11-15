@@ -50,6 +50,13 @@
       "when": 1794694176751,
       "tag": "0006_builtin_agent_max_steps_default_30",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794773388120,
+      "tag": "0007_builtin_agent_generative_ui",
+      "breakpoints": true
     }
   ]
 }

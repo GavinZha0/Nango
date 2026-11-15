@@ -60,6 +60,7 @@ export function createMockBuiltinAgent(
     memoryWindowSize: null,
     enabled: true,
     sharedStateEnabled: false,
+    generativeUiEnabled: false,
     visibility: "private",
     credentialId: overrides.credentialId ?? makeSeqUuid("01918a3c", seq),
     createdBy: "user-editor-1",

@@ -90,3 +90,4 @@ Delete stale comments if a refactor changes their behavior. Keep simple pointers
 - First user signup is promoted to `admin`; subsequent signups default to `user`.
 - Soft delete is the only user-deletion path (sets `deleted_at` + `deleted_by`).
 - CopilotKit runtimes: `/api/copilotkit` (backend) and `/api/copilotkit/builtin` (built-in).
+- **Commit messages**: Enforced by `commitlint.config.mjs` via `.husky/commit-msg` — use Conventional Commits (`feat|fix|refactor|style|docs|test|chore|perf|build|ci|revert`) with every line (header, body, footer) <= 100 characters.

@@ -1,0 +1,1 @@
+ALTER TABLE "builtin_agent" ADD COLUMN "generative_ui_enabled" boolean DEFAULT false NOT NULL;

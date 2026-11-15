@@ -351,6 +351,27 @@ export class PersistingAgent extends AbstractAgent {
               break;
             }
 
+            case EventType.ACTIVITY_SNAPSHOT: {
+              flushPending();
+              persist("activity_snapshot", {
+                messageId: ev.messageId,
+                activityType: ev.activityType,
+                content: ev.content,
+                ...(ev.replace !== undefined ? { replace: ev.replace } : {}),
+              });
+              break;
+            }
+
+            case EventType.ACTIVITY_DELTA: {
+              flushPending();
+              persist("activity_delta", {
+                messageId: ev.messageId,
+                activityType: ev.activityType,
+                patch: ev.patch,
+              });
+              break;
+            }
+
             case EventType.RUN_FINISHED: {
               flushPending();
               persist("finished", ev);

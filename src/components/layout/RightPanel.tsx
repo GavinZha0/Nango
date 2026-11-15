@@ -17,6 +17,11 @@ import {
   useCopilotKit,
   useRenderTool,
 } from "@/lib/copilot/client";
+import { buildGenerativeUiConfig } from "@/lib/copilot/generative-ui";
+import {
+  DEFAULT_GENERATIVE_UI_COMPONENTS,
+  type StandardUiComponentName,
+} from "@/lib/generative-ui/catalog";
 import "@copilotkit/react-ui/v2/styles.css";
 
 import { Button } from "@/components/ui/button";
@@ -445,13 +450,49 @@ export function RightPanel(): ReactNode {
         );
   }, [agentId, agentSource, builtinAgents, agentType, agents, teams, credentialId]);
 
+  const activeBuiltinAgent = useMemo(
+    () =>
+      agentSource === "builtin" && agentId
+        ? builtinAgents.find((a) => a.id === agentId)
+        : undefined,
+    [agentSource, agentId, builtinAgents],
+  );
+  const isGenerativeUiEnabled = Boolean(activeBuiltinAgent?.generativeUiEnabled);
+
+  const [genUiComponents, setGenUiComponents] = useState<
+    readonly StandardUiComponentName[]
+  >(DEFAULT_GENERATIVE_UI_COMPONENTS);
+
+  useEffect(() => {
+    if (!isGenerativeUiEnabled) return;
+    let cancelled = false;
+    fetch("/api/config/generative-ui")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { enabledComponents?: StandardUiComponentName[] } | null) => {
+        if (!cancelled && Array.isArray(data?.enabledComponents)) {
+          setGenUiComponents(data.enabledComponents);
+        }
+      })
+      .catch(() => {
+        // Keep default component list on transient fetch failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGenerativeUiEnabled]);
+
+  const generativeUiConfig = useMemo(() => {
+    if (!isGenerativeUiEnabled || !agentId) return undefined;
+    return buildGenerativeUiConfig(genUiComponents, agentId);
+  }, [isGenerativeUiEnabled, agentId, genUiComponents]);
+
   // Build CopilotKitProvider props. Stable references prevent infinite rerenders.
   const runtimeUrl = agentSource === "builtin"
     ? "/api/copilotkit/builtin"
     : "/api/copilotkit";
 
   const copilotKey = agentId
-    ? `${agentId}::${agentSource}::${credentialId ?? ""}`
+    ? `${agentId}::${agentSource}::${credentialId ?? ""}::${isGenerativeUiEnabled ? "gui" : ""}`
     : "no-agent";
 
   if (!agentId) {
@@ -485,6 +526,7 @@ export function RightPanel(): ReactNode {
           key={copilotKey}
           runtimeUrl={runtimeUrl}
           headers={buildChatHeaders}
+          generativeUI={generativeUiConfig}
           // Stable refs — see STABLE_EMPTY_AGENTS comment at top.
           properties={STABLE_EMPTY_PROPS}
           agents__unsafe_dev_only={STABLE_EMPTY_AGENTS}

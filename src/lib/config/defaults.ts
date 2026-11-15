@@ -8,6 +8,10 @@
  */
 
 import type { ConfigValueType } from "@/lib/db/schema";
+import {
+  DEFAULT_GENERATIVE_UI_COMPONENTS,
+  GENERATIVE_UI_CONFIG_KEY,
+} from "@/lib/generative-ui/catalog";
 
 export interface ConfigDefault {
   key: string;
@@ -146,6 +150,9 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "guardrail.result_sanitization.enabled", value: "true", valueType: "boolean", description: "Enable tool result sanitization middleware (neutralize framework tags in external tool outputs)" },
   { key: "guardrail.loop_detection.enabled", value: "true", valueType: "boolean", description: "Enable loop detection middleware (break consecutive identical tool calls)" },
   { key: "guardrail.loop_detection.threshold", value: "3", valueType: "number", description: "Number of consecutive identical tool calls before blocking" },
+
+  // ── generative ui ────────────────────────────────────────────────
+  { key: GENERATIVE_UI_CONFIG_KEY, value: DEFAULT_GENERATIVE_UI_COMPONENTS.join(","), valueType: "string", description: "Comma-separated standard A2UI components available to agents with Generative UI enabled" },
 ] as const;
 
 /** Lookup map for fast default resolution. */

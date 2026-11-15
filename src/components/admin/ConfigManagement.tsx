@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ChevronDown,
   ChevronRight,
   FolderOpen,
   Loader2,
@@ -22,7 +23,14 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  GENERATIVE_UI_CONFIG_KEY,
+  STANDARD_UI_COMPONENT_NAMES,
+  parseGenerativeUiComponents,
+  serializeGenerativeUiComponents,
+} from "@/lib/generative-ui/catalog";
 import {
   Table,
   TableBody,
@@ -108,6 +116,16 @@ function ValueCell({
           ))}
         </SelectContent>
       </Select>
+    );
+  }
+
+  // Generative UI component multi-select
+  if (row.key === GENERATIVE_UI_CONFIG_KEY) {
+    return (
+      <GenerativeUiComponentsSelect
+        value={row.value}
+        onSave={(next) => onSave(row.key, next)}
+      />
     );
   }
 
@@ -204,6 +222,74 @@ function ValueCell({
       >
         <X className="h-3 w-3" />
       </Button>
+    </div>
+  );
+}
+
+function GenerativeUiComponentsSelect({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (value: string) => Promise<void>;
+}): ReactNode {
+  const [open, setOpen] = useState(false);
+  const selected = useMemo(
+    () => new Set(parseGenerativeUiComponents(value)),
+    [value],
+  );
+
+  const toggle = (name: (typeof STANDARD_UI_COMPONENT_NAMES)[number]): void => {
+    const next = new Set(selected);
+    if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
+    }
+    void onSave(serializeGenerativeUiComponents([...next]));
+  };
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen((prev) => !prev)}
+        className="h-7 w-56 justify-between px-2.5 text-xs font-mono"
+      >
+        <span className="truncate">
+          {selected.size === 0
+            ? "0 components selected"
+            : `${selected.size} components selected`}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </Button>
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpen(false)}
+          />
+          <div className="absolute right-0 z-50 mt-1 max-h-64 w-64 overflow-y-auto rounded-md border border-border bg-popover p-1.5 shadow-md">
+            {STANDARD_UI_COMPONENT_NAMES.map((name) => {
+              const checked = selected.has(name);
+              return (
+                <label
+                  key={name}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs font-mono hover:bg-accent"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={() => toggle(name)}
+                  />
+                  <span>{name}</span>
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

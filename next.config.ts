@@ -14,6 +14,14 @@ const nextConfig: NextConfig = {
     turbopackPluginRuntimeStrategy: "workerThreads",
   },
 
+  turbopack: {
+    resolveAlias: {
+      // @copilotkit/react-core/v2/generative-ui dynamically imports optional
+      // peer `maplibre-gl`; alias to a rejecting stub so Turbopack builds.
+      "maplibre-gl": "./src/lib/copilot/maplibre-stub.ts",
+    },
+  },
+
   // pino transports are loaded via worker + dynamic require() — nft
   // can't trace them, so standalone builds miss `pino-pretty` and
   // the server crashes when NANGO_LOG_PRETTY=true with

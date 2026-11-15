@@ -29,6 +29,7 @@ export interface BuiltinAgentRow {
   maxSteps: number | null;
   toolApprovalMode: string;
   sharedStateEnabled?: boolean;
+  generativeUiEnabled?: boolean;
   memoryEnabled: boolean;
   memoryWindowSize: number | null;
   enabled: boolean;

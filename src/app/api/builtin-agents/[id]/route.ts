@@ -142,6 +142,7 @@ const updateSchema = z
     maxSteps: z.number().int().min(5).optional(),
     toolApprovalMode: z.enum(["always", "auto", "never"]).optional(),
     sharedStateEnabled: z.boolean().optional(),
+    generativeUiEnabled: z.boolean().optional(),
     memoryEnabled: z.boolean().optional(),
     memoryWindowSize: z.number().int().positive().nullable().optional(),
     enabled: z.boolean().optional(),
@@ -242,6 +243,7 @@ export const PATCH = withEditor<{ id: string }>(
       || body.maxSteps !== undefined
       || body.toolApprovalMode !== undefined
       || body.sharedStateEnabled !== undefined
+      || body.generativeUiEnabled !== undefined
       || body.memoryEnabled !== undefined
       || body.memoryWindowSize !== undefined
       || body.tools !== undefined;
@@ -275,6 +277,7 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.prompt !== undefined) updates.prompt = body.prompt;
     if (body.toolApprovalMode !== undefined) updates.toolApprovalMode = body.toolApprovalMode;
     if (body.sharedStateEnabled !== undefined) updates.sharedStateEnabled = body.sharedStateEnabled;
+    if (body.generativeUiEnabled !== undefined) updates.generativeUiEnabled = body.generativeUiEnabled;
     if (body.temperature !== undefined) updates.temperature = body.temperature != null ? String(body.temperature) : null;
     if (body.maxTokens !== undefined) updates.maxTokens = body.maxTokens;
     if (body.maxSteps !== undefined) updates.maxSteps = body.maxSteps;

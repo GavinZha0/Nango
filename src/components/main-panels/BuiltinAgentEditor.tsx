@@ -196,6 +196,7 @@ interface FormState {
   temperature: number;
   role: AgentRole | null;
   sharedStateEnabled: boolean;
+  generativeUiEnabled: boolean;
 }
 
 const EMPTY_FORM: FormState = {
@@ -211,6 +212,7 @@ const EMPTY_FORM: FormState = {
   temperature: 0.3,
   role: null,
   sharedStateEnabled: false,
+  generativeUiEnabled: false,
 };
 
 function formFromDetail(data: AgentDetail): FormState {
@@ -227,6 +229,7 @@ function formFromDetail(data: AgentDetail): FormState {
     temperature: data.temperature != null ? parseFloat(data.temperature) : 0.3,
     role: data.role ?? null,
     sharedStateEnabled: resolveSharedStateEnabled(data),
+    generativeUiEnabled: data.generativeUiEnabled ?? false,
   };
 }
 
@@ -395,6 +398,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
       if (formFields.temperature !== undefined && formFields.temperature !== null) { normalized.temperature = Number(formFields.temperature); applied.push("temperature"); }
       if (formFields.role !== undefined) { normalized.role = formFields.role as AgentRole | null; applied.push("role"); }
       if (typeof formFields.sharedStateEnabled === "boolean") { normalized.sharedStateEnabled = formFields.sharedStateEnabled; applied.push("sharedStateEnabled"); }
+      if (typeof formFields.generativeUiEnabled === "boolean") { normalized.generativeUiEnabled = formFields.generativeUiEnabled; applied.push("generativeUiEnabled"); }
       setForm((prev) => ({ ...prev, ...normalized }));
     }
     if (draftTools && typeof draftTools === "object" && !Array.isArray(draftTools)) {
@@ -630,6 +634,7 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
         prompt: form.prompt.trim() || null,
         toolApprovalMode: form.toolApprovalMode,
         sharedStateEnabled: form.sharedStateEnabled,
+        generativeUiEnabled: form.generativeUiEnabled,
         maxSteps: form.maxSteps,
         temperature: form.temperature,
         tools: toolList,
@@ -1222,6 +1227,24 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 </>
               );
             })()}
+            <div className="mt-4 flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
+              <div className="min-w-0 pr-3">
+                <Label
+                  htmlFor="generative-ui-toggle"
+                  className="cursor-pointer text-xs font-medium"
+                >
+                  Generative UI
+                </Label>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Allow this agent to render structured interactive UI components in chat.
+                </p>
+              </div>
+              <Switch
+                id="generative-ui-toggle"
+                checked={form.generativeUiEnabled}
+                onCheckedChange={(checked) => update("generativeUiEnabled", checked)}
+              />
+            </div>
           </div>
 
           {/* RIGHT COLUMN: System Prompt. `lg:sticky` so it stays

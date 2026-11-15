@@ -52,6 +52,7 @@ import { from, type Observable } from "rxjs";
 import {
   EventType,
   type BaseEvent,
+  type ActivityDeltaEvent,
   type ActivitySnapshotEvent,
   type RunFinishedEvent,
   type RunStartedEvent,
@@ -327,6 +328,40 @@ function* eventRowToAgUi(
       );
       return;
     }
+    case "activity_snapshot": {
+      const messageId = readString(p.messageId);
+      const activityType = readString(p.activityType);
+      const content = p.content;
+      if (
+        !messageId
+        || !activityType
+        || typeof content !== "object"
+        || content === null
+        || Array.isArray(content)
+      ) {
+        return;
+      }
+      yield buildActivitySnapshot(
+        messageId,
+        activityType,
+        content as Record<string, unknown>,
+        ev.ts.getTime(),
+        typeof p.replace === "boolean" ? p.replace : true,
+      );
+      return;
+    }
+    case "activity_delta": {
+      const messageId = readString(p.messageId);
+      const activityType = readString(p.activityType);
+      if (!messageId || !activityType || !Array.isArray(p.patch)) return;
+      yield buildActivityDelta(
+        messageId,
+        activityType,
+        p.patch as ActivityDeltaEvent["patch"],
+        ev.ts.getTime(),
+      );
+      return;
+    }
     // started / finished / degraded: suppressed. Each run
     // is wrapped by our own RUN_STARTED / RUN_FINISHED at the outer
     // loop.
@@ -557,6 +592,7 @@ function buildActivitySnapshot(
   activityType: string,
   content: Record<string, unknown>,
   timestamp?: number,
+  replace = true,
 ): ActivitySnapshotEvent {
   return withTs(
     {
@@ -564,7 +600,24 @@ function buildActivitySnapshot(
       messageId,
       activityType,
       content,
-      replace: true,
+      replace,
+    },
+    timestamp,
+  );
+}
+
+function buildActivityDelta(
+  messageId: string,
+  activityType: string,
+  patch: ActivityDeltaEvent["patch"],
+  timestamp?: number,
+): ActivityDeltaEvent {
+  return withTs(
+    {
+      type: EventType.ACTIVITY_DELTA,
+      messageId,
+      activityType,
+      patch,
     },
     timestamp,
   );

@@ -63,6 +63,8 @@ function describeEvent(event: AgUiEvent): string {
       return `raw event=${JSON.stringify(event.event)}`;
     case EventType.ACTIVITY_SNAPSHOT:
       return `activity-snapshot ${event.messageId} ${event.activityType}`;
+    case EventType.ACTIVITY_DELTA:
+      return `activity-delta ${event.messageId} ${event.activityType}`;
     default: {
       // Exhaustiveness check: if a new variant is added to AgUiEvent
       // without a matching case here, tsc fails on this assignment.

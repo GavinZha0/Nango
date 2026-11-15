@@ -1086,6 +1086,9 @@ export const BuiltinAgentTable = pgTable("builtin_agent", {
   /** Whether this agent has read/write access to the editor's shared state (Copilot Mode). */
   sharedStateEnabled: boolean("shared_state_enabled").notNull().default(false),
 
+  /** Whether this agent can render structured Generative UI (A2UI) components. */
+  generativeUiEnabled: boolean("generative_ui_enabled").notNull().default(false),
+
   visibility: text("visibility").notNull().default("private"), // "private" | "public"
 
   createdBy: uuid("created_by").references(() => UserTable.id, {
@@ -1512,6 +1515,8 @@ export type EntityRunEventType =
   | "reasoning"
   | "tool_call_chunk"
   | "tool_call_result"
+  | "activity_snapshot"
+  | "activity_delta"
   | "finished"
   | "error"
   | "approval_requested"

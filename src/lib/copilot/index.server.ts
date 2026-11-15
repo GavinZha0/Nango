@@ -81,6 +81,7 @@ export type {
   StepStartedEvent,
   StepFinishedEvent,
   ActivitySnapshotEvent,
+  ActivityDeltaEvent,
   CustomEvent,
   RawEvent,
 } from "@ag-ui/client";
@@ -107,6 +108,7 @@ import type {
   StepStartedEvent,
   StepFinishedEvent,
   ActivitySnapshotEvent,
+  ActivityDeltaEvent,
   CustomEvent,
   RawEvent,
 } from "@ag-ui/client";
@@ -150,5 +152,6 @@ export type AgUiEvent =
   | StepStartedEvent
   | StepFinishedEvent
   | ActivitySnapshotEvent
+  | ActivityDeltaEvent
   | CustomEvent
   | RawEvent;

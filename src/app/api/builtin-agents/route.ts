@@ -62,6 +62,7 @@ export const GET = withSession(ROUTE, async ({ req, session }) => {
       credentialId: BuiltinAgentTable.credentialId,
       toolApprovalMode: BuiltinAgentTable.toolApprovalMode,
       sharedStateEnabled: BuiltinAgentTable.sharedStateEnabled,
+      generativeUiEnabled: BuiltinAgentTable.generativeUiEnabled,
       // Total number of tool rows attached to this agent
       toolCount: sql<number>`(
         select count(*)::int from builtin_agent_tool
@@ -139,6 +140,7 @@ const createSchema = z.object({
   maxSteps: z.number().int().min(5).optional(),
   toolApprovalMode: z.enum(["always", "auto", "never"]).optional(),
   sharedStateEnabled: z.boolean().optional(),
+  generativeUiEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
   memoryWindowSize: z.number().int().positive().nullable().optional(),
   visibility: z.enum(["private", "public"]).optional(),
@@ -212,6 +214,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
           maxSteps: body.maxSteps ?? 30,
           toolApprovalMode: body.toolApprovalMode ?? "auto",
           sharedStateEnabled: resolveSharedStateEnabled({ sharedStateEnabled: body.sharedStateEnabled, role }),
+          generativeUiEnabled: body.generativeUiEnabled ?? false,
           memoryEnabled: body.memoryEnabled ?? false,
           memoryWindowSize: body.memoryWindowSize ?? null,
           enabled: true,
