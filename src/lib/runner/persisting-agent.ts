@@ -390,11 +390,36 @@ export class PersistingAgent extends AbstractAgent {
           }
       };
 
+      // Execute middlewares attached to `inner` (e.g. CopilotRuntime's
+      // GenerativeUIMiddleware) inside PersistingAgent so they both inject
+      // tools/context and emit ACTIVITY_* events through our persistence tee.
+      type MiddlewareLike = {
+        run: (nextInput: RunAgentInput, next: AbstractAgent) => Observable<BaseEvent>;
+      };
+      const inner = this.cfg.inner;
+      const innerMiddlewares =
+        (inner as unknown as { middlewares?: readonly MiddlewareLike[] }).middlewares ?? [];
+      const entry = innerMiddlewares.reduceRight<
+        Pick<AbstractAgent, "run" | "messages" | "state">
+      >(
+        (next, mw) => ({
+          run: (nextInput: RunAgentInput) =>
+            mw.run(nextInput, next as AbstractAgent),
+          get messages() {
+            return next.messages;
+          },
+          get state() {
+            return next.state;
+          },
+        }),
+        inner,
+      );
+
       // CONTRACT: manual subscription so `subscriber.complete()` is
       // sequenced AFTER `finalizeOnce()` — the terminal status flip
       // must be visible before the SSE stream closes, otherwise a
       // synchronous reconnect surfaces as a blank chat.
-      const innerSub = this.cfg.inner.run(input).subscribe({
+      const innerSub = entry.run(input).subscribe({
         next: (rawEv: BaseEvent) => {
           handleEvent(rawEv);
           subscriber.next(rawEv);

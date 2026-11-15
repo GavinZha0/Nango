@@ -1040,10 +1040,11 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                   id: "builtin" as const,
                   label: "Tool",
                   count: {
-                    selected: [...tools.builtinTools].filter((n) =>
-                      builtinToolCatalog.some((t) => t.name === n),
-                    ).length,
-                    total: builtinToolCatalog.length,
+                    selected:
+                      [...tools.builtinTools].filter((n) =>
+                        builtinToolCatalog.some((t) => t.name === n),
+                      ).length + (form.generativeUiEnabled ? 1 : 0),
+                    total: builtinToolCatalog.length + 1,
                   },
                 },
                 {
@@ -1161,13 +1162,31 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                     )}
                     {activeTab === "builtin" && (
                       <CheckList
-                        items={builtinToolCatalog.map((t) => ({
-                          id: t.name,
-                          name: t.displayName,
-                          description: t.description,
-                        }))}
-                        selected={tools.builtinTools}
-                        onToggle={(id) => toggleTool("builtinTools", id)}
+                        items={[
+                          ...builtinToolCatalog.map((t) => ({
+                            id: t.name,
+                            name: t.displayName,
+                            description: t.description,
+                          })),
+                          {
+                            id: "__generative_ui__",
+                            name: "Generative UI",
+                            description:
+                              "Allow this agent to render structured interactive UI components in chat.",
+                          },
+                        ]}
+                        selected={
+                          form.generativeUiEnabled
+                            ? new Set([...tools.builtinTools, "__generative_ui__"])
+                            : tools.builtinTools
+                        }
+                        onToggle={(id) => {
+                          if (id === "__generative_ui__") {
+                            update("generativeUiEnabled", !form.generativeUiEnabled);
+                          } else {
+                            toggleTool("builtinTools", id);
+                          }
+                        }}
                         emptyText="No built-in tools available."
                       />
                     )}
@@ -1227,24 +1246,6 @@ export function BuiltinAgentEditor({ agentId, onBack, onSaved, onCreated, onDele
                 </>
               );
             })()}
-            <div className="mt-4 flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
-              <div className="min-w-0 pr-3">
-                <Label
-                  htmlFor="generative-ui-toggle"
-                  className="cursor-pointer text-xs font-medium"
-                >
-                  Generative UI
-                </Label>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  Allow this agent to render structured interactive UI components in chat.
-                </p>
-              </div>
-              <Switch
-                id="generative-ui-toggle"
-                checked={form.generativeUiEnabled}
-                onCheckedChange={(checked) => update("generativeUiEnabled", checked)}
-              />
-            </div>
           </div>
 
           {/* RIGHT COLUMN: System Prompt. `lg:sticky` so it stays

@@ -8,7 +8,7 @@
 
 export const GENERATIVE_UI_CONFIG_KEY = "generative_ui.enabled_components";
 
-/** All 69 components exposed by `@copilotkit/react-core/v2/generative-ui` `standardUI`. */
+/** All 68 components exposed by `@copilotkit/react-core/v2/generative-ui` `standardUI`. */
 export const STANDARD_UI_COMPONENT_NAMES = [
   "Box",
   "Column",
@@ -39,7 +39,6 @@ export const STANDARD_UI_COMPONENT_NAMES = [
   "Math",
   "ShimmerText",
   "Link",
-  "Tooltip",
   "Button",
   "Pressable",
   "Form",

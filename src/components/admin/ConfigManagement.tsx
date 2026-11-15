@@ -8,9 +8,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -234,10 +236,41 @@ function GenerativeUiComponentsSelect({
   onSave: (value: string) => Promise<void>;
 }): ReactNode {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+  } | null>(null);
+
   const selected = useMemo(
     () => new Set(parseGenerativeUiComponents(value)),
     [value],
   );
+
+  const updatePosition = useCallback((): void => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const right = Math.max(8, window.innerWidth - rect.right);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    if (spaceBelow < 270 && rect.top > 270) {
+      setMenuPos({ bottom: window.innerHeight - rect.top + 4, right });
+    } else {
+      setMenuPos({ top: rect.bottom + 4, right });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, updatePosition]);
 
   const toggle = (name: (typeof STANDARD_UI_COMPONENT_NAMES)[number]): void => {
     const next = new Set(selected);
@@ -252,6 +285,7 @@ function GenerativeUiComponentsSelect({
   return (
     <div className="relative">
       <Button
+        ref={triggerRef}
         type="button"
         variant="outline"
         size="sm"
@@ -265,31 +299,40 @@ function GenerativeUiComponentsSelect({
         </span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </Button>
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute right-0 z-50 mt-1 max-h-64 w-64 overflow-y-auto rounded-md border border-border bg-popover p-1.5 shadow-md">
-            {STANDARD_UI_COMPONENT_NAMES.map((name) => {
-              const checked = selected.has(name);
-              return (
-                <label
-                  key={name}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs font-mono hover:bg-accent"
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() => toggle(name)}
-                  />
-                  <span>{name}</span>
-                </label>
-              );
-            })}
-          </div>
-        </>
-      )}
+      {open && menuPos && typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setOpen(false)}
+            />
+            <div
+              style={{
+                top: menuPos.top,
+                bottom: menuPos.bottom,
+                right: menuPos.right,
+              }}
+              className="fixed z-50 max-h-64 w-64 overflow-y-auto rounded-md border border-border bg-popover p-1.5 shadow-md"
+            >
+              {STANDARD_UI_COMPONENT_NAMES.map((name) => {
+                const checked = selected.has(name);
+                return (
+                  <label
+                    key={name}
+                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs font-mono hover:bg-accent"
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={() => toggle(name)}
+                    />
+                    <span>{name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
