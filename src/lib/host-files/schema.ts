@@ -163,11 +163,125 @@ export const downloadFileArgsSchema = z.object({
     ),
 });
 
+// find_files
+
+export const findFilesArgsSchema = z.object({
+  pattern: z
+    .string()
+    .min(1)
+    .max(256)
+    .describe(
+      "Glob pattern relative to `path` (or workspace root), e.g. \"**/*.ts\", " +
+        "\"*.md\", \"reports/2026-*.csv\". Use \"**\" to match across subdirectories.",
+    ),
+  path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .optional()
+    .describe(
+      "Optional root-relative subdirectory to search inside, e.g. \"src\". " +
+        "Defaults to the workspace root (\".\").",
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe("Max matching file paths to return (1-500). Default 200."),
+});
+
+// grep_files
+
+export const grepFilesArgsSchema = z.object({
+  query: z
+    .string()
+    .min(1)
+    .max(512)
+    .describe(
+      "Text substring or regular expression to search for inside UTF-8 text files.",
+    ),
+  path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .optional()
+    .describe(
+      "Optional root-relative file or directory to search inside. " +
+        "Defaults to the workspace root (\".\").",
+    ),
+  glob: z
+    .string()
+    .min(1)
+    .max(256)
+    .optional()
+    .describe(
+      "Optional glob filter relative to `path`, e.g. \"**/*.ts\" or \"*.md\".",
+    ),
+  is_regex: z
+    .boolean()
+    .optional()
+    .describe("Treat `query` as a JavaScript regular expression. Default false."),
+  case_sensitive: z
+    .boolean()
+    .optional()
+    .describe("Use case-sensitive matching. Default false."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe("Max matching lines to return (1-500). Default 100."),
+});
+
+// move_file
+
+export const moveFileArgsSchema = z.object({
+  source_path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .describe("Root-relative path of the existing file or directory to move or rename."),
+  destination_path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .describe(
+      "Root-relative destination path. Parent directory must already exist — " +
+        "create it with create_folder.",
+    ),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe(
+      "Overwrite an existing destination file. Default false — an existing " +
+        "destination fails with EXISTS. Directories cannot be overwritten.",
+    ),
+});
+
+// delete_file
+
+export const deleteFileArgsSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .describe(
+      "Root-relative path of the file or empty directory to delete.",
+    ),
+});
+
 export type ReadFileArgs = z.infer<typeof readFileArgsSchema>;
 export type WriteFileArgs = z.infer<typeof writeFileArgsSchema>;
 export type EditFileArgs = z.infer<typeof editFileArgsSchema>;
 export type CreateFolderArgs = z.infer<typeof createFolderArgsSchema>;
 export type DownloadFileArgs = z.infer<typeof downloadFileArgsSchema>;
+export type FindFilesArgs = z.infer<typeof findFilesArgsSchema>;
+export type GrepFilesArgs = z.infer<typeof grepFilesArgsSchema>;
+export type MoveFileArgs = z.infer<typeof moveFileArgsSchema>;
+export type DeleteFileArgs = z.infer<typeof deleteFileArgsSchema>;
 
 // Result envelopes
 
@@ -304,3 +418,73 @@ export interface DownloadOk {
 }
 
 export type DownloadEnvelope = DownloadOk | DownloadErr;
+
+export interface FindFilesMatch {
+  /** Canonical root-relative path (posix separators). */
+  path: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export interface FindFilesOk {
+  ok: true;
+  root: string;
+  pattern: string;
+  files: FindFilesMatch[];
+  totalScanned: number;
+  truncated: boolean;
+}
+
+export type FindFilesEnvelope = FindFilesOk | HostFileErr;
+
+export type GrepFileError = HostFileError | "INVALID_PATTERN";
+
+export interface GrepFileErr {
+  ok: false;
+  error: GrepFileError;
+  message: string;
+}
+
+export interface GrepMatch {
+  /** Canonical root-relative path (posix separators). */
+  path: string;
+  /** 1-based line number. */
+  line: number;
+  text: string;
+}
+
+export interface GrepFilesOk {
+  ok: true;
+  root: string;
+  query: string;
+  matches: GrepMatch[];
+  filesSearched: number;
+  truncated: boolean;
+}
+
+export type GrepFilesEnvelope = GrepFilesOk | GrepFileErr;
+
+export type MoveFileError = HostFileError | "EXISTS";
+
+export interface MoveFileErr {
+  ok: false;
+  error: MoveFileError;
+  message: string;
+}
+
+export interface MoveFileOk {
+  ok: true;
+  sourcePath: string;
+  destinationPath: string;
+  kind: "file" | "directory";
+}
+
+export type MoveFileEnvelope = MoveFileOk | MoveFileErr;
+
+export interface DeleteFileOk {
+  ok: true;
+  path: string;
+  kind: "file" | "directory";
+}
+
+export type DeleteFileEnvelope = DeleteFileOk | HostFileErr;

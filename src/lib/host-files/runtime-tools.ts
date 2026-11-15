@@ -28,6 +28,7 @@ import {
   readFile,
   rename,
   rm,
+  rmdir,
   stat,
   unlink,
   writeFile,
@@ -46,20 +47,29 @@ import { describeFsError, isReadOnlyError, isRenameClobberError } from "./fs-err
 import { getHostFileRoot, resolveCreateInJail, resolveInJail } from "./jail.server";
 import {
   createFolderArgsSchema,
+  deleteFileArgsSchema,
   editFileArgsSchema,
+  findFilesArgsSchema,
+  grepFilesArgsSchema,
+  moveFileArgsSchema,
   readFileArgsSchema,
   writeFileArgsSchema,
   type CreateFolderEnvelope,
+  type DeleteFileEnvelope,
   type DirListingEntry,
   type EditFileEnvelope,
   type EditFileError,
+  type FindFilesEnvelope,
+  type GrepFilesEnvelope,
   type HostFileErr,
   type HostFileError,
   type ListDirOk,
+  type MoveFileEnvelope,
   type ReadFileEnvelope,
   type ReadFileOk,
   type WriteFileEnvelope,
 } from "./schema";
+import { runFindFiles, runGrepFiles } from "./search.server";
 
 /** Default per-call byte budgets; admin-tunable via config. */
 const DEFAULT_MAX_BYTES = 1_048_576;
@@ -867,4 +877,311 @@ function writeFailure(relPath: string, verb: string, e: unknown): HostFileErr {
 
 function editErr(error: EditFileError, message: string): EditFileEnvelope {
   return { ok: false, error, message };
+}
+
+/**
+ * Recursively find files inside `host.file.root` matching a glob pattern.
+ * Auto-mounted whenever `read_file` or `write_file` is enabled.
+ */
+export function buildFindFilesTool(): ToolDefinition {
+  return defineTool({
+    name: "find_files",
+    description:
+      "Find files inside the mounted shared folder (`host.file.root`) matching a " +
+      "glob pattern (e.g. \"**/*.ts\", \"*.md\", \"reports/2026-*.csv\"). " +
+      "Skips symlinks and common noise directories (.git, node_modules, .next). " +
+      "Paths returned are root-relative, ready for `read_file`.",
+    parameters: findFilesArgsSchema,
+    execute: async (args): Promise<FindFilesEnvelope> => {
+      const targetSubpath = args.path?.trim() || ".";
+      const resolved = await jailResolve(targetSubpath, "read");
+      if (!resolved.ok) return resolved;
+
+      let st: Stats;
+      try {
+        st = await stat(resolved.absPath);
+      } catch (e) {
+        return err(
+          "NOT_FOUND",
+          `Cannot search "${targetSubpath}": ${describeFsError(e)}`,
+        );
+      }
+      if (!st.isDirectory()) {
+        return err(
+          "IS_FILE",
+          `"${resolved.relPath || "."}" is a file, not a directory. Pass a directory path to find_files.`,
+        );
+      }
+
+      try {
+        const result = await runFindFiles({
+          absDir: resolved.absPath,
+          jailRelDir: resolved.relPath,
+          pattern: args.pattern,
+          limit: args.limit,
+        });
+        return {
+          ok: true,
+          root: resolved.relPath || ".",
+          pattern: args.pattern,
+          ...result,
+        };
+      } catch (e) {
+        return err(
+          "READ_FAILED",
+          `Failed to search "${resolved.relPath || "."}": ${describeFsError(e)}`,
+        );
+      }
+    },
+  });
+}
+
+/**
+ * Search UTF-8 text files inside `host.file.root` for matching lines.
+ * Auto-mounted whenever `read_file` or `write_file` is enabled.
+ */
+export function buildGrepFilesTool(): ToolDefinition {
+  return defineTool({
+    name: "grep_files",
+    description:
+      "Search for text or a regular expression inside UTF-8 text files in the " +
+      "mounted shared folder (`host.file.root`). Returns matching file paths, " +
+      "1-based line numbers, and line snippets. Skips binary files, symlinks, " +
+      "and oversized files.",
+    parameters: grepFilesArgsSchema,
+    execute: async (args): Promise<GrepFilesEnvelope> => {
+      const targetSubpath = args.path?.trim() || ".";
+      const resolved = await jailResolve(targetSubpath, "read");
+      if (!resolved.ok) return resolved;
+
+      let st: Stats;
+      try {
+        st = await stat(resolved.absPath);
+      } catch (e) {
+        return err(
+          "NOT_FOUND",
+          `Cannot search "${targetSubpath}": ${describeFsError(e)}`,
+        );
+      }
+      if (!st.isFile() && !st.isDirectory()) {
+        return err(
+          "READ_FAILED",
+          `"${resolved.relPath || "."}" is neither a file nor a directory.`,
+        );
+      }
+
+      if (args.is_regex) {
+        try {
+          new RegExp(args.query, args.case_sensitive ? "" : "i");
+        } catch (e) {
+          return {
+            ok: false,
+            error: "INVALID_PATTERN",
+            message: `Invalid regular expression "${args.query}": ${e instanceof Error ? e.message : String(e)}`,
+          };
+        }
+      }
+
+      try {
+        const result = await runGrepFiles({
+          absTarget: resolved.absPath,
+          jailRelTarget: resolved.relPath,
+          isFile: st.isFile(),
+          query: args.query,
+          glob: args.glob,
+          isRegex: args.is_regex,
+          caseSensitive: args.case_sensitive,
+          limit: args.limit,
+          maxBytesBudget: readMaxBytes(),
+        });
+        return {
+          ok: true,
+          root: resolved.relPath || ".",
+          query: args.query,
+          ...result,
+        };
+      } catch (e) {
+        return err(
+          "READ_FAILED",
+          `Failed to grep "${resolved.relPath || "."}": ${describeFsError(e)}`,
+        );
+      }
+    },
+  });
+}
+
+/**
+ * Move or rename a file or directory inside `host.file.root`.
+ * Auto-mounted alongside `write_file`.
+ */
+export function buildMoveFileTool(): ToolDefinition {
+  return defineTool({
+    name: "move_file",
+    description:
+      "Move or rename a file or directory inside the mounted shared folder " +
+      "(`host.file.root`). The destination parent directory must already exist " +
+      "(create it with `create_folder`). By default refuses to overwrite an " +
+      "existing file unless `overwrite: true` is set.",
+    parameters: moveFileArgsSchema,
+    execute: async (args): Promise<MoveFileEnvelope> => {
+      const source = await jailResolve(args.source_path, "write");
+      if (!source.ok) return source;
+      if (source.relPath === "") {
+        return err(
+          "INVALID_PATH",
+          "Cannot move or rename the host-file root directory itself.",
+        );
+      }
+
+      const dest = await jailResolve(args.destination_path, "write");
+      if (!dest.ok) return dest;
+      if (dest.relPath === "") {
+        return err(
+          "INVALID_PATH",
+          "Cannot use the host-file root directory itself as `destination_path`.",
+        );
+      }
+
+      if (source.relPath === dest.relPath) {
+        return err(
+          "INVALID_PATH",
+          `Source and destination paths are identical ("${source.relPath}").`,
+        );
+      }
+
+      if (dest.relPath.startsWith(`${source.relPath}/`)) {
+        return err(
+          "INVALID_PATH",
+          `Cannot move directory "${source.relPath}" into its own subdirectory "${dest.relPath}".`,
+        );
+      }
+
+      let srcStat: Stats;
+      try {
+        srcStat = await lstat(source.absPath);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+          return err("NOT_FOUND", `Source path "${source.relPath}" does not exist.`);
+        }
+        return writeFailure(source.relPath, "inspect", e);
+      }
+      if (srcStat.isSymbolicLink()) {
+        return err(
+          "PATH_ESCAPE",
+          `Cannot move "${source.relPath}": symlinks are not followed inside the host-file root.`,
+        );
+      }
+      const kind: "file" | "directory" = srcStat.isDirectory() ? "directory" : "file";
+
+      let destExists = false;
+      try {
+        const destStat = await lstat(dest.absPath);
+        if (destStat.isSymbolicLink()) {
+          return err(
+            "PATH_ESCAPE",
+            `Cannot overwrite "${dest.relPath}": symlinks are not followed inside the host-file root.`,
+          );
+        }
+        if (!args.overwrite) {
+          return {
+            ok: false,
+            error: "EXISTS",
+            message: `Destination "${dest.relPath}" already exists. Pass \`overwrite: true\` to replace a file.`,
+          };
+        }
+        if (kind === "directory" || destStat.isDirectory()) {
+          return err(
+            "IS_DIRECTORY",
+            `Cannot overwrite "${dest.relPath}" when moving or targeting a directory.`,
+          );
+        }
+        destExists = true;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
+          return writeFailure(dest.relPath, "inspect", e);
+        }
+      }
+
+      try {
+        try {
+          await rename(source.absPath, dest.absPath);
+        } catch (e) {
+          // QUIRK: on Windows, rename onto an existing file fails with EPERM/EEXIST.
+          if (destExists && isRenameClobberError(e)) {
+            await unlink(dest.absPath);
+            await rename(source.absPath, dest.absPath);
+          } else {
+            throw e;
+          }
+        }
+        return {
+          ok: true,
+          sourcePath: source.relPath,
+          destinationPath: dest.relPath,
+          kind,
+        };
+      } catch (e) {
+        return writeFailure(dest.relPath, "move", e);
+      }
+    },
+  });
+}
+
+/**
+ * Delete a file or empty directory inside `host.file.root`.
+ * Auto-mounted alongside `write_file`.
+ */
+export function buildDeleteFileTool(): ToolDefinition {
+  return defineTool({
+    name: "delete_file",
+    description:
+      "Delete a file or an empty directory inside the mounted shared folder " +
+      "(`host.file.root`). Non-empty directories are refused so files cannot " +
+      "be wiped recursively in one call.",
+    parameters: deleteFileArgsSchema,
+    execute: async (args): Promise<DeleteFileEnvelope> => {
+      const resolved = await jailResolve(args.path, "write");
+      if (!resolved.ok) return resolved;
+      if (resolved.relPath === "") {
+        return err(
+          "INVALID_PATH",
+          "Cannot delete the host-file root directory itself.",
+        );
+      }
+
+      let st: Stats;
+      try {
+        st = await lstat(resolved.absPath);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+          return err("NOT_FOUND", `Path "${resolved.relPath}" does not exist.`);
+        }
+        return writeFailure(resolved.relPath, "inspect", e);
+      }
+      if (st.isSymbolicLink()) {
+        return err(
+          "PATH_ESCAPE",
+          `Cannot delete "${resolved.relPath}": symlinks are not followed inside the host-file root.`,
+        );
+      }
+
+      try {
+        if (st.isDirectory()) {
+          await rmdir(resolved.absPath);
+          return { ok: true, path: resolved.relPath, kind: "directory" };
+        }
+        await unlink(resolved.absPath);
+        return { ok: true, path: resolved.relPath, kind: "file" };
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (code === "ENOTEMPTY" || code === "EEXIST") {
+          return err(
+            "WRITE_FAILED",
+            `Directory "${resolved.relPath}" is not empty; delete its files first.`,
+          );
+        }
+        return writeFailure(resolved.relPath, "delete", e);
+      }
+    },
+  });
 }

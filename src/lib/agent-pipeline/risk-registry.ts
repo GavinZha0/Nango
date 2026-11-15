@@ -146,6 +146,14 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
   ],
   [
+    "find_files",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
+    "grep_files",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
     "write_file",
     {
       riskLevel: "high",
@@ -167,6 +175,26 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
       // the same real files, so it must not run unattended under the
       // default policy either. It is auto-mounted beside write_file and so
       // has no toggle of its own to override.
+    },
+  ],
+  [
+    "move_file",
+    {
+      riskLevel: "high",
+      sideEffects: "write",
+      headlessAllowed: false,
+      // CONTRACT: same posture as write_file — moves/renames real files
+      // in the mounted folder, so it requires approval and is denied headless.
+    },
+  ],
+  [
+    "delete_file",
+    {
+      riskLevel: "critical",
+      sideEffects: "destructive",
+      headlessAllowed: false,
+      // CONTRACT: destructive removal in the user's real mounted folder;
+      // always requires approval and is blocked in headless/scheduled runs.
     },
   ],
   [

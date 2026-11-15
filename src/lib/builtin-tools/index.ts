@@ -8,7 +8,14 @@ import "server-only";
 
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 
-import { buildCreateFolderTool, buildEditFileTool } from "@/lib/host-files/runtime-tools";
+import {
+  buildCreateFolderTool,
+  buildDeleteFileTool,
+  buildEditFileTool,
+  buildFindFilesTool,
+  buildGrepFilesTool,
+  buildMoveFileTool,
+} from "@/lib/host-files/runtime-tools";
 
 import { BUILTIN_TOOLS, findBuiltinTool } from "./catalog";
 
@@ -31,6 +38,12 @@ export {
 const HOST_WRITE_TOOLS = new Set(["write_file", "download_file"]);
 
 /**
+ * Text file toggles (`read_file`, `write_file`). Enabling either one
+ * automatically mounts `find_files` and `grep_files` for discovery.
+ */
+const HOST_TEXT_FILE_TOOLS = new Set(["read_file", "write_file"]);
+
+/**
  * CONTRACT: these ride along with a capability instead of being ticked,
  * so they are deliberately absent from `BUILTIN_TOOLS` — they never show
  * up in the editor checkbox list (`/api/builtin-tools`) and cannot be
@@ -41,14 +54,23 @@ const HOST_WRITE_TOOLS = new Set(["write_file", "download_file"]);
 const AUXILIARY_TOOLS: Record<string, () => ToolDefinition> = {
   create_folder: buildCreateFolderTool,
   edit_file: buildEditFileTool,
+  move_file: buildMoveFileTool,
+  delete_file: buildDeleteFileTool,
+  find_files: buildFindFilesTool,
+  grep_files: buildGrepFilesTool,
 };
 
 function auxiliaryTools(names: readonly string[]): string[] {
   const out: string[] = [];
   if (names.some((name) => HOST_WRITE_TOOLS.has(name))) out.push("create_folder");
-  // `edit_file` follows write_file only: download_file brings bytes in, it
-  // does not make the agent a text editor.
-  if (names.includes("write_file")) out.push("edit_file");
+  // `edit_file`, `move_file`, and `delete_file` follow write_file only:
+  // download_file brings bytes in, it does not grant file management/editing.
+  if (names.includes("write_file")) {
+    out.push("edit_file", "move_file", "delete_file");
+  }
+  if (names.some((name) => HOST_TEXT_FILE_TOOLS.has(name))) {
+    out.push("find_files", "grep_files");
+  }
   return out;
 }
 

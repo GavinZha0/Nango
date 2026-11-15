@@ -45,6 +45,30 @@ vi.mock("@/lib/host-files/runtime-tools", () => ({
     parameters: { _def: {} },
     execute: async () => ({}),
   }),
+  buildFindFilesTool: () => ({
+    name: "find_files",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+  buildGrepFilesTool: () => ({
+    name: "grep_files",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+  buildMoveFileTool: () => ({
+    name: "move_file",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
+  buildDeleteFileTool: () => ({
+    name: "delete_file",
+    description: "stub",
+    parameters: { _def: {} },
+    execute: async () => ({}),
+  }),
 }));
 
 vi.mock("@/lib/host-files/download-runtime-tools", () => ({
@@ -102,6 +126,10 @@ describe("BUILTIN_TOOLS catalog", () => {
     ]);
     expect(findBuiltinTool("create_folder")).toBeNull();
     expect(findBuiltinTool("edit_file")).toBeNull();
+    expect(findBuiltinTool("find_files")).toBeNull();
+    expect(findBuiltinTool("grep_files")).toBeNull();
+    expect(findBuiltinTool("move_file")).toBeNull();
+    expect(findBuiltinTool("delete_file")).toBeNull();
   });
 
   it("each entry has a displayName, description, and category", () => {
@@ -231,6 +259,10 @@ describe("buildBuiltinTools", () => {
       "write_file",
       "create_folder",
       "edit_file",
+      "move_file",
+      "delete_file",
+      "find_files",
+      "grep_files",
     ]);
     expect(buildBuiltinTools(["download_file"]).map((t) => t.name)).toEqual([
       "download_file",
@@ -241,7 +273,11 @@ describe("buildBuiltinTools", () => {
   it("never mounts create_folder for a read-only agent", () => {
     // CONTRACT: the read/write split is the permission model — a read-only
     // agent must not gain any write-side tool, including mkdir.
-    expect(buildBuiltinTools(["read_file"]).map((t) => t.name)).toEqual(["read_file"]);
+    expect(buildBuiltinTools(["read_file"]).map((t) => t.name)).toEqual([
+      "read_file",
+      "find_files",
+      "grep_files",
+    ]);
   });
 
   it("mounts edit_file only beside write_file", () => {
@@ -255,7 +291,16 @@ describe("buildBuiltinTools", () => {
     ).toEqual([]);
 
     const both = buildBuiltinTools(["write_file", "download_file"]).map((t) => t.name);
-    expect(both).toEqual(["write_file", "download_file", "create_folder", "edit_file"]);
+    expect(both).toEqual([
+      "write_file",
+      "download_file",
+      "create_folder",
+      "edit_file",
+      "move_file",
+      "delete_file",
+      "find_files",
+      "grep_files",
+    ]);
     expect(both.filter((n) => n === "edit_file")).toHaveLength(1);
 
     // Explicitly listing it in a legacy row must not double-mount either.
@@ -263,6 +308,10 @@ describe("buildBuiltinTools", () => {
       "write_file",
       "edit_file",
       "create_folder",
+      "move_file",
+      "delete_file",
+      "find_files",
+      "grep_files",
     ]);
   });
 
@@ -272,6 +321,10 @@ describe("buildBuiltinTools", () => {
       "write_file",
       "create_folder",
       "edit_file",
+      "move_file",
+      "delete_file",
+      "find_files",
+      "grep_files",
     ]);
   });
 });
