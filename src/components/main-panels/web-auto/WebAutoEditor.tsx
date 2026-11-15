@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { readNdjson } from "@/lib/http/read-ndjson";
-import { Play, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertCircle, Play, X, ArrowLeft, Loader2, Save, Trash2, Copy, Check, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useWebAutoStore, WebAutoCaseRow, WebAutoSuiteRow } from "@/store/web-auto-store";
@@ -715,7 +715,13 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                     className="h-6 px-2 text-xs"
                     disabled={!selectedCase || running || !selectedSuite?.mcpServerId}
                     onClick={() => void handleRunCase()}
-                    title={!selectedSuite?.mcpServerId ? "Playwright not configured" : "Run case"}
+                    title={
+                      !selectedSuite?.mcpServerId
+                        ? typeof window !== "undefined" && Boolean((window as { nangoDesktop?: unknown }).nangoDesktop)
+                          ? "Playwright not configured — install Playwright from the MCP Market"
+                          : "Playwright not configured — add a Playwright MCP server"
+                        : "Run case"
+                    }
                     data-testid="run-case-button"
                   >
                     {running ? (
@@ -734,6 +740,21 @@ export function WebAutoEditor({ suiteId }: { suiteId: string }) {
                   </Button>
                 </div>
               </div>
+
+              {selectedSuite && !selectedSuite.mcpServerId && (
+                <div
+                  className="flex items-center gap-1.5 border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300 shrink-0"
+                  data-testid="playwright-missing-banner"
+                >
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {typeof window !== "undefined" &&
+                    Boolean((window as { nangoDesktop?: unknown }).nangoDesktop)
+                      ? "Playwright MCP is not configured. Install Playwright from the MCP Market."
+                      : "Playwright MCP is not configured. Add a Playwright MCP server in the MCP panel."}
+                  </span>
+                </div>
+              )}
 
               <div className="grid h-full grid-rows-[calc(50%-1rem)_calc(50%+1rem)] min-w-0 flex-1 overflow-hidden bg-background/50">
                 <div className="flex flex-col min-h-0 overflow-hidden">

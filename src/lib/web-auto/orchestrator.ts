@@ -111,12 +111,16 @@ export async function runWebAutoCase(
   }
 
   if (!input.suite.mcpServerId) {
+    const missingMcpMessage =
+      process.env.NANGO_DESKTOP === "1"
+        ? "Suite has no Playwright configured. Install Playwright from the MCP Market."
+        : "Suite has no Playwright configured. Add a Playwright MCP server first.";
     const errorAssertionResult: import("@/lib/assertions").AssertionResult = {
       index: 0,
       type: "error",
       ok: false,
       errorSource: "internal",
-      message: "Suite has no MCP server configured for Playwright execution",
+      message: missingMcpMessage,
     };
     return {
       status: "errored",
@@ -129,7 +133,7 @@ export async function runWebAutoCase(
       },
       error: {
         source: "internal",
-        message: "Suite has no MCP server configured for Playwright execution",
+        message: missingMcpMessage,
       },
       startedAt,
       durationMs: 0,

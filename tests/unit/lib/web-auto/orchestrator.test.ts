@@ -77,7 +77,7 @@ describe("runWebAutoCase", () => {
     });
 
     expect(outcome.status).toBe("errored");
-    expect(outcome.error?.message).toContain("no MCP server configured");
+    expect(outcome.error?.message).toContain("no Playwright configured");
   });
 
   it("returns failed when deterministic assertions fail", async () => {

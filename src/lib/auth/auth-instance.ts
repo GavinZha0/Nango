@@ -243,8 +243,8 @@ const options = {
     // Cache session in cookie for 1 hour to reduce DB queries.
     // Disabled = every request hits database; Enabled = faster but stale data possible.
     cookieCache: { enabled: true, maxAge: 60 * 60 },
-    // Session expires after 5 days of inactivity (user must re-login).
-    expiresIn: 60 * 60 * 24 * 5,
+    // Session expires after 10 days of inactivity (user must re-login).
+    expiresIn: 60 * 60 * 24 * 10,
     // Refresh session cookie every 24 hours (extends expiry window).
     updateAge: 60 * 60 * 24,
   },

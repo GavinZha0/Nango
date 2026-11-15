@@ -435,6 +435,14 @@ export function WebAutoSuiteDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {(effectiveMcpId === "" || effectiveMcpId === "__none__") && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                      {typeof window !== "undefined" &&
+                      Boolean((window as { nangoDesktop?: unknown }).nangoDesktop)
+                        ? "No Playwright MCP selected. Install Playwright from the MCP Market."
+                        : "No Playwright MCP selected. Add a Playwright MCP server in the MCP panel."}
+                    </p>
+                  )}
                 </div>
 
                 {/* Script Execution Timeout */}

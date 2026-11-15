@@ -165,7 +165,7 @@ describe("AuthInstanceTest", () => {
     it("configures session cookie cache, expiry, and updateAge", () => {
       expect(mocks.capturedOptions.value.session).toEqual({
         cookieCache: { enabled: true, maxAge: 60 * 60 },
-        expiresIn: 60 * 60 * 24 * 5,
+        expiresIn: 60 * 60 * 24 * 10,
         updateAge: 60 * 60 * 24,
       });
     });
