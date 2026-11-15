@@ -2,16 +2,18 @@
 
 import "@copilotkit/react-ui/v2/styles.css";
 
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   CopilotChat,
   CopilotChatAssistantMessage,
   CopilotChatReasoningMessage,
+  CopilotChatToolCallsView,
   CopilotChatUserMessage,
   CopilotChatView,
   type CopilotChatAssistantMessageProps,
   type CopilotChatReasoningMessageProps,
+  type CopilotChatToolCallsViewProps,
   type CopilotChatUserMessageProps,
   type CopilotChatViewProps,
   useAgent,
@@ -38,6 +40,24 @@ import { classifyError } from "@/lib/copilot/classify-error";
 /** Stable reference so <CopilotChat> shallow-equality check doesn't bail out. */
 const CHAT_LABELS = {
   chatInputPlaceholder: "Message the agent…",
+  chatInputToolbarStartTranscribeButtonLabel: "Start voice input",
+  chatInputToolbarCancelTranscribeButtonLabel: "Cancel voice input",
+  chatInputToolbarFinishTranscribeButtonLabel: "Finish voice input",
+  chatInputToolbarAddButtonLabel: "Add attachment or context",
+  chatInputToolbarToolsButtonLabel: "Tools",
+  chatInputToolbarSendButtonLabel: "Send message",
+  chatInputToolbarStopButtonLabel: "Stop generating",
+  assistantMessageToolbarCopyCodeLabel: "Copy code",
+  assistantMessageToolbarCopyCodeCopiedLabel: "Copied",
+  assistantMessageToolbarCopyMessageLabel: "Copy message",
+  assistantMessageToolbarThumbsUpLabel: "Good response",
+  assistantMessageToolbarThumbsDownLabel: "Bad response",
+  assistantMessageToolbarReadAloudLabel: "Read aloud",
+  assistantMessageToolbarRegenerateLabel: "Regenerate response",
+  userMessageToolbarCopyMessageLabel: "Copy message",
+  userMessageToolbarEditMessageLabel: "Edit message",
+  chatScrollToBottomLabel: "Scroll to bottom",
+  chatConnectingLabel: "Connecting…",
 } as const;
 
 import { StreamingMicButton } from "@/components/right-panels/StreamingMicButton";
@@ -191,6 +211,36 @@ function CollapsibleUserMessage(props: CopilotChatUserMessageProps): ReactNode {
 
 // ChatViewShell — chatView slot wrapper
 
+// ── Custom Tool Calls View (Grouped + Pending Approval Guard) ────
+
+/**
+ * Collapses consecutive wildcard tool calls into a compact summary line
+ * (`display="line"`), while falling back to `display="separate"` whenever
+ * any tool call in the message has a pending approval so HITL approval
+ * buttons are never hidden inside a collapsed group.
+ */
+function GroupedToolCallsView(props: CopilotChatToolCallsViewProps): ReactElement | null {
+  const pendingApprovals = useWorkspaceStore((s) => s.pendingApprovals);
+  const toolCalls = props.message.toolCalls;
+  const hasPendingApproval =
+    pendingApprovals.length > 0 &&
+    Array.isArray(toolCalls) &&
+    toolCalls.some((tc) =>
+      pendingApprovals.some(
+        (a) =>
+          (a.toolCallId && a.toolCallId === tc.id) ||
+          a.toolName === tc.function.name,
+      ),
+    );
+
+  return (
+    <CopilotChatToolCallsView
+      {...props}
+      display={hasPendingApproval ? "separate" : "line"}
+    />
+  );
+}
+
 // ── Custom Assistant Message with Turn-End Button Logic ──────────
 
 function ConnectedAssistantMessage(
@@ -234,6 +284,7 @@ function ConnectedAssistantMessage(
   return (
     <CopilotChatAssistantMessage
       {...props}
+      toolCallsView={GroupedToolCallsView}
       onRegenerate={isEndOfTurn ? regenerate : undefined}
       onThumbsUp={isEndOfTurn ? noop : undefined}
       onThumbsDown={isEndOfTurn ? noop : undefined}
@@ -442,9 +493,7 @@ const MemoChat = memo(function MemoChat({
       agentId={agentId}
       threadId={threadId}
       labels={CHAT_LABELS}
-      // SlotValue typing requires a namespace component; cast for the
-      // same reason as messageView above (runtime accepts any FC).
-      chatView={ChatViewShell as unknown as typeof CopilotChatView}
+      chatView={ChatViewShell}
       input={NANGO_INPUT_SLOT}
     />
   );

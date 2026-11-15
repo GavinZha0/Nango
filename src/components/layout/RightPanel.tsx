@@ -11,7 +11,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { History, MessagesSquare, RefreshCw, Hospital } from "lucide-react";
-import { z } from "zod";
 import {
   CopilotKitProvider,
   useAgent,
@@ -71,6 +70,25 @@ const TAB_SEGMENTS: {
 // HITL render cache. See docs/chat-flow-audit.md.
 const STABLE_EMPTY_AGENTS = Object.freeze({}) as Record<string, never>;
 const STABLE_EMPTY_PROPS = Object.freeze({}) as Record<string, unknown>;
+
+/**
+ * Per-request header builder for `CopilotKitProvider` (evaluated on each
+ * outgoing request rather than on render, avoiding provider reconnects when
+ * `activeMode` changes). Backend sends `X-Credential-Id`; built-in sends
+ * `X-Orchestration-Mode`. See docs/orchestrator.md.
+ */
+function buildChatHeaders(): Record<string, string> {
+  const { activeAgentSource, activeCredentialId, activeMode } =
+    useWorkspaceStore.getState();
+  const h: Record<string, string> = {};
+  if (activeAgentSource === "backend" && activeCredentialId) {
+    h[CREDENTIAL_ID_HEADER] = activeCredentialId;
+  }
+  if (activeAgentSource === "builtin") {
+    h[ORCHESTRATION_MODE_HEADER] = activeMode;
+  }
+  return h;
+}
 const STABLE_ACTIVITY_RENDERERS: ReactActivityMessageRenderer<ErrorActivityContent>[] = Object.freeze([
   {
     activityType: "error_card",
@@ -349,8 +367,8 @@ function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): 
   // timing cache. See `WildcardToolRenderer.tsx`.
   useRenderTool({
     name: "*",
-    parameters: z.any(),
     render: WildcardToolRenderer,
+    group: true,
   });
 
   // threadId eager-capture: write `runtimeThreadId` once per agent
@@ -432,22 +450,6 @@ export function RightPanel(): ReactNode {
     ? "/api/copilotkit/builtin"
     : "/api/copilotkit";
 
-  // Memoize stable refs
-  const activeMode = useWorkspaceStore((s) => s.activeMode);
-
-  // Custom chat headers — backend sends `X-Credential-Id`, built-in
-  // sends `X-Orchestration-Mode`. See docs/orchestrator.md.
-  const headers = useMemo(() => {
-    const h: Record<string, string> = {};
-    if (agentSource === "backend" && credentialId) {
-      h[CREDENTIAL_ID_HEADER] = credentialId;
-    }
-    if (agentSource === "builtin") {
-      h[ORCHESTRATION_MODE_HEADER] = activeMode;
-    }
-    return h;
-  }, [agentSource, credentialId, activeMode]);
-
   const copilotKey = agentId
     ? `${agentId}::${agentSource}::${credentialId ?? ""}`
     : "no-agent";
@@ -482,7 +484,7 @@ export function RightPanel(): ReactNode {
         <CopilotKitProvider
           key={copilotKey}
           runtimeUrl={runtimeUrl}
-          headers={headers}
+          headers={buildChatHeaders}
           // Stable refs — see STABLE_EMPTY_AGENTS comment at top.
           properties={STABLE_EMPTY_PROPS}
           agents__unsafe_dev_only={STABLE_EMPTY_AGENTS}

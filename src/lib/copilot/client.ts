@@ -11,6 +11,7 @@ export {
   CopilotChatAssistantMessage,
   CopilotChatUserMessage,
   CopilotChatReasoningMessage,
+  CopilotChatToolCallsView,
   useCopilotKit,
   useAgent,
   useFrontendTool,
@@ -24,6 +25,7 @@ export type {
   CopilotChatViewProps,
   CopilotChatUserMessageProps,
   CopilotChatReasoningMessageProps,
+  CopilotChatToolCallsViewProps,
   ReactActivityMessageRenderer,
 } from "@copilotkit/react-core/v2";
 
