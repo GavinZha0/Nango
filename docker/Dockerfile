@@ -8,7 +8,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Install pnpm via npm. QUIRK: corepack (through 0.36) cannot launch pnpm 12's
 # native Rust binary — it still expects the old bin/pnpm.cjs JS entry and dies
 # with MODULE_NOT_FOUND. Keep in sync with package.json#packageManager.
-ARG PNPM_VERSION=12.18.0
+ARG PNPM_VERSION=12.21.0
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Copy package files. pnpm 11+ reads `overrides` / `allowBuilds` from

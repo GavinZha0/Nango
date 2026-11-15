@@ -243,7 +243,7 @@ Implemented in [`desktop/tray.ts`](file:///d:/AI/nango/desktop/tray.ts) and [`de
 ### 6.1 Prerequisites
 
 - Node.js >= 24
-- pnpm >= 10 (`pnpm@12.18.0`)
+- pnpm >= 10 (`pnpm@12.21.0`)
 - Operating System: Windows 10/11 x64 or macOS 13+
 
 ### 6.2 Packaging Commands
