@@ -16,112 +16,121 @@ export async function register(): Promise<void> {
   // Lazy import: keeps server-only modules out of the edge-runtime
   // graph that Next builds for things like middleware.
 
-  // CONTRACT: process_boot row MUST be inserted before recoverStrandedRuns.
-  const { recordProcessBoot } = await import("@/lib/runner/process-boot");
+  // Phase 1: Parallel boot tasks.
+  // - `process_boot` MUST be recorded before stranded-run recovery.
+  // - Config bootstrap (`seedDefaults` + `loadAllConfigs`) MUST finish before
+  //   `bootstrapScheduler()`, before serving requests, and before importing any
+  //   module whose top-level singleton evaluates `getConfig*` (e.g. `lookup`,
+  //   `agentPool`).
+  // - CONTRACT: Any module imported before `configReady` settles MUST NOT read
+  //   `getConfig*` at module evaluation time, or it will pin code defaults into
+  //   `globalThis` singletons for the lifetime of the process.
+  // - `seedBuiltinInfrastructure` runs in Phase 1 so background sandbox probing
+  //   sees any newly seeded `NANGO_SEED_SANDBOX_URL` credentials.
   let bootStartedAt: Date | undefined;
-  try {
-    const boot = await recordProcessBoot();
-    bootStartedAt = boot.startedAt;
-  } catch (err) {
-    console.error("[nango] process boot record failed; skipping recovery:", err);
-  }
 
-  if (bootStartedAt) {
-    const { recoverStrandedRuns } = await import("@/lib/runner/recovery");
+  const configReady = (async () => {
     try {
-      await recoverStrandedRuns(bootStartedAt);
-    } catch (err) {
-      // Don't block boot if recovery itself fails — log and move on.
-      // The next boot tries again, and the operational tools (Drizzle
-      // Studio, psql) can patch up state in the meantime.
-      console.error("[nango] runner recovery failed:", err);
-    }
-
-    // Same idea, sibling subsystem: flip stranded verification_run rows
-    // from `running` to `errored`. See docs/verification.md.
-    const { recoverStrandedVerificationRuns } = await import(
-      "@/lib/verification/recovery"
-    );
-    try {
-      await recoverStrandedVerificationRuns(bootStartedAt);
-    } catch (err) {
-      console.error("[nango] verification recovery failed:", err);
-    }
-
-    // Evaluation subsystem: same recovery pattern.
-    const { recoverStrandedEvalRuns } = await import(
-      "@/lib/evaluation/recovery"
-    );
-    try {
-      await recoverStrandedEvalRuns(bootStartedAt);
-    } catch (err) {
-      console.error("[nango] evaluation recovery failed:", err);
-    }
-
-    // Web Auto subsystem: boot-epoch recovery for stranded web_auto_run rows.
-    const { recoverStrandedWebAutoRuns } = await import(
-      "@/lib/web-auto/recovery"
-    );
-    try {
-      await recoverStrandedWebAutoRuns(bootStartedAt);
-    } catch (err) {
-      console.error("[nango] web-auto recovery failed:", err);
-    }
-  }
-
-  // Application config: seed defaults (insert-if-absent), then load all
-  // rows into the in-memory cache. Must run before any module that reads
-  // config values (caches, sandbox, etc.).
-  const { seedDefaults, loadAllConfigs } = await import(
-    "@/lib/config/service"
-  );
-  try {
-    await seedDefaults();
-    await loadAllConfigs();
-  } catch (err) {
-    console.error("[nango] config bootstrap failed:", err);
-  }
-
-  // Dataset cache sweep — see docs/data-sources.md.
-  // Best-effort: a failed sweep logs and continues so a permission
-  // hiccup can never block boot.
-  try {
-    const { purgeAllDatasets } = await import("@/lib/data-sources/cache");
-    const removed = await purgeAllDatasets();
-    if (removed > 0) {
-      console.log(
-        `[instrumentation] dataset cache swept: removed ${removed} top-level entries`,
+      const { seedDefaults, loadAllConfigs } = await import(
+        "@/lib/config/service"
       );
+      await seedDefaults();
+      await loadAllConfigs();
+    } catch (err) {
+      console.error("[nango] config bootstrap failed:", err);
     }
-  } catch (err) {
-    console.error("[nango] dataset cache sweep failed:", err);
+  })();
+
+  await Promise.all([
+    (async () => {
+      try {
+        const { recordProcessBoot } = await import("@/lib/runner/process-boot");
+        const boot = await recordProcessBoot();
+        bootStartedAt = boot.startedAt;
+      } catch (err) {
+        console.error(
+          "[nango] process boot record failed; skipping recovery:",
+          err,
+        );
+      }
+    })(),
+    configReady,
+    (async () => {
+      await configReady;
+      try {
+        const { seedBuiltinInfrastructure } = await import(
+          "@/lib/credentials/seed-infra"
+        );
+        await seedBuiltinInfrastructure();
+      } catch (err) {
+        console.error("[nango] builtin infrastructure seed failed:", err);
+      }
+    })(),
+    (async () => {
+      await configReady;
+      try {
+        const { canonicalizeSupervisorAgents } = await import(
+          "@/lib/builtin-agents/canonicalize-supervisor"
+        );
+        await canonicalizeSupervisorAgents();
+      } catch (err) {
+        console.error("[nango] supervisor canonicalize failed:", err);
+      }
+    })(),
+  ]);
+
+  // Phase 2: Parallel boot-epoch recovery across independent subsystems.
+  // Runs before `bootstrapScheduler()` so stranded rows are flipped before
+  // scheduled jobs dispatch.
+  if (bootStartedAt) {
+    const startedAt = bootStartedAt;
+    await Promise.all([
+      (async () => {
+        try {
+          const { recoverStrandedRuns } = await import("@/lib/runner/recovery");
+          await recoverStrandedRuns(startedAt);
+        } catch (err) {
+          // Don't block boot if recovery itself fails — log and move on.
+          console.error("[nango] runner recovery failed:", err);
+        }
+      })(),
+      (async () => {
+        try {
+          const { recoverStrandedVerificationRuns } = await import(
+            "@/lib/verification/recovery"
+          );
+          await recoverStrandedVerificationRuns(startedAt);
+        } catch (err) {
+          console.error("[nango] verification recovery failed:", err);
+        }
+      })(),
+      (async () => {
+        try {
+          const { recoverStrandedEvalRuns } = await import(
+            "@/lib/evaluation/recovery"
+          );
+          await recoverStrandedEvalRuns(startedAt);
+        } catch (err) {
+          console.error("[nango] evaluation recovery failed:", err);
+        }
+      })(),
+      (async () => {
+        try {
+          const { recoverStrandedWebAutoRuns } = await import(
+            "@/lib/web-auto/recovery"
+          );
+          await recoverStrandedWebAutoRuns(startedAt);
+        } catch (err) {
+          console.error("[nango] web-auto recovery failed:", err);
+        }
+      })(),
+    ]);
   }
 
-  // Built-in infrastructure: seed default credentials (Dify Sandbox, SenseVoice)
-  // and default MCP servers (Playwright) into DB if not present.
-  const { seedBuiltinInfrastructure } = await import(
-    "@/lib/credentials/seed-infra"
+  // Phase 3: Schedules & graceful shutdown registration.
+  const { bootstrapScheduler, shutdownScheduler } = await import(
+    "@/lib/runner/scheduler"
   );
-  try {
-    await seedBuiltinInfrastructure();
-  } catch (err) {
-    console.error("[nango] builtin infrastructure seed failed:", err);
-  }
-
-  // Supervisor canonicalization — see docs/prompts.md.
-  const { canonicalizeSupervisorAgents } = await import(
-    "@/lib/builtin-agents/canonicalize-supervisor"
-  );
-  try {
-    await canonicalizeSupervisorAgents();
-  } catch (err) {
-    console.error("[nango] supervisor canonicalize failed:", err);
-  }
-
-  // Schedules: register one Croner job per enabled row. Independent
-  // of recovery — a scheduler boot failure shouldn't prevent the app
-  // from serving requests; the next restart tries again.
-  const { bootstrapScheduler, shutdownScheduler } = await import("@/lib/runner/scheduler");
   const { mcpProviderPool } = await import("@/lib/mcp");
   try {
     await bootstrapScheduler();
@@ -149,17 +158,29 @@ export async function register(): Promise<void> {
     nodeProcess.on("beforeExit", onShutdown);
   }
 
-  // Sandbox: resolve the active adapter eagerly so an unreachable
-  // dify-sandbox service fails at boot instead of on the first user
-  // invocation. Also pins the selection in the per-process cache and emits a single line
-  // operators can grep for.
-  const { getActiveAdapter } = await import("@/lib/sandbox/registry.server");
-  try {
-    const active = await getActiveAdapter();
-    console.log(
-      `[nango] sandbox active backend: ${active.backend}`,
-    );
-  } catch (err) {
-    console.error("[nango] sandbox bootstrap failed:", err);
-  }
+  // Non-blocking background warmup/housekeeping: never delay HTTP server
+  // readiness (`/api/health`) on filesystem sweeps or external sandbox probes.
+  void (async () => {
+    try {
+      const { purgeAllDatasets } = await import("@/lib/data-sources/cache");
+      const removed = await purgeAllDatasets();
+      if (removed > 0) {
+        console.log(
+          `[instrumentation] dataset cache swept: removed ${removed} top-level entries`,
+        );
+      }
+    } catch (err) {
+      console.error("[nango] dataset cache sweep failed:", err);
+    }
+  })();
+
+  void (async () => {
+    try {
+      const { getActiveAdapter } = await import("@/lib/sandbox/registry.server");
+      const active = await getActiveAdapter();
+      console.log(`[nango] sandbox active backend: ${active.backend}`);
+    } catch (err) {
+      console.error("[nango] sandbox bootstrap failed:", err);
+    }
+  })();
 }
