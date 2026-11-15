@@ -14,6 +14,7 @@
 import path from "node:path";
 import type {
   ElectronBrowserWindow,
+  ElectronBrowserWindowConstructor,
   ElectronMainModule,
   ElectronTray,
 } from "./electron-types";
@@ -77,6 +78,106 @@ export interface DesktopCoordinatorDeps {
   resourcesPath: string;
   preloadPath?: string;
   autoUpdater?: AutoUpdaterLike;
+}
+
+function buildSplashDataUrl(version: string): string {
+  const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0; height: 100%; background: #0b0d12; color: #e5e7eb;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    user-select: none; overflow: hidden;
+    -webkit-app-region: drag;
+  }
+  .box { text-align: center; padding: 24px; }
+  .title { font-size: 22px; font-weight: 600; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .ver { font-size: 12px; color: #9ca3af; margin-bottom: 18px; }
+  .status { font-size: 13px; color: #cbd5e1; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="title">Nango</div>
+    <div class="ver">v${version}</div>
+    <div id="status" class="status">正在启动本地服务…</div>
+  </div>
+</body>
+</html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+interface SplashHandle {
+  updateStatus(text: string): void;
+  close(): void;
+}
+
+function createSplashWindow(
+  BrowserWindow: ElectronBrowserWindowConstructor,
+  version: string,
+): SplashHandle | null {
+  try {
+    const splash = new BrowserWindow({
+      width: 380,
+      height: 220,
+      frame: false,
+      resizable: false,
+      center: true,
+      backgroundColor: "#0b0d12",
+      show: true,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    splash.removeMenu?.();
+
+    let loaded = false;
+    let latestText: string | null = null;
+
+    const applyStatus = (text: string) => {
+      if (splash.isDestroyed()) return;
+      try {
+        void splash.webContents
+          ?.executeJavaScript?.(
+            `(() => { const el = document.getElementById("status"); if (el) el.textContent = ${JSON.stringify(text)}; })()`,
+          )
+          ?.catch(() => {});
+      } catch {
+        // Ignore splash update failures
+      }
+    };
+
+    void splash
+      .loadURL(buildSplashDataUrl(version))
+      .then(() => {
+        loaded = true;
+        if (latestText !== null) {
+          applyStatus(latestText);
+        }
+      })
+      .catch(() => {});
+
+    return {
+      updateStatus(text: string) {
+        latestText = text;
+        if (loaded) {
+          applyStatus(text);
+        }
+      },
+      close() {
+        if (!splash.isDestroyed()) {
+          splash.close?.();
+        }
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 export class DesktopAppCoordinator {
@@ -164,100 +265,133 @@ export class DesktopAppCoordinator {
     const { app, BrowserWindow, Tray, Menu, dialog, shell, safeStorage } =
       this.electron;
 
-    const userDataDir = app.getPath("userData");
-    const documentsDir = app.getPath("documents");
-    const workspaceDir = path.join(documentsDir, "NangoWorkspace");
-    const logsDir = path.join(userDataDir, "logs");
-    const pgDataDir =
-      process.env.NANGO_PGDATA_DIR?.trim() || path.join(userDataDir, "pgdata");
+    const appVersion = app.getVersion();
+    const splashWin = createSplashWindow(BrowserWindow, appVersion);
 
-    const bundled = resolveBundledResourcePaths(this.resourcesPath);
-    const secrets = loadOrCreateDesktopSecrets(userDataDir, safeStorage);
-    const ports = await resolveDesktopPorts();
-    const standaloneDir = await ensureStandaloneExtracted({
-      userDataDir,
-      resourcesPath: this.resourcesPath,
-      appVersion: app.getVersion(),
-    });
+    try {
+      const userDataDir = app.getPath("userData");
+      const documentsDir = app.getPath("documents");
+      const workspaceDir = path.join(documentsDir, "NangoWorkspace");
+      const logsDir = path.join(userDataDir, "logs");
+      const pgDataDir =
+        process.env.NANGO_PGDATA_DIR?.trim() || path.join(userDataDir, "pgdata");
 
-    const handleFatalServiceError = (err: Error) => {
-      dialog.showErrorBox(
-        "Nango 后台服务异常退出",
-        `${err.message}\n\n日志目录：${logsDir}`,
-      );
-      void shell.openPath(logsDir);
-      void this.shutdownAndQuit();
-    };
+      const bundled = resolveBundledResourcePaths(this.resourcesPath);
 
-    this.pgManager = new PostgresManager({
-      pgBinDir: bundled.pgBinDir,
-      pgDataDir,
-      pgPort: ports.pgPort,
-      pgPassword: secrets.postgresPassword,
-      onFatalExit: handleFatalServiceError,
-    });
-    await this.pgManager.start();
+      splashWin?.updateStatus("正在初始化密钥与端口…");
+      const [secrets, ports] = await Promise.all([
+        Promise.resolve().then(() =>
+          loadOrCreateDesktopSecrets(userDataDir, safeStorage),
+        ),
+        resolveDesktopPorts(),
+      ]);
+      if (this.isQuitting) return;
 
-    this.serverManager = new ServerManager({
-      standaloneDir,
-      appPort: ports.appPort,
-      pgPort: ports.pgPort,
-      betterAuthUrl: ports.betterAuthUrl,
-      secrets,
-      userDataDir,
-      workspaceDir,
-      bundledNodeExe: bundled.bundledNodeExe,
-      bundledNodeBinDir: bundled.bundledNodeBinDir,
-      duckdbExtensionDir: bundled.duckdbExtensionDir,
-      onFatalExit: handleFatalServiceError,
-    });
-    await this.serverManager.start();
-
-    this.registerIpcHandlers(workspaceDir);
-
-    const win = new BrowserWindow({
-      width: 1440,
-      height: 900,
-      minWidth: 1024,
-      minHeight: 680,
-      title: "Nango",
-      show: false,
-      webPreferences: {
-        preload: this.preloadPath,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-    // Remove the default application menu bar (File/Edit/View/Window) on Windows/Linux
-    win.removeMenu?.();
-    bindReloadShortcuts(win);
-    this.mainWindow = win;
-    bindCloseToTray(win, () => this.isQuitting);
-
-    this.tray = createSystemTray({
-      iconPath: bundled.trayIconPath,
-      workspaceDir,
-      logsDir,
-      TrayClass: Tray,
-      Menu,
-      shell,
-      getMainWindow: () => this.mainWindow,
-      onRequestQuit: () => {
+      const handleFatalServiceError = (err: Error) => {
+        if (this.isQuitting) return;
+        dialog.showErrorBox(
+          "Nango 后台服务异常退出",
+          `${err.message}\n\n日志目录：${logsDir}`,
+        );
+        void shell.openPath(logsDir);
         void this.shutdownAndQuit();
-      },
-    });
+      };
 
-    await win.loadURL(ports.betterAuthUrl);
-    win.show();
-    win.focus();
-
-    if (this.autoUpdater) {
-      this.updateController = new DesktopUpdateController({
-        updater: this.autoUpdater,
-        prepareForInstall: () => this.shutdownServicesOnly(),
+      this.pgManager = new PostgresManager({
+        pgBinDir: bundled.pgBinDir,
+        pgDataDir,
+        pgPort: ports.pgPort,
+        pgPassword: secrets.postgresPassword,
+        onFatalExit: handleFatalServiceError,
       });
-      void this.updateController.checkForUpdatesSafely();
+
+      splashWin?.updateStatus("正在启动数据库与运行时…");
+      const [standaloneDir] = await Promise.all([
+        ensureStandaloneExtracted({
+          userDataDir,
+          resourcesPath: this.resourcesPath,
+          appVersion,
+        }),
+        this.pgManager.start(),
+      ]);
+      if (this.isQuitting) return;
+
+      splashWin?.updateStatus("正在启动应用服务…");
+      this.serverManager = new ServerManager({
+        standaloneDir,
+        appPort: ports.appPort,
+        pgPort: ports.pgPort,
+        betterAuthUrl: ports.betterAuthUrl,
+        secrets,
+        userDataDir,
+        workspaceDir,
+        bundledNodeExe: bundled.bundledNodeExe,
+        bundledNodeBinDir: bundled.bundledNodeBinDir,
+        duckdbExtensionDir: bundled.duckdbExtensionDir,
+        appVersion,
+        forceMigrate: this.pgManager.wasNewlyInitialized(),
+        onFatalExit: handleFatalServiceError,
+      });
+      await this.serverManager.start();
+      if (this.isQuitting) return;
+
+      this.registerIpcHandlers(workspaceDir);
+
+      const win = new BrowserWindow({
+        width: 1440,
+        height: 900,
+        minWidth: 1024,
+        minHeight: 680,
+        title: "Nango",
+        show: false,
+        webPreferences: {
+          preload: this.preloadPath,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+      // Remove the default application menu bar (File/Edit/View/Window) on Windows/Linux
+      win.removeMenu?.();
+      bindReloadShortcuts(win);
+      this.mainWindow = win;
+      bindCloseToTray(win, () => this.isQuitting);
+
+      this.tray = createSystemTray({
+        iconPath: bundled.trayIconPath,
+        workspaceDir,
+        logsDir,
+        TrayClass: Tray,
+        Menu,
+        shell,
+        getMainWindow: () => this.mainWindow,
+        onRequestQuit: () => {
+          void this.shutdownAndQuit();
+        },
+      });
+
+      splashWin?.updateStatus("正在加载工作区…");
+      await win.loadURL(ports.betterAuthUrl);
+      if (this.isQuitting) {
+        if (!win.isDestroyed()) {
+          win.close?.();
+        }
+        return;
+      }
+      win.show();
+      win.focus();
+      splashWin?.close();
+
+      if (this.autoUpdater) {
+        this.updateController = new DesktopUpdateController({
+          updater: this.autoUpdater,
+          prepareForInstall: () => this.shutdownServicesOnly(),
+        });
+        void this.updateController.checkForUpdatesSafely();
+      }
+    } catch (err) {
+      splashWin?.close();
+      throw err;
     }
   }
 

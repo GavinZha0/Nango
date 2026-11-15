@@ -142,6 +142,10 @@ export function computeBackoffDelayMs(
 export interface ServerManagerOptions extends DesktopServerEnvInput {
   /** Root directory of the repaired Next.js standalone bundle (contains `server.js` and `docker/migrate.mjs`). */
   standaloneDir: string;
+  /** Desktop application version used to skip redundant migration subprocesses when unchanged. */
+  appVersion?: string;
+  /** Force running migrations even if `.migrated-version` matches (e.g. freshly initialized PG cluster). */
+  forceMigrate?: boolean;
   /** Readiness timeout in milliseconds (default 60_000ms). */
   readyTimeoutMs?: number;
   /** Optional callback invoked when consecutive crash restarts are exhausted. */
@@ -167,11 +171,39 @@ export class ServerManager {
         : DEFAULT_SERVER_READY_TIMEOUT_MS);
   }
 
+  private migrationMarkerPath(): string {
+    return path.join(this.opts.userDataDir, "runtime", ".migrated-version");
+  }
+
+  private shouldSkipMigrations(): boolean {
+    if (this.opts.forceMigrate || !this.opts.appVersion) return false;
+    try {
+      const recorded = fs.readFileSync(this.migrationMarkerPath(), "utf8").trim();
+      return recorded === this.opts.appVersion;
+    } catch {
+      return false;
+    }
+  }
+
+  private recordMigratedVersion(): void {
+    if (!this.opts.appVersion) return;
+    try {
+      const markerPath = this.migrationMarkerPath();
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+      fs.writeFileSync(markerPath, this.opts.appVersion, "utf8");
+    } catch {
+      // Best-effort marker write; next boot will simply re-run migrate.mjs.
+    }
+  }
+
   /**
    * Execute `docker/migrate.mjs` using the bundled Node 24 binary before
    * starting `server.js`.
    */
   async runMigrations(env: NodeJS.ProcessEnv): Promise<void> {
+    if (this.shouldSkipMigrations()) {
+      return;
+    }
     const migrateScript = path.join(
       this.opts.standaloneDir,
       "docker",
@@ -183,6 +215,7 @@ export class ServerManager {
       timeout: 60_000,
       windowsHide: true,
     });
+    this.recordMigratedVersion();
   }
 
   /**
@@ -198,10 +231,12 @@ export class ServerManager {
 
     const env = buildDesktopServerEnv(this.opts);
     await this.runMigrations(env);
+    if (this.stopping) return;
     await this.spawnAndWaitReady(env);
   }
 
   private async spawnAndWaitReady(env: NodeJS.ProcessEnv): Promise<void> {
+    if (this.stopping) return;
     const serverScript = path.join(this.opts.standaloneDir, "server.js");
     const child = spawn(this.opts.bundledNodeExe, [serverScript], {
       cwd: this.opts.standaloneDir,
@@ -226,6 +261,13 @@ export class ServerManager {
 
     try {
       await this.waitForHttpReady(this.readyTimeoutMs, child);
+      if (this.stopping) {
+        await this.terminateChildProcess(child);
+        if (this.proc === child) {
+          this.proc = null;
+        }
+        return;
+      }
       ready = true;
       this.consecutiveCrashes = 0;
     } catch (err) {
@@ -269,7 +311,7 @@ export class ServerManager {
     timeoutMs: number,
     child?: ChildProcess,
   ): Promise<void> {
-    const probeUrl = `http://127.0.0.1:${this.opts.appPort}/api/auth/get-session`;
+    const probeUrl = `http://127.0.0.1:${this.opts.appPort}/api/health`;
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -286,7 +328,7 @@ export class ServerManager {
           return;
         }
       } catch {
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 80));
       }
     }
 

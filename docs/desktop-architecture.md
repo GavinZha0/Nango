@@ -171,10 +171,11 @@ Implemented in [`desktop/postgres-manager.ts`](file:///d:/AI/nango/desktop/postg
    - Detects abnormal shutdown lock files (`postmaster.pid`). Reads the first line to obtain the recorded PID; if no active process matches the PID, removes the stale lock file before starting.
 3. **Execution & Supervision**:
    - Spawns `postgres` directly with local loopback binding (`127.0.0.1`), logging to `<userData>/logs/postgres.log`.
-   - Verifies readiness via `pg_isready` before releasing the startup barrier.
-4. **Migration Runner** ([`desktop/server-manager.ts`](file:///d:/AI/nango/desktop/server-manager.ts)):
-   - Spawns the bundled Node 24 executable against `docker/migrate.mjs` before launching `server.js`.
+   - Verifies readiness via lightweight loopback TCP socket probing on `127.0.0.1:<pgPort>` (avoiding repeated `pg_isready` subprocess spawns; `createdb` / `migrate.mjs` handle any transient startup-phase retries).
+4. **Migration Runner & Server Readiness** ([`desktop/server-manager.ts`](file:///d:/AI/nango/desktop/server-manager.ts)):
+   - Spawns the bundled Node 24 executable against `docker/migrate.mjs` before launching `server.js`, skipping the subprocess when `<userData>/runtime/.migrated-version` already matches `appVersion` on an existing cluster (assumes the bundled standalone build and local `<userData>/pgdata` cluster evolve together by `appVersion`; pointing `NANGO_PGDATA_DIR` at an external or older cluster under the same version will skip `migrate.mjs`).
    - Applies pending Drizzle ORM migrations against the local cluster automatically.
+   - Polls `GET /api/health` (unauthenticated, DB-free liveness probe) on the local standalone server port until ready.
 
 ### 4.4 Next.js 16 App Router & Turbopack Stability
 
@@ -205,17 +206,19 @@ Implemented in [`desktop/postgres-manager.ts`](file:///d:/AI/nango/desktop/postg
 ### 4.7 System Tray & Window Presentation
 
 Implemented in [`desktop/tray.ts`](file:///d:/AI/nango/desktop/tray.ts) and [`desktop/main.ts`](file:///d:/AI/nango/desktop/main.ts):
-1. **Clean UI**:
+1. **Splash Window**:
+   - Displays a lightweight frameless `data:text/html` splash window immediately after `app.whenReady()` with live startup phase updates, closing automatically once the main window finishes loading (or on fatal startup error).
+2. **Clean UI**:
    - Invokes `win.removeMenu()` to completely remove default application menus (`File`, `Edit`, `View`, `Window`), preserving a pure web-like aesthetic.
-2. **Close-to-Tray Residence**:
+3. **Close-to-Tray Residence**:
    - Closing the window (`X` button) intercepts the `close` event when not quitting, hiding the window to the tray while keeping background agent runs and scheduled tasks active.
-3. **Tray Menu**:
+4. **Tray Menu**:
    - English system tray menu:
      - `Open Nango`: Restores and focuses the main window.
      - `Open Workspace Folder`: Opens the workspace directory in File Explorer / Finder.
      - `Open Logs Folder`: Opens the application logs directory.
      - `Quit Nango`: Triggers orderly shutdown.
-4. **Orderly Shutdown Sequence**:
+5. **Orderly Shutdown Sequence**:
    - Notifies Next.js server to terminate active agent runs and flush SSE streams.
    - Stops the PostgreSQL cluster via `pg_ctl stop -D <pgdata> -m fast`.
    - Exits the Electron main process.

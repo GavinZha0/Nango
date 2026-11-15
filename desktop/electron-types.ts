@@ -53,6 +53,7 @@ export interface ElectronInputEvent {
 export interface ElectronWebContents {
   reload(): void;
   reloadIgnoringCache(): void;
+  executeJavaScript?: (code: string) => Promise<unknown>;
   on(
     event: "before-input-event",
     listener: (event: { preventDefault(): void }, input: ElectronInputEvent) => void,
@@ -63,6 +64,7 @@ export interface ElectronBrowserWindow {
   loadURL(url: string): Promise<void>;
   show(): void;
   hide(): void;
+  close?: () => void;
   focus(): void;
   isMinimized(): boolean;
   restore(): void;
@@ -83,8 +85,12 @@ export interface ElectronBrowserWindowConstructor {
     minHeight?: number;
     title?: string;
     show?: boolean;
-    webPreferences: {
-      preload: string;
+    frame?: boolean;
+    resizable?: boolean;
+    center?: boolean;
+    backgroundColor?: string;
+    webPreferences?: {
+      preload?: string;
       contextIsolation: boolean;
       nodeIntegration: boolean;
       sandbox?: boolean;

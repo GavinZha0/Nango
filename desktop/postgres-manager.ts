@@ -14,6 +14,7 @@
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -137,6 +138,14 @@ export class PostgresManager {
   private stopping = false;
   private consecutiveCrashes = 0;
   private newlyInitialized = false;
+  // CONTRACT: `newlyInitialized` is cleared once `ensureDatabaseCreated()` succeeds,
+  // whereas `createdClusterOnBoot` stays true for this boot so `ServerManager`
+  // knows to force `migrate.mjs` even if `.migrated-version` already exists.
+  private createdClusterOnBoot = false;
+
+  wasNewlyInitialized(): boolean {
+    return this.createdClusterOnBoot;
+  }
 
   constructor(opts: PostgresManagerOptions) {
     this.pgBinDir = opts.pgBinDir;
@@ -190,6 +199,7 @@ export class PostgresManager {
           `--pwfile=${pwFilePath}`,
         ]);
         this.newlyInitialized = true;
+        this.createdClusterOnBoot = true;
       } finally {
         fs.rmSync(pwFilePath, { force: true });
       }
@@ -205,9 +215,11 @@ export class PostgresManager {
   async start(): Promise<void> {
     this.stopping = false;
     await this.ensureInitialized();
+    if (this.stopping) return;
     cleanStalePostmasterPid(this.pgDataDir);
 
     await this.spawnAndWaitReady();
+    if (this.stopping) return;
 
     if (this.newlyInitialized) {
       try {
@@ -221,6 +233,7 @@ export class PostgresManager {
   }
 
   private async spawnAndWaitReady(): Promise<void> {
+    if (this.stopping) return;
     const postgresBin = this.binPath("postgres");
     const child = spawn(
       postgresBin,
@@ -248,6 +261,13 @@ export class PostgresManager {
 
     try {
       await this.waitForReady(this.readyTimeoutMs, child);
+      if (this.stopping) {
+        await this.terminateChildProcess(child);
+        if (this.proc === child) {
+          this.proc = null;
+        }
+        return;
+      }
       ready = true;
       this.consecutiveCrashes = 0;
     } catch (err) {
@@ -287,11 +307,28 @@ export class PostgresManager {
     });
   }
 
+  private probeTcpPort(timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.createConnection({
+        host: "127.0.0.1",
+        port: this.pgPort,
+      });
+      const finish = (ok: boolean) => {
+        socket.removeAllListeners();
+        socket.destroy();
+        resolve(ok);
+      };
+      socket.setTimeout(timeoutMs);
+      socket.once("connect", () => finish(true));
+      socket.once("timeout", () => finish(false));
+      socket.once("error", () => finish(false));
+    });
+  }
+
   private async waitForReady(
     timeoutMs: number,
     child?: ChildProcess,
   ): Promise<void> {
-    const pgIsReadyBin = this.binPath("pg_isready");
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -300,16 +337,10 @@ export class PostgresManager {
           `PostgreSQL exited prematurely during startup with code ${child.exitCode}.`,
         );
       }
-      try {
-        await execFileAsync(
-          pgIsReadyBin,
-          ["-h", "127.0.0.1", "-p", String(this.pgPort), "-U", this.pgUser],
-          { timeout: 2_000 },
-        );
+      if (await this.probeTcpPort(1_000)) {
         return;
-      } catch {
-        await new Promise((r) => setTimeout(r, 250));
       }
+      await new Promise((r) => setTimeout(r, 80));
     }
 
     throw new Error(
