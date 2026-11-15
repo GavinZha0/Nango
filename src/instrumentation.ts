@@ -13,6 +13,7 @@ export async function register(): Promise<void> {
     `[instrumentation] register() called, NEXT_RUNTIME=${process.env.NEXT_RUNTIME ?? "(unset)"}`,
   );
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
   // Lazy import: keeps server-only modules out of the edge-runtime
   // graph that Next builds for things like middleware.
 

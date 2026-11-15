@@ -842,13 +842,14 @@ function evaluateJsonSchema(
 
 // ── 3. JS Expression Evaluation ──────────────────────────────────────────────
 
-// QUIRK: js_expression 沙箱是"浅加固"而非安全边界。通过多层防御降低攻击面：
-// 1. 空原型沙箱基础对象（Object.create(null)）阻止通过 globalThis 访问宿主原型链
-// 2. codeGeneration: { strings: false, wasm: false } 禁止 eval/Function 构造器和 WebAssembly
-// 3. JSON 深拷贝剥离宿主类实例/page 句柄
-// 4. RBAC 限制 editor/admin 角色才能编辑断言
-// 理论上仍有极晦涩的逃逸路径（沙箱内对象的原型链），但需禁用 Function 才能利用，
-// 且无已知实用 payload。信任域 = editor/admin。真正的进程级隔离需 isolated-vm 或子进程。
+// QUIRK: The js_expression sandbox is "shallow-hardened", not a security boundary. Defense-in-depth reduces attack surface:
+// 1. Null-prototype sandbox base object (Object.create(null)) blocks access to host prototype chain via globalThis
+// 2. codeGeneration: { strings: false, wasm: false } disables eval/Function constructors and WebAssembly
+// 3. JSON deep clone strips host class instances / page handles
+// 4. RBAC restricts assertion editing to editor/admin roles
+// Obscure escape paths via sandboxed object prototype chains remain theoretically possible,
+// but require Function and have no known practical payload. Trust boundary = editor/admin.
+// True process-level isolation requires isolated-vm or a child process.
 function evaluateJsExpression(
   spec: JsExpressionAssertion,
   payload: unknown,
@@ -866,9 +867,9 @@ function evaluateJsExpression(
     const cases =
       (sanitizeForSandbox(options.runContext?.cases ?? {}) as Record<string, unknown>) ?? {};
 
-    // 白名单注入纯数据；不再展开 options.runContext → 自动剥离宿主句柄。
-    // CONTRACT: $ 与 root 统一绑定为原始信封；result 绑定为业务整包数据。
-    // SECURITY: 不再把 variables 展开到顶层，变量只能通过 variables.KEY 访问，避免覆盖真实证据（如 result、root）。
+    // Allowlist pure data only; stop spreading options.runContext -> automatically strips host handles.
+    // CONTRACT: $ and root are both bound to the raw envelope; result is bound to the business payload.
+    // SECURITY: Do not spread variables into the top level; variables are only accessible via variables.KEY to avoid shadowing real evidence (e.g., result, root).
     const contextObj = Object.freeze({
       ...(flat && typeof flat === "object" && !Array.isArray(flat) ? flat : {}),
       result: flat,
@@ -879,9 +880,9 @@ function evaluateJsExpression(
       cases,
     });
 
-    // SECURITY: 禁用 WebAssembly，防止 WASM 逃逸
-    // QUIRK: codeGeneration.strings 无法完全阻断原型链逃逸（result.constructor.constructor 仍可访问）
-    // 真正的隔离需要 isolated-vm。当前依赖 RBAC（editor/admin）作为主要防线
+    // SECURITY: Disable WebAssembly to prevent WASM escapes
+    // QUIRK: codeGeneration.strings cannot fully block prototype-chain escapes (result.constructor.constructor is still accessible).
+    // True isolation requires isolated-vm. Currently relies on RBAC (editor/admin) as the primary defense.
     const sandbox = createContext(contextObj, {
       codeGeneration: { wasm: false },
       microtaskMode: 'afterEvaluate',

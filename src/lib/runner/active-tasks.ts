@@ -35,12 +35,12 @@ export interface TaskProgressDetail {
 }
 
 /**
- * 查询指定用户所有正在运行的后台任务（排除 schedule 定时任务）。
- * 供 Next.js API 路由与 Agent 服务端 Tools（如 Nango）共同调用。
+ * Query all currently running background tasks for the given user (excluding scheduled tasks).
+ * Shared by Next.js API routes and agent server-side tools (e.g., Nango).
  */
 export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
   try {
-    // 1. 查询正在运行的 Agent 异步任务
+    // 1. Query running async agent tasks
     const runningAgents = await db
       .select({
         id: EntityRunTable.id,
@@ -76,7 +76,7 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
       startedAt: row.startedAt ?? row.createdAt,
     }));
 
-    // 2. 查询正在运行的 Verification Suite
+    // 2. Query running Verification Suites
     const runningVerifications = await db
       .select({
         id: VerificationRunTable.id,
@@ -114,7 +114,7 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
         row.skippedCount,
     }));
 
-    // 3. 查询正在运行的 Evaluation Suite
+    // 3. Query running Evaluation Suites
     const runningEvaluations = await db
       .select({
         id: EvalRunTable.id,
@@ -147,7 +147,7 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
       completedCount: row.passedCount + row.failedCount + row.erroredCount,
     }));
 
-    // 4. 查询正在运行的 Web Auto Suite
+    // 4. Query running Web Auto Suites
     const runningWebAuto = await db
       .select({
         id: WebAutoRunTable.id,
@@ -180,7 +180,7 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
       completedCount: row.passedCount + row.failedCount + row.erroredCount,
     }));
 
-    // 合并所有活跃任务并按照 startedAt 升序排列 (最早启动的排在前面)
+    // Merge all active tasks and sort by startedAt ascending (earliest started first)
     return [...agentTasks, ...verificationTasks, ...evaluationTasks, ...webAutoTasks].sort(
       (a, b) => a.startedAt.getTime() - b.startedAt.getTime()
     );
@@ -191,8 +191,8 @@ export async function getActiveTasks(ownerId: string): Promise<ActiveTask[]> {
 }
 
 /**
- * 查询单个任务的执行状态、进度和结果。
- * 供 Agent 工具后续追踪特定任务结果并向用户汇报。
+ * Query the execution status, progress, and result of a single task.
+ * Used by agent tools to track specific task outcomes and report back to the user.
  *
  * SECURITY: scoped to the run's owner (`isAdmin` bypasses). agent runs
  * filter by `EntityRunTable.ownerId`; verification/evaluation/web_auto runs have

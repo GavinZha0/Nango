@@ -94,6 +94,8 @@ export function buildDesktopServerEnv(
   env.NANGO_DESKTOP = "1";
   env.NANGO_ALLOW_STDIO_MCP = "true";
   env.NO_HTTPS = "1";
+  env.COPILOTKIT_TELEMETRY_DISABLED = "true";
+  env.NEXT_TELEMETRY_DISABLED = "1";
   env.HOSTNAME = "127.0.0.1";
   env.PORT = String(input.appPort);
 

@@ -70,7 +70,7 @@ editorTest.describe("Datasource Page", () => {
   );
 
   // 3. Ephemeral write flow: create data source, toggle, edit, and delete
-  // CONTRACT: "只读基底 + 写操作自建自销毁" — base data sources are never modified.
+  // CONTRACT: "read-only base + create-and-destroy for writes" — base data sources are never modified.
   editorTest(
     "should create, toggle enabled and visibility, edit, and delete an ephemeral data source",
     async ({ page }) => {

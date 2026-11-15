@@ -83,7 +83,7 @@ function safeValueFormatter(str: string): (val: unknown) => string {
     }
     return (val: unknown) => String(val);
   }
-  // Plain unit suffix, e.g. " 亿人".
+  // Plain unit suffix, e.g. " billion".
   return (val: unknown) => String(val) + (str.startsWith(" ") ? "" : " ") + str;
 }
 

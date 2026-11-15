@@ -84,7 +84,7 @@ editorTest.describe("Web Auto Page", () => {
   );
 
   // 3. Ephemeral write flow: create suite & target, create case, edit script, delete case, and delete suite
-  // CONTRACT: "只读基底 + 写操作自建自销毁" — base targets and suites are never modified.
+  // CONTRACT: "read-only base + create-and-destroy for writes" — base targets and suites are never modified.
   editorTest(
     "should create, inspect, edit case script, and delete an ephemeral suite and target",
     async ({ page }) => {

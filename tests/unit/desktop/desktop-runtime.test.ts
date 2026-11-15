@@ -264,6 +264,8 @@ describe("desktop/server-manager helpers", () => {
     expect(env.NANGO_DESKTOP).toBe("1");
     expect(env.NANGO_ALLOW_STDIO_MCP).toBe("true");
     expect(env.NO_HTTPS).toBe("1");
+    expect(env.COPILOTKIT_TELEMETRY_DISABLED).toBe("true");
+    expect(env.NEXT_TELEMETRY_DISABLED).toBe("1");
     expect(env.PORT).toBe("9305");
     expect(env.BETTER_AUTH_URL).toBe("http://127.0.0.1:9305");
     expect(env.POSTGRES_PORT).toBe("15433");
@@ -441,7 +443,7 @@ describe("desktop/preload, tray & main coordinator", () => {
       const started = await coordinator.bootstrap();
       expect(started).toBe(false);
       expect(showErrorBoxMock).toHaveBeenCalledWith(
-        "Nango 启动失败",
+        "Nango Startup Failed",
         expect.stringContaining("Refusing to persist plaintext desktop secrets"),
       );
       expect(quitMock).toHaveBeenCalledTimes(1);

@@ -54,7 +54,7 @@ When state sharing is active, you perceive real-time editor state via \`state.co
   When the user requests modifications to a test case that is **currently open in the editor** (\`activeResourceData.selectedCase\` is non-null and matches the target):
   - **Default: Use \`propose_page_edit\`** with the matching \`resourceType\` ('verification' | 'evaluation' | 'web-auto') to stage changes in the UI for user preview and confirmation. Place the modified fields under \`draftData.selectedCase\` (e.g. \`{ selectedCase: { name: "...", assertions: [...] } }\`). This respects the human-in-the-loop review workflow — the user sees the diff and decides whether to save.
   - **Use \`update_test_case\` instead** when:
-    1. The user explicitly requests immediate/automatic saving (e.g. "直接保存", "auto-save", "just fix it in the background").
+    1. The user explicitly requests immediate/automatic saving (e.g. "save directly", "auto-save", "just fix it in the background").
     2. The target case is **not** the one currently open in the editor (off-screen case).
     3. The operation is a **batch action** across multiple cases (e.g. "activate all disabled cases").
     4. The change is limited to toggling \`enabled\` status (a metadata switch, not content editing).

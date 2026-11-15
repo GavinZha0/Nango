@@ -103,7 +103,7 @@ function buildSplashDataUrl(version: string): string {
   <div class="box">
     <div class="title">Nango</div>
     <div class="ver">v${version}</div>
-    <div id="status" class="status">正在启动本地服务…</div>
+    <div id="status" class="status">Starting local services…</div>
   </div>
 </body>
 </html>`;
@@ -253,8 +253,8 @@ export class DesktopAppCoordinator {
       const userDataDir = app.getPath("userData");
       const logsDir = path.join(userDataDir, "logs");
       this.electron.dialog.showErrorBox(
-        "Nango 启动失败",
-        `${msg}\n\n若服务意外退出，可能是本地端口被占用或数据目录权限受限。\n日志目录：${logsDir}`,
+        "Nango Startup Failed",
+        `${msg}\n\nIf the service exited unexpectedly, a local port may be in use or data directory permissions may be restricted.\nLogs directory: ${logsDir}`,
       );
       await this.shutdownAndQuit();
       return false;
@@ -278,7 +278,7 @@ export class DesktopAppCoordinator {
 
       const bundled = resolveBundledResourcePaths(this.resourcesPath);
 
-      splashWin?.updateStatus("正在初始化密钥与端口…");
+      splashWin?.updateStatus("Initializing secrets and ports…");
       const [secrets, ports] = await Promise.all([
         Promise.resolve().then(() =>
           loadOrCreateDesktopSecrets(userDataDir, safeStorage),
@@ -290,8 +290,8 @@ export class DesktopAppCoordinator {
       const handleFatalServiceError = (err: Error) => {
         if (this.isQuitting) return;
         dialog.showErrorBox(
-          "Nango 后台服务异常退出",
-          `${err.message}\n\n日志目录：${logsDir}`,
+          "Nango Background Service Exited Unexpectedly",
+          `${err.message}\n\nLogs directory: ${logsDir}`,
         );
         void shell.openPath(logsDir);
         void this.shutdownAndQuit();
@@ -305,7 +305,7 @@ export class DesktopAppCoordinator {
         onFatalExit: handleFatalServiceError,
       });
 
-      splashWin?.updateStatus("正在启动数据库与运行时…");
+      splashWin?.updateStatus("Starting database and runtime…");
       const [standaloneDir] = await Promise.all([
         ensureStandaloneExtracted({
           userDataDir,
@@ -316,7 +316,7 @@ export class DesktopAppCoordinator {
       ]);
       if (this.isQuitting) return;
 
-      splashWin?.updateStatus("正在启动应用服务…");
+      splashWin?.updateStatus("Starting application server…");
       this.serverManager = new ServerManager({
         standaloneDir,
         appPort: ports.appPort,
@@ -393,7 +393,7 @@ export class DesktopAppCoordinator {
         },
       });
 
-      splashWin?.updateStatus("正在加载工作区…");
+      splashWin?.updateStatus("Loading workspace…");
       await win.loadURL(ports.betterAuthUrl);
       if (this.isQuitting) {
         if (!win.isDestroyed()) {
@@ -425,7 +425,7 @@ export class DesktopAppCoordinator {
 
     ipcMain.handle(IPC_CHANNELS.SELECT_FOLDER, async () => {
       const result = await dialog.showOpenDialog(this.mainWindow, {
-        title: "选择本地共享文件夹 (host.file.root)",
+        title: "Select Local Shared Folder (host.file.root)",
         defaultPath: defaultWorkspaceDir,
         properties: ["openDirectory", "createDirectory", "dontAddToRecent"],
       });

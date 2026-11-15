@@ -55,7 +55,7 @@ editorTest.describe("Agent Page", () => {
 
   // Ephemeral write flow: create a built-in agent end-to-end through the UI,
   // then flip its enable / visibility toggles in the left panel and delete it.
-  // CONTRACT: "只读基底 + 写操作自建自销毁" — base agents are never modified.
+  // CONTRACT: "read-only base + create-and-destroy for writes" — base agents are never modified.
   editorTest(
     "should create, toggle enabled and visibility, and delete an ephemeral agent",
     async ({ page }) => {

@@ -46,7 +46,7 @@ import { z } from "zod";
  * - "mcp:<server_id>": MCP server tools where <server_id> is a valid UUID
  * - "custom": Custom/user-defined tools (reserved for future use)
  * 
- * This validation ensures前后端一致性 and prevents invalid values from
+ * This validation ensures frontend-backend consistency and prevents invalid values from
  * being stored in the database.
  * 
  * Exported for use in frontend validation to maintain consistency.

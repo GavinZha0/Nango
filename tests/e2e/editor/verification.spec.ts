@@ -88,7 +88,7 @@ editorTest.describe("Verification Page", () => {
   );
 
   // 3. Ephemeral write flow: create suite, create case, edit, delete case, and delete suite
-  // CONTRACT: "只读基底 + 写操作自建自销毁" — base suites and cases are never modified.
+  // CONTRACT: "read-only base + create-and-destroy for writes" — base suites and cases are never modified.
   editorTest(
     "should create, inspect, edit case, and delete an ephemeral suite and case",
     async ({ page }) => {

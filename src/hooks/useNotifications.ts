@@ -107,7 +107,7 @@ export function useStartNotifications(): void {
   useEffect(() => {
     void notificationActions.refresh();
 
-    // 初始化拉取活跃后台任务
+    // Initial fetch of active background tasks
     const setTasks = useActiveTasksStore.getState().setTasks;
     fetch("/api/runs/active")
       .then((res) => (res.ok ? res.json() : { activeTasks: [] }))

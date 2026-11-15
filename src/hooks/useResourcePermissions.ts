@@ -18,8 +18,8 @@ export interface ResourcePermissions {
 }
 
 /**
- * 客户端统一资源权限评估 Hook
- * 接收一个包含创建人、可见性的对象，返回四个维度的控制布尔值
+ * Client-side unified resource permission evaluation hook.
+ * Accepts an object containing creator and visibility, returning four permission booleans.
  */
 export function useResourcePermissions(resource: ClientResource | null | undefined): ResourcePermissions {
   const { isEditor, isAdmin, loading: roleLoading } = useRole();
@@ -30,7 +30,7 @@ export function useResourcePermissions(resource: ClientResource | null | undefin
   const loading = roleLoading || sessionLoading;
 
   return useMemo(() => {
-    // 默认无任何权限
+    // Default to no permissions
     if (loading || !resource || !currentUserId) {
       return {
         canEdit: false,
@@ -43,13 +43,13 @@ export function useResourcePermissions(resource: ClientResource | null | undefin
 
     const isOwner = resource.createdBy === currentUserId;
 
-    // 1. 编辑权限：Admin，或者是该资源创建者，或该资源为 Public 且具备 Editor 角色
+    // 1. Edit permission: Admin, resource creator, or public resource with Editor role
     const canEdit = isAdmin || isOwner || (resource.visibility === "public" && isEditor);
 
-    // 2. 删除权限：Admin 或者是资源创建者
+    // 2. Delete permission: Admin or resource creator
     const canDelete = isAdmin || isOwner;
 
-    // 3. 可见性修改与启用切换：与删除权限一致
+    // 3. Visibility and enable-toggle permissions: match delete permission
     const canChangeVisibility = canDelete;
     const canToggleEnabled = canDelete;
 

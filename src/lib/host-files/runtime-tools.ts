@@ -899,7 +899,7 @@ export function buildFindFilesTool(): ToolDefinition {
 
       let st: Stats;
       try {
-        st = await stat(resolved.absPath);
+        st = await stat(/*turbopackIgnore: true*/ resolved.absPath);
       } catch (e) {
         return err(
           "NOT_FOUND",
@@ -956,7 +956,7 @@ export function buildGrepFilesTool(): ToolDefinition {
 
       let st: Stats;
       try {
-        st = await stat(resolved.absPath);
+        st = await stat(/*turbopackIgnore: true*/ resolved.absPath);
       } catch (e) {
         return err(
           "NOT_FOUND",

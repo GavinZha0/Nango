@@ -260,7 +260,7 @@ function NotificationRow({
                       }
                     }}
                   >
-                    <span>🎯 跳转至对应套件面板</span>
+                    <span>🎯 Go to suite panel</span>
                   </Button>
                 </div>
               )}

@@ -7,7 +7,7 @@ export interface ActiveTask {
   kind: "agent" | "verification" | "evaluation" | "web_auto";
   name: string;
   status: "running" | "succeeded" | "failed";
-  startedAt: string | Date; // 序列化后的时间字符串或 Date 对象
+  startedAt: string | Date; // Serialized ISO timestamp string or Date object
   totalCount?: number;
   completedCount?: number;
 }
@@ -35,7 +35,7 @@ export const useActiveTasksStore = create<ActiveTasksState>()((set) => ({
 
   addTask: (task) =>
     set((s) => {
-      // 避免重复加入
+      // Avoid duplicate entries
       if (s.activeTasks.some((t) => t.id === task.id)) return s;
       return { activeTasks: [...s.activeTasks, task] };
     }),
@@ -60,7 +60,7 @@ export const useActiveTasksStore = create<ActiveTasksState>()((set) => ({
       ),
     }));
 
-    // 1 分钟后自动从活跃状态列表中淡出隐藏
+    // Automatically fade out from the active list after 1 minute
     setTimeout(() => {
       useActiveTasksStore.getState().removeTask(id);
     }, 60000);

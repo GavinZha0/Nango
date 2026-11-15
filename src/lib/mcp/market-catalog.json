@@ -295,7 +295,7 @@
   },
   {
     "id": "feishu",
-    "name": "Feishu (飞书)",
+    "name": "Feishu",
     "category": "Productivity",
     "description": "Read and manage Feishu/Lark documents, tasks, and workspace data.",
     "type": "stdio",
@@ -313,7 +313,7 @@
   },
   {
     "id": "dingtalk",
-    "name": "DingTalk (钉钉)",
+    "name": "DingTalk",
     "category": "Productivity",
     "description": "Interact with DingTalk contacts, calendars, tasks, and robot messages.",
     "type": "stdio",
