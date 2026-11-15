@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.36.0](https://github.com/GavinZha0/Nango/compare/v0.35.0...v0.36.0) (2026-11-15)
+
+
+### Features
+
+* **agent:** raise tool timeouts to 60s, fix post-approval timer, and update maxSteps ([777cb78](https://github.com/GavinZha0/Nango/commit/777cb787f99d6263aaf8007447caf3a8266a12f1))
+* **host-files:** add find_files, grep_files, move_file, and delete_file tools ([7e98aba](https://github.com/GavinZha0/Nango/commit/7e98aba63b6887ffd2b29d0f16605afcf1fae107))
+* **web-auto:** add Playwright-missing guidance and extend session TTL ([766adbf](https://github.com/GavinZha0/Nango/commit/766adbf3d1f8886d6a9fa117bf27ac9a7283a7f5))
+
+
+### Bug Fixes
+
+* **desktop:** harden navigation guards, crash reload, shutdown UX, and NO_PROXY ([8048a6b](https://github.com/GavinZha0/Nango/commit/8048a6b049943f916889136efd28dfac05c356cc))
+* **desktop:** harden Windows shutdown, standalone extraction, and log rotation ([abfd3cf](https://github.com/GavinZha0/Nango/commit/abfd3cf80967f36717561cdaa98dd7ef9e5449e5))
+
+
+### Performance Improvements
+
+* **boot:** parallelize instrumentation boot and defer non-critical probes ([a84872a](https://github.com/GavinZha0/Nango/commit/a84872a69f93bf70f09dc23feb131ad0ed50badb))
+* **desktop:** optimize startup speed with splash window and lightweight probes ([61bf3f6](https://github.com/GavinZha0/Nango/commit/61bf3f6fc98f4e001d80b45b627bf47e32ee3017))
+
 ## [0.35.0](https://github.com/GavinZha0/Nango/compare/v0.34.0...v0.35.0) (2026-11-14)
 
 
