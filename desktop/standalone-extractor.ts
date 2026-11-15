@@ -69,13 +69,27 @@ export async function ensureStandaloneExtracted(
   fs.rmSync(runtimeDir, { recursive: true, force: true });
   fs.mkdirSync(runtimeDir, { recursive: true });
 
+  const runtimeRoot = path.resolve(runtimeDir);
   const deferredSymlinks: Array<{ destPath: string; linkpath: string }> = [];
   const fileWrites: Array<Promise<void>> = [];
 
   await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(tarPath);
     const parser = new Parser({
       onReadEntry(entry: ReadEntry) {
-        const destPath = path.join(runtimeDir, entry.path);
+        const destPath = path.resolve(runtimeRoot, entry.path);
+        // SECURITY: Guard against path traversal / zip-slip entries escaping runtimeDir.
+        if (
+          destPath !== runtimeRoot &&
+          !destPath.startsWith(runtimeRoot + path.sep)
+        ) {
+          entry.resume();
+          stream.destroy();
+          reject(
+            new Error(`Refusing tar entry outside runtimeDir: ${entry.path}`),
+          );
+          return;
+        }
         if (entry.type === "Directory") {
           fs.mkdirSync(destPath, { recursive: true });
           entry.resume();
@@ -100,7 +114,6 @@ export async function ensureStandaloneExtracted(
       },
     });
 
-    const stream = fs.createReadStream(tarPath);
     stream.on("error", reject);
     parser.on("error", reject);
     parser.on("finish", () => {
@@ -124,7 +137,14 @@ export async function ensureStandaloneExtracted(
 
     if (process.platform === "win32") {
       const targetAbs = path.resolve(path.dirname(destPath), linkpath);
-      fs.symlinkSync(targetAbs, destPath, "junction");
+      // Windows junctions only support directories; copy file targets instead
+      // so file symlinks (e.g. `.bin` shims) never abort extraction.
+      const stat = fs.statSync(targetAbs);
+      if (stat.isDirectory()) {
+        fs.symlinkSync(targetAbs, destPath, "junction");
+      } else {
+        fs.copyFileSync(targetAbs, destPath);
+      }
     } else {
       fs.symlinkSync(linkpath, destPath);
     }

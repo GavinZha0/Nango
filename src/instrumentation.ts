@@ -149,13 +149,38 @@ export async function register(): Promise<void> {
   if (!g.__nango_shutdown_registered) {
     g.__nango_shutdown_registered = true;
     const nodeProcess: NodeJS.Process = globalThis.process;
-    const onShutdown = (): void => {
+    let shuttingDown = false;
+    const runShutdown = (exitAfter: boolean): void => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       shutdownScheduler();
-      void mcpProviderPool.shutdown();
+      const done = mcpProviderPool.shutdown();
+      if (exitAfter) {
+        void done.finally(() => {
+          nodeProcess.exit(0);
+        });
+      }
     };
+    const onShutdown = (): void => runShutdown(false);
     nodeProcess.on("SIGTERM", onShutdown);
     nodeProcess.on("SIGINT", onShutdown);
     nodeProcess.on("beforeExit", onShutdown);
+
+    // CONTRACT: On Windows, `child.kill("SIGTERM")` terminates immediately via
+    // `TerminateProcess`, bypassing signal handlers. Desktop's `ServerManager`
+    // writes `__NANGO_SHUTDOWN__\n` over piped stdin for graceful cleanup.
+    if (nodeProcess.stdin && !nodeProcess.stdin.isTTY) {
+      let stdinBuf = "";
+      nodeProcess.stdin.setEncoding("utf8");
+      nodeProcess.stdin.on("data", (chunk: string) => {
+        stdinBuf += chunk;
+        if (stdinBuf.includes("__NANGO_SHUTDOWN__")) {
+          runShutdown(true);
+        } else if (stdinBuf.length > 256) {
+          stdinBuf = stdinBuf.slice(-64);
+        }
+      });
+    }
   }
 
   // Non-blocking background warmup/housekeeping: never delay HTTP server

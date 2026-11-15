@@ -219,7 +219,7 @@ Implemented in [`desktop/tray.ts`](file:///d:/AI/nango/desktop/tray.ts) and [`de
      - `Open Logs Folder`: Opens the application logs directory.
      - `Quit Nango`: Triggers orderly shutdown.
 5. **Orderly Shutdown Sequence**:
-   - Notifies Next.js server to terminate active agent runs and flush SSE streams.
+   - Notifies Next.js server to run `instrumentation.ts` cleanup (via `SIGTERM` on POSIX or the piped `stdin` `__NANGO_SHUTDOWN__\n` sentinel on Windows), closing pooled `stdio` MCP child trees and scheduler timers before a 5s `SIGKILL` fallback.
    - Stops the PostgreSQL cluster via `pg_ctl stop -D <pgdata> -m fast`.
    - Exits the Electron main process.
 

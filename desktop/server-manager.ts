@@ -22,6 +22,7 @@ const execFileAsync = promisify(execFile);
 
 export const MAX_SERVER_CRASH_RESTARTS = 3;
 export const DEFAULT_SERVER_READY_TIMEOUT_MS = 60_000;
+const SERVER_LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 export interface DesktopWritableDirs {
   workspaceDir: string;
@@ -156,6 +157,7 @@ export class ServerManager {
   private readonly opts: ServerManagerOptions;
   private readonly readyTimeoutMs: number;
   private proc: ChildProcess | null = null;
+  private logStream: fs.WriteStream | null = null;
   private stopping = false;
   private consecutiveCrashes = 0;
 
@@ -235,26 +237,52 @@ export class ServerManager {
     await this.spawnAndWaitReady(env);
   }
 
+  private closeLogStream(): void {
+    if (!this.logStream) return;
+    try {
+      this.logStream.destroy();
+    } catch {
+      // Ignore stream teardown errors
+    }
+    this.logStream = null;
+  }
+
+  private openServerLogStream(): fs.WriteStream {
+    this.closeLogStream();
+    const serverLogPath = path.join(this.opts.userDataDir, "logs", "server.log");
+    try {
+      const st = fs.statSync(serverLogPath);
+      if (st.size >= SERVER_LOG_MAX_BYTES) {
+        fs.renameSync(serverLogPath, `${serverLogPath}.old`);
+      }
+    } catch {
+      // Missing log or rotation failure is non-fatal
+    }
+    const stream = fs.createWriteStream(serverLogPath, { flags: "a" });
+    this.logStream = stream;
+    return stream;
+  }
+
   private async spawnAndWaitReady(env: NodeJS.ProcessEnv): Promise<void> {
     if (this.stopping) return;
     const serverScript = path.join(this.opts.standaloneDir, "server.js");
     const child = spawn(this.opts.bundledNodeExe, [serverScript], {
       cwd: this.opts.standaloneDir,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
     this.proc = child;
     let ready = false;
 
-    // Stream Next.js server logs into userData/logs/server.log for runtime forensics.
-    const serverLogPath = path.join(this.opts.userDataDir, "logs", "server.log");
-    const logStream = fs.createWriteStream(serverLogPath, { flags: "a" });
+    // Stream Next.js server logs into userData/logs/server.log (rotated at 5 MB).
+    const logStream = this.openServerLogStream();
     child.stdout?.pipe(logStream);
     child.stderr?.pipe(logStream);
 
     child.on("exit", (code, signal) => {
       this.proc = null;
+      this.closeLogStream();
       if (!ready || this.stopping) return;
       void this.handleUnexpectedExit(code, signal, env);
     });
@@ -299,7 +327,19 @@ export class ServerManager {
       });
 
       try {
-        child.kill("SIGTERM");
+        // On Windows, `child.kill("SIGTERM")` invokes `TerminateProcess` and
+        // skips `instrumentation.ts` shutdown hooks; signal via piped stdin first.
+        if (
+          process.platform === "win32" &&
+          child.stdin &&
+          !child.stdin.destroyed &&
+          child.stdin.writable
+        ) {
+          child.stdin.write("__NANGO_SHUTDOWN__\n");
+          child.stdin.end();
+        } else {
+          child.kill("SIGTERM");
+        }
       } catch {
         clearTimeout(killTimer);
         resolve();
@@ -373,32 +413,12 @@ export class ServerManager {
     const child = this.proc;
     if (!child || child.exitCode !== null) {
       this.proc = null;
+      this.closeLogStream();
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      const killTimer = setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // Process already exited
-        }
-        resolve();
-      }, 5_000);
-
-      child.once("exit", () => {
-        clearTimeout(killTimer);
-        resolve();
-      });
-
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        clearTimeout(killTimer);
-        resolve();
-      }
-    });
-
+    await this.terminateChildProcess(child);
     this.proc = null;
+    this.closeLogStream();
   }
 }

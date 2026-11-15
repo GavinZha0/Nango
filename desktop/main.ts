@@ -387,7 +387,9 @@ export class DesktopAppCoordinator {
           updater: this.autoUpdater,
           prepareForInstall: () => this.shutdownServicesOnly(),
         });
-        void this.updateController.checkForUpdatesSafely();
+        // Auto-update checks/downloads at boot are intentionally disabled until
+        // an explicit install/restart UI is wired; avoids downloading updates on
+        // every launch only to discard them on exit.
       }
     } catch (err) {
       splashWin?.close();
