@@ -193,15 +193,8 @@ pnpm desktop:build-standalone
 
 该命令将生成 `desktop/resources/standalone.tar`（包含 `server.js`、数据库迁移脚本、静态资源及完整的 `node_modules` 运行时闭包）。
 
-### 3. 编译桌面主进程与运行时预处理
 
-编译 TypeScript 主进程源码，基于 `public/logo.png` 生成托盘与应用图标，并预处理运行时依赖闭包：
-
-```bash
-pnpm desktop:compile
-```
-
-### 4. 生成安装程序
+### 3. 生成安装程序
 
 使用 `electron-builder` 生成最终的桌面安装程序：
 

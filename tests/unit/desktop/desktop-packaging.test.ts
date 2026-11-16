@@ -912,6 +912,81 @@ describe("desktop/standalone-extractor.ts", () => {
       fs.rmSync(tmpExtract, { recursive: true, force: true });
     }
   });
+
+  it("does not abort extraction when standalone.tar contains a dangling symlink", async () => {
+    const tmpSrc = fs.mkdtempSync(path.join(os.tmpdir(), "nango-dangling-src-"));
+    const tmpRes = fs.mkdtempSync(path.join(os.tmpdir(), "nango-dangling-res-"));
+    const tmpUser = fs.mkdtempSync(path.join(os.tmpdir(), "nango-dangling-usr-"));
+    try {
+      const pkgDir = path.join(tmpSrc, "node_modules", ".pnpm", "pkg@1.0.0", "node_modules");
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(tmpSrc, "server.js"), "console.log('ok');", "utf8");
+
+      const danglingLink = path.join(pkgDir, "helper-module-transforms");
+      const missingTarget = path.join(
+        tmpSrc,
+        "node_modules",
+        ".pnpm",
+        "missing@1.0.0",
+        "node_modules",
+        "@babel",
+        "helper-module-transforms",
+      );
+      try {
+        // Create target briefly so Windows allows junction creation, then remove it
+        // so the archived symlink is genuinely dangling.
+        fs.mkdirSync(missingTarget, { recursive: true });
+        fs.symlinkSync(
+          missingTarget,
+          danglingLink,
+          process.platform === "win32" ? "junction" : undefined,
+        );
+        fs.rmSync(
+          path.join(tmpSrc, "node_modules", ".pnpm", "missing@1.0.0"),
+          { recursive: true, force: true },
+        );
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === "EPERM") {
+          return;
+        }
+        throw err;
+      }
+
+      const tarPath = path.join(tmpRes, "standalone.tar");
+      tar.c(
+        {
+          sync: true,
+          file: tarPath,
+          cwd: tmpSrc,
+          onWriteEntry(entry) {
+            if (entry.type === "SymbolicLink" && entry.linkpath) {
+              entry.linkpath = normalizeTarSymlinkTarget(
+                entry.absolute,
+                entry.linkpath,
+                tmpSrc,
+              );
+            }
+          },
+        },
+        ["."],
+      );
+
+      const extractedDir = await ensureStandaloneExtracted({
+        userDataDir: tmpUser,
+        resourcesPath: tmpRes,
+        appVersion: "0.37.0-test",
+      });
+
+      expect(fs.existsSync(path.join(extractedDir, "server.js"))).toBe(true);
+      expect(fs.readFileSync(path.join(extractedDir, ".version"), "utf8")).toBe(
+        "0.37.0-test",
+      );
+    } finally {
+      fs.rmSync(tmpSrc, { recursive: true, force: true });
+      fs.rmSync(tmpRes, { recursive: true, force: true });
+      fs.rmSync(tmpUser, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("desktop/main.ts — bindReloadShortcuts", () => {

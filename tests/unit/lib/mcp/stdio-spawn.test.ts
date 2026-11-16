@@ -169,6 +169,18 @@ describe("repair-standalone — extractPnpmStoreComponent & handleCopyError", ()
       ),
     ).toBe("@duckdb+node-bindings-win32-x64@2.0.0-r.1");
 
+    expect(
+      extractPnpmStoreComponent(
+        "../../../@babel+helper-module-transf_6872374011460b18643e91f7c39139c9/node_modules/@babel/helper-module-transforms",
+      ),
+    ).toBe("@babel+helper-module-transf_6872374011460b18643e91f7c39139c9");
+
+    expect(
+      extractPnpmStoreComponent(
+        "../../some-long-unscoped-package-name_0123456789abcdef0123456789abcdef/node_modules/some-pkg",
+      ),
+    ).toBe("some-long-unscoped-package-name_0123456789abcdef0123456789abcdef");
+
     expect(extractPnpmStoreComponent("./unrelated-file.js")).toBeNull();
   });
 

@@ -204,15 +204,8 @@ pnpm desktop:build-standalone
 
 This generates `desktop/resources/standalone.tar` containing `server.js`, migrations, assets, and the verified runtime `node_modules` closure.
 
-### 3. Compile Desktop Process & Prepare Runtime
 
-Compile the TypeScript main process, generate tray and application icons from `public/logo.png`, and stage runtime production dependencies:
-
-```bash
-pnpm desktop:compile
-```
-
-### 4. Package Application Installer
+### 3. Package Application Installer
 
 Package the distribution-ready installer using `electron-builder`:
 

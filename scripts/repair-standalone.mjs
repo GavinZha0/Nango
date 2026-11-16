@@ -34,11 +34,16 @@ const standaloneNodeModules = path.join(
 const standaloneStoreDir = path.join(standaloneNodeModules, ".pnpm");
 
 /**
- * List direct `<pkg>@<ver>` subdirectories in `.pnpm`.
+ * List direct `<pkg>@<ver>` or pnpm hash-truncated `<pkg>_<hash>` subdirectories in `.pnpm`.
  */
 function listPnpmPackageDirs(pnpmDir) {
   return readdirSync(pnpmDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && d.name.includes("@"))
+    .filter(
+      (d) =>
+        d.isDirectory() &&
+        d.name !== "node_modules" &&
+        (d.name.includes("@") || /_[0-9a-f]{16,}$/i.test(d.name)),
+    )
     .map((d) => d.name);
 }
 
@@ -69,12 +74,15 @@ function* walkSymlinks(dir) {
 }
 
 /**
- * Extract the `<dep>@<ver>` directory name from a `.pnpm` relative symlink target.
+ * Extract the `<dep>@<ver>` (or pnpm hash-truncated `<dep>_<hash>`) directory name
+ * from a `.pnpm` relative symlink target.
  * Matches both POSIX (`../../<dep>@<ver>/node_modules/...`) and Windows (`..\\..\\<dep>@<ver>\\node_modules\\...`).
  */
 export function extractPnpmStoreComponent(linkTarget) {
   const normalized = linkTarget.replace(/\\/g, "/");
-  const match = normalized.match(/(?:^|\/)([^/]+@[^/]+)\/node_modules\/.+/);
+  const match = normalized.match(
+    /(?:^|\/)((?:[^/]+@[^/]+|[^/]+_[0-9a-f]{16,}))\/node_modules\/.+/i,
+  );
   return match ? match[1] : null;
 }
 

@@ -127,25 +127,61 @@ export async function ensureStandaloneExtracted(
   await Promise.all(fileWrites);
 
   // Two-pass symlink materialization: all target files/directories exist now.
-  for (const { destPath, linkpath } of deferredSymlinks) {
-    fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    try {
-      fs.unlinkSync(destPath);
-    } catch {
-      // Ignored
-    }
+  if (process.platform === "win32") {
+    let pending = deferredSymlinks;
+    while (pending.length > 0) {
+      const nextPending: typeof deferredSymlinks = [];
+      let progressed = false;
 
-    if (process.platform === "win32") {
-      const targetAbs = path.resolve(path.dirname(destPath), linkpath);
-      // Windows junctions only support directories; copy file targets instead
-      // so file symlinks (e.g. `.bin` shims) never abort extraction.
-      const stat = fs.statSync(targetAbs);
-      if (stat.isDirectory()) {
-        fs.symlinkSync(targetAbs, destPath, "junction");
-      } else {
-        fs.copyFileSync(targetAbs, destPath);
+      for (const entry of pending) {
+        const { destPath, linkpath } = entry;
+        const targetAbs = path.resolve(path.dirname(destPath), linkpath);
+
+        let isFileTarget: boolean;
+        try {
+          isFileTarget = fs.statSync(targetAbs).isFile();
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+            // Target may be a chained symlink not yet materialized, or a dangling
+            // symlink (e.g. untraced optional peer dependency). Defer to next pass.
+            nextPending.push(entry);
+            continue;
+          }
+          throw err;
+        }
+
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        try {
+          fs.unlinkSync(destPath);
+        } catch {
+          // Ignored
+        }
+
+        // Windows junctions only support directories; copy file targets instead
+        // so file symlinks (e.g. `.bin` shims) never abort extraction.
+        if (isFileTarget) {
+          fs.copyFileSync(targetAbs, destPath);
+        } else {
+          fs.symlinkSync(targetAbs, destPath, "junction");
+        }
+        progressed = true;
       }
-    } else {
+
+      if (!progressed) {
+        // Remaining entries have genuinely missing targets (dangling symlinks);
+        // skip them so untraced optional peer symlinks never block app startup.
+        break;
+      }
+      pending = nextPending;
+    }
+  } else {
+    for (const { destPath, linkpath } of deferredSymlinks) {
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      try {
+        fs.unlinkSync(destPath);
+      } catch {
+        // Ignored
+      }
       fs.symlinkSync(linkpath, destPath);
     }
   }
