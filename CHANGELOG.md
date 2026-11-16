@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1](https://github.com/GavinZha0/Nango/compare/v0.37.0...v0.37.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **desktop:** handle dangling symlinks and pnpm hashed store dirs ([9984a85](https://github.com/GavinZha0/Nango/commit/9984a8564c40d67fa72ca232afe7b6bd12b92870))
+
 ## [0.37.0](https://github.com/GavinZha0/Nango/compare/v0.36.0...v0.37.0) (2026-11-15)
 
 
