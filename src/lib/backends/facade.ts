@@ -7,6 +7,7 @@ import { ADAPTERS } from "./registry";
 import { isSupportedBackend } from "./types";
 import type {
   BackendCapabilities,
+  BackendTransport,
   EntityDescriptor,
   EntityFetchError,
   EntityKind,
@@ -55,6 +56,7 @@ export interface GetEntitiesOptions {
 export interface CredentialEntityStatus {
   credentialId: string;
   name: string;
+  transport?: BackendTransport;
   ok: boolean;
   errors: EntityFetchError[];
 }

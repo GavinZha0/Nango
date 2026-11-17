@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { agentKey, getEntities } from "@/lib/backends/facade";
 import type { BackendId } from "@/lib/backends/facade";
-import type { EntityKind, EntityFetchError } from "@/lib/backends/types";
+import type { BackendTransport, EntityKind, EntityFetchError } from "@/lib/backends/types";
 import { useWorkspaceStore } from "@/store/workspace";
 import { cn } from "@/lib/utils";
 import { alphabeticCompare } from "@/lib/utils/sort";
@@ -697,6 +697,7 @@ export function AgentPanel(): ReactNode {
     credentialName: string;
     entries: BackendEntry[];
     creds: { credentialId: string }[];
+    transports: BackendTransport[];
     errors: EntityFetchError[];
     ok: boolean;
   }
@@ -757,11 +758,14 @@ export function AgentPanel(): ReactNode {
     for (const cred of backendCredentials) {
       let group = groupMap.get(cred.name)
       if (!group) {
-        group = {credentialName: cred.name, entries: [], creds: [], errors: [], ok: true };
+        group = {credentialName: cred.name, entries: [], creds: [], transports: [], errors: [], ok: true };
         groupMap.set(cred.name, group);
       }
       group.entries.push(...(entriesByCred.get(cred.name) ?? []))
       group.creds.push({credentialId: cred.credentialId });
+      if (cred.transport && !group.transports.includes(cred.transport)) {
+        group.transports.push(cred.transport);
+      }
       if(!cred.ok) {
         group.ok = false;
         group.errors.push(...(cred.errors));
@@ -953,17 +957,27 @@ export function AgentPanel(): ReactNode {
                         onToggle={() => toggleSection(sectionKey)}
                         tone={tone}
                         action={
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void loadBackendCredentials(backendGroup.creds)
-                            }
-                            disabled={groupRefreshing}
-                            className="cursor-pointer rounded p-1 text-muted-foreground/60 hover:text-foreground disabled:opacity-50"
-                            aria-label={`Refresh ${backendGroup.credentialName}`}
-                          >
-                            <RefreshCw className={cn("h-3 w-3", groupRefreshing && "animate-spin")} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            {backendGroup.transports.map((transport) => (
+                              <span
+                                key={transport}
+                                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-muted-foreground"
+                              >
+                                {transport}
+                              </span>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void loadBackendCredentials(backendGroup.creds)
+                              }
+                              disabled={groupRefreshing}
+                              className="cursor-pointer rounded p-1 text-muted-foreground/60 hover:text-foreground disabled:opacity-50"
+                              aria-label={`Refresh ${backendGroup.credentialName}`}
+                            >
+                              <RefreshCw className={cn("h-3 w-3", groupRefreshing && "animate-spin")} />
+                            </button>
+                          </div>
                         }
                       />
 

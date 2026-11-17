@@ -5,6 +5,7 @@ import {
   hasEntityKind,
   type BackendCredentialInfo,
 } from "@/lib/backends/facade";
+import { resolveBackendTransport } from "@/lib/backends/types";
 
 describe("toBackendCredentials", () => {
   it("filters to supported providers only", () => {
@@ -60,5 +61,25 @@ describe("hasEntityKind", () => {
 
   it("returns false for empty credentials", () => {
     expect(hasEntityKind([], "agent")).toBe(false);
+  });
+});
+
+describe("resolveBackendTransport", () => {
+  it("returns A2A for a2a provider regardless of aguiUrl flag", () => {
+    expect(resolveBackendTransport("a2a", false)).toBe("A2A");
+    expect(resolveBackendTransport("a2a", true)).toBe("A2A");
+  });
+
+  it("returns AGUI when non-a2a provider has aguiUrl configured", () => {
+    expect(resolveBackendTransport("agno", true)).toBe("AGUI");
+    expect(resolveBackendTransport("mastra", true)).toBe("AGUI");
+    expect(resolveBackendTransport("dify", true)).toBe("AGUI");
+  });
+
+  it("returns REST when non-a2a provider has no aguiUrl", () => {
+    expect(resolveBackendTransport("agno", false)).toBe("REST");
+    expect(resolveBackendTransport("mastra", null)).toBe("REST");
+    expect(resolveBackendTransport("dify", undefined)).toBe("REST");
+    expect(resolveBackendTransport(null, false)).toBe("REST");
   });
 });

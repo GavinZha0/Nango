@@ -36,6 +36,22 @@ export function isSupportedBackend(
   return value != null && PROVIDER_ID_SET.has(value);
 }
 
+/** High-level transport mode shown in the External Agent panel group header. */
+export type BackendTransport = "REST" | "AGUI" | "A2A";
+
+/**
+ * Derive the display transport label from a backend credential's provider
+ * and whether an AG-UI passthrough URL is configured.
+ */
+export function resolveBackendTransport(
+  provider: string | null | undefined,
+  hasAguiUrl?: boolean | null,
+): BackendTransport {
+  if (provider === "a2a") return "A2A";
+  if (hasAguiUrl) return "AGUI";
+  return "REST";
+}
+
 // Domain descriptors
 
 /** Canonical model summary projected from each backend's native shape. */

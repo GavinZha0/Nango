@@ -12,8 +12,13 @@ import { CredentialTable } from "@/lib/db/schema";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { CREDENTIAL_ID_PATTERN } from "@/lib/http/chat-headers";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
-import type { EntityDescriptor, EntityFetchError, EntityKind } from "@/lib/backends/types";
-import { ALL_ENTITY_KINDS } from "@/lib/backends/types";
+import type {
+  BackendTransport,
+  EntityDescriptor,
+  EntityFetchError,
+  EntityKind,
+} from "@/lib/backends/types";
+import { ALL_ENTITY_KINDS, resolveBackendTransport } from "@/lib/backends/types";
 
 export const dynamic = "force-dynamic";
 
@@ -53,11 +58,14 @@ function parseCredentialIds(raw: string | null): string[] | null {
 interface CredentialRow {
   id: string;
   name: string;
+  provider: string | null;
+  aguiUrl: string | null;
 }
 
 interface CredentialStatus {
   credentialId: string;
   name: string;
+  transport: BackendTransport;
   ok: boolean;
   errors: EntityFetchError[];
 }
@@ -84,6 +92,8 @@ export const GET = withSession(ROUTE, async ({ req }: { req: NextRequest }) => {
     .select({
       id: CredentialTable.id,
       name: CredentialTable.name,
+      provider: CredentialTable.provider,
+      aguiUrl: CredentialTable.aguiUrl,
     })
     .from(CredentialTable)
     .where(and(...baseConditions, ...(credentialIds ? [inArray(CredentialTable.id, credentialIds)] : [])));
@@ -92,15 +102,16 @@ export const GET = withSession(ROUTE, async ({ req }: { req: NextRequest }) => {
   const tables = await Promise.all(
     credentials.map(async (cred): Promise<EntityDescriptor[]> => {
       if (force) EntityCatalog.invalidate(cred.id);
+      const transport = resolveBackendTransport(cred.provider, Boolean(cred.aguiUrl));
       try {
         const result = await EntityCatalog.listWithStatus(cred.id);
         const errors: EntityFetchError[] = result?.errors ?? [];
-        statuses.push({ credentialId: cred.id, name: cred.name, ok: errors.length === 0, errors });
+        statuses.push({ credentialId: cred.id, name: cred.name, transport, ok: errors.length === 0, errors });
         if (result === null) return [];
         return result.entities.map((e) => ({ ...e, credentialName: cred.name }));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        statuses.push({ credentialId: cred.id, name: cred.name, ok: false, errors: [{ message }] });
+        statuses.push({ credentialId: cred.id, name: cred.name, transport, ok: false, errors: [{ message }] });
         return [];
       }
     }),
