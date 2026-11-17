@@ -5,12 +5,12 @@
 
 ### Features
 
-* **backends:** show REST/AGUI/A2A transport badge in external agent groups ([ba60ed8](https://github.com/GavinZha0/Nango/commit/ba60ed8677b6ea15726b1ab8011c2f2033ee2219))
+* **backends:** show REST/AGUI/A2A transport badge in external agent groups ([ba60ed8](https://github.com/GavinZha0/Nango/commit/ba60ed8677b6ea15726b1ab8011c2f2033ee2219)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **desktop:** fallback to mode-0600 disk keyring on macOS ([64e1188](https://github.com/GavinZha0/Nango/commit/64e11885283b2e1d62730d5ade9042e46f30584e))
+* **desktop:** fallback to mode-0600 disk keyring on macOS ([64e1188](https://github.com/GavinZha0/Nango/commit/64e11885283b2e1d62730d5ade9042e46f30584e)) by @GavinZha0
 
 ## [0.37.1](https://github.com/GavinZha0/Nango/compare/v0.37.0...v0.37.1) (2026-11-16)
 
