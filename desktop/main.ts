@@ -279,9 +279,19 @@ export class DesktopAppCoordinator {
       const bundled = resolveBundledResourcePaths(this.resourcesPath);
 
       splashWin?.updateStatus("Initializing secrets and ports…");
+      // QUIRK: Unsigned/ad-hoc macOS builds trigger Keychain access prompts and
+      // denials via Electron safeStorage; use mode-0600 disk storage on darwin
+      // until signed with a Developer ID certificate.
+      const usePlaintextDarwinStorage = process.platform === "darwin";
       const [secrets, ports] = await Promise.all([
         Promise.resolve().then(() =>
-          loadOrCreateDesktopSecrets(userDataDir, safeStorage),
+          loadOrCreateDesktopSecrets(
+            userDataDir,
+            usePlaintextDarwinStorage ? undefined : safeStorage,
+            usePlaintextDarwinStorage
+              ? { allowPlaintextFallback: true }
+              : undefined,
+          ),
         ),
         resolveDesktopPorts(),
       ]);
