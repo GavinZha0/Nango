@@ -408,6 +408,11 @@ describe("desktop/preload, tray & main coordinator", () => {
     const tmpUserData = fs.mkdtempSync(
       path.join(os.tmpdir(), "nango-desktop-boot-err-"),
     );
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
     try {
       const quitMock = vi.fn();
       const showErrorBoxMock = vi.fn();
@@ -432,7 +437,7 @@ describe("desktop/preload, tray & main coordinator", () => {
           shell: { openPath: vi.fn(async () => "") },
           ipcMain: { handle: vi.fn() },
           safeStorage: {
-            // Unavailable safeStorage causes loadOrCreateDesktopSecrets to throw during startup
+            // Unavailable safeStorage causes loadOrCreateDesktopSecrets to throw on non-darwin
             isEncryptionAvailable: () => false,
             encryptString: () => Buffer.alloc(0),
             decryptString: () => "",
@@ -448,6 +453,70 @@ describe("desktop/preload, tray & main coordinator", () => {
       );
       expect(quitMock).toHaveBeenCalledTimes(1);
     } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+      fs.rmSync(tmpUserData, { recursive: true, force: true });
+    }
+  });
+
+  it("uses plaintext keyring fallback on darwin when safeStorage is unavailable", async () => {
+    const tmpUserData = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nango-desktop-darwin-keyring-"),
+    );
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", {
+      value: "darwin",
+      configurable: true,
+    });
+    try {
+      const quitMock = vi.fn();
+      const showErrorBoxMock = vi.fn();
+      const coordinator = new DesktopAppCoordinator({
+        resourcesPath: "/resources",
+        electron: {
+          app: {
+            requestSingleInstanceLock: () => true,
+            quit: quitMock,
+            getVersion: () => "1.0.0",
+            getPath: () => tmpUserData,
+            whenReady: async () => {},
+            on: vi.fn(),
+          },
+          BrowserWindow: vi.fn() as unknown as never,
+          Tray: vi.fn() as unknown as never,
+          Menu: { buildFromTemplate: vi.fn() },
+          dialog: {
+            showOpenDialog: vi.fn(),
+            showErrorBox: showErrorBoxMock,
+          },
+          shell: { openPath: vi.fn(async () => "") },
+          ipcMain: { handle: vi.fn() },
+          safeStorage: {
+            isEncryptionAvailable: () => false,
+            encryptString: () => Buffer.alloc(0),
+            decryptString: () => "",
+          },
+        },
+      });
+
+      const started = await coordinator.bootstrap();
+      expect(started).toBe(false);
+      expect(showErrorBoxMock).toHaveBeenCalledWith(
+        "Nango Startup Failed",
+        expect.stringContaining("standalone.tar"),
+      );
+      const secretsFile = path.join(tmpUserData, "secrets.bin");
+      expect(fs.existsSync(secretsFile)).toBe(true);
+      const envelope = JSON.parse(fs.readFileSync(secretsFile, "utf8")) as {
+        encrypted: boolean;
+      };
+      expect(envelope.encrypted).toBe(false);
+      expect(quitMock).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
       fs.rmSync(tmpUserData, { recursive: true, force: true });
     }
   });
