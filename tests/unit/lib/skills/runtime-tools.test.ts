@@ -6,19 +6,29 @@ import {
   buildRunSkillScriptOnSshTool,
 } from "@/lib/skills/runtime-tools";
 import { getDbSkillStorage, InvalidSkillPathError } from "@/lib/skills/storage";
-import {
-  runOnBoundServer,
-  SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
-} from "@/lib/ssh/runtime-tools";
+import { runOnBoundServer } from "@/lib/ssh/runtime-tools";
 import type { SkillSpec } from "@/lib/skills/skill-pool";
 
-vi.mock("@/lib/skills/storage");
+let mockSkillScriptMaxCommandChars: number | undefined;
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    getConfigNumber: (key: string, defaultValue: number) => {
+      if (
+        key === "ssh.max_command_chars" &&
+        mockSkillScriptMaxCommandChars !== undefined
+      ) {
+        return mockSkillScriptMaxCommandChars;
+      }
+      return defaultValue;
+    },
+  };
+});
 
-// Explicit factory: automocking would erase the numeric constant that
-// runtime-tools.ts imports, silently disabling the COMMAND_TOO_LONG gate.
+vi.mock("@/lib/skills/storage");
 vi.mock("@/lib/ssh/runtime-tools", () => ({
   runOnBoundServer: vi.fn(),
-  SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS: 16_000,
 }));
 
 const mockStorage = { readFile: vi.fn() };
@@ -398,10 +408,11 @@ describe("buildRunSkillScriptOnSshTool", () => {
   });
 
   // The cap is measured by runOnBoundServer on the composed wire command; this
-  // layer only declares the budget and passes the verdict through.
+  // layer only forwards the configured budget (default 20_000) and passes the verdict through.
   it("forwards the wire-length budget instead of measuring it locally", async () => {
+    mockSkillScriptMaxCommandChars = undefined;
     mockStorage.readFile.mockResolvedValue({
-      content: Buffer.from("a".repeat(SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS), "utf-8"),
+      content: Buffer.from("a".repeat(20_000), "utf-8"),
     });
     mockRunOnBoundServer.mockResolvedValue({ ok: true, stdout: "" } as never);
 
@@ -411,9 +422,24 @@ describe("buildRunSkillScriptOnSshTool", () => {
       serverName: "server-1",
     });
 
-    expect(mockRunOnBoundServer.mock.calls[0][0].maxCommandChars).toBe(
-      SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
-    );
+    expect(mockRunOnBoundServer.mock.calls[0][0].maxCommandChars).toBe(20_000);
+  });
+
+  it("reads ssh.max_command_chars from config", async () => {
+    mockSkillScriptMaxCommandChars = 32_000;
+    mockStorage.readFile.mockResolvedValue({
+      content: Buffer.from("echo hi\n", "utf-8"),
+    });
+    mockRunOnBoundServer.mockResolvedValue({ ok: true, stdout: "" } as never);
+
+    await runOnSsh.execute({
+      name: "ssh-skill",
+      filename: "probe.sh",
+      serverName: "server-1",
+    });
+
+    expect(mockRunOnBoundServer.mock.calls[0][0].maxCommandChars).toBe(32_000);
+    mockSkillScriptMaxCommandChars = undefined;
   });
 
   it("returns COMMAND_TOO_LONG from the shared path unchanged", async () => {

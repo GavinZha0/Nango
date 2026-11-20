@@ -118,4 +118,20 @@ describe("buildTree", () => {
     buildTree(files);
     expect(files).toEqual(snapshot);
   });
+
+  it("computes recursive fileCount on directory nodes", () => {
+    const tree = buildTree([
+      f("scripts/probe.sh"),
+      f("scripts/lib/helper.py"),
+      f("scripts/lib/util.py"),
+      f("LICENSE"),
+    ]);
+    const scripts = tree.find((n) => n.label === "scripts");
+    const lib = scripts?.children.find((n) => n.label === "lib");
+    const license = tree.find((n) => n.label === "LICENSE");
+
+    expect(scripts?.fileCount).toBe(3);
+    expect(lib?.fileCount).toBe(2);
+    expect(license?.fileCount).toBe(1);
+  });
 });

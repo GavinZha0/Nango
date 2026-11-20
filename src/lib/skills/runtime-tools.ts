@@ -26,10 +26,8 @@ import {
 import { getActiveAdapter } from "@/lib/sandbox/registry.server";
 import { assembleCodeOutput } from "@/lib/sandbox/code-output";
 import { shellSingleQuote } from "@/lib/ssh/client";
-import {
-  runOnBoundServer,
-  SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
-} from "@/lib/ssh/runtime-tools";
+import { getSshLimits } from "@/lib/ssh/limits";
+import { runOnBoundServer } from "@/lib/ssh/runtime-tools";
 
 /**
  * Interpreter dispatch by file extension. Adding a language requires both a
@@ -464,7 +462,7 @@ export function buildRunSkillScriptOnSshTool(
         serverName: args.serverName,
         command,
         timeoutSeconds: args.timeoutSeconds,
-        maxCommandChars: SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS,
+        maxCommandChars: getSshLimits().maxCommandChars,
         agentSshServerIds: opts.agentSshServerIds,
         signal: ctx?.abortSignal,
       });

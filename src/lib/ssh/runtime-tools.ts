@@ -12,6 +12,7 @@ import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
 
 import { composeWireCommand, execOnServer, SshError } from "./client";
+import { getSshLimits } from "./limits";
 import { listSshServersByIds, resolveSshServerByName } from "./lookup";
 import { evaluateCommandPolicy } from "./policy";
 
@@ -27,7 +28,7 @@ const RunSshArgs = z.object({
   command: z
     .string()
     .min(1)
-    .max(8000)
+    .max(16000)
     .describe(
       "Single shell command to execute. Runs as the server's configured user.",
     ),
@@ -46,12 +47,6 @@ const RunSshArgs = z.object({
         "Default is 60 seconds.",
     ),
 });
-
-// CONTRACT: Only applies to run_skill_script_on_ssh (reviewed script bytes),
-// NOT to run_ssh_command (LLM-authored commands, capped at 8000 at the input).
-// Measured against the *composed* wire command — see
-// `RunOnBoundServerOpts.maxCommandChars`.
-export const SSH_SKILL_SCRIPT_MAX_COMMAND_CHARS = 16_000;
 
 export interface RunOnBoundServerOpts {
   serverName: string;
@@ -139,21 +134,20 @@ export async function runOnBoundServer(
   // Length gate on the string that actually reaches sshd. Measured here, not
   // by the caller, because a login-shell host re-quotes the whole command and
   // a caller that measures its own pre-wrapped string under-reports.
-  if (opts.maxCommandChars !== undefined) {
-    const wireLength = composeWireCommand(opts.command, server.loginShell).length;
-    if (wireLength > opts.maxCommandChars) {
-      return {
-        ok: false,
-        error: "COMMAND_TOO_LONG",
-        message:
-          `Assembled SSH command is ${wireLength} characters` +
-          (server.loginShell
-            ? " after login-shell wrapping"
-            : "") +
-          `, exceeding the maximum of ${opts.maxCommandChars}. ` +
-          "Shorten the script or split the run.",
-      };
-    }
+  const maxCommandChars = opts.maxCommandChars ?? getSshLimits().maxCommandChars;
+  const wireLength = composeWireCommand(opts.command, server.loginShell).length;
+  if (wireLength > maxCommandChars) {
+    return {
+      ok: false,
+      error: "COMMAND_TOO_LONG",
+      message:
+        `Assembled SSH command is ${wireLength} characters` +
+        (server.loginShell
+          ? " after login-shell wrapping"
+          : "") +
+        `, exceeding the maximum of ${maxCommandChars}. ` +
+        "Shorten the script or split the run.",
+    };
   }
 
   try {

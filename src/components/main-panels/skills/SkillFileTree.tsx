@@ -51,6 +51,8 @@ export interface TreeNode {
   /** Full path: a file's `skill_file.path`, or a directory prefix. */
   path: string;
   kind: "dir" | "file";
+  /** Total number of files under this node (1 for files, recursive sum for dirs). */
+  fileCount: number;
   children: TreeNode[];
 }
 
@@ -61,9 +63,12 @@ const collator = new Intl.Collator(undefined, {
 
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return nodes
-    .map((n) =>
-      n.kind === "dir" ? { ...n, children: sortNodes(n.children) } : n,
-    )
+    .map((n) => {
+      if (n.kind !== "dir") return n;
+      const children = sortNodes(n.children);
+      const fileCount = children.reduce((sum, c) => sum + c.fileCount, 0);
+      return { ...n, children, fileCount };
+    })
     // Directories first so a group stays contiguous regardless of name.
     .sort((a, b) =>
       a.kind === b.kind ? collator.compare(a.label, b.label) : a.kind === "dir" ? -1 : 1,
@@ -86,6 +91,7 @@ export function buildTree(files: SkillFileMeta[]): TreeNode[] {
           label: segments[i],
           path: prefix,
           kind,
+          fileCount: isLeaf ? 1 : 0,
           children: [],
         };
         level.push(node);
@@ -199,6 +205,9 @@ export function SkillFileTree({
                   <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500/80 dark:text-blue-400/80" />
                 )}
                 <span className="truncate">{node.label}</span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
+                  ({node.fileCount})
+                </span>
               </button>
               {renderActions({ path: node.path, kind: "folder" })}
             </div>

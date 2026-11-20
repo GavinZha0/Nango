@@ -85,6 +85,12 @@ type VisibilityValue = "private" | "public";
 
 const CHIP = "rounded-sm px-1 py-0.5 text-[10px] leading-none font-mono";
 
+const TRANSPORT_TEXT_CLASS: Record<BackendTransport, string> = {
+  A2A: "text-emerald-600 dark:text-emerald-400",
+  AGUI: "text-blue-600 dark:text-blue-400",
+  REST: "text-muted-foreground",
+};
+
 function ModelChip({ modelId }: { modelId?: string }) {
   if (!modelId) return null;
   return (
@@ -961,7 +967,10 @@ export function AgentPanel(): ReactNode {
                             {backendGroup.transports.map((transport) => (
                               <span
                                 key={transport}
-                                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-muted-foreground"
+                                className={cn(
+                                  "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none",
+                                  TRANSPORT_TEXT_CLASS[transport],
+                                )}
                               >
                                 {transport}
                               </span>

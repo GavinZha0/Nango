@@ -203,20 +203,32 @@ describe("runOnBoundServer", () => {
     expect((result as { message: string }).message).not.toMatch(/login-shell/);
   });
 
-  // run_ssh_command's 8000 bounds LLM output, not the wire, so it passes no
-  // cap and a wrapped command may legitimately exceed it.
-  it("applies no wire cap when maxCommandChars is unset", async () => {
+  // When maxCommandChars is unset, runOnBoundServer falls back to
+  // ssh.max_command_chars (default 20_000).
+  it("applies default 20000 wire cap when maxCommandChars is unset", async () => {
     allowEverything();
     mockExec.mockResolvedValue(okResult as never);
 
-    const result = await runOnBoundServer({
+    // 5000 chars without quotes: 5000 + 11 = 5011 on the wire (under 20000).
+    const okAttempt = await runOnBoundServer({
+      serverName: "test-server",
+      command: "a".repeat(5000),
+      agentSshServerIds: ["server-1"],
+    });
+    expect(okAttempt.ok).toBe(true);
+    expect(mockExec).toHaveBeenCalledTimes(1);
+
+    // 8000 single quotes: 8000*4 + 11 = 32011 on the wire (over 20000).
+    const tooLongAttempt = await runOnBoundServer({
       serverName: "test-server",
       command: "'".repeat(8000),
       agentSshServerIds: ["server-1"],
     });
-
-    expect(result.ok).toBe(true);
-    expect(mockExec).toHaveBeenCalled();
+    expect(tooLongAttempt).toMatchObject({
+      ok: false,
+      error: "COMMAND_TOO_LONG",
+    });
+    expect(mockExec).toHaveBeenCalledTimes(1);
   });
 
   it("returns the exec envelope with server identity", async () => {
@@ -344,11 +356,11 @@ describe("run_ssh_command after the runOnBoundServer extraction", () => {
     );
   });
 
-  it("keeps the 8000-character cap on LLM-authored commands", async () => {
+  it("keeps the 16000-character cap on LLM-authored commands", async () => {
     await expect(
       buildTool().execute({
         serverName: "test-server",
-        command: "a".repeat(8001),
+        command: "a".repeat(16001),
       }),
     ).rejects.toThrow();
     expect(mockResolve).not.toHaveBeenCalled();

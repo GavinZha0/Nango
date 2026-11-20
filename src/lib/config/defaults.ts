@@ -61,6 +61,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "ssh.exec_timeout", value: "60", valueType: "number", description: "Command timeout in seconds" },
   { key: "ssh.connect_timeout", value: "10", valueType: "number", description: "Connection timeout in seconds" },
   { key: "ssh.max_output_bytes", value: "1048576", valueType: "number", description: "Max output per stream in bytes (1 MiB)" },
+  { key: "ssh.max_command_chars", value: "20000", valueType: "number", description: "Max assembled SSH wire command length in characters" },
 
   // ── skill ─────────────────────────────────────────────────────────
   { key: "skill.max_file_bytes", value: "262144", valueType: "number", description: "Max single file size in bytes (256 KB)" },
