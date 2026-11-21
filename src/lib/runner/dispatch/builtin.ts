@@ -544,6 +544,20 @@ export async function buildBuiltinAgents(
       ? ""
       : buildBentoSlidesPromptBlock();
 
+    const generativeUiPriorityBlock: string =
+      spec.generativeUiEnabled && (hasEcharts || hasHtmlPage)
+        ? [
+            "## UI & Visualization Tool Priority",
+            "1. **When the `render_ui` tool is available, prefer it first** for structured layouts, cards, tables, tabs, reports, and standard charts.",
+            ...(hasEcharts
+              ? ["2. **Use `generate_echarts_config`** when `render_ui` is unavailable or cannot express the chart (e.g. external dataset separation, multi-axis, custom tooltips, or specialized ECharts series)."]
+              : []),
+            ...(hasHtmlPage
+              ? [`${hasEcharts ? "3" : "2"}. **Use \`generate_html_page\`** when \`render_ui\` is unavailable or cannot build the requested experience (e.g. free-form HTML/CSS/JS pages or interactive games).`]
+              : []),
+          ].join("\n")
+        : "";
+
     // Always true in practice — `ambientTools` is never empty. Kept as
     // a disjunction so the invariant still holds if ambient tools ever
     // become conditional. `maxSteps` below depends on this: a tool-only
@@ -597,6 +611,7 @@ export async function buildBuiltinAgents(
       if (chartPromptBlock.length > 0) parts.push(chartPromptBlock);
       if (htmlPagePromptBlock.length > 0) parts.push(htmlPagePromptBlock);
       if (bentoSlidesPromptBlock.length > 0) parts.push(bentoSlidesPromptBlock);
+      if (generativeUiPriorityBlock.length > 0) parts.push(generativeUiPriorityBlock);
 
       if (resolveSharedStateEnabled({ sharedStateEnabled: spec.sharedStateEnabled, role: spec.role })) {
         parts.push(SHARED_STATE_PROMPT_BLOCK);

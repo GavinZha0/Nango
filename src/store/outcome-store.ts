@@ -10,6 +10,7 @@
  */
 
 import { create } from "zustand";
+import type { GenerativeUISurfaceContent } from "@copilotkit/shared/generative-ui";
 import { applySlideEdit } from "@/lib/outcomes/merge-slides";
 import { normalizeOutcomeId } from "@/lib/outcomes/schema";
 
@@ -44,7 +45,7 @@ function cappedPendingPush(
  *  dedicated renderer under `components/workspace/blocks/`. Adding a
  *  new block: append the discriminant + a `<KindBlock>` component +
  *  wire it in `BlockList`. */
-export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock | ImageBlock | SlideBlock;
+export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock | ImageBlock | SlideBlock | A2uiBlock;
 
 export interface TextBlock {
   kind: "text";
@@ -115,6 +116,11 @@ export interface HtmlBlock {
   /** Complete HTML page source (≤ 512 KB; enforced at the handler).
    *  Rendered inside a sandboxed iframe via `srcdoc`. */
   html: string;
+}
+
+export interface A2uiBlock {
+  kind: "a2ui";
+  surface: GenerativeUISurfaceContent;
 }
 
 export interface ImageBlock {

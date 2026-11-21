@@ -68,6 +68,7 @@ export const AgentDraftSchema = z.object({
   toolApprovalMode: z.enum(["always", "auto", "never"]).optional().describe("Safety gate for tool approvals"),
   role: z.enum(["supervisor", "secretary", "evaluator", "tester"]).nullable().optional().describe("System role assignment"),
   sharedStateEnabled: z.boolean().optional().describe("Whether this agent has shared state co-editing enabled"),
+  generativeUiEnabled: z.boolean().optional().describe("Whether this agent can render structured Generative UI (A2UI) components in chat"),
   tools: z.object({
     mcp: z.array(z.string()).optional().describe("Array of bound MCP server UUIDs"),
     skills: z.array(z.string()).optional().describe("Array of bound Skill UUIDs"),

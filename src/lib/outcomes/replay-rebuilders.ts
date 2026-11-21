@@ -43,6 +43,11 @@ import {
 } from "@/lib/outcomes/args-to-content";
 import { normalizeOutcomeId } from "./schema";
 import { applySlideEdit } from "./merge-slides";
+import {
+  deriveSurfaceOutcomeId,
+  extractSurfaceTitle,
+  parseSurfaceContent,
+} from "@/lib/generative-ui/surface";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
 
@@ -670,6 +675,34 @@ export function rebuildImageOutcome(
     );
     return null;
   }
+}
+
+/** Rebuild an Outcome from a folded `generative-ui-surface` document. */
+export function rebuildA2UiOutcome(
+  rawSurface: unknown,
+  ctx: RebuildContext,
+): { id: string; outcome: Outcome } | null {
+  const surface = parseSurfaceContent(rawSurface);
+  if (!surface || surface.status !== "ready" || surface.operations.length === 0) {
+    return null;
+  }
+
+  const outcomeId = deriveSurfaceOutcomeId(surface.surfaceId);
+  return {
+    id: outcomeId,
+    outcome: {
+      outcomeId,
+      kind: "report",
+      title: extractSurfaceTitle(surface),
+      blocks: [{ kind: "a2ui", surface }],
+      agentId: ctx.entityId,
+      threadId: ctx.threadId,
+      runId: ctx.runId,
+      createdAt: ctx.ts.getTime(),
+      collapsed: false,
+      savedArtifactId: null,
+    },
+  };
 }
 
 // helpers

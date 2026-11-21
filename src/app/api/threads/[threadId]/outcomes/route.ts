@@ -1,7 +1,8 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { GENERATIVE_UI_ACTIVITY_TYPE } from "@copilotkit/shared/generative-ui";
 
 import { db } from "@/lib/db";
 import {
@@ -20,10 +21,15 @@ import {
   rebuildBentoSlideEditOutcome,
   rebuildImageOutcome,
   rebuildWebSearchOutcome,
+  rebuildA2UiOutcome,
   type RebuildContext,
   type ToolCallChunkPayload,
   type ToolCallResultPayload,
 } from "@/lib/outcomes/replay-rebuilders";
+import {
+  applySurfaceDelta,
+  type SurfacePatchOp,
+} from "@/lib/generative-ui/surface";
 
 /**
  * GET /api/threads/[id]/outcomes — replay the thread's
@@ -75,6 +81,13 @@ export const GET = withSession<{ threadId: string }>(
           or(
             eq(EntityRunEventTable.type, "tool_call_chunk"),
             eq(EntityRunEventTable.type, "tool_call_result"),
+            and(
+              or(
+                eq(EntityRunEventTable.type, "activity_snapshot"),
+                eq(EntityRunEventTable.type, "activity_delta"),
+              ),
+              sql`${EntityRunEventTable.payload}->>'activityType' = ${GENERATIVE_UI_ACTIVITY_TYPE}`,
+            ),
           ),
         ),
       )
@@ -94,6 +107,13 @@ export const GET = withSession<{ threadId: string }>(
     }
     const pending: Map<string, PendingPair> = new Map();
     const outcomes: Map<string, Outcome> = new Map();
+    interface SurfaceDraft {
+      raw: Record<string, unknown>;
+      runId: string;
+      entityId: string;
+      ts: Date;
+    }
+    const surfaceDrafts: Map<string, SurfaceDraft> = new Map();
 
     const ctxFor = (p: PendingPair): RebuildContext => ({
       threadId,
@@ -232,7 +252,55 @@ export const GET = withSession<{ threadId: string }>(
           outcomes.set(imageOutcome.id, imageOutcome.outcome);
           if (pair) pending.delete(result.toolCallId);
         }
+      } else if (row.eventType === "activity_snapshot") {
+        const p = row.payload as {
+          messageId?: unknown;
+          activityType?: unknown;
+          content?: unknown;
+        };
+        if (
+          typeof p.messageId === "string" &&
+          p.activityType === GENERATIVE_UI_ACTIVITY_TYPE &&
+          p.content &&
+          typeof p.content === "object" &&
+          !Array.isArray(p.content)
+        ) {
+          surfaceDrafts.set(p.messageId, {
+            raw: { ...(p.content as Record<string, unknown>) },
+            runId: row.runId,
+            entityId: row.entityId,
+            ts: row.eventTs,
+          });
+        }
+      } else if (row.eventType === "activity_delta") {
+        const p = row.payload as {
+          messageId?: unknown;
+          activityType?: unknown;
+          patch?: unknown;
+        };
+        if (
+          typeof p.messageId === "string" &&
+          p.activityType === GENERATIVE_UI_ACTIVITY_TYPE &&
+          Array.isArray(p.patch)
+        ) {
+          const existing = surfaceDrafts.get(p.messageId);
+          if (existing) {
+            existing.raw = applySurfaceDelta(existing.raw, p.patch as SurfacePatchOp[]);
+            existing.ts = row.eventTs;
+          }
+        }
       }
+    }
+
+    for (const draft of surfaceDrafts.values()) {
+      const built = rebuildA2UiOutcome(draft.raw, {
+        threadId,
+        runId: draft.runId,
+        entityId: draft.entityId,
+        ts: draft.ts,
+        log,
+      });
+      if (built) outcomes.set(built.id, built.outcome);
     }
 
     // 3. Back-fill savedArtifactId. Defensive try/catch: missing

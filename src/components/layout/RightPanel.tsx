@@ -57,6 +57,7 @@ import { useCopilotSharedStateSync } from "@/hooks/useCopilotSharedState";
 import { useRole } from "@/hooks/useRole";
 import { SaveToEvalDialog } from "@/components/chat/SaveToEvalDialog";
 import { useTestMutationSubscriber } from "@/hooks/useTestMutationSubscriber";
+import { useA2UiOutcomeTap } from "@/hooks/useA2UiOutcomeTap";
 
 // Tab segment metadata
 
@@ -345,7 +346,13 @@ function RightPanelToolbar(): ReactNode {
  * threadId eager-capture. Renders nothing.
  */
 
-function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): ReactNode {
+function KnownAgentProviderHooks({
+  activeAgentId,
+  isGenerativeUiEnabled,
+}: {
+  activeAgentId: string;
+  isGenerativeUiEnabled: boolean;
+}): ReactNode {
   useOutcomeTools();
   useCopilotSharedStateSync(activeAgentId);
   // Specific renderers — CopilotKit's matcher prefers exact name
@@ -385,6 +392,7 @@ function KnownAgentProviderHooks({ activeAgentId }: { activeAgentId: string }): 
 
   const { agent } = useAgent({ agentId: activeAgentId });
   useTestMutationSubscriber(agent);
+  useA2UiOutcomeTap(agent, isGenerativeUiEnabled);
 
   // threadId eager-capture
   useEffect(() => {
@@ -535,7 +543,12 @@ export function RightPanel(): ReactNode {
           enableInspector={false}
           renderActivityMessages={STABLE_ACTIVITY_RENDERERS}
         >
-          {isAgentKnown && <KnownAgentProviderHooks activeAgentId={agentId} />}
+          {isAgentKnown && (
+            <KnownAgentProviderHooks
+              activeAgentId={agentId}
+              isGenerativeUiEnabled={isGenerativeUiEnabled}
+            />
+          )}
           <div
             id="right-tabpanel-chat"
             data-testid="right-tabpanel-chat"

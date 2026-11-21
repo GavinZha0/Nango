@@ -112,6 +112,7 @@ interface AgentRow {
   maxSteps: number;
   toolApprovalMode: string;
   sharedStateEnabled: boolean;
+  generativeUiEnabled: boolean;
   credentialId: string;
 }
 
@@ -144,6 +145,7 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
       maxSteps: BuiltinAgentTable.maxSteps,
       toolApprovalMode: BuiltinAgentTable.toolApprovalMode,
       sharedStateEnabled: BuiltinAgentTable.sharedStateEnabled,
+      generativeUiEnabled: BuiltinAgentTable.generativeUiEnabled,
       credentialId: BuiltinAgentTable.credentialId,
     })
     .from(BuiltinAgentTable)
@@ -194,6 +196,7 @@ export const defaultLoadAgentSpec: AgentSpecLoader = async (agentId) => {
     maxTokens: agent.maxTokens,
     toolApprovalMode: agent.toolApprovalMode as AgentToolApprovalMode,
     sharedStateEnabled: resolveSharedStateEnabled(agent),
+    generativeUiEnabled: agent.generativeUiEnabled,
     maxSteps: agent.maxSteps,
     apiKey: credential.token,
     credentialType: credential.type,

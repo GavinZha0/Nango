@@ -78,6 +78,7 @@ export function OutcomeCard({
   // header-only by construction.
   const expanded: boolean = isEnlarged ? true : !outcome.collapsed;
   const isSaved: boolean = outcome.savedArtifactId !== null;
+  const hasA2uiBlock: boolean = outcome.blocks.some((b) => b.kind === "a2ui");
   const isSelected: boolean = selectedId === outcome.outcomeId;
 
   // Scroll this card into view when the user clicks "View in Outcomes"
@@ -231,7 +232,7 @@ export function OutcomeCard({
               server); otherwise active Save button. The button disables
               itself during the round-trip so rapid clicks can't fire a
               second request. */}
-          {isSaved ? (
+          {!hasA2uiBlock && (isSaved ? (
             <span
               className="inline-flex h-7 w-7 items-center justify-center text-green-600"
               title="Saved to Artifact library"
@@ -252,7 +253,7 @@ export function OutcomeCard({
             >
               <Save className="h-4 w-4" />
             </button>
-          )}
+          ))}
 
           {/* Remove — V1 substitute for the future remove_chart tool. */}
           <button

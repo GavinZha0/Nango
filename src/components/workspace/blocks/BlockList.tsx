@@ -23,6 +23,7 @@ import type { ReactElement } from "react";
 
 import type { OutcomeBlock } from "@/store/outcome-store";
 
+import { A2uiBlockRenderer } from "./A2uiBlock";
 import { CardListBlockRenderer } from "./CardListBlock";
 import { ChartBlockRenderer } from "./ChartBlock";
 import { HtmlBlockRenderer } from "./HtmlBlock";
@@ -74,6 +75,8 @@ function BlockSwitch({
       return <ImageBlockRenderer block={block} size={size} />;
     case "slide":
       return <SlideBlockRenderer block={block} size={size} />;
+    case "a2ui":
+      return <A2uiBlockRenderer block={block} size={size} />;
     default: {
       // exhaustiveness check — TS will error here if a new block
       // kind is added to the union without a branch above.

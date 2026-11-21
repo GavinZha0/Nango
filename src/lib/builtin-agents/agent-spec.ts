@@ -42,6 +42,8 @@ export interface AgentSpec {
   toolApprovalMode: AgentToolApprovalMode;
   /** Whether this agent has read/write access to the editor's shared state (Copilot Mode). */
   sharedStateEnabled: boolean;
+  /** Whether this agent can render structured Generative UI (A2UI) components. */
+  generativeUiEnabled?: boolean;
   /** Always >= 1; defaults to 10 in schema. */
   maxSteps: number;
   /** SECURITY: decrypted LLM API key. Memory-only, never persisted /
