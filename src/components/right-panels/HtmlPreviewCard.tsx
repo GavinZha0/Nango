@@ -89,6 +89,8 @@ export function HtmlPreviewCard(props: HtmlPreviewProps): ReactElement {
       createdAt: Date.now(),
       collapsed: false,
       savedArtifactId: null,
+      revision: props.toolCallId,
+      savedRevision: null,
     });
   }, [props.status, props.result, props.toolCallId]);
 

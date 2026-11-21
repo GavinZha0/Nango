@@ -12,7 +12,10 @@
 import { create } from "zustand";
 import type { GenerativeUISurfaceContent } from "@copilotkit/shared/generative-ui";
 import { applySlideEdit } from "@/lib/outcomes/merge-slides";
-import { normalizeOutcomeId } from "@/lib/outcomes/schema";
+import {
+  deriveSlideRevision,
+  normalizeOutcomeId,
+} from "@/lib/outcomes/schema";
 
 // CONTRACT: Hard cap on buffered pending edits per outcome to prevent unbounded
 // memory growth when edits reference non-existent slide IDs (e.g. LLM hallucination,
@@ -178,6 +181,23 @@ interface BaseOutcome {
   /** `null` until user clicks Save; then the `artifact.id` returned
    *  by POST /api/artifacts. */
   savedArtifactId: string | null;
+
+  /** Deterministic producer version of the current outcome content. */
+  revision: string;
+  /** `revision` recorded at the last Save / Re-save (`null` when
+   *  unsaved or migrated from a pre-revision artifact). */
+  savedRevision: string | null;
+}
+
+/** True when a saved outcome has been updated after its last save. */
+export function isOutcomeStale(
+  outcome: Pick<Outcome, "savedArtifactId" | "savedRevision" | "revision">,
+): boolean {
+  return (
+    outcome.savedArtifactId !== null &&
+    outcome.savedRevision !== null &&
+    outcome.savedRevision !== outcome.revision
+  );
 }
 
 /** The only outcome shape today. `blocks` renders in order via
@@ -234,7 +254,11 @@ interface OutcomeState {
   removeOutcome: (outcomeId: string) => void;
   toggleCollapse: (outcomeId: string) => void;
   select: (outcomeId: string | null) => void;
-  markSaved: (outcomeId: string, savedArtifactId: string) => void;
+  markSaved: (
+    outcomeId: string,
+    savedArtifactId: string,
+    savedRevision?: string,
+  ) => void;
 
   /** Called by the workspaceStore threadId subscriber. */
   clearForThreadSwitch: () => void;
@@ -318,12 +342,13 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
           (o) => o.outcomeId === outcome.outcomeId,
         );
         if (idx === -1) return { outcomes: [...state.outcomes, outcome] };
-        // Carry savedArtifactId + collapsed across re-emits so a
-        // producer regenerate doesn't unsave or expand the card.
+        // Carry savedArtifactId, savedRevision + collapsed across re-emits
+        // so a producer regenerate doesn't unsave or expand the card.
         const prior: Outcome = state.outcomes[idx];
         const merged: Outcome = {
           ...outcome,
           savedArtifactId: prior.savedArtifactId ?? outcome.savedArtifactId,
+          savedRevision: prior.savedRevision ?? outcome.savedRevision,
           collapsed: prior.collapsed,
         };
         const next: Outcome[] = state.outcomes.slice();
@@ -375,6 +400,8 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
           appliedToolCallIds: flushed.appliedIds,
         };
 
+        const nextRevision = deriveSlideRevision(flushed.appliedIds);
+
         if (!prior) {
           const outcome: Outcome = {
             outcomeId: input.outcomeId,
@@ -388,6 +415,8 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
             createdAt: Date.now(),
             collapsed: false,
             savedArtifactId: null,
+            revision: nextRevision,
+            savedRevision: null,
           };
           return {
             outcomes: [...state.outcomes, outcome],
@@ -400,6 +429,7 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
           title: nextTitle,
           description: nextDescription,
           blocks: [updatedSlideBlock],
+          revision: nextRevision,
         };
 
         const nextOutcomes = state.outcomes.slice();
@@ -501,6 +531,7 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
                 }
               : b,
           ),
+          revision: deriveSlideRevision(flushed.appliedIds),
         };
 
         const nextOutcomes = state.outcomes.slice();
@@ -526,10 +557,16 @@ export const useOutcomeStore = create<OutcomeState>((set, get) => {
 
     select: (outcomeId) => set({ selectedId: outcomeId }),
 
-    markSaved: (outcomeId, savedArtifactId) =>
+    markSaved: (outcomeId, savedArtifactId, savedRevision) =>
       set((state) => ({
         outcomes: state.outcomes.map((o) =>
-          o.outcomeId === outcomeId ? { ...o, savedArtifactId } : o,
+          o.outcomeId === outcomeId
+            ? {
+                ...o,
+                savedArtifactId,
+                savedRevision: savedRevision ?? o.revision,
+              }
+            : o,
         ),
       })),
 

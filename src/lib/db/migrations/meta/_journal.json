@@ -57,6 +57,13 @@
       "when": 1794773388120,
       "tag": "0007_builtin_agent_generative_ui",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795292604156,
+      "tag": "0008_artifact_source_revision",
+      "breakpoints": true
     }
   ]
 }

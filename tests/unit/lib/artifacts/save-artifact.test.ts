@@ -11,6 +11,7 @@ import type { EntityRunEventEntity } from "@/lib/db/schema";
 const mockInsertedArtifacts: Array<Record<string, unknown>> = [];
 const mockInsertedWorkflows: Array<Record<string, unknown>> = [];
 const mockArtifactUpdates: Array<Record<string, unknown>> = [];
+const mockWorkflowUpdates: Array<Record<string, unknown>> = [];
 let mockExistingArtifact: Record<string, unknown> | null = null;
 let mockEvents: EntityRunEventEntity[] = [];
 /** When set, the next ArtifactTable insert throws this instead of inserting. */
@@ -61,9 +62,22 @@ vi.mock("@/lib/db", () => {
     }),
   }));
 
+  const updateMock = vi.fn((table) => {
+    const chain = {
+      set: vi.fn((vals: Record<string, unknown>) => {
+        if (table === ArtifactTable) mockArtifactUpdates.push(vals);
+        if (table === WorkflowTable) mockWorkflowUpdates.push(vals);
+        return chain;
+      }),
+      where: vi.fn().mockResolvedValue(undefined),
+    };
+    return chain;
+  });
+
   const txMock = {
     select: vi.fn(() => createQueryMock()),
     insert: insertMock,
+    update: updateMock,
   };
 
   return {
@@ -71,16 +85,7 @@ vi.mock("@/lib/db", () => {
       select: vi.fn(() => createQueryMock()),
       insert: insertMock,
       transaction: vi.fn(async (cb) => cb(txMock)),
-      update: vi.fn((table) => {
-        const chain = {
-          set: vi.fn((vals: Record<string, unknown>) => {
-            if (table === ArtifactTable) mockArtifactUpdates.push(vals);
-            return chain;
-          }),
-          where: vi.fn().mockResolvedValue(undefined),
-        };
-        return chain;
-      }),
+      update: updateMock,
     },
   };
 });
@@ -116,6 +121,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     mockInsertedArtifacts.length = 0;
     mockInsertedWorkflows.length = 0;
     mockArtifactUpdates.length = 0;
+    mockWorkflowUpdates.length = 0;
     mockExistingArtifact = null;
     mockEvents = [];
     mockArtifactInsertError = null;
@@ -799,7 +805,10 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     it("inserts a workflow-less a2ui artifact on first save", async () => {
       mockEvents = surfaceEvents(["Q3"]);
 
-      const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+      const result = await saveArtifact(
+        { ownerId, threadId, outcomeId, revision: "2" },
+        mockDeps,
+      );
 
       expect(result).toEqual({
         artifactId: "art-1",
@@ -811,6 +820,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       const saved = mockInsertedArtifacts[0]!;
       expect(saved.type).toBe("a2ui");
       expect(saved.workflowId).toBeNull();
+      expect(saved.sourceRevision).toBe("2");
       expect((saved.snapshot as { operations: unknown[] }).operations).toHaveLength(2);
     });
 
@@ -825,7 +835,10 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       };
       mockEvents = surfaceEvents(["Q3", "Q4"]);
 
-      const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+      const result = await saveArtifact(
+        { ownerId, threadId, outcomeId, revision: "3" },
+        mockDeps,
+      );
 
       expect(result).toEqual({
         artifactId: "existing-a2ui-1",
@@ -836,6 +849,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       expect(mockInsertedArtifacts).toHaveLength(0);
       expect(mockArtifactUpdates).toHaveLength(1);
       const update = mockArtifactUpdates[0]!;
+      expect(update.sourceRevision).toBe("3");
       const snapshot = update.snapshot as { operations: unknown[] };
       expect(snapshot.operations).toHaveLength(3);
       expect((update.config as { surface: unknown }).surface).toEqual(snapshot);
@@ -854,6 +868,158 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       expect(result.artifactId).toBe("winner-a2ui");
       expect(result.reused).toBe(true);
       expect(mockArtifactUpdates).toHaveLength(1);
+    });
+  });
+
+  describe("Re-save refresh for chart & html outcomes", () => {
+    it("refreshes workflow.spec, config, snapshot, and sourceRevision for an updated chart", async () => {
+      const outcomeId = "sales-chart";
+      mockExistingArtifact = {
+        id: "existing-chart-1",
+        workflowId: "existing-wf-1",
+        workflowOutputField: "option",
+        sourceRevision: "call-chart-v1",
+      };
+      mockEvents = [
+        {
+          id: 1,
+          runId: "run-1",
+          seq: 0,
+          type: "tool_call_chunk",
+          payload: {
+            toolCallId: "call-chart-v1",
+            toolName: "generate_echarts_config",
+            args: JSON.stringify({
+              outcome_id: outcomeId,
+              title: "Sales v1",
+              option: { series: [{ type: "bar", data: [1, 2] }] },
+            }),
+          },
+          createdAt: new Date("2026-11-21T10:00:00Z"),
+        },
+        {
+          id: 2,
+          runId: "run-1",
+          seq: 1,
+          type: "tool_call_result",
+          payload: {
+            toolCallId: "call-chart-v1",
+            content: JSON.stringify({ ok: true, outcome_id: outcomeId }),
+          },
+          createdAt: new Date("2026-11-21T10:00:01Z"),
+        },
+        {
+          id: 3,
+          runId: "run-2",
+          seq: 0,
+          type: "tool_call_chunk",
+          payload: {
+            toolCallId: "call-chart-v2",
+            toolName: "generate_echarts_config",
+            args: JSON.stringify({
+              outcome_id: outcomeId,
+              title: "Sales v2",
+              option: { series: [{ type: "line", data: [3, 4] }] },
+            }),
+          },
+          createdAt: new Date("2026-11-21T10:05:00Z"),
+        },
+        {
+          id: 4,
+          runId: "run-2",
+          seq: 1,
+          type: "tool_call_result",
+          payload: {
+            toolCallId: "call-chart-v2",
+            content: JSON.stringify({ ok: true, outcome_id: outcomeId }),
+          },
+          createdAt: new Date("2026-11-21T10:05:01Z"),
+        },
+      ] as unknown as EntityRunEventEntity[];
+
+      const result = await saveArtifact(
+        { ownerId, threadId, outcomeId, revision: "call-chart-v2" },
+        mockDeps,
+      );
+
+      expect(result.reused).toBe(true);
+      expect(result.artifactId).toBe("existing-chart-1");
+      expect(result.workflowId).toBe("existing-wf-1");
+      expect(mockInsertedArtifacts).toHaveLength(0);
+      expect(mockWorkflowUpdates).toHaveLength(1);
+      expect(mockArtifactUpdates).toHaveLength(1);
+
+      const artUpdate = mockArtifactUpdates[0]!;
+      expect(artUpdate.sourceRevision).toBe("call-chart-v2");
+      expect((artUpdate.snapshot as { series: Array<{ type: string }> }).series[0]?.type).toBe("line");
+    });
+
+    it("refreshes workflow.spec, config, snapshot, and sourceRevision for an updated html page", async () => {
+      const outcomeId = "landing-page";
+      mockExistingArtifact = {
+        id: "existing-html-1",
+        workflowId: "existing-wf-html",
+        workflowOutputField: "html",
+        sourceRevision: "call-html-v1",
+      };
+      mockEvents = [
+        {
+          id: 1,
+          runId: "run-1",
+          seq: 0,
+          type: "tool_call_chunk",
+          payload: {
+            toolCallId: "call-html-v2",
+            toolName: "generate_html_page",
+            args: JSON.stringify({
+              outcome_id: outcomeId,
+              title: "Landing v2",
+              html: "<html><body><h1>v2</h1></body></html>",
+            }),
+          },
+          createdAt: new Date(),
+        },
+        {
+          id: 2,
+          runId: "run-1",
+          seq: 1,
+          type: "tool_call_result",
+          payload: {
+            toolCallId: "call-html-v2",
+            content: JSON.stringify({ ok: true, outcome_id: outcomeId }),
+          },
+          createdAt: new Date(),
+        },
+      ] as unknown as EntityRunEventEntity[];
+
+      const result = await saveArtifact(
+        { ownerId, threadId, outcomeId, revision: "call-html-v2" },
+        mockDeps,
+      );
+
+      expect(result.reused).toBe(true);
+      expect(mockWorkflowUpdates).toHaveLength(1);
+      expect(mockArtifactUpdates).toHaveLength(1);
+      expect(mockArtifactUpdates[0]!.sourceRevision).toBe("call-html-v2");
+      expect(mockArtifactUpdates[0]!.snapshot).toBe("<html><body><h1>v2</h1></body></html>");
+    });
+
+    it("short-circuits without DB updates when revision matches sourceRevision", async () => {
+      mockExistingArtifact = {
+        id: "existing-chart-same",
+        workflowId: "existing-wf-same",
+        workflowOutputField: "option",
+        sourceRevision: "call-chart-v1",
+      };
+
+      const result = await saveArtifact(
+        { ownerId, threadId, outcomeId: "sales-chart", revision: "call-chart-v1" },
+        mockDeps,
+      );
+
+      expect(result.reused).toBe(true);
+      expect(mockWorkflowUpdates).toHaveLength(0);
+      expect(mockArtifactUpdates).toHaveLength(0);
     });
   });
 });

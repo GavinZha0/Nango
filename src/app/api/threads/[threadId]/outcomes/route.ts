@@ -313,6 +313,7 @@ export const GET = withSession<{ threadId: string }>(
           .select({
             id: ArtifactTable.id,
             sourceOutcomeId: ArtifactTable.sourceOutcomeId,
+            sourceRevision: ArtifactTable.sourceRevision,
           })
           .from(ArtifactTable)
           .where(
@@ -325,7 +326,10 @@ export const GET = withSession<{ threadId: string }>(
         for (const row of saved) {
           if (!row.sourceOutcomeId) continue;
           const o: Outcome | undefined = outcomes.get(row.sourceOutcomeId);
-          if (o) o.savedArtifactId = row.id;
+          if (o) {
+            o.savedArtifactId = row.id;
+            o.savedRevision = row.sourceRevision ?? null;
+          }
         }
       } catch (err) {
         const cause = (err as { cause?: unknown } | undefined)?.cause;

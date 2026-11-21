@@ -12,6 +12,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  RefreshCw,
   Save,
   Check,
   Trash2,
@@ -33,8 +34,9 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { cn } from "@/lib/utils";
-import { useOutcomeStore, type Outcome } from "@/store/outcome-store";
+import { isOutcomeStale, useOutcomeStore, type Outcome } from "@/store/outcome-store";
 
 import { BlockList } from "./blocks/BlockList";
 import { ChartErrorBoundary } from "./ChartErrorBoundary";
@@ -70,6 +72,7 @@ export function OutcomeCard({
   const removeOutcome = useOutcomeStore((s) => s.removeOutcome);
   const selectedId = useOutcomeStore((s) => s.selectedId);
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
+  const { save, isSaving } = useSaveOutcome();
 
   const isThumbnail = viewState === "thumbnail";
   const isEnlarged = viewState === "enlarged";
@@ -78,6 +81,7 @@ export function OutcomeCard({
   // header-only by construction.
   const expanded: boolean = isEnlarged ? true : !outcome.collapsed;
   const isSaved: boolean = outcome.savedArtifactId !== null;
+  const isStale: boolean = isOutcomeStale(outcome);
   const isSelected: boolean = selectedId === outcome.outcomeId;
 
   // Scroll this card into view when the user clicks "View in Outcomes"
@@ -227,11 +231,9 @@ export function OutcomeCard({
             </button>
           )}
 
-          {/* Save state — ✓ if already saved (idempotent in store and on
-              server); otherwise active Save button. The button disables
-              itself during the round-trip so rapid clicks can't fire a
-              second request. */}
-          {isSaved ? (
+          {/* Save state — ✓ if saved & current; Re-save button if updated
+              since last save; otherwise active Save button. */}
+          {isSaved && !isStale ? (
             <span
               className="inline-flex h-7 w-7 items-center justify-center text-green-600"
               title="Saved to Artifact library"
@@ -239,6 +241,21 @@ export function OutcomeCard({
             >
               <Check className="h-4 w-4" />
             </span>
+          ) : isSaved && isStale ? (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={(e) => {
+                stop(e);
+                void save(outcome);
+              }}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 text-xs font-medium text-amber-600 hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-400"
+              title="Updated since last save — click to Re-save"
+              aria-label="Re-save to library"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isSaving && "animate-spin")} />
+              <span>Re-save</span>
+            </button>
           ) : (
             <button
               type="button"

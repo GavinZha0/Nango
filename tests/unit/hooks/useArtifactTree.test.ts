@@ -27,6 +27,7 @@ function leaf(id: string, parentId: string | null, name: string): ArtifactNode {
     updatedAt: new Date(0),
     sourceThreadId: null,
     sourceOutcomeId: null,
+    sourceRevision: null,
     workflowId: null,
     workflowOutputField: null,
     snapshot: null,

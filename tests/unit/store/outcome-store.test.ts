@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useOutcomeStore, type SlideBlock } from "@/store/outcome-store";
+import {
+  isOutcomeStale,
+  useOutcomeStore,
+  type SlideBlock,
+} from "@/store/outcome-store";
 
 describe("outcome-store: upsertSlideOutcome", () => {
   beforeEach(() => {
@@ -369,6 +373,106 @@ describe("outcome-store: applySlideEditOutcome", () => {
     // call-ins-s2 is applied, but call-del-ghost is still unmatched and not stamped
     expect(block.appliedToolCallIds).toEqual(["call-base", "call-ins-s2"]);
     expect(useOutcomeStore.getState().pendingSlideEdits["deck-unmatched"]).toHaveLength(1);
+  });
+});
+
+describe("outcome-store: revision & staleness", () => {
+  beforeEach(() => {
+    useOutcomeStore.getState().clearForThreadSwitch();
+  });
+
+  it("preserves savedArtifactId & savedRevision across addOutcome upserts while updating revision", () => {
+    const store = useOutcomeStore.getState();
+
+    store.addOutcome({
+      outcomeId: "chart-1",
+      kind: "report",
+      title: "Sales",
+      blocks: [{ kind: "text", markdown: "v1" }],
+      agentId: "agent-1",
+      threadId: "thread-1",
+      runId: null,
+      createdAt: 1000,
+      collapsed: false,
+      savedArtifactId: null,
+      revision: "tc-1",
+      savedRevision: null,
+    });
+
+    useOutcomeStore.getState().markSaved("chart-1", "art-1", "tc-1");
+    let current = useOutcomeStore.getState().outcomes[0]!;
+    expect(current.savedArtifactId).toBe("art-1");
+    expect(current.savedRevision).toBe("tc-1");
+    expect(isOutcomeStale(current)).toBe(false);
+
+    // Regenerate with the same outcomeId and a new toolCallId
+    useOutcomeStore.getState().addOutcome({
+      outcomeId: "chart-1",
+      kind: "report",
+      title: "Sales v2",
+      blocks: [{ kind: "text", markdown: "v2" }],
+      agentId: "agent-1",
+      threadId: "thread-1",
+      runId: null,
+      createdAt: 2000,
+      collapsed: false,
+      savedArtifactId: null,
+      revision: "tc-2",
+      savedRevision: null,
+    });
+
+    current = useOutcomeStore.getState().outcomes[0]!;
+    expect(current.savedArtifactId).toBe("art-1");
+    expect(current.savedRevision).toBe("tc-1");
+    expect(current.revision).toBe("tc-2");
+    expect(isOutcomeStale(current)).toBe(true);
+
+    // Re-save catches savedRevision up to revision
+    useOutcomeStore.getState().markSaved("chart-1", "art-1", "tc-2");
+    current = useOutcomeStore.getState().outcomes[0]!;
+    expect(isOutcomeStale(current)).toBe(false);
+  });
+
+  it("tracks slide revisions across generate and edit, without false positives for legacy null savedRevision", () => {
+    const store = useOutcomeStore.getState();
+
+    store.upsertSlideOutcome({
+      outcomeId: "deck-rev",
+      title: "Deck",
+      doc: { format: "bento/slides", slides: [{ id: "s1" }] },
+      toolCallId: "tc-init",
+      agentId: "agent-1",
+      threadId: "thread-1",
+      runId: null,
+    });
+
+    let current = useOutcomeStore.getState().outcomes[0]!;
+    expect(current.revision).toBe("tc-init:0");
+
+    // Legacy saved artifact with no sourceRevision -> not stale
+    useOutcomeStore.getState().markSaved("deck-rev", "art-legacy", undefined);
+    // Simulate legacy null savedRevision
+    useOutcomeStore.setState((s) => ({
+      outcomes: s.outcomes.map((o) =>
+        o.outcomeId === "deck-rev" ? { ...o, savedRevision: null } : o,
+      ),
+    }));
+    current = useOutcomeStore.getState().outcomes[0]!;
+    expect(isOutcomeStale(current)).toBe(false);
+
+    // Now mark with real savedRevision, then apply an edit -> stale
+    useOutcomeStore.getState().markSaved("deck-rev", "art-legacy", "tc-init:0");
+    useOutcomeStore.getState().applySlideEditOutcome({
+      outcomeId: "deck-rev",
+      action: "insert",
+      slides: [{ id: "s2", title: "Slide 2" }],
+      toolCallId: "tc-edit-1",
+    });
+
+    current = useOutcomeStore.getState().outcomes[0]!;
+    expect(current.revision).toBe("tc-init:1");
+    expect(current.savedRevision).toBe("tc-init:0");
+    expect(isOutcomeStale(current)).toBe(true);
   });
 });
 

@@ -194,6 +194,8 @@ export interface SaveArtifactInput {
   name?: string;
   /** Verbatim, stored on the row's `description` column. */
   description?: string | null;
+  /** Producer revision tag stored on `artifact.source_revision`. */
+  revision?: string;
 }
 
 export interface SaveArtifactDeps {
@@ -253,17 +255,35 @@ export async function saveArtifact(
     return saveA2uiArtifact(input, existing);
   }
 
-  // CONTRACT: Load events ONCE and reuse across both the idempotency
-  // update path (if existing !== null) and the fresh-save path.
-  // Prevents double full-thread event walk for the common
-  // "re-save" case.
-  const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
-  const invocations = coalesceToolCalls(rawEvents);
-
   if (existing !== null) {
-    // CONTRACT: If the existing artifact is an incrementally-appended slide deck,
-    // subsequent append calls in the thread may have arrived after the first save.
-    // Update the existing artifact's snapshot so it captures the full merged presentation.
+    // Fast-path idempotency: caller's revision matches what is already stored.
+    if (
+      input.revision !== undefined &&
+      existing.sourceRevision === input.revision
+    ) {
+      return {
+        artifactId: existing.artifactId,
+        workflowId: existing.workflowId,
+        workflowOutputField: existing.workflowOutputField,
+        reused: true,
+      };
+    }
+
+    const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
+    const invocations = coalesceToolCalls(rawEvents);
+
+    if (invocations.length === 0) {
+      return {
+        artifactId: existing.artifactId,
+        workflowId: existing.workflowId,
+        workflowOutputField: existing.workflowOutputField,
+        reused: true,
+      };
+    }
+
+    // CONTRACT: If the existing artifact is an incrementally-appended or
+    // regenerated slide deck, update the existing artifact's snapshot so it
+    // captures the full merged presentation.
     const normId = normalizeOutcomeId(input.outcomeId);
     const relatedSlideInvs = invocations.filter(
       (inv) =>
@@ -276,7 +296,9 @@ export async function saveArtifact(
     const hasEditsOrAppends = relatedSlideInvs.some(
       (inv) => inv.toolName === "edit_bento_slides",
     );
-    if (hasEditsOrAppends && relatedSlideInvs.length > 0) {
+    const slideRevisionChanged =
+      input.revision !== undefined && input.revision !== existing.sourceRevision;
+    if ((hasEditsOrAppends || slideRevisionChanged) && relatedSlideInvs.length > 0) {
       const lastInv = relatedSlideInvs[relatedSlideInvs.length - 1]!;
       const combinedConfig = {
         ...lastInv.inputs,
@@ -300,9 +322,29 @@ export async function saveArtifact(
             snapshot: mergedSnapshot,
             snapshotAt: new Date(),
             config: updatedConfig,
+            ...(input.revision !== undefined && { sourceRevision: input.revision }),
           })
           .where(eq(ArtifactTable.id, existing.artifactId));
       }
+      return {
+        artifactId: existing.artifactId,
+        workflowId: existing.workflowId,
+        workflowOutputField: existing.workflowOutputField,
+        reused: true,
+      };
+    }
+
+    // Workflow-backed outcomes (chart / html): rebuild the latest workflow spec,
+    // config, and snapshot in place so Re-save keeps live and snapshot views aligned.
+    if (input.revision === undefined || input.revision !== existing.sourceRevision) {
+      const refreshed = await refreshWorkflowBackedArtifact({
+        input,
+        existing,
+        rawEvents,
+        invocations,
+        deps,
+      });
+      if (refreshed !== null) return refreshed;
     }
 
     return {
@@ -312,6 +354,9 @@ export async function saveArtifact(
       reused: true,
     };
   }
+
+  const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
+  const invocations = coalesceToolCalls(rawEvents);
 
   // Resolve outcomeId → (runId, toolCallId). The outcome's id
   // (`chart_id` for generate_echarts_config) is embedded in a
@@ -416,6 +461,7 @@ export async function saveArtifact(
           }),
           sourceThreadId: input.threadId,
           sourceOutcomeId: input.outcomeId,
+          ...(input.revision !== undefined && { sourceRevision: input.revision }),
           workflowId: workflowRow.id,
           workflowOutputField,
           viewMode: "snapshot",
@@ -477,37 +523,14 @@ export async function saveArtifact(
   // so the artifact is immediately useful when opened in snapshot mode.
   // Non-fatal: a failure here does not fail the save; the user can
   // trigger a manual snapshot later.
-  try {
-    const resolution = await executeWorkflow({
+  if (!hasAppendedOrEditedSlides) {
+    await runWorkflowSnapshotBestEffort({
+      artifactId: result.artifactId,
       workflowId: result.workflowId,
       spec: canonical,
       outputField: workflowOutputField,
       ownerId: input.ownerId,
-      forceFresh: false,
     });
-    if (resolution !== null && resolution.data !== undefined) {
-      // For slide artifacts with appended or edited slides, initialSnapshot already contains
-      // the complete merged slides deck; executeWorkflow on the last invocation alone
-      // only resolves the last chunk. Preserve initialSnapshot in this case.
-      if (!hasAppendedOrEditedSlides) {
-        await db
-          .update(ArtifactTable)
-          .set({
-            snapshot: resolution.data as Record<string, unknown>,
-            snapshotAt: resolution.executedAt,
-          })
-          .where(eq(ArtifactTable.id, result.artifactId));
-      }
-    }
-  } catch (snapshotErr) {
-    observabilityLogger.warn(
-      {
-        err: snapshotErr,
-        artifactId: result.artifactId,
-        workflowId: result.workflowId,
-      },
-      "initial snapshot creation failed (non-fatal)",
-    );
   }
 
   return {
@@ -515,6 +538,138 @@ export async function saveArtifact(
     workflowId: result.workflowId,
     workflowOutputField,
     reused: false,
+  };
+}
+
+/**
+ * Execute `spec` once (non-fatal) and persist its output as `artifact.snapshot`.
+ * Shared between initial save and workflow-backed Re-save.
+ */
+async function runWorkflowSnapshotBestEffort(args: {
+  artifactId: string;
+  workflowId: string;
+  spec: ReturnType<typeof validate> extends never ? never : Parameters<typeof executeWorkflow>[0]["spec"];
+  outputField: string;
+  ownerId: string;
+}): Promise<void> {
+  try {
+    const resolution = await executeWorkflow({
+      workflowId: args.workflowId,
+      spec: args.spec,
+      outputField: args.outputField,
+      ownerId: args.ownerId,
+      forceFresh: false,
+    });
+    if (resolution !== null && resolution.data !== undefined) {
+      await db
+        .update(ArtifactTable)
+        .set({
+          snapshot: resolution.data as Record<string, unknown>,
+          snapshotAt: resolution.executedAt,
+        })
+        .where(eq(ArtifactTable.id, args.artifactId));
+    }
+  } catch (snapshotErr) {
+    observabilityLogger.warn(
+      {
+        err: snapshotErr,
+        artifactId: args.artifactId,
+        workflowId: args.workflowId,
+      },
+      "workflow snapshot execution failed (non-fatal)",
+    );
+  }
+}
+
+/**
+ * Re-build and persist `workflow.spec`, `artifact.config`, `snapshot`, and
+ * `source_revision` for an existing `chart` or `html` artifact. Returns `null`
+ * if the existing outcome is not a workflow-backed refreshable type.
+ */
+async function refreshWorkflowBackedArtifact(args: {
+  input: SaveArtifactInput;
+  existing: ExistingArtifactRef;
+  rawEvents: Awaited<ReturnType<typeof loadThreadEvents>>;
+  invocations: ReturnType<typeof coalesceToolCalls>;
+  deps: SaveArtifactDeps;
+}): Promise<SaveArtifactResult | null> {
+  const { input, existing, rawEvents, invocations, deps } = args;
+  const resolution = await resolveOutcomeToCall(
+    {
+      threadId: input.threadId,
+      outcomeId: input.outcomeId,
+      ownerId: input.ownerId,
+    },
+    rawEvents,
+  );
+  const built = buildWorkflowSpecFromRunEvents({
+    invocations,
+    artifactCreatingCallId: resolution.toolCallId,
+  });
+  const artifactType = deriveArtifactType(built.artifactCreatorToolName);
+  if (artifactType !== "chart" && artifactType !== "html") {
+    return null;
+  }
+
+  const canonical = await canonicalize(built.spec, deps);
+  validate(canonical);
+  const workflowOutputField = pickWorkflowOutputField(built.spec);
+
+  const creatorInv = invocations.find((i) => i.callId === resolution.toolCallId);
+  const combinedConfig = {
+    ...built.strippedFrontendConfig,
+    ...(creatorInv?.result ? { result: creatorInv.result } : {}),
+  };
+  const refreshedSnapshot = extractInitialSnapshot(
+    artifactType,
+    creatorInv,
+    combinedConfig,
+    invocations,
+    input.outcomeId,
+  );
+
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    if (existing.workflowId !== null) {
+      await tx
+        .update(WorkflowTable)
+        .set({
+          name: canonical.name,
+          spec: canonical,
+          updatedBy: input.ownerId,
+          updatedAt: now,
+        })
+        .where(eq(WorkflowTable.id, existing.workflowId));
+    }
+    await tx
+      .update(ArtifactTable)
+      .set({
+        config: combinedConfig,
+        workflowOutputField,
+        updatedAt: now,
+        ...(refreshedSnapshot !== null && refreshedSnapshot !== undefined
+          ? { snapshot: refreshedSnapshot, snapshotAt: now }
+          : {}),
+        ...(input.revision !== undefined && { sourceRevision: input.revision }),
+      })
+      .where(eq(ArtifactTable.id, existing.artifactId));
+  });
+
+  if (existing.workflowId !== null) {
+    await runWorkflowSnapshotBestEffort({
+      artifactId: existing.artifactId,
+      workflowId: existing.workflowId,
+      spec: canonical,
+      outputField: workflowOutputField,
+      ownerId: input.ownerId,
+    });
+  }
+
+  return {
+    artifactId: existing.artifactId,
+    workflowId: existing.workflowId,
+    workflowOutputField,
+    reused: true,
   };
 }
 
@@ -645,6 +800,7 @@ interface ExistingArtifactRef {
   /** `null` for workflow-less artifacts (e.g. `a2ui` snapshots). */
   workflowId: string | null;
   workflowOutputField: string | null;
+  sourceRevision: string | null;
 }
 
 type TxHandle = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -676,6 +832,7 @@ async function findExistingArtifactIn(
       id: ArtifactTable.id,
       workflowId: ArtifactTable.workflowId,
       workflowOutputField: ArtifactTable.workflowOutputField,
+      sourceRevision: ArtifactTable.sourceRevision,
     })
     .from(ArtifactTable)
     .where(
@@ -696,6 +853,7 @@ async function findExistingArtifactIn(
     artifactId: row.id,
     workflowId: row.workflowId,
     workflowOutputField: row.workflowOutputField,
+    sourceRevision: row.sourceRevision ?? null,
   };
 }
 
@@ -911,6 +1069,7 @@ async function saveA2uiArtifact(
         snapshot: matchedSurface,
         snapshotAt: now,
         updatedAt: now,
+        ...(input.revision !== undefined && { sourceRevision: input.revision }),
       })
       .where(eq(ArtifactTable.id, ref.artifactId));
     return {
@@ -939,6 +1098,7 @@ async function saveA2uiArtifact(
         createdBy: input.ownerId,
         sourceThreadId: input.threadId,
         sourceOutcomeId: input.outcomeId,
+        ...(input.revision !== undefined && { sourceRevision: input.revision }),
         workflowId: null,
         workflowOutputField: null,
       })

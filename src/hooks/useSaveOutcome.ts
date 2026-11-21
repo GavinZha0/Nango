@@ -39,7 +39,7 @@
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
-import { useOutcomeStore, type Outcome } from "@/store/outcome-store";
+import { isOutcomeStale, useOutcomeStore, type Outcome } from "@/store/outcome-store";
 import { useWorkspaceStore } from "@/store/workspace";
 
 export interface SaveOutcomeOverrides {
@@ -76,6 +76,7 @@ interface SaveArtifactBody {
   parentId?: string;
   name?: string;
   description?: string | null;
+  revision?: string;
 }
 
 export function useSaveOutcome(): UseSaveOutcomeReturn {
@@ -88,9 +89,10 @@ export function useSaveOutcome(): UseSaveOutcomeReturn {
       overrides: SaveOutcomeOverrides = {},
     ): Promise<boolean> => {
       // UI-layer guard: don't fire a request for an already-saved
-      // outcome. The card UI hides the Save icon in this case, but
-      // belt-and-braces here for any future programmatic caller.
-      if (outcome.savedArtifactId !== null) return true;
+      // up-to-date outcome. Stale outcomes (updated after last save)
+      // bypass this guard so Re-save refreshes the existing artifact.
+      const isStale = isOutcomeStale(outcome);
+      if (outcome.savedArtifactId !== null && !isStale) return true;
 
       setIsSaving(true);
       try {
@@ -108,6 +110,7 @@ export function useSaveOutcome(): UseSaveOutcomeReturn {
         const body: SaveArtifactBody = {
           threadId,
           outcomeId: outcome.outcomeId,
+          revision: outcome.revision,
           ...(overrides.parentId !== undefined && { parentId: overrides.parentId }),
           ...(overrides.name !== undefined && { name: overrides.name }),
           ...(overrides.description !== undefined && {
@@ -136,11 +139,13 @@ export function useSaveOutcome(): UseSaveOutcomeReturn {
         }
 
         const data: SaveArtifactResponse = await res.json();
-        markSaved(outcome.outcomeId, data.artifactId);
+        markSaved(outcome.outcomeId, data.artifactId, outcome.revision);
         toast.success(
-          data.reused
-            ? "Already in Artifact library"
-            : "Saved to Artifact library",
+          isStale
+            ? "Artifact updated"
+            : data.reused
+              ? "Already in Artifact library"
+              : "Saved to Artifact library",
         );
         return true;
       } catch (err) {

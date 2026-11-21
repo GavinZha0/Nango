@@ -1,0 +1,1 @@
+ALTER TABLE "artifact" ADD COLUMN "source_revision" text;

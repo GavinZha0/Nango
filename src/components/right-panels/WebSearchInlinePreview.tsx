@@ -100,6 +100,8 @@ export function WebSearchInlinePreview(
       // signal.
       collapsed: false,
       savedArtifactId: null,
+      revision: props.toolCallId,
+      savedRevision: null,
     });
   }, [parsed, props.toolCallId, props.parameters, addOutcome]);
 

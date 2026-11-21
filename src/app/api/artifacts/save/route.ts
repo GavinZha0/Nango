@@ -27,6 +27,8 @@ const bodySchema = z
     parentId: z.string().uuid().optional(),
     name: z.string().min(1).max(200).optional(),
     description: z.string().max(2000).nullable().optional(),
+    /** Producer revision tag recorded on `artifact.source_revision`. */
+    revision: z.string().min(1).max(200).optional(),
   })
   .strict();
 
@@ -41,6 +43,7 @@ export const POST = withSession(ROUTE, async ({ req, session, log }) => {
         ...(body.parentId !== undefined && { parentId: body.parentId }),
         ...(body.name !== undefined && { name: body.name }),
         ...(body.description !== undefined && { description: body.description }),
+        ...(body.revision !== undefined && { revision: body.revision }),
       },
       buildProductionSaveDeps(session.user.id),
     );

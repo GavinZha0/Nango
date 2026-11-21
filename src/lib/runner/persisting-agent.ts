@@ -9,11 +9,13 @@ import "server-only";
 
 import { AbstractAgent, EventType } from "@/lib/copilot/index.server";
 import type { AgUiEvent, BaseEvent, RunAgentInput, RunErrorEvent } from "@/lib/copilot/index.server";
+import { GENERATIVE_UI_RENDER_TOOL } from "@copilotkit/shared/generative-ui";
 import { Observable } from "rxjs";
 
 import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventType, EntityRunStatus } from "@/lib/db/schema";
 import { redactSensitiveText } from "@/lib/agent-pipeline/output-safety";
+import { normalizeRenderUiArgsJson } from "@/lib/generative-ui/surface";
 import { recordEvent, finalizeRun } from "./event-store";
 import { RunSequenceRegistry } from "./sequence-registry";
 
@@ -399,6 +401,8 @@ export class PersistingAgent extends AbstractAgent {
       const inner = this.cfg.inner;
       const innerMiddlewares =
         (inner as unknown as { middlewares?: readonly MiddlewareLike[] }).middlewares ?? [];
+      const normalizedInner: Pick<AbstractAgent, "run" | "messages" | "state"> =
+        innerMiddlewares.length > 0 ? wrapWithRenderUiNormalizer(inner) : inner;
       const entry = innerMiddlewares.reduceRight<
         Pick<AbstractAgent, "run" | "messages" | "state">
       >(
@@ -412,7 +416,7 @@ export class PersistingAgent extends AbstractAgent {
             return next.state;
           },
         }),
-        inner,
+        normalizedInner,
       );
 
       // CONTRACT: manual subscription so `subscriber.complete()` is
@@ -463,4 +467,80 @@ export class PersistingAgent extends AbstractAgent {
       };
     });
   }
+}
+
+/**
+ * Buffer `render_ui` `TOOL_CALL_ARGS` deltas until `TOOL_CALL_END` and repair
+ * common LLM nesting mistakes (e.g. `components` placed outside `updateComponents`)
+ * before `GenerativeUIMiddleware` validates the operations.
+ */
+function wrapWithRenderUiNormalizer(
+  inner: AbstractAgent,
+): Pick<AbstractAgent, "run" | "messages" | "state"> {
+  return {
+    get messages() {
+      return inner.messages;
+    },
+    get state() {
+      return inner.state;
+    },
+    run: (nextInput: RunAgentInput) =>
+      new Observable<BaseEvent>((subscriber) => {
+        const buffers = new Map<string, string[]>();
+        const flushCall = (toolCallId: string) => {
+          const chunks = buffers.get(toolCallId);
+          if (!chunks) return;
+          buffers.delete(toolCallId);
+          const joined = chunks.join("");
+          const normalized = normalizeRenderUiArgsJson(joined);
+          if (normalized.length > 0) {
+            const argsEv: AgUiEvent = {
+              type: EventType.TOOL_CALL_ARGS,
+              toolCallId,
+              delta: normalized,
+            };
+            subscriber.next(argsEv);
+          }
+        };
+
+        const sub = inner.run(nextInput).subscribe({
+          next: (rawEv: BaseEvent) => {
+            const ev = rawEv as AgUiEvent;
+            if (
+              ev.type === EventType.TOOL_CALL_START &&
+              ev.toolCallName === GENERATIVE_UI_RENDER_TOOL &&
+              typeof ev.toolCallId === "string"
+            ) {
+              buffers.set(ev.toolCallId, []);
+              subscriber.next(rawEv);
+              return;
+            }
+            if (
+              ev.type === EventType.TOOL_CALL_ARGS &&
+              typeof ev.toolCallId === "string" &&
+              buffers.has(ev.toolCallId)
+            ) {
+              buffers.get(ev.toolCallId)!.push(ev.delta ?? "");
+              return;
+            }
+            if (
+              ev.type === EventType.TOOL_CALL_END &&
+              typeof ev.toolCallId === "string" &&
+              buffers.has(ev.toolCallId)
+            ) {
+              flushCall(ev.toolCallId);
+              subscriber.next(rawEv);
+              return;
+            }
+            subscriber.next(rawEv);
+          },
+          error: (err: unknown) => subscriber.error(err),
+          complete: () => {
+            for (const id of [...buffers.keys()]) flushCall(id);
+            subscriber.complete();
+          },
+        });
+        return () => sub.unsubscribe();
+      }),
+  };
 }

@@ -61,6 +61,8 @@ export function useA2UiOutcomeTap(
           createdAt: Date.now(),
           collapsed: false,
           savedArtifactId: null,
+          revision: String(surface.operations.length),
+          savedRevision: null,
         });
       }
     };

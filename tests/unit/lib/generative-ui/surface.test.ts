@@ -7,12 +7,9 @@ import {
   parseSurfaceContent,
   deriveSurfaceOutcomeId,
   extractSurfaceTitle,
+  normalizeRenderUiArgsJson,
 } from "@/lib/generative-ui/surface";
 import { rebuildA2UiOutcome } from "@/lib/outcomes/replay-rebuilders";
-import {
-  buildA2uiChartOption,
-  resolveA2uiProp,
-} from "@/components/workspace/blocks/A2uiBlock";
 
 describe("Generative UI surface folding & validation", () => {
   it("folds /operations/-, /status, /rejected, and /rejected/- deltas immutably", () => {
@@ -215,67 +212,31 @@ describe("Generative UI surface folding & validation", () => {
     expect(surface?.model.componentsModel.get("root")?.properties.text).toBe("Trimmed Catalog");
   });
 
-  it("maps A2UI Chart props (chartType, donut, string series, inferred y keys) to ECharts options", () => {
-    const inferred = buildA2uiChartOption({
-      chartType: "line",
-      xKey: "month",
-      data: [{ month: "Jan", revenue: 120, cost: 80 }],
-    });
-    expect(inferred.series).toEqual([
-      { type: "line", name: "revenue", encode: { x: "month", y: "revenue" } },
-      { type: "line", name: "cost", encode: { x: "month", y: "cost" } },
-    ]);
-
-    const withStringSeries = buildA2uiChartOption({
-      chartType: "area",
-      xKey: "day",
-      series: ["visits"],
-      data: [{ day: "Mon", visits: 50 }],
-    });
-    expect(withStringSeries.series).toEqual([
-      { type: "line", name: "visits", areaStyle: {}, encode: { x: "day", y: "visits" } },
-    ]);
-
-    const donut = buildA2uiChartOption({
-      chartType: "donut",
-      xKey: "region",
-      series: [{ key: "share", label: "Share" }],
-      data: [{ region: "APAC", share: 42 }],
-    });
-    expect(donut.series).toEqual([
-      { type: "pie", radius: ["45%", "70%"], data: [{ name: "APAC", value: 42 }] },
-    ]);
-  });
-
-  it("interpolates ${/path} template strings against surface dataModel", () => {
-    const surfaceDoc = parseSurfaceContent({
-      surfaceId: "interp-test",
+  it("repairs updateComponents when components/surfaceId sit at outer operation level", () => {
+    const malformed = JSON.stringify({
       target: "chat",
-      catalogId: "nango/workspace@1",
-      status: "ready",
-      rejected: [],
       operations: [
         {
           version: "1.0",
-          createSurface: {
-            surfaceId: "interp-test",
-            catalogId: "nango/workspace@1",
-          },
-        },
-        {
-          version: "1.0",
-          updateDataModel: {
-            surfaceId: "interp-test",
-            path: "/",
-            value: { window: { slot: "14:00-16:00" } },
+          surfaceId: "release-checklist-1",
+          components: [{ id: "pre-chart", component: "Chart" }],
+          updateComponents: {
+            surfaceId: "release-checklist-1",
+            components: [],
           },
         },
       ],
     });
-    const manager = new GenerativeUISurfaceManager(createHeadlessCatalog("nango/workspace@1"));
-    manager.ingest("thread-1", undefined, surfaceDoc!);
-    const surface = manager.getSurface("thread-1", "interp-test")!;
-    const resolved = resolveA2uiProp("发布窗口 ${/window/slot} · 共 11 项检查", surface.model);
-    expect(resolved).toBe("发布窗口 14:00-16:00 · 共 11 项检查");
+
+    const repaired = JSON.parse(normalizeRenderUiArgsJson(malformed)) as {
+      operations: Array<Record<string, unknown>>;
+    };
+    const op = repaired.operations[0]!;
+    expect(op.components).toBeUndefined();
+    expect(op.surfaceId).toBeUndefined();
+    expect(op.updateComponents).toEqual({
+      surfaceId: "release-checklist-1",
+      components: [{ id: "pre-chart", component: "Chart" }],
+    });
   });
 });

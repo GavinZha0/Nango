@@ -41,7 +41,7 @@ import {
   type GenerateBentoSlidesArtifactArgs,
   type EditBentoSlidesArtifactArgs,
 } from "@/lib/outcomes/args-to-content";
-import { normalizeOutcomeId } from "./schema";
+import { deriveSlideRevision, normalizeOutcomeId } from "./schema";
 import { applySlideEdit } from "./merge-slides";
 import {
   deriveSurfaceOutcomeId,
@@ -155,6 +155,8 @@ export function rebuildChartOutcome(
       createdAt: ctx.ts.getTime(),
       collapsed: false,
       savedArtifactId: null,
+      revision: chunk.toolCallId,
+      savedRevision: null,
     },
   };
 }
@@ -261,6 +263,8 @@ export function rebuildWebSearchOutcome(
       // for compactness on demand.
       collapsed: false,
       savedArtifactId: null,
+      revision: result.toolCallId,
+      savedRevision: null,
     },
   };
 }
@@ -337,6 +341,8 @@ export function rebuildHtmlPageOutcome(
       createdAt: ctx.ts.getTime(),
       collapsed: false,
       savedArtifactId: null,
+      revision: chunk.toolCallId,
+      savedRevision: null,
     },
   };
 }
@@ -461,6 +467,8 @@ export function rebuildBentoSlidesOutcome(
       createdAt: priorOutcome?.createdAt ?? ctx.ts.getTime(),
       collapsed: priorOutcome ? priorOutcome.collapsed : false,
       savedArtifactId: priorOutcome?.savedArtifactId ?? null,
+      revision: deriveSlideRevision([chunk.toolCallId]),
+      savedRevision: priorOutcome?.savedRevision ?? null,
     },
   };
 }
@@ -600,6 +608,7 @@ export function rebuildBentoSlideEditOutcome(
     outcome: {
       ...priorOutcome,
       blocks: updatedBlocks,
+      revision: deriveSlideRevision(nextAppliedIds),
     },
   };
 }
@@ -662,6 +671,8 @@ export function rebuildImageOutcome(
         createdAt: ctx.ts.getTime(),
         collapsed: false,
         savedArtifactId: null,
+        revision: result.toolCallId,
+        savedRevision: null,
       },
     };
   } catch (err) {
@@ -701,6 +712,8 @@ export function rebuildA2UiOutcome(
       createdAt: ctx.ts.getTime(),
       collapsed: false,
       savedArtifactId: null,
+      revision: String(surface.operations.length),
+      savedRevision: null,
     },
   };
 }

@@ -35,6 +35,13 @@ export const normalizeChartId = normalizeOutcomeId;
 export const normalizePageId = normalizeOutcomeId;
 export const normalizeSlideId = normalizeOutcomeId;
 
+/** Deterministic slide revision from `SlideBlock.appliedToolCallIds`
+ *  (`<generateCallId>:<editCount>`). Shared by client store and server replay. */
+export function deriveSlideRevision(appliedToolCallIds: readonly string[]): string {
+  if (appliedToolCallIds.length === 0) return "";
+  return `${appliedToolCallIds[0]}:${appliedToolCallIds.length - 1}`;
+}
+
 // ─── generate_echarts_config ────────────────────────────────────────
 
 /**

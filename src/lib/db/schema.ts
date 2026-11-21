@@ -296,9 +296,10 @@ export const ArtifactTable = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     config: jsonb("config"),
-    // Origin tracking for the Save-from-Outcomes flow (idempotency).
+    // Origin tracking for the Save-from-Outcomes flow (idempotency & staleness).
     sourceThreadId: text("source_thread_id"),
     sourceOutcomeId: text("source_outcome_id"),
+    sourceRevision: text("source_revision"),
     visibility: text("visibility").notNull().default("private"), // "private" | "shared"
     // Display order within the same parent (drag-reorder support).
     displayOrder: integer("display_order").notNull().default(0),

@@ -128,6 +128,7 @@ vi.mock("@/lib/db/schema", () => ({
     updatedAt: "updated_at",
     sourceThreadId: "source_thread_id",
     sourceOutcomeId: "source_outcome_id",
+    sourceRevision: "source_revision",
   },
 }));
 
@@ -176,13 +177,15 @@ beforeEach(() => {
 
 describe("assembleTree", () => {
   it("returns empty array on empty input", async () => {
-    enqueue([]);
+    enqueue([]); // initial select
+    enqueue([]); // seedArtifactCategoriesForUser select
+    enqueue([]); // re-select after auto-seed
     const tree = await assembleTree(OWNER);
     expect(tree).toEqual([]);
   });
 
   it("nests leaves under their root folders", async () => {
-    enqueue([
+    const rows = [
       row({ id: "root-charts", kind: "folder", name: "Charts" }),
       row({ id: "root-reports", kind: "folder", name: "Reports" }),
       row({
@@ -206,7 +209,10 @@ describe("assembleTree", () => {
         type: "report",
         name: "R1",
       }),
-    ]);
+    ];
+    enqueue(rows);
+    enqueue([{ name: "Charts" }, { name: "Reports" }]); // seed check
+    enqueue(rows); // re-select
     const tree = await assembleTree(OWNER);
     expect(tree).toHaveLength(2);
     expect(tree[0].name).toBe("Charts");
@@ -216,7 +222,7 @@ describe("assembleTree", () => {
   });
 
   it("supports multi-level nesting", async () => {
-    enqueue([
+    const rows = [
       row({ id: "root", kind: "folder", name: "Charts" }),
       row({
         id: "sub",
@@ -231,13 +237,16 @@ describe("assembleTree", () => {
         type: "chart",
         name: "revenue",
       }),
-    ]);
+    ];
+    enqueue(rows);
+    enqueue([{ name: "Charts" }]); // seed check
+    enqueue(rows); // re-select
     const tree = await assembleTree(OWNER);
     expect(tree[0].children[0].children[0].name).toBe("revenue");
   });
 
   it("drops nodes whose parent is missing", async () => {
-    enqueue([
+    const rows = [
       row({
         id: "orphan",
         parentId: "ghost",
@@ -245,7 +254,10 @@ describe("assembleTree", () => {
         type: "chart",
         name: "lonely",
       }),
-    ]);
+    ];
+    enqueue(rows);
+    enqueue([]); // seed check
+    enqueue(rows); // re-select
     const tree = await assembleTree(OWNER);
     expect(tree).toEqual([]);
   });
@@ -254,13 +266,13 @@ describe("assembleTree", () => {
 // ──────────────────── seedArtifactCategoriesForUser ─────────────────
 
 describe("seedArtifactCategoriesForUser", () => {
-  it("inserts all 6 categories when none exist", async () => {
+  it("inserts all 7 categories when none exist", async () => {
     enqueue([]); // existing root rows = none
     await seedArtifactCategoriesForUser(OWNER);
     expect(db.insert).toHaveBeenCalledOnce();
     const inserted = insertedValues[0] as Array<{ name: string; kind: string }>;
     expect(inserted.map((r) => r.name).sort()).toEqual(
-      ["Charts", "Code", "HTML", "Images", "Slides", "Reports"].sort(),
+      ["A2UI", "Charts", "Code", "HTML", "Images", "Slides", "Reports"].sort(),
     );
     expect(inserted.every((r) => r.kind === "folder")).toBe(true);
   });
@@ -270,12 +282,13 @@ describe("seedArtifactCategoriesForUser", () => {
     await seedArtifactCategoriesForUser(OWNER);
     const inserted = insertedValues[0] as Array<{ name: string }>;
     expect(inserted.map((r) => r.name).sort()).toEqual(
-      ["Code", "HTML", "Images", "Slides"].sort(),
+      ["A2UI", "Code", "HTML", "Images", "Slides"].sort(),
     );
   });
 
   it("no-ops when all categories present", async () => {
     enqueue([
+      { name: "A2UI" },
       { name: "Charts" },
       { name: "Reports" },
       { name: "Code" },

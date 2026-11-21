@@ -164,3 +164,91 @@ export function extractSurfaceTitle(surface: GenerativeUISurfaceContent): string
   }
   return firstText ?? surface.surfaceId;
 }
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return Boolean(v && typeof v === "object" && !Array.isArray(v));
+}
+
+function normalizeRenderUiOperation(op: unknown): { op: unknown; changed: boolean } {
+  if (!isPlainObject(op)) return { op, changed: false };
+  const next: Record<string, unknown> = { ...op };
+  let changed = false;
+
+  if (isPlainObject(next.updateComponents)) {
+    const uc = { ...next.updateComponents };
+    if (
+      (!Array.isArray(uc.components) || uc.components.length === 0) &&
+      Array.isArray(next.components) &&
+      next.components.length > 0
+    ) {
+      uc.components = next.components;
+      delete next.components;
+      changed = true;
+    }
+    if (!uc.surfaceId && typeof next.surfaceId === "string") {
+      uc.surfaceId = next.surfaceId;
+      changed = true;
+    }
+    if ("surfaceId" in next) {
+      delete next.surfaceId;
+      changed = true;
+    }
+    if (changed) next.updateComponents = uc;
+  } else if (isPlainObject(next.createSurface)) {
+    const cs = { ...next.createSurface };
+    for (const key of ["surfaceId", "catalogId", "dataModel", "components"] as const) {
+      if (key in next) {
+        if (
+          cs[key] === undefined ||
+          (key === "components" && Array.isArray(cs.components) && cs.components.length === 0)
+        ) {
+          cs[key] = next[key];
+        }
+        delete next[key];
+        changed = true;
+      }
+    }
+    if (changed) next.createSurface = cs;
+  } else if (isPlainObject(next.updateDataModel)) {
+    const ud = { ...next.updateDataModel };
+    for (const key of ["surfaceId", "path", "value"] as const) {
+      if (key in next) {
+        if (ud[key] === undefined) ud[key] = next[key];
+        delete next[key];
+        changed = true;
+      }
+    }
+    if (changed) next.updateDataModel = ud;
+  }
+
+  return { op: changed ? next : op, changed };
+}
+
+/**
+ * Repair common LLM argument nesting mistakes on `render_ui` (e.g. placing
+ * `components` / `surfaceId` at the outer operation object alongside an empty
+ * `updateComponents: { components: [] }`) before CopilotKit's
+ * `GenerativeUIMiddleware` validates them. Returns `rawJson` untouched if
+ * nothing needed repair or if `rawJson` is not valid JSON.
+ */
+export function normalizeRenderUiArgsJson(rawJson: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return rawJson;
+  }
+  if (!isPlainObject(parsed) || !Array.isArray(parsed.operations)) {
+    return rawJson;
+  }
+
+  let anyChanged = false;
+  const operations = parsed.operations.map((item) => {
+    const res = normalizeRenderUiOperation(item);
+    if (res.changed) anyChanged = true;
+    return res.op;
+  });
+
+  if (!anyChanged) return rawJson;
+  return JSON.stringify({ ...parsed, operations });
+}

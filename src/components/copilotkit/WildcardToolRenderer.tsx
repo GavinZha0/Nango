@@ -240,6 +240,8 @@ export function WildcardToolRenderer({
       createdAt: Date.now(),
       collapsed: false,
       savedArtifactId: null,
+      revision: toolCallId,
+      savedRevision: null,
     });
   }, [status, images, toolCallId, name, addOutcome]);
 
