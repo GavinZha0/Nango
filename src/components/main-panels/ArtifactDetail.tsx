@@ -35,6 +35,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { assembleBentoHtml } from "@/lib/bento/template";
+import { A2uiBlockRenderer } from "@/components/workspace/blocks/A2uiBlock";
+import { parseSurfaceContent } from "@/lib/generative-ui/surface";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -1191,6 +1193,22 @@ function ArtifactBody({
           </div>
         );
       }
+    }
+  }
+
+  // A2UI artifacts: render saved Generative UI surface via standalone A2uiBlockRenderer.
+  if (node.type === "a2ui") {
+    const surface = parseSurfaceContent(
+      node.snapshot ??
+        (node.config as { surface?: unknown } | null)?.surface ??
+        data,
+    );
+    if (surface) {
+      return (
+        <ChartErrorBoundary resetKey={node.id}>
+          <A2uiBlockRenderer block={{ kind: "a2ui", surface }} size="large" />
+        </ChartErrorBoundary>
+      );
     }
   }
 

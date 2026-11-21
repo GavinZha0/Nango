@@ -8,7 +8,15 @@
 
 import "server-only";
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
+import { GENERATIVE_UI_ACTIVITY_TYPE } from "@copilotkit/shared/generative-ui";
+import {
+  applySurfaceDelta,
+  extractSurfaceTitle,
+  parseSurfaceContent,
+  type SurfacePatchOp,
+} from "@/lib/generative-ui/surface";
+import { ApiError } from "@/lib/http/route-handlers";
 
 import { logger as observabilityLogger } from "@/lib/observability/logger";
 
@@ -239,6 +247,10 @@ export async function saveArtifact(
     sourceThreadId: input.threadId,
     sourceOutcomeId: input.outcomeId,
   });
+
+  if (input.outcomeId.startsWith("genui:")) {
+    return saveA2uiArtifact(input, existing);
+  }
 
   // CONTRACT: Load events ONCE and reuse across both the idempotency
   // update path (if existing !== null) and the fresh-save path.
@@ -795,4 +807,136 @@ function readStringField(
 ): string | undefined {
   const v = obj[key];
   return typeof v === "string" ? v : undefined;
+}
+
+/**
+ * Save a `genui:<surfaceId>` A2UI outcome as a static snapshot `a2ui`
+ * artifact. Reconstructs the surface from `activity_snapshot` /
+ * `activity_delta` rows in `entity_run_event`, preserving server-side
+ * provenance and `(source_thread_id, source_outcome_id)` idempotency.
+ */
+async function saveA2uiArtifact(
+  input: SaveArtifactInput,
+  existing: ExistingArtifactRef | null,
+): Promise<SaveArtifactResult> {
+  const targetSurfaceId = input.outcomeId.slice("genui:".length);
+  const rows = await db
+    .select({
+      eventType: EntityRunEventTable.type,
+      payload: EntityRunEventTable.payload,
+    })
+    .from(EntityRunEventTable)
+    .innerJoin(EntityRunTable, eq(EntityRunTable.id, EntityRunEventTable.runId))
+    .where(
+      and(
+        eq(EntityRunTable.threadId, input.threadId),
+        eq(EntityRunTable.ownerId, input.ownerId),
+        or(
+          eq(EntityRunEventTable.type, "activity_snapshot"),
+          eq(EntityRunEventTable.type, "activity_delta"),
+        ),
+        sql`${EntityRunEventTable.payload}->>'activityType' = ${GENERATIVE_UI_ACTIVITY_TYPE}`,
+      ),
+    )
+    .orderBy(
+      asc(EntityRunTable.createdAt),
+      asc(EntityRunEventTable.seq),
+      asc(EntityRunEventTable.ts),
+    );
+
+  const drafts = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    if (row.eventType === "activity_snapshot") {
+      const p = row.payload as {
+        messageId?: unknown;
+        content?: unknown;
+      };
+      if (
+        typeof p.messageId === "string" &&
+        p.content &&
+        typeof p.content === "object" &&
+        !Array.isArray(p.content)
+      ) {
+        drafts.set(p.messageId, { ...(p.content as Record<string, unknown>) });
+      }
+    } else if (row.eventType === "activity_delta") {
+      const p = row.payload as {
+        messageId?: unknown;
+        patch?: unknown;
+      };
+      if (typeof p.messageId === "string" && Array.isArray(p.patch)) {
+        const cur = drafts.get(p.messageId);
+        if (cur) {
+          drafts.set(p.messageId, applySurfaceDelta(cur, p.patch as SurfacePatchOp[]));
+        }
+      }
+    }
+  }
+
+  let matchedSurface: ReturnType<typeof parseSurfaceContent> = null;
+  for (const raw of drafts.values()) {
+    const parsed = parseSurfaceContent(raw);
+    if (
+      parsed &&
+      parsed.surfaceId === targetSurfaceId &&
+      parsed.status === "ready" &&
+      parsed.operations.length > 0
+    ) {
+      matchedSurface = parsed;
+    }
+  }
+
+  if (!matchedSurface) {
+    throw new ApiError(
+      "NOT_FOUND",
+      404,
+      `No ready A2UI surface found in thread ${input.threadId} for outcome ${input.outcomeId}.`,
+    );
+  }
+
+  const now = new Date();
+  if (existing !== null) {
+    await db
+      .update(ArtifactTable)
+      .set({
+        snapshot: matchedSurface,
+        snapshotAt: now,
+        updatedAt: now,
+      })
+      .where(eq(ArtifactTable.id, existing.artifactId));
+
+    return {
+      artifactId: existing.artifactId,
+      workflowId: existing.workflowId,
+      workflowOutputField: existing.workflowOutputField,
+      reused: true,
+    };
+  }
+
+  const [inserted] = await db
+    .insert(ArtifactTable)
+    .values({
+      kind: "artifact",
+      type: "a2ui",
+      parentId: input.parentId ?? null,
+      name: input.name?.trim() || extractSurfaceTitle(matchedSurface),
+      description: input.description ?? null,
+      config: { surface: matchedSurface },
+      snapshot: matchedSurface,
+      snapshotAt: now,
+      viewMode: "snapshot",
+      createdBy: input.ownerId,
+      sourceThreadId: input.threadId,
+      sourceOutcomeId: input.outcomeId,
+      workflowId: null,
+      workflowOutputField: null,
+    })
+    .returning({ id: ArtifactTable.id });
+
+  return {
+    artifactId: inserted.id,
+    workflowId: "",
+    workflowOutputField: "",
+    reused: false,
+  };
 }

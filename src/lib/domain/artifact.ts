@@ -6,6 +6,7 @@ export const ARTIFACT_TYPES = [
   "html",
   "slide",
   "report",
+  "a2ui",
 ] as const;
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
@@ -55,6 +56,7 @@ export const SEED_CATEGORIES: readonly {
   { name: "Images", types: ["image"] },
   { name: "HTML", types: ["html"] },
   { name: "Slides", types: ["slide"] },
+  { name: "A2UI", types: ["a2ui"] },
   // Note: the legacy `dashboard` artifact type is intentionally NOT
   // seeded a category here. Dashboards proper live in their own
   // `dashboard` table; the `dashboard` value on `artifact.type` is

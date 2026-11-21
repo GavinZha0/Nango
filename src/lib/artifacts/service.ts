@@ -141,11 +141,24 @@ async function loadOwnedFolder(
  * a nested tree. Sibling order: `displayOrder ASC, createdAt ASC`.
  */
 export async function assembleTree(ownerId: string): Promise<ArtifactNode[]> {
-  const rows: ArtifactEntity[] = await db
+  let rows: ArtifactEntity[] = await db
     .select()
     .from(ArtifactTable)
     .where(eq(ArtifactTable.createdBy, ownerId))
     .orderBy(asc(ArtifactTable.displayOrder), asc(ArtifactTable.createdAt));
+
+  // Ensure newly added system categories (e.g. "A2UI") exist for existing users.
+  const rootNames = new Set(
+    rows.filter((r) => r.parentId === null && r.kind === "folder").map((r) => r.name),
+  );
+  if (SEED_CATEGORIES.some((c) => !rootNames.has(c.name))) {
+    await seedArtifactCategoriesForUser(ownerId);
+    rows = await db
+      .select()
+      .from(ArtifactTable)
+      .where(eq(ArtifactTable.createdBy, ownerId))
+      .orderBy(asc(ArtifactTable.displayOrder), asc(ArtifactTable.createdAt));
+  }
 
   const byId: Map<string, ArtifactNode> = new Map(
     rows.map((row) => [row.id, { ...row, children: [] }]),

@@ -76,14 +76,17 @@ export function SaveOutcomeDialog({
   // the `artifactType` decision in `useSaveOutcome.toCreateArtifactBody`
   // so the picker default and the saved row's folder agree.
   const defaultCategoryName: string | undefined = useMemo(() => {
+    const isA2ui: boolean = outcome.blocks.some((b) => b.kind === "a2ui");
     const isSlide: boolean = outcome.blocks.some((b) => b.kind === "slide");
     const isSingleChart: boolean =
       outcome.blocks.length === 1 && outcome.blocks[0].kind === "chart";
-    const artifactType: ArtifactType = isSlide
-      ? "slide"
-      : isSingleChart
-        ? "chart"
-        : "report";
+    const artifactType: ArtifactType = isA2ui
+      ? "a2ui"
+      : isSlide
+        ? "slide"
+        : isSingleChart
+          ? "chart"
+          : "report";
     return lookupCategoryForType(artifactType)?.name;
   }, [outcome.blocks]);
 
