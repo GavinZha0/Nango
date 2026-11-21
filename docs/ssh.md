@@ -152,7 +152,7 @@ Caps from config keys (`lib/ssh/limits.ts`, parallel to
 | `ssh.exec_timeout`      | 60 s       | Per-call wall-clock cap |
 | `ssh.max_output_bytes`  | 1 048 576  | Per-stream byte cap (1 MiB) |
 | `ssh.max_command_chars` | 20 000     | Max assembled wire command length |
-| `ssh.sftp_max_bytes`    | 52 428 800 | Max single-file size for SFTP upload/download (50 MiB) |
+| `ssh.sftp_max_bytes`    | 104 857 600 | Max single-file size for SFTP upload/download (100 MiB) |
 | `ssh.pool_idle_timeout` | 180 s      | Idle TTL before a pooled SSH connection is disposed |
 
 Output exceeding the byte cap sets `truncated: true` and the rest is
@@ -294,7 +294,11 @@ collects `sshServerIds`. When that list is non-empty:
 - when at least one bound enabled host has `sftp_enabled = true`,
   `ssh_put_file` and `ssh_get_file` are also mounted (local paths are
   jailed to `host.file.root`; calls targeting a host with
-  `sftp_enabled = false` return `error: 'SFTP_DISABLED'`),
+  `sftp_enabled = false` return `error: 'SFTP_DISABLED'`). Note that
+  `commandAllow` / `commandDeny` do not govern SFTP transfers: `remotePath`
+  can target any path writable/readable by the SSH OS user, gated by
+  per-host `sftp_enabled`, `ssh_put_file` HITL approval (`riskLevel: 'high'`),
+  and `headlessAllowed: false`,
 - `buildSshHostsPromptBlock(sshServerIds)` produces the system-prompt
   injection:
 

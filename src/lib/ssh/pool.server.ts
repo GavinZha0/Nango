@@ -41,6 +41,11 @@ const inflightConnects = new Map<
   string,
   { configDigest: string; promise: Promise<PoolEntry> }
 >();
+const generations = new Map<string, number>();
+
+function bumpGeneration(serverId: string): void {
+  generations.set(serverId, (generations.get(serverId) ?? 0) + 1);
+}
 
 /**
  * Compute a deterministic digest of connection target + auth material so
@@ -152,6 +157,7 @@ export async function acquireSshConnection(opts: {
   // Coalesce concurrent connects for the same serverId + configDigest.
   let inflight = inflightConnects.get(serverId);
   if (!inflight || inflight.configDigest !== configDigest) {
+    const connectGen = generations.get(serverId) ?? 0;
     const promise = (async (): Promise<PoolEntry> => {
       const ssh = new NodeSSH();
       try {
@@ -164,16 +170,20 @@ export async function acquireSshConnection(opts: {
         }
         throw err;
       }
+      const evictedDuringConnect =
+        (generations.get(serverId) ?? 0) !== connectGen;
       const entry: PoolEntry = {
         serverId,
         configDigest,
         ssh,
         refCount: 0,
-        stale: false,
+        stale: evictedDuringConnect,
         idleTimer: null,
       };
-      attachSocketEviction(entry);
-      entries.set(serverId, entry);
+      if (!evictedDuringConnect) {
+        attachSocketEviction(entry);
+        entries.set(serverId, entry);
+      }
       return entry;
     })().finally(() => {
       if (inflightConnects.get(serverId)?.promise === promise) {
@@ -223,6 +233,7 @@ function makeLease(entry: PoolEntry, idleTimeoutMs: number): PooledSshLease {
  * Called by `invalidateForSshServerChange` on server edit/delete.
  */
 export function evictSshConnection(serverId: string): void {
+  bumpGeneration(serverId);
   inflightConnects.delete(serverId);
   const entry = entries.get(serverId);
   if (!entry) return;
@@ -237,6 +248,8 @@ export function evictSshConnection(serverId: string): void {
 
 /** Test / shutdown helper: dispose all pooled connections. */
 export function clearSshPool(): void {
+  for (const id of inflightConnects.keys()) bumpGeneration(id);
+  for (const id of entries.keys()) bumpGeneration(id);
   inflightConnects.clear();
   for (const entry of Array.from(entries.values())) {
     entry.stale = true;

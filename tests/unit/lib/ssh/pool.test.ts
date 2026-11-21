@@ -177,4 +177,46 @@ describe("ssh connection pool", () => {
 
     expect(createdInstances).toHaveLength(2);
   });
+
+  it("does not register a connection evicted while connect is in-flight", async () => {
+    const digest = computeSshConfigDigest("10.0.0.1", 22, "SHA256:abc", auth);
+    const cfg = { host: "10.0.0.1", port: 22, username: "u", password: "p" };
+
+    let resolveConnect!: () => void;
+    const pendingConnect = new Promise<void>((r) => {
+      resolveConnect = r;
+    });
+
+    const firstAcquire = acquireSshConnection({
+      serverId: "srv-race",
+      configDigest: digest,
+      connectConfig: cfg,
+      idleTimeoutMs: 60_000,
+    });
+    // Replace the first instance's connect with our deferred promise.
+    const inst0 = createdInstances[0];
+    inst0.connect.mockImplementationOnce(async () => {
+      await pendingConnect;
+      inst0.connected = true;
+      return inst0;
+    });
+
+    // Trigger eviction while connect is still in-flight.
+    evictSshConnection("srv-race");
+    resolveConnect();
+
+    const lease1 = await firstAcquire;
+    lease1.release();
+    expect(inst0.dispose).toHaveBeenCalledTimes(1);
+
+    // Next acquire must open a fresh connection rather than reusing inst0.
+    const lease2 = await acquireSshConnection({
+      serverId: "srv-race",
+      configDigest: digest,
+      connectConfig: cfg,
+      idleTimeoutMs: 60_000,
+    });
+    lease2.release();
+    expect(createdInstances).toHaveLength(2);
+  });
 });

@@ -310,4 +310,29 @@ describe("execOnServer — login_shell", () => {
       "echo from-stdin\n",
     );
   });
+
+  it("unblocks immediately on abort without hanging on execCommand", async () => {
+    const controller = new AbortController();
+    execImpl = () => new Promise(() => {}); // Never resolves
+
+    const p = execOnServer(targetServer, passwordAuth, "tail -f /var/log/app", {
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    controller.abort();
+
+    const res = await p;
+    expect(res.exitCode).toBeNull();
+    expect(res.signal).toBe("ABORTED");
+  });
+
+  it("unblocks immediately with TIMEOUT when execCommand hangs", async () => {
+    execImpl = () => new Promise(() => {}); // Never resolves
+
+    await expect(
+      execOnServer(targetServer, passwordAuth, "tail -f /var/log/app", {
+        timeoutMs: 20,
+      }),
+    ).rejects.toMatchObject({ code: "TIMEOUT" });
+  });
 });

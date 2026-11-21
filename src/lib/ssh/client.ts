@@ -13,6 +13,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { stat, unlink } from "node:fs/promises";
 import { NodeSSH } from "node-ssh";
 
 import { childLogger } from "@/lib/observability/logger";
@@ -176,12 +177,20 @@ export async function execOnServer(
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lease: PooledSshLease | undefined;
+  let rejectCancel: ((err: Error) => void) | undefined;
+
+  const cancelPromise = new Promise<never>((_resolve, reject) => {
+    rejectCancel = reject;
+  });
+  // Prevent unhandledRejection if cancelPromise rejects before race() attaches.
+  cancelPromise.catch(() => {});
 
   const onAbort = (): void => {
     aborted = true;
     if (lease && !lease.isShared()) {
       lease.ssh.dispose();
     }
+    rejectCancel?.(new SshError("ABORTED", "Exec aborted by caller."));
   };
   if (opts.signal) {
     if (opts.signal.aborted) {
@@ -210,22 +219,31 @@ export async function execOnServer(
     // Exec with output cap + per-call timeout.
     timer = setTimeout(() => {
       timedOut = true;
+      log.warn({ host: server.host, timeoutMs }, "SSH exec timed out");
       if (lease && !lease.isShared()) {
         lease.ssh.dispose();
       }
+      rejectCancel?.(
+        new SshError(
+          "TIMEOUT",
+          `SSH exec exceeded ${timeoutMs}ms on ${server.host}; channel closed (remote process may still be running).`,
+        ),
+      );
     }, timeoutMs);
 
-    try {
-      const stdoutCap = makeCappedSink(limits.maxOutputBytes);
-      const stderrCap = makeCappedSink(limits.maxOutputBytes);
+    const stdoutCap = makeCappedSink(limits.maxOutputBytes);
+    const stderrCap = makeCappedSink(limits.maxOutputBytes);
 
+    try {
       const finalCommand = composeWireCommand(command, server.loginShell);
-      const result = await lease.ssh.execCommand(finalCommand, {
+      const execPromise = lease.ssh.execCommand(finalCommand, {
         ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
         onStdout: (chunk) => stdoutCap.push(chunk),
         onStderr: (chunk) => stderrCap.push(chunk),
       });
+      execPromise.catch(() => {});
 
+      const result = await Promise.race([execPromise, cancelPromise]);
       const durationMs = Date.now() - startedAt;
 
       if (aborted) {
@@ -254,6 +272,16 @@ export async function execOnServer(
         truncated: stdoutCap.truncated || stderrCap.truncated,
       };
     } catch (err) {
+      if (aborted) {
+        return {
+          stdout: stdoutCap.value(),
+          stderr: stderrCap.value(),
+          exitCode: null,
+          signal: "ABORTED",
+          durationMs: Date.now() - startedAt,
+          truncated: stdoutCap.truncated || stderrCap.truncated,
+        };
+      }
       if (err instanceof SshError) throw err;
       if (timedOut) {
         throw new SshError(
@@ -261,7 +289,6 @@ export async function execOnServer(
           `SSH exec exceeded ${timeoutMs}ms on ${server.host}.`,
         );
       }
-      if (aborted) throw new SshError("ABORTED", "Exec aborted by caller.");
       throw new SshError(
         "EXEC_FAILED",
         `SSH exec on ${server.host} failed: ${errMessage(err)}`,
@@ -300,12 +327,19 @@ async function runSftpTransfer(
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lease: PooledSshLease | undefined;
+  let rejectCancel: ((err: Error) => void) | undefined;
+
+  const cancelPromise = new Promise<never>((_resolve, reject) => {
+    rejectCancel = reject;
+  });
+  cancelPromise.catch(() => {});
 
   const onAbort = (): void => {
     aborted = true;
     if (lease && !lease.isShared()) {
       lease.ssh.dispose();
     }
+    rejectCancel?.(new SshError("ABORTED", "SFTP transfer aborted by caller."));
   };
   if (opts.signal) {
     if (opts.signal.aborted) {
@@ -333,13 +367,22 @@ async function runSftpTransfer(
 
     timer = setTimeout(() => {
       timedOut = true;
+      log.warn({ host: server.host, timeoutMs }, "SSH exec timed out");
       if (lease && !lease.isShared()) {
         lease.ssh.dispose();
       }
+      rejectCancel?.(
+        new SshError(
+          "TIMEOUT",
+          `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
+        ),
+      );
     }, timeoutMs);
 
     try {
-      const sizeBytes = await fn(lease.ssh, limits.sftpMaxBytes);
+      const workPromise = fn(lease.ssh, limits.sftpMaxBytes);
+      workPromise.catch(() => {});
+      const sizeBytes = await Promise.race([workPromise, cancelPromise]);
       if (aborted) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
       if (timedOut) {
         throw new SshError(
@@ -393,34 +436,48 @@ export async function getFileFromServer(
   localAbsPath: string,
   opts: SftpTransferOptions = {},
 ): Promise<SftpTransferResult> {
-  return runSftpTransfer(server, auth, opts, async (ssh, maxBytes) => {
-    const sftp = await ssh.requestSFTP();
-    const stats = await new Promise<{ size: number; isDirectory: () => boolean }>(
-      (resolve, reject) => {
-        sftp.stat(
-          remotePath,
-          (err: unknown, st: { size: number; isDirectory: () => boolean }) => {
-            if (err) reject(err);
-            else resolve(st);
-          },
+  try {
+    return await runSftpTransfer(server, auth, opts, async (ssh, maxBytes) => {
+      const sftp = await ssh.requestSFTP();
+      const stats = await new Promise<{ size: number; isDirectory: () => boolean }>(
+        (resolve, reject) => {
+          sftp.stat(
+            remotePath,
+            (err: unknown, st: { size: number; isDirectory: () => boolean }) => {
+              if (err) reject(err);
+              else resolve(st);
+            },
+          );
+        },
+      );
+      if (stats.isDirectory()) {
+        throw new SshError(
+          "EXEC_FAILED",
+          `Remote path '${remotePath}' is a directory; SFTP get only transfers files.`,
         );
-      },
-    );
-    if (stats.isDirectory()) {
-      throw new SshError(
-        "EXEC_FAILED",
-        `Remote path '${remotePath}' is a directory; SFTP get only transfers files.`,
-      );
-    }
-    if (stats.size > maxBytes) {
-      throw new SshError(
-        "EXEC_FAILED",
-        `Remote file '${remotePath}' is ${stats.size} bytes, exceeding the ${maxBytes}-byte SFTP limit.`,
-      );
-    }
-    await ssh.getFile(localAbsPath, remotePath, sftp);
-    return stats.size;
-  });
+      }
+      if (stats.size > maxBytes) {
+        throw new SshError(
+          "EXEC_FAILED",
+          `Remote file '${remotePath}' is ${stats.size} bytes, exceeding the ${maxBytes}-byte SFTP limit.`,
+        );
+      }
+      await ssh.getFile(localAbsPath, remotePath, sftp);
+      // Re-check local size after download in case the remote file grew during transfer.
+      const localSt = await stat(localAbsPath);
+      if (localSt.size > maxBytes) {
+        throw new SshError(
+          "EXEC_FAILED",
+          `Downloaded file '${remotePath}' is ${localSt.size} bytes, exceeding the ${maxBytes}-byte SFTP limit.`,
+        );
+      }
+      return localSt.size;
+    });
+  } catch (err) {
+    // Clean up any partial or oversized file left in the local jail.
+    await unlink(localAbsPath).catch(() => {});
+    throw err;
+  }
 }
 
 // Verify (host capture + auth in one round-trip)
@@ -669,6 +726,3 @@ export function composeWireCommand(
 ): string {
   return loginShell ? buildLoginShellCommand(command) : command;
 }
-
-// Suppress the unused-log warning (we keep `log` for future telemetry).
-void log;

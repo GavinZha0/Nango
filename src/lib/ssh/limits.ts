@@ -12,7 +12,7 @@ const DEFAULT_EXEC_TIMEOUT_S = 60;
 const DEFAULT_CONNECT_TIMEOUT_S = 10;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576; // 1 MiB per stream
 const DEFAULT_MAX_COMMAND_CHARS = 20_000;
-const DEFAULT_SFTP_MAX_BYTES = 52_428_800; // 50 MiB per SFTP transfer
+const DEFAULT_SFTP_MAX_BYTES = 104_857_600; // 100 MiB per SFTP transfer
 const DEFAULT_POOL_IDLE_TIMEOUT_S = 180; // 3 min idle eviction
 
 export interface SshLimits {

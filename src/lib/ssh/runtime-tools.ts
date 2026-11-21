@@ -249,7 +249,7 @@ export function buildRunSshCommandTool(opts: {
       "as the server's configured user; per-server allow / deny " +
       "patterns may reject the call before it reaches the host " +
       "(`error: 'POLICY_DENIED'`). Output is capped at " +
-      "SSH_EXEC_MAX_OUTPUT_BYTES (default 1 MiB per stream); " +
+      "ssh.max_output_bytes (default 1 MiB per stream); " +
       "exceeding sets `truncated: true`.",
     parameters: RunSshArgs,
     execute: async (rawArgs, ctx?: { abortSignal?: AbortSignal }) => {
