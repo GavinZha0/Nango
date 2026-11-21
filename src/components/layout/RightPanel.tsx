@@ -49,6 +49,9 @@ import {
   errorActivityContentSchema,
   type ErrorActivityContent,
 } from "@/components/chat/ErrorActivityCard";
+import { A2uiPreviewCard } from "@/components/right-panels/A2uiPreviewCard";
+import { GenerativeUISurfaceContentSchema } from "@copilotkit/core/generative-ui";
+import { GENERATIVE_UI_ACTIVITY_TYPE } from "@copilotkit/shared/generative-ui";
 import type { ReactActivityMessageRenderer } from "@/lib/copilot/client";
 import { webSearchArgsSchema } from "@/lib/web-search/schema";
 import { useHandoffTools } from "@/hooks/useHandoff";
@@ -100,6 +103,11 @@ const STABLE_ACTIVITY_RENDERERS: ReactActivityMessageRenderer<ErrorActivityConte
     activityType: "error_card",
     content: errorActivityContentSchema,
     render: ErrorActivityCard,
+  },
+  {
+    activityType: GENERATIVE_UI_ACTIVITY_TYPE,
+    content: GenerativeUISurfaceContentSchema,
+    render: A2uiPreviewCard,
   },
 ]) as unknown as ReactActivityMessageRenderer<ErrorActivityContent>[];
 

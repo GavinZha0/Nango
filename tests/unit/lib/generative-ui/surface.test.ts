@@ -9,7 +9,10 @@ import {
   extractSurfaceTitle,
 } from "@/lib/generative-ui/surface";
 import { rebuildA2UiOutcome } from "@/lib/outcomes/replay-rebuilders";
-import { buildA2uiChartOption } from "@/components/workspace/blocks/A2uiBlock";
+import {
+  buildA2uiChartOption,
+  resolveA2uiProp,
+} from "@/components/workspace/blocks/A2uiBlock";
 
 describe("Generative UI surface folding & validation", () => {
   it("folds /operations/-, /status, /rejected, and /rejected/- deltas immutably", () => {
@@ -242,5 +245,37 @@ describe("Generative UI surface folding & validation", () => {
     expect(donut.series).toEqual([
       { type: "pie", radius: ["45%", "70%"], data: [{ name: "APAC", value: 42 }] },
     ]);
+  });
+
+  it("interpolates ${/path} template strings against surface dataModel", () => {
+    const surfaceDoc = parseSurfaceContent({
+      surfaceId: "interp-test",
+      target: "chat",
+      catalogId: "nango/workspace@1",
+      status: "ready",
+      rejected: [],
+      operations: [
+        {
+          version: "1.0",
+          createSurface: {
+            surfaceId: "interp-test",
+            catalogId: "nango/workspace@1",
+          },
+        },
+        {
+          version: "1.0",
+          updateDataModel: {
+            surfaceId: "interp-test",
+            path: "/",
+            value: { window: { slot: "14:00-16:00" } },
+          },
+        },
+      ],
+    });
+    const manager = new GenerativeUISurfaceManager(createHeadlessCatalog("nango/workspace@1"));
+    manager.ingest("thread-1", undefined, surfaceDoc!);
+    const surface = manager.getSurface("thread-1", "interp-test")!;
+    const resolved = resolveA2uiProp("发布窗口 ${/window/slot} · 共 11 项检查", surface.model);
+    expect(resolved).toBe("发布窗口 14:00-16:00 · 共 11 项检查");
   });
 });

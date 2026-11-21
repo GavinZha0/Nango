@@ -281,6 +281,10 @@ function ConnectedAssistantMessage(
     }
   }
 
+  const hasText = Boolean(props.message.content && props.message.content.trim().length > 0);
+  const hasToolCalls = Boolean(props.message.toolCalls && props.message.toolCalls.length > 0);
+  const forceToolTurnToolbar = !hasText && hasToolCalls && isEndOfTurn && !isRunning;
+
   return (
     <CopilotChatAssistantMessage
       {...props}
@@ -289,7 +293,22 @@ function ConnectedAssistantMessage(
       onThumbsUp={isEndOfTurn ? noop : undefined}
       onThumbsDown={isEndOfTurn ? noop : undefined}
       onReadAloud={isEndOfTurn && hasTts ? readAloud : undefined}
-    />
+    >
+      {forceToolTurnToolbar
+        ? ({ markdownRenderer, toolCallsView, toolbar }) => (
+            <div
+              data-testid="copilot-assistant-message"
+              className="copilotKitMessage copilotKitAssistantMessage"
+            >
+              <div className="cpk:prose cpk:max-w-full cpk:break-words cpk:dark:prose-invert">
+                {markdownRenderer}
+              </div>
+              {toolCallsView}
+              {toolbar}
+            </div>
+          )
+        : undefined}
+    </CopilotChatAssistantMessage>
   );
 }
 
