@@ -787,8 +787,7 @@ export function SshServerEditor({
                   data-testid="ssh-sftp-enabled-switch"
                 />
                 <span className="text-xs text-muted-foreground">
-                  Allow <code className="font-mono">ssh_put_file</code> /{" "}
-                  <code className="font-mono">ssh_get_file</code> on this host
+                  Allow uploading and downloading files on this host
                 </span>
               </div>
             </div>

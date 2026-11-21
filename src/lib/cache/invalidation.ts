@@ -18,6 +18,7 @@ import { agentPool } from "@/lib/builtin-agents";
 import { EntityCatalog } from "@/lib/backends/entity-catalog";
 import { mcpProviderPool } from "@/lib/mcp";
 import { skillPool } from "@/lib/skills";
+import { evictSshConnection } from "@/lib/ssh/pool.server";
 import { invalidateCredentialCache } from "@/lib/credentials/lookup";
 
 /**
@@ -117,6 +118,7 @@ export async function invalidateForDataSourceChange(
 export async function invalidateForSshServerChange(
   sshServerId: string,
 ): Promise<void> {
+  evictSshConnection(sshServerId);
   const rows: Array<{ agentId: string }> = await db
     .select({ agentId: BuiltinAgentToolTable.agentId })
     .from(BuiltinAgentToolTable)

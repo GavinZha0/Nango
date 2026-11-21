@@ -13,6 +13,7 @@ const DEFAULT_CONNECT_TIMEOUT_S = 10;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576; // 1 MiB per stream
 const DEFAULT_MAX_COMMAND_CHARS = 20_000;
 const DEFAULT_SFTP_MAX_BYTES = 52_428_800; // 50 MiB per SFTP transfer
+const DEFAULT_POOL_IDLE_TIMEOUT_S = 180; // 3 min idle eviction
 
 export interface SshLimits {
   /** Wall-clock cap on a single command execution. */
@@ -25,6 +26,8 @@ export interface SshLimits {
   maxCommandChars: number;
   /** Max single-file size in bytes for SFTP upload/download. */
   sftpMaxBytes: number;
+  /** Idle TTL before an unused pooled SSH connection is disposed. */
+  poolIdleTimeoutMs: number;
 }
 
 export function getSshLimits(): SshLimits {
@@ -34,6 +37,7 @@ export function getSshLimits(): SshLimits {
     maxOutputBytes: getConfigNumber("ssh.max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES),
     maxCommandChars: getConfigNumber("ssh.max_command_chars", DEFAULT_MAX_COMMAND_CHARS),
     sftpMaxBytes: getConfigNumber("ssh.sftp_max_bytes", DEFAULT_SFTP_MAX_BYTES),
+    poolIdleTimeoutMs: getConfigMs("ssh.pool_idle_timeout", DEFAULT_POOL_IDLE_TIMEOUT_S),
   };
 }
 

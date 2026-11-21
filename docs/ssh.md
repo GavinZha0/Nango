@@ -153,6 +153,7 @@ Caps from config keys (`lib/ssh/limits.ts`, parallel to
 | `ssh.max_output_bytes`  | 1 048 576  | Per-stream byte cap (1 MiB) |
 | `ssh.max_command_chars` | 20 000     | Max assembled wire command length |
 | `ssh.sftp_max_bytes`    | 52 428 800 | Max single-file size for SFTP upload/download (50 MiB) |
+| `ssh.pool_idle_timeout` | 180 s      | Idle TTL before a pooled SSH connection is disposed |
 
 Output exceeding the byte cap sets `truncated: true` and the rest is
 dropped. `AbortSignal` triggers `ssh.dispose()`; the remote process

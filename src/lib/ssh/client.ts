@@ -18,6 +18,11 @@ import { NodeSSH } from "node-ssh";
 import { childLogger } from "@/lib/observability/logger";
 import { getSshLimits } from "./limits";
 import type { NormalisedSshAuth } from "./credential-schema";
+import {
+  acquireSshConnection,
+  computeSshConfigDigest,
+  type PooledSshLease,
+} from "./pool.server";
 
 const log = childLogger({ component: "ssh" });
 
@@ -80,6 +85,9 @@ export interface ExecResult {
  * REQUIRES a non-null fingerprint and will reject otherwise.
  */
 export interface SshConnectionTarget {
+  /** Optional `ssh_server.id` — when provided, `execOnServer` and SFTP
+   *  transfers reuse a pooled connection keyed by this id. */
+  serverId?: string;
   host: string;
   port: number;
   knownHostFingerprint: string | null;
@@ -104,6 +112,48 @@ export interface ExecOptions {
   signal?: AbortSignal;
 }
 
+async function acquireClientLease(
+  server: SshConnectionTarget,
+  auth: NormalisedSshAuth,
+): Promise<PooledSshLease> {
+  const limits = getSshLimits();
+  const connectConfig = buildConnectConfig(server, auth, limits.connectTimeoutMs);
+  if (server.serverId) {
+    const configDigest = computeSshConfigDigest(
+      server.host,
+      server.port,
+      server.knownHostFingerprint === null
+        ? null
+        : server.knownHostFingerprint.replace(/=+$/, ""),
+      auth,
+    );
+    return acquireSshConnection({
+      serverId: server.serverId,
+      configDigest,
+      connectConfig,
+      idleTimeoutMs: limits.poolIdleTimeoutMs,
+    });
+  }
+  const ssh = new NodeSSH();
+  try {
+    await ssh.connect(connectConfig);
+  } catch (err) {
+    try {
+      ssh.dispose();
+    } catch {
+      // ignore
+    }
+    throw err;
+  }
+  return {
+    ssh,
+    isShared: () => false,
+    release: () => {
+      ssh.dispose();
+    },
+  };
+}
+
 /**
  * Execute a single command on the host described by `server`,
  * authenticating with `auth`. Always verifies the server's host key
@@ -120,14 +170,18 @@ export async function execOnServer(
 ): Promise<ExecResult> {
   const limits = getSshLimits();
   const timeoutMs = opts.timeoutMs ?? limits.execTimeoutMs;
-  const ssh = new NodeSSH();
 
   const startedAt = Date.now();
   let aborted = false;
+  let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let lease: PooledSshLease | undefined;
+
   const onAbort = (): void => {
     aborted = true;
-    ssh.dispose();
+    if (lease && !lease.isShared()) {
+      lease.ssh.dispose();
+    }
   };
   if (opts.signal) {
     if (opts.signal.aborted) {
@@ -138,7 +192,7 @@ export async function execOnServer(
 
   try {
     try {
-      await ssh.connect(buildConnectConfig(server, auth, limits.connectTimeoutMs));
+      lease = await acquireClientLease(server, auth);
     } catch (err) {
       if (err instanceof SshHostKeyMismatchError) throw err;
       if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
@@ -149,11 +203,16 @@ export async function execOnServer(
       );
     }
 
+    if (aborted) {
+      throw new SshError("ABORTED", "Connect aborted by caller.");
+    }
+
     // Exec with output cap + per-call timeout.
-    let timedOut = false;
     timer = setTimeout(() => {
       timedOut = true;
-      ssh.dispose();
+      if (lease && !lease.isShared()) {
+        lease.ssh.dispose();
+      }
     }, timeoutMs);
 
     try {
@@ -161,7 +220,7 @@ export async function execOnServer(
       const stderrCap = makeCappedSink(limits.maxOutputBytes);
 
       const finalCommand = composeWireCommand(command, server.loginShell);
-      const result = await ssh.execCommand(finalCommand, {
+      const result = await lease.ssh.execCommand(finalCommand, {
         ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
         onStdout: (chunk) => stdoutCap.push(chunk),
         onStderr: (chunk) => stderrCap.push(chunk),
@@ -212,7 +271,7 @@ export async function execOnServer(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
-    ssh.dispose();
+    lease?.release({ destroy: timedOut || aborted });
   }
 }
 
@@ -236,13 +295,17 @@ async function runSftpTransfer(
 ): Promise<SftpTransferResult> {
   const limits = getSshLimits();
   const timeoutMs = opts.timeoutMs ?? limits.execTimeoutMs;
-  const ssh = new NodeSSH();
   const startedAt = Date.now();
   let aborted = false;
+  let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let lease: PooledSshLease | undefined;
+
   const onAbort = (): void => {
     aborted = true;
-    ssh.dispose();
+    if (lease && !lease.isShared()) {
+      lease.ssh.dispose();
+    }
   };
   if (opts.signal) {
     if (opts.signal.aborted) {
@@ -253,7 +316,7 @@ async function runSftpTransfer(
 
   try {
     try {
-      await ssh.connect(buildConnectConfig(server, auth, limits.connectTimeoutMs));
+      lease = await acquireClientLease(server, auth);
     } catch (err) {
       if (err instanceof SshHostKeyMismatchError) throw err;
       if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
@@ -264,14 +327,19 @@ async function runSftpTransfer(
       );
     }
 
-    let timedOut = false;
+    if (aborted) {
+      throw new SshError("ABORTED", "Connect aborted by caller.");
+    }
+
     timer = setTimeout(() => {
       timedOut = true;
-      ssh.dispose();
+      if (lease && !lease.isShared()) {
+        lease.ssh.dispose();
+      }
     }, timeoutMs);
 
     try {
-      const sizeBytes = await fn(ssh, limits.sftpMaxBytes);
+      const sizeBytes = await fn(lease.ssh, limits.sftpMaxBytes);
       if (aborted) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
       if (timedOut) {
         throw new SshError(
@@ -298,7 +366,7 @@ async function runSftpTransfer(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
-    ssh.dispose();
+    lease?.release({ destroy: timedOut || aborted });
   }
 }
 

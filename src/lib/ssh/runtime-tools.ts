@@ -185,6 +185,7 @@ export async function runOnBoundServer(
   try {
     const result = await execOnServer(
       {
+        serverId: server.id,
         host: server.host,
         port: server.port,
         knownHostFingerprint: server.knownHostFingerprint,
@@ -440,6 +441,7 @@ export function buildSshPutFileTool(opts: {
       try {
         const res = await putFileOnServer(
           {
+            serverId: prep.server.id,
             host: prep.server.host,
             port: prep.server.port,
             knownHostFingerprint: prep.server.knownHostFingerprint,
@@ -503,6 +505,7 @@ export function buildSshGetFileTool(opts: {
       try {
         const res = await getFileFromServer(
           {
+            serverId: prep.server.id,
             host: prep.server.host,
             port: prep.server.port,
             knownHostFingerprint: prep.server.knownHostFingerprint,

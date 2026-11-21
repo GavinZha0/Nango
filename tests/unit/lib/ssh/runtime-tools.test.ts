@@ -289,6 +289,7 @@ describe("runOnBoundServer", () => {
 
     expect(mockExec).toHaveBeenCalledWith(
       {
+        serverId: "server-1",
         host: "10.0.0.5",
         port: 22,
         knownHostFingerprint: "SHA256:abc",
@@ -296,7 +297,7 @@ describe("runOnBoundServer", () => {
       },
       server.auth,
       "ls",
-      { timeoutMs: undefined, signal: controller.signal },
+      { timeoutMs: undefined, stdin: undefined, signal: controller.signal },
     );
   });
 
