@@ -63,6 +63,8 @@ export const createSshServerSchema = z.object({
 
   /** Wrap commands in `bash -lc '...'`. Defaults to true server-side. */
   loginShell: z.boolean().optional(),
+  /** Enable SFTP upload/download (`ssh_put_file` / `ssh_get_file`). Defaults to false. */
+  sftpEnabled: z.boolean().optional(),
 
   enabled: z.boolean().optional(),
   visibility: z.enum(["private", "public"]).optional(),
@@ -83,6 +85,7 @@ export const updateSshServerSchema = z
     commandDeny: commandList.optional(),
 
     loginShell: z.boolean().optional(),
+    sftpEnabled: z.boolean().optional(),
 
     enabled: z.boolean().optional(),
     visibility: z.enum(["private", "public"]).optional(),

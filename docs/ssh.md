@@ -152,6 +152,7 @@ Caps from config keys (`lib/ssh/limits.ts`, parallel to
 | `ssh.exec_timeout`      | 60 s       | Per-call wall-clock cap |
 | `ssh.max_output_bytes`  | 1 048 576  | Per-stream byte cap (1 MiB) |
 | `ssh.max_command_chars` | 20 000     | Max assembled wire command length |
+| `ssh.sftp_max_bytes`    | 52 428 800 | Max single-file size for SFTP upload/download (50 MiB) |
 
 Output exceeding the byte cap sets `truncated: true` and the rest is
 dropped. `AbortSignal` triggers `ssh.dispose()`; the remote process
@@ -289,6 +290,10 @@ collects `sshServerIds`. When that list is non-empty:
 - both `run_ssh_command` and `list_ssh_hosts` are added to the
   per-dispatch `ToolDefinition[]` (regardless of whether the admin
   ticked them in any UI surface — binding is the signal),
+- when at least one bound enabled host has `sftp_enabled = true`,
+  `ssh_put_file` and `ssh_get_file` are also mounted (local paths are
+  jailed to `host.file.root`; calls targeting a host with
+  `sftp_enabled = false` return `error: 'SFTP_DISABLED'`),
 - `buildSshHostsPromptBlock(sshServerIds)` produces the system-prompt
   injection:
 

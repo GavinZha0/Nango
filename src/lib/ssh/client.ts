@@ -216,6 +216,145 @@ export async function execOnServer(
   }
 }
 
+// SFTP (upload / download)
+
+export interface SftpTransferResult {
+  sizeBytes: number;
+  durationMs: number;
+}
+
+export interface SftpTransferOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+async function runSftpTransfer(
+  server: SshConnectionTarget,
+  auth: NormalisedSshAuth,
+  opts: SftpTransferOptions,
+  fn: (ssh: NodeSSH, maxBytes: number) => Promise<number>,
+): Promise<SftpTransferResult> {
+  const limits = getSshLimits();
+  const timeoutMs = opts.timeoutMs ?? limits.execTimeoutMs;
+  const ssh = new NodeSSH();
+  const startedAt = Date.now();
+  let aborted = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = (): void => {
+    aborted = true;
+    ssh.dispose();
+  };
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      throw new SshError("ABORTED", "Aborted before connect.");
+    }
+    opts.signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
+    try {
+      await ssh.connect(buildConnectConfig(server, auth, limits.connectTimeoutMs));
+    } catch (err) {
+      if (err instanceof SshHostKeyMismatchError) throw err;
+      if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
+      throw new SshError(
+        "CONNECT_FAILED",
+        `SSH connect to ${server.host}:${server.port} failed: ${errMessage(err)}`,
+        err,
+      );
+    }
+
+    let timedOut = false;
+    timer = setTimeout(() => {
+      timedOut = true;
+      ssh.dispose();
+    }, timeoutMs);
+
+    try {
+      const sizeBytes = await fn(ssh, limits.sftpMaxBytes);
+      if (aborted) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
+      if (timedOut) {
+        throw new SshError(
+          "TIMEOUT",
+          `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
+        );
+      }
+      return { sizeBytes, durationMs: Date.now() - startedAt };
+    } catch (err) {
+      if (err instanceof SshError) throw err;
+      if (timedOut) {
+        throw new SshError(
+          "TIMEOUT",
+          `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
+        );
+      }
+      if (aborted) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
+      throw new SshError(
+        "EXEC_FAILED",
+        `SFTP transfer on ${server.host} failed: ${errMessage(err)}`,
+        err,
+      );
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+    ssh.dispose();
+  }
+}
+
+/** Upload a local file to a remote SSH host via SFTP. */
+export async function putFileOnServer(
+  server: SshConnectionTarget,
+  auth: NormalisedSshAuth,
+  localAbsPath: string,
+  remotePath: string,
+  localSizeBytes: number,
+  opts: SftpTransferOptions = {},
+): Promise<SftpTransferResult> {
+  return runSftpTransfer(server, auth, opts, async (ssh) => {
+    await ssh.putFile(localAbsPath, remotePath);
+    return localSizeBytes;
+  });
+}
+
+/** Download a remote file from an SSH host via SFTP, enforcing `sftpMaxBytes`. */
+export async function getFileFromServer(
+  server: SshConnectionTarget,
+  auth: NormalisedSshAuth,
+  remotePath: string,
+  localAbsPath: string,
+  opts: SftpTransferOptions = {},
+): Promise<SftpTransferResult> {
+  return runSftpTransfer(server, auth, opts, async (ssh, maxBytes) => {
+    const sftp = await ssh.requestSFTP();
+    const stats = await new Promise<{ size: number; isDirectory: () => boolean }>(
+      (resolve, reject) => {
+        sftp.stat(
+          remotePath,
+          (err: unknown, st: { size: number; isDirectory: () => boolean }) => {
+            if (err) reject(err);
+            else resolve(st);
+          },
+        );
+      },
+    );
+    if (stats.isDirectory()) {
+      throw new SshError(
+        "EXEC_FAILED",
+        `Remote path '${remotePath}' is a directory; SFTP get only transfers files.`,
+      );
+    }
+    if (stats.size > maxBytes) {
+      throw new SshError(
+        "EXEC_FAILED",
+        `Remote file '${remotePath}' is ${stats.size} bytes, exceeding the ${maxBytes}-byte SFTP limit.`,
+      );
+    }
+    await ssh.getFile(localAbsPath, remotePath, sftp);
+    return stats.size;
+  });
+}
+
 // Verify (host capture + auth in one round-trip)
 
 /**

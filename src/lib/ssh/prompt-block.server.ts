@@ -13,6 +13,8 @@ export interface SshPromptBlock {
    *  with a leading newline; empty string when no usable servers are
    *  bound (caller should skip the concatenation entirely). */
   promptBlock: string;
+  /** True when at least one bound enabled server has `sftpEnabled: true`. */
+  hasSftpEnabled: boolean;
 }
 
 /**
@@ -22,10 +24,16 @@ export interface SshPromptBlock {
 export async function buildSshHostsPromptBlock(
   sshServerIds: readonly string[],
 ): Promise<SshPromptBlock> {
-  if (sshServerIds.length === 0) return { promptBlock: "" };
+  if (sshServerIds.length === 0) {
+    return { promptBlock: "", hasSftpEnabled: false };
+  }
 
   const rows = await listSshServersByIds([...sshServerIds]);
-  if (rows.length === 0) return { promptBlock: "" };
+  if (rows.length === 0) {
+    return { promptBlock: "", hasSftpEnabled: false };
+  }
+
+  const hasSftpEnabled = rows.some((r) => r.sftpEnabled);
 
   const lines = rows.map((r) => {
     const desc = r.description ? ` — ${r.description}` : "";
@@ -33,8 +41,14 @@ export async function buildSshHostsPromptBlock(
       r.commandAllow !== null || r.commandDeny.length > 0
         ? " [restricted]"
         : "";
-    return `  - ${r.name} (${r.host}:${r.port})${restricted}${desc}`;
+    const sftp = r.sftpEnabled ? " [sftp]" : "";
+    return `  - ${r.name} (${r.host}:${r.port})${restricted}${sftp}${desc}`;
   });
+
+  const sftpNote = hasSftpEnabled
+    ? " Hosts marked `[sftp]` also support `ssh_put_file` / `ssh_get_file` " +
+      "(local paths are confined to the host-file shared folder)."
+    : "";
 
   const intro =
     "Available SSH hosts (pass the slug as `serverName` to " +
@@ -43,13 +57,15 @@ export async function buildSshHostsPromptBlock(
     "(there is no remote sandbox). Hosts marked `[restricted]` " +
     "additionally enforce a per-server command allow / deny policy; " +
     "rejected calls come back with `error: 'POLICY_DENIED'` " +
-    "(unrestricted hosts skip that gate). Treat this like an " +
-    "authenticated terminal session: use it for diagnostics, log " +
+    "(unrestricted hosts skip that gate)." +
+    sftpNote +
+    " Treat this like an authenticated terminal session: use it for diagnostics, log " +
     "inspection, controlled deploys; do NOT use it to mutate data you " +
     "cannot easily roll back. Output is captured (stdout, stderr, " +
     "exitCode) and may be truncated if very large.";
 
   return {
     promptBlock: `## Available SSH hosts\n\n${intro}\n${lines.join("\n")}`,
+    hasSftpEnabled,
   };
 }

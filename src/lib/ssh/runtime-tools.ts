@@ -6,14 +6,32 @@
 
 import "server-only";
 
+import { mkdir, stat } from "node:fs/promises";
+import path from "node:path";
+
 import { z } from "zod";
 
 import { defineTool } from "@/lib/copilot/index.server";
 import type { ToolDefinition } from "@/lib/copilot/index.server";
+import {
+  getHostFileRoot,
+  resolveCreateInJail,
+  resolveInJail,
+} from "@/lib/host-files/jail.server";
 
-import { composeWireCommand, execOnServer, SshError } from "./client";
+import {
+  composeWireCommand,
+  execOnServer,
+  getFileFromServer,
+  putFileOnServer,
+  SshError,
+} from "./client";
 import { getSshLimits } from "./limits";
-import { listSshServersByIds, resolveSshServerByName } from "./lookup";
+import {
+  listSshServersByIds,
+  resolveSshServerByName,
+  type ResolvedSshServer,
+} from "./lookup";
 import { evaluateCommandPolicy } from "./policy";
 
 // run_ssh_command
@@ -263,12 +281,257 @@ export function buildListSshHostsTool(opts: {
     name: "list_ssh_hosts",
     description:
       "List the SSH hosts bound to this agent. Returns " +
-      "[{ id, name, description, host, port, commandAllow, commandDeny }]. " +
+      "[{ id, name, description, host, port, commandAllow, commandDeny, sftpEnabled }]. " +
       "Pass `name` as the `serverName` argument to run_ssh_command.",
     parameters: ListSshArgs,
     execute: async () => {
       const hosts = await listSshServersByIds(ids);
       return { hosts };
+    },
+  });
+}
+
+// SFTP (ssh_put_file / ssh_get_file)
+
+const SftpPutArgs = z.object({
+  serverName: z
+    .string()
+    .min(1)
+    .describe("Slug of the ssh_server to upload to (must have SFTP enabled)."),
+  localPath: z
+    .string()
+    .min(1)
+    .describe(
+      "Source file path relative to the host-file shared folder (host.file.root).",
+    ),
+  remotePath: z
+    .string()
+    .min(1)
+    .describe("Destination file path on the remote SSH host."),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(300)
+    .optional()
+    .describe("Wall-clock timeout in SECONDS (1-300). Default 60."),
+});
+
+const SftpGetArgs = z.object({
+  serverName: z
+    .string()
+    .min(1)
+    .describe("Slug of the ssh_server to download from (must have SFTP enabled)."),
+  remotePath: z
+    .string()
+    .min(1)
+    .describe("Source file path on the remote SSH host."),
+  localPath: z
+    .string()
+    .min(1)
+    .describe(
+      "Destination file path relative to the host-file shared folder (host.file.root).",
+    ),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(300)
+    .optional()
+    .describe("Wall-clock timeout in SECONDS (1-300). Default 60."),
+});
+
+type SftpPrepOk = { ok: true; server: ResolvedSshServer; root: string };
+type SftpPrepErr = { ok: false; error: string; message: string };
+
+async function prepareSftpTransfer(
+  serverName: string,
+  remotePath: string,
+  agentSshServerIds: readonly string[],
+): Promise<SftpPrepOk | SftpPrepErr> {
+  if (remotePath.includes("\0") || remotePath.trim().length === 0) {
+    return {
+      ok: false,
+      error: "INVALID_PATH",
+      message: "remotePath must be a non-empty path without NUL bytes.",
+    };
+  }
+
+  const allowedIds = new Set(agentSshServerIds);
+  const lookup = await resolveSshServerByName(serverName, allowedIds);
+  if (!lookup.ok) {
+    return { ok: false, error: lookup.error, message: lookup.message };
+  }
+  const server = lookup.resolved;
+
+  if (!server.sftpEnabled) {
+    return {
+      ok: false,
+      error: "SFTP_DISABLED",
+      message:
+        `Permission denied: SFTP file transfer is disabled on SSH server '${serverName}'. ` +
+        "Enable the 'SFTP file' option on this SSH server to allow uploads and downloads.",
+    };
+  }
+
+  const root = getHostFileRoot();
+  if (!root) {
+    return {
+      ok: false,
+      error: "ROOT_NOT_CONFIGURED",
+      message:
+        "Host-file shared folder (`host.file.root`) is not configured; SFTP local transfers require it.",
+    };
+  }
+
+  return { ok: true, server, root };
+}
+
+/** Build the `ssh_put_file` tool definition (upload from host-file jail to remote SSH host). */
+export function buildSshPutFileTool(opts: {
+  agentSshServerIds: readonly string[];
+}): ToolDefinition {
+  return defineTool({
+    name: "ssh_put_file",
+    description:
+      "Upload a file from the local host-file shared folder to a bound SSH host via SFTP. " +
+      "Requires the target SSH server to have SFTP enabled (`[sftp]`).",
+    parameters: SftpPutArgs,
+    execute: async (rawArgs, ctx?: { abortSignal?: AbortSignal }) => {
+      const args = SftpPutArgs.parse(rawArgs);
+      const prep = await prepareSftpTransfer(
+        args.serverName,
+        args.remotePath,
+        opts.agentSshServerIds,
+      );
+      if (!prep.ok) return prep;
+
+      const jailed = await resolveInJail(prep.root, args.localPath, "read");
+      if (!jailed.ok) {
+        return { ok: false, error: jailed.error, message: jailed.message };
+      }
+
+      let st: Awaited<ReturnType<typeof stat>>;
+      try {
+        st = await stat(jailed.absPath);
+      } catch {
+        return {
+          ok: false,
+          error: "NOT_FOUND",
+          message: `Local file '${jailed.relPath}' does not exist.`,
+        };
+      }
+      if (!st.isFile()) {
+        return {
+          ok: false,
+          error: "INVALID_PATH",
+          message: `Local path '${jailed.relPath}' is not a regular file.`,
+        };
+      }
+      const maxBytes = getSshLimits().sftpMaxBytes;
+      if (st.size > maxBytes) {
+        return {
+          ok: false,
+          error: "FILE_TOO_LARGE",
+          message: `Local file '${jailed.relPath}' is ${st.size} bytes, exceeding the ${maxBytes}-byte SFTP limit.`,
+        };
+      }
+
+      try {
+        const res = await putFileOnServer(
+          {
+            host: prep.server.host,
+            port: prep.server.port,
+            knownHostFingerprint: prep.server.knownHostFingerprint,
+          },
+          prep.server.auth,
+          jailed.absPath,
+          args.remotePath,
+          st.size,
+          {
+            timeoutMs:
+              args.timeoutSeconds != null
+                ? args.timeoutSeconds * 1000
+                : undefined,
+            signal: ctx?.abortSignal,
+          },
+        );
+        return {
+          ok: true,
+          serverName: prep.server.name,
+          host: prep.server.host,
+          localPath: jailed.relPath,
+          remotePath: args.remotePath,
+          ...res,
+        };
+      } catch (err) {
+        if (err instanceof SshError) {
+          return { ok: false, error: err.code, message: err.message };
+        }
+        throw err;
+      }
+    },
+  });
+}
+
+/** Build the `ssh_get_file` tool definition (download from remote SSH host to host-file jail). */
+export function buildSshGetFileTool(opts: {
+  agentSshServerIds: readonly string[];
+}): ToolDefinition {
+  return defineTool({
+    name: "ssh_get_file",
+    description:
+      "Download a file from a bound SSH host to the local host-file shared folder via SFTP. " +
+      "Requires the target SSH server to have SFTP enabled (`[sftp]`).",
+    parameters: SftpGetArgs,
+    execute: async (rawArgs, ctx?: { abortSignal?: AbortSignal }) => {
+      const args = SftpGetArgs.parse(rawArgs);
+      const prep = await prepareSftpTransfer(
+        args.serverName,
+        args.remotePath,
+        opts.agentSshServerIds,
+      );
+      if (!prep.ok) return prep;
+
+      const jailed = await resolveCreateInJail(prep.root, args.localPath);
+      if (!jailed.ok) {
+        return { ok: false, error: jailed.error, message: jailed.message };
+      }
+
+      await mkdir(path.dirname(jailed.absPath), { recursive: true });
+
+      try {
+        const res = await getFileFromServer(
+          {
+            host: prep.server.host,
+            port: prep.server.port,
+            knownHostFingerprint: prep.server.knownHostFingerprint,
+          },
+          prep.server.auth,
+          args.remotePath,
+          jailed.absPath,
+          {
+            timeoutMs:
+              args.timeoutSeconds != null
+                ? args.timeoutSeconds * 1000
+                : undefined,
+            signal: ctx?.abortSignal,
+          },
+        );
+        return {
+          ok: true,
+          serverName: prep.server.name,
+          host: prep.server.host,
+          remotePath: args.remotePath,
+          localPath: jailed.relPath,
+          ...res,
+        };
+      } catch (err) {
+        if (err instanceof SshError) {
+          return { ok: false, error: err.code, message: err.message };
+        }
+        throw err;
+      }
     },
   });
 }

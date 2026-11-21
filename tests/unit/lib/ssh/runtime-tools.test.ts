@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { runOnBoundServer, buildRunSshCommandTool } from "@/lib/ssh/runtime-tools";
+import {
+  runOnBoundServer,
+  buildRunSshCommandTool,
+  buildSshPutFileTool,
+  buildSshGetFileTool,
+} from "@/lib/ssh/runtime-tools";
 import * as lookup from "@/lib/ssh/lookup";
 import * as policy from "@/lib/ssh/policy";
 import { execOnServer, SshError } from "@/lib/ssh/client";
@@ -27,6 +32,7 @@ const server = {
   port: 22,
   knownHostFingerprint: "SHA256:abc",
   loginShell: true,
+  sftpEnabled: false,
   commandAllow: null,
   commandDeny: ["rm -rf"],
   auth: { username: "svc-nango", credentialId: "cred-1" },
@@ -400,5 +406,63 @@ describe("run_ssh_command after the runOnBoundServer extraction", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("NOT_BOUND");
     expect(mockExec).not.toHaveBeenCalled();
+  });
+});
+
+describe("ssh_put_file & ssh_get_file", () => {
+  type Executable = { execute: (args: unknown) => Promise<Record<string, unknown>> };
+
+  it("ssh_put_file returns SFTP_DISABLED when sftpEnabled is false", async () => {
+    mockResolve.mockResolvedValue({
+      ok: true,
+      resolved: { ...server, sftpEnabled: false } as never,
+    });
+    const tool = buildSshPutFileTool({
+      agentSshServerIds: ["server-1"],
+    }) as unknown as Executable;
+
+    const result = await tool.execute({
+      serverName: "test-server",
+      localPath: "app.conf",
+      remotePath: "/etc/app/app.conf",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("SFTP_DISABLED");
+  });
+
+  it("ssh_get_file returns SFTP_DISABLED when sftpEnabled is false", async () => {
+    mockResolve.mockResolvedValue({
+      ok: true,
+      resolved: { ...server, sftpEnabled: false } as never,
+    });
+    const tool = buildSshGetFileTool({
+      agentSshServerIds: ["server-1"],
+    }) as unknown as Executable;
+
+    const result = await tool.execute({
+      serverName: "test-server",
+      remotePath: "/var/log/app.log",
+      localPath: "app.log",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("SFTP_DISABLED");
+  });
+
+  it("ssh_put_file rejects NUL bytes in remotePath", async () => {
+    const tool = buildSshPutFileTool({
+      agentSshServerIds: ["server-1"],
+    }) as unknown as Executable;
+
+    const result = await tool.execute({
+      serverName: "test-server",
+      localPath: "app.conf",
+      remotePath: "/tmp/bad\0path",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("INVALID_PATH");
+    expect(mockResolve).not.toHaveBeenCalled();
   });
 });

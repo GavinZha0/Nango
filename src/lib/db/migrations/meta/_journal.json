@@ -64,6 +64,13 @@
       "when": 1795292604156,
       "tag": "0008_artifact_source_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795302059284,
+      "tag": "0009_ssh-sftp-enabled",
+      "breakpoints": true
     }
   ]
 }

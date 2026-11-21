@@ -513,6 +513,9 @@ export const SshServerTable = pgTable("ssh_server", {
    *  (Alpine, busybox, network devices) or when profile output
    *  pollutes stdout. */
   loginShell: boolean("login_shell").notNull().default(true),
+  /** When true, SFTP upload/download (`ssh_put_file` / `ssh_get_file`)
+   *  is permitted on this host. Defaults to false (opt-in per host). */
+  sftpEnabled: boolean("sftp_enabled").notNull().default(false),
 
   // State
   /** Disabled rows are excluded from the agent's `Available SSH

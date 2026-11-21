@@ -87,7 +87,8 @@ export const PATCH = withEditor<{ id: string }>(
       || body.commandAllow !== undefined
       || body.commandApprove !== undefined
       || body.commandDeny !== undefined
-      || body.loginShell !== undefined;
+      || body.loginShell !== undefined
+      || body.sftpEnabled !== undefined;
     if (editsContent && !canEditResource(rbac, session)) {
       throw new ApiError(
         "FORBIDDEN",
@@ -158,6 +159,7 @@ export const PATCH = withEditor<{ id: string }>(
     if (body.commandApprove !== undefined) updates.commandApprove = body.commandApprove;
     if (body.commandDeny !== undefined) updates.commandDeny = body.commandDeny;
     if (body.loginShell !== undefined) updates.loginShell = body.loginShell;
+    if (body.sftpEnabled !== undefined) updates.sftpEnabled = body.sftpEnabled;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     if (body.visibility !== undefined) updates.visibility = body.visibility;
 

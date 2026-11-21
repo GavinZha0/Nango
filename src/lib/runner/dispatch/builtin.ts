@@ -49,6 +49,8 @@ import {
 import {
   buildListSshHostsTool,
   buildRunSshCommandTool,
+  buildSshGetFileTool,
+  buildSshPutFileTool,
 } from "@/lib/ssh/runtime-tools";
 import { buildRepeatTool } from "@/lib/repeater/runtime-tools";
 import type { GracefulMcpProvider } from "@/lib/mcp/client-providers";
@@ -371,10 +373,18 @@ export async function buildBuiltinAgents(
       : [];
 
     // Binding any ssh_server auto-mounts run_ssh_command + list_ssh_hosts.
+    // SFTP tools (ssh_put_file + ssh_get_file) are mounted when at least one
+    // bound enabled ssh_server has `sftpEnabled: true`.
     const sshTools: ToolDefinition[] = runnableSshIds.length > 0
       ? [
           buildRunSshCommandTool({ agentSshServerIds: runnableSshIds }),
           buildListSshHostsTool({ agentSshServerIds: runnableSshIds }),
+          ...(sshHostsRuntime.hasSftpEnabled
+            ? [
+                buildSshPutFileTool({ agentSshServerIds: runnableSshIds }),
+                buildSshGetFileTool({ agentSshServerIds: runnableSshIds }),
+              ]
+            : []),
         ]
       : [];
 

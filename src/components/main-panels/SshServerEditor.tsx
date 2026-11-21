@@ -50,6 +50,7 @@ export interface SshServerDetail {
   commandApprove: string[];
   commandDeny: string[];
   loginShell: boolean;
+  sftpEnabled: boolean;
   enabled: boolean;
   visibility: string;
 }
@@ -96,6 +97,7 @@ interface FormState {
   commandApproveText: string;
   commandDenyText: string;
   loginShell: boolean;
+  sftpEnabled: boolean;
 }
 
 function buildInitialForm(detail: SshServerDetail | undefined): FormState {
@@ -110,6 +112,7 @@ function buildInitialForm(detail: SshServerDetail | undefined): FormState {
     commandApproveText: formatCommandList(detail?.commandApprove ?? []),
     commandDenyText: formatCommandList(detail?.commandDeny ?? []),
     loginShell: detail?.loginShell ?? true,
+    sftpEnabled: detail?.sftpEnabled ?? false,
   };
 }
 
@@ -158,6 +161,7 @@ export function SshServerEditor({
       commandApprove: parseCommandList(form.commandApproveText),
       commandDeny: parseCommandList(form.commandDenyText),
       loginShell: form.loginShell,
+      sftpEnabled: form.sftpEnabled,
     } as Record<string, unknown>),
     [form],
   );
@@ -319,6 +323,7 @@ export function SshServerEditor({
       commandApprove: approveParsed,
       commandDeny: denyParsed,
       loginShell: form.loginShell,
+      sftpEnabled: form.sftpEnabled,
     };
     if (forCreate) {
       base.name = form.name;
@@ -767,6 +772,23 @@ export function SshServerEditor({
                 />
                 <span className="text-xs text-muted-foreground">
                   Wrap commands in <code className="font-mono">bash -lc &apos;...&apos;</code>
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Label htmlFor="ssh-sftp-enabled" className="w-20 shrink-0">
+                SFTP file
+              </Label>
+              <div className="flex flex-1 items-center gap-2">
+                <Switch
+                  id="ssh-sftp-enabled"
+                  checked={form.sftpEnabled}
+                  onCheckedChange={(v) => update("sftpEnabled", v)}
+                  data-testid="ssh-sftp-enabled-switch"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Allow <code className="font-mono">ssh_put_file</code> /{" "}
+                  <code className="font-mono">ssh_get_file</code> on this host
                 </span>
               </div>
             </div>

@@ -224,6 +224,14 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],
   [
+    "ssh_put_file",
+    { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
+  ],
+  [
+    "ssh_get_file",
+    { riskLevel: "medium", sideEffects: "write", headlessAllowed: true },
+  ],
+  [
     "run_skill_script_on_ssh",
     {
       riskLevel: "medium",

@@ -131,6 +131,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
       commandApprove: body.commandApprove ?? [],
       commandDeny: body.commandDeny ?? [],
       loginShell: body.loginShell ?? true,
+      sftpEnabled: body.sftpEnabled ?? false,
       enabled: body.enabled ?? true,
       visibility: body.visibility ?? "private",
       createdBy: session.user.id,

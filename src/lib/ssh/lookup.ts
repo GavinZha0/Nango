@@ -37,6 +37,8 @@ export interface ResolvedSshServer {
   commandDeny: string[];
   /** Wrap commands as `bash -lc '…'` on this host. */
   loginShell: boolean;
+  /** Whether SFTP file upload/download is enabled on this host. */
+  sftpEnabled: boolean;
   auth: NormalisedSshAuth;
 }
 
@@ -157,6 +159,7 @@ async function resolveFromRow(
       commandAllow: row.commandAllow,
       commandDeny: row.commandDeny,
       loginShell: row.loginShell,
+      sftpEnabled: row.sftpEnabled,
       auth,
     },
   };
@@ -180,6 +183,7 @@ export interface SshServerListing {
   port: number;
   commandAllow: string[] | null;
   commandDeny: string[];
+  sftpEnabled: boolean;
 }
 
 /** List ssh_server rows by id (e.g. agent-bound rows) — enabled only. */
@@ -196,6 +200,7 @@ export async function listSshServersByIds(
       port: SshServerTable.port,
       commandAllow: SshServerTable.commandAllow,
       commandDeny: SshServerTable.commandDeny,
+      sftpEnabled: SshServerTable.sftpEnabled,
       enabled: SshServerTable.enabled,
     })
     .from(SshServerTable)

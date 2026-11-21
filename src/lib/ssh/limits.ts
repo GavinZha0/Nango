@@ -12,6 +12,7 @@ const DEFAULT_EXEC_TIMEOUT_S = 60;
 const DEFAULT_CONNECT_TIMEOUT_S = 10;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576; // 1 MiB per stream
 const DEFAULT_MAX_COMMAND_CHARS = 20_000;
+const DEFAULT_SFTP_MAX_BYTES = 52_428_800; // 50 MiB per SFTP transfer
 
 export interface SshLimits {
   /** Wall-clock cap on a single command execution. */
@@ -22,6 +23,8 @@ export interface SshLimits {
   maxOutputBytes: number;
   /** Max assembled SSH wire command length in characters. */
   maxCommandChars: number;
+  /** Max single-file size in bytes for SFTP upload/download. */
+  sftpMaxBytes: number;
 }
 
 export function getSshLimits(): SshLimits {
@@ -30,6 +33,7 @@ export function getSshLimits(): SshLimits {
     connectTimeoutMs: getConfigMs("ssh.connect_timeout", DEFAULT_CONNECT_TIMEOUT_S),
     maxOutputBytes: getConfigNumber("ssh.max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES),
     maxCommandChars: getConfigNumber("ssh.max_command_chars", DEFAULT_MAX_COMMAND_CHARS),
+    sftpMaxBytes: getConfigNumber("ssh.sftp_max_bytes", DEFAULT_SFTP_MAX_BYTES),
   };
 }
 
