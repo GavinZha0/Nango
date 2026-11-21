@@ -1,9 +1,9 @@
 /**
  * Shared byte-level gate for scripts declared in `scripts-on-ssh`.
  *
- * These files are not executed locally: their source is embedded in a command
- * string and handed to `bash -c` / `python3 -c` on a remote host. Anything the
- * encoder mangles in transit executes as mojibake there, far from the skill
+ * These files are not executed locally: their source is streamed via `stdin`
+ * to `bash -s` / `python3 -` on a remote host. Anything the encoder mangles in
+ * transit executes as mojibake there, far from the skill author. Every boundary
  * author. Every boundary that can see the bytes — folder
  * import and dispatch — calls {@link readSshScriptSource} so the check has
  * one definition.
@@ -25,7 +25,7 @@ export type SshScriptSource =
  * observable, which is the whole point of this check.
  *
  * QUIRK: a leading UTF-8 BOM is stripped rather than rejected. `bash` treats
- * it as part of the first token and `python3 -c` reports a syntax error, so a
+ * it as part of the first token and `python3 -` reports a syntax error, so a
  * BOM-authored script is otherwise unrunnable and stripping is the only repair
  * available at dispatch time.
  */

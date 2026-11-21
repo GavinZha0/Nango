@@ -109,9 +109,9 @@ export async function runOnBoundServer(
   }
   const server = lookup.resolved;
 
-  // SECURITY: only servers EXPLICITLY bound to this agent can be
-  // targeted. Without this check, knowledge of any server slug
-  // would let one agent reach into another's hosts.
+  // Defense-in-depth guard (unreachable against real `resolveSshServerByName`,
+  // which already filters by `allowedIds` in SQL; retained for safety and
+  // mocked unit tests).
   if (!allowedIds.has(server.id)) {
     return {
       ok: false,

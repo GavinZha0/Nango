@@ -93,7 +93,7 @@ export interface SshConnectionTarget {
 // Public API
 
 export interface ExecOptions {
-  /** Per-call override; falls back to `SSH_EXEC_TIMEOUT_MS`. */
+  /** Per-call override; falls back to `ssh.exec_timeout` (`getSshLimits().execTimeoutMs`). */
   timeoutMs?: number;
   /** Optional stdin payload streamed to the remote command (e.g. reviewed
    *  skill script source for `bash -s` / `python3 -`). */
