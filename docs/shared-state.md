@@ -10,7 +10,7 @@ Shared State is an ambient **UX & Bidirectional CoAgent Orchestration Capability
 1. **Real-time Context Awareness**: The Agent continuously perceives the user's focus, including active page view (`activeView`, `activeUrl`), open resource identifier (`activeResourceId`), and real-time form data values (`activeResourceData`).
 2. **Interactive Co-Editing (Human-in-the-Loop)**: The Agent stages non-destructive form modifications via `propose_page_edit`. The UI immediately reflects changes in form state and highlights the Save button in amber (`bg-amber-600` / `text-amber-500`) for explicit human confirmation.
 3. **Editor Registration Stack**: Multi-panel and nested inspector views (e.g. Test Case Inspector opened on top of a Suite Editor) register onto a FIFO `editors: EditorRegistration[]` stack. Closing child drawers automatically restores the parent editor context without orphaned state.
-4. **Zod Single Source of Truth**: All 9 resource definitions are modeled as pure `.strict()` Zod schemas, dynamically deriving outbound JSON Schemas via `z.toJSONSchema()`, eliminating duplicate handwritten schema drifts.
+4. **Zod Single Source of Truth**: All 10 resource definitions are modeled as pure `.strict()` Zod schemas, dynamically deriving outbound JSON Schemas via `z.toJSONSchema()`, eliminating duplicate handwritten schema drifts.
 5. **Prompt Caching & Compact Contracts**: Full resource constraints (types, allowed fields, enum values, max bounds) are statically compiled into `SHARED_STATE_PROMPT_BLOCK`, enabling zero dynamic token wastage through LLM prompt caching.
 6. **Robust Reversibility**: `discardDraft` restores from a clean pre-draft baseline snapshot, resetting form fields and clearing the amber highlight.
 
@@ -74,14 +74,15 @@ Before form data is serialized into `activeResourceData` or read by tool handler
 
 ---
 
-## 3. Supported Modules & Schema Matrix (9 Integrated Resources)
+## 3. Supported Modules & Schema Matrix (10 Integrated Resources)
 
 All schemas are defined in `src/lib/copilot/resource-schemas.ts` and registered in `src/lib/copilot/resource-registry.ts`:
 
 | Module | Route / Type | Zod Draft Schema | Canonical Field Constraints | Visual / Security Barrier |
 | :--- | :--- | :--- | :--- | :--- |
 | **Schedule** | `/schedule` | `ScheduleDraftSchema` | `name` (max 120), `task` (min 1), `agentKey`, `triggerMode` (cron/interval/once), `intervalValue`, `intervalUnit`, `cronExpr`, `oneShotTime`, `timezone` | Amber Save Button (`bg-amber-600`) |
-| **Skills** | `/skills` | `SkillDraftSchema` | `name`, `skillMd` (Full markdown with YAML frontmatter) | Amber Save Button + `source="builtin"` Write Barrier |
+| **Skills** | `/skills` | `SkillDraftSchema` | `source` (max 200), `skillMd` (Full markdown with YAML frontmatter), `fileContent` (open UTF-8 helper file content) | Amber Save Button + dirty helper-file guard |
+| **Knowledge Base** | `/kb` | `KbDraftSchema` | `description` (max `MAX_DESCRIPTION_CHARS`), `content` (open page body) | Amber Save Button (`bg-amber-600`) + no backend `kb_write` (HITL only) |
 | **Agent** | `/agent` | `AgentDraftSchema` | `name`, `description`, `icon`, `model`, `modelProvider`, `credentialId`, `prompt`, `temperature` (0-1), `maxSteps` (1-50), `toolApprovalMode`, `role`, `tools` | Amber Save Button (`bg-amber-600`) |
 | **Data Source** | `/datasource` | `DataSourceDraftSchema` | `name` (max 63), `description`, `provider` (postgres/mysql/mariadb/vertica), `credentialId`, `host`, `port` (1-65535), `database`, `params`, `readOnly`, `tableAllowlist`, `tableDenylist` | Amber Save Button (`bg-amber-600`) |
 | **SSH Server** | `/ssh-server` | `SshServerDraftSchema` | `name` (max 63), `description`, `credentialId`, `host`, `port` (1-65535, def 22), `knownHostFingerprint`, `commandAllow`, `commandApprove`, `commandDeny`, `loginShell` | Amber Save Button (`bg-amber-600`) |
@@ -90,9 +91,18 @@ All schemas are defined in `src/lib/copilot/resource-schemas.ts` and registered 
 | **Verification** | `/verification` | `VerificationDraftSchema` | `name`, `description`, `input`, `assertions` (`jsonpath` / `js_expression` / `json_schema` / `metric`; array or JSON string), `selectedCase` (`name`, `description`, `input`, `assertions`) | Amber Save Icon (`text-amber-500`) |
 | **Evaluation** | `/evaluation` | `EvaluationDraftSchema` | `name`, `description`, `input` (`turns`: `userMessage` / `expectedOutput`), `assertions` (`text_match` / `jsonpath` / `js_expression` / `tool_call` / `metric` / `llm_dim` / `llm_custom`), `turns`, `selectedCase` (`name`, `description`, `input`, `assertions`, `turns`) | Amber Save Icon (`text-amber-500`) |
 
-### 3.1 Read-Only & Inspection Surfaces: Trace (`/trace/[id]`)
+### 3.1 Layered Context Snapshots (Multi-Item Editors)
 
-Unlike the 9 editable draft resources, `/trace/[id]` is registered via `useCopilotDraft` with `isReadOnly: true` and `resourceType: "trace"`.
+Multi-item editors (`verification`, `evaluation`, `web-auto`, `skills`, `kb`) expose a 3-layer `activeResourceData` payload so the agent sees structural context without loading unselected bodies:
+- **Container level**: `suite` / `skill` / `collection` metadata (`id`, `name`, `description`, etc.).
+- **Sitemap level**: lightweight `cases` / `files` / `pages` list (paths/names/descriptions only).
+- **Focused item level**: `selectedCase` / `selectedFile` / `selectedPage` (full editable fields for the currently open item, or `null` when none is selected).
+
+Because `useCopilotDraft` passes the full layered `getCurrentData()` snapshot back into `applyDraft` during `discardDraft()`, layered editors use extraction helpers (`extractTargetCase`, `extractTargetKbPage`, `extractTargetSkillDraft` in `src/components/main-panels/common/`) to accept both flat `propose_page_edit` payloads and layered pre-draft snapshots.
+
+### 3.2 Read-Only & Inspection Surfaces: Trace (`/trace/[id]`)
+
+Unlike the 10 editable draft resources, `/trace/[id]` is registered via `useCopilotDraft` with `isReadOnly: true` and `resourceType: "trace"`.
 - **`activeResourceData` (Progressive Disclosure L1)**: Exposes essential lightweight metrics (`traceId`, `status`, `runs`, `subRuns`, `toolFailures`, `durationMs`, `targetAgent`, `firstInputTask`, `turns`). Conversational questions about turn history can be resolved directly from `turns` with zero tool overhead.
 - **`get_trace_details` Tool (Progressive Disclosure L2)**: Mounted for any agent with `sharedStateEnabled = true`. Accepts `run` (1-based turn number or UUID) and `role` (`'user'` | `'assistant'` | `'tool'` | `'all'`) to filter output down to the requested slice, preventing token bloat. Defaults to compact output (omitting 500-char tool result snippets) when querying all runs in bulk.
 

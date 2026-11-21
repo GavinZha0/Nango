@@ -7,12 +7,13 @@
  * and body on the right. Nothing else is authored here. A page's path and source
  * are metadata, so they are created and changed from the dialogs on their rows;
  * a folder row only folds its subtree and never moves the detail pane. Pages are
- * plain text: the body is a plain textarea whatever `content_type` says, there
- * is no rendered view, and there is no file import — an author opens the source
- * themselves and pastes what an agent will read.
+ * pages are plain text: the body is a plain textarea whatever `content_type` says,
+ * there is no rendered view, and there is no file import — an author opens the
+ * source themselves and pastes what an agent will read.
  *
- * No `useCopilotDraft` here: that mechanism lets an agent rewrite a resource,
- * and agents cannot write knowledge. See docs/kb.md.
+ * Uses `useCopilotDraft` to expose hierarchical collection/page context and
+ * accept HITL draft edits (`description`, `content`) for the open page. See
+ * docs/kb.md and docs/shared-state.md.
  */
 
 import {
@@ -41,6 +42,8 @@ import {
   type KbPageIdentity,
 } from "@/components/main-panels/kb/KbPageDialog";
 import { useResourcePermissions } from "@/hooks/useResourcePermissions";
+import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { extractTargetKbPage } from "@/components/main-panels/common";
 import { cn, formatBytes } from "@/lib/utils";
 import { encodePathSegments, getParentPath } from "@/lib/paths";
 import { isUnderFolder, topLevelFolderCount } from "@/lib/kb/paths";
@@ -268,6 +271,63 @@ export function KbEditor({
   const createBlocked: boolean = isNewNode && draft.content === "";
   const canSubmit: boolean = isNewNode ? !createBlocked : isDirty;
 
+  const getCurrentData = useCallback(
+    () =>
+      ({
+        collection: {
+          id: detail.id,
+          name: detail.name,
+          description: detail.description ?? null,
+          enabled: detail.enabled,
+          pageCount: detail.pages.length,
+        },
+        pages: detail.pages.map((p) => ({
+          id: p.id,
+          path: p.path,
+          description: p.description ?? null,
+        })),
+        selectedPage: showPageForm
+          ? {
+              id: selection.kind === "page" ? selection.id : null,
+              path: draft.path,
+              description: draft.description,
+              sourceRef: draft.sourceRef || null,
+              content: draft.content,
+              isNewPage: isNewNode,
+              isDirty,
+            }
+          : null,
+        isReadOnly: !editable,
+      }) as Record<string, unknown>,
+    [detail, showPageForm, selection, draft, isNewNode, isDirty, editable],
+  );
+
+  const applyDraft = useCallback(
+    (incoming: Partial<Record<string, unknown>>) => {
+      if (!editable || !showPageForm || pageLoading) return [];
+      const target = extractTargetKbPage(incoming as Record<string, unknown>);
+      const modified: string[] = [];
+      if (typeof target.description === "string" && target.description !== draft.description) {
+        setDraft((prev) => ({ ...prev, description: target.description as string }));
+        modified.push("description");
+      }
+      if (typeof target.content === "string" && target.content !== draft.content) {
+        setDraft((prev) => ({ ...prev, content: target.content as string }));
+        modified.push("content");
+      }
+      return modified;
+    },
+    [editable, showPageForm, pageLoading, draft.description, draft.content],
+  );
+
+  const { draftApplied, clearDraftState } = useCopilotDraft({
+    resourceType: "kb",
+    resourceId: detail.id,
+    isReadOnly: !editable,
+    getCurrentData,
+    applyDraft,
+  });
+
   // ── Selection ────────────────────────────────────────────────────
 
   /** Commit a node and its draft together, resetting the dirty baseline. */
@@ -276,6 +336,7 @@ export function KbEditor({
     setDraft(next);
     setSaved(next);
     setError(null);
+    clearDraftState();
   }
 
   /**
@@ -548,7 +609,7 @@ export function KbEditor({
                 disabled={saving || deleting || !canSubmit}
                 className={cn(
                   "h-6 gap-1 px-2 text-xs",
-                  canSubmit && "bg-amber-600 text-white hover:bg-amber-700",
+                  (canSubmit || draftApplied) && "bg-amber-600 text-white hover:bg-amber-700",
                 )}
               >
                 {saving ? (

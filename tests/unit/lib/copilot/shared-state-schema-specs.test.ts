@@ -8,6 +8,7 @@ import {
   AGENT_ACTIVE_RESOURCE_SCHEMA,
   MCP_ACTIVE_RESOURCE_SCHEMA,
   SKILL_ACTIVE_RESOURCE_SCHEMA,
+  KB_ACTIVE_RESOURCE_SCHEMA,
   DATASOURCE_ACTIVE_RESOURCE_SCHEMA,
   SSH_SERVER_ACTIVE_RESOURCE_SCHEMA,
 } from "@/lib/copilot/resource-schemas";
@@ -22,12 +23,13 @@ describe("Shared State Schema Specs Contract", () => {
     { name: "Agent", schema: AGENT_ACTIVE_RESOURCE_SCHEMA, expectedType: "agent" },
     { name: "MCP", schema: MCP_ACTIVE_RESOURCE_SCHEMA, expectedType: "mcp" },
     { name: "Skill", schema: SKILL_ACTIVE_RESOURCE_SCHEMA, expectedType: "skills" },
+    { name: "KB", schema: KB_ACTIVE_RESOURCE_SCHEMA, expectedType: "kb" },
     { name: "DataSource", schema: DATASOURCE_ACTIVE_RESOURCE_SCHEMA, expectedType: "datasource" },
     { name: "SSH Server", schema: SSH_SERVER_ACTIVE_RESOURCE_SCHEMA, expectedType: "ssh-server" },
   ];
 
-  it("exports all 9 active resource schemas with valid version and properties", () => {
-    expect(ALL_SCHEMAS).toHaveLength(9);
+  it("exports all 10 active resource schemas with valid version and properties", () => {
+    expect(ALL_SCHEMAS).toHaveLength(10);
 
     for (const { name, schema, expectedType } of ALL_SCHEMAS) {
       expect(schema.version, `${name} must have version 1.0`).toBe("1.0");
@@ -66,7 +68,7 @@ describe("Shared State Schema Specs Contract", () => {
     }
   });
 
-  it("builds dynamic RESOURCE_DRAFT_CONTRACTS_BLOCK containing all 9 resource contracts", async () => {
+  it("builds dynamic RESOURCE_DRAFT_CONTRACTS_BLOCK containing all 10 resource contracts", async () => {
     const { RESOURCE_DRAFT_CONTRACTS_BLOCK } = await import("@/lib/copilot/resource-schemas");
     const { SHARED_STATE_PROMPT_BLOCK } = await import("@/lib/constants/supervisor");
 

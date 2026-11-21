@@ -12,3 +12,8 @@ export {
   type BaseCaseVerdictItem,
 } from "./BaseCaseList";
 export { extractTargetCase } from "./extractTargetCase";
+export {
+  extractTargetKbPage,
+  extractTargetSkillDraft,
+  type ExtractedSkillDraft,
+} from "./extractLayeredDraft";

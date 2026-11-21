@@ -8,6 +8,7 @@ import {
   AGENT_ACTIVE_RESOURCE_SCHEMA,
   DATASOURCE_ACTIVE_RESOURCE_SCHEMA,
   EVALUATION_ACTIVE_RESOURCE_SCHEMA,
+  KB_ACTIVE_RESOURCE_SCHEMA,
   MCP_ACTIVE_RESOURCE_SCHEMA,
   SCHEDULE_ACTIVE_RESOURCE_SCHEMA,
   SKILL_ACTIVE_RESOURCE_SCHEMA,
@@ -17,6 +18,7 @@ import {
   AgentDraftSchema,
   DataSourceDraftSchema,
   EvaluationDraftSchema,
+  KbDraftSchema,
   McpDraftSchema,
   ScheduleDraftSchema,
   SkillDraftSchema,
@@ -30,6 +32,7 @@ export * from "./resource-schemas";
 export const RESOURCE_TYPES = [
   "schedule",
   "skills",
+  "kb",
   "agent",
   "datasource",
   "ssh-server",
@@ -56,6 +59,10 @@ export const RESOURCE_REGISTRY: Record<ResourceType, ResourceDefinition> = {
   skills: {
     schema: SKILL_ACTIVE_RESOURCE_SCHEMA,
     draftSchema: SkillDraftSchema,
+  },
+  kb: {
+    schema: KB_ACTIVE_RESOURCE_SCHEMA,
+    draftSchema: KbDraftSchema,
   },
   agent: {
     schema: AGENT_ACTIVE_RESOURCE_SCHEMA,

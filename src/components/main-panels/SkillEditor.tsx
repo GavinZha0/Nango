@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCopilotDraft } from "@/hooks/useCopilotDraft";
+import { extractTargetSkillDraft } from "@/components/main-panels/common";
 import { parseSkillMd } from "@/lib/skills/parser";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import {
@@ -383,6 +384,7 @@ export function SkillEditor({
             : f,
         ),
       );
+      clearDraftState();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -550,34 +552,105 @@ export function SkillEditor({
   }, [form.skillMd, initialDetail?.name, initialDetail?.version]);
 
   const getCurrentData = useCallback(
-    () => ({
-      source: form.source,
-      skillMd: form.skillMd,
-      isReadOnly: false,
-    } as Record<string, unknown>),
-    [form],
+    () =>
+      ({
+        skill: {
+          id: skillId,
+          name: draftMeta.name,
+          version: draftMeta.version,
+          source: form.source,
+          ...(selected !== SKILL_MD_PATH ? { skillMd: form.skillMd } : {}),
+          isCreating,
+          scriptsOnSsh,
+          scriptsOnDb,
+        },
+        files: [
+          { path: SKILL_MD_PATH, kind: "primary" as const },
+          ...files.map((f) => ({
+            path: f.path,
+            size: f.size,
+            contentType: f.contentType,
+          })),
+        ],
+        selectedFile:
+          selected === SKILL_MD_PATH
+            ? {
+                path: SKILL_MD_PATH,
+                isBinary: false,
+                content: form.skillMd,
+                isDirty: isSkillMdDirty,
+              }
+            : {
+                path: selected,
+                isBinary: payload?.encoding === "base64",
+                contentType: selectedMeta?.contentType ?? null,
+                content: isTextFile ? fileDraft : null,
+                isDirty: isFileDirty,
+                loading: fileLoading,
+              },
+        isReadOnly: false,
+      }) as Record<string, unknown>,
+    [
+      skillId,
+      draftMeta.name,
+      draftMeta.version,
+      form.source,
+      form.skillMd,
+      isCreating,
+      scriptsOnSsh,
+      scriptsOnDb,
+      files,
+      selected,
+      isSkillMdDirty,
+      selectedMeta?.contentType,
+      payload?.encoding,
+      isTextFile,
+      fileDraft,
+      isFileDirty,
+      fileLoading,
+    ],
   );
   const applyDraft = useCallback(
     (draft: Partial<Record<string, unknown>>) => {
-      if (selected !== SKILL_MD_PATH && currentDirty) {
-        setError("Save or discard the current helper file before applying an AI draft.");
+      const target = extractTargetSkillDraft(draft as Record<string, unknown>, SKILL_MD_PATH);
+      const wantsSkillMdChange = typeof target.skillMd === "string" && target.skillMd !== form.skillMd;
+      if (wantsSkillMdChange && selected !== SKILL_MD_PATH && isFileDirty && !target.selectedPath) {
+        setError("Save or discard the current helper file before applying an AI draft to SKILL.md.");
         return [];
       }
+      const wantsFileChange = typeof target.fileContent === "string";
+      if (wantsFileChange && !target.selectedPath && selected === SKILL_MD_PATH) {
+        setError("Open a text helper file before applying a helper file draft.");
+        return [];
+      }
+
       const modified: string[] = [];
-      if (typeof draft.source === "string" && draft.source !== form.source) {
-        setForm((prev) => ({ ...prev, source: draft.source as string }));
+      if (typeof target.source === "string" && target.source !== form.source) {
+        setForm((prev) => ({ ...prev, source: target.source as string }));
         modified.push("source");
       }
-      if (typeof draft.skillMd === "string" && draft.skillMd !== form.skillMd) {
-        setForm((prev) => ({ ...prev, skillMd: draft.skillMd as string }));
+      if (wantsSkillMdChange) {
+        setForm((prev) => ({ ...prev, skillMd: target.skillMd as string }));
         modified.push("skillMd");
-        setSelected(SKILL_MD_PATH);
-        setFileDraft(null);
-        setSavedFileContent(null);
+        if (!target.selectedPath) {
+          setSelected(SKILL_MD_PATH);
+          setFileDraft(null);
+          setSavedFileContent(null);
+        }
+      }
+      if (wantsFileChange) {
+        if (target.selectedPath && target.selectedPath !== SKILL_MD_PATH) {
+          setSelected(target.selectedPath);
+          setFileDraft(target.fileContent as string);
+          modified.push("fileContent");
+        } else if (!fileLoading && isTextFile && target.fileContent !== fileDraft) {
+          setFileDraft(target.fileContent as string);
+          modified.push("fileContent");
+        }
       }
       return modified;
     },
-    [form.source, form.skillMd, selected, currentDirty],
+    [form.source, form.skillMd, selected, isFileDirty, fileLoading, isTextFile, fileDraft],
   );
 
   const { draftApplied, clearDraftState } = useCopilotDraft({

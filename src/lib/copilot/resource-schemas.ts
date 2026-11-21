@@ -1,11 +1,12 @@
 /**
  * Canonical Copilot Active Resource Schema Specifications.
  *
- * Single source of truth for all 9 symmetrically integrated modules.
- * JSON Schemas are dynamically derived from Zod contracts via z.toJSONSchema().
+ * Single source of truth for all 10 integrated modules.
+ * JSON Schemas are symmetrically derived from Zod draft contracts via z.toJSONSchema().
  */
 
 import { z } from "zod";
+import { MAX_DESCRIPTION_CHARS } from "@/lib/kb/limits";
 
 export interface ResourceJSONSchema {
   version: "1.0";
@@ -46,6 +47,12 @@ export const ScheduleDraftSchema = z.object({
 export const SkillDraftSchema = z.object({
   source: z.string().max(200).optional().describe("Free-form origin label (e.g. anthropic, skills.sh); empty = unlabeled"),
   skillMd: z.string().optional().describe("Full SKILL.md contents including YAML frontmatter and procedure instructions"),
+  fileContent: z.string().optional().describe("Updated UTF-8 text content for the currently open helper file (when a non-SKILL.md text file is selected)"),
+}).strict();
+
+export const KbDraftSchema = z.object({
+  description: z.string().max(MAX_DESCRIPTION_CHARS).optional().describe("Short description of the currently open KB page"),
+  content: z.string().optional().describe("Full plain-text/markdown body of the currently open KB page"),
 }).strict();
 
 export const AgentDraftSchema = z.object({
@@ -162,6 +169,7 @@ export const EvaluationDraftSchema = z.object({
 export const DRAFT_SCHEMAS = {
   schedule: ScheduleDraftSchema,
   skills: SkillDraftSchema,
+  kb: KbDraftSchema,
   agent: AgentDraftSchema,
   datasource: DataSourceDraftSchema,
   "ssh-server": SshServerDraftSchema,
@@ -183,6 +191,12 @@ export const SKILL_ACTIVE_RESOURCE_SCHEMA = deriveResourceJSONSchema(
   SkillDraftSchema,
   "skills",
   "Skill Editor symmetric state contract.",
+);
+
+export const KB_ACTIVE_RESOURCE_SCHEMA = deriveResourceJSONSchema(
+  KbDraftSchema,
+  "kb",
+  "Knowledge Base Editor symmetric state contract.",
 );
 
 export const AGENT_ACTIVE_RESOURCE_SCHEMA = deriveResourceJSONSchema(
@@ -301,6 +315,7 @@ export function buildResourceDraftContractsBlock(): string {
   const schemas: Array<{ type: string; schema: ResourceJSONSchema }> = [
     { type: "schedule", schema: SCHEDULE_ACTIVE_RESOURCE_SCHEMA },
     { type: "skills", schema: SKILL_ACTIVE_RESOURCE_SCHEMA },
+    { type: "kb", schema: KB_ACTIVE_RESOURCE_SCHEMA },
     { type: "agent", schema: AGENT_ACTIVE_RESOURCE_SCHEMA },
     { type: "datasource", schema: DATASOURCE_ACTIVE_RESOURCE_SCHEMA },
     { type: "ssh-server", schema: SSH_SERVER_ACTIVE_RESOURCE_SCHEMA },

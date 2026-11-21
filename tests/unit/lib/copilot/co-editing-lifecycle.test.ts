@@ -400,5 +400,100 @@ describe("Co-Editing & Shared State Lifecycle Integration Suite", () => {
     expect(useCopilotStateStore.getState().activeEditor).toBeNull();
     expect(useCopilotStateStore.getState().activeResourceData).toBeNull();
   });
+
+  describe("Scenario 7: Layered Snapshot Discard Restoration (KB & Skills)", () => {
+    it("restores KB selectedPage description and content from layered preDraft snapshot", async () => {
+      const { extractTargetKbPage } = await import("@/components/main-panels/common");
+
+      const pageState = { description: "Orig desc", content: "Orig body" };
+      let preDraftSnapshot: Record<string, unknown> | null = null;
+
+      const getCurrentData = () => ({
+        collection: { id: "kb-1", name: "Docs", description: "Team docs", enabled: true, pageCount: 1 },
+        pages: [{ id: 1, path: "intro", description: pageState.description }],
+        selectedPage: { id: 1, path: "intro", description: pageState.description, content: pageState.content },
+      });
+
+      const applyDraft = (draft: Record<string, unknown>) => {
+        const target = extractTargetKbPage(draft);
+        const modified: string[] = [];
+        if (typeof target.description === "string" && target.description !== pageState.description) {
+          pageState.description = target.description;
+          modified.push("description");
+        }
+        if (typeof target.content === "string" && target.content !== pageState.content) {
+          pageState.content = target.content;
+          modified.push("content");
+        }
+        return modified;
+      };
+
+      preDraftSnapshot = getCurrentData();
+      expect(applyDraft({ description: "AI desc", content: "AI body" })).toEqual(["description", "content"]);
+      expect(pageState).toEqual({ description: "AI desc", content: "AI body" });
+
+      // Simulate discardDraft passing layered preDraftSnapshot back into applyDraft
+      applyDraft(preDraftSnapshot);
+      expect(pageState).toEqual({ description: "Orig desc", content: "Orig body" });
+    });
+
+    it("restores Skill source, skillMd, and helper fileContent from layered preDraft snapshot", async () => {
+      const { extractTargetSkillDraft } = await import("@/components/main-panels/common");
+
+      let source = "anthropic";
+      let skillMd = "---\nname: demo\n---\nOrig";
+      let selected = "scripts/run.py";
+      let fileContent = "print('orig')";
+
+      const getCurrentData = () => ({
+        skill: {
+          id: "skill-1",
+          name: "demo",
+          source,
+          ...(selected !== "SKILL.md" ? { skillMd } : {}),
+        },
+        files: [{ path: "SKILL.md", kind: "primary" }, { path: "scripts/run.py", size: 13 }],
+        selectedFile:
+          selected === "SKILL.md"
+            ? { path: "SKILL.md", content: skillMd }
+            : { path: selected, content: fileContent },
+      });
+
+      const applyDraft = (draft: Record<string, unknown>) => {
+        const target = extractTargetSkillDraft(draft, "SKILL.md");
+        const modified: string[] = [];
+        if (typeof target.source === "string" && target.source !== source) {
+          source = target.source;
+          modified.push("source");
+        }
+        if (typeof target.skillMd === "string" && target.skillMd !== skillMd) {
+          skillMd = target.skillMd;
+          modified.push("skillMd");
+          if (!target.selectedPath) selected = "SKILL.md";
+        }
+        if (typeof target.fileContent === "string") {
+          if (target.selectedPath && target.selectedPath !== "SKILL.md") {
+            selected = target.selectedPath;
+            fileContent = target.fileContent;
+            modified.push("fileContent");
+          } else if (selected !== "SKILL.md" && target.fileContent !== fileContent) {
+            fileContent = target.fileContent;
+            modified.push("fileContent");
+          }
+        }
+        return modified;
+      };
+
+      const preDraftSnapshot = getCurrentData();
+      expect(applyDraft({ source: "custom", fileContent: "print('ai')" })).toEqual(["source", "fileContent"]);
+      expect(source).toBe("custom");
+      expect(fileContent).toBe("print('ai')");
+
+      applyDraft(preDraftSnapshot);
+      expect(source).toBe("anthropic");
+      expect(fileContent).toBe("print('orig')");
+      expect(selected).toBe("scripts/run.py");
+    });
+  });
 });
 

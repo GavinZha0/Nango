@@ -10,10 +10,10 @@ import {
 } from "@/lib/copilot/resource-registry";
 
 describe("Resource Registry and URL Derivation Contract", () => {
-  it("defines all 9 active resource types matching registry keys and draft schemas", () => {
-    expect(RESOURCE_TYPES).toHaveLength(9);
-    expect(Object.keys(RESOURCE_REGISTRY)).toHaveLength(9);
-    expect(Object.keys(DRAFT_SCHEMAS)).toHaveLength(9);
+  it("defines all 10 active resource types matching registry keys and draft schemas", () => {
+    expect(RESOURCE_TYPES).toHaveLength(10);
+    expect(Object.keys(RESOURCE_REGISTRY)).toHaveLength(10);
+    expect(Object.keys(DRAFT_SCHEMAS)).toHaveLength(10);
 
     for (const type of RESOURCE_TYPES) {
       expect(RESOURCE_REGISTRY[type]).toBeDefined();
@@ -29,6 +29,8 @@ describe("Resource Registry and URL Derivation Contract", () => {
     expect(deriveResourceType("/schedule/123-uuid")).toBe("schedule");
     expect(deriveResourceType("/skills")).toBe("skills");
     expect(deriveResourceType("/skills/csv-analyst")).toBe("skills");
+    expect(deriveResourceType("/kb")).toBe("kb");
+    expect(deriveResourceType("/kb/team-wiki")).toBe("kb");
     expect(deriveResourceType("/agent")).toBe("agent");
     expect(deriveResourceType("/agent/abc-id")).toBe("agent");
     expect(deriveResourceType("/datasource/my-db")).toBe("datasource");

@@ -782,8 +782,9 @@ Cross-cutting UI rules:
   tree reads, and it removes the create action and every row's pencil and trash
   together. `canDelete` alone gates the header Delete. The hook settles a beat after
   mount so the action cluster appears rather than flashing "Read-only" at an author.
-- The center pane is **not** wired to `useCopilotDraft`: that mechanism exists so an
-  agent can rewrite a resource, and agents cannot write knowledge.
+- The center pane is wired to `useCopilotDraft` for human-in-the-loop (HITL) draft
+  suggestions (`description` and `content` on the open page); there is still no
+  backend `kb_write` tool, so humans own every persisted write.
 
 ## 16. Flow F — folder import
 
