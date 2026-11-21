@@ -64,8 +64,9 @@ interface UseSaveOutcomeReturn {
 
 interface SaveArtifactResponse {
   artifactId: string;
-  workflowId: string;
-  workflowOutputField: string;
+  /** `null` for workflow-less artifacts (e.g. `a2ui` snapshots). */
+  workflowId: string | null;
+  workflowOutputField: string | null;
   reused: boolean;
 }
 

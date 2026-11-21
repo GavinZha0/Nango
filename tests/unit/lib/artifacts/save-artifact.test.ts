@@ -1,4 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import {
+  GENERATIVE_UI_ACTIVITY_TYPE,
+  STANDARD_CATALOG_ID,
+} from "@copilotkit/shared/generative-ui";
 
 import { saveArtifact, type SaveArtifactInput, type SaveArtifactDeps } from "@/lib/artifacts/save-artifact";
 import { ArtifactTable, WorkflowTable } from "@/lib/db/schema";
@@ -6,8 +10,11 @@ import type { EntityRunEventEntity } from "@/lib/db/schema";
 
 const mockInsertedArtifacts: Array<Record<string, unknown>> = [];
 const mockInsertedWorkflows: Array<Record<string, unknown>> = [];
+const mockArtifactUpdates: Array<Record<string, unknown>> = [];
 let mockExistingArtifact: Record<string, unknown> | null = null;
 let mockEvents: EntityRunEventEntity[] = [];
+/** When set, the next ArtifactTable insert throws this instead of inserting. */
+let mockArtifactInsertError: (() => unknown) | null = null;
 
 // Mock the DB and transaction
 vi.mock("@/lib/db", () => {
@@ -27,39 +34,53 @@ vi.mock("@/lib/db", () => {
     return builder;
   };
 
+  const insertMock = vi.fn((table) => ({
+    values: vi.fn((vals) => {
+      if (table === WorkflowTable) {
+        const row = { id: `wf-${mockInsertedWorkflows.length + 1}`, ...vals };
+        mockInsertedWorkflows.push(row);
+        return {
+          returning: vi.fn().mockResolvedValue([row]),
+        };
+      }
+      if (table === ArtifactTable) {
+        if (mockArtifactInsertError) {
+          const makeErr = mockArtifactInsertError;
+          mockArtifactInsertError = null;
+          return { returning: vi.fn().mockRejectedValue(makeErr()) };
+        }
+        const row = { id: `art-${mockInsertedArtifacts.length + 1}`, ...vals };
+        mockInsertedArtifacts.push(row);
+        return {
+          returning: vi.fn().mockResolvedValue([row]),
+        };
+      }
+      return {
+        returning: vi.fn().mockResolvedValue([{ id: "lineage-1" }]),
+      };
+    }),
+  }));
+
   const txMock = {
     select: vi.fn(() => createQueryMock()),
-    insert: vi.fn((table) => ({
-      values: vi.fn((vals) => {
-        if (table === WorkflowTable) {
-          const row = { id: `wf-${mockInsertedWorkflows.length + 1}`, ...vals };
-          mockInsertedWorkflows.push(row);
-          return {
-            returning: vi.fn().mockResolvedValue([row]),
-          };
-        }
-        if (table === ArtifactTable) {
-          const row = { id: `art-${mockInsertedArtifacts.length + 1}`, ...vals };
-          mockInsertedArtifacts.push(row);
-          return {
-            returning: vi.fn().mockResolvedValue([row]),
-          };
-        }
-        return {
-          returning: vi.fn().mockResolvedValue([{ id: "lineage-1" }]),
-        };
-      }),
-    })),
+    insert: insertMock,
   };
 
   return {
     db: {
       select: vi.fn(() => createQueryMock()),
+      insert: insertMock,
       transaction: vi.fn(async (cb) => cb(txMock)),
-      update: vi.fn(() => ({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue(undefined),
-      })),
+      update: vi.fn((table) => {
+        const chain = {
+          set: vi.fn((vals: Record<string, unknown>) => {
+            if (table === ArtifactTable) mockArtifactUpdates.push(vals);
+            return chain;
+          }),
+          where: vi.fn().mockResolvedValue(undefined),
+        };
+        return chain;
+      }),
     },
   };
 });
@@ -94,8 +115,10 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     vi.clearAllMocks();
     mockInsertedArtifacts.length = 0;
     mockInsertedWorkflows.length = 0;
+    mockArtifactUpdates.length = 0;
     mockExistingArtifact = null;
     mockEvents = [];
+    mockArtifactInsertError = null;
   });
 
   it("should save Image Outcome with Base64 data, solidifying initial snapshot", async () => {
@@ -722,5 +745,115 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(result.artifactId).toBe("existing-art-99");
     expect(result.workflowId).toBe("existing-wf-99");
     expect(mockInsertedArtifacts.length).toBe(0);
+  });
+
+  describe("A2UI (genui:) outcomes", () => {
+    const surfaceId = "sales-summary";
+    const outcomeId = `genui:${surfaceId}`;
+    const messageId = `surface-msg-${surfaceId}`;
+
+    // Shape matches the `{ eventType, payload }` projection selected by
+    // `saveA2uiArtifact`.
+    const surfaceEvents = (headings: string[]): EntityRunEventEntity[] =>
+      [
+        {
+          eventType: "activity_snapshot",
+          payload: {
+            messageId,
+            activityType: GENERATIVE_UI_ACTIVITY_TYPE,
+            content: {
+              surfaceId,
+              target: "chat",
+              catalogId: STANDARD_CATALOG_ID,
+              status: "streaming",
+              rejected: [],
+              operations: [
+                {
+                  version: "1.0",
+                  createSurface: { surfaceId, catalogId: STANDARD_CATALOG_ID },
+                },
+              ],
+            },
+          },
+        },
+        ...headings.map((heading) => ({
+          eventType: "activity_delta",
+          payload: {
+            messageId,
+            activityType: GENERATIVE_UI_ACTIVITY_TYPE,
+            patch: [
+              {
+                op: "add",
+                path: "/operations/-",
+                value: {
+                  version: "1.0",
+                  updateDataModel: { surfaceId, path: "/heading", value: heading },
+                },
+              },
+              { op: "replace", path: "/status", value: "ready" },
+            ],
+          },
+        })),
+      ] as unknown as EntityRunEventEntity[];
+
+    it("inserts a workflow-less a2ui artifact on first save", async () => {
+      mockEvents = surfaceEvents(["Q3"]);
+
+      const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+
+      expect(result).toEqual({
+        artifactId: "art-1",
+        workflowId: null,
+        workflowOutputField: null,
+        reused: false,
+      });
+      expect(mockInsertedArtifacts).toHaveLength(1);
+      const saved = mockInsertedArtifacts[0]!;
+      expect(saved.type).toBe("a2ui");
+      expect(saved.workflowId).toBeNull();
+      expect((saved.snapshot as { operations: unknown[] }).operations).toHaveLength(2);
+    });
+
+    it("refreshes the existing workflow-less row instead of re-inserting", async () => {
+      // Regression: a NULL-workflow row used to be reported as "not found",
+      // sending re-saves into the (source_thread_id, source_outcome_id)
+      // unique index.
+      mockExistingArtifact = {
+        id: "existing-a2ui-1",
+        workflowId: null,
+        workflowOutputField: null,
+      };
+      mockEvents = surfaceEvents(["Q3", "Q4"]);
+
+      const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+
+      expect(result).toEqual({
+        artifactId: "existing-a2ui-1",
+        workflowId: null,
+        workflowOutputField: null,
+        reused: true,
+      });
+      expect(mockInsertedArtifacts).toHaveLength(0);
+      expect(mockArtifactUpdates).toHaveLength(1);
+      const update = mockArtifactUpdates[0]!;
+      const snapshot = update.snapshot as { operations: unknown[] };
+      expect(snapshot.operations).toHaveLength(3);
+      expect((update.config as { surface: unknown }).surface).toEqual(snapshot);
+    });
+
+    it("folds a lost insert race into the refresh path", async () => {
+      mockEvents = surfaceEvents(["Q3"]);
+      mockArtifactInsertError = () => {
+        // The concurrent winner becomes visible to the re-query.
+        mockExistingArtifact = { id: "winner-a2ui", workflowId: null, workflowOutputField: null };
+        return Object.assign(new Error("duplicate key"), { code: "23505" });
+      };
+
+      const result = await saveArtifact({ ownerId, threadId, outcomeId }, mockDeps);
+
+      expect(result.artifactId).toBe("winner-a2ui");
+      expect(result.reused).toBe(true);
+      expect(mockArtifactUpdates).toHaveLength(1);
+    });
   });
 });

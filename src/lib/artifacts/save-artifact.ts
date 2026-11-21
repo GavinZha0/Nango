@@ -207,8 +207,9 @@ export interface SaveArtifactDeps {
 
 export interface SaveArtifactResult {
   artifactId: string;
-  workflowId: string;
-  workflowOutputField: string;
+  /** `null` for workflow-less artifacts (e.g. `a2ui` snapshots). */
+  workflowId: string | null;
+  workflowOutputField: string | null;
   /** True if an existing artifact was returned (idempotent save). */
   reused: boolean;
 }
@@ -359,7 +360,9 @@ export async function saveArtifact(
   const workflowName = canonical.name;
   const workflowOutputField = pickWorkflowOutputField(built.spec);
 
-  let result: { artifactId: string; workflowId: string; reused: boolean };
+  let result:
+    | { artifactId: string; workflowId: string | null; reused: true }
+    | { artifactId: string; workflowId: string; reused: false };
   try {
     const inserted = await db.transaction(async (tx) => {
       // Re-check inside the transaction — narrows the race window
@@ -639,8 +642,9 @@ async function loadThreadEvents(
 
 interface ExistingArtifactRef {
   artifactId: string;
-  workflowId: string;
-  workflowOutputField: string;
+  /** `null` for workflow-less artifacts (e.g. `a2ui` snapshots). */
+  workflowId: string | null;
+  workflowOutputField: string | null;
 }
 
 type TxHandle = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -684,9 +688,10 @@ async function findExistingArtifactIn(
     .limit(1);
   const row = rows[0];
   if (row === undefined) return null;
-  if (row.workflowId === null || row.workflowOutputField === null) {
-    return null;
-  }
+  // CONTRACT: A row with a NULL workflow still owns the
+  // (source_thread_id, source_outcome_id) unique slot. Reporting it as
+  // "not found" would send callers down the insert path straight into
+  // `artifact_source_unique_idx`, so workflow-less rows are returned too.
   return {
     artifactId: row.id,
     workflowId: row.workflowId,
@@ -895,48 +900,70 @@ async function saveA2uiArtifact(
   }
 
   const now = new Date();
-  if (existing !== null) {
+  // Refresh path: keeps the artifact id, name and folder; only the
+  // surface content moves forward. `config.surface` is rewritten with
+  // `snapshot` so the two copies never disagree.
+  const refresh = async (ref: ExistingArtifactRef): Promise<SaveArtifactResult> => {
     await db
       .update(ArtifactTable)
       .set({
+        config: { surface: matchedSurface },
         snapshot: matchedSurface,
         snapshotAt: now,
         updatedAt: now,
       })
-      .where(eq(ArtifactTable.id, existing.artifactId));
-
+      .where(eq(ArtifactTable.id, ref.artifactId));
     return {
-      artifactId: existing.artifactId,
-      workflowId: existing.workflowId,
-      workflowOutputField: existing.workflowOutputField,
+      artifactId: ref.artifactId,
+      workflowId: ref.workflowId,
+      workflowOutputField: ref.workflowOutputField,
       reused: true,
     };
-  }
+  };
 
-  const [inserted] = await db
-    .insert(ArtifactTable)
-    .values({
-      kind: "artifact",
-      type: "a2ui",
-      parentId: input.parentId ?? null,
-      name: input.name?.trim() || extractSurfaceTitle(matchedSurface),
-      description: input.description ?? null,
-      config: { surface: matchedSurface },
-      snapshot: matchedSurface,
-      snapshotAt: now,
-      viewMode: "snapshot",
-      createdBy: input.ownerId,
-      sourceThreadId: input.threadId,
-      sourceOutcomeId: input.outcomeId,
+  if (existing !== null) return refresh(existing);
+
+  try {
+    const [inserted] = await db
+      .insert(ArtifactTable)
+      .values({
+        kind: "artifact",
+        type: "a2ui",
+        parentId: input.parentId ?? null,
+        name: input.name?.trim() || extractSurfaceTitle(matchedSurface),
+        description: input.description ?? null,
+        config: { surface: matchedSurface },
+        snapshot: matchedSurface,
+        snapshotAt: now,
+        viewMode: "snapshot",
+        createdBy: input.ownerId,
+        sourceThreadId: input.threadId,
+        sourceOutcomeId: input.outcomeId,
+        workflowId: null,
+        workflowOutputField: null,
+      })
+      .returning({ id: ArtifactTable.id });
+    if (inserted === undefined) {
+      throw new Error("saveA2uiArtifact: artifact row insert returned no id.");
+    }
+
+    return {
+      artifactId: inserted.id,
       workflowId: null,
       workflowOutputField: null,
-    })
-    .returning({ id: ArtifactTable.id });
-
-  return {
-    artifactId: inserted.id,
-    workflowId: "",
-    workflowOutputField: "",
-    reused: false,
-  };
+      reused: false,
+    };
+  } catch (err) {
+    // A concurrent save won the unique slot between the fast-path
+    // lookup and this insert — fold into the refresh path.
+    if (isUniqueViolation(err)) {
+      const winner = await findExistingArtifact({
+        ownerId: input.ownerId,
+        sourceThreadId: input.threadId,
+        sourceOutcomeId: input.outcomeId,
+      });
+      if (winner !== null) return refresh(winner);
+    }
+    throw err;
+  }
 }
