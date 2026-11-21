@@ -281,4 +281,23 @@ describe("execOnServer — login_shell", () => {
     );
     expect(captured.execCommand).toBe(`bash -lc 'echo '\\''hello'\\'''`);
   });
+
+  it("normalizes trailing base64 padding on knownHostFingerprint", async () => {
+    await execOnServer(
+      { ...targetServer, knownHostFingerprint: `${CORRECT_FP}=` },
+      passwordAuth,
+      "uptime",
+    );
+    expect(captured.execCommand).toBe("uptime");
+  });
+
+  it("disposes ssh client even when connect fails", async () => {
+    connectImpl = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+    await expect(
+      execOnServer(targetServer, passwordAuth, "uptime"),
+    ).rejects.toThrow(SshError);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
 });

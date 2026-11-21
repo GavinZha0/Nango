@@ -226,11 +226,12 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
   [
     "run_skill_script_on_ssh",
     {
-      riskLevel: "high",
+      riskLevel: "medium",
       sideEffects: "write",
       headlessAllowed: true,
-      // CONTRACT: headlessAllowed=true because the script bytes are reviewed
-      // skill content (not LLM-authored), unlike run_ssh_command (false).
+      // CONTRACT: base risk is medium + headlessAllowed=true because the script
+      // bytes are reviewed skill content (not LLM-authored); dangerous LLM-supplied
+      // `args` dynamically escalate to critical + requiresApproval below.
     },
   ],
 ]);

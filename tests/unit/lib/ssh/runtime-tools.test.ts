@@ -67,6 +67,7 @@ describe("runOnBoundServer", () => {
     });
 
     expect(result).toEqual({ ok: false, error: "NOT_FOUND", message: "no such server" });
+    expect(mockResolve).toHaveBeenCalledWith("x", new Set());
     expect(mockExec).not.toHaveBeenCalled();
   });
 
@@ -141,6 +142,22 @@ describe("runOnBoundServer", () => {
       server.commandAllow,
       server.commandDeny,
     );
+  });
+
+  it("skips evaluateCommandPolicy when skipCommandPolicy is true", async () => {
+    mockResolve.mockResolvedValue({ ok: true, resolved: server as never });
+    mockExec.mockResolvedValue(okResult as never);
+
+    const result = await runOnBoundServer({
+      serverName: "test-server",
+      command: "bash -c 'rm -rf /tmp/scratch' 'skill'",
+      agentSshServerIds: ["server-1"],
+      skipCommandPolicy: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockPolicy).not.toHaveBeenCalled();
+    expect(mockExec).toHaveBeenCalled();
   });
 
   // Regression for the cap being checked pre-wrap: `bash -lc '<cmd>'`

@@ -19,15 +19,30 @@ export const sshServerName = z
     "name must start with a-z and contain only [a-z0-9_-] (max 63 chars)",
   );
 
-/** SHA256:<base64> per RFC 4255 / `ssh-keygen -lf` output. */
+/** SHA256:<base64> per RFC 4255 / `ssh-keygen -lf` output (trailing `=` stripped). */
 export const sshFingerprint = z
   .string()
   .regex(
     /^SHA256:[A-Za-z0-9+/=]+$/,
     "fingerprint must be SHA256:<base64> — produce on a trusted machine with `ssh-keyscan -t ed25519 <host> | ssh-keygen -lf -`",
-  );
+  )
+  .transform((fp) => fp.replace(/=+$/, ""));
 
-const commandList = z.array(z.string().min(1));
+const regexPattern = z
+  .string()
+  .min(1)
+  .superRefine((pattern, ctx) => {
+    try {
+      new RegExp(pattern);
+    } catch (err) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid regex pattern "${pattern}": ${(err as Error).message}`,
+      });
+    }
+  });
+
+const commandList = z.array(regexPattern);
 
 /** Shared body for POST. */
 export const createSshServerSchema = z.object({

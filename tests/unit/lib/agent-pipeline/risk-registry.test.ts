@@ -263,10 +263,11 @@ describe("G20 Headless Deny in toolApprovalMiddleware", () => {
 describe("evaluateToolRisk — run_skill_script_on_ssh", () => {
   const base = { name: "k8s_ops", filename: "probe.sh", serverName: "prod-01" };
 
-  it("registers as high / write but stays headless-allowed", () => {
+  it("registers as medium / write (no approval for safe args) and stays headless-allowed", () => {
     const res = evaluateToolRisk("run_skill_script_on_ssh", base);
-    expect(res.riskLevel).toBe("high");
+    expect(res.riskLevel).toBe("medium");
     expect(res.sideEffects).toBe("write");
+    expect(res.requiresApproval).toBe(false);
     expect(res.headlessAllowed).toBe(true);
   });
 
@@ -290,14 +291,15 @@ describe("evaluateToolRisk — run_skill_script_on_ssh", () => {
       scriptText: "rm -rf /",
       args: ["--verbose"],
     });
-    expect(res.riskLevel).toBe("high");
+    expect(res.riskLevel).toBe("medium");
+    expect(res.requiresApproval).toBe(false);
     expect(res.headlessAllowed).toBe(true);
   });
 
   it("tolerates missing or malformed args arrays", () => {
     for (const args of [undefined, "rm -rf /", [null, 42], []]) {
       const res = evaluateToolRisk("run_skill_script_on_ssh", { ...base, args });
-      expect(res.riskLevel).toBe("high");
+      expect(res.riskLevel).toBe("medium");
     }
   });
 });

@@ -695,7 +695,6 @@ export async function buildBuiltinAgents(
       "get_skill",
       "get_skill_file",
       "run_skill_script",
-      "run_skill_script_on_ssh",
       // Repeater coordinator tool
       "repeat_tool",
     ]);

@@ -188,4 +188,43 @@ describe("wrapToolApproval", () => {
     expect(mockRecordEvent).not.toHaveBeenCalled();
   });
 
+  it("fails closed (requires approval) when commandApprove contains an invalid regex", async () => {
+    const { db } = await import("@/lib/db");
+    vi.mocked(db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([
+            {
+              commandApprove: ["[unclosed-regex"],
+            },
+          ]),
+        }),
+      }),
+    } as never);
+
+    const originalExecute = vi.fn().mockResolvedValue("should_not_run");
+    const tool: ToolDefinition = {
+      name: "run_ssh_command",
+      description: "ssh tool",
+      parameters: { type: "object", properties: {} } as unknown as ToolDefinition["parameters"],
+      execute: originalExecute,
+    };
+
+    const wrapped = wrapToolApproval(tool, "run_ssh_command", "auto", "run123", "user123");
+    const execPromise = wrapped.execute!({ serverName: "prod", command: "uptime" });
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockRecordEvent).toHaveBeenCalled();
+    const approvalId = (mockRecordEvent.mock.calls[0][3] as Record<string, unknown>).approvalId as string;
+
+    mockPublish("user123", { kind: "tool_approval_resolved", runId: "run123", approvalId, approved: false });
+
+    const res = await execPromise;
+    expect(res).toEqual({
+      isError: true,
+      message: "Tool execution was rejected or timed out by the user.",
+    });
+    expect(originalExecute).not.toHaveBeenCalled();
+  });
+
 });

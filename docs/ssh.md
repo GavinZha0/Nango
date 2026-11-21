@@ -58,7 +58,7 @@ The credential **reuses existing types** — Nango deliberately does not mint an
 | `credential_id` | FK to `credential`. |
 | `host`, `port` | Default port 22. |
 | `known_host_fingerprint` | Pinned host key. |
-| `command_allow`, `command_deny` | JSON arrays of regex patterns. |
+| `command_allow`, `command_deny`, `command_approve` | JSON arrays of regex patterns (`allow` / `deny` for execution policy; `approve` for HITL approval triggers). |
 | `enabled`, `visibility` | RBAC/UI toggles. |
 
 **`builtin_agent_tool` Table**
@@ -84,10 +84,11 @@ API-layer (`lib/ssh/validation.ts`):
 | `name` | regex `^[a-z][a-z0-9_-]{0,62}$`, immutable post-create |
 | `host` | non-empty string (no DNS / IP parsing — fail loudly at connect) |
 | `port` | int `[1, 65535]`, default 22 |
-| `knownHostFingerprint` | regex `^SHA256:[A-Za-z0-9+/=]+$`. **Optional on create** — server runs auto-verify and pins when missing (§4) |
+| `knownHostFingerprint` | regex `^SHA256:[A-Za-z0-9+/=]+$` (trailing `=` padding stripped on save). **Optional on create** — server runs auto-verify and pins when missing (§4) |
 | `credentialId` | must reference a row whose `type ∈ {'basic_auth', 'private_key'}` (cross-checked at POST/PATCH) |
-| `commandAllow` | `string[] | null`, regex patterns; null = unrestricted |
-| `commandDeny`  | `string[]`, regex patterns; takes precedence over allow |
+| `commandAllow` | `string[] | null`, valid JS regex patterns; null = unrestricted |
+| `commandApprove` | `string[]`, valid JS regex patterns; commands requiring manual approval in `auto` mode |
+| `commandDeny`  | `string[]`, valid JS regex patterns; takes precedence over allow |
 
 `/api/ssh-credentials` (the editor's credential picker) filters by
 `type IN ('basic_auth', 'private_key') AND enabled = true` — any
@@ -142,14 +143,15 @@ interface ExecResult {
 }
 ```
 
-Caps from env vars (`lib/ssh/limits.ts`, parallel to
+Caps from config keys (`lib/ssh/limits.ts`, parallel to
 `data-sources/limits.ts`):
 
-| Env var | Default | Purpose |
+| Config key | Default | Purpose |
 |---|---|---|
-| `SSH_CONNECT_TIMEOUT_MS`     | 10 000     | TCP + handshake budget |
-| `SSH_EXEC_TIMEOUT_MS`        | 30 000     | Per-call wall-clock cap |
-| `SSH_EXEC_MAX_OUTPUT_BYTES`  | 1 048 576  | Per-stream byte cap |
+| `ssh.connect_timeout`   | 10 s       | TCP + handshake budget |
+| `ssh.exec_timeout`      | 60 s       | Per-call wall-clock cap |
+| `ssh.max_output_bytes`  | 1 048 576  | Per-stream byte cap (1 MiB) |
+| `ssh.max_command_chars` | 20 000     | Max assembled wire command length |
 
 Output exceeding the byte cap sets `truncated: true` and the rest is
 dropped. `AbortSignal` triggers `ssh.dispose()`; the remote process
@@ -206,7 +208,7 @@ defineTool({
     "sets `truncated: true`.",
   parameters: z.object({
     serverName: z.string(),
-    command: z.string().min(1).max(8000),
+    command: z.string().min(1).max(16000),
     // SECONDS — field name disambiguates from the LLM's setTimeout /
     // OpenSSH ms intuition. Boundary converts to ms before calling
     // execOnServer.
@@ -218,8 +220,8 @@ defineTool({
 defineTool({
   name: "list_ssh_hosts",
   description: "List the SSH hosts bound to this agent. Returns " +
-    "[{ name, host, port, description }]. Pass `name` as the " +
-    "`serverName` argument to run_ssh_command.",
+    "[{ id, name, description, host, port, commandAllow, commandDeny }]. " +
+    "Pass `name` as the `serverName` argument to run_ssh_command.",
   parameters: z.object({}),
   ...
 });
@@ -229,7 +231,7 @@ defineTool({
   description: "Execute a reviewed skill script on a bound SSH host. " +
     "The script must be declared in the skill's scripts-on-ssh frontmatter. " +
     "Pass `name` (skill name), `filename`, `serverName`, and optional `args` " +
-    "and `timeoutSeconds` (1-300, default 30). Returns { ok, serverName, " +
+    "and `timeoutSeconds` (1-300, default 60). Returns { ok, serverName, " +
     "host, skill, script, scriptSha256, stdout, stderr, exitCode, signal, " +
     "durationMs, truncated }.",
   parameters: RunSkillScriptOnSshArgs,
@@ -237,8 +239,8 @@ defineTool({
 });
 ```
 
-> **Policy consideration for skill scripts on SSH:**
-> `run_skill_script_on_ssh` wraps reviewed script bytes in `bash -c '<script>' '<skillName>' ...` or `python3 -c '<script>' ...` and passes the full string to `runOnBoundServer`. Because the assembled command is multi-line / composite, target SSH hosts with granular `commandAllow` line-level regexes may reject the invocation. For hosts intended to run skill scripts, consider using a deny-only policy (`commandDeny`) or include interpreter patterns like `^bash -c` / `^python3 -c` in `commandAllow`.
+> **Policy decoupling for skill scripts on SSH:**
+> `run_skill_script_on_ssh` wraps reviewed script bytes in `bash -c '<script>' '<skillName>' ...` or `python3 -c '<script>' ...` and passes the full string to `runOnBoundServer` with `skipCommandPolicy: true`. Because the script source is human-reviewed skill content (not LLM-authored shell input), it bypasses the host's `commandAllow` / `commandDeny` regex policy (so granular `run_ssh_command` allowlists do not block skill scripts, and admins do not need to open `^bash -c` / `^python3 -c` in `commandAllow`). LLM-supplied `args` are still scanned by `evaluateToolRisk` (`DANGEROUS_SSH_PATTERNS`) and trigger human approval when escalated to `critical`.
 > Both `run_ssh_command` and `run_skill_script_on_ssh` share the same wire-command length cap (`ssh.max_command_chars`, default 20,000 characters), measured by `runOnBoundServer` via `composeWireCommand(command, server.loginShell)` — the exact string sent to `sshd` (including `loginShell` wrapping and single-quote escaping). `run_ssh_command` additionally keeps a 16,000-character Zod input cap (`RunSshArgs.command`) as an LLM guardrail, leaving room for `loginShell` wrapping.
 >
 > Script bytes are decoded with a fatal `TextDecoder` before assembly. `Buffer.toString("utf-8")` never throws — it replaces ill-formed sequences with U+FFFD, which would execute as mojibake on the host — so invalid UTF-8 and NUL bytes are refused with `INVALID_SCRIPT_BYTES`, and a leading BOM (which `bash` and `python3 -c` both reject) is stripped. Import applies the same check, so dispatch normally never sees the refusal.
@@ -257,27 +259,24 @@ LLM call
   └─> runtime-tools.execute(args)
        │ args = { serverName, command, timeoutSeconds? }
        │
-       ├─ resolveSshServerByName(serverName)         (lib/ssh/lookup.ts)
+       ├─ resolveSshServerByName(serverName, allowedIds) (lib/ssh/lookup.ts)
+       │   └─ filter by agent binding first (NOT_FOUND if unbound)
        │   └─ load ssh_server row
        │       │ enabled? else DISABLED
-       │       │ resolved? else NOT_FOUND
        │   └─ loadSshAuth(row.credentialId)          (lib/ssh/auth-loader.ts)
        │       │ credential row + type check + decrypt + zod parse
        │       │ → NormalisedSshAuth { kind, username, ...secret }
        │   └─ ResolvedSshServer { host, port, fingerprint, auth, allow, deny }
        │
-       ├─ allowedIds.has(server.id)?                 (binding RBAC)
-       │   else { ok:false, error:'NOT_BOUND' }
-       │
        ├─ evaluateCommandPolicy(command, allow, deny) (lib/ssh/policy.ts)
        │   else { ok:false, error:'POLICY_DENIED', matchedPattern }
        │
        └─ execOnServer({host, port, fp}, auth, command, opts)
-           └─ { ok:true, serverName, host, username, ...result }
+           └─ { ok:true, serverName, host, ...result }
 ```
 
-`username` in the response comes from the credential, not from the
-LLM call — the LLM never sees it as input. Credentials are resolved,
+`username` is intentionally omitted from the tool result so the credential
+identity never enters the LLM context. Credentials are resolved,
 decrypted, and consumed entirely server-side; nothing in the
 `ToolResult` envelope or the persisted `entity_run_event` row carries
 the secret.
@@ -328,8 +327,18 @@ denied command short-circuits BEFORE the SSH channel opens; the tool
 returns `{ ok: false, error: "POLICY_DENIED", message,
 matchedPattern? }` so both the agent and the audit trail can read
 the matched rule. Specific patterns are intentionally NOT inlined
-into the prompt — restricted hosts get a `[restricted]` tag instead;
-the LLM learns specifics from `POLICY_DENIED` responses.
+into the system prompt block — restricted hosts get a `[restricted]`
+tag instead — while `list_ssh_hosts` returns `commandAllow` and
+`commandDeny` on each listing so the LLM can inspect constraints
+when needed.
+
+**Approval ordering (`commandApprove`)**: in `auto` approval mode,
+`toolApprovalMiddleware` (`lib/runner/tool-approval.ts`) evaluates
+`commandApprove` regexes *before* `run_ssh_command.execute` runs
+`evaluateCommandPolicy`. Consequently, a command matching both
+`commandApprove` and `commandDeny` will prompt for human approval
+first and then be rejected with `POLICY_DENIED` if approved. Malformed
+`commandApprove` regexes fail closed (requiring approval).
 
 ## 6. API surface
 

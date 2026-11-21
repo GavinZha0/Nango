@@ -464,6 +464,7 @@ export function buildRunSkillScriptOnSshTool(
         timeoutSeconds: args.timeoutSeconds,
         maxCommandChars: getSshLimits().maxCommandChars,
         agentSshServerIds: opts.agentSshServerIds,
+        skipCommandPolicy: true,
         signal: ctx?.abortSignal,
       });
 

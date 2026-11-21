@@ -95,14 +95,22 @@ async function evaluateApprovalNeeded(
         const server = servers[0] ?? null;
         if (server && server.commandApprove && Array.isArray(server.commandApprove)) {
           for (const pattern of server.commandApprove) {
-            if (pattern && new RegExp(pattern, "i").test(command)) {
-              log.info({ toolName, command, pattern }, "auto approval triggered: ssh server specific pattern matched");
+            if (!pattern) continue;
+            try {
+              if (new RegExp(pattern).test(command)) {
+                log.info({ toolName, command, pattern }, "auto approval triggered: ssh server specific pattern matched");
+                return true;
+              }
+            } catch (regexErr) {
+              // SECURITY: fail-closed — a malformed commandApprove regex must trigger approval rather than silently skipping it.
+              log.warn({ serverName, pattern, err: regexErr }, "invalid commandApprove regex; failing closed to require approval");
               return true;
             }
           }
         }
       } catch (e) {
-        log.error({ serverName, err: e }, "failed to read SshServerTable for commandApprove checks");
+        log.error({ serverName, err: e }, "failed to read SshServerTable for commandApprove checks; failing closed to require approval");
+        return true;
       }
     }
   }

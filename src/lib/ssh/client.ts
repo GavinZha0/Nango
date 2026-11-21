@@ -121,6 +121,7 @@ export async function execOnServer(
 
   const startedAt = Date.now();
   let aborted = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const onAbort = (): void => {
     aborted = true;
     ssh.dispose();
@@ -133,77 +134,79 @@ export async function execOnServer(
   }
 
   try {
-    await ssh.connect(buildConnectConfig(server, auth, limits.connectTimeoutMs));
-  } catch (err) {
-    if (err instanceof SshHostKeyMismatchError) throw err;
-    if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
-    throw new SshError(
-      "CONNECT_FAILED",
-      `SSH connect to ${server.host}:${server.port} failed: ${errMessage(err)}`,
-      err,
-    );
-  }
+    try {
+      await ssh.connect(buildConnectConfig(server, auth, limits.connectTimeoutMs));
+    } catch (err) {
+      if (err instanceof SshHostKeyMismatchError) throw err;
+      if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
+      throw new SshError(
+        "CONNECT_FAILED",
+        `SSH connect to ${server.host}:${server.port} failed: ${errMessage(err)}`,
+        err,
+      );
+    }
 
-  // Exec with output cap + per-call timeout.
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    ssh.dispose();
-  }, timeoutMs);
+    // Exec with output cap + per-call timeout.
+    let timedOut = false;
+    timer = setTimeout(() => {
+      timedOut = true;
+      ssh.dispose();
+    }, timeoutMs);
 
-  try {
-    const stdoutCap = makeCappedSink(limits.maxOutputBytes);
-    const stderrCap = makeCappedSink(limits.maxOutputBytes);
+    try {
+      const stdoutCap = makeCappedSink(limits.maxOutputBytes);
+      const stderrCap = makeCappedSink(limits.maxOutputBytes);
 
-    const finalCommand = composeWireCommand(command, server.loginShell);
-    const result = await ssh.execCommand(finalCommand, {
-      onStdout: (chunk) => stdoutCap.push(chunk),
-      onStderr: (chunk) => stderrCap.push(chunk),
-    });
+      const finalCommand = composeWireCommand(command, server.loginShell);
+      const result = await ssh.execCommand(finalCommand, {
+        onStdout: (chunk) => stdoutCap.push(chunk),
+        onStderr: (chunk) => stderrCap.push(chunk),
+      });
 
-    const durationMs = Date.now() - startedAt;
+      const durationMs = Date.now() - startedAt;
 
-    if (aborted) {
+      if (aborted) {
+        return {
+          stdout: stdoutCap.value(),
+          stderr: stderrCap.value(),
+          exitCode: null,
+          signal: "ABORTED",
+          durationMs,
+          truncated: stdoutCap.truncated || stderrCap.truncated,
+        };
+      }
+      if (timedOut) {
+        throw new SshError(
+          "TIMEOUT",
+          `SSH exec exceeded ${timeoutMs}ms on ${server.host}; channel closed (remote process may still be running).`,
+        );
+      }
+
       return {
         stdout: stdoutCap.value(),
         stderr: stderrCap.value(),
-        exitCode: null,
-        signal: "ABORTED",
+        exitCode: result.code,
+        signal: result.signal,
         durationMs,
         truncated: stdoutCap.truncated || stderrCap.truncated,
       };
-    }
-    if (timedOut) {
+    } catch (err) {
+      if (err instanceof SshError) throw err;
+      if (timedOut) {
+        throw new SshError(
+          "TIMEOUT",
+          `SSH exec exceeded ${timeoutMs}ms on ${server.host}.`,
+        );
+      }
+      if (aborted) throw new SshError("ABORTED", "Exec aborted by caller.");
       throw new SshError(
-        "TIMEOUT",
-        `SSH exec exceeded ${timeoutMs}ms on ${server.host}; channel closed (remote process may still be running).`,
+        "EXEC_FAILED",
+        `SSH exec on ${server.host} failed: ${errMessage(err)}`,
+        err,
       );
     }
-
-    return {
-      stdout: stdoutCap.value(),
-      stderr: stderrCap.value(),
-      exitCode: result.code,
-      signal: result.signal,
-      durationMs,
-      truncated: stdoutCap.truncated || stderrCap.truncated,
-    };
-  } catch (err) {
-    if (err instanceof SshError) throw err;
-    if (timedOut) {
-      throw new SshError(
-        "TIMEOUT",
-        `SSH exec exceeded ${timeoutMs}ms on ${server.host}.`,
-      );
-    }
-    if (aborted) throw new SshError("ABORTED", "Exec aborted by caller.");
-    throw new SshError(
-      "EXEC_FAILED",
-      `SSH exec on ${server.host} failed: ${errMessage(err)}`,
-      err,
-    );
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
     if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
     ssh.dispose();
   }
@@ -328,7 +331,10 @@ function buildConnectConfig(
   connectTimeoutMs: number,
   onCapture?: (fingerprint: string) => void,
 ): ConnectConfig {
-  const expected = server.knownHostFingerprint;
+  const expected =
+    server.knownHostFingerprint === null
+      ? null
+      : server.knownHostFingerprint.replace(/=+$/, "");
   const base: ConnectConfig = {
     host: server.host,
     port: server.port,

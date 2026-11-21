@@ -97,6 +97,15 @@ describe("resolveSshServerByName", () => {
       });
     }
   });
+
+  it("returns NOT_FOUND without loading auth when boundIds is empty", async () => {
+    dbState.rows = [enabledRow];
+    loadAuthMock.mockClear();
+    const r = await resolveSshServerByName("prod-web-1", new Set());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("NOT_FOUND");
+    expect(loadAuthMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("resolveSshServerById", () => {

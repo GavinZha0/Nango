@@ -59,17 +59,36 @@ export type SshLookupResult = SshLookupOk | SshLookupFail;
 
 /**
  * Resolve an ssh_server row by its LLM-facing name and load the
- * referenced credential's auth blob. Honours the `enabled` flag —
- * disabled rows return DISABLED so the caller can surface a
- * targeted error rather than a generic "not found" leak.
+ * referenced credential's auth blob.
+ *
+ * When `boundIds` is provided (agent runtime path), membership is
+ * filtered in SQL before checking `enabled` or decrypting credentials
+ * so an unbound server is indistinguishable from a non-existent one
+ * (`NOT_FOUND`) and never triggers credential decryption.
  */
 export async function resolveSshServerByName(
   name: string,
+  boundIds?: ReadonlySet<string>,
 ): Promise<SshLookupResult> {
+  if (boundIds && boundIds.size === 0) {
+    return {
+      ok: false,
+      error: "NOT_FOUND",
+      message: `No SSH server named '${name}' is configured.`,
+    };
+  }
+
+  const whereClause = boundIds
+    ? and(
+        eq(SshServerTable.name, name),
+        inArray(SshServerTable.id, [...boundIds]),
+      )
+    : eq(SshServerTable.name, name);
+
   const rows = await db
     .select()
     .from(SshServerTable)
-    .where(eq(SshServerTable.name, name))
+    .where(whereClause)
     .limit(1);
 
   if (rows.length === 0) {

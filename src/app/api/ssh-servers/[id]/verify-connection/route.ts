@@ -1,7 +1,11 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 
+import { canViewResource } from "@/lib/auth/permissions";
+import { db } from "@/lib/db";
+import { SshServerTable } from "@/lib/db/schema";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import { verifyConnection } from "@/lib/ssh/client";
 import { resolveSshServerById } from "@/lib/ssh/lookup";
@@ -13,8 +17,33 @@ const ROUTE = "/api/ssh-servers/[id]/verify-connection";
  */
 export const POST = withEditor<{ id: string }>(
   ROUTE,
-  async ({ params }) => {
+  async ({ params, session }) => {
     const { id } = params;
+
+    const [meta] = await db
+      .select({
+        visibility: SshServerTable.visibility,
+        createdBy: SshServerTable.createdBy,
+      })
+      .from(SshServerTable)
+      .where(eq(SshServerTable.id, id))
+      .limit(1);
+
+    if (
+      !meta ||
+      !canViewResource(
+        {
+          visibility: meta.visibility as "private" | "public",
+          createdBy: meta.createdBy,
+        },
+        session,
+      )
+    ) {
+      // Same status as not-found so we don't leak existence to a
+      // user who can't see the row.
+      throw new ApiError("NOT_FOUND", 404, "SSH server not found.");
+    }
+
     const lookup = await resolveSshServerById(id);
     if (!lookup.ok) {
       const status = lookup.error === "NOT_FOUND" ? 404 : 400;

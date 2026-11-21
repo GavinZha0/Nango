@@ -9,11 +9,11 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { CredentialTable } from "@/lib/db/schema";
-import { withSession } from "@/lib/http/route-handlers";
+import { withEditor } from "@/lib/http/route-handlers";
 
 export const dynamic = "force-dynamic";
 
-export const GET = withSession("/api/ssh-credentials", async () => {
+export const GET = withEditor("/api/ssh-credentials", async () => {
   const rows = await db
     .select({
       id: CredentialTable.id,

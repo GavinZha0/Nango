@@ -60,6 +60,12 @@ export interface RunOnBoundServerOpts {
    * about input size rather than wire size.
    */
   maxCommandChars?: number;
+  /**
+   * Skip `evaluateCommandPolicy` (`commandAllow` / `commandDeny`). Used by
+   * `run_skill_script_on_ssh`, whose script bytes are human-reviewed skill
+   * content rather than LLM-authored shell commands.
+   */
+  skipCommandPolicy?: boolean;
   signal?: AbortSignal;
 }
 
@@ -92,7 +98,10 @@ export async function runOnBoundServer(
 ): Promise<RunOnBoundServerResult> {
   const allowedIds = new Set(opts.agentSshServerIds);
 
-  const lookup = await resolveSshServerByName(opts.serverName);
+  // SECURITY: pass `allowedIds` into lookup so unbound servers fail
+  // before `enabled` / credential decryption and return `NOT_FOUND`
+  // (preventing cross-agent existence / credential-health probing).
+  const lookup = await resolveSshServerByName(opts.serverName, allowedIds);
   if (!lookup.ok) {
     return { ok: false, error: lookup.error, message: lookup.message };
   }
@@ -115,20 +124,23 @@ export async function runOnBoundServer(
   // denied command never opens an SSH channel. `commandAllow` is
   // null when unconstrained; non-null arrays are evaluated per
   // `lib/ssh/policy.ts`. `commandDeny` always wins on a match.
-  const decision = evaluateCommandPolicy(
-    opts.command,
-    server.commandAllow,
-    server.commandDeny,
-  );
-  if (!decision.allowed) {
-    return {
-      ok: false,
-      error: "POLICY_DENIED",
-      message: decision.reason ?? "Command rejected by ssh_server policy.",
-      ...(decision.matchedPattern
-        ? { matchedPattern: decision.matchedPattern }
-        : {}),
-    };
+  // Skipped for reviewed skill scripts (`skipCommandPolicy: true`).
+  if (!opts.skipCommandPolicy) {
+    const decision = evaluateCommandPolicy(
+      opts.command,
+      server.commandAllow,
+      server.commandDeny,
+    );
+    if (!decision.allowed) {
+      return {
+        ok: false,
+        error: "POLICY_DENIED",
+        message: decision.reason ?? "Command rejected by ssh_server policy.",
+        ...(decision.matchedPattern
+          ? { matchedPattern: decision.matchedPattern }
+          : {}),
+      };
+    }
   }
 
   // Length gate on the string that actually reaches sshd. Measured here, not
@@ -248,8 +260,8 @@ export function buildListSshHostsTool(opts: {
     name: "list_ssh_hosts",
     description:
       "List the SSH hosts bound to this agent. Returns " +
-      "[{ name, host, port, description }]. Pass `name` as the " +
-      "`serverName` argument to run_ssh_command.",
+      "[{ id, name, description, host, port, commandAllow, commandDeny }]. " +
+      "Pass `name` as the `serverName` argument to run_ssh_command.",
     parameters: ListSshArgs,
     execute: async () => {
       const hosts = await listSshServersByIds(ids);
