@@ -60,6 +60,8 @@ export interface RunOnBoundServerOpts {
    * about input size rather than wire size.
    */
   maxCommandChars?: number;
+  /** Optional stdin payload forwarded to `execOnServer`. */
+  stdin?: string;
   /**
    * Skip `evaluateCommandPolicy` (`commandAllow` / `commandDeny`). Used by
    * `run_skill_script_on_ssh`, whose script bytes are human-reviewed skill
@@ -179,6 +181,7 @@ export async function runOnBoundServer(
           opts.timeoutSeconds != null
             ? opts.timeoutSeconds * 1000
             : undefined,
+        stdin: opts.stdin,
         signal: opts.signal,
       },
     );

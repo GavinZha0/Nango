@@ -300,4 +300,14 @@ describe("execOnServer — login_shell", () => {
     ).rejects.toThrow(SshError);
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("forwards stdin to ssh.execCommand when provided", async () => {
+    await execOnServer(targetServer, passwordAuth, "bash -s", {
+      stdin: "echo from-stdin\n",
+    });
+    expect(captured.execCommand).toBe("bash -s");
+    expect((captured.execOpts as { stdin?: string }).stdin).toBe(
+      "echo from-stdin\n",
+    );
+  });
 });

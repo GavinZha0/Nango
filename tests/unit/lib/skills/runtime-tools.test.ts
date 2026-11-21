@@ -403,8 +403,8 @@ describe("buildRunSkillScriptOnSshTool", () => {
       serverName: "server-1",
     });
 
-    expect(mockRunOnBoundServer.mock.calls[0][0].command).toContain("echo hi");
-    expect(mockRunOnBoundServer.mock.calls[0][0].command).not.toContain("\ufeff");
+    expect(mockRunOnBoundServer.mock.calls[0][0].stdin).toContain("echo hi");
+    expect(mockRunOnBoundServer.mock.calls[0][0].stdin).not.toContain("\ufeff");
   });
 
   // The cap is measured by runOnBoundServer on the composed wire command; this
@@ -461,10 +461,10 @@ describe("buildRunSkillScriptOnSshTool", () => {
     expect(result).toMatchObject({ ok: false, error: "COMMAND_TOO_LONG" });
   });
 
-  // CONTRACT: .sh runs as `bash -c '<script>' '<skill>' <args...>` so $0 is the
-  // skill name and $1.. are the caller args; .py runs as `python3 -c '<script>'
-  // <args...>` so sys.argv[1:] are the caller args. Arguments are shell-quoted.
-  it("assembles the bash command with the skill name as $0", async () => {
+  // CONTRACT: .sh runs as `bash -s [-- <args...>]` and .py runs as
+  // `python3 - [<args...>]`, with the reviewed script source streamed over
+  // `stdin` so long scripts are not constrained by `maxCommandChars`.
+  it("assembles the bash -s command and streams script bytes over stdin", async () => {
     mockStorage.readFile.mockResolvedValue({ content: Buffer.from("echo hi") });
     mockRunOnBoundServer.mockResolvedValue({ ok: true, stdout: "hi" } as never);
 
@@ -478,13 +478,15 @@ describe("buildRunSkillScriptOnSshTool", () => {
     expect(mockRunOnBoundServer).toHaveBeenCalledTimes(1);
     const call = mockRunOnBoundServer.mock.calls[0][0];
     expect(call.command).toBe(
-      `bash -c 'echo hi' 'ssh-skill' '-n' 'value with spaces'`,
+      `bash -s -- '-n' 'value with spaces'`,
     );
+    expect(call.stdin).toBe("echo hi");
+    expect(call.skipCommandPolicy).toBe(true);
     expect(call.serverName).toBe("server-1");
     expect(call.agentSshServerIds).toEqual(["server-1"]);
   });
 
-  it("assembles the python command without a $0 slot", async () => {
+  it("assembles the python3 - command and streams script bytes over stdin", async () => {
     mockStorage.readFile.mockResolvedValue({
       content: Buffer.from("print('x')"),
     });
@@ -497,9 +499,9 @@ describe("buildRunSkillScriptOnSshTool", () => {
       args: ["one"],
     });
 
-    expect(mockRunOnBoundServer.mock.calls[0][0].command).toBe(
-      `python3 -c 'print('\\''x'\\'')' 'one'`,
-    );
+    const call = mockRunOnBoundServer.mock.calls[0][0];
+    expect(call.command).toBe(`python3 - 'one'`);
+    expect(call.stdin).toBe("print('x')");
   });
 
   it("omits trailing argument separators when no args are passed", async () => {
@@ -512,13 +514,13 @@ describe("buildRunSkillScriptOnSshTool", () => {
       serverName: "server-1",
     });
 
-    expect(mockRunOnBoundServer.mock.calls[0][0].command).toBe(
-      `bash -c 'echo hi' 'ssh-skill'`,
-    );
-    expect(mockRunOnBoundServer.mock.calls[0][0].timeoutSeconds).toBeUndefined();
+    const call = mockRunOnBoundServer.mock.calls[0][0];
+    expect(call.command).toBe(`bash -s`);
+    expect(call.stdin).toBe("echo hi");
+    expect(call.timeoutSeconds).toBeUndefined();
   });
 
-  it("escapes single quotes in script bytes and args", async () => {
+  it("escapes single quotes in args while keeping script bytes unescaped in stdin", async () => {
     mockStorage.readFile.mockResolvedValue({
       content: Buffer.from("echo it's", "utf-8"),
     });
@@ -531,9 +533,9 @@ describe("buildRunSkillScriptOnSshTool", () => {
       args: ["don't"],
     });
 
-    const { command } = mockRunOnBoundServer.mock.calls[0][0];
-    expect(command).toContain(`'echo it'\\''s'`);
-    expect(command).toContain(`'don'\\''t'`);
+    const { command, stdin } = mockRunOnBoundServer.mock.calls[0][0];
+    expect(command).toBe(`bash -s -- 'don'\\''t'`);
+    expect(stdin).toBe("echo it's");
   });
 
   it("forwards timeoutSeconds and the abort signal", async () => {

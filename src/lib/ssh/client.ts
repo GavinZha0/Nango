@@ -95,6 +95,9 @@ export interface SshConnectionTarget {
 export interface ExecOptions {
   /** Per-call override; falls back to `SSH_EXEC_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /** Optional stdin payload streamed to the remote command (e.g. reviewed
+   *  skill script source for `bash -s` / `python3 -`). */
+  stdin?: string;
   /** Caller-provided cancel signal. Closing the SSH client on abort
    *  unblocks the tool immediately; the remote process is NOT killed
    *  (SSH protocol cannot pre-empt server-side execution). */
@@ -159,6 +162,7 @@ export async function execOnServer(
 
       const finalCommand = composeWireCommand(command, server.loginShell);
       const result = await ssh.execCommand(finalCommand, {
+        ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
         onStdout: (chunk) => stdoutCap.push(chunk),
         onStderr: (chunk) => stderrCap.push(chunk),
       });

@@ -445,22 +445,24 @@ export function buildRunSkillScriptOnSshTool(
       }
       const scriptText: string = decoded.text;
 
-      // Step 7: Command assembly.
-      // bash: bash -c '<script>' '<skillName>' '<arg1>' '<arg2>' ...
-      // python: python3 -c '<script>' '<arg1>' '<arg2>' ...
-      const quotedScript = shellSingleQuote(scriptText);
+      // Step 7: Command assembly (exec + stdin).
+      // Script source is streamed via `stdin` so long scripts are not
+      // constrained by `maxCommandChars` / remote `ARG_MAX` or double-quoted
+      // by `loginShell` wrapping.
+      // bash: bash -s [-- '<arg1>' '<arg2>' ...]
+      // python: python3 - ['<arg1>' '<arg2>' ...]
       const quotedArgs = (args.args ?? []).map(shellSingleQuote).join(" ");
       const command =
         interpreter === "bash"
-          ? `bash -c ${quotedScript} ${shellSingleQuote(spec.name)}${quotedArgs ? " " + quotedArgs : ""}`
-          : `python3 -c ${quotedScript}${quotedArgs ? " " + quotedArgs : ""}`;
+          ? `bash -s${quotedArgs ? " -- " + quotedArgs : ""}`
+          : `python3 -${quotedArgs ? " " + quotedArgs : ""}`;
 
       // Step 8: Delegate to runOnBoundServer, which owns the length gate on
-      // the composed wire command (a login-shell host re-quotes `command`,
-      // so measuring it here would under-report).
+      // the composed wire command (here only the interpreter + quoted args).
       const execResult = await runOnBoundServer({
         serverName: args.serverName,
         command,
+        stdin: scriptText,
         timeoutSeconds: args.timeoutSeconds,
         maxCommandChars: getSshLimits().maxCommandChars,
         agentSshServerIds: opts.agentSshServerIds,
