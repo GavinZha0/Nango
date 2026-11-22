@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/GavinZha0/Nango/compare/v0.39.0...v0.39.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **desktop:** use built-in tar to extract zip archives on Windows ([61704c6](https://github.com/GavinZha0/Nango/commit/61704c6d8b6e99397cfcde9cc341088743b01f73))
+
 ## [0.39.0](https://github.com/GavinZha0/Nango/compare/v0.38.0...v0.39.0) (2026-11-22)
 
 
