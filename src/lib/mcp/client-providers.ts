@@ -167,15 +167,12 @@ export function createGracefulMcpProvider(
     } catch (err) {
       health = "discovery-failed";
       lastErrorMessage = err instanceof Error ? err.message : String(err);
-      log.error(
+      log.warn(
         {
           event: "mcp_discovery_failed",
           url: cfg.url,
           transport: cfg.type,
-          err:
-            err instanceof Error
-              ? { name: err.name, message: err.message, stack: err.stack }
-              : { name: "Unknown", message: String(err) },
+          error: lastErrorMessage,
         },
         "MCP tool discovery failed; agent will run without these tools",
       );

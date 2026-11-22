@@ -8,3 +8,6 @@ allowBuilds:
   "@scarf/scarf": false
   sharp: false
   unrs-resolver: false
+
+overrides:
+  "@ag-ui/client": "1.0.5"
