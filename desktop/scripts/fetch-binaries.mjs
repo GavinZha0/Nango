@@ -261,16 +261,12 @@ function extractArchive(archivePath, destDir) {
     return;
   }
   if (process.platform === "win32") {
-    execFileSync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `Expand-Archive -LiteralPath '${archivePath.replaceAll("'", "''")}' -DestinationPath '${destDir.replaceAll("'", "''")}' -Force`,
-      ],
-      { stdio: "inherit" },
-    );
+    // QUIRK: GitHub Actions pwsh puts PS7's Microsoft.PowerShell.Archive on
+    // PSModulePath, so powershell.exe (5.1/.NET 4.8) fails calling PS7's 3-arg
+    // ZipFileExtensions.ExtractToDirectory overload. Built-in bsdtar handles .zip.
+    execFileSync("tar", ["-xf", archivePath, "-C", destDir], {
+      stdio: "inherit",
+    });
   } else {
     execFileSync("unzip", ["-q", "-o", archivePath, "-d", destDir], {
       stdio: "inherit",
