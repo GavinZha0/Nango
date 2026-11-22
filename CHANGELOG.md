@@ -5,26 +5,26 @@
 
 ### Features
 
-* **artifacts:** support saving and rendering a2ui outcomes ([628fe6f](https://github.com/GavinZha0/Nango/commit/628fe6fc3a57e5b85ac86333f1ca910e947cf928))
-* **copilot:** add shared state and co-editing for kb and layered skills ([fecd032](https://github.com/GavinZha0/Nango/commit/fecd0320d66acee9b86ce0720cdf366962d26fa4))
-* **outcomes,artifacts:** add outcome re-save tracking and native a2ui rendering ([0b02b3c](https://github.com/GavinZha0/Nango/commit/0b02b3c489414999ca8c038129a5b342e5854077))
-* **outcomes:** add a2ui outcome block with live tap and replay ([3653fb9](https://github.com/GavinZha0/Nango/commit/3653fb9b209ed351cd60073b75f1a47338f13167))
-* **ssh:** add per-host SFTP upload/download tools with opt-in toggle ([c62f4f2](https://github.com/GavinZha0/Nango/commit/c62f4f259650a448e8ad57c126a24ac7271da8e0))
-* **ui,ssh,skills:** color transport badges, unify ssh cap, show folder counts ([7de147a](https://github.com/GavinZha0/Nango/commit/7de147a67fb68e585fc531938bb1aa326191260e))
+* **artifacts:** support saving and rendering a2ui outcomes ([628fe6f](https://github.com/GavinZha0/Nango/commit/628fe6fc3a57e5b85ac86333f1ca910e947cf928)) by @GavinZha0
+* **copilot:** add shared state and co-editing for kb and layered skills ([fecd032](https://github.com/GavinZha0/Nango/commit/fecd0320d66acee9b86ce0720cdf366962d26fa4)) by @GavinZha0
+* **outcomes,artifacts:** add outcome re-save tracking and native a2ui rendering ([0b02b3c](https://github.com/GavinZha0/Nango/commit/0b02b3c489414999ca8c038129a5b342e5854077)) by @GavinZha0
+* **outcomes:** add a2ui outcome block with live tap and replay ([3653fb9](https://github.com/GavinZha0/Nango/commit/3653fb9b209ed351cd60073b75f1a47338f13167)) by @GavinZha0
+* **ssh:** add per-host SFTP upload/download tools with opt-in toggle ([c62f4f2](https://github.com/GavinZha0/Nango/commit/c62f4f259650a448e8ad57c126a24ac7271da8e0)) by @GavinZha0
+* **ui,ssh,skills:** color transport badges, unify ssh cap, show folder counts ([7de147a](https://github.com/GavinZha0/Nango/commit/7de147a67fb68e585fc531938bb1aa326191260e)) by @GavinZha0
 
 
 ### Bug Fixes
 
-* **artifacts:** refresh workflow-less a2ui artifacts on re-save ([10b361f](https://github.com/GavinZha0/Nango/commit/10b361f541e93ed17fe14c324f831563f44b27c3))
-* **outcomes:** align a2ui block rendering and chat preview card ([61ec2ab](https://github.com/GavinZha0/Nango/commit/61ec2ab43962222bbd23215245b907fd978f056a))
-* **ssh:** harden RBAC, approval gates, policy decoupling, and docs ([ee0946d](https://github.com/GavinZha0/Nango/commit/ee0946d0325685aaefa8f13382ad2f10cb40be42))
-* **ssh:** harden RBAC, policy/approval gates, and stream skill scripts via stdin ([f0f0f6f](https://github.com/GavinZha0/Nango/commit/f0f0f6f10c55c7d1db605bae3594b8da8c85c9c5))
-* **ssh:** race shared leases on cancel, fix pool eviction race, and harden SFTP ([c41dd85](https://github.com/GavinZha0/Nango/commit/c41dd856a3421ff20492fe1b1e8ea93fcf345219))
+* **artifacts:** refresh workflow-less a2ui artifacts on re-save ([10b361f](https://github.com/GavinZha0/Nango/commit/10b361f541e93ed17fe14c324f831563f44b27c3)) by @GavinZha0
+* **outcomes:** align a2ui block rendering and chat preview card ([61ec2ab](https://github.com/GavinZha0/Nango/commit/61ec2ab43962222bbd23215245b907fd978f056a)) by @GavinZha0
+* **ssh:** harden RBAC, approval gates, policy decoupling, and docs ([ee0946d](https://github.com/GavinZha0/Nango/commit/ee0946d0325685aaefa8f13382ad2f10cb40be42)) by @GavinZha0
+* **ssh:** harden RBAC, policy/approval gates, and stream skill scripts via stdin ([f0f0f6f](https://github.com/GavinZha0/Nango/commit/f0f0f6f10c55c7d1db605bae3594b8da8c85c9c5)) by @GavinZha0
+* **ssh:** race shared leases on cancel, fix pool eviction race, and harden SFTP ([c41dd85](https://github.com/GavinZha0/Nango/commit/c41dd856a3421ff20492fe1b1e8ea93fcf345219)) by @GavinZha0
 
 
 ### Performance Improvements
 
-* **ssh:** add lightweight in-process SSH connection pool ([e63c1b1](https://github.com/GavinZha0/Nango/commit/e63c1b16f7959506bb909184f0a6d8776143e31d))
+* **ssh:** add lightweight in-process SSH connection pool ([e63c1b1](https://github.com/GavinZha0/Nango/commit/e63c1b16f7959506bb909184f0a6d8776143e31d)) by @GavinZha0
 
 ## [0.38.0](https://github.com/GavinZha0/Nango/compare/v0.37.1...v0.38.0) (2026-11-17)
 
