@@ -12,9 +12,10 @@ ARG PNPM_VERSION=12.21.0
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Copy package files. pnpm 11+ reads `overrides` / `allowBuilds` from
-# pnpm-workspace.yaml, NOT package.json, so the install layer must see
-# it or `--frozen-lockfile` fails with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm-workspace.yaml, NOT package.json, and `pnpmfileChecksum` from
+# .pnpmfile.cjs, so the install layer must see them or `--frozen-lockfile`
+# fails with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs ./
 RUN pnpm install --frozen-lockfile
 
 # Copy source
