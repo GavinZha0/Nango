@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 let mockMaxOutputBytes = 1_048_576;
+let mockMaxSessionsPerServer = 10;
 vi.mock("@/lib/config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/config")>();
   return {
@@ -9,6 +10,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
     getConfigMs: (_key: string, defaultSeconds: number) => defaultSeconds * 1000,
     getConfigNumber: (key: string, defaultValue: number) => {
       if (key === "ssh.max_output_bytes") return mockMaxOutputBytes;
+      if (key === "ssh.max_sessions_per_server") return mockMaxSessionsPerServer;
       return defaultValue;
     },
   };
@@ -24,6 +26,7 @@ interface CapturedConfig {
   config?: Record<string, unknown>;
   execCommand?: string;
   execOpts?: {
+    onChannel?: (ch: { close: () => void }) => void;
     onStdout?: (chunk: Buffer) => void;
     onStderr?: (chunk: Buffer) => void;
   };
@@ -31,17 +34,25 @@ interface CapturedConfig {
 
 const captured: CapturedConfig = {};
 let connectImpl: () => Promise<void> = async () => {};
-let execImpl: () => Promise<{
+let execImpl: (
+  command: string,
+  opts: CapturedConfig["execOpts"],
+) => Promise<{
   stdout: string;
   stderr: string;
   code: number | null;
   signal: string | null;
 }> = async () => ({ stdout: "", stderr: "", code: 0, signal: null });
+let putFileImpl: () => Promise<void> = async () => {};
+let channelCloseSpy = vi.fn();
+let sftpEndSpy = vi.fn();
 let disposeSpy = vi.fn();
 
 vi.mock("node-ssh", () => ({
   NodeSSH: class {
     connection = null;
+    connected = false;
+    isConnected = () => this.connected;
     async connect(config: Record<string, unknown>): Promise<this> {
       captured.config = config;
       if (typeof config.hostVerifier === "function") {
@@ -51,31 +62,46 @@ vi.mock("node-ssh", () => ({
         verifier(key);
       }
       await connectImpl();
+      this.connected = true;
       return this;
     }
     async execCommand(
       command: string,
       opts: {
+        onChannel?: (ch: { close: () => void }) => void;
         onStdout?: (chunk: Buffer) => void;
         onStderr?: (chunk: Buffer) => void;
       },
     ): Promise<{ stdout: string; stderr: string; code: number | null; signal: string | null }> {
       captured.execCommand = command;
       captured.execOpts = opts;
-      return execImpl();
+      opts.onChannel?.({ close: channelCloseSpy });
+      return execImpl(command, opts);
     }
-    dispose = disposeSpy;
+    async requestSFTP(): Promise<{ end: () => void }> {
+      return { end: sftpEndSpy };
+    }
+    async putFile(): Promise<void> {
+      return putFileImpl();
+    }
+    dispose = () => {
+      this.connected = false;
+      disposeSpy();
+    };
   },
 }));
 
 const {
   execOnServer,
+  putFileOnServer,
   SshError,
   SshHostKeyMismatchError,
   shellSingleQuote,
   buildLoginShellCommand,
 } = await import("@/lib/ssh/client");
 const { __resetSshLimitsCache } = await import("@/lib/ssh/limits");
+const { clearSshPool } = await import("@/lib/ssh/pool.server");
+const { __sshSessionSlotStats } = await import("@/lib/ssh/session-limiter.server");
 
 // Helpers --------------------------------------------------------------------
 
@@ -109,7 +135,13 @@ beforeEach(() => {
   (captured as { hostKey?: Buffer }).hostKey = HOST_KEY;
   connectImpl = async () => {};
   execImpl = async () => ({ stdout: "ok", stderr: "", code: 0, signal: null });
+  putFileImpl = async () => {};
+  channelCloseSpy = vi.fn();
+  sftpEndSpy = vi.fn();
   disposeSpy = vi.fn();
+  mockMaxOutputBytes = 1_048_576;
+  mockMaxSessionsPerServer = 10;
+  clearSshPool();
   __resetSshLimitsCache();
 });
 
@@ -334,5 +366,135 @@ describe("execOnServer — login_shell", () => {
         timeoutMs: 20,
       }),
     ).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(channelCloseSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("execOnServer — session slots & shared channel cancel", () => {
+  it("closes only the timed-out channel without disposing a shared pooled connection", async () => {
+    let releaseSecond!: () => void;
+    let callCount = 0;
+    execImpl = (_cmd, opts) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return new Promise(() => {}); // Times out
+      }
+      return new Promise((resolve) => {
+        releaseSecond = () => {
+          opts?.onStdout?.(Buffer.from("second-ok"));
+          resolve({ stdout: "second-ok", stderr: "", code: 0, signal: null });
+        };
+      });
+    };
+
+    const pooledTarget = { ...targetServer, serverId: "srv-shared-1" };
+    const p1 = execOnServer(pooledTarget, passwordAuth, "sleep 10", { timeoutMs: 20 });
+    const p2 = execOnServer(pooledTarget, passwordAuth, "echo second");
+
+    await expect(p1).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(channelCloseSpy).toHaveBeenCalledTimes(1);
+    expect(disposeSpy).not.toHaveBeenCalled();
+
+    releaseSecond();
+    const res2 = await p2;
+    expect(res2.stdout).toBe("second-ok");
+    expect(__sshSessionSlotStats("srv-shared-1")).toEqual({ active: 0, waiters: 0 });
+  });
+
+  it("times out cleanly while waiting for a full session slot without leaking", async () => {
+    mockMaxSessionsPerServer = 1;
+    let releaseFirst!: () => void;
+    execImpl = (_cmd, opts) =>
+      new Promise((resolve) => {
+        releaseFirst = () => {
+          opts?.onStdout?.(Buffer.from("first-ok"));
+          resolve({ stdout: "first-ok", stderr: "", code: 0, signal: null });
+        };
+      });
+
+    const pooledTarget = { ...targetServer, serverId: "srv-slot-timeout" };
+    const p1 = execOnServer(pooledTarget, passwordAuth, "echo first");
+    await new Promise((r) => setTimeout(r, 10));
+
+    const p2 = execOnServer(pooledTarget, passwordAuth, "echo queued", { timeoutMs: 20 });
+    await expect(p2).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(__sshSessionSlotStats("srv-slot-timeout")).toEqual({ active: 1, waiters: 0 });
+
+    releaseFirst();
+    await expect(p1).resolves.toMatchObject({ stdout: "first-ok" });
+    expect(__sshSessionSlotStats("srv-slot-timeout")).toEqual({ active: 0, waiters: 0 });
+  });
+
+  it("aborts cleanly while waiting for a full session slot without leaking", async () => {
+    mockMaxSessionsPerServer = 1;
+    let releaseFirst!: () => void;
+    execImpl = (_cmd, opts) =>
+      new Promise((resolve) => {
+        releaseFirst = () => {
+          opts?.onStdout?.(Buffer.from("first-ok"));
+          resolve({ stdout: "first-ok", stderr: "", code: 0, signal: null });
+        };
+      });
+
+    const pooledTarget = { ...targetServer, serverId: "srv-slot-abort" };
+    const p1 = execOnServer(pooledTarget, passwordAuth, "echo first");
+    await new Promise((r) => setTimeout(r, 10));
+
+    const ac = new AbortController();
+    const p2 = execOnServer(pooledTarget, passwordAuth, "echo queued", { signal: ac.signal });
+    ac.abort();
+    await expect(p2).rejects.toMatchObject({ code: "ABORTED" });
+    expect(__sshSessionSlotStats("srv-slot-abort")).toEqual({ active: 1, waiters: 0 });
+
+    releaseFirst();
+    await expect(p1).resolves.toMatchObject({ stdout: "first-ok" });
+    expect(__sshSessionSlotStats("srv-slot-abort")).toEqual({ active: 0, waiters: 0 });
+  });
+  it("unblocks immediately with TIMEOUT when connect hangs", async () => {
+    connectImpl = () => new Promise(() => {});
+
+    await expect(
+      execOnServer(targetServer, passwordAuth, "echo", { timeoutMs: 20 }),
+    ).rejects.toMatchObject({ code: "TIMEOUT" });
+  });
+
+  it("unblocks immediately with ABORTED when connect hangs", async () => {
+    connectImpl = () => new Promise(() => {});
+    const ac = new AbortController();
+
+    const p = execOnServer(targetServer, passwordAuth, "echo", { signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 10));
+    ac.abort();
+
+    await expect(p).rejects.toMatchObject({ code: "ABORTED" });
+  });
+});
+
+describe("putFileOnServer — SFTP channel cancellation", () => {
+  it("ends the SFTP channel and releases the slot on timeout", async () => {
+    putFileImpl = () => new Promise(() => {});
+    const pooledTarget = { ...targetServer, serverId: "srv-sftp-timeout" };
+
+    await expect(
+      putFileOnServer(pooledTarget, passwordAuth, "/tmp/a", "/remote/a", 10, { timeoutMs: 20 }),
+    ).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(sftpEndSpy).toHaveBeenCalled();
+    expect(__sshSessionSlotStats("srv-sftp-timeout")).toEqual({ active: 0, waiters: 0 });
+  });
+
+  it("ends the SFTP channel and releases the slot on abort", async () => {
+    putFileImpl = () => new Promise(() => {});
+    const pooledTarget = { ...targetServer, serverId: "srv-sftp-abort" };
+    const ac = new AbortController();
+
+    const p = putFileOnServer(pooledTarget, passwordAuth, "/tmp/a", "/remote/a", 10, {
+      signal: ac.signal,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    ac.abort();
+
+    await expect(p).rejects.toMatchObject({ code: "ABORTED" });
+    expect(sftpEndSpy).toHaveBeenCalled();
+    expect(__sshSessionSlotStats("srv-sftp-abort")).toEqual({ active: 0, waiters: 0 });
   });
 });

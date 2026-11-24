@@ -211,14 +211,15 @@ For the complete, authoritative list of keys, their default values, and descript
 | `datasource.preview.default_rows` | 5 | number | Default preview rows |
 | `datasource.cache_root` | *(empty)* | string | Parquet cache root path |
 
-### ssh (4)
+### ssh (5)
 
 | Key | Default | Type | Description |
 |---|---|---|---|
-| `ssh.exec_timeout` | 30 | number | Command timeout in seconds |
+| `ssh.exec_timeout` | 60 | number | Command timeout in seconds |
 | `ssh.connect_timeout` | 10 | number | Connection timeout in seconds |
-| `ssh.max_output_bytes` | 1048576 | number | Max output per stream in bytes |
+| `ssh.max_output_bytes` | 1048576 | number | Max output per stream in bytes (1 MiB) |
 | `ssh.max_command_chars` | 20000 | number | Max assembled SSH wire command length in characters |
+| `ssh.max_sessions_per_server` | 10 | number | Max concurrent SSH sessions per server (matches OpenSSH MaxSessions default) |
 
 ### skill (3)
 

@@ -69,3 +69,7 @@ next-env.d.ts
 /desktop/resources/
 /desktop/dist/
 /dist/desktop/
+
+# Python bytecode caches (skill script tests)
+__pycache__/
+*.py[cod]

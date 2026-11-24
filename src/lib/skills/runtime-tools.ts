@@ -462,7 +462,7 @@ export function buildRunSkillScriptOnSshTool(
       const execResult = await runOnBoundServer({
         serverName: args.serverName,
         command,
-        stdin: scriptText,
+        stdin: interpreter === "bash" ? wrapBashScriptForStdin(scriptText): scriptText,
         timeoutSeconds: args.timeoutSeconds,
         maxCommandChars: getSshLimits().maxCommandChars,
         agentSshServerIds: opts.agentSshServerIds,
@@ -494,6 +494,14 @@ export function buildRunSkillScriptOnSshTool(
       };
     },
   });
+}
+
+/**
+ * Isolate a `bash -s` script's stdin from `/dev/null` so inner commands
+ * (e.g. `ssh`, `read`) cannot consume the remaining script lines.
+ */
+export function wrapBashScriptForStdin(script: string): string {
+  return `{\n${script}\n} < /dev/null\n`;
 }
 
 // "Available Skills" block format mirrors Anthropic's published examples.

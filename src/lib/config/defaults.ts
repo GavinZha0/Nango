@@ -62,6 +62,7 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "ssh.connect_timeout", value: "10", valueType: "number", description: "Connection timeout in seconds" },
   { key: "ssh.max_output_bytes", value: "1048576", valueType: "number", description: "Max output per stream in bytes (1 MiB)" },
   { key: "ssh.max_command_chars", value: "20000", valueType: "number", description: "Max assembled SSH wire command length in characters" },
+  { key: "ssh.max_sessions_per_server", value: "10", valueType: "number", description: "Max concurrent SSH sessions per server (matches OpenSSH MaxSessions default)" },
 
   // ── skill ─────────────────────────────────────────────────────────
   { key: "skill.max_file_bytes", value: "262144", valueType: "number", description: "Max single file size in bytes (256 KB)" },

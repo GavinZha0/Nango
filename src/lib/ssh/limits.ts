@@ -14,7 +14,7 @@ const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576; // 1 MiB per stream
 const DEFAULT_MAX_COMMAND_CHARS = 20_000;
 const DEFAULT_SFTP_MAX_BYTES = 104_857_600; // 100 MiB per SFTP transfer
 const DEFAULT_POOL_IDLE_TIMEOUT_S = 180; // 3 min idle eviction
-
+const DEFAULT_MAX_SESSIONS_PER_SERVER = 10
 export interface SshLimits {
   /** Wall-clock cap on a single command execution. */
   execTimeoutMs: number;
@@ -28,6 +28,8 @@ export interface SshLimits {
   sftpMaxBytes: number;
   /** Idle TTL before an unused pooled SSH connection is disposed. */
   poolIdleTimeoutMs: number;
+  /** Max concurrent sessions per server. */
+  maxSessionsPerServer: number;
 }
 
 export function getSshLimits(): SshLimits {
@@ -38,6 +40,7 @@ export function getSshLimits(): SshLimits {
     maxCommandChars: getConfigNumber("ssh.max_command_chars", DEFAULT_MAX_COMMAND_CHARS),
     sftpMaxBytes: getConfigNumber("ssh.sftp_max_bytes", DEFAULT_SFTP_MAX_BYTES),
     poolIdleTimeoutMs: getConfigMs("ssh.pool_idle_timeout", DEFAULT_POOL_IDLE_TIMEOUT_S),
+    maxSessionsPerServer: getConfigNumber("ssh.max_sessions_per_server", DEFAULT_MAX_SESSIONS_PER_SERVER),
   };
 }
 

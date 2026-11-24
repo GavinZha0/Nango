@@ -154,12 +154,20 @@ Caps from config keys (`lib/ssh/limits.ts`, parallel to
 | `ssh.max_command_chars` | 20 000     | Max assembled wire command length |
 | `ssh.sftp_max_bytes`    | 104 857 600 | Max single-file size for SFTP upload/download (100 MiB) |
 | `ssh.pool_idle_timeout` | 180 s      | Idle TTL before a pooled SSH connection is disposed |
+| `ssh.max_sessions_per_server` | 10   | Max concurrent exec/SFTP sessions per `ssh_server` (`session-limiter.server.ts`) |
 
 Output exceeding the byte cap sets `truncated: true` and the rest is
-dropped. `AbortSignal` triggers `ssh.dispose()`; the remote process
-keeps running (SSH cannot pre-empt server-side execution after
-channel close), but the tool returns immediately with
-`signal: "ABORTED"` and `exitCode: null` so the agent unblocks.
+dropped. Both `execOnServer` and `runSftpTransfer` share
+`runWithSshSession`, which acquires a per-server slot (`acquireSshSessionSlot`)
+and starts the wall-clock deadline before slot wait + connect + exec/SFTP.
+On timeout or `AbortSignal`, only the call's own channel (`channel.close()`
+or `sftp.end()`) is closed — a shared pooled connection is **not**
+disposed so sibling concurrent calls keep running (the lease is marked
+`destroy: true` on release to evict it for future callers); the remote
+process keeps running (SSH cannot pre-empt server-side execution after
+channel close), while the tool unblocks immediately (`signal: "ABORTED"`
+and `exitCode: null` on abort during exec, or `SshError` on timeout /
+pre-exec abort).
 
 ### 3.3 Login-shell wrapping
 
@@ -242,7 +250,7 @@ defineTool({
 ```
 
 > **Policy decoupling & stdin delivery for skill scripts on SSH:**
-> `run_skill_script_on_ssh` executes reviewed script bytes via `bash -s [-- <args...>]` or `python3 - [<args...>]` with the script source streamed over `stdin` (`execCommand(..., { stdin })`), and passes `skipCommandPolicy: true` to `runOnBoundServer`. Streaming via `stdin` avoids `ARG_MAX` / `ssh.max_command_chars` limits and double-quoting on `loginShell` hosts (so long scripts > 15k chars run cleanly, and `ssh.max_command_chars` only bounds the short interpreter + quoted `args` wire command); consequently, scripts must not read raw `stdin` (`read` / `input()` / `sys.stdin`). Because the script source is human-reviewed skill content (not LLM-authored shell input), it bypasses the host's `commandAllow` / `commandDeny` regex policy, while LLM-supplied `args` are still scanned by `evaluateToolRisk` (`DANGEROUS_SSH_PATTERNS`) and trigger human approval when escalated to `critical`.
+> `run_skill_script_on_ssh` executes reviewed script bytes via `bash -s [-- <args...>]` or `python3 - [<args...>]` with the script source streamed over `stdin` (`execCommand(..., { stdin })`), and passes `skipCommandPolicy: true` to `runOnBoundServer`. For `bash -s`, `wrapBashScriptForStdin` wraps the source in `{\n<script>\n} < /dev/null\n` so inner commands (e.g. `ssh`, `read`) cannot consume the remaining script lines from `stdin`. Streaming via `stdin` avoids `ARG_MAX` / `ssh.max_command_chars` limits and double-quoting on `loginShell` hosts (so long scripts > 15k chars run cleanly, and `ssh.max_command_chars` only bounds the short interpreter + quoted `args` wire command); consequently, scripts must not read raw `stdin` (`read` / `input()` / `sys.stdin`). Because the script source is human-reviewed skill content (not LLM-authored shell input), it bypasses the host's `commandAllow` / `commandDeny` regex policy, while LLM-supplied `args` are still scanned by `evaluateToolRisk` (`DANGEROUS_SSH_PATTERNS`) and trigger human approval when escalated to `critical`.
 > Both `run_ssh_command` and `run_skill_script_on_ssh` share the same wire-command length cap (`ssh.max_command_chars`, default 20,000 characters), measured by `runOnBoundServer` via `composeWireCommand(command, server.loginShell)` — the exact string sent to `sshd` (including `loginShell` wrapping and single-quote escaping). `run_ssh_command` additionally keeps a 16,000-character Zod input cap (`RunSshArgs.command`) as an LLM guardrail, leaving room for `loginShell` wrapping.
 >
 > Script bytes are decoded with a fatal `TextDecoder` before assembly. `Buffer.toString("utf-8")` never throws — it replaces ill-formed sequences with U+FFFD, which would execute as mojibake on the host — so invalid UTF-8 and NUL bytes are refused with `INVALID_SCRIPT_BYTES`, and a leading BOM (which `bash` and `python3 -` both reject) is stripped. Import applies the same check, so dispatch normally never sees the refusal.
@@ -380,16 +388,18 @@ All routes use the standard error envelope from `withSession` /
 | Credential payload schemas + normalised auth shape | `src/lib/ssh/credential-schema.ts` |
 | Decrypt + parse credential row | `src/lib/ssh/auth-loader.ts` |
 | `ssh_server` lookup (name → resolved row + auth) | `src/lib/ssh/lookup.ts` |
-| `node-ssh` wrapper (`execOnServer`, `verifyConnection`) | `src/lib/ssh/client.ts` |
+| `node-ssh` wrapper (`execOnServer`, `putFileOnServer`, `getFileFromServer`, `verifyConnection`) | `src/lib/ssh/client.ts` |
+| Connection pool (per-`serverId` reuse + idle eviction) | `src/lib/ssh/pool.server.ts` |
+| Per-server concurrent session limiter (`MaxSessions`) | `src/lib/ssh/session-limiter.server.ts` |
 | Command policy evaluator | `src/lib/ssh/policy.ts` |
 | Runtime tool definitions | `src/lib/ssh/runtime-tools.ts` |
 | Prompt block | `src/lib/ssh/prompt-block.server.ts` |
-| Env-var caps | `src/lib/ssh/limits.ts` |
+| Config-backed limits | `src/lib/ssh/limits.ts` |
 | Auto-mount + prompt-block injection | `src/lib/runner/dispatch/builtin.ts` (search "ssh_server") |
 | API — CRUD + Verify + credential picker | `src/app/api/ssh-servers/`, `src/app/api/ssh-credentials/` |
 | Validation schemas (Zod) | `src/lib/ssh/validation.ts` |
 | Editor / panel | `src/components/middle-panels/SshServerEditor.tsx`, `src/components/left-panels/SshServerPanel.tsx` |
-| Tests | `tests/unit/lib/ssh/{client,credential-schema,limits,lookup,policy}.test.ts` |
+| Tests | `tests/unit/lib/ssh/{client,credential-schema,limits,lookup,policy,pool,runtime-tools,security-policy,session-limiter}.test.ts` |
 
 ## 9. Future work
 

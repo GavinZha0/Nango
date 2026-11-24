@@ -98,7 +98,7 @@ function rootUnreachable(root: string): JailPathErr {
 }
 
 /**
- * Hostile input → lexical candidate inside the root. No fs access yet.
+ * Hostile input → root-relative segment. No fs access yet.
  *
  * Strip anything that could re-root the join: a drive spec or UNC
  * prefix, then leading separators. `resolve` honours an absolute
@@ -107,9 +107,8 @@ function rootUnreachable(root: string): JailPathErr {
  * of "C:/Windows/…" would re-root the join again.
  */
 function neutralizeInput(
-  root: string,
   inputPath: string,
-): { ok: true; absPath: string; trimmed: string } | JailPathErr {
+): { ok: true; rel: string; trimmed: string } | JailPathErr {
   if (inputPath.includes("\0")) {
     return invalidPath("Path contains a NUL byte.");
   }
@@ -128,10 +127,20 @@ function neutralizeInput(
     rel = ".";
   }
 
+  return { ok: true, rel, trimmed };
+}
+
+async function anchorInRealRoot(root: string, rel: string): Promise<{ ok: true; realRoot: string; absPath: string } | JailPathErr> {
+  let realRoot: string;
+  try {
+    realRoot = await realpath(root);
+  } catch {
+    return rootUnreachable(root);
+  }
   return {
     ok: true,
+    realRoot,
     absPath: path.resolve(/*turbopackIgnore: true*/ root, rel),
-    trimmed,
   };
 }
 
@@ -167,9 +176,12 @@ export async function resolveInJail(
   inputPath: string,
   action: "read" | "write",
 ): Promise<JailPathResult> {
-  const input = neutralizeInput(root, inputPath);
+  const input = neutralizeInput(inputPath);
   if (!input.ok) return input;
-  const { absPath, trimmed } = input;
+  const { trimmed } = input;
+  const anchored = await anchorInRealRoot(root, input.rel);
+  if (!anchored.ok) return anchored;
+  const { realRoot, absPath } = anchored;
 
   // 3. Final component must not be a symlink. ENOENT is expected for
   // new-file writes and is not an error here.
@@ -183,12 +195,7 @@ export async function resolveInJail(
   // leaf does not exist yet (which is the write path). Checking the
   // parent rather than walking up to the filesystem root keeps
   // "directory missing" a distinct, actionable error.
-  let realRoot: string;
-  try {
-    realRoot = await realpath(root);
-  } catch {
-    return rootUnreachable(root);
-  }
+
 
   // The root addressed as itself ("" or "/"): its parent is outside the
   // jail by definition, so the parent-containment check must not apply.
@@ -244,16 +251,13 @@ export async function resolveCreateInJail(
   root: string,
   inputPath: string,
 ): Promise<JailPathResult> {
-  const input = neutralizeInput(root, inputPath);
+  const input = neutralizeInput(inputPath);
   if (!input.ok) return input;
-  const { absPath, trimmed } = input;
+  const { trimmed } = input;
 
-  let realRoot: string;
-  try {
-    realRoot = await realpath(root);
-  } catch {
-    return rootUnreachable(root);
-  }
+  const anchored = await anchorInRealRoot(root, input.rel);
+  if (!anchored.ok) return anchored;
+  const { realRoot, absPath } = anchored;
 
   // Lexical containment first: `..` segments are resolved above, so this
   // only fires for a path that was re-rooted into a sibling of the

@@ -480,7 +480,7 @@ describe("buildRunSkillScriptOnSshTool", () => {
     expect(call.command).toBe(
       `bash -s -- '-n' 'value with spaces'`,
     );
-    expect(call.stdin).toBe("echo hi");
+    expect(call.stdin).toBe("{\necho hi\n} < /dev/null\n");
     expect(call.skipCommandPolicy).toBe(true);
     expect(call.serverName).toBe("server-1");
     expect(call.agentSshServerIds).toEqual(["server-1"]);
@@ -516,7 +516,7 @@ describe("buildRunSkillScriptOnSshTool", () => {
 
     const call = mockRunOnBoundServer.mock.calls[0][0];
     expect(call.command).toBe(`bash -s`);
-    expect(call.stdin).toBe("echo hi");
+    expect(call.stdin).toBe("{\necho hi\n} < /dev/null\n");
     expect(call.timeoutSeconds).toBeUndefined();
   });
 
@@ -535,7 +535,7 @@ describe("buildRunSkillScriptOnSshTool", () => {
 
     const { command, stdin } = mockRunOnBoundServer.mock.calls[0][0];
     expect(command).toBe(`bash -s -- 'don'\\''t'`);
-    expect(stdin).toBe("echo it's");
+    expect(stdin).toBe("{\necho it's\n} < /dev/null\n");
   });
 
   it("forwards timeoutSeconds and the abort signal", async () => {

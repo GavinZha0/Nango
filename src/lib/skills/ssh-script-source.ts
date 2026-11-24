@@ -4,9 +4,8 @@
  * These files are not executed locally: their source is streamed via `stdin`
  * to `bash -s` / `python3 -` on a remote host. Anything the encoder mangles in
  * transit executes as mojibake there, far from the skill author. Every boundary
- * author. Every boundary that can see the bytes — folder
- * import and dispatch — calls {@link readSshScriptSource} so the check has
- * one definition.
+ * that can see the bytes = folder import and dispatch - calls
+ * {@link readSshScriptSource} so the check has one definition.
  *
  * See docs/skills.md and docs/ssh.md.
  */

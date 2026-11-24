@@ -14,18 +14,21 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { stat, unlink } from "node:fs/promises";
-import { NodeSSH } from "node-ssh";
+import { NodeSSH, type SSHExecCommandOptions } from "node-ssh";
 
 import { childLogger } from "@/lib/observability/logger";
-import { getSshLimits } from "./limits";
+import { getSshLimits, type SshLimits } from "./limits";
 import type { NormalisedSshAuth } from "./credential-schema";
 import {
   acquireSshConnection,
   computeSshConfigDigest,
   type PooledSshLease,
 } from "./pool.server";
-
+import { acquireSshSessionSlot } from "./session-limiter.server";
 const log = childLogger({ component: "ssh" });
+
+type ClientChannel = Parameters<NonNullable<SSHExecCommandOptions["onChannel"]>>[0];
+type SftpChannel = Awaited<ReturnType<NodeSSH["requestSFTP"]>>;
 
 // Errors (typed)
 
@@ -155,6 +158,155 @@ async function acquireClientLease(
   };
 }
 
+async function acquireCancelableLease(
+  server: SshConnectionTarget,
+  auth: NormalisedSshAuth,
+  cancelPromise: Promise<never>,
+  isAborted: () => boolean,
+  isTimedOut: () => boolean,
+  timeoutMessage: string,
+): Promise<PooledSshLease> {
+  const leasePromise = acquireClientLease(server, auth);
+  // If cancelPromise wins the race, release any late-arriving lease so pool refCount never leaks.
+  leasePromise.then(
+    (l) => {
+      if (isAborted() || isTimedOut()) l.release({ destroy: true });
+    },
+    () => {},
+  );
+  try {
+    return await Promise.race([leasePromise, cancelPromise]);
+  } catch (err) {
+    if (err instanceof SshHostKeyMismatchError) throw err;
+    if (isAborted()) throw new SshError("ABORTED", "Connect aborted by caller.");
+    if (isTimedOut()) throw new SshError("TIMEOUT", timeoutMessage);
+    throw new SshError(
+      "CONNECT_FAILED",
+      `SSH connect to ${server.host}:${server.port} failed: ${errMessage(err)}`,
+      err,
+    );
+  }
+}
+
+interface SshSessionContext {
+  lease: PooledSshLease;
+  limits: SshLimits;
+  timeoutMs: number;
+  startedAt: number;
+  cancelPromise: Promise<never>;
+  isAborted: () => boolean;
+  isTimedOut: () => boolean;
+}
+
+async function runWithSshSession<T>(
+  server: SshConnectionTarget,
+  auth: NormalisedSshAuth,
+  opts: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    label: string;
+    onCancel: () => void;
+    onCleanup?: () => void;
+  },
+  fn: (ctx: SshSessionContext) => Promise<T>,
+): Promise<T> {
+  const limits = getSshLimits();
+  const timeoutMs = opts.timeoutMs ?? limits.execTimeoutMs;
+  const startedAt = Date.now();
+  let aborted = false;
+  let timedOut = false;
+  let lease: PooledSshLease | undefined;
+  let rejectCancel: ((err: Error) => void) | undefined;
+
+  const cancelPromise = new Promise<never>((_resolve, reject) => {
+    rejectCancel = reject;
+  });
+  // Prevent unhandledRejection if cancelPromise rejects before race() attaches.
+  cancelPromise.catch(() => {});
+
+  // Close only this call's channel; disposing a shared connection would kill sibling calls.
+  const cancelSession = (): void => {
+    opts.onCancel();
+    if (lease && !lease.isShared()) {
+      lease.ssh.dispose();
+    }
+  };
+
+  const onAbort = (): void => {
+    aborted = true;
+    cancelSession();
+    rejectCancel?.(new SshError("ABORTED", `${opts.label} aborted by caller.`));
+  };
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      throw new SshError("ABORTED", "Aborted before connect.");
+    }
+    opts.signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  // Start the wall-clock deadline before slot wait so queueing + connect + exec stay bounded.
+  const timer = setTimeout(() => {
+    timedOut = true;
+    log.warn({ host: server.host, timeoutMs }, `${opts.label} timed out`);
+    cancelSession();
+    rejectCancel?.(new SshError("TIMEOUT", `${opts.label} timed out.`));
+  }, timeoutMs);
+
+  const slot = server.serverId
+    ? acquireSshSessionSlot(server.serverId, limits.maxSessionsPerServer)
+    : undefined;
+  let releaseSlot: (() => void) | undefined;
+
+  try {
+    if (slot) {
+      try {
+        releaseSlot = await Promise.race([slot.ready, cancelPromise]);
+      } catch (err) {
+        if (aborted) {
+          throw new SshError("ABORTED", `Aborted while waiting for ${opts.label} session slot.`);
+        }
+        if (timedOut) {
+          throw new SshError("TIMEOUT", `Timed out while waiting for ${opts.label} session slot.`);
+        }
+        throw err;
+      }
+    }
+
+    lease = await acquireCancelableLease(
+      server,
+      auth,
+      cancelPromise,
+      () => aborted,
+      () => timedOut,
+      `SSH connect to ${server.host}:${server.port} timed out after ${timeoutMs}ms.`,
+    );
+
+    if (aborted) {
+      throw new SshError("ABORTED", "Connect aborted by caller.");
+    }
+    if (timedOut) {
+      throw new SshError("TIMEOUT", `${opts.label} exceeded timeout before starting.`);
+    }
+
+    return await fn({
+      lease,
+      limits,
+      timeoutMs,
+      startedAt,
+      cancelPromise,
+      isAborted: () => aborted,
+      isTimedOut: () => timedOut,
+    });
+  } finally {
+    clearTimeout(timer);
+    if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+    opts.onCleanup?.();
+    lease?.release({ destroy: timedOut || aborted });
+    if (releaseSlot) releaseSlot();
+    else slot?.cancel();
+  }
+}
+
 /**
  * Execute a single command on the host described by `server`,
  * authenticating with `auth`. Always verifies the server's host key
@@ -169,136 +321,98 @@ export async function execOnServer(
   command: string,
   opts: ExecOptions = {},
 ): Promise<ExecResult> {
-  const limits = getSshLimits();
-  const timeoutMs = opts.timeoutMs ?? limits.execTimeoutMs;
+  let channel: ClientChannel | undefined;
 
-  const startedAt = Date.now();
-  let aborted = false;
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let lease: PooledSshLease | undefined;
-  let rejectCancel: ((err: Error) => void) | undefined;
+  return runWithSshSession(
+    server,
+    auth,
+    {
+      timeoutMs: opts.timeoutMs,
+      signal: opts.signal,
+      label: "SSH exec",
+      onCancel: () => closeChannel(channel),
+    },
+    async ({ lease, limits, timeoutMs, startedAt, cancelPromise, isAborted, isTimedOut }) => {
+      const stdoutCap = makeCappedSink(limits.maxOutputBytes);
+      const stderrCap = makeCappedSink(limits.maxOutputBytes);
 
-  const cancelPromise = new Promise<never>((_resolve, reject) => {
-    rejectCancel = reject;
-  });
-  // Prevent unhandledRejection if cancelPromise rejects before race() attaches.
-  cancelPromise.catch(() => {});
+      try {
+        const finalCommand = composeWireCommand(command, server.loginShell);
+        const execPromise = lease.ssh.execCommand(finalCommand, {
+          ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
+          onChannel: (ch) => {
+            channel = ch;
+            if (isTimedOut() || isAborted()) {
+              closeChannel(ch);
+            }
+          },
+          onStdout: (chunk) => stdoutCap.push(chunk),
+          onStderr: (chunk) => stderrCap.push(chunk),
+        });
+        execPromise.catch(() => {});
 
-  const onAbort = (): void => {
-    aborted = true;
-    if (lease && !lease.isShared()) {
-      lease.ssh.dispose();
-    }
-    rejectCancel?.(new SshError("ABORTED", "Exec aborted by caller."));
-  };
-  if (opts.signal) {
-    if (opts.signal.aborted) {
-      throw new SshError("ABORTED", "Aborted before connect.");
-    }
-    opts.signal.addEventListener("abort", onAbort, { once: true });
-  }
+        const result = await Promise.race([execPromise, cancelPromise]);
+        const durationMs = Date.now() - startedAt;
 
-  try {
-    try {
-      lease = await acquireClientLease(server, auth);
-    } catch (err) {
-      if (err instanceof SshHostKeyMismatchError) throw err;
-      if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
-      throw new SshError(
-        "CONNECT_FAILED",
-        `SSH connect to ${server.host}:${server.port} failed: ${errMessage(err)}`,
-        err,
-      );
-    }
+        if (isAborted()) {
+          return {
+            stdout: stdoutCap.value(),
+            stderr: stderrCap.value(),
+            exitCode: null,
+            signal: "ABORTED",
+            durationMs,
+            truncated: stdoutCap.truncated || stderrCap.truncated,
+          };
+        }
+        if (isTimedOut()) {
+          throw new SshError(
+            "TIMEOUT",
+            `SSH exec exceeded ${timeoutMs}ms on ${server.host}; channel closed (remote process may still be running).`,
+          );
+        }
 
-    if (aborted) {
-      throw new SshError("ABORTED", "Connect aborted by caller.");
-    }
-
-    // Exec with output cap + per-call timeout.
-    timer = setTimeout(() => {
-      timedOut = true;
-      log.warn({ host: server.host, timeoutMs }, "SSH exec timed out");
-      if (lease && !lease.isShared()) {
-        lease.ssh.dispose();
-      }
-      rejectCancel?.(
-        new SshError(
-          "TIMEOUT",
-          `SSH exec exceeded ${timeoutMs}ms on ${server.host}; channel closed (remote process may still be running).`,
-        ),
-      );
-    }, timeoutMs);
-
-    const stdoutCap = makeCappedSink(limits.maxOutputBytes);
-    const stderrCap = makeCappedSink(limits.maxOutputBytes);
-
-    try {
-      const finalCommand = composeWireCommand(command, server.loginShell);
-      const execPromise = lease.ssh.execCommand(finalCommand, {
-        ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
-        onStdout: (chunk) => stdoutCap.push(chunk),
-        onStderr: (chunk) => stderrCap.push(chunk),
-      });
-      execPromise.catch(() => {});
-
-      const result = await Promise.race([execPromise, cancelPromise]);
-      const durationMs = Date.now() - startedAt;
-
-      if (aborted) {
         return {
           stdout: stdoutCap.value(),
           stderr: stderrCap.value(),
-          exitCode: null,
-          signal: "ABORTED",
+          exitCode: result.code,
+          signal: result.signal,
           durationMs,
           truncated: stdoutCap.truncated || stderrCap.truncated,
         };
-      }
-      if (timedOut) {
+      } catch (err) {
+        if (isAborted()) {
+          return {
+            stdout: stdoutCap.value(),
+            stderr: stderrCap.value(),
+            exitCode: null,
+            signal: "ABORTED",
+            durationMs: Date.now() - startedAt,
+            truncated: stdoutCap.truncated || stderrCap.truncated,
+          };
+        }
+        if (err instanceof SshError) throw err;
+        if (isTimedOut()) {
+          throw new SshError(
+            "TIMEOUT",
+            `SSH exec exceeded ${timeoutMs}ms on ${server.host}.`,
+          );
+        }
         throw new SshError(
-          "TIMEOUT",
-          `SSH exec exceeded ${timeoutMs}ms on ${server.host}; channel closed (remote process may still be running).`,
+          "EXEC_FAILED",
+          `SSH exec on ${server.host} failed: ${errMessage(err)}`,
+          err,
         );
       }
+    },
+  );
+}
 
-      return {
-        stdout: stdoutCap.value(),
-        stderr: stderrCap.value(),
-        exitCode: result.code,
-        signal: result.signal,
-        durationMs,
-        truncated: stdoutCap.truncated || stderrCap.truncated,
-      };
-    } catch (err) {
-      if (aborted) {
-        return {
-          stdout: stdoutCap.value(),
-          stderr: stderrCap.value(),
-          exitCode: null,
-          signal: "ABORTED",
-          durationMs: Date.now() - startedAt,
-          truncated: stdoutCap.truncated || stderrCap.truncated,
-        };
-      }
-      if (err instanceof SshError) throw err;
-      if (timedOut) {
-        throw new SshError(
-          "TIMEOUT",
-          `SSH exec exceeded ${timeoutMs}ms on ${server.host}.`,
-        );
-      }
-      throw new SshError(
-        "EXEC_FAILED",
-        `SSH exec on ${server.host} failed: ${errMessage(err)}`,
-        err,
-      );
-    }
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
-    lease?.release({ destroy: timedOut || aborted });
+function closeChannel(channel: ClientChannel | undefined): void {
+  if (!channel) return;
+  try {
+    channel.close();
+  } catch {
+    // Channel already closed or connection gone
   }
 }
 
@@ -318,98 +432,70 @@ async function runSftpTransfer(
   server: SshConnectionTarget,
   auth: NormalisedSshAuth,
   opts: SftpTransferOptions,
-  fn: (ssh: NodeSSH, maxBytes: number) => Promise<number>,
+  fn: (ssh: NodeSSH, sftp: SftpChannel, maxBytes: number) => Promise<number>,
 ): Promise<SftpTransferResult> {
-  const limits = getSshLimits();
-  const timeoutMs = opts.timeoutMs ?? limits.execTimeoutMs;
-  const startedAt = Date.now();
-  let aborted = false;
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let lease: PooledSshLease | undefined;
-  let rejectCancel: ((err: Error) => void) | undefined;
+  let sftp: SftpChannel | undefined;
 
-  const cancelPromise = new Promise<never>((_resolve, reject) => {
-    rejectCancel = reject;
-  });
-  cancelPromise.catch(() => {});
+  return runWithSshSession(
+    server,
+    auth,
+    {
+      timeoutMs: opts.timeoutMs,
+      signal: opts.signal,
+      label: "SFTP transfer",
+      onCancel: () => endSftp(sftp),
+      onCleanup: () => endSftp(sftp),
+    },
+    async ({ lease, limits, timeoutMs, startedAt, cancelPromise, isAborted, isTimedOut }) => {
+      try {
+        // Open SFTP explicitly so timeout/abort can end this channel without disposing a shared lease.
+        const workPromise = (async (): Promise<number> => {
+          const opened = await lease.ssh.requestSFTP();
+          sftp = opened;
+          if (isTimedOut() || isAborted()) {
+            endSftp(opened);
+            throw new SshError(
+              isAborted() ? "ABORTED" : "TIMEOUT",
+              isAborted() ? "SFTP transfer aborted by caller." : "SFTP transfer timed out.",
+            );
+          }
+          return fn(lease.ssh, opened, limits.sftpMaxBytes);
+        })();
+        workPromise.catch(() => {});
+        const sizeBytes = await Promise.race([workPromise, cancelPromise]);
+        if (isAborted()) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
+        if (isTimedOut()) {
+          throw new SshError(
+            "TIMEOUT",
+            `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
+          );
+        }
+        return { sizeBytes, durationMs: Date.now() - startedAt };
+      } catch (err) {
+        if (err instanceof SshError) throw err;
+        if (isTimedOut()) {
+          throw new SshError(
+            "TIMEOUT",
+            `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
+          );
+        }
+        if (isAborted()) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
+        throw new SshError(
+          "EXEC_FAILED",
+          `SFTP transfer on ${server.host} failed: ${errMessage(err)}`,
+          err,
+        );
+      }
+    },
+  );
+}
 
-  const onAbort = (): void => {
-    aborted = true;
-    if (lease && !lease.isShared()) {
-      lease.ssh.dispose();
-    }
-    rejectCancel?.(new SshError("ABORTED", "SFTP transfer aborted by caller."));
-  };
-  if (opts.signal) {
-    if (opts.signal.aborted) {
-      throw new SshError("ABORTED", "Aborted before connect.");
-    }
-    opts.signal.addEventListener("abort", onAbort, { once: true });
-  }
-
+function endSftp(sftp: SftpChannel | undefined): void {
+  if (!sftp) return;
   try {
-    try {
-      lease = await acquireClientLease(server, auth);
-    } catch (err) {
-      if (err instanceof SshHostKeyMismatchError) throw err;
-      if (aborted) throw new SshError("ABORTED", "Connect aborted by caller.");
-      throw new SshError(
-        "CONNECT_FAILED",
-        `SSH connect to ${server.host}:${server.port} failed: ${errMessage(err)}`,
-        err,
-      );
-    }
-
-    if (aborted) {
-      throw new SshError("ABORTED", "Connect aborted by caller.");
-    }
-
-    timer = setTimeout(() => {
-      timedOut = true;
-      log.warn({ host: server.host, timeoutMs }, "SSH exec timed out");
-      if (lease && !lease.isShared()) {
-        lease.ssh.dispose();
-      }
-      rejectCancel?.(
-        new SshError(
-          "TIMEOUT",
-          `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
-        ),
-      );
-    }, timeoutMs);
-
-    try {
-      const workPromise = fn(lease.ssh, limits.sftpMaxBytes);
-      workPromise.catch(() => {});
-      const sizeBytes = await Promise.race([workPromise, cancelPromise]);
-      if (aborted) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
-      if (timedOut) {
-        throw new SshError(
-          "TIMEOUT",
-          `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
-        );
-      }
-      return { sizeBytes, durationMs: Date.now() - startedAt };
-    } catch (err) {
-      if (err instanceof SshError) throw err;
-      if (timedOut) {
-        throw new SshError(
-          "TIMEOUT",
-          `SFTP transfer exceeded ${timeoutMs}ms on ${server.host}.`,
-        );
-      }
-      if (aborted) throw new SshError("ABORTED", "SFTP transfer aborted by caller.");
-      throw new SshError(
-        "EXEC_FAILED",
-        `SFTP transfer on ${server.host} failed: ${errMessage(err)}`,
-        err,
-      );
-    }
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
-    lease?.release({ destroy: timedOut || aborted });
+    sftp.end();
+  } catch {
+    // Channel already closed or connection gone.
   }
 }
 
@@ -422,8 +508,8 @@ export async function putFileOnServer(
   localSizeBytes: number,
   opts: SftpTransferOptions = {},
 ): Promise<SftpTransferResult> {
-  return runSftpTransfer(server, auth, opts, async (ssh) => {
-    await ssh.putFile(localAbsPath, remotePath);
+  return runSftpTransfer(server, auth, opts, async (ssh, sftp) => {
+    await ssh.putFile(localAbsPath, remotePath, sftp);
     return localSizeBytes;
   });
 }
@@ -437,8 +523,7 @@ export async function getFileFromServer(
   opts: SftpTransferOptions = {},
 ): Promise<SftpTransferResult> {
   try {
-    return await runSftpTransfer(server, auth, opts, async (ssh, maxBytes) => {
-      const sftp = await ssh.requestSFTP();
+    return await runSftpTransfer(server, auth, opts, async (ssh, sftp, maxBytes) => {
       const stats = await new Promise<{ size: number; isDirectory: () => boolean }>(
         (resolve, reject) => {
           sftp.stat(
