@@ -75,7 +75,9 @@ function insertedPages(): Array<Record<string, unknown>> {
 beforeEach(() => {
   for (const key of Object.keys(mockConfig)) delete mockConfig[key];
   dbMock.$reset();
-  dbMock.$enqueue([{ id: COLLECTION_ID, name: "x-manual" }], []);
+  // The name pre-check finds nothing, then the collection insert and the page
+  // insert consume the two rows a fresh import needs.
+  dbMock.$enqueue([], [{ id: COLLECTION_ID, name: "x-manual" }], []);
   getSessionMock.mockResolvedValue(
     createMockSession(createMockUser({ id: OWNER_ID, role: "editor" })),
   );
@@ -367,12 +369,203 @@ describe("POST /api/kb/import — budgets", () => {
     expect(dbMock.transaction).not.toHaveBeenCalled();
   });
 
-  it("turns a collection-name collision into 409 without leaving pages behind", async () => {
+  it("turns a collection-name collision into a 409 the dialog can read", async () => {
+    dbMock.$reset();
+    dbMock.$enqueue(
+      [
+        {
+          id: COLLECTION_ID,
+          name: "x-manual",
+          enabled: true,
+          visibility: "private",
+          createdBy: "someone-else",
+        },
+      ],
+      [{ count: 2 }],
+    );
+
+    const res = await upload(manifest([{ path: "a.md", content: "Prose.\n" }]));
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      message: string;
+      details: Record<string, unknown>;
+    };
+    expect(body.message).toContain("x-manual");
+    expect(body.details).toEqual(
+      expect.objectContaining({
+        existingId: COLLECTION_ID,
+        existingName: "x-manual",
+        // Another user's collection: the delete gate says no, so the dialog
+        // offers a rename only.
+        canOverwrite: false,
+        enabled: true,
+        boundAgentCount: 2,
+      }),
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the 23505 race backstop as a details-less 409", async () => {
     dbMock._chain.returning.mockRejectedValueOnce(UNIQUE_VIOLATION);
 
     const res = await upload(manifest([{ path: "a.md", content: "Prose.\n" }]));
 
     expect(res.status).toBe(409);
     expect(((await res.json()) as { message: string }).message).toContain("x-manual");
+  });
+});
+
+describe("POST /api/kb/import — conflict negotiation", () => {
+  const EXISTING = {
+    id: COLLECTION_ID,
+    name: "x-manual",
+    enabled: true,
+    visibility: "private",
+    createdBy: OWNER_ID,
+  };
+
+  /** The page rows the single insert was handed — an overwrite writes no collection row. */
+  function firstInsertValues(): Array<Record<string, unknown>> {
+    return dbMock._chain.values.mock.calls[0][0] as Array<Record<string, unknown>>;
+  }
+
+  it("overwrites the owner's collection: corpus replaced, row metadata untouched", async () => {
+    dbMock.$reset();
+    // Pre-check, then the overwrite transaction: update-returning, delete, insert.
+    dbMock.$enqueue([EXISTING], [EXISTING], [], []);
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "New prose.\n" }], {
+        conflictStrategy: "overwrite",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.overwritten).toBe(true);
+    expect(body.id).toBe(COLLECTION_ID);
+    expect(body.pagesImported).toBe(1);
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.delete).toHaveBeenCalledTimes(1);
+    expect(dbMock.insert).toHaveBeenCalledTimes(1);
+    expect(dbMock._chain.set.mock.calls[0][0]).toEqual({
+      updatedBy: OWNER_ID,
+      updatedAt: expect.any(Date),
+    });
+    expect(firstInsertValues().map((p) => p.path)).toEqual(["a.md"]);
+  });
+
+  it("403s an overwrite of another user's collection", async () => {
+    dbMock.$reset();
+    dbMock.$enqueue([{ ...EXISTING, createdBy: "someone-else" }]);
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "Prose.\n" }], {
+        conflictStrategy: "overwrite",
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin overwrite a collection they do not own", async () => {
+    getSessionMock.mockResolvedValue(
+      createMockSession(createMockUser({ id: "admin-1", role: "admin" })),
+    );
+    dbMock.$reset();
+    const foreign = { ...EXISTING, createdBy: "someone-else" };
+    dbMock.$enqueue([foreign], [foreign], [], []);
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "Prose.\n" }], {
+        conflictStrategy: "overwrite",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(dbMock.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls through to a fresh import when the overwrite target vanished", async () => {
+    dbMock.$reset();
+    dbMock.$enqueue([], [{ id: COLLECTION_ID, name: "x-manual" }], []);
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "Prose.\n" }], {
+        conflictStrategy: "overwrite",
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it("imports under customName when it is free", async () => {
+    dbMock.$reset();
+    dbMock.$enqueue([], [{ id: COLLECTION_ID, name: "x-manual-copy" }], []);
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "Prose.\n" }], {
+        conflictStrategy: "rename",
+        customName: "x-manual-copy",
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(firstInsertValues()).toEqual(
+      expect.objectContaining({ name: "x-manual-copy" }),
+    );
+  });
+
+  it("409s a rename onto a taken customName with the dialog details", async () => {
+    dbMock.$reset();
+    dbMock.$enqueue(
+      [{ ...EXISTING, name: "x-manual-copy", createdBy: "someone-else" }],
+      [{ count: 0 }],
+    );
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "Prose.\n" }], {
+        conflictStrategy: "rename",
+        customName: "x-manual-copy",
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { details: Record<string, unknown> };
+    expect(body.details).toEqual(
+      expect.objectContaining({ existingName: "x-manual-copy", canOverwrite: false }),
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a customName that is not a legal slug before any lookup", async () => {
+    const res = await upload(
+      manifest([{ path: "a.md", content: "x" }], {
+        conflictStrategy: "rename",
+        customName: "X Manual",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("allocates a suffixed slug when a rename carries no customName", async () => {
+    dbMock.$reset();
+    // Pre-check finds the collision, the first candidate is free, then the
+    // fresh import writes its two inserts.
+    dbMock.$enqueue([EXISTING], [], [{ id: COLLECTION_ID, name: "x-manual_123" }], []);
+
+    const res = await upload(
+      manifest([{ path: "a.md", content: "Prose.\n" }], {
+        conflictStrategy: "rename",
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    const collection = dbMock._chain.values.mock.calls[0][0] as { name: string };
+    expect(collection.name).toMatch(/^x-manual_\d{3}$/);
   });
 });

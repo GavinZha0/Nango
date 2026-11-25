@@ -90,6 +90,13 @@ export interface ImportCollectionInput {
   pages: ImportPageInput[];
 }
 
+/** An existing collection whose whole corpus a re-import replaces. */
+export interface OverwriteCollectionInput {
+  collectionId: string;
+  pages: ImportPageInput[];
+  updatedBy: string;
+}
+
 export interface CreatePageInput {
   path: string;
   description?: string | null;
@@ -239,24 +246,7 @@ export async function importCollection(
   input: ImportCollectionInput,
 ): Promise<KbCollectionEntity> {
   assertValidText("KB name", input.name);
-  if (input.pages.length === 0) {
-    throw new ApiError("BAD_REQUEST", 400, "The folder held no importable page.");
-  }
-
-  const paths: string[] = [];
-  for (const page of input.pages) {
-    assertLegalPath(page.path);
-    if (page.description != null) {
-      assertValidText("Page description", page.description);
-    }
-    assertValidText("Page content", page.content);
-    assertContentFits(page.content);
-    // Every earlier path is the baseline: this catches a subtree that nests
-    // inside one of its own page names, and a manifest that repeats a path.
-    assertNoFolderClash(paths, page.path);
-    paths.push(page.path);
-  }
-  assertImportRoom(paths);
+  assertPagesValid(input.pages);
 
   try {
     return await db.transaction(async (tx) => {
@@ -272,17 +262,7 @@ export async function importCollection(
         })
         .returning();
       await tx.insert(KbPageTable).values(
-        input.pages.map((page) => ({
-          collectionId: collection.id,
-          path: page.path,
-          description: page.description ?? null,
-          content: page.content,
-          contentType: page.contentType ?? "text/markdown",
-          size: Buffer.byteLength(page.content, "utf8"),
-          sourceRef: page.sourceRef ?? null,
-          createdBy: input.createdBy,
-          updatedBy: input.createdBy,
-        })),
+        toPageRows(collection.id, input.createdBy, input.pages),
       );
       return collection;
     });
@@ -290,6 +270,43 @@ export async function importCollection(
     throwIfNameTaken(err, input.name);
     throw err;
   }
+}
+
+/**
+ * Replace an existing collection's whole corpus in one transaction.
+ *
+ * CONTRACT: the row's identity and publish state survive — `name`,
+ * `description`, `enabled`, `visibility` and the id itself are untouched, so
+ * agent bindings survive a re-import and a published KB stays published with
+ * the new pages. What is replaced is the page set: every `kb_page` row is
+ * deleted and the uploaded set inserted, so a page the new folder does not
+ * carry disappears.
+ *
+ * The new set passes the same per-page invariants and whole-set budgets
+ * {@link importCollection} enforces, checked before the transaction opens.
+ */
+export async function overwriteCollection(
+  input: OverwriteCollectionInput,
+): Promise<KbCollectionEntity> {
+  assertPagesValid(input.pages);
+
+  return await db.transaction(async (tx) => {
+    const [collection] = await tx
+      .update(KbCollectionTable)
+      .set({ updatedBy: input.updatedBy, updatedAt: new Date() })
+      .where(eq(KbCollectionTable.id, input.collectionId))
+      .returning();
+    if (!collection) {
+      throw new ApiError("NOT_FOUND", 404, "Knowledge base not found.");
+    }
+    await tx
+      .delete(KbPageTable)
+      .where(eq(KbPageTable.collectionId, collection.id));
+    await tx.insert(KbPageTable).values(
+      toPageRows(collection.id, input.updatedBy, input.pages),
+    );
+    return collection;
+  });
 }
 
 /**
@@ -656,6 +673,51 @@ function assertFolderBudget(
       { reason: "LIMIT_REACHED", kind: "folder", count: after.size, max },
     );
   }
+}
+
+/**
+ * The per-page invariants and whole-set budgets an imported corpus must pass,
+ * shared by {@link importCollection} and {@link overwriteCollection} so a
+ * re-import can never admit a page a first import would refuse.
+ */
+function assertPagesValid(pages: readonly ImportPageInput[]): void {
+  if (pages.length === 0) {
+    throw new ApiError("BAD_REQUEST", 400, "The folder held no importable page.");
+  }
+
+  const paths: string[] = [];
+  for (const page of pages) {
+    assertLegalPath(page.path);
+    if (page.description != null) {
+      assertValidText("Page description", page.description);
+    }
+    assertValidText("Page content", page.content);
+    assertContentFits(page.content);
+    // Every earlier path is the baseline: this catches a subtree that nests
+    // inside one of its own page names, and a manifest that repeats a path.
+    assertNoFolderClash(paths, page.path);
+    paths.push(page.path);
+  }
+  assertImportRoom(paths);
+}
+
+/** The `kb_page` insert values both import paths write. */
+function toPageRows(
+  collectionId: string,
+  actorId: string,
+  pages: readonly ImportPageInput[],
+) {
+  return pages.map((page) => ({
+    collectionId,
+    path: page.path,
+    description: page.description ?? null,
+    content: page.content,
+    contentType: page.contentType ?? "text/markdown",
+    size: Buffer.byteLength(page.content, "utf8"),
+    sourceRef: page.sourceRef ?? null,
+    createdBy: actorId,
+    updatedBy: actorId,
+  }));
 }
 
 /**

@@ -8,57 +8,48 @@
  * nothing this pane could edit.
  */
 
-import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { mutate as globalMutate } from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 
 import { KbEditor } from "@/components/main-panels/KbEditor";
-import { KB_LIST_KEY } from "@/components/left-panels/KbPanel";
+import { KB_LIST_KEY, kbDetailKey } from "@/components/left-panels/KbPanel";
 import type { KbCollectionDetail } from "@/lib/types/kb";
+
+const fetcher = async (url: string): Promise<KbCollectionDetail> => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      message?: string;
+      error?: string;
+    } | null;
+    throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as KbCollectionDetail;
+};
 
 export default function KbEditorPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
-  const [detail, setDetail] = useState<KbCollectionDetail | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  // SWR, not a one-shot effect: an overwrite import from the left panel
+  // revalidates this key while the route id stays the same, and the editor
+  // below remounts off the fresh updatedAt. Focus revalidation stays off so a
+  // refetch can never remount mid-edit and drop an unsaved draft.
+  const { data: detail, error: fetchError, isLoading } = useSWR(
+    id ? kbDetailKey(id) : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      if (cancelled) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/kb/${id}`);
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as {
-            message?: string;
-            error?: string;
-          } | null;
-          throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
-        }
-        const d = (await res.json()) as KbCollectionDetail;
-        if (!cancelled) setDetail(d);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  if (loading) {
+  if (isLoading) {
     return <p className="px-8 py-10 text-xs text-muted-foreground">Loading…</p>;
   }
-  if (error) {
-    return <p className="px-8 py-10 text-xs text-destructive">{error}</p>;
+  if (fetchError) {
+    return (
+      <p className="px-8 py-10 text-xs text-destructive">
+        {fetchError instanceof Error ? fetchError.message : String(fetchError)}
+      </p>
+    );
   }
   if (!detail) {
     return (
@@ -69,9 +60,10 @@ export default function KbEditorPage() {
   }
 
   return (
-    // Remount on id change so the editor's tree state never spans collections.
+    // Remount on id change so the editor's tree state never spans collections,
+    // and on updatedAt change so an external overwrite replaces the whole tree.
     <KbEditor
-      key={detail.id}
+      key={`${detail.id}:${detail.updatedAt}`}
       initialDetail={detail}
       onBack={() => router.push("/kb")}
       // The list lives in the left panel's SWR cache and the panel stays

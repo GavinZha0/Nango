@@ -11,10 +11,13 @@
  * the editor has no row for the corpus it shows.
  *
  * The third thing the toolbar does is turn a picked folder into a collection
- * (`FolderUp`) with no dialog at all: the collector and the caps are the shared
- * folder-import ones, the folder's own name becomes the slug, and the import
- * lands unpublished so the author can read the corpus before writing the
- * routing line it needs to be enabled.
+ * (`FolderUp`): the collector and the caps are the shared folder-import ones,
+ * the folder's own name becomes the slug, and a first import lands unpublished
+ * so the author can read the corpus before writing the routing line it needs
+ * to be enabled. The only dialog an import produces is the name-collision one —
+ * slugs are globally unique, so re-importing a folder offers to overwrite the
+ * existing collection (corpus replaced; id, bindings, description and publish
+ * state preserved) or to import under a new name.
  *
  * See docs/kb.md.
  */
@@ -38,12 +41,13 @@ import {
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -59,6 +63,7 @@ import { classifyKbImportPath } from "@/lib/kb/import-policy";
 import {
   KB_COLLECTION_NAME_RE,
   KB_COLLECTION_NAME_RULE,
+  buildSuffixedKbName,
   kbSlugFromFolderName,
 } from "@/lib/kb/validation";
 import { MAX_DESCRIPTION_CHARS } from "@/lib/kb/limits";
@@ -70,6 +75,9 @@ import {
 
 /** Shared so the editor route can invalidate the panel's list cache. */
 export const KB_LIST_KEY = "/api/kb";
+
+/** The editor route's SWR key; import revalidates it so an overwrite remounts the editor. */
+export const kbDetailKey = (id: string) => `${KB_LIST_KEY}/${id}`;
 
 /**
  * CONTRACT: these mirror the server's *defaults* (kb.max_pages, kb.page_max_bytes)
@@ -245,6 +253,28 @@ function reportImportResult(
   );
 }
 
+// Import name-collision dialog
+
+interface PendingImportConflict {
+  /** The slug the first attempt used; the retry resends it with a strategy. */
+  name: string;
+  entries: Array<{ path: string; contentBase64: string }>;
+  clientSkipped: string[];
+  existingName: string;
+  /** The delete gate's answer: owner or admin. False hides the Overwrite button. */
+  canOverwrite: boolean;
+  /** A published collection's pages are live to its agents — the dialog says so. */
+  enabled: boolean;
+  boundAgentCount: number;
+  renameValue: string;
+  submitting: boolean;
+}
+
+function suggestRenamedKb(baseName: string): string {
+  const digits = String(100 + Math.floor(Math.random() * 900));
+  return buildSuffixedKbName(baseName, `_${digits}`);
+}
+
 interface CollectionDialogProps {
   /** Present = edit this collection's metadata; absent = create one. */
   row?: KbCollectionListItem | undefined;
@@ -392,6 +422,7 @@ export function KbPanel(): ReactNode {
   >(null);
 
   const [importing, setImporting] = useState<boolean>(false);
+  const [pendingConflict, setPendingConflict] = useState<PendingImportConflict | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // CONTRACT: the SWR cache is the only source of truth for this list. The
@@ -443,6 +474,94 @@ export function KbPanel(): ReactNode {
     }
   }
 
+  async function submitKbImport(
+    name: string,
+    entries: Array<{ path: string; contentBase64: string }>,
+    clientSkipped: string[],
+    opts?: { conflictStrategy: "overwrite" | "rename"; customName?: string },
+  ): Promise<boolean> {
+    const res = await fetch(`${KB_LIST_KEY}/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        entries,
+        ...(opts ? { conflictStrategy: opts.conflictStrategy } : {}),
+        ...(opts?.customName ? { customName: opts.customName } : {}),
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as
+      | (KbCollectionRow & {
+          message?: string;
+          error?: string;
+          skipped?: string[];
+          pagesImported?: number;
+          overwritten?: boolean;
+          details?: {
+            existingId?: string;
+            existingName?: string;
+            canOverwrite?: boolean;
+            enabled?: boolean;
+            boundAgentCount?: number;
+          };
+        })
+      | null;
+
+    // A first-attempt collision carries the dialog's data. A 409 without
+    // details (a concurrent-insert race) falls through to the plain error —
+    // retrying the import reopens the dialog.
+    if (res.status === 409 && !opts && body?.details?.existingId) {
+      const details = body.details;
+      setPendingConflict({
+        name,
+        entries,
+        clientSkipped,
+        existingName: details.existingName ?? name,
+        canOverwrite: details.canOverwrite ?? false,
+        enabled: details.enabled ?? false,
+        boundAgentCount: details.boundAgentCount ?? 0,
+        renameValue: suggestRenamedKb(name),
+        submitting: false,
+      });
+      return false;
+    }
+
+    if (!res.ok) {
+      toast.error("Import failed", {
+        description: body?.message ?? body?.error ?? `HTTP ${res.status}`,
+        duration: 10_000,
+      });
+      return false;
+    }
+
+    if (body?.overwritten) {
+      const ignored = clientSkipped.length + (body.skipped?.length ?? 0);
+      toast.success(`Overwrote knowledge base “${body.name}”`, {
+        description:
+          "Every page was replaced; the ID, bindings, description and publish state were preserved." +
+          (ignored > 0 ? ` Ignored ${ignored} file(s).` : ""),
+        duration: 10_000,
+      });
+    } else {
+      reportImportResult(
+        body?.pagesImported ?? entries.length,
+        clientSkipped,
+        body?.skipped,
+      );
+    }
+    await mutate();
+    if (body?.id) {
+      // An overwrite lands on the collection the author may already be
+      // editing: the push below is then a no-op, so revalidate the editor's
+      // own SWR key — the fresh updatedAt remounts it onto the new corpus.
+      void globalMutate(kbDetailKey(body.id));
+      // Same as a create: the author is sent to what they just imported, which
+      // is where the description gets written.
+      router.push(`/kb/${body.id}`);
+    }
+    return true;
+  }
+
   /**
    * Pick a folder, get a collection: the folder's own name is the slug and the
    * description is left for the author, who has not read the corpus yet. The
@@ -475,30 +594,7 @@ export function KbPanel(): ReactNode {
         });
         return;
       }
-      const res = await fetch(`${KB_LIST_KEY}/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: slug, entries: collected.entries }),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | (KbCollectionRow & { message?: string; error?: string; skipped?: string[] })
-        | null;
-      if (!res.ok) {
-        toast.error("Import failed", {
-          description: body?.message ?? body?.error ?? `HTTP ${res.status}`,
-          duration: 10_000,
-        });
-        return;
-      }
-      reportImportResult(
-        collected.entries.length,
-        collected.skipped,
-        body?.skipped,
-      );
-      void mutate();
-      // Same as a create: the author is sent to what they just imported, which
-      // is where the description gets written.
-      if (body?.id) router.push(`/kb/${body.id}`);
+      await submitKbImport(slug, collected.entries, collected.skipped);
     } catch (err) {
       toast.error("Import failed", {
         description: err instanceof Error ? err.message : "Import failed",
@@ -507,6 +603,35 @@ export function KbPanel(): ReactNode {
     } finally {
       setImporting(false);
       if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }
+
+  async function handleResolveConflict(strategy: "overwrite" | "rename"): Promise<void> {
+    if (!pendingConflict || pendingConflict.submitting) return;
+    setPendingConflict((prev) => (prev ? { ...prev, submitting: true } : null));
+    try {
+      const ok = await submitKbImport(
+        pendingConflict.name,
+        pendingConflict.entries,
+        pendingConflict.clientSkipped,
+        {
+          conflictStrategy: strategy,
+          ...(strategy === "rename" && pendingConflict.renameValue.trim()
+            ? { customName: pendingConflict.renameValue.trim() }
+            : {}),
+        },
+      );
+      if (ok) {
+        setPendingConflict(null);
+      } else {
+        setPendingConflict((prev) => (prev ? { ...prev, submitting: false } : null));
+      }
+    } catch (err) {
+      toast.error("Import failed", {
+        description: err instanceof Error ? err.message : "Import failed",
+        duration: 10_000,
+      });
+      setPendingConflict((prev) => (prev ? { ...prev, submitting: false } : null));
     }
   }
 
@@ -605,6 +730,83 @@ export function KbPanel(): ReactNode {
           }}
         />
       )}
+
+      <Dialog
+        open={pendingConflict !== null}
+        onOpenChange={(open) => {
+          if (!open && !pendingConflict?.submitting) setPendingConflict(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Knowledge base already exists</DialogTitle>
+            <DialogDescription>
+              A knowledge base named{" "}
+              <span className="font-mono font-medium text-foreground">
+                {pendingConflict?.existingName}
+              </span>{" "}
+              already exists.
+              {pendingConflict?.canOverwrite ? (
+                <>
+                  {(pendingConflict?.boundAgentCount ?? 0) > 0
+                    ? ` Currently bound to ${pendingConflict?.boundAgentCount} agent(s).`
+                    : ""}
+                  {pendingConflict?.enabled
+                    ? " It is published, so overwriting replaces every page its agents read immediately — the ID, description, bindings and publish state are preserved."
+                    : " Overwriting replaces all of its pages while keeping the ID, description, bindings and publish state."}
+                </>
+              ) : (
+                " It belongs to another user, so you can only import under a different name."
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label htmlFor="kb-import-rename">New name (if renaming)</Label>
+            <Input
+              id="kb-import-rename"
+              value={pendingConflict?.renameValue ?? ""}
+              disabled={pendingConflict?.submitting}
+              onChange={(e) =>
+                setPendingConflict((prev) =>
+                  prev ? { ...prev, renameValue: e.target.value } : null,
+                )
+              }
+              maxLength={63}
+              placeholder="my-kb_123"
+              className="font-mono text-xs"
+            />
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pendingConflict?.submitting}
+              onClick={() => setPendingConflict(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pendingConflict?.submitting || !pendingConflict?.renameValue.trim()}
+              onClick={() => void handleResolveConflict("rename")}
+            >
+              Rename &amp; Import
+            </Button>
+            {pendingConflict?.canOverwrite && (
+              <Button
+                type="button"
+                disabled={pendingConflict?.submitting}
+                onClick={() => void handleResolveConflict("overwrite")}
+              >
+                Overwrite
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

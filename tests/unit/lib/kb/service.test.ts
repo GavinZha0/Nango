@@ -33,6 +33,7 @@ import {
   getPages,
   importCollection,
   listCollections,
+  overwriteCollection,
   renameFolder,
   updateCollection,
   updatePage,
@@ -928,5 +929,115 @@ describe("kb/service — folder import", () => {
       status: 409,
       reason: "NAME_TAKEN",
     });
+  });
+});
+
+describe("kb/service — import overwrite", () => {
+  const page = (
+    path: string,
+    content = "body",
+    extra: Partial<ImportPageInput> = {},
+  ): ImportPageInput => ({
+    path,
+    content,
+    contentType: "text/markdown",
+    ...extra,
+  });
+
+  const PRESERVED_ROW = {
+    id: COLLECTION_ID,
+    name: "x-manual",
+    description: "routing line",
+    enabled: true,
+    visibility: "private",
+  };
+
+  it("replaces every page and stamps the actor while the row metadata survives", async () => {
+    dbMock.$enqueue([PRESERVED_ROW], [], []);
+
+    const row = await overwriteCollection({
+      collectionId: COLLECTION_ID,
+      pages: [page("chapter-01/install"), page("loose")],
+      updatedBy: ACTOR_ID,
+    });
+
+    expect(row).toEqual(PRESERVED_ROW);
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.delete).toHaveBeenCalledTimes(1);
+    expect(dbMock.insert).toHaveBeenCalledTimes(1);
+    // Only the audit columns are set — name/description/enabled/visibility stay.
+    expect(dbMock._chain.set.mock.calls[0][0]).toEqual({
+      updatedBy: ACTOR_ID,
+      updatedAt: expect.any(Date),
+    });
+    const inserted = dbMock._chain.values.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(inserted).toEqual([
+      expect.objectContaining({
+        collectionId: COLLECTION_ID,
+        path: "chapter-01/install",
+        createdBy: ACTOR_ID,
+        updatedBy: ACTOR_ID,
+      }),
+      expect.objectContaining({ collectionId: COLLECTION_ID, path: "loose" }),
+    ]);
+  });
+
+  it("404s a collection that vanished between the dialog and the retry", async () => {
+    dbMock.$enqueue([]);
+
+    await expectApiError(
+      () =>
+        overwriteCollection({
+          collectionId: COLLECTION_ID,
+          pages: [page("a")],
+          updatedBy: ACTOR_ID,
+        }),
+      { code: "NOT_FOUND", status: 404 },
+    );
+    expect(dbMock.delete).not.toHaveBeenCalled();
+  });
+
+  it("runs the import's page invariants before opening a transaction", async () => {
+    await expectApiError(
+      () =>
+        overwriteCollection({
+          collectionId: COLLECTION_ID,
+          pages: [page("a"), page("a/b")],
+          updatedBy: ACTOR_ID,
+        }),
+      { code: "CONFLICT", status: 409, reason: "PATH_TAKEN" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty page set instead of blanking the corpus", async () => {
+    await expectApiError(
+      () =>
+        overwriteCollection({
+          collectionId: COLLECTION_ID,
+          pages: [],
+          updatedBy: ACTOR_ID,
+        }),
+      { code: "BAD_REQUEST", status: 400 },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+  });
+
+  it("counts the page budget on the whole replacement set", async () => {
+    mockConfig["kb.max_pages"] = "2";
+
+    await expectApiError(
+      () =>
+        overwriteCollection({
+          collectionId: COLLECTION_ID,
+          pages: [page("a"), page("b"), page("c")],
+          updatedBy: ACTOR_ID,
+        }),
+      { code: "BAD_REQUEST", status: 400, reason: "LIMIT_REACHED" },
+    );
+    expect(dbMock.transaction).not.toHaveBeenCalled();
   });
 });

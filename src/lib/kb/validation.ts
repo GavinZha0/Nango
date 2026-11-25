@@ -21,6 +21,9 @@ import { MAX_DESCRIPTION_CHARS, MAX_LABEL_CHARS } from "@/lib/kb/limits";
  */
 export const KB_COLLECTION_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
+/** The `kb_name` ceiling the runtime enforces — the regex above admits at most this many chars. */
+export const KB_NAME_MAX_LEN = 63;
+
 /** The rule as one sentence: the API edge, the dialog and the import toast all say it. */
 export const KB_COLLECTION_NAME_RULE =
   "name must start with a-z or 0-9 and contain only [a-z0-9_-] (max 63 chars)";
@@ -46,8 +49,22 @@ export function kbSlugFromFolderName(name: string): string | null {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^[-_]+/, "")
     .replace(/-+$/, "")
-    .slice(0, 63);
+    .slice(0, KB_NAME_MAX_LEN);
   return KB_COLLECTION_NAME_RE.test(slug) ? slug : null;
+}
+
+/**
+ * Append a collision suffix while keeping the result a legal slug: the base is
+ * cut to make room, and a trailing `-`/`_` the cut left dangling is trimmed so
+ * the suffix never lands on a separator. Shared by the server's auto-rename
+ * and the client dialog's prefilled suggestion so the two cannot disagree
+ * about what a valid name is.
+ */
+export function buildSuffixedKbName(baseName: string, suffix: string): string {
+  const maxBase = Math.max(1, KB_NAME_MAX_LEN - suffix.length);
+  const head =
+    baseName.slice(0, maxBase).replace(/[-_]+$/, "") || baseName.slice(0, maxBase);
+  return `${head}${suffix}`;
 }
 
 /**

@@ -9,14 +9,20 @@
  * collection slug rule client-side.
  *
  * There is no collection `description` in this body and no dialog to type one
- * into: the importer has not read the corpus yet. The collection lands disabled
+ * into: the importer has not read the corpus yet. A first import lands disabled
  * with a NULL description and the author publishes it from the panel once they
  * know what it is — see the `enabled ⇒ description` contract in
  * `src/lib/kb/service.ts`.
  *
- * The whole folder becomes one new collection — there is no "add these files to
- * collection X" path, because merging a foreign tree into a corpus an agent is
- * already reading is the one thing a reviewable import cannot promise.
+ * The whole folder becomes one collection. A name collision — the slug is
+ * globally unique because agents route by it — is negotiated, not just refused:
+ * the first attempt answers 409 with enough detail for the panel to offer a
+ * choice, and a retry carries `conflictStrategy`. `overwrite` replaces the
+ * existing collection's corpus while keeping its id, bindings, description and
+ * publish state, and is gated like a delete (owner or admin). `rename` imports
+ * under `customName`, or under a server-allocated suffixed slug when none is
+ * given. There is still no "add these files to collection X" partial merge: a
+ * corpus is replaced whole or created new.
  *
  * See docs/kb.md.
  */
@@ -24,10 +30,14 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { withEditor } from "@/lib/http/route-handlers";
+import { db } from "@/lib/db";
+import { BuiltinAgentToolTable, KbCollectionTable } from "@/lib/db/schema";
+import { ApiError, withEditor, type Session } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
+import { canDeleteResource } from "@/lib/auth/permissions";
 import { folderManifestSchema } from "@/lib/folder-import/manifest";
 import {
   assertBodyWithinCap,
@@ -43,8 +53,12 @@ import {
   textDecodeProblem,
 } from "@/lib/kb/import-policy";
 import { pathProblem } from "@/lib/kb/paths";
-import { importCollection, type ImportPageInput } from "@/lib/kb/service";
-import { collectionNameSchema } from "@/lib/kb/validation";
+import {
+  importCollection,
+  overwriteCollection,
+  type ImportPageInput,
+} from "@/lib/kb/service";
+import { buildSuffixedKbName, collectionNameSchema } from "@/lib/kb/validation";
 
 const ROUTE = "/api/kb/import";
 
@@ -58,8 +72,94 @@ const importSchema = z
   .object({
     name: collectionNameSchema,
     entries: folderManifestSchema.shape.entries,
+    conflictStrategy: z
+      .enum(["fail", "overwrite", "rename"])
+      .optional()
+      .default("fail"),
+    customName: collectionNameSchema.optional(),
   })
   .strict();
+
+function randomDigits(len: number): string {
+  const min = 10 ** (len - 1);
+  const span = 9 * min;
+  return String(min + Math.floor(Math.random() * span));
+}
+
+interface CollectionByName {
+  id: string;
+  name: string;
+  enabled: boolean;
+  visibility: "private" | "public";
+  createdBy: string | null;
+}
+
+async function findCollectionByName(
+  name: string,
+): Promise<CollectionByName | null> {
+  const rows = await db
+    .select({
+      id: KbCollectionTable.id,
+      name: KbCollectionTable.name,
+      enabled: KbCollectionTable.enabled,
+      visibility: KbCollectionTable.visibility,
+      createdBy: KbCollectionTable.createdBy,
+    })
+    .from(KbCollectionTable)
+    .where(eq(KbCollectionTable.name, name))
+    .limit(1);
+  const row = rows[0];
+  return row
+    ? { ...row, visibility: row.visibility as "private" | "public" }
+    : null;
+}
+
+/** How many agents would feel a corpus swap on this collection. */
+async function countBoundAgents(collectionId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(BuiltinAgentToolTable)
+    .where(eq(BuiltinAgentToolTable.kbCollectionId, collectionId));
+  return row?.count ?? 0;
+}
+
+/**
+ * The 409 the panel's conflict dialog is built from. `canOverwrite` is the
+ * delete gate — a full corpus replacement is destructive enough that editing a
+ * public collection must not imply it.
+ */
+async function throwNameConflict(
+  existing: CollectionByName,
+  session: Session,
+): Promise<never> {
+  throw new ApiError(
+    "CONFLICT",
+    409,
+    `A knowledge base named "${existing.name}" already exists.`,
+    {
+      existingId: existing.id,
+      existingName: existing.name,
+      canOverwrite: canDeleteResource(existing, session),
+      enabled: existing.enabled,
+      boundAgentCount: await countBoundAgents(existing.id),
+    },
+  );
+}
+
+async function allocateSuffixedName(base: string): Promise<string> {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const suffix = `_${randomDigits(attempt < 8 ? 3 : 5)}`;
+    const candidate = buildSuffixedKbName(base, suffix);
+    if (!(await findCollectionByName(candidate))) {
+      return candidate;
+    }
+  }
+  throw new ApiError(
+    "CONFLICT",
+    409,
+    `Could not allocate a unique name for "${base}".`,
+  );
+}
 
 export const POST = withEditor(ROUTE, async ({ req, session }) => {
   assertBodyWithinCap(req, MAX_REQUEST_BYTES);
@@ -94,8 +194,46 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     };
   });
 
+  // Name-collision negotiation. A rename with a custom target looks that name
+  // up; every other strategy is a collision on the submitted one.
+  const strategy = body.conflictStrategy;
+  const lookupName =
+    strategy === "rename" && body.customName ? body.customName : body.name;
+  const existing = await findCollectionByName(lookupName);
+
+  let targetName = lookupName;
+  if (existing) {
+    if (strategy === "overwrite") {
+      if (!canDeleteResource(existing, session)) {
+        throw new ApiError(
+          "FORBIDDEN",
+          403,
+          `"${existing.name}" belongs to another user; only its owner or an admin can overwrite it.`,
+        );
+      }
+      const collection = await overwriteCollection({
+        collectionId: existing.id,
+        pages,
+        updatedBy: session.user.id,
+      });
+      return NextResponse.json(
+        { ...collection, pagesImported: pages.length, skipped, overwritten: true },
+        { status: 200 },
+      );
+    }
+    if (strategy === "rename" && !body.customName) {
+      targetName = await allocateSuffixedName(body.name);
+    } else {
+      // "fail", or a rename onto a custom name that is itself taken — the
+      // dialog stays open and the author picks another.
+      await throwNameConflict(existing, session);
+    }
+  }
+  // `existing === null` with strategy "overwrite" means the collection was
+  // deleted between the dialog and the retry: fall through to a fresh import.
+
   const collection = await importCollection({
-    name: body.name,
+    name: targetName,
     createdBy: session.user.id,
     pages,
   });
