@@ -1260,3 +1260,104 @@ The combined architecture and metric improvement is complete when:
 - **[R8-1]** Track A is complete when all three modules run on the shared platform and the retired symbols are gone (§5.2 A6); Track B progresses per dimension, each enabled dimension backed by a passing Judge regression suite (§6.2), while visual judging and other deferred extensions remain clearly labelled as future work.
 
 Success is measured by these invariants, not by how many files or tables were merged.
+
+---
+
+## 8. 务实评审意见与修订建议（基于 `3fdbb06` 代码核实）
+
+> **评审基线**：2026-11，对照当前仓库 HEAD（`3fdbb06`）代码、依赖版本（`ai@^6.0.332`、`zod@^4.6.7`、Electron 桌面端打包链）、最新迁移（`0000`–`0009`）及并行方案 [async-task-board-proposal.md](async-task-board-proposal.md)，并结合已确认的两项产品决策：
+> 1. **不引入专用 Playwright MCP**：Web Auto 直接复用用户挂载的 Playwright MCP，未配置时提醒用户安装/配置；
+> 2. **Verification 同样需要支持 LLM 评估**：Verification、Web Auto、Evaluation 三大模块统一支持可选的 LLM Judge 断言，不再把 Verification 排除在 Judge 体系之外。
+
+### 8.1 总体判断
+
+R8 相比 R7 的瘦身方向非常正确：拆分平台重构（Track A）与质量维度打磨（Track B）、按模块分批切换、把 Judge 从 Agent Dispatch 改为直接结构化模型调用、砍掉单机不需要的 `request_key`/`attempt_no`/`deadline_at`/乐观锁、用冻结 fixture 替代学术化人工标注校准，这些减法大幅降低了落地风险。
+
+但在真正编码落地前，以下 **两项产品决策修正**、**六处代码核实出的硬坑** 和 **四处可继续做减法的工程细节** 必须同步调整，否则会在实现阶段返工或造成体验倒退。
+
+---
+
+### 8.2 两项产品决策对原方案的直接修订
+
+#### 决策 A：取消专用 Playwright MCP 限制（撤销 R8-10）
+
+- **现状核实**：
+  - 当前 [WebAutoSuiteDialog.tsx](../src/components/main-panels/web-auto/WebAutoSuiteDialog.tsx) 通过 `findBestPlaywrightMcpServer` 自动匹配用户现有的 Playwright MCP，[discovery.server.ts](../src/lib/web-auto/discovery.server.ts) 自动发现可见公共 Playwright MCP；未配置时 [orchestrator.ts](../src/lib/web-auto/orchestrator.ts) 已按桌面端/自部署分别给出安装提示。
+  - 数据库 `mcp_server` 表（[schema.ts](../src/lib/db/schema.ts)）没有 `isolated` 模式字段，应用层也无法可靠验证远端 HTTP/SSE Playwright MCP 的启动参数。
+  - 如果按 R8-10 在保存/绑定阶段拦截“已挂载到 Chat Agent 的 Playwright MCP”，个人与小团队用户（尤其是 Electron 桌面端用户）将被迫维护两套 Playwright MCP，严重伤害开箱体验。
+- **修订方案**：
+  1. **撤销 R8-10 的绑定拦截**：允许 Web Auto 直接复用用户已挂载的 Playwright MCP，不检查是否同时被 Chat Agent 挂载，也不强求校验 `--isolated`。
+  2. **缺省提醒清晰化**：套件未绑定或绑定的 Playwright MCP 被删除（`mcp_server_id IS NULL`）或不可用时，在面板、套件弹窗、运行接口及 Tester 工具中统一提示用户先挂载/安装 Playwright MCP（桌面端引导从 MCP Market 安装，自部署引导在 MCP 页面添加）。
+  3. **保留轻量的测试期串行保护**：测试平台内部仍按 `mcp_server_id` 持有进程内互斥锁（覆盖 Web Auto Suite Run 与单用例 Playground Run），防止多条浏览器测试并发踩踏，并在用例/套件结束时尽量清理自己打开的页面/上下文。
+  4. **调整 S5 边界定位**：与聊天 Agent 共用同一 Playwright MCP 属于单机小团队可接受的共享资源边界，通过运行前/文档提示告知“运行期间可能共享浏览器会话”，重点守严 S4（凭据不外泄到公开输出、错误、反馈和日志）。
+
+#### 决策 B：三大测试模块统一支持可选 LLM 评估（撤销 Verification 禁 Judge 限制）
+
+- **现状与原方案冲突核实**：
+  - 当前代码 [assertions/types.ts](../src/lib/assertions/types.ts) 中 `CATEGORY_TYPE_MAPPING.verification` 仅包含 `["jsonpath", "json_schema", "js_expression", "metric"]`，[verification/runner-mcp.ts](../src/lib/verification/runner-mcp.ts) 未接入 `determineCaseVerdict` 与 Judge，[create-test-suite.ts](../src/lib/testing/tools/create-test-suite.ts) 明确拒绝给 `verification`（及 `web-auto`）传 `evaluatorAgentId`。
+  - 原文档 §1 第 6 条、§4.4、§4.5.2、§4.7.4 和 §5.2 A3 将 Verification 硬性排除在 Judge 之外，甚至要求在 `test_suite` 表上用 **DB CHECK 约束禁止 Verification 的 `evaluator_agent_id` 非空**。如果按此建表，后续给 Verification 加 LLM 评估会被迫重做迁移、改服务白名单、改 UI 和改 Tester。
+- **修订方案（统一后架构反而更简单）**：
+  1. **移除 `test_suite` 对 Verification 绑定 Evaluator 的禁止约束**：`evaluator_agent_id`（可空）、`judge_timeout_sec`、`judge_threshold` 对 Verification / Web Auto / Evaluation **三者一视同仁**。数据库 CHECK 约束只校验目标字段互斥（`mcp_server_id` 与 `builtin_agent_id` / `backend_*` 不可混用），不再禁止 Verification 绑定 Evaluator。
+  2. **能力矩阵完全由 `requires ⊆ provides` 驱动**：
+     - 三个适配器均提供 `output`（及可选 `targetError`），因此二元语义断言 `accuracy`（`expected` / `reference`）和 `rule`（`must` / `must_not`）天然对 **Verification、Web Auto、Evaluation 全部可用**；同时顺理成章把 `text_match` 放开给 Verification。
+     - 依赖多轮对话或工具调用树的 `llm_dim` 维度（`requires: ["turns"]` 或 `["trace"]`）依然自动限定在 Evaluation，无需写死按 `category` 判断是否允许 Judge 的分支。
+  3. **保持 Verification 的零开销默认路径与负向测试兼容**：
+     - 纯确定性 Verification 用例（不含 `accuracy`/`rule`）完全不要求绑定 `evaluator_agent_id`，零模型开销，维持 `<50ms` 响应；
+     - 用例包含 `accuracy`/`rule`（例如评估 MCP 工具返回的自然语言摘要、检索内容或错误提示是否符合语义预期）时，走统一的“确定性 fail-fast → 未配置 evaluator 报配置错误 `errored` → 调统一 Judge 服务 → 统一 Reducer”链路；
+     - MCP 负向测试（断言 `targetError`）不受影响，Judge 证据包同时暴露 `evidence.output` 与 `evidence.targetError`。
+  4. **同步调整 A2 / A3 依赖与 Tester 工具**：
+     - 将 **A2（新 Judge 服务 + `accuracy`/`rule`）置于 A3（Verification 切换）之前**，让 Verification 成为第一个完整验证“统一表 + 统一 `TestService` + 可选 Judge + 统一 `useTestRun`”全闭环的试点模块（Verification 没有多轮回放和浏览器锁，最适合跑通端到端平台）；
+     - Tester `create_test_suite` 与 REST 共享同一 `TestService`，同时允许 `verification`、`web-auto`、`evaluation` 绑定可见且 `role === 'evaluator'` 的评估器（一并关闭原 T1）。
+
+---
+
+### 8.3 对照当前代码核实出的 6 处技术坑与修正
+
+| # | 涉及条目 | 代码核实事实 | 务实修正方案 |
+|---|---|---|---|
+| **1** | **R8-3** Judge 调用与模型解析 | `ai@^6.0.332` 已将 `generateObject` 标记为 `@deprecated`（提示改用 `generateText` + `output`）；[model-resolver.ts](../src/lib/builtin-agents/model-resolver.ts) 的 `NATIVE_PROVIDERS` 还包含 **`vertex`**（R8-3 漏列 `@ai-sdk/google-vertex`）；且项目大量使用 `openai-compatible` / Ollama / DeepSeek，部分网关不支持严格 `json_schema` | 改用 `generateText({ output: Output.object({ schema }), ... })`；`resolveJudgeModel` 补全 `vertex` 并与主模型工厂共享鉴权/Header 逻辑；内置 **structured output → JSON mode / 文本 JSON 提取 + Zod 校验** 的降级兜底，防止非顶级模型大面积 `errored` |
+| **2** | **R8-7** 复用 `event-reconstruction.ts` | [event-reconstruction.ts](../src/lib/copilot/event-reconstruction.ts) 产出的是前端 `/connect` 消费的 `Observable<BaseEvent>`，与 `StartRunInput.previousMessages`（[types.ts](../src/lib/runner/types.ts)）结构不匹配；且 `runner.start({ mode: "sync" })` **不写 user `message` 事件**（[runner.ts](../src/lib/runner/runner.ts)），`reconstructFromDb` 还会为缺失结果的工具调用**合成 `isError: true, severity: "warning"` 假结果**，直接复用会丢 prompt 并污染 Judge 证据 | **放弃硬套 `event-reconstruction.ts`**。① 多轮回放直接扩展 `StartRunInput.previousMessages` 与 `buildSyntheticRunInput` 支持完整 AG-UI `Message[]`（含 `toolCalls` 与 `role: "tool"`）；② 证据收集基于 `entity_run`（按 `parent_run_id` 查树）+ `entity_run_event` + 现有 `src/lib/runner/tool-call-aggregator.ts` 写独立的 `collectRunTreeEvidence()` |
+| **3** | **R8-4** QuickJS WASM 与正则执行 | 项目含 Electron 桌面端打包（[build-standalone.mjs](../scripts/build-standalone.mjs) + [next.config.ts](../next.config.ts)），WASM 依赖需显式配置 `outputFileTracingIncludes` 与 `serverExternalPackages`（如现有 `web-tree-sitter`）；且 QuickJS 内置 RegExp 仍是回溯引擎，把 `text_match` / JSONPath 正则每次都跨 WASM 边界执行性价比偏低 | 仅 `js_expression` 使用 QuickJS（单 case 复用同一 runtime/context），正则改用轻量线性时间引擎或长度/复杂度约束；A1/Hotfix 验收必须加上 `NEXT_STANDALONE_OUTPUT=true pnpm build` 和桌面端打包冒烟；单机小团队定位下无需因隔离未上线就先 fail-closed 禁用现有 `js_expression` |
+| **4** | **R8-12** `runner.start` 取消信号 | [runner.ts](../src/lib/runner/runner.ts) 现有 sync timeout 回调仅调用了 `subscription?.unsubscribe()`，**尚未调用** [persisting-agent.ts](../src/lib/runner/persisting-agent.ts) 已实现的 `persistedAgent.abortRun()` | 为 `runner.start` 增加 `signal?: AbortSignal` 时，同步把现有 sync timeout 路径也补上 `persistedAgent.abortRun()`，确保真正中止底层 LLM 流 |
+| **5** | **R8-16** A6 接入 `schedule` 定时运行 | [ScheduleTable](../src/lib/db/schema.ts) 强绑定 `entity_id` / `entity_kind` / `task`（均 `NOT NULL`），[scheduler.ts](../src/lib/runner/scheduler.ts) 直接调 `runner.start()`，历史面板按 `entity_run.schedule_id` 反查 | 把定时跑测试套件**移出 Track A 完成门槛**，避免 A6 尾大不掉；作为独立小需求在 Track A 后立项，一次性改完 `schedule` 表、调度分支、UI 选择器与 RecentRuns 视图 |
+| **6** | **D3 / §4.7.10** 迁移基线 + 并行方案冲突 | 仓库已推进至 `0000`–`0009` 共 10 个迁移（非文档所述的单文件 `0000`）；同时新提交的 [async-task-board-proposal.md](async-task-board-proposal.md)（§6.6–§6.8）同样计划改动测试 run 表（加 `task_id`）、删除 `active-tasks.ts` 四段拼接、移除 `notification.run_id`、改造 `/api/runs/stream` 和 `previousMessages` | ① 按当前 `0000`–`0009` 实际基线修复 D3 迁移测试，不再纠结历史 `0001`–`0013`；② 开工前与 `async-task-board-proposal.md` 对齐 4 个交叉契约：`test_run` 预留可选 `task_id` 列、通知去多态化、`previousMessages` 富消息结构共用、SSE 帧格式不冲突 |
+
+---
+
+### 8.4 可继续做减法的 4 处工程细节
+
+1. **R8-11（Playground 统一为 `test_run`）要守住两阶段体验且别让 Tester 轮询**：
+   - **执行引擎与 Result DTO 必须 100% 统一**，但传输行为不要一刀切：
+   - **Tester `run_test_case`**（[run-test-case.ts](../src/lib/testing/tools/run-test-case.ts)）：工具内部等待单条执行完成后**直接同步返回完整结果（附带 `runId`）**，不要只返回 `runId` 迫使 Tester Agent 多轮调用 `get_test_results` 轮询（Verification 单条仅 <50ms，异步轮询纯属浪费 token 和延迟）。
+   - **UI Playground**：若坚持走 `test_run` + SSE 快照取代 NDJSON，**必须在 §4.7.9 增加“阶段一（目标执行完、Judge 开始前）写入/推送中间 `evidence` 帧”**，否则 Web Auto 看不到脚本输出/截图、Evaluation 看不到目标回复，必须干等 Judge 跑完，造成明显体验倒退。同时明确所有历史列表、通知和任务看板默认过滤 `trigger_source !== 'playground'`。
+2. **数据库模型（§4.7）进一步减负**：
+   - **删 Suite 建议直接 `CASCADE` 清理 `test_run`**：保留 `test_case_run.case_id SET NULL` + 快照很有价值（改删单条用例不影响历史回看）；但删掉整个 Suite 后留下一堆 `suite_id = NULL` 的孤儿 `test_run`，在现有 UI 中根本没有入口查看，徒增权限判断和清理成本。删除 Suite 时经二次确认直接级联删除其历史更务实。
+   - **`case_key` 对普通用户隐形**：继续兼容 `010_login` → `010` 的 3 位前缀心智，新建用例时由服务端自动派生 `case_key` 并放在高级/只读提示里，不增加表单填写负担。
+   - **`case_snapshot` 不重复存整段系统 rubric 原文**：存 `rubricVersion`（对应代码中的版本化常量）+ 编译后的用户断言即可，避免每条 `test_case_run` 的 JSONB 膨胀。
+3. **调轻 A2 门槛，避免 A5 切换后 Evaluation 维度归零**：
+   - A2 阶段不强制凑齐 `accuracy`/`rule` 各 ≥15 条 fixture × 3 遍的硬门槛；先用 **5–8 个高价值核心反例**（工具失败却宣称成功、隐藏参考≠grounding、Prompt 注入企图改分、缺证据返回 `insufficient_evidence`）跑通 `pnpm test:judge` 即可上线，后续靠线上误判通过 `pnpm judge:fixture` 持续增量沉淀。
+   - A5 切换 Evaluation 时，不要让内置 `llm_dim` 归零（相对现有 8 维度是功能倒退）；随 A5 同步带出最常用的 **2–3 个核心维度**（如 `response-quality`、`faithfulness`、`tool-use` / `safety`）及最小反例集，其余维度再按 Track B 增量开启。
+4. **开工前做一次文档定稿瘦身（落地 R8-17）**：
+   - 当前文档 1,260+ 行，叠加了 R2–R8 的历史修正、删除线和已修复缺陷，开发直接照着写极易看漏被覆盖的条款。建议在 A1 编码前把 §3 历史缺陷台账移出到独立 checklist/issue，正文收敛为一份 300–400 行的**最终拍板 V1 实施规格书**（只保留最终 TS 契约、5 张表 DDL 草案、模块切换清单与验收门禁）。
+
+---
+
+### 8.5 调整后的务实推进路线
+
+1. **阶段 0 — 立即止血（1–2 天，不依赖重构）**：
+   - 先落 Hotfix 轨及高痛点小 Bug：S4（停止返回未脱敏 `resolvedInput`）、W5（Judge 异常脱敏）、S3（补齐 REST/Tester 绑定权限检查）、T2（Tester 补齐 prefix 规则与 timeout）、A10 空数组分支、E13 混合空 turn、U2（Evaluation 跑完按钮卡死 busy）。
+   - 与 [async-task-board-proposal.md](async-task-board-proposal.md) 书面确认 4 个接口交叉点。
+2. **阶段 1 — 平台核心契约 + 统一 Judge 服务（原 A1 + A2）**：
+   - 落地 `src/lib/test-core/`：`Evidence`、`ExecResult`、`TypedError`、支持 `requires ⊆ provides` 的注册表、基于稳定 `assertionId` 的纯 Reducer 与表驱动单测。
+   - 基于 AI SDK v6 `generateText` + `Output.object`（覆盖 `vertex` 及兼容模型降级）实现统一 Judge 服务与二元 `accuracy` / `rule`；用 5–8 个核心反例跑通 `pnpm test:judge`。
+   - 落地 QuickJS（仅 `js_expression`）并验证 standalone 与 Electron 桌面端打包。
+3. **阶段 2 — 按模块逐个切到统一表与 `TestService`（修订后的 A3 → A4 → A5 → A6）**：
+   - 基于当前 `0000`–`0009` 基线修复 D3 迁移测试；建 5 张统一表（`test_suite` 放开三类模块均可选绑定 `evaluator_agent_id`；删 Suite 级联删 `test_run`）。
+   - **A3（Verification 切换）**：依托 A2 一次性跑通“统一表 + `TestService` + 可选 LLM Judge（`accuracy`/`rule`）+ `text_match` + `useTestRun`”全链路，同时保持纯确定性用例零 LLM 开销；删旧 Verification 表与代码。
+   - **A4（Web Auto 切换）**：复用用户已挂载 Playwright MCP（缺失时提醒配置），加进程内按 `mcp_server_id` 互斥锁与页面清理，接统一 Judge 与 `PrivateExecutionContext` 凭据脱敏链路；删旧 Web Auto 表与代码。
+   - **A5（Evaluation 切换）**：补齐 `runner.start` 的 `AbortSignal`（同步修 sync timeout 调 `abortRun`）与 `previousMessages` 完整消息回放，落地独立 `collectRunTreeEvidence()`，随迁 2–3 个核心 `llm_dim` 防止维度归零；删旧 Evaluation 表与代码。
+   - **A6（纯收尾清理）**：删尽退休符号与旧 hooks，更新 `verification.md` / `web-auto.md` / `evaluation.md` 与 `AGENTS.md`（不捆绑 `schedule` 改造）。
+4. **阶段 3 — 独立增量能力（不阻塞 Track A）**：
+   - `schedule` 定时跑测试套件（独立改动 `schedule` 表、调度器与 UI）；
+   - Track B 剩余质量维度（`trajectory`、`analysis-correctness` 等）与 G3–G6 确定性增强；
+   - 视觉/多模态 Judge 等后续演进。

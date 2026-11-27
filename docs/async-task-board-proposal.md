@@ -1341,3 +1341,113 @@ P1a 验收截住和 usage，P1b 补齐恢复项。至少覆盖 openai-compatible
 
 - 来源：Anthropic 产品的公开行为，未引用具体文档。
 - 借鉴：产物在独立视图展示、有版本、可由 AI 继续编辑（§4.4、§14）；后台子任务完成后，在主 agent 的下一轮作为提醒注入（§8.2 `notify`）。
+
+
+---
+
+## 18. 评审意见与优化建议（待并入 v3.5）
+
+> 评审时间：2026-11。本节综合两轮代码核查与 SWE 评审结论，所有事实均对照 `src/lib/runner/`、`src/lib/copilot/event-reconstruction.ts`、`@copilotkit/runtime/dist/agent/index.mjs`（1.90.0）与 `ai/dist/index.mjs` 源码核实，不修改前文正文，供修订 v3.5 时直接采纳。
+
+### 18.1 三个高优先级问题的代码核查与优化方案
+
+#### R-1. 恢复期补执行结果的事件闭环与跨 Attempt 重建规则（涉及 §4.6、§4.7、§7.4）
+
+- **代码事实**：
+  1. `PersistingAgent` 只把 `agent.run()` 产出的 AG-UI 事件落库（`src/lib/runner/persisting-agent.ts:323-354`）。Attempt #1 挂起时，`tool_call_chunk` 和审批门返回的占位结果 `{ status: "pending_approval" }` 都已写成 `entity_run_event`。
+  2. §7.4 中恢复期按冻结参数补执行发生在 Attempt #2 的 `BuiltInAgent` 启动之前，不经过事件流。如果不显式落库：Attempt #2 再次挂起或崩溃后，Attempt #3 重建会退回占位结果；同时 `effectLogMiddleware` 直接写 `tool_exec_started` 却缺少对应的 `tool_call_result`，按 §4.6 / §7.10 会被误判为 `unknown`。
+  3. 现有的 `src/lib/copilot/event-reconstruction.ts` 只服务 `/connect` 前端回放，且 `fetchRuns` 写死只查终态 run（`L213-217`，不含 `suspended`）、`collectResolvedToolCalls` 按单 run 统计（`L134`），**没有“跨 attempt 同 `toolCallId` 覆盖”与“生成模型 `Message[]`”的能力**。
+- **优化方案**：
+  1. **显式落库**：Attempt #2 补执行（或拒绝）已批准调用后，Runner 必须通过 `recordEvent` 向 Attempt #2 的 `entity_run_event` 写入一条真实 `tool_call_result`（沿用原 `toolCallId`）。与 `effectLogMiddleware` 的 `tool_exec_started` 落在同一 attempt 中，天然消除 `unknown` 误判。
+  2. **两条重建路径分工明确**：
+     - **模型消息重建（P1b 新增纯函数 `reconstructTaskMessages`）**：按 `attempt` 升序遍历该 task 全部事件，先扫描生成 `latestResultByCallId: Map<toolCallId, content>`（后出现的真实结果覆盖先前的 `pending_approval` 占位）；组装 AG-UI `Message[]` 时，遇到 `tool_call_chunk` 组装 `assistant.toolCalls` 并在其后按 `latestResultByCallId` 生成**唯一一条** `role: "tool"` 消息，跳过被覆盖的占位行与无对应 chunk 的孤立补执行 result 行。
+     - **前端只读回放（P3 委派卡片）**：P1b 不改动 `event-reconstruction.ts` 聊天回放主链路；到 P3 开放 `suspended` attempt 回放时，再按同样“同 `toolCallId` 取最新结果”的规则去重。
+
+#### R-2. 混合挂起（审批 + `interrupt` 同一步）的统一恢复路径（涉及 §7.3、§7.4、§13、§15.10、§17.9）
+
+- **代码事实**：
+  1. **挂起阶段天然兼容**：同一步并行出现带 `execute` 的工具（触发审批）与无 `execute` 的 `request_user_input`（`interrupt: true`）时，AI SDK 正常执行前者并产出占位结果（`ai/dist/index.mjs:7471-7473`），随后因 `clientToolOutputs.length !== clientToolCalls.length` 直接 `finish` 结束本次运行（`L8915-8955`）；`BuiltInAgent` 同时产出审批工具的 `TOOL_CALL_RESULT` 和 `RUN_FINISHED{ outcome: { type: "interrupt" } }`（`@copilotkit/runtime/dist/agent/index.mjs:990-1077`）。
+  2. **`input.resume` 不会落库**：`BuiltInAgent` 处理 `input.resume` 仅是把 `entry` 转成 `role: "tool"` 消息 `push` 到本次内存 `messages` 末尾（`index.mjs:630-658`），**不发出 `TOOL_CALL_RESULT` 事件**。因此 `PersistingAgent` 看不到用户回答，后续再次挂起或重启时会丢失回答，回放也会触发 `synthesizeToolCallResult` 伪造错误（`event-reconstruction.ts:168`）。
+  3. **可统一为单路径**：`convertMessagesToVercelAISDKMessages`（`index.mjs:399-417`）原生支持 AG-UI `role: "tool"` 消息，且 `index.mjs:637-643` 检测到 `alreadyAnswered` 时会自动跳过 `resume`。
+- **优化方案**：
+  1. **内置 agent 恢复统一走事件落库 + `reconstructTaskMessages`**：无论是 `tool_approval`（approve 执行结果 / deny 错误）还是 `question` / `form`（用户回答），恢复时全部由 Runner 以 `recordEvent` 写入新 attempt 的 `tool_call_result`（沿用原 `toolCallId`），并由 `reconstructTaskMessages` **就地回填在对应 `assistant.toolCalls` 之后**（比 `resume` 一律 `push` 到数组末尾更符合 Anthropic / Gemini 等对 `tool` 消息紧邻位置的严格校验），不再传 `RunAgentInput.resume`。
+  2. **`RunAgentInput.resume` 仅保留给 §13 外部 AG-UI 原生后端**（agno / Mastra，历史由上游维护）。
+  3. **补验证**：在 §17.9 增加 1 个 mock 实测场景（同一步并行 `execute` + `interrupt: true` → 挂起 → 统一经 `input.messages` 恢复），并在 §15.10 真实 provider 矩阵增加“混合挂起恢复”行。
+
+#### R-3. `steeringQueue` 在 `transformParams` 注入的跨步丢失、不持久化与角色安全问题（涉及 §4.1、§8.4、§9、WP21）
+
+- **代码事实**：
+  1. **跨步丢失**：AI SDK 每步重算 `stepInputMessages = [...initialMessages, ...responseMessages]`（`ai/dist/index.mjs:8453, 8925-8933`）。`wrapLanguageModel` 的 `transformParams`（`L14147-14152`）只作用于当次 `doStream` 请求，无法回写 `initialMessages` / `responseMessages`。若 Step 2 从 `steeringQueue` 弹出消息注入 `prompt`，Step 3 时该消息会凭空消失（§17.9 场景 C 只测了单步，未覆盖多步与回放）。若改成每步重复附带全量 `appliedSteering`，不仅 token 随步数线性膨胀，语义也变成“每步反复提醒”。
+  2. **无持久化**：`PersistingAgent` 只订阅外层 AG-UI 事件，看不到 `transformParams` 改写，注入内容不进 `entity_run_event`，崩溃恢复或回放时上下文不一致。
+  3. **角色与安全语义缺失**：方案未定义 steering 注入的消息角色。子任务更新属于不可信 agent 输出（`trust: "untrusted_agent_output"`），若伪装成 `user` 消息直接违背 §8.6“结构化数据用 tool result、不伪装 user 指令”的防注入原则。
+- **优化方案（拆分两个原本耦合的需求）**：
+  1. **聊天回合中途 steering（原 §8.4 high 优先级注入运行中用户回合）**：**从 P2 移出（降为独立评估项，不进入 WP21）**。用户聊天回合通常只需数秒，现有的“用户回合 finalize 钩子立刻触发系统回合 + 下一轮 `get_task_updates` 注入”已覆盖绝大多数场景。去掉此项后，**`runner.step_control.chat_enabled` 开关一并取消**，StepControl 仅用于 Task 运行，聊天主链路零侵入。
+  2. **`send_to_task`（Supervisor 给运行中后台任务发备注，§9）**：**保留，但不走 `transformParams`**。改为复用 StepControl 既有的 `yieldRequested`：任务在当前步骤边界干净停下 → 将带来源标签的备注作为正式事件写入任务历史（落库、可回放、无跨步丢失）→ 立即创建下一个 attempt 继续执行。
+
+---
+
+### 18.2 三个中优先级问题的代码核查与优化方案
+
+#### R-5. `ThreadMutex` 拦截点、原子持锁与让出超时（涉及 §8.3、§8.4）
+
+- **代码事实**：
+  1. `InMemoryAgentRunner.run()` 默认 `onConcurrentRun = "throw"`，在 `store.isRunning || store.stopRequested` 时直接抛 `ThreadAlreadyRunningError`（`in-memory.mjs:428, 442-443`）；`src/lib/copilot/persisted-agent-runner.ts:49` 中 `sharedInMemoryRunner = new InMemoryAgentRunner()` 未传 options，确为 throw 模式。
+  2. 聊天请求先经过 Nango 自己的 `runner.runChatRequest` / `runBuiltinChatRequest`，再构造 `PersistedAgentRunner` 并调用 `inner.run()`（`persisted-agent-runner.ts:81`）。
+  3. `InMemoryAgentRunner` 的 `isRunning` 在 `inner.run()` 同步置位、流 finalize 时复位；若 `ThreadMutex` 的获取与 `inner.run()` 之间存在空窗，两个并发请求仍可能先后通过检查后撞上 `ThreadAlreadyRunningError`。
+- **优化方案**：
+  1. **明确拦截点与持锁边界**：在 §8.4 补足时序——`ThreadMutex` 在 `runChatRequest` / `runBuiltinChatRequest`（用户回合）与系统续跑入口**构造 `PersistedAgentRunner` 之前**原子获取，直到 `inner.run()` 的流 finalize（`isRunning` 复位）后才释放，使 `ThreadMutex` 成为唯一并发入口，CopilotKit 的 throw 仅作兜底断言。
+  2. **用户优先让出 + 超时强制中止**：用户请求发现 `ThreadMutex` 正被系统回合占用时，直接置该系统回合的 `yieldRequested` 并在 `ThreadMutex` 上等待；增加配置 `continuation.yield_timeout_sec`（默认 `10` 秒），超时仍未到步骤边界则复用 `InMemoryAgentRunner.stop()`（`agent.abortRun()`）强制中止系统回合，并按 §8.3 的 `batch_id` 将已认领的 `thread_inbox` 条目退回 `pending`。
+
+#### R-6. 产物草稿写入时机、目录树可见性与转正归属（涉及 §1.4、§4.4、§6.7）
+
+- **代码事实**：
+  1. **挂起也触发尝试结束**：§4.4 写“在尝试结束时自动保存为 draft”，但审批/提问挂起同样发出 `RUN_FINISHED`，会导致半成品被提前写草稿，恢复后再次重复写入。
+  2. **树查询无过滤且无 `parentId` 会变根节点**：`assembleTree`（`src/lib/artifacts/service.ts:143-175`）查 `createdBy = ownerId` 的全部行且无 `status` 过滤，`parentId === null` 的节点会直接推入 `roots`（`L168-170`），与 `SEED_CATEGORIES` 并列污染左侧 `/artifact` 目录树；同时 `save-artifact.ts` 允许 `parentId: null`。
+  3. **§1.4 现状描述已过时**：当前 `src/lib/artifacts/save-artifact.ts` 已改为「仅 `chart` 建 workflow，其余类型（html / slide / image / a2ui / report）存 `{ blocks }` 静态快照且 `workflowId = null`」。
+- **优化方案**：
+  1. **写入时机**：改为**仅在任务进入终态（`succeeded / failed / cancelled`）时**自动保存草稿（并沿用 `(source_thread_id, source_outcome_id)` 幂等更新），避免挂起阶段产生半成品，同时保留 `failed` 任务已产出的部分成果。
+  2. **树过滤与转正落位**：`assembleTree`（`GET /api/artifacts/tree`）默认过滤 `status = 'saved'`，草稿仅在 Task 卡片或独立“草稿”筛选视图展示；用户点击「保存产物 / 确认归档」将草稿转为 `status = 'saved'` 时，**必须同时分配 `parentId`**（用户指定目录，或默认通过 `lookupCategoryForType(artifact.type)` 挂到对应系统分类下），避免转正后仍以 `parentId = null` 悬在根层级。
+  3. **同步 §1.4**：将“代码现状”列中关于 `save-artifact` 的描述更新为「chart 建 workflow，其余类型存 `{ blocks }` 静态快照」。
+
+#### R-7. WP9（三大测试子系统接入）拆分与隐藏耦合处理（涉及 §6.6、§6.7、§15.4）
+
+- **代码事实**：
+  1. WP9 涉及 Verification / Evaluation / Web Auto 三个大 orchestrator、三个 recovery 及 `run-test-suite.ts`，执行不经 `BuiltInAgent` / StepControl，与 P1a 后台 Agent 内核正交，且与尚未实施的 `auto-test-improvement.md` §4.7（统一 `test_run` 表）存在表结构演进重叠。
+  2. **隐藏耦合**：当前测试子系统调用 `recordRunNotification({ runId })`（`src/lib/runner/notifications.ts:75-102`）发送完成通知并靠 `notification.run_id` 跳转到运行详情；`src/lib/runner/active-tasks.ts:79-184` 也包含三个测试子系统的活跃查询。若只把 WP9 推迟、却在 WP1 删掉 `notification.run_id` 并在 WP7 删掉 `/api/runs/active`，会导致 P1a～P1b 期间测试套件的通知跳转和活跃指示退化。
+- **优化方案**：
+  1. **拆为独立阶段 `P1c（测试子系统接入看板）`**：排在 P1b 之后（与 P2 无强依赖，且便于与 `auto-test-improvement.md` 的落地顺序对齐）。
+  2. **避免过渡期退化**：WP1 仅新增 `notification.task_id`、**推迟删除 `notification.run_id` 至 P1c**；WP7 从 `active-tasks.ts` 移除已由 `task` 表接管的 `entity_run`（agent）查询分支，保留三个测试子系统的查询直到 P1c 迁完后再整体删除 `/api/runs/active` 与 `active-tasks.ts`。
+
+#### R-9. `join` 的 `all` / `any` 对 `failed` 与 `cancelled` 的触发语义（涉及 §6.5、§8.2、§9）
+
+- **问题**：§6.5 / §8.2 只写“all 全部完成 / any 任一完成”，未定义 `failed` / `cancelled` 是否计入完成。若 `join: all` 中 1 个失败就永不触发，或 `join: any` 中 1 个秒失败就立刻触发汇总，都违背业务直觉。
+- **优化方案**：
+  1. **`join: "all"`**：触发条件为**组内全部成员到达终态（`succeeded | failed | cancelled`）**。若**全员均为 `cancelled`**（用户主动取消整批），仅将 `task_join_group.fired_at` 置位封口，**不**写 `join_ready`；只要至少有一项为 `succeeded` 或 `failed`，即触发 `join_ready`。
+  2. **`join: "any"`**：触发条件为**首个成员到达 `succeeded`**；或**全员到达终态且至少有一项 `failed`**（全军覆没时兜底唤醒 Supervisor，不因单个任务先失败而提前中止其余仍在运行的任务）。全员 `cancelled` 同样静默封口。
+  3. **非终态成员处理与 Payload**：`any` 触发时**不自动取消**其余运行中成员（避免隐式竞态，由 Supervisor 按需 `cancel_task`）；`join_ready` 的 `payload` 显式携带终态分布 `{ counts: { succeeded, failed, cancelled, pending }, items: [...] }`，方便 Supervisor 汇总或重试失败项。
+
+#### R-10. `entity_run.boot_id` 的 `SET NULL` 外键与 `NULL` 比较漏网漏洞（涉及 §6.2、§7.10）
+
+- **代码事实**：`src/lib/db/schema.ts:1594` 注释明确预留了启动时按 90 天清理 `process_boot` 旧行的计划。若 `entity_run.boot_id` 设为 `FK process_boot ON DELETE SET NULL`，一旦旧 boot 行被删、`boot_id` 变为 `NULL`，§7.10 的 `status = 'running' AND boot_id <> 当前进程` 在 SQL 三值逻辑下对 `NULL` 恒为假，导致对应 run 永久失去接管资格。
+- **优化方案（双重保险）**：
+  1. **去掉 `entity_run.boot_id` 的 FK 约束**，只保留 `bigint`（进程世代号本身不需要外键约束，清理 `process_boot` 也不应抹掉历史 run 的 `boot_id`）。
+  2. **恢复查询改用 `IS DISTINCT FROM`**：`WHERE status = 'running' AND boot_id IS DISTINCT FROM $currentBootId`，从 SQL 语义上保证即使存在 `boot_id IS NULL` 的异常行也必定被接管。
+
+#### R-11. 有人值守（`attended = true`）`run_interaction` 的生命周期闭环（涉及 §4.2、§6.3、§7.10）
+
+- **代码事实**：现有聊天审批等待（`src/lib/runner/tool-approval.ts:125-170`）已有 `agent.approval_timeout`（默认 300 秒）超时机制，但未监听 `AbortSignal`。方案 §6.3 写“只有无人值守才设置 `expires_at`”，且仅定义了任务取消时的批量取消；一旦用户点 Stop 中止聊天、run 报错或进程重启，聊天回合写下的 `attended = true` 的 `pending` interaction 会永久滞留，并在刷新后经 `GET /api/interactions?status=pending` 渲染为僵尸卡片。
+- **优化方案（三条退出路径全覆盖）**：
+  1. **超时对齐**：`attended = true` 同样写入 `expires_at = now + agent.approval_timeout`（默认 300 秒），内存等待超时拒绝时同步将数据库行置为 `expired`（兜底扫描一致处理）。
+  2. **Run 终态联动清理**：任何 `entity_run` 进入终态（`succeeded / failed / cancelled`，含用户 Stop 和异常报错）时，在 finalize 中执行 `UPDATE run_interaction SET status = 'cancelled', resolved_at = now() WHERE run_id = $runId AND status = 'pending'`；内存等待同时监听 `abortSignal`，Stop 时立即唤醒释放 Promise。
+  3. **重启恢复清理**：§7.10 启动恢复时，除将非任务运行置为 `failed` 外，一并将 `attended = true AND status = 'pending'` 的 interaction 全部置为 `cancelled`（内存等待者已随旧进程消失，绝不可再恢复）。
+
+---
+
+### 18.3 其他实现细节与 Schema 修正（经二次核实定稿）
+
+| 编号 | 类别 | 核实结论与最终建议 | 涉及章节 |
+|---|---|---|---|
+| **R-4** | 空流截断与断言 | StepControl 的 `wrapStream` 返回合成空流时，必须按 `{ type: "stream-start", warnings: [] }` → `{ type: "finish", ... }` 顺序发出，确保 AI SDK 记录到 1 个 step（`recordedSteps.length > 0`），避免触发 `NoOutputGeneratedError`（`ai/dist/index.mjs:8029-8032`）。已确认此空流不会让 `BuiltInAgent` 写出空 `assistant` 消息；作为防回归断言，在 §15.10 真实 provider 矩阵补充一行“恢复后送入模型的消息末尾为 `tool` 角色、无空 `assistant`”，不改正文设计 | §4.1、§15.10 |
+| **R-8a** | 删 `current_run_id` | 直接**删除 `task.current_run_id` 列**（比保留列或去 FK 更彻底）。看板列表不依赖它，需要最新尝试的地方（详情、取消、watchdog、恢复）直接按已有 `UNIQUE (task_id, attempt)` 查询（`attempt = task.attempt_count` 或 `ORDER BY attempt DESC LIMIT 1`），彻底消除跨表循环外键与插入后回填时序 | §6.1、§6.2、§7.1 |
+| **R-8b** | 冻结参数去冗余 | 将 `run_interaction.tool_args`（jsonb）改为 **`tool_args_preview`（`text`，脱敏后截断至 ~2 KB）** 专供卡片与列表展示；完整冻结参数不冗余落库，恢复执行时按 `(run_id, tool_call_id)` 从不可变且未脱敏的 `entity_run_event`（`tool_call_chunk.args`，见 `persisting-agent.ts:327-335`）解析，若 chunk 缺失或 JSON 解析失败则明确报错拒绝执行。另在 §16 遗留问题补充记录存量风险：`tool_call_chunk.args` 目前无大小上限，超大 `write_file` 会撑大单行事件 | §6.3、§7.4、§16 |
+| **R-8c** | §7.5 SQL 笔误 | §7.5 示例 SQL 中的 `response=$1` 同步修正为 §6.3 的三列：`decision=$1, grant_scope=$2, answer=$3`（`tool_approval` 写 `decision` / `grant_scope`，`question` / `form` 写 `answer`），并对齐接口参数映射 | §7.5 |
