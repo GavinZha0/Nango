@@ -37,7 +37,11 @@ import { useOutcomeTools } from "@/hooks/useOutcomeTools";
 import { ChatPanelBody } from "@/components/right-panels/ChatPanel";
 import { HistoryPanelBody } from "@/components/right-panels/HistoryPanel";
 import { AgentSelector } from "@/components/chat/AgentSelector";
-import { CREDENTIAL_ID_HEADER, ORCHESTRATION_MODE_HEADER } from "@/lib/http/chat-headers";
+import {
+  CREDENTIAL_ID_HEADER,
+  ORCHESTRATION_MODE_HEADER,
+  TOOL_APPROVAL_MODE_HEADER,
+} from "@/lib/http/chat-headers";
 import {
   DelegateToAgentCard,
   delegateToAgentArgsSchema,
@@ -87,14 +91,21 @@ const STABLE_EMPTY_PROPS = Object.freeze({}) as Record<string, unknown>;
  * `X-Orchestration-Mode`. See docs/orchestrator.md.
  */
 function buildChatHeaders(): Record<string, string> {
-  const { activeAgentSource, activeCredentialId, activeMode } =
-    useWorkspaceStore.getState();
+  const {
+    activeAgentSource,
+    activeCredentialId,
+    activeMode,
+    approvalModeOverride,
+  } = useWorkspaceStore.getState();
   const h: Record<string, string> = {};
   if (activeAgentSource === "backend" && activeCredentialId) {
     h[CREDENTIAL_ID_HEADER] = activeCredentialId;
   }
   if (activeAgentSource === "builtin") {
     h[ORCHESTRATION_MODE_HEADER] = activeMode;
+    if (approvalModeOverride) {
+      h[TOOL_APPROVAL_MODE_HEADER] = approvalModeOverride;
+    }
   }
   return h;
 }

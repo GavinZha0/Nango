@@ -29,3 +29,43 @@ export const CREDENTIAL_ID_PATTERN: RegExp = /^[a-f0-9-]{36}$/;
  * the registry default (`auto`) when missing or unrecognised.
  */
 export const ORCHESTRATION_MODE_HEADER = "X-Orchestration-Mode" as const;
+
+/**
+ * Carries a transient tool-approval-mode override (`always` / `auto` / `never`)
+ * on `/api/copilotkit/builtin/...` requests for the active top-level agent.
+ *
+ * SECURITY: server enforces editor/admin role before honoring this header;
+ * standard `user` requests ignore it and fall back to `spec.toolApprovalMode`.
+ */
+export const TOOL_APPROVAL_MODE_HEADER = "X-Tool-Approval-Mode" as const;
+
+export const VALID_TOOL_APPROVAL_MODES = ["always", "auto", "never"] as const;
+export type ToolApprovalMode = (typeof VALID_TOOL_APPROVAL_MODES)[number];
+
+const TOOL_APPROVAL_MODE_SET: ReadonlySet<string> = new Set(
+  VALID_TOOL_APPROVAL_MODES,
+);
+
+/** Parse an untrusted approval mode string (header / DB / UI). */
+export function parseToolApprovalMode(
+  raw: string | null | undefined,
+): ToolApprovalMode | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return TOOL_APPROVAL_MODE_SET.has(normalized)
+    ? (normalized as ToolApprovalMode)
+    : undefined;
+}
+
+/**
+ * Resolve effective approval mode for a built-in agent run.
+ * SECURITY: only editor/admin callers may override the agent's configured mode.
+ */
+export function resolveEffectiveToolApprovalMode(args: {
+  configured: ToolApprovalMode;
+  override?: ToolApprovalMode;
+  canOverride: boolean;
+}): ToolApprovalMode {
+  if (args.canOverride && args.override) return args.override;
+  return args.configured;
+}

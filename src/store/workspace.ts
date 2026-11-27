@@ -6,6 +6,7 @@ import {
   DEFAULT_ORCHESTRATION_MODE,
   type OrchestrationModeId,
 } from "@/lib/orchestration/modes";
+import type { ToolApprovalMode } from "@/lib/http/chat-headers";
 
 interface WorkspaceState {
   // Entity list cache. Grouped for cheap UI rendering.
@@ -57,6 +58,11 @@ interface WorkspaceState {
   /** Transient — resets to `auto` on reload. */
   activeMode: OrchestrationModeId;
   setActiveMode: (mode: OrchestrationModeId) => void;
+
+  // Tool approval mode override (built-in agents, editor/admin only)
+  /** Transient per-session override; `null` uses the active agent's configured default. */
+  approvalModeOverride: ToolApprovalMode | null;
+  setApprovalModeOverride: (mode: ToolApprovalMode | null) => void;
 
   // Nango entry-point
   /** Snapshot of the agent the user was on before switching into
@@ -229,7 +235,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             pendingHandoffContext: null, 
             runtimeThreadId: null, 
             explicitThreadId: null, 
-            lastChatError: null 
+            lastChatError: null,
+            approvalModeOverride: null,
           };
         }),
       mergeBuiltinAgents: (builtinAgents) => set({ builtinAgents, agentsLoaded: true }),
@@ -271,6 +278,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             lastChatError: sameAgent ? state.lastChatError : null,
             // Direct selection invalidates the Nango breadcrumb.
             previousAgent: sameAgent ? state.previousAgent : null,
+            approvalModeOverride: sameAgent ? state.approvalModeOverride : null,
           };
         }),
 
@@ -281,6 +289,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       // Orchestration mode
       activeMode: DEFAULT_ORCHESTRATION_MODE,
       setActiveMode: (mode) => set({ activeMode: mode }),
+
+      // Tool approval mode override
+      approvalModeOverride: null,
+      setApprovalModeOverride: (mode) => set({ approvalModeOverride: mode }),
 
       // Nango breadcrumb
       previousAgent: null,
@@ -315,6 +327,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             runtimeThreadId: null,
             explicitThreadId: null,
             lastChatError: null,
+            approvalModeOverride: null,
           };
         }),
       exitNango: () =>
@@ -331,6 +344,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             runtimeThreadId: null,
             explicitThreadId: null,
             lastChatError: null,
+            approvalModeOverride: null,
           };
         }),
       enterAgent: (target, contextSummary) =>
@@ -355,6 +369,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             runtimeThreadId: null,
             explicitThreadId: null,
             lastChatError: null,
+            approvalModeOverride: null,
             pendingHandoffContext:
               contextSummary && contextSummary.trim().length > 0
                 ? contextSummary

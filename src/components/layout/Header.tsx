@@ -70,6 +70,7 @@ function UserMenu(): ReactNode {
       backendCredentials: [],
       agentsLoaded: false,
       lastChatError: null,
+      approvalModeOverride: null,
     });
     router.push("/sign-in");
     router.refresh();
@@ -180,13 +181,13 @@ function ChatToggleButton(): ReactNode {
         className={cn(
           "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
           rightPanelOpen
-            ? "bg-primary text-primary-foreground"
-            : "text-foreground hover:bg-accent hover:text-accent-foreground"
+            ? "bg-amber-500/60 text-amber-950 hover:bg-amber-500/80 dark:bg-amber-500/60 dark:text-amber-100 dark:hover:bg-amber-500/80"
+            : "text-amber-500 hover:bg-amber-500/15 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-500/20 dark:hover:text-amber-300"
         )}
         aria-label="Toggle chat panel"
         aria-pressed={rightPanelOpen}
       >
-        <BotMessageSquare className="h-5 w-5" />
+        <BotMessageSquare className={cn("h-5 w-5", !rightPanelOpen && "fill-amber-500/15")} />
       </TooltipTrigger>
       <TooltipContent side="bottom">
         <p>Chatbot</p>

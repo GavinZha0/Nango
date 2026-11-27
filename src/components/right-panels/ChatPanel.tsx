@@ -32,7 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { useWorkspaceStore } from "@/store/workspace";
-import { NangoSlotButton } from "@/components/right-panels/NangoSlotButton";
+import { ChatComposerInput } from "@/components/right-panels/ChatComposerInput";
 import { useElapsedSeconds } from "@/components/copilotkit/use-elapsed-seconds";
 import { useRegenerate } from "@/hooks/useRegenerate";
 import { useInjectHandoffContext } from "@/hooks/useHandoff";
@@ -76,8 +76,6 @@ const CHAT_LABELS = {
   chatConnectingLabel: "Connecting…",
 } as const;
 
-import { StreamingMicButton } from "@/components/right-panels/StreamingMicButton";
-
 /** No-op for unimplemented toolbar buttons (thumbs up/down/read-aloud). v2 still renders the slot. */
 const noop = () => {};
 
@@ -99,46 +97,6 @@ function findTurnKey(
   }
   return "__turn_0__";
 }
-
-function InputSlotWrapper(props: React.ComponentProps<typeof NangoSlotButton>) {
-  const { data: session } = authClient.useSession();
-  const userFields = session?.user as { sttModel?: string | null, sttCredentialId?: string | null } | undefined;
-  
-  // We now use our custom Client-VAD HTTP architecture for ALL models.
-  const useContinuousVoice = !!userFields?.sttCredentialId;
-
-  // Use the real getUserMedia natively, no proxying needed.
-  const realGetUserMedia = typeof navigator !== "undefined" && navigator.mediaDevices 
-    ? navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices) 
-    : undefined;
-
-  return (
-    <div className="flex items-center gap-1">
-      <NangoSlotButton {...props} />
-      {useContinuousVoice && realGetUserMedia && (
-        <>
-          <StreamingMicButton 
-            getUserMedia={realGetUserMedia} 
-          />
-          {/* Robust CSS hack: Hide CopilotKit mic completely but exclude our own streaming mic */}
-          <style>{`
-            /* Force the input container to be a relative anchor for our absolute mic */
-            .copilotKitInput {
-              position: relative !important;
-            }
-            /* Find any button that contains the microphone SVG but NOT our custom class, and nuke it */
-            .copilotKitInput button:has(svg.lucide-mic):not(.streaming-mic-button) {
-               display: none !important;
-            }
-          `}</style>
-        </>
-      )}
-    </div>
-  );
-}
-
-const NANGO_INPUT_SLOT = { addMenuButton: InputSlotWrapper } as const;
-
 
 let activeAudio: HTMLAudioElement | null = null;
 let activeMessageId: string | null = null;
@@ -628,7 +586,7 @@ const MemoChat = memo(function MemoChat({
       threadId={threadId}
       labels={CHAT_LABELS}
       chatView={ChatViewShell}
-      input={NANGO_INPUT_SLOT}
+      input={ChatComposerInput}
     />
   );
 });

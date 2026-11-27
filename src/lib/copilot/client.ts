@@ -7,6 +7,7 @@
 export {
   CopilotKitProvider,
   CopilotChat,
+  CopilotChatInput,
   CopilotChatView,
   CopilotChatAssistantMessage,
   CopilotChatUserMessage,
@@ -22,6 +23,7 @@ export {
 
 export type {
   CopilotChatAssistantMessageProps,
+  CopilotChatInputProps,
   CopilotChatViewProps,
   CopilotChatUserMessageProps,
   CopilotChatReasoningMessageProps,

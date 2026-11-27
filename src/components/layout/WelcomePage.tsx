@@ -66,7 +66,7 @@ export function WelcomePage(): ReactNode {
       </div>
 
       <p className="mt-6 text-xs text-muted-foreground">
-        AI-powered personal workbench
+        AI-powered agentic workbench
       </p>
     </div>
   );

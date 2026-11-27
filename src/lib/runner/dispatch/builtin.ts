@@ -81,6 +81,8 @@ import {
   AUTO_APPROVAL_POLICY_BLOCK,
   ALWAYS_APPROVAL_POLICY_BLOCK,
 } from "@/lib/constants/safety";
+import { resolveEffectiveToolApprovalMode } from "@/lib/http/chat-headers";
+import type { AgentToolApprovalMode } from "@/lib/builtin-agents/agent-spec";
 import { SHARED_STATE_PROMPT_BLOCK } from "@/lib/constants/supervisor";
 import { resolveSharedStateEnabled } from "@/lib/types/builtin-agent";
 
@@ -144,6 +146,9 @@ export interface BuiltinBuildContext {
   runId?: string;
   /** Active orchestration mode. Only consulted for supervisor agents. */
   mode?: OrchestrationModeId | EntityRunMode;
+  /** Transient tool-approval-mode override from chat header.
+   *  SECURITY: honored only when `isAdmin || isEditor`; never propagated to delegated sub-runs. */
+  approvalModeOverride?: AgentToolApprovalMode;
   initiator?: EntityRunInitiator;
   /** Active editor page context snapshot from the request (if present). */
   pageContext?: PageContextSnapshot | null;
@@ -586,6 +591,13 @@ export async function buildBuiltinAgents(
       || calendarTools.length > 0
       || ambientTools.length > 0;
 
+    const effectiveApprovalMode: AgentToolApprovalMode =
+      resolveEffectiveToolApprovalMode({
+        configured: spec.toolApprovalMode,
+        override: ctx?.approvalModeOverride,
+        canOverride: Boolean(ctx?.isAdmin || ctx?.isEditor),
+      });
+
     // Prompt composition order — see docs/prompts.md.
     const modeSuffix: string =
       isSupervisor && ctx?.mode
@@ -640,9 +652,9 @@ export async function buildBuiltinAgents(
         parts.push(ERROR_POLICY_BLOCK);
       }
 
-      if (spec.toolApprovalMode === "auto") {
+      if (effectiveApprovalMode === "auto") {
         parts.push(AUTO_APPROVAL_POLICY_BLOCK);
-      } else if (spec.toolApprovalMode === "always") {
+      } else if (effectiveApprovalMode === "always") {
         parts.push(ALWAYS_APPROVAL_POLICY_BLOCK);
       }
 
@@ -716,7 +728,7 @@ export async function buildBuiltinAgents(
     // Agent-pipeline (P0): ordered middleware chain applies to BOTH
     // server-side tools and MCP providers identically.
     const pipelineMiddlewares = buildServerToolMiddlewares({
-      approvalMode: spec.toolApprovalMode,
+      approvalMode: effectiveApprovalMode,
       exemptTools: APPROVAL_EXEMPT_TOOLS,
       log,
     });

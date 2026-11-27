@@ -46,6 +46,10 @@ import {
   ORCHESTRATION_MODE_HEADER,
   resolveOrchestrationMode,
 } from "@/lib/orchestration/modes";
+import {
+  TOOL_APPROVAL_MODE_HEADER,
+  parseToolApprovalMode,
+} from "@/lib/http/chat-headers";
 import { recordEvent, recordRunStart, finalizeRun } from "./event-store";
 import { extractRunInput } from "./extract-run-input";
 import { injectServerUserId } from "./inject-user-id";
@@ -426,6 +430,11 @@ class RunnerImpl implements Runner {
     const mode = resolveOrchestrationMode(
       request.headers.get(ORCHESTRATION_MODE_HEADER),
     ).id;
+    // SECURITY: Only editors and admins may override an agent's approval mode.
+    const approvalModeOverride =
+      args.isAdmin || args.isEditor
+        ? parseToolApprovalMode(request.headers.get(TOOL_APPROVAL_MODE_HEADER))
+        : undefined;
     let agents: Record<string, BuiltInAgent>;
     let borrowed: BorrowRecord[];
     let degradations: Map<string, CapabilityDegradation[]>;
@@ -437,6 +446,7 @@ class RunnerImpl implements Runner {
           isAdmin: args.isAdmin,
           isEditor: args.isEditor,
           mode,
+          approvalModeOverride,
           runId: runId ?? undefined,
           pageContext: peek?.pageContext,
         }));
