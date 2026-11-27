@@ -33,12 +33,14 @@ adminTest.describe("History Panel", () => {
         session_name: "Project Planning Session",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        pinned: false,
       },
       {
         session_id: "thread-e2e-002",
         session_name: "Code Review Notes",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        pinned: false,
       },
     ];
 
@@ -77,5 +79,84 @@ adminTest.describe("History Panel", () => {
     // Verify item 1 is removed while item 2 remains
     await expect(item1).toBeHidden();
     await expect(item2).toBeVisible();
+  });
+
+  adminTest("should support pinning, renaming, and Last 30 days grouping via backend API", async ({ page }) => {
+    const now = new Date();
+    const fifteenDaysAgo = new Date(now.getTime() - 15 * 86_400_000).toISOString();
+    const mockSessions = [
+      {
+        session_id: "thread-e2e-010",
+        session_name: "Monthly Retro",
+        created_at: fifteenDaysAgo,
+        updated_at: fifteenDaysAgo,
+        pinned: false,
+        pinned_at: null,
+        custom_title: null,
+      },
+    ];
+
+    await page.route("**/api/threads?*", async (route) => {
+      await route.fulfill({ status: 200, json: mockSessions });
+    });
+
+    await page.route("**/api/threads/thread-e2e-010", async (route) => {
+      const body = route.request().postDataJSON() as { pinned?: boolean; title?: string | null };
+      if (body.pinned !== undefined) {
+        await route.fulfill({
+          status: 200,
+          json: {
+            session_id: "thread-e2e-010",
+            session_name: "Monthly Retro",
+            pinned: body.pinned,
+            pinned_at: body.pinned ? new Date().toISOString() : null,
+            custom_title: null,
+          },
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        json: {
+          session_id: "thread-e2e-010",
+          session_name: body.title || "Monthly Retro",
+          pinned: true,
+          pinned_at: new Date().toISOString(),
+          custom_title: body.title,
+        },
+      });
+    });
+
+    await gotoSettled(page, "/", page.getByTestId("agent-selector-trigger"));
+    await page.getByTestId("right-tab-history").click();
+
+    await expect(page.getByTestId("history-group-last30days")).toBeVisible();
+    const item = page.locator('[data-testid="history-session-item"][data-session-id="thread-e2e-010"]');
+    // Last 30 days starts collapsed by default
+    await expect(item).toBeHidden();
+    await page.getByTestId("history-group-toggle-last30days").click();
+    await expect(item).toBeVisible();
+
+    // Pin via PATCH
+    await item.hover();
+    const [pinReq] = await Promise.all([
+      page.waitForRequest((req) => req.url().includes("/api/threads/thread-e2e-010") && req.method() === "PATCH"),
+      item.locator('[data-action="pin"]').click(),
+    ]);
+    expect(pinReq.postDataJSON()).toEqual({ pinned: true });
+    await expect(page.getByTestId("history-group-pinned")).toBeVisible();
+
+    // Rename via dialog + PATCH
+    await item.hover();
+    await item.locator('[data-action="rename"]').click();
+    const input = page.getByTestId("rename-session-input");
+    await expect(input).toBeVisible();
+    await input.fill("Renamed Retro");
+    const [renameReq] = await Promise.all([
+      page.waitForRequest((req) => req.url().includes("/api/threads/thread-e2e-010") && req.method() === "PATCH"),
+      page.getByTestId("rename-session-submit").click(),
+    ]);
+    expect(renameReq.postDataJSON()).toEqual({ title: "Renamed Retro" });
+    await expect(item).toContainText("Renamed Retro");
   });
 });

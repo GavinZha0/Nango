@@ -214,8 +214,8 @@ that has no corresponding backend record.
 - Clicking "New Chat" (`startFreshChat()` zeroes the field).
 - Switching to a different agent (`setActiveAgent` for a different
   id zeroes both threadIds).
-- Refreshing the page (no threadId fields are persisted; only
-  `pinnedSessions` survives).
+- Refreshing the page (no `workspace.ts` fields are persisted; thread pin
+  state lives in PostgreSQL `thread_metadata`).
 
 **Why we don't auto-clear**: a naive "clear `runtimeThreadId` on
 `onRunFailed`" would break the much more common case of "user's 4th

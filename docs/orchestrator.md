@@ -322,9 +322,10 @@ session.user.id)`):
 
 | Endpoint | Behaviour |
 |---|---|
-| `GET /api/threads` | List the user's threads (one row per `thread_id`), most-recent first. Optional `?entityId=` filter. |
+| `GET /api/threads` | List the user's threads (one row per `thread_id`), pinned first then most-recent first, joined with `thread_metadata` for pin status and custom titles. Optional `?entityId=` filter. |
+| `PATCH /api/threads/[id]` | Update per-user `thread_metadata` (`pinned` toggle and/or `title` custom name; clears row when both revert to null). |
 | `GET /api/threads/[id]/messages` | Reconstruct AG-UI `Message[]` from `entity_run.input_task` (user turns) + `entity_run_event` (assistant / reasoning / tool turns). |
-| `DELETE /api/threads/[id]` | Recursive CTE walks the run forest and removes top-level + delegated sub-runs together. |
+| `DELETE /api/threads/[id]` | Recursive CTE walks the run forest and removes top-level + delegated sub-runs together with `thread_metadata`. |
 
 Sub-runs from supervisor delegation are **excluded** from these
 reads (`parent_run_id IS NULL`) — the user-facing chat surface stays

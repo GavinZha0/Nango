@@ -228,7 +228,7 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 > - **Batch Runs (Suite/Group)**: Asynchronous, DB-persisted, owner-scoped broadcast via `/api/runs/stream` (SSE).
 > - **Playground Single-Case Runs**: Ephemeral, zero DB writes, point-to-point via request-scoped NDJSON (`Accept: application/x-ndjson` or `?stream=true`). Decouples execution (Phase 1) from LLM evaluation (Phase 2), with client disconnect aborting remaining phases.
 
-| `/api/threads`, `/api/threads/[id]`, `/api/threads/[id]/messages` | GET / DELETE / GET | Unified chat history surface. Lists threads (filtered by optional `?entityId=`), reconstructs AG-UI `Message[]` from `entity_run.input_task` + post-coalesce `entity_run_event` rows, deletes a thread + its delegation sub-tree via recursive CTE. owner-scoped end to end (`owner_id = session.user.id`); sub-runs excluded by `parent_run_id IS NULL`. Replaces the previous reverse-proxy of upstream agent platform `/sessions` APIs. | session |
+| `/api/threads`, `/api/threads/[id]`, `/api/threads/[id]/messages` | GET / PATCH,DELETE / GET | Unified chat history surface. Lists threads (filtered by optional `?entityId=`, joined with `thread_metadata` for pin status and custom titles), updates pin/custom title via `PATCH`, reconstructs AG-UI `Message[]` from `entity_run.input_task` + post-coalesce `entity_run_event` rows, deletes a thread + its delegation sub-tree + `thread_metadata` in one transaction. Owner-scoped end to end (`owner_id = session.user.id`); sub-runs excluded by `parent_run_id IS NULL`. Replaces the previous reverse-proxy of upstream agent platform `/sessions` APIs. | session |
 | `/api/threads/[threadId]/outcomes` | GET | Retrieve transient outcomes generated within a conversation thread | session |
 | `/api/schedules`, `/api/schedules/[id]`, `/api/schedules/[id]/trigger` | CRUD/RPC | Schedule CRUD + manual trigger | session |
 | `/api/admin/credentials` | CRUD | Credential management | requireAdmin |
@@ -288,13 +288,13 @@ The CopilotKit provider is mounted inside `RightPanel` (not the root layout) on 
 
 | Store | Key fields |
 |---|---|
-| `workspace.ts` | agent list cache (agents/teams/builtinAgents), `activeAgentId`/`activeAgentSource`/`activeCredentialId`/`activeProvider`, `threadId` (CopilotKit v2), `pinnedSessions` (persisted), `orchestrationMode` |
+| `workspace.ts` | agent list cache (agents/teams/builtinAgents), `activeAgentId`/`activeAgentSource`/`activeCredentialId`/`activeProvider`, `threadId` (CopilotKit v2), `orchestrationMode` |
 | `outcome-store.ts` | Thread-scoped polymorphic Outcome list (charts, Bento Slides delta edits via `applySlideEdit`, dashboards), `addOutcome` upsert, `markSaved`, `toggleCollapse`, `loadForThread` (replay from `entity_run_event`) |
 | `sidebar.ts` | left-panel switcher, right-panel open flag |
 | `notifications.ts` | inbox items, `isStreamConnected` flag (SSE), updated by `useStartNotifications` + BroadcastChannel for cross-tab sync |
 | `schedules.ts` | schedule list cache + `scheduleActions` (refresh / create / patch / remove / triggerNow) |
 
-Only `pinnedSessions` is persisted to `localStorage` via the `persist` middleware; everything else is transient.
+`workspace.ts` is fully transient (no `localStorage` persistence); thread pin state and custom titles live in PostgreSQL (`thread_metadata`).
 
 > Per-run timing (TTFT, duration, inter-event gaps) is **not** kept in
 > client state. The authoritative timeline lives on

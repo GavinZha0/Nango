@@ -78,6 +78,13 @@
       "when": 1795816227683,
       "tag": "0010_add_entity_run_token_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795818633308,
+      "tag": "0011_add_thread_metadata",
+      "breakpoints": true
     }
   ]
 }

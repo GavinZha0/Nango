@@ -123,13 +123,15 @@ export interface EntityDescriptor {
   raw?: Record<string, unknown>;
 }
 
-/** Conversation-thread descriptor. Shape mirrors agno's wire format
- *  (HistoryPanel was built around it); other adapters project onto it. */
+/** Conversation-thread descriptor returned by `/api/threads`. */
 export interface SessionDescriptor {
   session_id: string;
   session_name: string;
   created_at: string;
   updated_at?: string;
+  pinned?: boolean;
+  pinned_at?: string | null;
+  custom_title?: string | null;
 }
 
 /** Stable cross-list identity key for an agent. */

@@ -1509,6 +1509,34 @@ export const EntityRunEventTable = pgTable(
 
 export type EntityRunEntity = typeof EntityRunTable.$inferSelect;
 export type EntityRunEventEntity = typeof EntityRunEventTable.$inferSelect;
+
+/**
+ * Per-user metadata for a chat thread (pin state, custom title).
+ * Created lazily on first mutation and deleted when both fields revert
+ * to null or when the thread itself is deleted.
+ */
+export const ThreadMetadataTable = pgTable(
+  "thread_metadata",
+  {
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => UserTable.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id").notNull(),
+    pinnedAt: timestamp("pinned_at"),
+    customTitle: text("custom_title"),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.ownerId, t.threadId] }),
+    index("thread_metadata_owner_pinned_idx")
+      .on(t.ownerId, t.pinnedAt.desc())
+      .where(sql`${t.pinnedAt} IS NOT NULL`),
+  ],
+);
+
+export type ThreadMetadataEntity = typeof ThreadMetadataTable.$inferSelect;
 export type EntityRunStatus =
   | "queued"
   | "running"

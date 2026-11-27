@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import type { EntityDescriptor, EntityKind } from "@/lib/backends/types";
 import type { CredentialEntityStatus } from "@/lib/backends/facade";
 import type { BuiltinAgentRow } from "@/lib/types/builtin-agent";
@@ -100,10 +99,6 @@ interface WorkspaceState {
    *  bump-then-clear races the lazy-capture guard. */
   startFreshChat: () => void;
 
-  // Pinned sessions
-  pinnedSessions: Set<string>;
-  togglePin: (sessionId: string) => void;
-
   /** Most recent transport / protocol failure. Cleared on new run,
    *  agent switch, or manual dismiss. The banner filters entries
    *  whose `agentId` doesn't match `activeAgentId`. */
@@ -166,9 +161,7 @@ function nameOfActiveAgent(state: WorkspaceState): string | undefined {
   return list.find((e) => e.id === id && e.credentialId === credId)?.name;
 }
 
-export const useWorkspaceStore = create<WorkspaceState>()(
-  persist(
-    (set, get) => ({
+export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       // Entity list cache
       agents: [],
       teams: [],
@@ -390,19 +383,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           lastChatError: null,
         })),
 
-      // Pinned sessions
-      pinnedSessions: new Set<string>(),
-      togglePin: (sessionId) =>
-        set((state) => {
-          const next = new Set(state.pinnedSessions);
-          if (next.has(sessionId)) {
-            next.delete(sessionId);
-          } else {
-            next.add(sessionId);
-          }
-          return { pinnedSessions: next };
-        }),
-
       // Chat error
       lastChatError: null,
       setChatError: (err) => set({ lastChatError: err }),
@@ -421,16 +401,4 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set((state) => ({
           pendingApprovals: state.pendingApprovals.filter((a) => a.approvalId !== approvalId),
         })),
-    }),
-    {
-      name: "workspace-store",
-      // CONTRACT: only `pinnedSessions` is persisted; everything
-      // else is transient.
-      partialize: (state) => ({ pinnedSessions: Array.from(state.pinnedSessions) }),
-      merge: (persisted, current) => ({
-        ...current,
-        pinnedSessions: new Set((persisted as { pinnedSessions: string[] }).pinnedSessions ?? []),
-      }),
-    }
-  )
-);
+    }));
