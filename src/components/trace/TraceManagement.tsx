@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
 
 import { formatTimestamp, formatDurationMs } from "@/components/admin/format";
+import { formatTokenCount } from "@/lib/copilot/token-usage";
 
 /** Server-side row shape. Mirrors the response of
  *  `GET /api/trace` 1:1. */
@@ -46,6 +47,9 @@ interface TraceRow {
   initiator: string;
   runCount: number;
   cumulativeDurationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
   worstStatus: string;
 }
 
@@ -217,13 +221,14 @@ export function TraceManagement(): ReactNode {
               <TableHead className="w-24">Initiator</TableHead>
               <TableHead className="w-16 text-right">Runs</TableHead>
               <TableHead className="w-24">Compute</TableHead>
+              <TableHead className="w-24 text-right">Tokens</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="py-10 text-center text-xs text-muted-foreground"
                 >
                   Loading…
@@ -232,7 +237,7 @@ export function TraceManagement(): ReactNode {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="py-10 text-center text-xs text-muted-foreground"
                 >
                   No traces match the current filters.
@@ -246,26 +251,17 @@ export function TraceManagement(): ReactNode {
                   row.ownerName ?? row.ownerEmail ?? row.ownerId;
                 return (
                   <TableRow key={row.threadId} className="cursor-pointer">
-                    <TableCell
-                      className="whitespace-nowrap text-xs text-muted-foreground"
-                      title={row.firstRunCreatedAt}
-                    >
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                       <Link href={href} className="hover:underline">
                         {formatTimestamp(row.firstRunCreatedAt, tz)}
                       </Link>
                     </TableCell>
-                    <TableCell
-                      className="whitespace-nowrap font-mono text-[10px] text-muted-foreground"
-                      title={row.threadId}
-                    >
+                    <TableCell className="whitespace-nowrap font-mono text-[10px] text-muted-foreground">
                       <Link href={href} className="hover:underline">
                         …{row.threadId.slice(-8)}
                       </Link>
                     </TableCell>
-                    <TableCell
-                      className={cn("max-w-0 truncate text-xs", taskTone)}
-                      title={`${row.worstStatus.toUpperCase()} · ${row.firstRunTask}`}
-                    >
+                    <TableCell className={cn("max-w-0 truncate text-xs", taskTone)}>
                       <Link href={href}>{row.firstRunTask}</Link>
                     </TableCell>
                     <TableCell className="max-w-[12rem] truncate text-xs">
@@ -273,10 +269,7 @@ export function TraceManagement(): ReactNode {
                         {entityLabel(row)}
                       </Link>
                     </TableCell>
-                    <TableCell
-                      className="truncate text-xs"
-                      title={row.ownerEmail ?? row.ownerId}
-                    >
+                    <TableCell className="truncate text-xs">
                       <Link href={href} className="text-foreground">
                         {userLabel}
                       </Link>
@@ -293,6 +286,13 @@ export function TraceManagement(): ReactNode {
                       <Link href={href}>
                         {row.cumulativeDurationMs > 0
                           ? formatDurationMs(row.cumulativeDurationMs)
+                          : "—"}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums text-muted-foreground">
+                      <Link href={href}>
+                        {row.totalTokens !== null
+                          ? formatTokenCount(row.totalTokens)
                           : "—"}
                       </Link>
                     </TableCell>

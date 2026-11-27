@@ -1408,6 +1408,12 @@ export const EntityRunTable = pgTable(
     outputSummary: text("output_summary"),
     outputArtifacts: jsonb("output_artifacts"),
 
+    /** Token counts reported on `RUN_FINISHED.usage` for this run.
+     *  Null when the model/backend does not report usage. */
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+
     /** On failure: short message for UI; structured details for ops. */
     errorMessage: text("error_message"),
     errorDetails: jsonb("error_details"),

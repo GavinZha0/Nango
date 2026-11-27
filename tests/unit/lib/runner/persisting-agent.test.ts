@@ -286,4 +286,51 @@ describe("PersistingAgent: drain-before-complete sequencing", () => {
     expect(finalizeRunMock).toHaveBeenCalledTimes(1);
     expect(finalizeArgs?.status).toBe("cancelled");
   });
+
+  it("extracts RUN_FINISHED.usage and passes token counts to finalizeRun", async () => {
+    const inner = new InnerAgent();
+    const agent = new PersistingAgent({ inner, runId: "run-usage" });
+
+    const sub = agent
+      .run({
+        threadId: "t",
+        runId: "run-usage",
+        tools: [],
+        context: [],
+        forwardedProps: {},
+        state: {},
+        messages: [],
+      } as unknown as RunAgentInput)
+      .subscribe();
+
+    inner.subject.next({
+      type: EventType.RUN_STARTED,
+      threadId: "t",
+      runId: "run-usage",
+    } as unknown as AgUiEvent);
+    inner.subject.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "t",
+      runId: "run-usage",
+      usage: [
+        { provider: "openai", model: "gpt-4o", inputTokens: 1200, outputTokens: 350 },
+      ],
+    } as unknown as AgUiEvent);
+    inner.subject.complete();
+
+    await flush();
+    for (const d of appendDeferreds) d.resolve();
+    await flush();
+
+    expect(finalizeRunMock).toHaveBeenCalledTimes(1);
+    expect(finalizeArgs?.fields).toEqual({
+      inputTokens: 1200,
+      outputTokens: 350,
+      totalTokens: 1550,
+    });
+
+    finalizeDeferred!.resolve();
+    await flush();
+    sub.unsubscribe();
+  });
 });

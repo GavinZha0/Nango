@@ -128,6 +128,9 @@ export async function finalizeRun(
     outputArtifacts?: unknown;
     errorMessage?: string;
     errorDetails?: unknown;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
   } = {},
 ): Promise<void> {
   await db
@@ -139,6 +142,9 @@ export async function finalizeRun(
       outputArtifacts: fields.outputArtifacts as Record<string, unknown> | undefined,
       errorMessage: fields.errorMessage,
       errorDetails: fields.errorDetails as Record<string, unknown> | undefined,
+      ...(fields.inputTokens !== undefined ? { inputTokens: fields.inputTokens } : {}),
+      ...(fields.outputTokens !== undefined ? { outputTokens: fields.outputTokens } : {}),
+      ...(fields.totalTokens !== undefined ? { totalTokens: fields.totalTokens } : {}),
     })
     .where(
       and(

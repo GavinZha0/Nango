@@ -184,6 +184,20 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
         )
       `.mapWith(Number),
       statuses: sql<string[]>`ARRAY_AGG(DISTINCT ${EntityRunTable.status})`,
+      inputTokens: sql<number | null>`SUM(${EntityRunTable.inputTokens})`.mapWith(
+        (v) => (v === null || v === undefined ? null : Number(v)),
+      ),
+      outputTokens: sql<number | null>`SUM(${EntityRunTable.outputTokens})`.mapWith(
+        (v) => (v === null || v === undefined ? null : Number(v)),
+      ),
+      totalTokens: sql<number | null>`
+        SUM(
+          COALESCE(
+            ${EntityRunTable.totalTokens},
+            ${EntityRunTable.inputTokens} + ${EntityRunTable.outputTokens}
+          )
+        )
+      `.mapWith((v) => (v === null || v === undefined ? null : Number(v))),
     })
     .from(EntityRunTable)
     .where(
@@ -219,6 +233,9 @@ export const GET = withEditor(ROUTE, async ({ req, session }) => {
         initiator: anchor.initiator,
         runCount: agg.topLevelCount,
         cumulativeDurationMs: agg.cumulativeDurationMs,
+        inputTokens: agg.inputTokens,
+        outputTokens: agg.outputTokens,
+        totalTokens: agg.totalTokens,
         worstStatus: pickWorstStatus(agg.statuses ?? []),
       },
     ];

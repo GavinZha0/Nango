@@ -77,6 +77,10 @@ import {
   type EntityRunEventEntity,
 } from "@/lib/db/schema";
 import type { childLogger } from "@/lib/observability/logger";
+import {
+  toAgUiUsageEntries,
+  type RawAgUiTokenUsageEntry,
+} from "@/lib/copilot/token-usage";
 
 /** Caller-supplied inputs. `ownerId` scopes the DB query — never trust
  *  the threadId alone, always intersect with the requesting user. */
@@ -132,12 +136,22 @@ async function* generateEvents(
 
     const events = eventsByRun.get(run.id) ?? [];
     const resolvedToolCallIds = collectResolvedToolCalls(events);
+    let finishedUsage: RawAgUiTokenUsageEntry[] | undefined;
 
     // The user's prompt event row (if any) lives at seq 0 of HTTP-
     // dispatched runs; the per-row emitter handles it like any other
     // `message` event. No special pre-emit step required.
 
     for (const ev of events) {
+      if (ev.type === "finished") {
+        const rawUsage = (ev.payload as { usage?: unknown } | null | undefined)
+          ?.usage;
+        if (Array.isArray(rawUsage) && rawUsage.length > 0) {
+          finishedUsage = rawUsage as RawAgUiTokenUsageEntry[];
+        }
+        continue;
+      }
+
       if (ev.type === "message") {
         const msgId = (ev.payload as { messageId?: unknown } | null | undefined)
           ?.messageId;
@@ -179,7 +193,15 @@ async function* generateEvents(
       }
     }
 
-    yield buildRunFinished(args.threadId, run.id);
+    if (!finishedUsage) {
+      finishedUsage = toAgUiUsageEntries({
+        inputTokens: run.inputTokens ?? null,
+        outputTokens: run.outputTokens ?? null,
+        totalTokens: run.totalTokens ?? null,
+      });
+    }
+
+    yield buildRunFinished(args.threadId, run.id, finishedUsage);
   }
 }
 
@@ -470,8 +492,14 @@ function buildRunStarted(threadId: string, runId: string): RunStartedEvent {
 function buildRunFinished(
   threadId: string,
   runId: string,
+  usage?: RawAgUiTokenUsageEntry[],
 ): RunFinishedEvent {
-  return { type: EventType.RUN_FINISHED, threadId, runId };
+  return {
+    type: EventType.RUN_FINISHED,
+    threadId,
+    runId,
+    ...(usage && usage.length > 0 ? { usage } : {}),
+  };
 }
 
 function buildTextStart(

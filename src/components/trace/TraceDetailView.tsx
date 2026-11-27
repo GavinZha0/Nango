@@ -47,6 +47,10 @@ import {
 } from "@/components/admin/format";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { useDisplayTimezone } from "@/hooks/useDisplayTimezone";
+import {
+  formatTokenPair,
+  formatTokenSummary,
+} from "@/lib/copilot/token-usage";
 
 // ---------------------------------------------------------------------------
 // Wire-shape mirrors `GET /api/trace/[id]`
@@ -71,6 +75,9 @@ interface RunMetrics {
   durationMs: number | null;
   toolCalls: ReadonlyArray<ToolCallSummary>;
   subRunCount: number;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
 }
 
 interface RunWithMetrics {
@@ -112,6 +119,9 @@ interface TraceSummary {
   worstStatus: string;
   totalToolCalls?: number;
   failedToolCalls?: number;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
 }
 
 interface TraceDetailResponse {
@@ -227,6 +237,12 @@ function RunCard({
 
   const delegateCalls = run.metrics.toolCalls.filter(isDelegateCall);
   const regularCalls = run.metrics.toolCalls.filter((tc) => !isDelegateCall(tc));
+  const runTokenUsage = {
+    inputTokens: run.metrics.inputTokens ?? null,
+    outputTokens: run.metrics.outputTokens ?? null,
+    totalTokens: run.metrics.totalTokens ?? null,
+  };
+  const runTokenLabel = formatTokenPair(runTokenUsage);
 
   return (
     <div
@@ -310,6 +326,13 @@ function RunCard({
             )}
           </div>
         )}
+        {runTokenLabel && (
+          <div className="mt-1.5 flex justify-end">
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+              {runTokenLabel}
+            </span>
+          </div>
+        )}
       </button>
 
       {subRuns.length > 0 && (
@@ -337,9 +360,16 @@ function RunCard({
 // ---------------------------------------------------------------------------
 
 function TraceSummaryCard({ summary }: { summary: TraceSummary }): ReactNode {
+  const tokenUsage = {
+    inputTokens: summary.inputTokens ?? null,
+    outputTokens: summary.outputTokens ?? null,
+    totalTokens: summary.totalTokens ?? null,
+  };
+  const tokenSummary = formatTokenSummary(tokenUsage);
+
   return (
     <section className="rounded-md border bg-card py-2 px-4 shadow-sm">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4 lg:grid-cols-7">
         <Stat label="Runs" value={String(summary.topLevelRunCount)} />
         <Stat label="Sub-runs" value={String(summary.subRunCount)} />
         <Stat
@@ -361,6 +391,11 @@ function TraceSummaryCard({ summary }: { summary: TraceSummary }): ReactNode {
             summary.lastRunFinishedAt,
           )}
         />
+        <Stat
+          label="Tokens"
+          value={tokenSummary ?? "—"}
+          mono
+        />
       </div>
     </section>
   );
@@ -369,16 +404,25 @@ function TraceSummaryCard({ summary }: { summary: TraceSummary }): ReactNode {
 function Stat({
   label,
   value,
+  mono,
 }: {
   label: string;
   value: ReactNode;
+  mono?: boolean;
 }): ReactNode {
   return (
     <div className="flex min-w-0 flex-col">
       <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className="truncate text-xs text-foreground">{value}</span>
+      <span
+        className={cn(
+          "truncate text-xs text-foreground",
+          mono && "font-mono tabular-nums",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -482,6 +526,9 @@ export function TraceDetailView({ traceId }: { traceId: string }): ReactNode {
       toolFailures: `${data.summary.failedToolCalls ?? 0}/${data.summary.totalToolCalls ?? 0}`,
       durationMs: data.summary.cumulativeDurationMs,
       avgTtftMs: data.summary.avgTtftMs,
+      inputTokens: data.summary.inputTokens ?? null,
+      outputTokens: data.summary.outputTokens ?? null,
+      totalTokens: data.summary.totalTokens ?? null,
       targetAgent: rootRun
         ? {
             id: rootRun.entityId,

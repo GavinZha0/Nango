@@ -16,6 +16,7 @@ import { childLogger } from "@/lib/observability/logger";
 import type { EntityRunEventType, EntityRunStatus } from "@/lib/db/schema";
 import { redactSensitiveText } from "@/lib/agent-pipeline/output-safety";
 import { normalizeRenderUiArgsJson } from "@/lib/generative-ui/surface";
+import { summarizeRunUsage, type TokenUsageSummary } from "@/lib/copilot/token-usage";
 import { recordEvent, finalizeRun } from "./event-store";
 import { RunSequenceRegistry } from "./sequence-registry";
 
@@ -84,6 +85,7 @@ export class PersistingAgent extends AbstractAgent {
   run(input: RunAgentInput): Observable<BaseEvent> {
     let seq = this.cfg.startSeq ?? 0;
     let lastError: string | null = null;
+    let runUsage: TokenUsageSummary | null = null;
     let finalized = false;
 
     const runId = this.cfg.runId;
@@ -178,9 +180,16 @@ export class PersistingAgent extends AbstractAgent {
       const drain = (async (): Promise<void> => {
         await Promise.allSettled(pendingWrites);
         try {
+          const usageFields = runUsage
+            ? {
+                inputTokens: runUsage.inputTokens,
+                outputTokens: runUsage.outputTokens,
+                totalTokens: runUsage.totalTokens,
+              }
+            : {};
           const cleanFields = fields.errorMessage
-            ? { ...fields, errorMessage: redactSensitiveText(fields.errorMessage) }
-            : fields;
+            ? { ...usageFields, ...fields, errorMessage: redactSensitiveText(fields.errorMessage) }
+            : { ...usageFields, ...fields };
           await finalizeRun(runId, status, cleanFields);
         } catch (e: unknown) {
           log.error(
@@ -376,6 +385,12 @@ export class PersistingAgent extends AbstractAgent {
 
             case EventType.RUN_FINISHED: {
               flushPending();
+              const parsedUsage = summarizeRunUsage(
+                (ev as { usage?: unknown }).usage,
+              );
+              if (parsedUsage) {
+                runUsage = parsedUsage;
+              }
               persist("finished", ev);
               break;
             }

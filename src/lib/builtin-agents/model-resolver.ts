@@ -58,6 +58,7 @@ export function resolveLanguageModel(spec: AgentSpec): ResolvedModel {
         name: `openai:${spec.model}`,
         baseURL: spec.restUrl.replace(/\/+$/, ""),
         headers: buildAuthHeaders(spec.apiKey, spec.credentialType, spec.headerName),
+        includeUsage: true,
       });
       return { model: compat(spec.model) };
     }
@@ -114,6 +115,7 @@ export function resolveLanguageModel(spec: AgentSpec): ResolvedModel {
     // Model ids carry a vendor prefix (`anthropic/claude-3.5-sonnet`).
     const openrouter = createOpenRouter({
       apiKey: spec.apiKey,
+      compatibility: "strict",
       ...(spec.restUrl ? { baseURL: spec.restUrl } : {}),
     });
     return { model: openrouter(spec.model) };

@@ -12,6 +12,7 @@ import {
   UserTable,
 } from "@/lib/db/schema";
 import { detectToolResultStatus } from "@/lib/copilot/detect-tool-result-status";
+import { mergeTokenUsage } from "@/lib/copilot/token-usage";
 import { ApiError, withEditor } from "@/lib/http/route-handlers";
 import {
   durationMsBetween,
@@ -40,6 +41,9 @@ interface RunMetrics {
   durationMs: number | null;
   toolCalls: ReadonlyArray<ToolCallSummary>;
   subRunCount: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
 }
 
 interface RunWithMetrics {
@@ -81,6 +85,9 @@ interface TraceSummary {
   worstStatus: string;
   totalToolCalls: number;
   failedToolCalls: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
 }
 
 interface TraceDetailResponse {
@@ -115,6 +122,9 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
       startedAt: EntityRunTable.startedAt,
       finishedAt: EntityRunTable.finishedAt,
       createdAt: EntityRunTable.createdAt,
+      inputTokens: EntityRunTable.inputTokens,
+      outputTokens: EntityRunTable.outputTokens,
+      totalTokens: EntityRunTable.totalTokens,
     })
     .from(EntityRunTable)
     .leftJoin(UserTable, eq(EntityRunTable.ownerId, UserTable.id))
@@ -243,6 +253,14 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
       };
     });
 
+    const runTokens = mergeTokenUsage([
+      {
+        inputTokens: r.inputTokens ?? null,
+        outputTokens: r.outputTokens ?? null,
+        totalTokens: r.totalTokens ?? null,
+      },
+    ]);
+
     return {
       id: r.id,
       parentRunId: r.parentRunId,
@@ -269,6 +287,9 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
         durationMs: durationMsBetween(r.startedAt, r.finishedAt),
         toolCalls,
         subRunCount: subRunCountByParent.get(r.id) ?? 0,
+        inputTokens: runTokens?.inputTokens ?? null,
+        outputTokens: runTokens?.outputTokens ?? null,
+        totalTokens: runTokens?.totalTokens ?? null,
       },
     };
   });
@@ -321,6 +342,16 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
     (tc) => tc.status === "failure",
   ).length;
 
+  // Token usage sums across ALL runs (top-level + sub-runs) because AG-UI
+  // attributes each child run's model usage on its own terminal event.
+  const traceTokens = mergeTokenUsage(
+    runsWithMetrics.map((r) => ({
+      inputTokens: r.metrics.inputTokens,
+      outputTokens: r.metrics.outputTokens,
+      totalTokens: r.metrics.totalTokens,
+    })),
+  );
+
   const summary: TraceSummary = {
     threadId,
     ownerId: owner.ownerId,
@@ -336,6 +367,9 @@ export const GET = withEditor<{ id: string }>(ROUTE, async ({ params, session })
     worstStatus,
     totalToolCalls,
     failedToolCalls,
+    inputTokens: traceTokens?.inputTokens ?? null,
+    outputTokens: traceTokens?.outputTokens ?? null,
+    totalTokens: traceTokens?.totalTokens ?? null,
   };
 
   const response: TraceDetailResponse = {

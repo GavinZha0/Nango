@@ -39,6 +39,9 @@ const mockRuns = [
     startedAt: "2026-10-04T12:00:00.000Z",
     finishedAt: "2026-10-04T12:00:05.000Z",
     createdAt: "2026-10-04T12:00:00.000Z",
+    inputTokens: 1000,
+    outputTokens: 200,
+    totalTokens: 1200,
   },
   {
     id: "run-2",
@@ -61,6 +64,9 @@ const mockRuns = [
     startedAt: "2026-10-04T12:00:01.000Z",
     finishedAt: "2026-10-04T12:00:04.000Z",
     createdAt: "2026-10-04T12:00:01.000Z",
+    inputTokens: 400,
+    outputTokens: 100,
+    totalTokens: 500,
   },
 ];
 
@@ -135,5 +141,16 @@ describe("GET /api/trace/[id] — Tool Failures and Summary Metrics", () => {
     expect(body.summary.totalToolCalls).toBe(2);
     expect(body.summary.failedToolCalls).toBe(1);
     expect(body.summary.worstStatus).toBe("failed");
+    // Trace-level token summary aggregates top-level + sub-runs.
+    expect(body.summary.inputTokens).toBe(1400);
+    expect(body.summary.outputTokens).toBe(300);
+    expect(body.summary.totalTokens).toBe(1700);
+    // Per-run metrics expose each run's own token usage.
+    expect(body.runs[0].metrics.inputTokens).toBe(1000);
+    expect(body.runs[0].metrics.outputTokens).toBe(200);
+    expect(body.runs[0].metrics.totalTokens).toBe(1200);
+    expect(body.runs[1].metrics.inputTokens).toBe(400);
+    expect(body.runs[1].metrics.outputTokens).toBe(100);
+    expect(body.runs[1].metrics.totalTokens).toBe(500);
   });
 });

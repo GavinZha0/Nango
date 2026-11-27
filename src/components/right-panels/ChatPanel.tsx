@@ -2,7 +2,16 @@
 
 import "@copilotkit/react-ui/v2/styles.css";
 
-import { memo, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
 import {
   CopilotChat,
@@ -29,6 +38,13 @@ import { useRegenerate } from "@/hooks/useRegenerate";
 import { useInjectHandoffContext } from "@/hooks/useHandoff";
 import { authClient } from "@/lib/auth/client";
 import { classifyError } from "@/lib/copilot/classify-error";
+import {
+  formatTokenPair,
+  formatTokenTooltip,
+  mergeTokenUsage,
+  summarizeRunUsage,
+  type TokenUsageSummary,
+} from "@/lib/copilot/token-usage";
 
 /**
  * ChatPanel — v2 CopilotKit chat surface (body only).
@@ -64,6 +80,25 @@ import { StreamingMicButton } from "@/components/right-panels/StreamingMicButton
 
 /** No-op for unimplemented toolbar buttons (thumbs up/down/read-aloud). v2 still renders the slot. */
 const noop = () => {};
+
+/** Per-turn token usage keyed by the turn's originating user message id
+ *  (or `"__turn_0__"` when a reply has no preceding user message). */
+const EMPTY_TURN_USAGE: ReadonlyMap<string, TokenUsageSummary> = new Map();
+const TurnUsageContext = createContext<ReadonlyMap<string, TokenUsageSummary>>(
+  EMPTY_TURN_USAGE,
+);
+
+function findTurnKey(
+  messages: ReadonlyArray<{ id: string; role?: string }>,
+  endIdxInclusive: number,
+): string {
+  for (let i = Math.min(endIdxInclusive, messages.length - 1); i >= 0; i--) {
+    if (messages[i]?.role === "user") {
+      return messages[i].id;
+    }
+  }
+  return "__turn_0__";
+}
 
 function InputSlotWrapper(props: React.ComponentProps<typeof NangoSlotButton>) {
   const { data: session } = authClient.useSession();
@@ -285,6 +320,12 @@ function ConnectedAssistantMessage(
   const hasToolCalls = Boolean(props.message.toolCalls && props.message.toolCalls.length > 0);
   const forceToolTurnToolbar = !hasText && hasToolCalls && isEndOfTurn && !isRunning;
 
+  const turnUsageMap = useContext(TurnUsageContext);
+  const turnKey = index !== -1 ? findTurnKey(messages, index) : "__turn_0__";
+  const turnUsage = isEndOfTurn ? turnUsageMap.get(turnKey) : undefined;
+  const tokenLabel = formatTokenPair(turnUsage);
+  const tokenTooltip = formatTokenTooltip(turnUsage);
+
   return (
     <CopilotChatAssistantMessage
       {...props}
@@ -293,6 +334,17 @@ function ConnectedAssistantMessage(
       onThumbsUp={isEndOfTurn ? noop : undefined}
       onThumbsDown={isEndOfTurn ? noop : undefined}
       onReadAloud={isEndOfTurn && hasTts ? readAloud : undefined}
+      additionalToolbarItems={
+        tokenLabel ? (
+          <span
+            data-testid="copilot-token-usage"
+            title={tokenTooltip}
+            className="ml-auto select-text font-mono text-[11px] tabular-nums text-muted-foreground/80"
+          >
+            {tokenLabel}
+          </span>
+        ) : undefined
+      }
     >
       {forceToolTurnToolbar
         ? ({ markdownRenderer, toolCallsView, toolbar }) => (
@@ -438,11 +490,20 @@ function ChatViewShellBody({
     }
   }, [agent.messages.length]);
 
-  // Subscribe to agent run errors: toast for system infrastructure errors,
-  // in-chat role: "activity" error_card for session/model errors.
+  // Per-turn token usage collected from live & `/connect` replayed `RUN_FINISHED` events.
+  // `ChatViewShellBody` remounts on `key={agentId:chatEpoch}` so state starts clean per agent/chat.
+  const turnRunsRef = useRef<Map<string, Map<string, TokenUsageSummary>>>(new Map());
+  const [turnUsageMap, setTurnUsageMap] = useState<ReadonlyMap<string, TokenUsageSummary>>(
+    EMPTY_TURN_USAGE,
+  );
+
+  // Subscribe to agent run errors & token usage: toast for system infrastructure errors,
+  // in-chat role: "activity" error_card for session/model errors, and per-turn token totals
+  // from `RUN_FINISHED.usage` (covers both live runs and `/connect` history replay).
   const { copilotkit } = useCopilotKit();
   useEffect(() => {
     if (!agent) return;
+    turnRunsRef.current = new Map();
 
     const handleError = (rawErr: unknown) => {
       const classified = classifyError(rawErr);
@@ -488,13 +549,67 @@ function ChatViewShellBody({
       {},
     );
 
-    return () => sub.unsubscribe();
+    // Subscribe directly on the AG-UI agent for `onRunFinishedEvent` (not in
+    // `subscribeToAgentWithOptions`'s allowlist) so live runs and `/connect`
+    // history replays both populate per-turn token usage.
+    const usageSub = agent.subscribe({
+      onMessagesChanged: ({ messages }) => {
+        if (messages.length === 0 && turnRunsRef.current.size > 0) {
+          turnRunsRef.current = new Map();
+          setTurnUsageMap(EMPTY_TURN_USAGE);
+        }
+      },
+      onRunStartedEvent: ({ messages }) => {
+        // On Regenerate, history is truncated so the trailing message is the
+        // retried user prompt; drop its prior run usage before the new run lands.
+        // Frontend-tool continuation runs start after a `tool` message, so their
+        // preceding Run 1 usage is preserved and summed with Run 2.
+        const tail = messages.length > 0 ? messages[messages.length - 1] : undefined;
+        if (tail?.role === "user" && turnRunsRef.current.has(tail.id)) {
+          turnRunsRef.current.delete(tail.id);
+          setTurnUsageMap((prev) => {
+            if (!prev.has(tail.id)) return prev;
+            const next = new Map(prev);
+            next.delete(tail.id);
+            return next;
+          });
+        }
+      },
+      onRunFinishedEvent: ({ event, messages }) => {
+        const parsed = summarizeRunUsage(event.usage);
+        if (!parsed) return;
+        const turnKey = findTurnKey(messages, messages.length - 1);
+        let byRun = turnRunsRef.current.get(turnKey);
+        if (!byRun) {
+          byRun = new Map();
+          turnRunsRef.current.set(turnKey, byRun);
+        }
+        const runKey = event.runId || `${turnKey}:${byRun.size}`;
+        byRun.set(runKey, parsed);
+        const merged = mergeTokenUsage([...byRun.values()]);
+        if (!merged) return;
+        setTurnUsageMap((prev) => {
+          const next = new Map(prev);
+          next.set(turnKey, merged);
+          return next;
+        });
+      },
+    });
+
+    return () => {
+      sub.unsubscribe();
+      usageSub.unsubscribe();
+    };
   }, [agent, copilotkit]);
 
   // NOTE: only augment messageView using the static top-level reference.
   // Do NOT override slotProps.messages / onSubmitMessage / isRunning —
   // those are CopilotChat-managed state.
-  return <CopilotChatView {...slotProps} messageView={STATIC_MESSAGE_VIEW} />;
+  return (
+    <TurnUsageContext.Provider value={turnUsageMap}>
+      <CopilotChatView {...slotProps} messageView={STATIC_MESSAGE_VIEW} />
+    </TurnUsageContext.Provider>
+  );
 }
 
 // MemoChat

@@ -71,6 +71,13 @@
       "when": 1795302059284,
       "tag": "0009_ssh-sftp-enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795816227683,
+      "tag": "0010_add_entity_run_token_usage",
+      "breakpoints": true
     }
   ]
 }

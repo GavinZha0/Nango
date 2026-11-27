@@ -771,4 +771,45 @@ describe("synthesizeToolCallResult", () => {
   });
 });
 
+describe("reconstructFromDb — token usage replay", () => {
+  it("forwards usage from persisted finished event onto replayed RUN_FINISHED", async () => {
+    const run = makeRun({ id: "run-usage-1" });
+    const usage = [
+      { provider: "openai", model: "gpt-4o", inputTokens: 1240, outputTokens: 610, totalTokens: 1850 },
+    ];
+    const evs = [
+      makeEvent(run.id, 0, "message", { messageId: "u-1", role: "user", text: "hi" }),
+      makeEvent(run.id, 1, "message", { messageId: "a-1", role: "assistant", text: "hello" }),
+      makeEvent(run.id, 2, "finished", { type: "RUN_FINISHED", usage }),
+    ];
+    stageQueries([run], evs);
+
+    const out = await collect("thread-1", "user-1");
+    const finished = out[out.length - 1] as unknown as { type: string; usage?: unknown };
+    expect(finished.type).toBe(EventType.RUN_FINISHED);
+    expect(finished.usage).toEqual(usage);
+  });
+
+  it("falls back to entity_run token columns when finished event has no usage", async () => {
+    const run = {
+      ...makeRun({ id: "run-usage-2" }),
+      inputTokens: 900,
+      outputTokens: 150,
+      totalTokens: 1050,
+    };
+    const evs = [
+      makeEvent(run.id, 0, "message", { messageId: "a-2", role: "assistant", text: "done" }),
+      makeEvent(run.id, 1, "finished", { type: "RUN_FINISHED" }),
+    ];
+    stageQueries([run], evs);
+
+    const out = await collect("thread-1", "user-1");
+    const finished = out[out.length - 1] as unknown as { type: string; usage?: unknown };
+    expect(finished.type).toBe(EventType.RUN_FINISHED);
+    expect(finished.usage).toEqual([
+      { inputTokens: 900, outputTokens: 150, totalTokens: 1050 },
+    ]);
+  });
+});
+
 // endregion
