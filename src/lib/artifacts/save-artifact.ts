@@ -1,25 +1,21 @@
 /**
- * Save-artifact orchestrator — the impure I/O layer on top of the
- * pure spec-extraction pipeline (`buildWorkflowSpecFromRunEvents`).
- * Idempotent on `(source_thread_id, source_outcome_id)`.
+ * Save-artifact orchestrator — splits saving into two paths:
+ *  - `chart` outcomes: extract & persist a backing Workflow + Artifact.
+ *  - All other outcomes (`html`, `slide`, `image`, `a2ui`, `report`):
+ *    persist a static `{ blocks }` snapshot with `workflowId = NULL`.
  *
- * See docs/workflow.md.
+ * Idempotent on `(source_thread_id, source_outcome_id)`.
+ * See docs/artifact.md and docs/workflow.md.
  */
 
 import "server-only";
 
-import { and, asc, eq, or, sql } from "drizzle-orm";
-import { GENERATIVE_UI_ACTIVITY_TYPE } from "@copilotkit/shared/generative-ui";
+import { and, asc, eq, sql } from "drizzle-orm";
+
 import {
-  applySurfaceDelta,
-  extractSurfaceTitle,
-  parseSurfaceContent,
-  type SurfacePatchOp,
-} from "@/lib/generative-ui/surface";
-import { ApiError } from "@/lib/http/route-handlers";
-
-import { logger as observabilityLogger } from "@/lib/observability/logger";
-
+  artifactTypeFromBlocks,
+  type OutcomeBlock,
+} from "@/lib/blocks/schema";
 import { db } from "@/lib/db";
 import {
   ArtifactTable,
@@ -27,202 +23,56 @@ import {
   EntityRunTable,
   WorkflowTable,
 } from "@/lib/db/schema";
+import { ApiError } from "@/lib/http/route-handlers";
+import { getTempMedia } from "@/lib/media/temp-media-cache";
+import { logger as observabilityLogger } from "@/lib/observability/logger";
+import { replayThreadOutcomes } from "@/lib/outcomes/replay-thread.server";
+import { normalizeOutcomeId } from "@/lib/outcomes/schema";
 import {
   buildWorkflowSpecFromRunEvents,
   canonicalize,
   type CanonicalizeDeps,
-  type SaveLineageReport,
-  type ToolInvocation,
-  validate,
   type LLMWorkflowSpec,
+  type SaveLineageReport,
+  validate,
 } from "@/lib/workflows";
 import { WorkflowError } from "@/lib/workflows/error";
-import type { ArtifactType } from "@/lib/domain/artifact";
+import type { Outcome } from "@/store/outcome-store";
 
 import { coalesceToolCalls } from "./coalesce-tool-calls";
 import { executeWorkflow } from "./execute-workflow";
-import { extractFilenameFromScreenshotText } from "@/lib/playwright/storage.server";
-import { normalizeOutcomeId } from "@/lib/outcomes/schema";
-import { applySlideEdit } from "@/lib/outcomes/merge-slides";
 
-function extractInitialSnapshot(
-  artifactType: ArtifactType,
-  creatorInv: ToolInvocation | undefined,
-  config: Record<string, unknown>,
-  allInvocations?: ToolInvocation[],
-  outcomeId?: string,
-): unknown {
-  if (artifactType === "image") {
-    // 1. Check creatorInv.result or config.result for image data / URL / file
-    const resultObj = creatorInv?.result ?? (config.result as Record<string, unknown> | undefined);
-    if (resultObj && typeof resultObj === "object") {
-      const contentList = Array.isArray(resultObj.content) ? resultObj.content : [];
-      for (const item of contentList) {
-        if (item && typeof item === "object") {
-          const rec = item as Record<string, unknown>;
-          if (rec.type === "image") {
-            const url = typeof rec.url === "string" ? rec.url : null;
-            const data = typeof rec.data === "string" ? rec.data : null;
-            const mimeType = typeof rec.mimeType === "string" ? rec.mimeType : "image/png";
-            if (url) return { url, src: url, mimeType };
-            if (data && !data.startsWith("[")) {
-              const src = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
-              return { src, url: src, mimeType };
-            }
-          }
-          if (rec.type === "text" && typeof rec.text === "string") {
-            const filename = extractFilenameFromScreenshotText(rec.text);
-            if (filename) {
-              const url = `/api/media/playwright-files?file=${encodeURIComponent(filename)}`;
-              return { url, src: url, filename, mimeType: "image/png" };
-            }
-          }
-        }
-      }
-    }
-    // 2. Also check direct parameters in config / inputs
-    const directFilename = typeof config.filename === "string" ? config.filename : null;
-    if (directFilename) {
-      const url = `/api/media/playwright-files?file=${encodeURIComponent(directFilename)}`;
-      return { url, src: url, filename: directFilename, mimeType: "image/png" };
-    }
-  }
-
-  if (artifactType === "html") {
-    if (typeof config.html === "string" && config.html.length > 0) {
-      return config.html;
-    }
-  }
-
-  if (artifactType === "chart") {
-    if (config.option && typeof config.option === "object") {
-      return config.option;
-    }
-  }
-
-  if (artifactType === "slide") {
-    // 1. If we have full invocations history for this thread/outcome, reconstruct the latest merged deck.
-    if (allInvocations && outcomeId) {
-      const normId = normalizeOutcomeId(outcomeId);
-      const related = allInvocations.filter(
-        (inv) =>
-          inv.ok &&
-          (inv.toolName === "generate_bento_slides" ||
-            inv.toolName === "edit_bento_slides") &&
-          (inv.inputs.outcome_id === outcomeId ||
-            normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) === normId),
-      );
-      if (related.length > 0) {
-        // Find the last invocation that generated a deck (generate_bento_slides)
-        let startIndex = 0;
-        for (let i = related.length - 1; i >= 0; i--) {
-          if (related[i]!.toolName === "generate_bento_slides") {
-            startIndex = i;
-            break;
-          }
-        }
-        let currentDoc =
-          (related[startIndex]?.inputs.doc as Record<string, unknown>) ?? null;
-        if (currentDoc) {
-          currentDoc = { ...currentDoc };
-          for (let i = startIndex + 1; i < related.length; i++) {
-            const item = related[i]!;
-            if (item.toolName === "edit_bento_slides") {
-              // CONTRACT: Only replay edits the server tool accepted. `item.ok` is
-              // true only when the tool returned `{ ok: true, ... }` (verified by
-              // coalesceToolCalls via isFailedEnvelope). Skipping failed calls prevents
-              // applying operations that were rejected at execution time (e.g.
-              // REPLACE_COUNT_MISMATCH, DUPLICATE_SLIDE_ID). item.result carries the
-              // server-validated payload including ID-locked slides from normalizedSlides.
-              if (!item.ok || !item.result) continue;
-
-              const res = item.result;
-              const action = res.action;
-              if (action !== "delete" && action !== "replace" && action !== "insert") continue;
-
-              const editRes = applySlideEdit(currentDoc, {
-                action,
-                target_slide_ids: Array.isArray(res.target_slide_ids)
-                  ? res.target_slide_ids.map(String)
-                  : undefined,
-                slides: Array.isArray(res.slides)
-                  ? (res.slides as Array<Record<string, unknown>>)
-                  : undefined,
-              });
-              if (editRes.changed) {
-                currentDoc = editRes.doc;
-              }
-            }
-          }
-          if (!currentDoc.title && typeof config.title === "string" && config.title.trim()) {
-            currentDoc.title = config.title.trim();
-          }
-          return currentDoc;
-        }
-      }
-    }
-
-    // 2. Direct fallback from single config.doc if invocations list is not provided
-    if (config.doc && typeof config.doc === "object") {
-      const doc = { ...(config.doc as Record<string, unknown>) };
-      if (!doc.title && typeof config.title === "string" && config.title.trim()) {
-        doc.title = config.title.trim();
-      }
-      return doc;
-    }
-  }
-
-  return null;
-}
+const TOOL_IMAGE_PREFIX = "/api/media/tool-image/";
+// SECURITY: Cap serialized static snapshot size to avoid unbounded jsonb rows.
+const MAX_STATIC_SNAPSHOT_BYTES = 10 * 1024 * 1024;
 
 // ─── Public surface ────────────────────────────────────────────────────
 
 export interface SaveArtifactInput {
-  /** Caller user id — owner of the new artifact + workflow rows. */
   ownerId: string;
-  /** Chat thread the outcome belongs to. Drives both idempotency
-   *  and the cross-run event search. */
   threadId: string;
-  /** Producer-chosen stable id (`Outcome.outcomeId`). For
-   *  `generate_echarts_config` this is the LLM's `chart_id`. */
   outcomeId: string;
-  /** Optional folder. `saveArtifact` does NOT auto-route to a seed
-   *  category when omitted — programmatic callers wanting that
-   *  must resolve `parentId` themselves. */
   parentId?: string;
-  /** Optional name override. Falls through to `deriveArtifactName()`. */
   name?: string;
-  /** Verbatim, stored on the row's `description` column. */
   description?: string | null;
-  /** Producer revision tag stored on `artifact.source_revision`. */
   revision?: string;
 }
 
 export interface SaveArtifactDeps {
-  /** Tool-registry view; passed through to canonicalize. */
   getToolMetadata: CanonicalizeDeps["getToolMetadata"];
-  /** EntityCatalog view; passed through to canonicalize. */
   resolveAgentId: CanonicalizeDeps["resolveAgentId"];
-  /** Data-source catalog view; passed through to canonicalize. */
   resolveDataSourceId: CanonicalizeDeps["resolveDataSourceId"];
 }
 
 export interface SaveArtifactResult {
   artifactId: string;
-  /** `null` for workflow-less artifacts (e.g. `a2ui` snapshots). */
+  /** `null` for static (workflow-less) artifacts. */
   workflowId: string | null;
   workflowOutputField: string | null;
-  /** True if an existing artifact was returned (idempotent save). */
   reused: boolean;
 }
 
-/**
- * Stub wiring for development / tool-only workflows. Agent and
- * SQL node resolution always fails; tool metadata is empty.
- *
- * @deprecated Use `buildProductionSaveDeps(ownerId)` from
- * `./save-deps.server.ts` for real DB-backed resolution.
- */
+/** @deprecated Use `buildProductionSaveDeps(ownerId)` from `./save-deps.server.ts`. */
 export const stubSaveDeps: SaveArtifactDeps = {
   getToolMetadata: async () => ({}),
   resolveAgentId: async () => null,
@@ -231,122 +81,21 @@ export const stubSaveDeps: SaveArtifactDeps = {
 
 // ─── Entry point ───────────────────────────────────────────────────────
 
-/**
- * Save an artifact + its extracted workflow from a chat run.
- * Throws `WorkflowError` on spec validation failures (canonicalize
- * / validate); throws `ApiError` on access / not-found issues.
- */
 export async function saveArtifact(
   input: SaveArtifactInput,
   deps: SaveArtifactDeps,
 ): Promise<SaveArtifactResult> {
-  // Fast-path idempotency check — avoids the heavy event-walk +
-  // canonicalize pipeline for the common "user double-clicked save"
-  // case. The authoritative guard is the unique index on
-  // (source_thread_id, source_outcome_id) enforced inside the
-  // transaction below.
   const existing = await findExistingArtifact({
     ownerId: input.ownerId,
     sourceThreadId: input.threadId,
     sourceOutcomeId: input.outcomeId,
   });
 
-  if (input.outcomeId.startsWith("genui:")) {
-    return saveA2uiArtifact(input, existing);
-  }
-
-  if (existing !== null) {
-    // Fast-path idempotency: caller's revision matches what is already stored.
-    if (
-      input.revision !== undefined &&
-      existing.sourceRevision === input.revision
-    ) {
-      return {
-        artifactId: existing.artifactId,
-        workflowId: existing.workflowId,
-        workflowOutputField: existing.workflowOutputField,
-        reused: true,
-      };
-    }
-
-    const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
-    const invocations = coalesceToolCalls(rawEvents);
-
-    if (invocations.length === 0) {
-      return {
-        artifactId: existing.artifactId,
-        workflowId: existing.workflowId,
-        workflowOutputField: existing.workflowOutputField,
-        reused: true,
-      };
-    }
-
-    // CONTRACT: If the existing artifact is an incrementally-appended or
-    // regenerated slide deck, update the existing artifact's snapshot so it
-    // captures the full merged presentation.
-    const normId = normalizeOutcomeId(input.outcomeId);
-    const relatedSlideInvs = invocations.filter(
-      (inv) =>
-        inv.ok &&
-        (inv.toolName === "generate_bento_slides" ||
-          inv.toolName === "edit_bento_slides") &&
-        (inv.inputs.outcome_id === input.outcomeId ||
-          normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) === normId),
-    );
-    const hasEditsOrAppends = relatedSlideInvs.some(
-      (inv) => inv.toolName === "edit_bento_slides",
-    );
-    const slideRevisionChanged =
-      input.revision !== undefined && input.revision !== existing.sourceRevision;
-    if ((hasEditsOrAppends || slideRevisionChanged) && relatedSlideInvs.length > 0) {
-      const lastInv = relatedSlideInvs[relatedSlideInvs.length - 1]!;
-      const combinedConfig = {
-        ...lastInv.inputs,
-        ...(lastInv.result ? { result: lastInv.result } : {}),
-      };
-      const mergedSnapshot = extractInitialSnapshot(
-        "slide",
-        lastInv,
-        combinedConfig,
-        invocations,
-        input.outcomeId,
-      );
-      if (mergedSnapshot) {
-        const updatedConfig = {
-          ...combinedConfig,
-          doc: mergedSnapshot,
-        };
-        await db
-          .update(ArtifactTable)
-          .set({
-            snapshot: mergedSnapshot,
-            snapshotAt: new Date(),
-            config: updatedConfig,
-            ...(input.revision !== undefined && { sourceRevision: input.revision }),
-          })
-          .where(eq(ArtifactTable.id, existing.artifactId));
-      }
-      return {
-        artifactId: existing.artifactId,
-        workflowId: existing.workflowId,
-        workflowOutputField: existing.workflowOutputField,
-        reused: true,
-      };
-    }
-
-    // Workflow-backed outcomes (chart / html): rebuild the latest workflow spec,
-    // config, and snapshot in place so Re-save keeps live and snapshot views aligned.
-    if (input.revision === undefined || input.revision !== existing.sourceRevision) {
-      const refreshed = await refreshWorkflowBackedArtifact({
-        input,
-        existing,
-        rawEvents,
-        invocations,
-        deps,
-      });
-      if (refreshed !== null) return refreshed;
-    }
-
+  if (
+    existing !== null &&
+    input.revision !== undefined &&
+    existing.sourceRevision === input.revision
+  ) {
     return {
       artifactId: existing.artifactId,
       workflowId: existing.workflowId,
@@ -355,15 +104,175 @@ export async function saveArtifact(
     };
   }
 
+  const replayed = await replayThreadOutcomes(
+    input.threadId,
+    input.ownerId,
+    observabilityLogger,
+  );
+  const outcome =
+    replayed.get(input.outcomeId) ??
+    replayed.get(normalizeOutcomeId(input.outcomeId));
+
+  // Non-chart outcomes are persisted as static `{ blocks }` snapshots without a workflow.
+  if (outcome !== undefined && artifactTypeFromBlocks(outcome.blocks) !== "chart") {
+    return saveStaticOutcomeArtifact(input, outcome, existing);
+  }
+
+  // Chart outcomes (and direct chart toolCallId saves) go through the workflow pipeline.
+  return saveChartArtifact(input, existing, deps);
+}
+
+// ─── Static path (html / slide / image / a2ui / report) ────────────────
+
+function materializeStaticBlocks(blocks: ReadonlyArray<OutcomeBlock>): OutcomeBlock[] {
+  const materialized = blocks.map((block): OutcomeBlock => {
+    if (block.kind !== "image" || !block.src.startsWith(TOOL_IMAGE_PREFIX)) {
+      return block;
+    }
+    const mediaId = block.src.slice(TOOL_IMAGE_PREFIX.length);
+    const media = getTempMedia(mediaId);
+    if (!media) {
+      throw new ApiError(
+        "NOT_FOUND",
+        404,
+        "Image media has expired from temporary cache and cannot be saved.",
+      );
+    }
+    const dataUrl = `data:${media.mimeType};base64,${media.buffer.toString("base64")}`;
+    return {
+      ...block,
+      src: dataUrl,
+      mimeType: media.mimeType,
+    };
+  });
+
+  const bytes = Buffer.byteLength(JSON.stringify({ blocks: materialized }), "utf8");
+  if (bytes > MAX_STATIC_SNAPSHOT_BYTES) {
+    throw new ApiError(
+      "VALIDATION_FAILED",
+      413,
+      `Artifact snapshot exceeds ${MAX_STATIC_SNAPSHOT_BYTES} byte limit.`,
+    );
+  }
+
+  return materialized;
+}
+
+async function saveStaticOutcomeArtifact(
+  input: SaveArtifactInput,
+  outcome: Outcome,
+  existing: ExistingArtifactRef | null,
+): Promise<SaveArtifactResult> {
+  const blocks = materializeStaticBlocks(outcome.blocks);
+  const artifactType = artifactTypeFromBlocks(blocks);
+  const snapshotPayload = { blocks };
+  const revision = input.revision ?? outcome.revision;
+  const now = new Date();
+
+  const refresh = async (ref: ExistingArtifactRef): Promise<SaveArtifactResult> => {
+    await db
+      .update(ArtifactTable)
+      .set({
+        snapshot: snapshotPayload,
+        snapshotAt: now,
+        updatedAt: now,
+        sourceRevision: revision,
+      })
+      .where(eq(ArtifactTable.id, ref.artifactId));
+    return {
+      artifactId: ref.artifactId,
+      workflowId: null,
+      workflowOutputField: null,
+      reused: true,
+    };
+  };
+
+  if (existing !== null) return refresh(existing);
+
+  const name = (input.name?.trim() || outcome.title || "Untitled").slice(0, 200);
+  const description =
+    input.description !== undefined
+      ? input.description
+      : (outcome.description ?? null);
+
+  try {
+    const [inserted] = await db
+      .insert(ArtifactTable)
+      .values({
+        kind: "artifact",
+        type: artifactType,
+        parentId: input.parentId ?? null,
+        name,
+        description,
+        config: {},
+        snapshot: snapshotPayload,
+        snapshotAt: now,
+        viewMode: "snapshot",
+        createdBy: input.ownerId,
+        sourceThreadId: input.threadId,
+        sourceOutcomeId: input.outcomeId,
+        sourceRevision: revision,
+        workflowId: null,
+        workflowOutputField: null,
+      })
+      .returning({ id: ArtifactTable.id });
+    if (inserted === undefined) {
+      throw new Error("saveStaticOutcomeArtifact: artifact insert returned no id.");
+    }
+    return {
+      artifactId: inserted.id,
+      workflowId: null,
+      workflowOutputField: null,
+      reused: false,
+    };
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const winner = await findExistingArtifact({
+        ownerId: input.ownerId,
+        sourceThreadId: input.threadId,
+        sourceOutcomeId: input.outcomeId,
+      });
+      if (winner !== null) return refresh(winner);
+    }
+    throw err;
+  }
+}
+
+// ─── Chart workflow path ───────────────────────────────────────────────
+
+async function saveChartArtifact(
+  input: SaveArtifactInput,
+  existing: ExistingArtifactRef | null,
+  deps: SaveArtifactDeps,
+): Promise<SaveArtifactResult> {
   const rawEvents = await loadThreadEvents(input.threadId, input.ownerId);
   const invocations = coalesceToolCalls(rawEvents);
 
-  // Resolve outcomeId → (runId, toolCallId). The outcome's id
-  // (`chart_id` for generate_echarts_config) is embedded in a
-  // `tool_call_chunk` event's args somewhere in the thread; the
-  // chunk also carries the OpenAI `toolCallId` we need to identify
-  // the artifact creator.
-  // CONTRACT: Pass preloaded rawEvents to avoid double full-thread event walk.
+  if (existing !== null) {
+    if (invocations.length === 0) {
+      return {
+        artifactId: existing.artifactId,
+        workflowId: existing.workflowId,
+        workflowOutputField: existing.workflowOutputField,
+        reused: true,
+      };
+    }
+    const refreshed = await refreshChartArtifact({
+      input,
+      existing,
+      rawEvents,
+      invocations,
+      deps,
+    });
+    if (refreshed !== null) return refreshed;
+    return {
+      artifactId: existing.artifactId,
+      workflowId: existing.workflowId,
+      workflowOutputField: existing.workflowOutputField,
+      reused: true,
+    };
+  }
+
   const resolution = await resolveOutcomeToCall(
     {
       threadId: input.threadId,
@@ -373,35 +282,14 @@ export async function saveArtifact(
     rawEvents,
   );
 
-  // Pure pipeline: events → LLM spec + lineage.
   const built = buildWorkflowSpecFromRunEvents({
     invocations,
     artifactCreatingCallId: resolution.toolCallId,
   });
 
-  const artifactType = deriveArtifactType(built.artifactCreatorToolName);
-  const hasAppendedOrEditedSlides =
-    artifactType === "slide" &&
-    invocations.some(
-      (inv) =>
-        inv.ok &&
-        inv.toolName === "edit_bento_slides" &&
-        (inv.inputs.outcome_id === input.outcomeId ||
-          normalizeOutcomeId(String(inv.inputs.outcome_id ?? "")) ===
-            normalizeOutcomeId(input.outcomeId)),
-    );
-
-  // Canonicalize (fills `type` tag, agentId, registry schemas).
   const canonical = await canonicalize(built.spec, deps);
-
-  // Validate (DAG, cycles, ref reachability, top-level outputs).
   validate(canonical);
 
-  // Atomic persistence with idempotency guard inside the
-  // transaction. If a concurrent request inserted the same
-  // (source_thread_id, source_outcome_id) between our fast-path
-  // check and this point, the unique index causes a conflict.
-  // We catch it and return the winner's row.
   const workflowName = canonical.name;
   const workflowOutputField = pickWorkflowOutputField(built.spec);
 
@@ -410,9 +298,6 @@ export async function saveArtifact(
     | { artifactId: string; workflowId: string; reused: false };
   try {
     const inserted = await db.transaction(async (tx) => {
-      // Re-check inside the transaction — narrows the race window
-      // to the DB serialization level. The unique index is the
-      // ultimate backstop.
       const dup = await findExistingArtifactTx(tx, {
         ownerId: input.ownerId,
         sourceThreadId: input.threadId,
@@ -435,27 +320,23 @@ export async function saveArtifact(
       }
 
       const creatorInv = invocations.find((i) => i.callId === resolution.toolCallId);
-      const combinedConfig = {
+      const combinedConfig: Record<string, unknown> = {
         ...built.strippedFrontendConfig,
         ...(creatorInv?.result ? { result: creatorInv.result } : {}),
       };
-      const initialSnapshot = extractInitialSnapshot(
-        artifactType,
-        creatorInv,
-        combinedConfig,
-        invocations,
-        input.outcomeId,
-      );
+      const initialSnapshot =
+        combinedConfig.option && typeof combinedConfig.option === "object"
+          ? combinedConfig.option
+          : null;
 
       const [artifactRow] = await tx
         .insert(ArtifactTable)
         .values({
           kind: "artifact",
-          type: artifactType,
-          name:
-            input.name?.trim()?.length
-              ? input.name.trim().slice(0, 200)
-              : deriveArtifactName(built.spec, built.strippedFrontendConfig),
+          type: "chart",
+          name: input.name?.trim()?.length
+            ? input.name.trim().slice(0, 200)
+            : deriveArtifactName(built.spec, built.strippedFrontendConfig),
           ...(input.description !== undefined && {
             description: input.description,
           }),
@@ -465,7 +346,7 @@ export async function saveArtifact(
           workflowId: workflowRow.id,
           workflowOutputField,
           viewMode: "snapshot",
-          ...(initialSnapshot !== null && initialSnapshot !== undefined
+          ...(initialSnapshot !== null
             ? { snapshot: initialSnapshot, snapshotAt: new Date() }
             : {}),
           config: combinedConfig,
@@ -477,8 +358,6 @@ export async function saveArtifact(
         throw new Error("saveArtifact: artifact row insert returned no id.");
       }
 
-      // Lineage telemetry — single event, source-of-truth for admin
-      // run forensics.
       await insertLineageEvent(tx, resolution.runId, built.lineageReport);
 
       return {
@@ -489,8 +368,6 @@ export async function saveArtifact(
     });
     result = inserted;
   } catch (err) {
-    // Unique-index violation from a concurrent insert — the other
-    // request won the race. Re-query and return the winner's row.
     if (isUniqueViolation(err)) {
       const winner = await findExistingArtifact({
         ownerId: input.ownerId,
@@ -518,20 +395,13 @@ export async function saveArtifact(
     };
   }
 
-  // Create initial snapshot — execute the workflow once (uses SQL
-  // Parquet cache; fast) and persist the output as the first snapshot
-  // so the artifact is immediately useful when opened in snapshot mode.
-  // Non-fatal: a failure here does not fail the save; the user can
-  // trigger a manual snapshot later.
-  if (!hasAppendedOrEditedSlides) {
-    await runWorkflowSnapshotBestEffort({
-      artifactId: result.artifactId,
-      workflowId: result.workflowId,
-      spec: canonical,
-      outputField: workflowOutputField,
-      ownerId: input.ownerId,
-    });
-  }
+  await runWorkflowSnapshotBestEffort({
+    artifactId: result.artifactId,
+    workflowId: result.workflowId,
+    spec: canonical,
+    outputField: workflowOutputField,
+    ownerId: input.ownerId,
+  });
 
   return {
     artifactId: result.artifactId,
@@ -541,14 +411,10 @@ export async function saveArtifact(
   };
 }
 
-/**
- * Execute `spec` once (non-fatal) and persist its output as `artifact.snapshot`.
- * Shared between initial save and workflow-backed Re-save.
- */
 async function runWorkflowSnapshotBestEffort(args: {
   artifactId: string;
   workflowId: string;
-  spec: ReturnType<typeof validate> extends never ? never : Parameters<typeof executeWorkflow>[0]["spec"];
+  spec: Parameters<typeof executeWorkflow>[0]["spec"];
   outputField: string;
   ownerId: string;
 }): Promise<void> {
@@ -581,12 +447,7 @@ async function runWorkflowSnapshotBestEffort(args: {
   }
 }
 
-/**
- * Re-build and persist `workflow.spec`, `artifact.config`, `snapshot`, and
- * `source_revision` for an existing `chart` or `html` artifact. Returns `null`
- * if the existing outcome is not a workflow-backed refreshable type.
- */
-async function refreshWorkflowBackedArtifact(args: {
+async function refreshChartArtifact(args: {
   input: SaveArtifactInput;
   existing: ExistingArtifactRef;
   rawEvents: Awaited<ReturnType<typeof loadThreadEvents>>;
@@ -606,8 +467,7 @@ async function refreshWorkflowBackedArtifact(args: {
     invocations,
     artifactCreatingCallId: resolution.toolCallId,
   });
-  const artifactType = deriveArtifactType(built.artifactCreatorToolName);
-  if (artifactType !== "chart" && artifactType !== "html") {
+  if (built.artifactCreatorToolName !== "generate_echarts_config") {
     return null;
   }
 
@@ -616,17 +476,14 @@ async function refreshWorkflowBackedArtifact(args: {
   const workflowOutputField = pickWorkflowOutputField(built.spec);
 
   const creatorInv = invocations.find((i) => i.callId === resolution.toolCallId);
-  const combinedConfig = {
+  const combinedConfig: Record<string, unknown> = {
     ...built.strippedFrontendConfig,
     ...(creatorInv?.result ? { result: creatorInv.result } : {}),
   };
-  const refreshedSnapshot = extractInitialSnapshot(
-    artifactType,
-    creatorInv,
-    combinedConfig,
-    invocations,
-    input.outcomeId,
-  );
+  const refreshedSnapshot =
+    combinedConfig.option && typeof combinedConfig.option === "object"
+      ? combinedConfig.option
+      : null;
 
   const now = new Date();
   await db.transaction(async (tx) => {
@@ -647,7 +504,7 @@ async function refreshWorkflowBackedArtifact(args: {
         config: combinedConfig,
         workflowOutputField,
         updatedAt: now,
-        ...(refreshedSnapshot !== null && refreshedSnapshot !== undefined
+        ...(refreshedSnapshot !== null
           ? { snapshot: refreshedSnapshot, snapshotAt: now }
           : {}),
         ...(input.revision !== undefined && { sourceRevision: input.revision }),
@@ -675,16 +532,6 @@ async function refreshWorkflowBackedArtifact(args: {
 
 // ─── Internal helpers ──────────────────────────────────────────────────
 
-/**
- * Resolve a frontend outcomeId to the originating (runId, toolCallId).
- *
- * `outcomeId` is producer-chosen — generate_echarts_config uses the
- * LLM's `chart_id` argument; web_search uses the OpenAI callId.
- * Match either the callId directly or any top-level string-valued
- * arg equal to `outcomeId`. First chronological match wins.
- *
- * Throws `WorkflowError` (`UNKNOWN_ERROR`) when no match exists.
- */
 async function resolveOutcomeToCall(
   args: {
     threadId: string;
@@ -701,15 +548,8 @@ async function resolveOutcomeToCall(
 ): Promise<{ runId: string; toolCallId: string }> {
   const chunkRows =
     preloadedEvents ?? (await loadThreadEvents(args.threadId, args.ownerId));
-
-  // Coalesce so multi-chunk args (Vercel AI SDK streams args
-  // incrementally) end up as a single parseable object. Passing
-  // runId on each event pins each toolCallId to its origin run
-  // and ignores replayed chunks.
   const invocations = coalesceToolCalls(chunkRows);
 
-  // `ToolInvocation` doesn't carry runId — re-derive from the
-  // chunk rows. First chunk per toolCallId wins.
   const runIdByCall = new Map<string, string>();
   for (const row of chunkRows) {
     if (row.type !== "tool_call_chunk") continue;
@@ -720,9 +560,6 @@ async function resolveOutcomeToCall(
     if (!runIdByCall.has(id)) runIdByCall.set(id, row.runId);
   }
 
-  // Iterate backwards to find the LATEST invocation that produced this outcome.
-  // We explicitly skip failed invocations (!inv.ok) because they are filtered
-  // out by the save pipeline and cannot be the source of a saved artifact.
   for (let i = invocations.length - 1; i >= 0; i--) {
     const inv = invocations[i]!;
     if (!inv.ok) continue;
@@ -733,8 +570,6 @@ async function resolveOutcomeToCall(
         return { runId, toolCallId: inv.callId };
       }
     }
-    // Producer-chosen ids embedded in args (chart_id, …). Match any
-    // top-level string value equal to outcomeId.
     for (const value of Object.values(inv.inputs)) {
       if (typeof value === "string" && value === args.outcomeId) {
         const runId = runIdByCall.get(inv.callId);
@@ -751,11 +586,6 @@ async function resolveOutcomeToCall(
   });
 }
 
-/**
- * Load every `tool_call_chunk` + `tool_call_result` row in the
- * thread, ordered by (ts, seq). Each row carries its `runId` so
- * the coalescer can pin a toolCallId to its origin run.
- */
 async function loadThreadEvents(
   threadId: string,
   ownerId: string,
@@ -797,7 +627,6 @@ async function loadThreadEvents(
 
 interface ExistingArtifactRef {
   artifactId: string;
-  /** `null` for workflow-less artifacts (e.g. `a2ui` snapshots). */
   workflowId: string | null;
   workflowOutputField: string | null;
   sourceRevision: string | null;
@@ -805,7 +634,6 @@ interface ExistingArtifactRef {
 
 type TxHandle = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** Idempotency lookup — works with the ambient `db` connection. */
 async function findExistingArtifact(args: {
   ownerId: string;
   sourceThreadId: string;
@@ -814,7 +642,6 @@ async function findExistingArtifact(args: {
   return findExistingArtifactIn(db, args);
 }
 
-/** Idempotency lookup — works inside an open transaction. */
 async function findExistingArtifactTx(
   tx: TxHandle,
   args: { ownerId: string; sourceThreadId: string; sourceOutcomeId: string },
@@ -822,7 +649,6 @@ async function findExistingArtifactTx(
   return findExistingArtifactIn(tx, args);
 }
 
-/** Shared implementation for both ambient and transactional lookups. */
 async function findExistingArtifactIn(
   conn: typeof db | TxHandle,
   args: { ownerId: string; sourceThreadId: string; sourceOutcomeId: string },
@@ -845,10 +671,6 @@ async function findExistingArtifactIn(
     .limit(1);
   const row = rows[0];
   if (row === undefined) return null;
-  // CONTRACT: A row with a NULL workflow still owns the
-  // (source_thread_id, source_outcome_id) unique slot. Reporting it as
-  // "not found" would send callers down the insert path straight into
-  // `artifact_source_unique_idx`, so workflow-less rows are returned too.
   return {
     artifactId: row.id,
     workflowId: row.workflowId,
@@ -857,15 +679,10 @@ async function findExistingArtifactIn(
   };
 }
 
-/**
- * Detect PostgreSQL unique-constraint violation (error code 23505).
- * Works with both `pg` driver errors and Drizzle-wrapped errors.
- */
 function isUniqueViolation(err: unknown): boolean {
   if (err === null || typeof err !== "object") return false;
   const e = err as Record<string, unknown>;
   if (e.code === "23505") return true;
-  // Drizzle may wrap the driver error as `cause`.
   if (e.cause !== null && typeof e.cause === "object") {
     return (e.cause as Record<string, unknown>).code === "23505";
   }
@@ -890,9 +707,6 @@ async function pickNextEventSeq(
   tx: TxHandle,
   runId: string,
 ): Promise<number> {
-  // Pull MAX(seq) inside the transaction to avoid concurrent
-  // writers colliding on (run_id, seq) PK. V1 runs are
-  // single-writer per run so contention is theoretical.
   const rows = await tx
     .select({ maxSeq: sql<number | null>`MAX(${EntityRunEventTable.seq})` })
     .from(EntityRunEventTable)
@@ -901,11 +715,6 @@ async function pickNextEventSeq(
   return max === null || max === undefined ? 0 : max + 1;
 }
 
-/**
- * Pick which key from `spec.outputs` becomes the artifact's
- * `workflow_output_field`. V1 strategy: take the first key.
- * `spec.outputs` is guaranteed non-empty by validate.ts.
- */
 function pickWorkflowOutputField(spec: LLMWorkflowSpec): string {
   const keys = Object.keys(spec.outputs);
   if (keys.length === 0) {
@@ -917,42 +726,6 @@ function pickWorkflowOutputField(spec: LLMWorkflowSpec): string {
   return keys[0]!;
 }
 
-/** Map the artifact-creator tool name to an `ArtifactType`.
- *  Default falls through to "chart". New artifact-producing tools
- *  add a case here AND extend `ChartRendererSchema` (or a sibling)
- *  in `lib/workflows/spec/schema.ts` so the workflow spec recognises
- *  the corresponding node type. */
-function deriveArtifactType(toolName: string): ArtifactType {
-  switch (toolName) {
-    case "generate_echarts_config":
-      return "chart";
-    case "generate_html_page":
-    case "render_html":
-      return "html";
-    case "generate_bento_slides":
-    case "edit_bento_slides":
-      return "slide";
-    case "render_markdown":
-    case "web_search":
-      return "report";
-    case "browser_take_screenshot":
-    case "take_screenshot":
-    case "generate_image":
-    case "render_image":
-      return "image";
-    default:
-      if (toolName.includes("screenshot") || toolName.includes("image")) {
-        return "image";
-      }
-      return "report";
-  }
-}
-
-/**
- * Derive a human-readable artifact name. The frontend tool's args
- * often carry `title` / `name`; prefer those. Otherwise fall back
- * to the workflow's auto-name.
- */
 function deriveArtifactName(
   spec: LLMWorkflowSpec,
   config: Record<string, unknown>,
@@ -970,160 +743,4 @@ function readStringField(
 ): string | undefined {
   const v = obj[key];
   return typeof v === "string" ? v : undefined;
-}
-
-/**
- * Save a `genui:<surfaceId>` A2UI outcome as a static snapshot `a2ui`
- * artifact. Reconstructs the surface from `activity_snapshot` /
- * `activity_delta` rows in `entity_run_event`, preserving server-side
- * provenance and `(source_thread_id, source_outcome_id)` idempotency.
- */
-async function saveA2uiArtifact(
-  input: SaveArtifactInput,
-  existing: ExistingArtifactRef | null,
-): Promise<SaveArtifactResult> {
-  const targetSurfaceId = input.outcomeId.slice("genui:".length);
-  const rows = await db
-    .select({
-      eventType: EntityRunEventTable.type,
-      payload: EntityRunEventTable.payload,
-    })
-    .from(EntityRunEventTable)
-    .innerJoin(EntityRunTable, eq(EntityRunTable.id, EntityRunEventTable.runId))
-    .where(
-      and(
-        eq(EntityRunTable.threadId, input.threadId),
-        eq(EntityRunTable.ownerId, input.ownerId),
-        or(
-          eq(EntityRunEventTable.type, "activity_snapshot"),
-          eq(EntityRunEventTable.type, "activity_delta"),
-        ),
-        sql`${EntityRunEventTable.payload}->>'activityType' = ${GENERATIVE_UI_ACTIVITY_TYPE}`,
-      ),
-    )
-    .orderBy(
-      asc(EntityRunTable.createdAt),
-      asc(EntityRunEventTable.seq),
-      asc(EntityRunEventTable.ts),
-    );
-
-  const drafts = new Map<string, Record<string, unknown>>();
-  for (const row of rows) {
-    if (row.eventType === "activity_snapshot") {
-      const p = row.payload as {
-        messageId?: unknown;
-        content?: unknown;
-      };
-      if (
-        typeof p.messageId === "string" &&
-        p.content &&
-        typeof p.content === "object" &&
-        !Array.isArray(p.content)
-      ) {
-        drafts.set(p.messageId, { ...(p.content as Record<string, unknown>) });
-      }
-    } else if (row.eventType === "activity_delta") {
-      const p = row.payload as {
-        messageId?: unknown;
-        patch?: unknown;
-      };
-      if (typeof p.messageId === "string" && Array.isArray(p.patch)) {
-        const cur = drafts.get(p.messageId);
-        if (cur) {
-          drafts.set(p.messageId, applySurfaceDelta(cur, p.patch as SurfacePatchOp[]));
-        }
-      }
-    }
-  }
-
-  let matchedSurface: ReturnType<typeof parseSurfaceContent> = null;
-  for (const raw of drafts.values()) {
-    const parsed = parseSurfaceContent(raw);
-    if (
-      parsed &&
-      parsed.surfaceId === targetSurfaceId &&
-      parsed.status === "ready" &&
-      parsed.operations.length > 0
-    ) {
-      matchedSurface = parsed;
-    }
-  }
-
-  if (!matchedSurface) {
-    throw new ApiError(
-      "NOT_FOUND",
-      404,
-      `No ready A2UI surface found in thread ${input.threadId} for outcome ${input.outcomeId}.`,
-    );
-  }
-
-  const now = new Date();
-  // Refresh path: keeps the artifact id, name and folder; only the
-  // surface content moves forward. `config.surface` is rewritten with
-  // `snapshot` so the two copies never disagree.
-  const refresh = async (ref: ExistingArtifactRef): Promise<SaveArtifactResult> => {
-    await db
-      .update(ArtifactTable)
-      .set({
-        config: { surface: matchedSurface },
-        snapshot: matchedSurface,
-        snapshotAt: now,
-        updatedAt: now,
-        ...(input.revision !== undefined && { sourceRevision: input.revision }),
-      })
-      .where(eq(ArtifactTable.id, ref.artifactId));
-    return {
-      artifactId: ref.artifactId,
-      workflowId: ref.workflowId,
-      workflowOutputField: ref.workflowOutputField,
-      reused: true,
-    };
-  };
-
-  if (existing !== null) return refresh(existing);
-
-  try {
-    const [inserted] = await db
-      .insert(ArtifactTable)
-      .values({
-        kind: "artifact",
-        type: "a2ui",
-        parentId: input.parentId ?? null,
-        name: input.name?.trim() || extractSurfaceTitle(matchedSurface),
-        description: input.description ?? null,
-        config: { surface: matchedSurface },
-        snapshot: matchedSurface,
-        snapshotAt: now,
-        viewMode: "snapshot",
-        createdBy: input.ownerId,
-        sourceThreadId: input.threadId,
-        sourceOutcomeId: input.outcomeId,
-        ...(input.revision !== undefined && { sourceRevision: input.revision }),
-        workflowId: null,
-        workflowOutputField: null,
-      })
-      .returning({ id: ArtifactTable.id });
-    if (inserted === undefined) {
-      throw new Error("saveA2uiArtifact: artifact row insert returned no id.");
-    }
-
-    return {
-      artifactId: inserted.id,
-      workflowId: null,
-      workflowOutputField: null,
-      reused: false,
-    };
-  } catch (err) {
-    // A concurrent save won the unique slot between the fast-path
-    // lookup and this insert — fold into the refresh path.
-    if (isUniqueViolation(err)) {
-      const winner = await findExistingArtifact({
-        ownerId: input.ownerId,
-        sourceThreadId: input.threadId,
-        sourceOutcomeId: input.outcomeId,
-      });
-      if (winner !== null) return refresh(winner);
-    }
-    throw err;
-  }
 }

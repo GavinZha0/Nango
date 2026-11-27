@@ -15,6 +15,10 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import {
+  areBlocksCompatibleWithArtifactType,
+  artifactBlocksSnapshotSchema,
+} from "@/lib/blocks/schema";
 import { db } from "@/lib/db";
 import { ArtifactTable, WorkflowTable } from "@/lib/db/schema";
 import { ApiError } from "@/lib/http/route-handlers";
@@ -78,30 +82,51 @@ export async function saveSnapshot(
     );
   }
 
-  // If directSnapshot is provided (e.g. from current live session or edited slide doc),
-  // persist directly to DB without re-executing the workflow from stale cache.
+  // Static (workflow-less) artifacts: validate `{ blocks }` against schema and artifact type.
+  if (artifact.workflowId === null) {
+    const parsed = artifactBlocksSnapshotSchema.safeParse(directSnapshot);
+    if (!parsed.success) {
+      throw new ApiError(
+        "VALIDATION_FAILED",
+        400,
+        "Static artifact snapshot must be a valid `{ blocks }` payload.",
+      );
+    }
+    if (!areBlocksCompatibleWithArtifactType(artifact.type, parsed.data.blocks)) {
+      throw new ApiError(
+        "VALIDATION_FAILED",
+        400,
+        `Snapshot block kinds do not match artifact type "${artifact.type ?? "unknown"}".`,
+      );
+    }
+    const snapshotAt = new Date();
+    await database
+      .update(ArtifactTable)
+      .set({
+        snapshot: parsed.data,
+        snapshotAt,
+      })
+      .where(eq(ArtifactTable.id, artifactId));
+
+    const bundle = await buildArtifactBundle(artifactId, ownerId, bundleDeps, {
+      preferSnapshot: true,
+    });
+    bundle.data = parsed.data;
+    bundle.fromSnapshot = true;
+    bundle.snapshotAt = snapshotAt.toISOString();
+    return bundle;
+  }
+
+  // Workflow-backed artifacts (charts): if directSnapshot is provided, persist directly.
   if (directSnapshot !== undefined) {
     const snapshotAt = new Date();
-    const isSlide = artifact.type === "slide";
-    const currentConfig = (artifact.config as Record<string, unknown> | null) ?? {};
-
-    // CONTRACT: Only slide artifacts store their presentation document in config.doc.
-    // Non-slide artifacts (e.g. charts, tables, html) must NOT have config polluted.
-    const updatePayload: {
-      snapshot: Record<string, unknown>;
-      snapshotAt: Date;
-      config?: Record<string, unknown>;
-    } = {
-      snapshot: directSnapshot,
-      snapshotAt,
-    };
-    if (isSlide) {
-      updatePayload.config = { ...currentConfig, doc: directSnapshot };
-    }
 
     await database
       .update(ArtifactTable)
-      .set(updatePayload)
+      .set({
+        snapshot: directSnapshot,
+        snapshotAt,
+      })
       .where(eq(ArtifactTable.id, artifactId));
 
     // Update value fields in workflow spec if inputValues provided
@@ -137,28 +162,17 @@ export async function saveSnapshot(
 
   // Persist snapshot only when data is available.
   if (bundle.data !== undefined) {
-    const isSlide = artifact.type === "slide";
     const snapshotData = bundle.data as Record<string, unknown>;
     const snapshotAt = bundle.executedAt
       ? new Date(bundle.executedAt)
       : new Date();
-    const currentConfig = (artifact.config as Record<string, unknown> | null) ?? {};
-
-    const updatePayload: {
-      snapshot: Record<string, unknown>;
-      snapshotAt: Date;
-      config?: Record<string, unknown>;
-    } = {
-      snapshot: snapshotData,
-      snapshotAt,
-    };
-    if (isSlide) {
-      updatePayload.config = { ...currentConfig, doc: snapshotData };
-    }
 
     await database
       .update(ArtifactTable)
-      .set(updatePayload)
+      .set({
+        snapshot: snapshotData,
+        snapshotAt,
+      })
       .where(eq(ArtifactTable.id, artifactId));
 
     // Update value fields in workflow spec if inputValues provided

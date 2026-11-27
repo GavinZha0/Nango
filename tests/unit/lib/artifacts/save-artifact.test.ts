@@ -24,7 +24,17 @@ vi.mock("@/lib/db", () => {
     builder.from = vi.fn().mockReturnValue(builder);
     builder.innerJoin = vi.fn().mockReturnValue(builder);
     builder.where = vi.fn().mockReturnValue(builder);
-    builder.orderBy = vi.fn().mockImplementation(() => mockEvents);
+    builder.orderBy = vi.fn().mockImplementation(() =>
+      mockEvents.map((e) => {
+        const rec = e as unknown as Record<string, unknown>;
+        return {
+          ...rec,
+          eventType: rec.eventType ?? rec.type,
+          eventTs: rec.eventTs ?? rec.ts ?? rec.createdAt ?? new Date(),
+          entityId: rec.entityId ?? "agent-1",
+        };
+      }),
+    );
     builder.limit = vi.fn().mockImplementation(() => (mockExistingArtifact ? [mockExistingArtifact] : []));
     builder.then = (resolve: (val: unknown) => unknown) => {
       if (mockExistingArtifact) {
@@ -127,9 +137,9 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     mockArtifactInsertError = null;
   });
 
-  it("should save Image Outcome with Base64 data, solidifying initial snapshot", async () => {
-    const outcomeId = "shot-1";
+  it("should save Image Outcome with Base64 data as static blocks without workflow", async () => {
     const toolCallId = "call-1";
+    const outcomeId = toolCallId;
     const base64Data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
     mockEvents = [
@@ -141,7 +151,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         payload: {
           toolCallId,
           toolName: "browser_take_screenshot",
-          args: JSON.stringify({ shot_id: outcomeId }),
+          args: JSON.stringify({}),
         },
         createdAt: new Date(),
       },
@@ -176,23 +186,30 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     const result = await saveArtifact(input, mockDeps);
 
     expect(result.reused).toBe(false);
-    expect(result.artifactId).toBeDefined();
-    expect(mockInsertedArtifacts.length).toBe(1);
+    expect(result.workflowId).toBeNull();
+    expect(mockInsertedWorkflows).toHaveLength(0);
+    expect(mockInsertedArtifacts).toHaveLength(1);
 
-    const saved = mockInsertedArtifacts[0];
+    const saved = mockInsertedArtifacts[0]!;
     expect(saved.type).toBe("image");
+    expect(saved.workflowId).toBeNull();
     expect(saved.viewMode).toBe("snapshot");
     expect(saved.snapshotAt).toBeDefined();
     expect(saved.snapshot).toEqual({
-      src: `data:image/png;base64,${base64Data}`,
-      url: `data:image/png;base64,${base64Data}`,
-      mimeType: "image/png",
+      blocks: [
+        {
+          kind: "image",
+          src: `data:image/png;base64,${base64Data}`,
+          mimeType: "image/png",
+          alt: "Tool image output",
+        },
+      ],
     });
   });
 
-  it("should save Image Outcome with Playwright Markdown filename, constructing streaming URL snapshot", async () => {
-    const outcomeId = "shot-2";
+  it("should save Image Outcome with Playwright Markdown filename as static blocks without workflow", async () => {
     const toolCallId = "call-2";
+    const outcomeId = toolCallId;
     const filename = "githubhome.png";
 
     mockEvents = [
@@ -204,7 +221,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         payload: {
           toolCallId,
           toolName: "browser_take_screenshot",
-          args: JSON.stringify({ filename, shot_id: outcomeId }),
+          args: JSON.stringify({ filename }),
         },
         createdAt: new Date(),
       },
@@ -238,17 +255,24 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     const result = await saveArtifact(input, mockDeps);
 
     expect(result.reused).toBe(false);
-    expect(mockInsertedArtifacts.length).toBe(1);
+    expect(result.workflowId).toBeNull();
+    expect(mockInsertedWorkflows).toHaveLength(0);
+    expect(mockInsertedArtifacts).toHaveLength(1);
 
-    const saved = mockInsertedArtifacts[0];
+    const saved = mockInsertedArtifacts[0]!;
     expect(saved.type).toBe("image");
+    expect(saved.workflowId).toBeNull();
     expect(saved.viewMode).toBe("snapshot");
     expect(saved.snapshotAt).toBeDefined();
     expect(saved.snapshot).toEqual({
-      url: `/api/media/playwright-files?file=${encodeURIComponent(filename)}`,
-      src: `/api/media/playwright-files?file=${encodeURIComponent(filename)}`,
-      filename,
-      mimeType: "image/png",
+      blocks: [
+        {
+          kind: "image",
+          src: `/api/media/playwright-files?file=${encodeURIComponent(filename)}`,
+          mimeType: "image/png",
+          alt: "Tool screenshot output",
+        },
+      ],
     });
   });
 
@@ -307,7 +331,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(saved.snapshot).toEqual(chartOption);
   });
 
-  it("should save HTML Outcome with generated html string, solidifying html snapshot", async () => {
+  it("should save HTML Outcome as static blocks without workflow", async () => {
     const outcomeId = "html-456";
     const toolCallId = "call-4";
     const htmlContent = "<!DOCTYPE html><html><body><h1>Analytics Report</h1></body></html>";
@@ -321,7 +345,7 @@ describe("saveArtifact — Outcomes save unit tests", () => {
         payload: {
           toolCallId,
           toolName: "generate_html_page",
-          args: JSON.stringify({ page_id: outcomeId, html: htmlContent }),
+          args: JSON.stringify({ outcome_id: outcomeId, title: "Analytics Page", html: htmlContent }),
         },
         createdAt: new Date(),
       },
@@ -348,13 +372,18 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     const result = await saveArtifact(input, mockDeps);
 
     expect(result.reused).toBe(false);
-    expect(mockInsertedArtifacts.length).toBe(1);
+    expect(result.workflowId).toBeNull();
+    expect(mockInsertedWorkflows).toHaveLength(0);
+    expect(mockInsertedArtifacts).toHaveLength(1);
 
-    const saved = mockInsertedArtifacts[0];
+    const saved = mockInsertedArtifacts[0]!;
     expect(saved.type).toBe("html");
+    expect(saved.workflowId).toBeNull();
     expect(saved.viewMode).toBe("snapshot");
     expect(saved.snapshotAt).toBeDefined();
-    expect(saved.snapshot).toBe(htmlContent);
+    expect(saved.snapshot).toEqual({
+      blocks: [{ kind: "html", html: htmlContent }],
+    });
   });
 
   it("should successfully save a generate_bento_slides outcome as slide type with snapshot", async () => {
@@ -405,13 +434,19 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     const result = await saveArtifact(input, mockDeps);
 
     expect(result.reused).toBe(false);
-    expect(mockInsertedArtifacts.length).toBe(1);
+    expect(result.workflowId).toBeNull();
+    expect(mockInsertedWorkflows).toHaveLength(0);
+    expect(mockInsertedArtifacts).toHaveLength(1);
 
-    const saved = mockInsertedArtifacts[0];
+    const saved = mockInsertedArtifacts[0]!;
     expect(saved.type).toBe("slide");
+    expect(saved.workflowId).toBeNull();
     expect(saved.viewMode).toBe("snapshot");
     expect(saved.snapshotAt).toBeDefined();
-    expect(saved.snapshot).toEqual({ ...slideDoc, title: "Pitch Deck" });
+    const blocks = (saved.snapshot as { blocks: Array<{ kind: string; doc: Record<string, unknown> }> }).blocks;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.kind).toBe("slide");
+    expect(blocks[0]?.doc).toEqual(slideDoc);
   });
 
   it("should merge slides from multi-chunk append calls when saving slide artifact", async () => {
@@ -498,12 +533,13 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(result.reused).toBe(false);
     expect(mockInsertedArtifacts.length).toBe(1);
 
-    const saved = mockInsertedArtifacts[0];
+    const saved = mockInsertedArtifacts[0]!;
     expect(saved.type).toBe("slide");
-    const snapshot = saved.snapshot as { slides: Array<Record<string, unknown>> };
-    expect(snapshot.slides).toHaveLength(2);
-    expect(snapshot.slides[0]?.id).toBe("slide-1");
-    expect(snapshot.slides[1]?.id).toBe("slide-2");
+    expect(saved.workflowId).toBeNull();
+    const slideBlock = (saved.snapshot as { blocks: Array<{ doc: { slides: Array<Record<string, unknown>> } }> }).blocks[0]!;
+    expect(slideBlock.doc.slides).toHaveLength(2);
+    expect(slideBlock.doc.slides[0]?.id).toBe("slide-1");
+    expect(slideBlock.doc.slides[1]?.id).toBe("slide-2");
   });
 
   it("should preserve slide snapshot when an edit has changed: false (unmatched targets)", async () => {
@@ -571,11 +607,11 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(result.reused).toBe(false);
     expect(mockInsertedArtifacts.length).toBe(1);
 
-    const saved = mockInsertedArtifacts[0];
-    const snapshot = saved.snapshot as { slides: Array<Record<string, unknown>> };
-    expect(snapshot.slides).toHaveLength(2);
-    expect(snapshot.slides[0]?.id).toBe("s1");
-    expect(snapshot.slides[1]?.id).toBe("s2");
+    const saved = mockInsertedArtifacts[0]!;
+    const slideBlock = (saved.snapshot as { blocks: Array<{ doc: { slides: Array<Record<string, unknown>> } }> }).blocks[0]!;
+    expect(slideBlock.doc.slides).toHaveLength(2);
+    expect(slideBlock.doc.slides[0]?.id).toBe("s1");
+    expect(slideBlock.doc.slides[1]?.id).toBe("s2");
   });
 
   it("should reconstruct full sequence in total order across insert, replace, and delete", async () => {
@@ -723,13 +759,13 @@ describe("saveArtifact — Outcomes save unit tests", () => {
     expect(result.reused).toBe(false);
     expect(mockInsertedArtifacts.length).toBe(1);
 
-    const saved = mockInsertedArtifacts[0];
-    const snapshot = saved.snapshot as { slides: Array<{ id: string; title?: string }> };
-    expect(snapshot.slides).toHaveLength(2);
-    expect(snapshot.slides[0]?.id).toBe("s3");
-    expect(snapshot.slides[0]?.title).toBe("Slide 3 Middle");
-    expect(snapshot.slides[1]?.id).toBe("s2");
-    expect(snapshot.slides[1]?.title).toBe("Slide 2 Replaced");
+    const saved = mockInsertedArtifacts[0]!;
+    const slideBlock = (saved.snapshot as { blocks: Array<{ doc: { slides: Array<{ id: string; title?: string }> } }> }).blocks[0]!;
+    expect(slideBlock.doc.slides).toHaveLength(2);
+    expect(slideBlock.doc.slides[0]?.id).toBe("s3");
+    expect(slideBlock.doc.slides[0]?.title).toBe("Slide 3 Middle");
+    expect(slideBlock.doc.slides[1]?.id).toBe("s2");
+    expect(slideBlock.doc.slides[1]?.title).toBe("Slide 2 Replaced");
   });
 
   it("should be idempotent when saving the same outcome twice", async () => {
@@ -821,7 +857,9 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       expect(saved.type).toBe("a2ui");
       expect(saved.workflowId).toBeNull();
       expect(saved.sourceRevision).toBe("2");
-      expect((saved.snapshot as { operations: unknown[] }).operations).toHaveLength(2);
+      const a2uiBlock = (saved.snapshot as { blocks: Array<{ kind: string; surface: { operations: unknown[] } }> }).blocks[0]!;
+      expect(a2uiBlock.kind).toBe("a2ui");
+      expect(a2uiBlock.surface.operations).toHaveLength(2);
     });
 
     it("refreshes the existing workflow-less row instead of re-inserting", async () => {
@@ -850,9 +888,9 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       expect(mockArtifactUpdates).toHaveLength(1);
       const update = mockArtifactUpdates[0]!;
       expect(update.sourceRevision).toBe("3");
-      const snapshot = update.snapshot as { operations: unknown[] };
-      expect(snapshot.operations).toHaveLength(3);
-      expect((update.config as { surface: unknown }).surface).toEqual(snapshot);
+      const a2uiBlock = (update.snapshot as { blocks: Array<{ kind: string; surface: { operations: unknown[] } }> }).blocks[0]!;
+      expect(a2uiBlock.kind).toBe("a2ui");
+      expect(a2uiBlock.surface.operations).toHaveLength(3);
     });
 
     it("folds a lost insert race into the refresh path", async () => {
@@ -954,12 +992,12 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       expect((artUpdate.snapshot as { series: Array<{ type: string }> }).series[0]?.type).toBe("line");
     });
 
-    it("refreshes workflow.spec, config, snapshot, and sourceRevision for an updated html page", async () => {
+    it("refreshes static blocks snapshot and sourceRevision for an updated html page without touching workflow", async () => {
       const outcomeId = "landing-page";
       mockExistingArtifact = {
         id: "existing-html-1",
-        workflowId: "existing-wf-html",
-        workflowOutputField: "html",
+        workflowId: null,
+        workflowOutputField: null,
         sourceRevision: "call-html-v1",
       };
       mockEvents = [
@@ -998,10 +1036,13 @@ describe("saveArtifact — Outcomes save unit tests", () => {
       );
 
       expect(result.reused).toBe(true);
-      expect(mockWorkflowUpdates).toHaveLength(1);
+      expect(result.workflowId).toBeNull();
+      expect(mockWorkflowUpdates).toHaveLength(0);
       expect(mockArtifactUpdates).toHaveLength(1);
       expect(mockArtifactUpdates[0]!.sourceRevision).toBe("call-html-v2");
-      expect(mockArtifactUpdates[0]!.snapshot).toBe("<html><body><h1>v2</h1></body></html>");
+      expect(mockArtifactUpdates[0]!.snapshot).toEqual({
+        blocks: [{ kind: "html", html: "<html><body><h1>v2</h1></body></html>" }],
+      });
     });
 
     it("short-circuits without DB updates when revision matches sourceRevision", async () => {

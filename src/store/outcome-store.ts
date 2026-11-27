@@ -10,12 +10,36 @@
  */
 
 import { create } from "zustand";
-import type { GenerativeUISurfaceContent } from "@copilotkit/shared/generative-ui";
+import type {
+  A2uiBlock,
+  CardListBlock,
+  CardListItem,
+  CardListSourceKind,
+  ChartBlock,
+  HtmlBlock,
+  ImageBlock,
+  OutcomeBlock,
+  SlideBlock,
+  TextBlock,
+} from "@/lib/blocks/schema";
 import { applySlideEdit } from "@/lib/outcomes/merge-slides";
 import {
   deriveSlideRevision,
   normalizeOutcomeId,
 } from "@/lib/outcomes/schema";
+
+export type {
+  A2uiBlock,
+  CardListBlock,
+  CardListItem,
+  CardListSourceKind,
+  ChartBlock,
+  HtmlBlock,
+  ImageBlock,
+  OutcomeBlock,
+  SlideBlock,
+  TextBlock,
+};
 
 // CONTRACT: Hard cap on buffered pending edits per outcome to prevent unbounded
 // memory growth when edits reference non-existent slide IDs (e.g. LLM hallucination,
@@ -42,111 +66,7 @@ function cappedPendingPush(
     : appended;
 }
 
-// blocks
-
-/** Visual primitives a Report can be composed of. Each entry has a
- *  dedicated renderer under `components/workspace/blocks/`. Adding a
- *  new block: append the discriminant + a `<KindBlock>` component +
- *  wire it in `BlockList`. */
-export type OutcomeBlock = TextBlock | CardListBlock | ChartBlock | HtmlBlock | ImageBlock | SlideBlock | A2uiBlock;
-
-export interface TextBlock {
-  kind: "text";
-  /** Markdown source. Renderer is responsible for sanitisation. */
-  markdown: string;
-}
-
-/** Source-kind discriminator for citation-aware card-list rows
- *  (drives icon chrome and is paired with {@link CardListItem.index}
- *  in the `[N]` chat citation contract). New citation-aware
- *  producers MUST set it; legacy card lists may omit. See
- *  docs/artifact-evolution.md. */
-export type CardListSourceKind = "web" | "kb" | "sql" | "file";
-
-/** Generic "clickable card with thumbnail" — web-search results
- *  today, also suitable for kb retrieval, sql rows, file lookups. */
-export interface CardListItem {
-  /** 1-based citation number. Producers that don't participate in
-   *  the `[N]` citation contract may omit it; renderers fall back to
-   *  list position when absent. New citation-aware producers (web_search,
-   *  kb_retrieve, etc.) MUST set it monotonically starting at 1.
-   *  See docs/artifact-evolution.md. */
-  index?: number;
-  /** What kind of evidence this card represents. Drives card chrome
-   *  (domain favicon for web, doc icon for kb, table-row icon for
-   *  sql, file thumbnail for file). Omit for generic non-citation
-   *  card lists. */
-  sourceKind?: CardListSourceKind;
-  /** Hero / thumbnail URL. Renderer falls back to {@link favicon} +
-   *  letter avatar when absent. Broken images are dropped silently. */
-  image?: string;
-  /** Primary heading. Required even when image is present — alt text
-   *  for accessibility and a fallback when image fails. */
-  title: string;
-  /** When provided, the entire card becomes clickable (opens in a
-   *  new tab). When absent, the card is a presentation block. */
-  url?: string;
-  /** Secondary line under the title — typically domain or category. */
-  subtitle?: string;
-  /** Multi-line excerpt; renderer clamps the visible portion.
-   *  CITATION INVARIANT: when {@link sourceKind} is set, this MUST be
-   *  the raw upstream snippet (search engine summary, KB passage,
-   *  SQL row value) — NOT a re-paraphrased LLM gloss. Provenance is
-   *  the whole point of the block-side display. */
-  snippet?: string;
-  /** Trailing small text under snippet — typically a date or score. */
-  meta?: string;
-  /** Site icon URL. Used as a small overlay on the image or as the
-   *  main visual when {@link image} is absent. */
-  favicon?: string;
-}
-
-export interface CardListBlock {
-  kind: "card_list";
-  cards: CardListItem[];
-}
-
-export interface ChartBlock {
-  kind: "chart";
-  /** Full ECharts option JSON (≤ 64 KB; enforced at the handler). */
-  option: Record<string, unknown>;
-  /** Optional `extract_dataset_by_sql` cache key for traceability. */
-  datasetName?: string;
-}
-
-export interface HtmlBlock {
-  kind: "html";
-  /** Complete HTML page source (≤ 512 KB; enforced at the handler).
-   *  Rendered inside a sandboxed iframe via `srcdoc`. */
-  html: string;
-}
-
-export interface A2uiBlock {
-  kind: "a2ui";
-  surface: GenerativeUISurfaceContent;
-}
-
-export interface ImageBlock {
-  kind: "image";
-  /** URL (e.g. /api/media/tool-image/xxx) or data:image/...;base64,... */
-  src: string;
-  mimeType?: string;
-  alt?: string;
-  caption?: string;
-}
-
-export interface SlideBlock {
-  kind: "slide";
-  /** Complete Bento slides JSON document. Rendered via Bento HTML template in sandboxed iframe. */
-  doc: Record<string, unknown>;
-  /** Optional title to fall back to when doc.title is omitted */
-  title?: string;
-  /** Track all toolCallIds applied to this slide deck to ensure idempotent incremental appending.
-   *  CONTRACT: AG-UI protocol guarantees toolCallId global uniqueness across all tools.
-   *  Both generate_bento_slides and edit_bento_slides IDs are mixed here safely —
-   *  no collision possible, and the array serves purely as an idempotency guard. */
-  appliedToolCallIds?: string[];
-}
+// blocks — canonical definitions live in `@/lib/blocks/schema` and are re-exported above.
 
 // outcome
 

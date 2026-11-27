@@ -1,42 +1,20 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
-import { GENERATIVE_UI_ACTIVITY_TYPE } from "@copilotkit/shared/generative-ui";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import {
-  ArtifactTable,
-  EntityRunEventTable,
-  EntityRunTable,
-} from "@/lib/db/schema";
+import { ArtifactTable } from "@/lib/db/schema";
 import { ApiError, withSession } from "@/lib/http/route-handlers";
-
-import { normalizeOutcomeId } from "@/lib/outcomes/schema";
+import { replayThreadOutcomes } from "@/lib/outcomes/replay-thread.server";
 import type { Outcome } from "@/store/outcome-store";
-import {
-  rebuildChartOutcome,
-  rebuildHtmlPageOutcome,
-  rebuildBentoSlidesOutcome,
-  rebuildBentoSlideEditOutcome,
-  rebuildImageOutcome,
-  rebuildWebSearchOutcome,
-  rebuildA2UiOutcome,
-  type RebuildContext,
-  type ToolCallChunkPayload,
-  type ToolCallResultPayload,
-} from "@/lib/outcomes/replay-rebuilders";
-import {
-  applySurfaceDelta,
-  type SurfacePatchOp,
-} from "@/lib/generative-ui/surface";
 
 /**
  * GET /api/threads/[id]/outcomes — replay the thread's
  * outcome-producing tool history. Owner-scoped; threads with no
  * runs the user owns return `{ outcomes: [] }` (no 404 — "empty"
  * vs "not yours" are indistinguishable). Dispatches per-tool via
- * `lib/outcomes/replay-rebuilders.ts`. See docs/data-visualization.md.
+ * `lib/outcomes/replay-thread.server.ts`.
  */
 
 const ROUTE = "/api/threads/[threadId]/outcomes" as const;
@@ -45,8 +23,6 @@ export const GET = withSession<{ threadId: string }>(
   ROUTE,
   async ({ params, session, log }) => {
     const threadId: string = params.threadId;
-    // entity_run.thread_id is `uuid` — pre-validate so we return 400
-    // instead of leaking a Postgres parse error.
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         threadId,
@@ -56,256 +32,8 @@ export const GET = withSession<{ threadId: string }>(
     }
 
     const userId: string = session.user.id;
+    const outcomes = await replayThreadOutcomes(threadId, userId, log);
 
-    // Pull rebuildable chunks (filtered server-side by payload->>'toolName')
-    // + all result rows (no toolName in result payload — paired in memory).
-    // (ts, seq) ordering puts each chunk before its result.
-    const rows = await db
-      .select({
-        runId: EntityRunTable.id,
-        entityId: EntityRunTable.entityId,
-        eventType: EntityRunEventTable.type,
-        eventSeq: EntityRunEventTable.seq,
-        eventTs: EntityRunEventTable.ts,
-        payload: EntityRunEventTable.payload,
-      })
-      .from(EntityRunEventTable)
-      .innerJoin(
-        EntityRunTable,
-        eq(EntityRunTable.id, EntityRunEventTable.runId),
-      )
-      .where(
-        and(
-          eq(EntityRunTable.threadId, threadId),
-          eq(EntityRunTable.ownerId, userId),
-          or(
-            eq(EntityRunEventTable.type, "tool_call_chunk"),
-            eq(EntityRunEventTable.type, "tool_call_result"),
-            and(
-              or(
-                eq(EntityRunEventTable.type, "activity_snapshot"),
-                eq(EntityRunEventTable.type, "activity_delta"),
-              ),
-              sql`${EntityRunEventTable.payload}->>'activityType' = ${GENERATIVE_UI_ACTIVITY_TYPE}`,
-            ),
-          ),
-        ),
-      )
-      .orderBy(
-        asc(EntityRunTable.createdAt),
-        asc(EntityRunEventTable.seq),
-        asc(EntityRunEventTable.ts),
-      );
-
-    // 2. Walk events in order; bucket chunks needing pairing, rebuild
-    //    eagerly when no pairing is needed (generate_echarts_config).
-    interface PendingPair {
-      chunk: ToolCallChunkPayload;
-      runId: string;
-      entityId: string;
-      ts: Date;
-    }
-    const pending: Map<string, PendingPair> = new Map();
-    const outcomes: Map<string, Outcome> = new Map();
-    interface SurfaceDraft {
-      raw: Record<string, unknown>;
-      runId: string;
-      entityId: string;
-      ts: Date;
-    }
-    const surfaceDrafts: Map<string, SurfaceDraft> = new Map();
-
-    const ctxFor = (p: PendingPair): RebuildContext => ({
-      threadId,
-      runId: p.runId,
-      entityId: p.entityId,
-      ts: p.ts,
-      log,
-    });
-
-    for (const row of rows) {
-      if (row.eventType === "tool_call_chunk") {
-        const chunk = row.payload as ToolCallChunkPayload;
-
-        // generate_echarts_config and generate_html_page rebuild from
-        // chunk only — the result event is a server-side echo of the
-        // same payload, and the chunk already carries everything
-        // needed to reconstruct the outcome.
-        if (chunk.toolName === "generate_echarts_config") {
-          const built = rebuildChartOutcome(chunk, {
-            threadId,
-            runId: row.runId,
-            entityId: row.entityId,
-            ts: row.eventTs,
-            log,
-          });
-          if (built) outcomes.set(built.id, built.outcome);
-          continue;
-        }
-
-        if (chunk.toolName === "generate_html_page") {
-          const built = rebuildHtmlPageOutcome(chunk, {
-            threadId,
-            runId: row.runId,
-            entityId: row.entityId,
-            ts: row.eventTs,
-            log,
-          });
-          if (built) outcomes.set(built.id, built.outcome);
-          continue;
-        }
-
-        // generate_bento_slides and edit_bento_slides are stashed in `pending`
-        // so they can be paired with their result events. The rebuilders check
-        // result.ok before applying — failed calls (DOC_TOO_LARGE, REPLACE_COUNT_MISMATCH,
-        // etc.) are skipped rather than replayed as ghost outcomes.
-        if (
-          chunk.toolName === "generate_bento_slides" ||
-          chunk.toolName === "edit_bento_slides"
-        ) {
-          pending.set(chunk.toolCallId, {
-            chunk,
-            runId: row.runId,
-            entityId: row.entityId,
-            ts: row.eventTs,
-          });
-          continue;
-        }
-
-        // Stash all other chunks for pairing with results (web_search, screenshots, etc.)
-        pending.set(chunk.toolCallId, {
-          chunk,
-          runId: row.runId,
-          entityId: row.entityId,
-          ts: row.eventTs,
-        });
-      } else if (row.eventType === "tool_call_result") {
-        const result = row.payload as ToolCallResultPayload;
-        const pair = pending.get(result.toolCallId);
-
-        // 1. Try generate_bento_slides
-        if (pair && pair.chunk.toolName === "generate_bento_slides") {
-          pending.delete(result.toolCallId);
-          let priorOutcome: Outcome | undefined;
-          try {
-            const raw = JSON.parse(pair.chunk.args) as Record<string, unknown>;
-            if (raw && typeof raw.outcome_id === "string") {
-              const normId = normalizeOutcomeId(raw.outcome_id);
-              priorOutcome = outcomes.get(normId);
-            }
-          } catch {
-            // parse error handled inside rebuilder
-          }
-          const built = rebuildBentoSlidesOutcome(
-            pair.chunk,
-            ctxFor(pair),
-            priorOutcome,
-            result,
-          );
-          if (built) outcomes.set(built.id, built.outcome);
-          continue;
-        }
-
-        // 2. Try edit_bento_slides
-        if (pair && pair.chunk.toolName === "edit_bento_slides") {
-          pending.delete(result.toolCallId);
-          let priorOutcome: Outcome | undefined;
-          try {
-            const raw = JSON.parse(pair.chunk.args) as Record<string, unknown>;
-            if (raw && typeof raw.outcome_id === "string") {
-              const normId = normalizeOutcomeId(raw.outcome_id);
-              priorOutcome = outcomes.get(normId);
-            }
-          } catch {
-            // parse error handled inside rebuilder
-          }
-          const built = rebuildBentoSlideEditOutcome(
-            pair.chunk,
-            ctxFor(pair),
-            priorOutcome,
-            result,
-          );
-          if (built) outcomes.set(built.id, built.outcome);
-          continue;
-        }
-
-        // 3. Try web_search
-        if (pair && pair.chunk.toolName === "web_search") {
-          const built = rebuildWebSearchOutcome(pair.chunk, result, ctxFor(pair));
-          pending.delete(result.toolCallId);
-          if (built) outcomes.set(built.id, built.outcome);
-          continue;
-        }
-
-        // 4. Try image outcome from MCP tools (e.g. browser_take_screenshot)
-        const ctx: RebuildContext = pair
-          ? ctxFor(pair)
-          : {
-              threadId,
-              runId: row.runId,
-              entityId: row.entityId,
-              ts: row.eventTs,
-              log,
-            };
-        const imageOutcome = rebuildImageOutcome(pair?.chunk, result, ctx);
-        if (imageOutcome) {
-          outcomes.set(imageOutcome.id, imageOutcome.outcome);
-          if (pair) pending.delete(result.toolCallId);
-        }
-      } else if (row.eventType === "activity_snapshot") {
-        const p = row.payload as {
-          messageId?: unknown;
-          activityType?: unknown;
-          content?: unknown;
-        };
-        if (
-          typeof p.messageId === "string" &&
-          p.activityType === GENERATIVE_UI_ACTIVITY_TYPE &&
-          p.content &&
-          typeof p.content === "object" &&
-          !Array.isArray(p.content)
-        ) {
-          surfaceDrafts.set(p.messageId, {
-            raw: { ...(p.content as Record<string, unknown>) },
-            runId: row.runId,
-            entityId: row.entityId,
-            ts: row.eventTs,
-          });
-        }
-      } else if (row.eventType === "activity_delta") {
-        const p = row.payload as {
-          messageId?: unknown;
-          activityType?: unknown;
-          patch?: unknown;
-        };
-        if (
-          typeof p.messageId === "string" &&
-          p.activityType === GENERATIVE_UI_ACTIVITY_TYPE &&
-          Array.isArray(p.patch)
-        ) {
-          const existing = surfaceDrafts.get(p.messageId);
-          if (existing) {
-            existing.raw = applySurfaceDelta(existing.raw, p.patch as SurfacePatchOp[]);
-            existing.ts = row.eventTs;
-          }
-        }
-      }
-    }
-
-    for (const draft of surfaceDrafts.values()) {
-      const built = rebuildA2UiOutcome(draft.raw, {
-        threadId,
-        runId: draft.runId,
-        entityId: draft.entityId,
-        ts: draft.ts,
-        log,
-      });
-      if (built) outcomes.set(built.id, built.outcome);
-    }
-
-    // 3. Back-fill savedArtifactId. Defensive try/catch: missing
-    //    columns ("source_thread_id" / "source_outcome_id") must not
-    //    fail the whole replay — outcomes are still derivable.
     if (outcomes.size > 0) {
       const outcomeIds: string[] = [...outcomes.keys()];
       try {
@@ -348,7 +76,6 @@ export const GET = withSession<{ threadId: string }>(
                     code: (cause as { code?: string }).code,
                   }
                 : cause,
-            hint: "If pg says 'column \"source_thread_id\" does not exist', run `pnpm db:migrate` to apply migration 0031.",
           },
           "back-fill of savedArtifactId failed; returning outcomes without ✓ badges",
         );

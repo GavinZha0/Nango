@@ -1,18 +1,8 @@
 "use client";
 
 /**
- * /outcomes — main-panel route for the transient Outcomes panel.
- *
- * See `docs/data-visualization.md` This page is intentionally
- * trivial: it lazy-loads `OutcomesPanel`, which subscribes to
- * `outcomeStore` and renders the card list (grid or focus view).
- * The bulk of the bundle (echarts core, ~350 KB gzipped) only loads
- * when the user actually navigates here.
- *
- * NOT to be confused with `/artifact` — that route is reserved for
- * the future V2 Artifact library (CRUD over the `artifact` DB
- * table). `/outcomes` is thread-scoped, ephemeral, in-memory; it
- * back-fills from `entity_run_event` history on thread switch.
+ * /outcomes — main-panel route for the transient, thread-scoped Outcomes panel.
+ * Persisted artifacts live under `/artifact`.
  */
 
 import dynamic from "next/dynamic";

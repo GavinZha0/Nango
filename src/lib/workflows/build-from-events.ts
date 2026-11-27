@@ -179,36 +179,6 @@ function isChartInvocation(inv: ToolInvocation): boolean {
   return chartRendererFromToolName(inv.toolName) !== null;
 }
 
-const HTML_PAGE_TOOL_NAME = "generate_html_page";
-function isHtmlPageInvocation(inv: ToolInvocation): boolean {
-  return inv.toolName === HTML_PAGE_TOOL_NAME;
-}
-
-const BENTO_SLIDES_TOOL_NAME = "generate_bento_slides";
-function isBentoSlidesInvocation(inv: ToolInvocation): boolean {
-  return inv.toolName === BENTO_SLIDES_TOOL_NAME;
-}
-
-function isImageInvocation(inv: ToolInvocation): boolean {
-  const name = inv.toolName.toLowerCase();
-  if (
-    name === "browser_take_screenshot" ||
-    name === "take_screenshot" ||
-    name === "generate_image" ||
-    name === "render_image" ||
-    name.includes("screenshot")
-  ) {
-    return true;
-  }
-  if (inv.result && typeof inv.result === "object") {
-    const res = inv.result as Record<string, unknown>;
-    if (Array.isArray(res.content)) {
-      return (res.content as Array<{ type?: string }>).some((c) => c?.type === "image");
-    }
-  }
-  return false;
-}
-
 /**
  * SQL extraction tool's operational fields — present on tool
  * results but not part of any spec node's output contract. Strategy
@@ -280,21 +250,12 @@ export function buildWorkflowSpecFromRunEvents(
   // stored this payload was dropped (migration 0004).
   const strippedFrontendConfig = { ...artifactCreator.inputs };
 
-  // Chart tools, HTML tools, and image/screenshot tools become first-class
-  // workflow nodes — their invocations stay in `dataInvocations`.
+  // Chart tools become first-class workflow nodes; non-chart outcomes are saved
+  // as static `{ blocks }` snapshots without invoking this builder.
   const artifactCreatorIsChart = isChartInvocation(artifactCreator);
-  const artifactCreatorIsHtmlPage = isHtmlPageInvocation(artifactCreator);
-  const artifactCreatorIsBentoSlides = isBentoSlidesInvocation(artifactCreator);
-  const artifactCreatorIsImage = isImageInvocation(artifactCreator);
-  const artifactCreatorIsFirstClass =
-    artifactCreatorIsChart || artifactCreatorIsHtmlPage || artifactCreatorIsBentoSlides || artifactCreatorIsImage;
-  // CONTRACT: Incremental partial edit tools (edit_bento_slides) materialize directly
-  // into the artifact's static snapshot in saveArtifact, not standalone workflow nodes.
-  const dataInvocations = (
-    artifactCreatorIsFirstClass
-      ? successful
-      : successful.filter((i) => i.callId !== artifactCreatingCallId)
-  ).filter((i) => i.toolName !== "edit_bento_slides");
+  const dataInvocations = artifactCreatorIsChart
+    ? successful
+    : successful.filter((i) => i.callId !== artifactCreatingCallId);
 
   let nextId = 0;
   const literalNodes: LLMNode[] = dataInvocations.map((inv) => {
@@ -311,12 +272,6 @@ export function buildWorkflowSpecFromRunEvents(
   // spec.outputs mapping
   const outputs = artifactCreatorIsChart
     ? buildChartOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
-    : artifactCreatorIsHtmlPage
-    ? buildHtmlOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
-    : artifactCreatorIsBentoSlides
-    ? buildBentoSlidesOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
-    : artifactCreatorIsImage
-    ? buildImageOutputsMap(dataInvocations, reconciled.nodes, artifactCreatingCallId)
     : buildOutputsMap(
         reconciled.rewrittenArtifactInput,
         reconciled.nodes,
@@ -1337,77 +1292,6 @@ function buildChartOutputsMap(
   }
   return { option: `@nodes.${chartNode.id}.option` };
 }
-
-function buildHtmlOutputsMap(
-  dataInvocations: ReadonlyArray<ToolInvocation>,
-  nodes: ReadonlyArray<LLMNode>,
-  artifactCreatingCallId: string,
-): Record<string, string> {
-  const idx = dataInvocations.findIndex((inv) => inv.callId === artifactCreatingCallId);
-  if (idx < 0) {
-    throw new Error(
-      `buildHtmlOutputsMap: html callId '${artifactCreatingCallId}' ` +
-      `is not present in dataInvocations (was it a failed tool call?). ` +
-      `Cannot build spec.outputs without a html node.`,
-    );
-  }
-  const htmlNode = nodes[idx];
-  if (htmlNode === undefined || htmlNode.type !== "tool") {
-    throw new Error(
-      `buildHtmlOutputsMap: expected a html node at index ${idx} ` +
-      `(callId '${artifactCreatingCallId}') but got ` +
-      `${htmlNode === undefined ? "undefined" : `type="${htmlNode.type}"`}. ` +
-      `This indicates a bug in the assembleNode dispatch table.`,
-    );
-  }
-  return { html: `@nodes.${htmlNode.id}.html` };
-}
-
-function buildBentoSlidesOutputsMap(
-  dataInvocations: ReadonlyArray<ToolInvocation>,
-  nodes: ReadonlyArray<LLMNode>,
-  artifactCreatingCallId: string,
-): Record<string, string> {
-  const idx = dataInvocations.findIndex((inv) => inv.callId === artifactCreatingCallId);
-  if (idx < 0) {
-    throw new Error(
-      `buildBentoSlidesOutputsMap: slides callId '${artifactCreatingCallId}' ` +
-      `is not present in dataInvocations (was it a failed tool call?). ` +
-      `Cannot build spec.outputs without a slides node.`,
-    );
-  }
-  const slidesNode = nodes[idx];
-  if (slidesNode === undefined || slidesNode.type !== "tool") {
-    throw new Error(
-      `buildBentoSlidesOutputsMap: expected a slides tool node at index ${idx} ` +
-      `(callId '${artifactCreatingCallId}') but got ` +
-      `${slidesNode === undefined ? "undefined" : `type="${slidesNode.type}"`}. ` +
-      `This indicates a bug in the assembleNode dispatch table.`,
-    );
-  }
-  return { doc: `@nodes.${slidesNode.id}.doc` };
-}
-
-function buildImageOutputsMap(
-  dataInvocations: ReadonlyArray<ToolInvocation>,
-  nodes: ReadonlyArray<LLMNode>,
-  artifactCreatingCallId: string,
-): Record<string, string> {
-  const idx = dataInvocations.findIndex((inv) => inv.callId === artifactCreatingCallId);
-  if (idx < 0) {
-    throw new Error(
-      `buildImageOutputsMap: image callId '${artifactCreatingCallId}' is not present in dataInvocations.`,
-    );
-  }
-  const imgNode = nodes[idx];
-  if (imgNode === undefined) {
-    throw new Error(`buildImageOutputsMap: expected node at index ${idx}`);
-  }
-  return { image: `@nodes.${imgNode.id}.content` };
-}
-
-
-
 
 function placeholderNoOpNode(): LLMToolNode {
   // Degenerate spec — frontend_tool called with no data deps. The

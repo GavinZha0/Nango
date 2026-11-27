@@ -34,9 +34,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { assembleBentoHtml } from "@/lib/bento/template";
-import { A2uiBlockRenderer } from "@/components/workspace/blocks/A2uiBlock";
-import { parseSurfaceContent } from "@/lib/generative-ui/surface";
+import { toArtifactBlocks } from "@/lib/blocks/schema";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -89,8 +87,8 @@ import {
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkflowGraph } from "@/components/workflow-graph/WorkflowGraph";
+import { BlockList } from "@/components/workspace/blocks/BlockList";
 import { ChartErrorBoundary } from "@/components/workspace/ChartErrorBoundary";
-import { EChartsRenderer } from "@/components/workspace/EChartsRenderer";
 import { ArtifactFilterPanel } from "@/components/main-panels/ArtifactFilterPanel";
 import {
   useArtifactTree,
@@ -357,8 +355,13 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
       let currentSnapshot: Record<string, unknown> | undefined;
       if (node?.type === "slide") {
         const liveDoc = await getBentoDocFromIframe(slideIframeRef.current);
-        if (liveDoc && isSlideDoc(liveDoc)) {
-          currentSnapshot = liveDoc;
+        if (
+          liveDoc &&
+          (liveDoc.format === "bento/slides" || Array.isArray(liveDoc.slides))
+        ) {
+          currentSnapshot = {
+            blocks: [{ kind: "slide", doc: liveDoc, title: node.name }],
+          };
         }
       } else if (data?.data && typeof data.data === "object") {
         currentSnapshot = data.data as Record<string, unknown>;
@@ -491,6 +494,8 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
     );
   }
 
+  const hasWorkflow = Boolean(data?.workflow);
+
   return (
     <div className="flex h-full flex-col">
       <DetailHeader
@@ -503,32 +508,44 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps): ReactElemen
         snapshotInfo={snapshotInfo}
         activeView={activeView}
         setActiveView={setActiveView}
-        hasWorkflow={Boolean(data?.workflow)}
+        hasWorkflow={hasWorkflow}
         actions={
           isSeedCategory ? null : (
             <ActionBar
               viewMode={node?.viewMode ?? "snapshot"}
               disableManagement={activeView === "workflow"}
               onRefresh={
-                node?.type === "slide"
-                  ? undefined
-                  : () => {
+                hasWorkflow
+                  ? () => {
                       if (activeView === "workflow") setActiveView("preview");
                       void handleRefresh();
                     }
+                  : undefined
               }
-              onSaveSnapshot={() => {
-                if (activeView === "workflow") setActiveView("preview");
-                void handleSaveSnapshot();
-              }}
-              onLoadSnapshot={() => {
-                if (activeView === "workflow") setActiveView("preview");
-                void handleLoadSnapshot();
-              }}
-              onCompare={() => {
-                if (activeView === "workflow") setActiveView("preview");
-                // TODO: Compare modal
-              }}
+              onSaveSnapshot={
+                hasWorkflow || node.type === "slide"
+                  ? () => {
+                      if (activeView === "workflow") setActiveView("preview");
+                      void handleSaveSnapshot();
+                    }
+                  : undefined
+              }
+              onLoadSnapshot={
+                hasWorkflow
+                  ? () => {
+                      if (activeView === "workflow") setActiveView("preview");
+                      void handleLoadSnapshot();
+                    }
+                  : undefined
+              }
+              onCompare={
+                hasWorkflow
+                  ? () => {
+                      if (activeView === "workflow") setActiveView("preview");
+                      // TODO: Compare modal
+                    }
+                  : undefined
+              }
               onRename={() => setDialog("rename")}
               onMove={() => setDialog("move")}
               onDelete={() => setDialog("delete")}
@@ -911,14 +928,17 @@ function ActionBar({
   viewMode: "snapshot" | "live";
   disableManagement?: boolean;
   onRefresh?: () => void;
-  onSaveSnapshot: () => void;
-  onLoadSnapshot: () => void;
-  onCompare: () => void;
+  onSaveSnapshot?: () => void;
+  onLoadSnapshot?: () => void;
+  onCompare?: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
   onExport?: () => void;
 }): ReactElement {
+  const hasDataActions = Boolean(
+    onExport || onRefresh || onSaveSnapshot || onLoadSnapshot || onCompare,
+  );
   return (
     <TooltipProvider delay={200}>
       <div className="flex items-center gap-1">
@@ -950,47 +970,53 @@ function ActionBar({
           </Tooltip>
         )}
 
-        <Tooltip>
-          <TooltipTrigger
-            onClick={onSaveSnapshot}
-            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
-            aria-label="Save snapshot"
-          >
-            <Save className="h-4 w-4" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Save Snapshot</TooltipContent>
-        </Tooltip>
+        {onSaveSnapshot && (
+          <Tooltip>
+            <TooltipTrigger
+              onClick={onSaveSnapshot}
+              className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+              aria-label="Save snapshot"
+            >
+              <Save className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Save Snapshot</TooltipContent>
+          </Tooltip>
+        )}
 
-        <Tooltip>
-          <TooltipTrigger
-            onClick={onLoadSnapshot}
-            className={cn(
-              buttonVariants({ size: "icon", variant: "ghost" }),
-              "h-8 w-8",
-              viewMode === "snapshot"
-                ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 hover:text-amber-600"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            aria-label="Load snapshot"
-          >
-            <Camera className="h-4 w-4" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Load Snapshot</TooltipContent>
-        </Tooltip>
+        {onLoadSnapshot && (
+          <Tooltip>
+            <TooltipTrigger
+              onClick={onLoadSnapshot}
+              className={cn(
+                buttonVariants({ size: "icon", variant: "ghost" }),
+                "h-8 w-8",
+                viewMode === "snapshot"
+                  ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 hover:text-amber-600"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-label="Load snapshot"
+            >
+              <Camera className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Load Snapshot</TooltipContent>
+          </Tooltip>
+        )}
 
-        <Tooltip>
-          <TooltipTrigger
-            onClick={onCompare}
-            className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
-            aria-label="Compare snapshot vs live"
-          >
-            <GitCompare className="h-4 w-4" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Compare</TooltipContent>
-        </Tooltip>
+        {onCompare && (
+          <Tooltip>
+            <TooltipTrigger
+              onClick={onCompare}
+              className={cn(buttonVariants({ size: "icon", variant: "ghost" }), "h-8 w-8 text-muted-foreground hover:text-foreground")}
+              aria-label="Compare snapshot vs live"
+            >
+              <GitCompare className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Compare</TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Vertical Divider */}
-        <div className="mx-1 h-4 w-px shrink-0 bg-border" />
+        {hasDataActions && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
 
         {/* Node Management Group */}
         <Tooltip>
@@ -1128,105 +1154,20 @@ function ArtifactBody({
   data,
   slideIframeRef,
 }: ArtifactBodyProps): ReactElement {
-  // Chart artifacts: `bundle.data` is the merged ECharts option
-  // produced by the workflow's chart node. Render it directly so
-  // the body always reflects the latest workflow execution.
-  if (node.type === "chart" && isChartOption(data)) {
+  const blocks = toArtifactBlocks(node, data);
+  if (blocks) {
     return (
       <ChartErrorBoundary resetKey={node.id}>
-        <div className="h-full min-h-0 w-full">
-          <EChartsRenderer option={data as Record<string, unknown>} />
+        <div className="flex h-full min-h-0 w-full flex-col">
+          <BlockList
+            blocks={blocks}
+            size="large"
+            slideMode="edit"
+            slideIframeRef={slideIframeRef}
+          />
         </div>
       </ChartErrorBoundary>
     );
-  }
-
-  // HTML artifacts: `bundle.data` is the HTML string produced by
-  // the generate_html_page tool. Render via sandboxed iframe.
-  if (node.type === "html" && isHtmlContent(data)) {
-    return (
-      <div className="h-full min-h-0 w-full">
-        <iframe
-          srcDoc={data as string}
-          sandbox="allow-scripts"
-          referrerPolicy="no-referrer"
-          title={node.name ?? "HTML page"}
-          className="h-full w-full rounded border border-border bg-white"
-        />
-      </div>
-    );
-  }
-
-  // Bento slide artifacts: `bundle.data` (or node.snapshot or node.config.doc) is the Bento slides doc.
-  // Render via sandboxed iframe in full edit mode with slideIframeRef attached.
-  if (node.type === "slide") {
-    const rawDoc = isSlideDoc(data)
-      ? data
-      : isSlideDoc(node.snapshot)
-      ? node.snapshot
-      : isSlideDoc((node.config as { doc?: unknown })?.doc)
-      ? (node.config as { doc?: unknown }).doc
-      : null;
-
-    if (rawDoc) {
-      let html = "";
-      try {
-        html = assembleBentoHtml(rawDoc, {
-          fallbackTitle: node.name,
-          mode: "edit",
-        });
-      } catch (err) {
-        console.error("[ArtifactDetail] Failed to assemble Bento HTML:", err);
-      }
-
-      if (html) {
-        return (
-          <div className="h-full min-h-0 w-full flex flex-col">
-            <iframe
-              ref={slideIframeRef}
-              srcDoc={html}
-              sandbox="allow-scripts"
-              referrerPolicy="no-referrer"
-              title={node.name ?? "Bento Slides"}
-              className="h-full w-full rounded border border-border bg-slate-950 flex-1"
-            />
-          </div>
-        );
-      }
-    }
-  }
-
-  // A2UI artifacts: render saved Generative UI surface via standalone A2uiBlockRenderer.
-  if (node.type === "a2ui") {
-    const surface = parseSurfaceContent(
-      node.snapshot ??
-        (node.config as { surface?: unknown } | null)?.surface ??
-        data,
-    );
-    if (surface) {
-      return (
-        <ChartErrorBoundary resetKey={node.id}>
-          <A2uiBlockRenderer block={{ kind: "a2ui", surface }} size="large" />
-        </ChartErrorBoundary>
-      );
-    }
-  }
-
-  // Image artifacts: render image directly via URL / data URL
-  if (node.type === "image") {
-    const imgSrc = extractImageSrc(data, node.config);
-    if (imgSrc) {
-      return (
-        <div className="flex h-full min-h-0 w-full items-center justify-center p-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imgSrc}
-            alt={node.name ?? "Saved image artifact"}
-            className="max-h-[600px] max-w-full rounded object-contain shadow-sm border border-border"
-          />
-        </div>
-      );
-    }
   }
 
   return (
@@ -1237,101 +1178,9 @@ function ArtifactBody({
           {" "}(<code className="font-mono text-xs">{node.type}</code>)
         </>
       ) : null}
-      . The workflow ran, but its output isn&apos;t a chart shape; a
-      type-specific renderer will land in a future release.
+      .
     </div>
   );
-}
-
-function extractImageSrc(data: unknown, config: unknown): string | null {
-  const findInObject = (obj: unknown): string | null => {
-    if (!obj) return null;
-    if (typeof obj === "string" && obj.trim().length > 0) {
-      if (obj.startsWith("http") || obj.startsWith("/") || obj.startsWith("data:")) {
-        return obj;
-      }
-      const filenameMatch =
-        obj.match(/\[(?:[^\]]*screenshot[^\]]*)\]\(([^)]+)\)/i) ||
-        obj.match(/path:\s*['"]([^'"]+)['"]/i);
-      if (filenameMatch?.[1]) {
-        let clean = filenameMatch[1].trim().replace(/^['"]|['"]$/g, "").replace(/\\/g, "/");
-        clean = clean.replace(/^(\.\/|\/app\/\.output\/|\.playwright-mcp\/)/, "");
-        const base = clean.split("/").pop();
-        if (base && base !== "." && base !== "..") {
-          return `/api/media/playwright-files?file=${encodeURIComponent(base)}`;
-        }
-      }
-    }
-    if (Array.isArray(obj)) {
-      for (const item of obj) {
-        const found = findInObject(item);
-        if (found) return found;
-      }
-      return null;
-    }
-    if (typeof obj === "object") {
-      const rec = obj as Record<string, unknown>;
-      if (typeof rec.url === "string") return rec.url;
-      if (typeof rec.src === "string") return rec.src;
-      if (typeof rec.filename === "string" && rec.filename.trim().length > 0) {
-        return `/api/media/playwright-files?file=${encodeURIComponent(rec.filename)}`;
-      }
-      if (typeof rec.data === "string" && !rec.data.startsWith("[")) {
-        const mime = typeof rec.mimeType === "string" ? rec.mimeType : "image/png";
-        return rec.data.startsWith("data:") ? rec.data : `data:${mime};base64,${rec.data}`;
-      }
-      if (rec.content) {
-        const found = findInObject(rec.content);
-        if (found) return found;
-      }
-      if (rec.result) {
-        const found = findInObject(rec.result);
-        if (found) return found;
-      }
-      if (rec.blocks && Array.isArray(rec.blocks)) {
-        const imgBlock = rec.blocks.find((b: { kind?: string }) => b?.kind === "image") as
-          | { src?: string; url?: string; filename?: string }
-          | undefined;
-        if (imgBlock?.src) return imgBlock.src;
-        if (imgBlock?.url) return imgBlock.url;
-        if (imgBlock?.filename) {
-          return `/api/media/playwright-files?file=${encodeURIComponent(imgBlock.filename)}`;
-        }
-      }
-    }
-    return null;
-  };
-
-  return findInObject(data) ?? findInObject(config);
-}
-
-/**
- * Cheap structural check — `bundle.data` for a chart artifact is
- * an ECharts option (a plain JSON object with at minimum a
- * `series` array). We use this to decide whether to take the
- * workflow-data render path or fall through to the legacy
- * `node.content.blocks` payload.
- */
-function isChartOption(value: unknown): boolean {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const series = (value as { series?: unknown }).series;
-  return Array.isArray(series);
-}
-
-/** Cheap check — HTML content is a non-empty string. */
-function isHtmlContent(value: unknown): boolean {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-/** Structural check for Bento slides JSON doc. */
-function isSlideDoc(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const v = value as { format?: unknown; slides?: unknown };
-  return v.format === "bento/slides" || Array.isArray(v.slides);
 }
 
 // dialogs

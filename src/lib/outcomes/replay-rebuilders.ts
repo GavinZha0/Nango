@@ -48,6 +48,7 @@ import {
   extractSurfaceTitle,
   parseSurfaceContent,
 } from "@/lib/generative-ui/surface";
+import { extractFilenameFromScreenshotText } from "@/lib/playwright/storage.server";
 
 // Shared event payload shapes (mirror persisting-agent.ts)
 
@@ -650,6 +651,16 @@ export function rebuildImageOutcome(
         } else if (data && !data.startsWith("[")) {
           const src = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
           imageBlocks.push({ kind: "image", src, mimeType, alt: "Tool image output" });
+        }
+      } else if (item && item.type === "text" && typeof item.text === "string") {
+        const filename = extractFilenameFromScreenshotText(item.text);
+        if (filename) {
+          imageBlocks.push({
+            kind: "image",
+            src: `/api/media/playwright-files?file=${encodeURIComponent(filename)}`,
+            mimeType: "image/png",
+            alt: "Tool screenshot output",
+          });
         }
       }
     }

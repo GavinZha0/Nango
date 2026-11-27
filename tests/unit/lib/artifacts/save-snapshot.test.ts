@@ -138,7 +138,7 @@ describe("saveSnapshot — verified snapshot preservation & config integrity", (
     expect(bundle.fromSnapshot).toBe(true);
   });
 
-  it("updates config.doc for slide artifacts when directSnapshot is provided", async () => {
+  it("validates and persists `{ blocks }` for static slide artifacts without touching config", async () => {
     const recorded = { update: null as { snapshot?: unknown; config?: unknown } | null };
 
     const mockDb = {
@@ -149,7 +149,7 @@ describe("saveSnapshot — verified snapshot preservation & config integrity", (
               {
                 type: "slide",
                 createdBy: OWNER,
-                config: { theme: "light" },
+                config: {},
                 workflowId: null,
               },
             ],
@@ -166,6 +166,12 @@ describe("saveSnapshot — verified snapshot preservation & config integrity", (
       }),
     };
 
+    const slideBlocksPayload = {
+      blocks: [
+        { kind: "slide", doc: { format: "bento/slides", slides: [{ title: "S1" }] }, title: "Presentation" },
+      ],
+    };
+
     const bundleDeps: BundleDeps = {
       getArtifact: async () => ({
         id: ARTIFACT_ID,
@@ -174,7 +180,7 @@ describe("saveSnapshot — verified snapshot preservation & config integrity", (
         type: "slide",
         name: "Presentation",
         description: null,
-        config: { theme: "light", doc: { slides: [{ title: "S1" }] } },
+        config: {},
         sourceThreadId: null,
         sourceOutcomeId: null,
         visibility: "private",
@@ -182,7 +188,7 @@ describe("saveSnapshot — verified snapshot preservation & config integrity", (
         workflowId: null,
         workflowOutputField: null,
         viewMode: "snapshot",
-        snapshot: { slides: [{ title: "S1" }] },
+        snapshot: slideBlocksPayload,
         snapshotAt: new Date(),
         createdBy: OWNER,
         createdAt: new Date(),
@@ -192,23 +198,29 @@ describe("saveSnapshot — verified snapshot preservation & config integrity", (
       executeWorkflow: async () => null,
     };
 
-    const slideDoc = { slides: [{ title: "S1" }] };
     const bundle = await saveSnapshot(
       ARTIFACT_ID,
       OWNER,
       undefined,
-      slideDoc,
+      slideBlocksPayload,
       { db: mockDb as unknown as typeof db, bundleDeps },
     );
 
     expect(recorded.update).not.toBeNull();
-    expect(recorded.update?.snapshot).toEqual(slideDoc);
-    // Slide config correctly retains/updates doc
-    expect(recorded.update?.config).toEqual({
-      theme: "light",
-      doc: slideDoc,
-    });
-    expect(bundle.data).toEqual(slideDoc);
+    expect(recorded.update?.snapshot).toEqual(slideBlocksPayload);
+    expect(recorded.update?.config).toBeUndefined();
+    expect(bundle.data).toEqual(slideBlocksPayload);
+
+    // Incompatible block kind is rejected with 400
+    await expect(
+      saveSnapshot(
+        ARTIFACT_ID,
+        OWNER,
+        undefined,
+        { blocks: [{ kind: "html", html: "<p>wrong type</p>" }] },
+        { db: mockDb as unknown as typeof db, bundleDeps },
+      ),
+    ).rejects.toThrow(/do not match artifact type/);
   });
 
   it("updates workflow input values when inputValues provided with directSnapshot", async () => {

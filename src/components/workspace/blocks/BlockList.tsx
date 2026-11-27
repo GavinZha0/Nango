@@ -19,9 +19,9 @@
  * doesn't silently no-op.
  */
 
-import type { ReactElement } from "react";
+import type { ReactElement, RefObject } from "react";
 
-import type { OutcomeBlock } from "@/store/outcome-store";
+import type { OutcomeBlock } from "@/lib/blocks/schema";
 
 import { A2uiBlockRenderer } from "./A2uiBlock";
 import { CardListBlockRenderer } from "./CardListBlock";
@@ -39,9 +39,18 @@ interface BlockListProps {
    *  outcome panel's tight grid layout); artifact detail and other
    *  full-width consumers pass "large" for generous typography. */
   size?: BlockSize;
+  /** Passed through to `SlideBlockRenderer` (`"edit"` on artifact detail). */
+  slideMode?: "preview" | "edit";
+  /** Passed through to `SlideBlockRenderer` for postMessage doc extraction. */
+  slideIframeRef?: RefObject<HTMLIFrameElement | null>;
 }
 
-export function BlockList({ blocks, size = "compact" }: BlockListProps): ReactElement {
+export function BlockList({
+  blocks,
+  size = "compact",
+  slideMode,
+  slideIframeRef,
+}: BlockListProps): ReactElement {
   // `space-y-3` between blocks; padding lives on the outer OutcomeCard
   // body. Inner blocks render edge-to-edge so a single block (e.g. a
   // chart) doesn't get an awkward extra inset.
@@ -49,7 +58,13 @@ export function BlockList({ blocks, size = "compact" }: BlockListProps): ReactEl
   return (
     <div className={`space-y-3 ${isLarge ? "flex-grow flex flex-col min-h-0" : ""}`}>
       {blocks.map((b, i) => (
-        <BlockSwitch key={i} block={b} size={size} />
+        <BlockSwitch
+          key={i}
+          block={b}
+          size={size}
+          slideMode={slideMode}
+          slideIframeRef={slideIframeRef}
+        />
       ))}
     </div>
   );
@@ -58,9 +73,13 @@ export function BlockList({ blocks, size = "compact" }: BlockListProps): ReactEl
 function BlockSwitch({
   block,
   size,
+  slideMode,
+  slideIframeRef,
 }: {
   block: OutcomeBlock;
   size: BlockSize;
+  slideMode?: "preview" | "edit";
+  slideIframeRef?: RefObject<HTMLIFrameElement | null>;
 }): ReactElement {
   switch (block.kind) {
     case "text":
@@ -74,7 +93,14 @@ function BlockSwitch({
     case "image":
       return <ImageBlockRenderer block={block} size={size} />;
     case "slide":
-      return <SlideBlockRenderer block={block} size={size} />;
+      return (
+        <SlideBlockRenderer
+          block={block}
+          size={size}
+          mode={slideMode}
+          iframeRef={slideIframeRef}
+        />
+      );
     case "a2ui":
       return <A2uiBlockRenderer block={block} size={size} />;
     default: {
