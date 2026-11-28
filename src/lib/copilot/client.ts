@@ -22,6 +22,7 @@ export {
 } from "@copilotkit/react-core/v2";
 
 export type {
+  AttachmentsConfig,
   CopilotChatAssistantMessageProps,
   CopilotChatInputProps,
   CopilotChatViewProps,

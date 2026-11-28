@@ -73,15 +73,22 @@ const APPROVAL_MODE_MAP: Record<ToolApprovalMode, ApprovalModeMeta> = {
   never: APPROVAL_MODES[2],
 };
 
-function UploadFileButton(): ReactNode {
+function UploadFileButton({ onAddFile }: { onAddFile?: () => void }): ReactNode {
+  const enabled = Boolean(onAddFile);
   return (
     <span className="inline-flex" title="Upload file">
       <button
         type="button"
-        disabled
+        disabled={!enabled}
+        onClick={onAddFile}
         data-testid="composer-upload-button"
         aria-label="Upload file"
-        className="inline-flex h-7 w-7 shrink-0 cursor-not-allowed items-center justify-center rounded-full text-muted-foreground/45"
+        className={cn(
+          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          enabled
+            ? "cursor-pointer text-muted-foreground hover:bg-accent hover:text-foreground"
+            : "cursor-not-allowed text-muted-foreground/45",
+        )}
       >
         <Plus className="h-4 w-4" />
       </button>
@@ -235,6 +242,7 @@ export function ChatComposerInput(props: CopilotChatInputProps): ReactNode {
         finishTranscribeButton,
         disclaimer,
         mode,
+        onAddFile,
         onCancelTranscribe,
         onFinishTranscribe,
         positioning,
@@ -301,7 +309,9 @@ export function ChatComposerInput(props: CopilotChatInputProps): ReactNode {
                 {/* Row 2: action toolbar */}
                 <div className="flex items-center justify-between gap-1 px-2 pb-2 pt-1">
                   <div className="flex min-w-0 items-center gap-1">
-                    <UploadFileButton />
+                    <UploadFileButton
+                      onAddFile={mode === "input" ? onAddFile : undefined}
+                    />
                     <NangoSlotButton />
                     <ApprovalModeSelector />
                   </div>

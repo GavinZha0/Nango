@@ -83,7 +83,7 @@ export function extractTrailingToolResults(
   return out;
 }
 
-/** Pull task text + clientMessageId out of a single user message. */
+/** Pull task text + attachment filenames + clientMessageId out of a single user message. */
 function readUserMessage(
   m: { id?: unknown; content?: unknown },
 ): { task: string; userMessageId: string | undefined } | null {
@@ -93,15 +93,37 @@ function readUserMessage(
     return { task: c.slice(0, 1000), userMessageId: idFromBody };
   }
   if (Array.isArray(c)) {
-    const text = c
-      .map((p) =>
-        p && typeof p === "object" && "type" in p && (p as { type: string }).type === "text"
-          ? String((p as { text?: string }).text ?? "")
-          : "",
-      )
-      .filter(Boolean)
-      .join("\n");
-    if (text) return { task: text.slice(0, 1000), userMessageId: idFromBody };
+    const textParts: string[] = [];
+    const filenames: string[] = [];
+    for (const p of c) {
+      if (!p || typeof p !== "object" || !("type" in p)) continue;
+      const part = p as {
+        type?: unknown;
+        text?: unknown;
+        metadata?: { filename?: unknown };
+      };
+      if (part.type === "text") {
+        const t = String(part.text ?? "");
+        if (t) textParts.push(t);
+      } else if (
+        (part.type === "image" ||
+          part.type === "document" ||
+          part.type === "audio" ||
+          part.type === "video") &&
+        typeof part.metadata?.filename === "string" &&
+        part.metadata.filename.trim().length > 0
+      ) {
+        filenames.push(part.metadata.filename.trim());
+      }
+    }
+    const text = textParts.join("\n");
+    const attachmentTag =
+      filenames.length > 0 ? `[Attached: ${filenames.join(", ")}]` : "";
+    const combined =
+      text && attachmentTag
+        ? `${text}\n\n${attachmentTag}`
+        : text || attachmentTag;
+    if (combined) return { task: combined.slice(0, 1000), userMessageId: idFromBody };
   }
   return null;
 }

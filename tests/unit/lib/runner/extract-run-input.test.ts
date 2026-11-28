@@ -220,6 +220,32 @@ describe("extractRunInputFromBody", () => {
     expect(result.userMessageId).toBe("msg-multipart");
   });
 
+  it("persists attachment filenames without payloads in user history text", () => {
+    const result = extractRunInputFromBody({
+      messages: [
+        {
+          id: "msg-attach",
+          role: "user",
+          content: [
+            { type: "text", text: "Analyze these" },
+            {
+              type: "document",
+              source: { type: "data", value: "c2VjcmV0", mimeType: "text/csv" },
+              metadata: { filename: "sales.csv" },
+            },
+            {
+              type: "image",
+              source: { type: "data", value: "iVBORw==", mimeType: "image/png" },
+              metadata: { filename: "chart.png" },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.task).toBe("Analyze these\n\n[Attached: sales.csv, chart.png]");
+    expect(result.userMessageId).toBe("msg-attach");
+  });
+
   it("falls back gracefully when no user OR tool messages exist", () => {
     const result = extractRunInputFromBody({
       messages: [{ role: "assistant", content: "..." }],

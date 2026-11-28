@@ -19,6 +19,11 @@ import { childLogger } from "@/lib/observability/logger";
 import { scanIncomingPrompt } from "@/lib/agent-pipeline/input-safety";
 import { SseStreamRedactor, type RedactionRule } from "@/lib/agent-pipeline/output-safety";
 import { recordInterceptionLog } from "@/lib/agent-pipeline/guardrail-service";
+import { ApiError } from "@/lib/http/route-handlers";
+import {
+  getChatAttachmentLimits,
+  transformBuiltinChatAttachments,
+} from "@/lib/chat/attachments.server";
 
 /** Discriminates dispatch lineage in logs. */
 export type EntitySource = "backend" | "builtin";
@@ -118,40 +123,82 @@ export async function runWithAgents(
     basePath: input.endpoint,
   });
 
-  // INBOUND PROMPT SCAN
+  // INBOUND PROMPT SCAN + BUILT-IN ATTACHMENT NORMALIZATION
   let scanReq = request;
   if (request.method === "POST" && /\/agent\/[^/]+\/run\b/.test(new URL(request.url).pathname)) {
+    interface RunRequestBody {
+      messages?: Array<{ role?: string; content?: unknown; [k: string]: unknown }>;
+      [k: string]: unknown;
+    }
+    let body: RunRequestBody | null = null;
     try {
-      const body = await request.clone().json() as { messages?: { role?: string, content?: string }[] };
-      const messages = body?.messages;
-      if (Array.isArray(messages) && messages.length > 0) {
-        let lastUserIdx = -1;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i]?.role === "user") {
-            lastUserIdx = i;
-            break;
-          }
+      body = (await request.clone().json()) as RunRequestBody;
+    } catch (e) {
+      log.warn({ err: e }, "Failed to parse request for prompt scanning");
+    }
+
+    if (body && Array.isArray(body.messages) && body.messages.length > 0) {
+      let bodyModified = false;
+
+      if (input.entitySource === "builtin") {
+        // Throws ApiError(400) when an attachment violates allowlist/size/UTF-8 rules.
+        const transformed = transformBuiltinChatAttachments(
+          body.messages,
+          getChatAttachmentLimits(),
+        );
+        if (transformed.changed) {
+          body.messages = transformed.messages as RunRequestBody["messages"];
+          bodyModified = true;
         }
-        
-        if (lastUserIdx >= 0) {
+      }
+
+      const messages = body.messages ?? [];
+      let lastUserIdx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]?.role === "user") {
+          lastUserIdx = i;
+          break;
+        }
+      }
+
+      if (lastUserIdx >= 0) {
+        try {
           const lastMsg = messages[lastUserIdx];
-          if (lastMsg && typeof lastMsg.content === "string") {
-            const scanResult = await scanIncomingPrompt(lastMsg.content, input.diag?.userId, input.diag?.runId, input.diag?.agentId);
+          const textToScan =
+            typeof lastMsg?.content === "string"
+              ? lastMsg.content
+              : Array.isArray(lastMsg?.content)
+                ? lastMsg.content
+                    .map((p: unknown) =>
+                      p && typeof p === "object" && (p as { type?: string }).type === "text"
+                        ? String((p as { text?: string }).text ?? "")
+                        : "",
+                    )
+                    .filter(Boolean)
+                    .join("\n")
+                : "";
+
+          if (textToScan.length > 0) {
+            const scanResult = await scanIncomingPrompt(
+              textToScan,
+              input.diag?.userId,
+              input.diag?.runId,
+              input.diag?.agentId,
+            );
             if (scanResult.action === "block") {
               log.warn({ event: "prompt_blocked" }, "Incoming prompt blocked by guardrails");
               const messageId = `msg-blocked-${Date.now()}`;
               const errorMessage = `🚨 [Guardrails] ${scanResult.message || "Request blocked by safety policy."}`;
-              
+
               const runId = input.diag?.runId || `run-${Date.now()}`;
-              // Try to extract threadId if possible, else fallback
-              const threadId = (body as Record<string, unknown>)?.threadId as string || `thread-${Date.now()}`;
-              
+              const threadId = (body.threadId as string) || `thread-${Date.now()}`;
+
               const sse = [
                 `data: ${JSON.stringify({ type: "RUN_STARTED", threadId, runId })}\n\n`,
                 `data: ${JSON.stringify({ type: "TEXT_MESSAGE_START", messageId, role: "assistant" })}\n\n`,
                 `data: ${JSON.stringify({ type: "TEXT_MESSAGE_CONTENT", messageId, delta: errorMessage })}\n\n`,
                 `data: ${JSON.stringify({ type: "TEXT_MESSAGE_END", messageId })}\n\n`,
-                `data: ${JSON.stringify({ type: "RUN_FINISHED", threadId, runId })}\n\n`
+                `data: ${JSON.stringify({ type: "RUN_FINISHED", threadId, runId })}\n\n`,
               ].join("");
 
               return new Response(sse, {
@@ -159,24 +206,33 @@ export async function runWithAgents(
                 headers: {
                   "Content-Type": "text/event-stream",
                   "Cache-Control": "no-cache",
-                  "Connection": "keep-alive"
-                }
+                  "Connection": "keep-alive",
+                },
               });
-            } else if (scanResult.action === "redact" && scanResult.result) {
+            } else if (
+              scanResult.action === "redact" &&
+              scanResult.result &&
+              typeof lastMsg?.content === "string"
+            ) {
               messages[lastUserIdx].content = scanResult.result;
-              const newHeaders = new Headers(request.headers);
-              newHeaders.delete("content-length");
-              scanReq = new Request(request.url, {
-                method: request.method,
-                headers: newHeaders,
-                body: JSON.stringify(body)
-              });
+              bodyModified = true;
             }
           }
+        } catch (e) {
+          if (e instanceof ApiError) throw e;
+          log.warn({ err: e }, "Prompt scanning failed");
         }
       }
-    } catch (e) {
-      log.warn({ err: e }, "Failed to parse request for prompt scanning");
+
+      if (bodyModified) {
+        const newHeaders = new Headers(request.headers);
+        newHeaders.delete("content-length");
+        scanReq = new Request(request.url, {
+          method: request.method,
+          headers: newHeaders,
+          body: JSON.stringify(body),
+        });
+      }
     }
   }
 

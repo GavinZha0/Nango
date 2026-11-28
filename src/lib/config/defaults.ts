@@ -12,6 +12,12 @@ import {
   DEFAULT_GENERATIVE_UI_COMPONENTS,
   GENERATIVE_UI_CONFIG_KEY,
 } from "@/lib/generative-ui/catalog";
+import {
+  CHAT_ATTACHMENT_IMAGE_MAX_BYTES_KEY,
+  CHAT_ATTACHMENT_TEXT_MAX_BYTES_KEY,
+  DEFAULT_CHAT_ATTACHMENT_IMAGE_MAX_BYTES,
+  DEFAULT_CHAT_ATTACHMENT_TEXT_MAX_BYTES,
+} from "@/lib/chat/attachments";
 
 export interface ConfigDefault {
   key: string;
@@ -155,6 +161,10 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
 
   // ── generative ui ────────────────────────────────────────────────
   { key: GENERATIVE_UI_CONFIG_KEY, value: DEFAULT_GENERATIVE_UI_COMPONENTS.join(","), valueType: "string", description: "Comma-separated standard A2UI components available to agents with Generative UI enabled" },
+
+  // ── chat attachments ─────────────────────────────────────────────
+  { key: CHAT_ATTACHMENT_IMAGE_MAX_BYTES_KEY, value: String(DEFAULT_CHAT_ATTACHMENT_IMAGE_MAX_BYTES), valueType: "number", description: "Max single image attachment size in chat in bytes (default 3 MiB)" },
+  { key: CHAT_ATTACHMENT_TEXT_MAX_BYTES_KEY, value: String(DEFAULT_CHAT_ATTACHMENT_TEXT_MAX_BYTES), valueType: "number", description: "Max single text/code attachment size in chat in bytes (default 256 KiB)" },
 ] as const;
 
 /** Lookup map for fast default resolution. */

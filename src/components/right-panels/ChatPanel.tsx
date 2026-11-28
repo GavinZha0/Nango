@@ -7,6 +7,7 @@ import {
   memo,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactElement,
@@ -20,6 +21,7 @@ import {
   CopilotChatToolCallsView,
   CopilotChatUserMessage,
   CopilotChatView,
+  type AttachmentsConfig,
   type CopilotChatAssistantMessageProps,
   type CopilotChatReasoningMessageProps,
   type CopilotChatToolCallsViewProps,
@@ -30,6 +32,14 @@ import {
 } from "@/lib/copilot/client";
 
 import { cn } from "@/lib/utils";
+import {
+  CHAT_ATTACHMENT_ACCEPT,
+  DEFAULT_CHAT_ATTACHMENT_LIMITS,
+  classifyChatAttachment,
+  formatAttachmentByteLimit,
+  resolveChatAttachmentMimeType,
+  type ChatAttachmentLimits,
+} from "@/lib/chat/attachments";
 
 import { useWorkspaceStore } from "@/store/workspace";
 import { ChatComposerInput } from "@/components/right-panels/ChatComposerInput";
@@ -570,16 +580,90 @@ function ChatViewShellBody({
   );
 }
 
+const DISABLED_ATTACHMENTS: AttachmentsConfig = { enabled: false };
+
+function readFileAsBase64Local(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const commaIdx = result.indexOf(",");
+      if (commaIdx === -1) {
+        reject(new Error(`Failed to read "${file.name}".`));
+        return;
+      }
+      resolve(result.slice(commaIdx + 1));
+    };
+    reader.onerror = () => reject(new Error(`Failed to read "${file.name}".`));
+    reader.readAsDataURL(file);
+  });
+}
+
 // MemoChat
 
 /** Memoised chat surface. Isolates <CopilotChat> from panel chrome re-renders. */
 const MemoChat = memo(function MemoChat({
   agentId,
   threadId,
+  attachmentsEnabled,
+  attachmentLimits,
 }: {
   agentId: string;
   threadId: string | undefined;
+  attachmentsEnabled: boolean;
+  attachmentLimits: ChatAttachmentLimits;
 }) {
+  const attachmentsConfig = useMemo<AttachmentsConfig>(() => {
+    if (!attachmentsEnabled) return DISABLED_ATTACHMENTS;
+    return {
+      enabled: true,
+      accept: CHAT_ATTACHMENT_ACCEPT,
+      maxSize: Math.max(
+        attachmentLimits.imageMaxBytes,
+        attachmentLimits.textMaxBytes,
+      ),
+      onUpload: async (file: File) => {
+        const kind = classifyChatAttachment(file.name, file.type);
+        if (!kind) {
+          throw new Error(
+            `Unsupported file "${file.name}". Only text/code files and images (PNG, JPG, WebP, GIF) are allowed.`,
+          );
+        }
+        const limit =
+          kind === "image"
+            ? attachmentLimits.imageMaxBytes
+            : attachmentLimits.textMaxBytes;
+        if (file.size > limit) {
+          throw new Error(
+            `"${file.name}" exceeds the ${formatAttachmentByteLimit(limit)} ${kind} limit.`,
+          );
+        }
+        if (kind === "text") {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          if (bytes.includes(0)) {
+            throw new Error(`"${file.name}" is not a valid UTF-8 text file.`);
+          }
+          try {
+            new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          } catch {
+            throw new Error(`"${file.name}" is not a valid UTF-8 text file.`);
+          }
+        }
+        const value = await readFileAsBase64Local(file);
+        const mimeType = resolveChatAttachmentMimeType(file.name, file.type, kind);
+        return {
+          type: "data",
+          value,
+          mimeType,
+          metadata: { filename: file.name, attachmentKind: kind },
+        };
+      },
+      onUploadFailed: ({ message }) => {
+        toast.error(message);
+      },
+    };
+  }, [attachmentsEnabled, attachmentLimits]);
+
   return (
     <CopilotChat
       agentId={agentId}
@@ -587,6 +671,7 @@ const MemoChat = memo(function MemoChat({
       labels={CHAT_LABELS}
       chatView={ChatViewShell}
       input={ChatComposerInput}
+      attachments={attachmentsConfig}
     />
   );
 });
@@ -598,7 +683,39 @@ const MemoChat = memo(function MemoChat({
  *  fresh-chat mode keeps it null so CopilotKit mints a fresh ABC. */
 export function ChatPanelBody(): ReactNode {
   const activeAgentId = useWorkspaceStore((s) => s.activeAgentId);
+  const activeAgentSource = useWorkspaceStore((s) => s.activeAgentSource);
   const explicitThreadId = useWorkspaceStore((s) => s.explicitThreadId);
+  const [attachmentLimits, setAttachmentLimits] =
+    useState<ChatAttachmentLimits>(DEFAULT_CHAT_ATTACHMENT_LIMITS);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/config/chat")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: Partial<ChatAttachmentLimits> | null) => {
+        if (
+          !cancelled &&
+          data &&
+          typeof data.imageMaxBytes === "number" &&
+          typeof data.textMaxBytes === "number"
+        ) {
+          setAttachmentLimits({
+            imageMaxBytes: data.imageMaxBytes,
+            textMaxBytes: data.textMaxBytes,
+            maxAttachmentsPerMessage:
+              typeof data.maxAttachmentsPerMessage === "number"
+                ? data.maxAttachmentsPerMessage
+                : DEFAULT_CHAT_ATTACHMENT_LIMITS.maxAttachmentsPerMessage,
+          });
+        }
+      })
+      .catch(() => {
+        // Keep code defaults on transient fetch failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
@@ -641,6 +758,8 @@ export function ChatPanelBody(): ReactNode {
       <ChatPanelInner
         agentId={activeAgentId}
         threadId={explicitThreadId ?? undefined}
+        attachmentsEnabled={activeAgentSource === "builtin"}
+        attachmentLimits={attachmentLimits}
       />
     </div>
   );
@@ -654,9 +773,13 @@ export function ChatPanelBody(): ReactNode {
 function ChatPanelInner({
   agentId,
   threadId,
+  attachmentsEnabled,
+  attachmentLimits,
 }: {
   agentId: string;
   threadId: string | undefined;
+  attachmentsEnabled: boolean;
+  attachmentLimits: ChatAttachmentLimits;
 }): ReactNode {
   // `key={agentId:chatEpoch}` forces a remount on agent switch
   // OR `startFreshChat` so CopilotKit mints a fresh internal ABC
@@ -668,6 +791,8 @@ function ChatPanelInner({
       key={`${agentId}:${chatEpoch}`}
       agentId={agentId}
       threadId={threadId}
+      attachmentsEnabled={attachmentsEnabled}
+      attachmentLimits={attachmentLimits}
     />
   );
 }
