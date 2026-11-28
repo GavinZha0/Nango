@@ -224,6 +224,18 @@ export const BUILTIN_TOOL_RISK_MAP: ReadonlyMap<string, ToolRiskMeta> = new Map<
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],
   [
+    "run_local_command",
+    { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
+  ],
+  [
+    "read_local_command_output",
+    { riskLevel: "low", sideEffects: "read", readOnlyHint: true, headlessAllowed: true },
+  ],
+  [
+    "stop_local_command",
+    { riskLevel: "medium", sideEffects: "write", headlessAllowed: true },
+  ],
+  [
     "ssh_put_file",
     { riskLevel: "high", sideEffects: "write", headlessAllowed: false },
   ],
@@ -270,6 +282,18 @@ const DANGEROUS_SSH_PATTERNS = [
   /\bhalt\b/i,
   /\breboot\b/i,
   /(?<![\w-])kill\b/i,
+];
+
+const DANGEROUS_LOCAL_SHELL_PATTERNS = [
+  ...DANGEROUS_SSH_PATTERNS,
+  /\bRemove-Item\b/i,
+  /\bClear-Content\b/i,
+  /\bFormat-Volume\b/i,
+  /\bStop-Computer\b/i,
+  /\bRestart-Computer\b/i,
+  /\bStop-Process\b/i,
+  /\btaskkill\b/i,
+  /(?<![\w-])(?:del|erase|rd|rmdir)\b/i,
 ];
 
 const WRITE_SQL_PATTERNS = [
@@ -341,7 +365,7 @@ export function evaluateToolRisk(
     }
   }
 
-  // 3. Dynamic parameter analysis (assessArgs) for built-in SSH/SQL/slides tools
+  // 3. Dynamic parameter analysis (assessArgs) for built-in SSH/local-shell/SQL/slides tools
   if (!isMcp && toolName === "run_ssh_command" && args && typeof args === "object") {
     const cmd = (args as { command?: unknown }).command;
     if (typeof cmd === "string" && DANGEROUS_SSH_PATTERNS.some((p) => p.test(cmd))) {
@@ -349,6 +373,14 @@ export function evaluateToolRisk(
       sideEffects = "destructive";
       headlessAllowed = false;
       reason = "SSH command contains dangerous operation";
+    }
+  } else if (!isMcp && toolName === "run_local_command" && args && typeof args === "object") {
+    const cmd = (args as { command?: unknown }).command;
+    if (typeof cmd === "string" && DANGEROUS_LOCAL_SHELL_PATTERNS.some((p) => p.test(cmd))) {
+      riskLevel = "critical";
+      sideEffects = "destructive";
+      headlessAllowed = false;
+      reason = "Local shell command contains dangerous operation";
     }
   } else if (!isMcp && toolName === "run_skill_script_on_ssh" && args && typeof args === "object") {
     // SECURITY: Only scan the LLM-supplied `args` array, never the reviewed

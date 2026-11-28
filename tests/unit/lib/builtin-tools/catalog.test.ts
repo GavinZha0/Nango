@@ -121,6 +121,7 @@ describe("BUILTIN_TOOLS catalog", () => {
       "read_file",
       "repeat_tool",
       "run_code_in_sandbox",
+      "run_local_command",
       "web_search",
       "write_file",
     ]);
@@ -130,6 +131,8 @@ describe("BUILTIN_TOOLS catalog", () => {
     expect(findBuiltinTool("grep_files")).toBeNull();
     expect(findBuiltinTool("move_file")).toBeNull();
     expect(findBuiltinTool("delete_file")).toBeNull();
+    expect(findBuiltinTool("read_local_command_output")).toBeNull();
+    expect(findBuiltinTool("stop_local_command")).toBeNull();
   });
 
   it("each entry has a displayName, description, and category", () => {

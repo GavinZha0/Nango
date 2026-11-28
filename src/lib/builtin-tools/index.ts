@@ -16,6 +16,10 @@ import {
   buildGrepFilesTool,
   buildMoveFileTool,
 } from "@/lib/host-files/runtime-tools";
+import {
+  buildReadLocalCommandOutputTool,
+  buildStopLocalCommandTool,
+} from "@/lib/local-shell/runtime-tools";
 
 import { BUILTIN_TOOLS, findBuiltinTool } from "./catalog";
 
@@ -58,6 +62,8 @@ const AUXILIARY_TOOLS: Record<string, () => ToolDefinition> = {
   delete_file: buildDeleteFileTool,
   find_files: buildFindFilesTool,
   grep_files: buildGrepFilesTool,
+  read_local_command_output: buildReadLocalCommandOutputTool,
+  stop_local_command: buildStopLocalCommandTool,
 };
 
 function auxiliaryTools(names: readonly string[]): string[] {
@@ -70,6 +76,9 @@ function auxiliaryTools(names: readonly string[]): string[] {
   }
   if (names.some((name) => HOST_TEXT_FILE_TOOLS.has(name))) {
     out.push("find_files", "grep_files");
+  }
+  if (names.includes("run_local_command")) {
+    out.push("read_local_command_output", "stop_local_command");
   }
   return out;
 }

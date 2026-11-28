@@ -14,9 +14,11 @@ node_modules
 
 # Build artifacts
 .next
+.cache
 dist
 build
 out
+shared_folder
 
 # Logs
 *.log

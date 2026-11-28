@@ -21,6 +21,7 @@ import { buildRunInSandboxTool } from "@/lib/sandbox/runtime-tools";
 import { buildWebSearchTool } from "@/lib/web-search/runtime-tools";
 import { buildDownloadFileTool } from "@/lib/host-files/download-runtime-tools";
 import { buildReadFileTool, buildWriteFileTool } from "@/lib/host-files/runtime-tools";
+import { buildRunLocalCommandTool } from "@/lib/local-shell/runtime-tools";
 import {
   buildGenerateEchartsConfigTool,
   buildGenerateHtmlPageTool,
@@ -220,6 +221,49 @@ export const BUILTIN_TOOLS: readonly BuiltinToolEntry[] = [
       required: ["url", "target_path"],
     },
     build: buildDownloadFileTool,
+  },
+  {
+    name: "run_local_command",
+    displayName: "Run local command",
+    // Mounting this also brings `read_local_command_output` and
+    // `stop_local_command` for background tasks.
+    description:
+      "Execute non-interactive shell commands on the local host (enabled by default in Nango Desktop; strict env allowlist blocks secrets and `.env` access).",
+    category: "files",
+    input_schema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "Non-interactive shell command to execute on the local host.",
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Optional working directory (defaults to host.file.root; relative paths resolve inside host.file.root).",
+        },
+        timeout_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 600,
+          default: 60,
+          description: "Execution timeout in seconds (1-600). Ignored when background is true.",
+        },
+        shell: {
+          type: "string",
+          enum: ["auto", "powershell", "cmd", "bash", "zsh", "sh"],
+          default: "auto",
+          description: "Optional shell interpreter override.",
+        },
+        background: {
+          type: "boolean",
+          default: false,
+          description: "Start a long-running command in the background and return a taskId immediately.",
+        },
+      },
+      required: ["command"],
+    },
+    build: buildRunLocalCommandTool,
   },
   {
     name: "generate_html_page",

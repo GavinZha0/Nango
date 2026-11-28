@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "desktop/dist/**",
     "desktop/resources/**",
+    "shared_folder/**",
   ]),
   {
     // Project-wide rules.

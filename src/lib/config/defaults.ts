@@ -95,6 +95,12 @@ export const CONFIG_DEFAULTS: readonly ConfigDefault[] = [
   { key: "host.file.root", value: process.env.NANGO_DEFAULT_HOST_FILE_ROOT?.trim() || "/shared_folder", valueType: "string", description: "Container or desktop host path that read_file / write_file / edit_file / create_folder / download_file may touch; docker-compose mounts ./shared_folder here. Empty or unmounted fails every call. Use a dedicated directory — never a home folder." },
   { key: "host.file.read_max_bytes", value: "1048576", valueType: "number", description: "Max bytes read_file returns per call (1 MiB), raw reads included. Larger files are streamed in line windows instead of buffered whole; a raw read pages by byte from this budget. edit_file is capped by it too. Floors at 1 byte." },
   { key: "host.file.write_max_bytes", value: "1048576", valueType: "number", description: "Max bytes one write_file call accepts — a whole file body or an appended chunk (1 MiB). edit_file checks its result against it. Floors at 1 byte." },
+  { key: "host.shell.enabled", value: process.env.NANGO_DESKTOP === "1" ? "true" : "false", valueType: "boolean", description: "Enable the built-in run_local_command tool to run non-interactive commands on the local host. Defaults to true in Nango Desktop and false in Docker." },
+  { key: "host.shell.timeout", value: "60", valueType: "number", description: "Default wall-clock timeout in seconds for run_local_command (1-600)." },
+  { key: "host.shell.max_output_chars", value: "30000", valueType: "number", description: "Max combined stdout/stderr characters returned by run_local_command before mid-truncation." },
+  { key: "host.shell.default_shell", value: "auto", valueType: "string", options: ["auto", "powershell", "cmd", "bash", "zsh", "sh"], description: "Default shell interpreter for run_local_command ('auto' selects pwsh/powershell on Windows and SHELL/zsh/bash on POSIX)." },
+  { key: "host.shell.allow_any_cwd", value: process.env.NANGO_DESKTOP === "1" ? "true" : "false", valueType: "boolean", description: "Allow run_local_command to target working directories outside host.file.root (Nango's own app root and userData secrets directory remain blocked)." },
+  { key: "host.shell.env_passthrough", value: "", valueType: "string", description: "Comma-separated non-sensitive host environment variable names to forward to run_local_command (e.g. HTTP_PROXY,HTTPS_PROXY,NO_PROXY,KUBECONFIG). Secret/key/token/password variables are always refused." },
 
   // ── download ──────────────────────────────────────────────────────
   // download_file lands bytes in the host.file.root mount, so the jail
@@ -185,6 +191,9 @@ export function resolveDefaultConfigValue(key: string): string | undefined {
   if (key === "datasource.cache_root") {
     const fromEnv = process.env.NANGO_DEFAULT_CACHE_ROOT?.trim();
     if (fromEnv && fromEnv.length > 0) return fromEnv;
+  }
+  if (key === "host.shell.enabled" || key === "host.shell.allow_any_cwd") {
+    return process.env.NANGO_DESKTOP === "1" ? "true" : "false";
   }
   return CONFIG_DEFAULTS_MAP.get(key)?.value;
 }

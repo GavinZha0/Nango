@@ -133,6 +133,9 @@ export async function register(): Promise<void> {
     "@/lib/runner/scheduler"
   );
   const { mcpProviderPool } = await import("@/lib/mcp");
+  const { shutdownAllLocalShellTasks } = await import(
+    "@/lib/local-shell/task-store.server"
+  );
   try {
     await bootstrapScheduler();
   } catch (err) {
@@ -155,7 +158,10 @@ export async function register(): Promise<void> {
       if (shuttingDown) return;
       shuttingDown = true;
       shutdownScheduler();
-      const done = mcpProviderPool.shutdown();
+      const done = Promise.allSettled([
+        mcpProviderPool.shutdown(),
+        shutdownAllLocalShellTasks(),
+      ]);
       if (exitAfter) {
         void done.finally(() => {
           nodeProcess.exit(0);
