@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.40.0](https://github.com/GavinZha0/Nango/compare/v0.39.1...v0.40.0) (2026-11-28)
+
+
+### Features
+
+* **chat:** add two-row composer with approval mode override ([028e500](https://github.com/GavinZha0/Nango/commit/028e50058905dbaab8bb44232552aefe8fe80988))
+* **chat:** enable image and text file attachments for built-in agents ([2ce7ded](https://github.com/GavinZha0/Nango/commit/2ce7ded7ee4bfc4721e104089987c441d4d7f765))
+* **desktop:** unify nango_space Playwright output and add MCP setup notes ([b8cc5b1](https://github.com/GavinZha0/Nango/commit/b8cc5b1880ef705d7b89576d45455e498961d133))
+* **kb:** negotiate import name collisions with overwrite or rename ([76c6cfc](https://github.com/GavinZha0/Nango/commit/76c6cfc4e48255fc1b52621cf5e2a3b99208381d))
+* **local-shell:** add built-in local command tool with secret isolation ([d6eb8c9](https://github.com/GavinZha0/Nango/commit/d6eb8c9d6bbd8ead28dfea2df49a23a4b66a26c1))
+* persist and display token usage in chat and trace views ([1d4064b](https://github.com/GavinZha0/Nango/commit/1d4064b4ab845a9c17342196b762d81055075873))
+* **ssh:** limit concurrent sessions per server and cancel channels cleanly ([7677db4](https://github.com/GavinZha0/Nango/commit/7677db465fda3edb49432bccb78f4c1d6007add5))
+* **threads:** persist thread pins and custom titles in DB ([3f80bad](https://github.com/GavinZha0/Nango/commit/3f80bade5dfcdeaeb9cca84fa12a674a24bdfb51))
+
 ## [0.39.1](https://github.com/GavinZha0/Nango/compare/v0.39.0...v0.39.1) (2026-11-22)
 
 
