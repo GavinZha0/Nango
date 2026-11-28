@@ -87,16 +87,21 @@ export async function runWebAutoMcp(
       unknown
     >;
     
-    // Use fixed tool name for Playwright execution
-    const toolName = "browser_run_code_unsafe";
-    const tool = tools[toolName] as
-      | {
-          execute?: (
-            args: Record<string, unknown>,
-            options?: { timeoutMs?: number },
-          ) => Promise<unknown>;
-        }
-      | undefined;
+    // Prefer `browser_run_code_unsafe`, with fallback to `browser_run_code`
+    // in case an upstream `@playwright/mcp` release exposes the legacy name.
+    type ExecutableMcpTool = {
+      execute?: (
+        args: Record<string, unknown>,
+        options?: { timeoutMs?: number },
+      ) => Promise<unknown>;
+    };
+    const toolName =
+      typeof (tools["browser_run_code_unsafe"] as ExecutableMcpTool | undefined)?.execute === "function"
+        ? "browser_run_code_unsafe"
+        : typeof (tools["browser_run_code"] as ExecutableMcpTool | undefined)?.execute === "function"
+          ? "browser_run_code"
+          : "browser_run_code_unsafe";
+    const tool = tools[toolName] as ExecutableMcpTool | undefined;
 
     if (!tool || typeof tool.execute !== "function") {
       return {

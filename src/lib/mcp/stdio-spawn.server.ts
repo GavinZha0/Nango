@@ -19,6 +19,70 @@ import type { McpServerEntity } from "@/lib/db/schema";
 import { getCredentialFieldsById } from "@/lib/credentials/lookup";
 import { getOAuthAccessToken } from "@/lib/credentials/oauth-token-manager";
 import { childLogger, logger } from "@/lib/observability/logger";
+import { ensurePlaywrightOutputDir } from "@/lib/playwright/storage.server";
+
+const SAFE_PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+] as const;
+
+/**
+ * Forward non-credential proxy env vars so stdio launchers (`npx`, `uvx`) can
+ * download packages on proxied hosts without leaking embedded credentials.
+ */
+function hasEmbeddedUrlCredentials(value: string): boolean {
+  return value.includes("@");
+}
+
+/**
+ * Identify Playwright MCP stdio server configurations (`@playwright/mcp` or
+ * `playwright-mcp` in command/args).
+ */
+export function isPlaywrightMcpStdio(
+  command: string,
+  args?: readonly string[] | null,
+): boolean {
+  const haystack = [command, ...(args ?? [])].join(" ").toLowerCase();
+  return (
+    haystack.includes("@playwright/mcp")
+    || haystack.includes("playwright-mcp")
+  );
+}
+
+/**
+ * Auto-align Playwright MCP stdio servers to `<host.file.root>/playwright` so
+ * screenshots and exported PDFs land in the exact directory served by
+ * `/api/media/playwright-files`.
+ */
+export function applyPlaywrightStdioDefaults(input: {
+  command: string;
+  args?: string[];
+  cwd?: string;
+}): { args?: string[]; cwd?: string } {
+  if (!isPlaywrightMcpStdio(input.command, input.args)) {
+    return { args: input.args, cwd: input.cwd };
+  }
+
+  const outputDir = ensurePlaywrightOutputDir();
+  if (!outputDir) {
+    return { args: input.args, cwd: input.cwd };
+  }
+
+  const nextArgs = input.args ? [...input.args] : [];
+  const hasOutputDirFlag = nextArgs.some(
+    (arg) => arg === "--output-dir" || arg.startsWith("--output-dir="),
+  );
+  if (!hasOutputDirFlag) {
+    nextArgs.push("--output-dir", outputDir);
+  }
+
+  const nextCwd = input.cwd?.trim() ? input.cwd.trim() : outputDir;
+  return { args: nextArgs, cwd: nextCwd };
+}
 
 export const DEFAULT_STDIO_CREDENTIAL_ENV_NAME = "MCP_API_KEY";
 
@@ -102,6 +166,13 @@ export function assembleSafeChildEnv(
   const baseEnv: Record<string, string> = {
     ...getDefaultEnvironment(),
   };
+
+  for (const key of SAFE_PROXY_ENV_KEYS) {
+    const val = process.env[key]?.trim();
+    if (val && !hasEmbeddedUrlCredentials(val) && !(key in baseEnv)) {
+      baseEnv[key] = val;
+    }
+  }
 
   // Prepend bundled Node binary directory when running inside Nango Desktop
   // so `node` / `npx` work on user machines that do not have Node installed.

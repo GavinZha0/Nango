@@ -3,7 +3,7 @@
  * agent tools.
  *
  * All of them operate exclusively inside the operator-mounted root
- * configured by `host.file.root` (default `/shared_folder`, the
+ * configured by `host.file.root` (default `/nango_space`, the
  * container-side of the compose bind mount). There is no availability
  * gate: a missing or mis-mounted root fails the call with
  * `ROOT_NOT_CONFIGURED` and the error message tells the agent which
@@ -109,7 +109,7 @@ function requireHostFileRoot(): { ok: true; root: string } | HostFileErr {
       "ROOT_NOT_CONFIGURED",
       "Host file access is off — there is no permission to read or write " +
         "because `host.file.root` is empty. Ask the user to check the " +
-        "container's shared_folder mount and point `host.file.root` " +
+        "container's nango_space mount and point `host.file.root` " +
         "(Admin → Config) at that container path. Do not retry.",
     );
   }
@@ -861,7 +861,7 @@ function readOnlyMount(relPath: string): HostFileErr {
     "READ_ONLY_MOUNT",
     `No write permission for "${relPath}" — the shared folder is mounted ` +
       "read-only. Tell the user rather than retrying: an admin must drop " +
-      "the `:ro` flag from the shared_folder volume in the container's " +
+      "the `:ro` flag from the nango_space volume in the container's " +
       "mount config (and own the host directory as the container user), or " +
       "point `host.file.root` elsewhere.",
   );

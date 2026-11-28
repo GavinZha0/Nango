@@ -91,14 +91,14 @@ The `dify-sandbox` service is an isolated code execution environment:
 ```yaml
   nango-app:
     volumes:
-      - ./shared_folder:/shared_folder      # shipped read-write
+      - ./nango_space:/nango_space      # shipped read-write
 ```
 
 ```
-host.file.root = /shared_folder             # the container path, not ./shared_folder
+host.file.root = /nango_space             # the container path, not ./nango_space
 ```
 
-- Agents see `./shared_folder` on the host as `/shared_folder`; paths passed to the tools are relative to that root, and anything resolving outside it is refused.
+- Agents see `./nango_space` on the host as `/nango_space`; paths passed to the tools are relative to that root, and anything resolving outside it is refused.
 - The mount ships read-write because `write_file`, `edit_file`, `create_folder` and `download_file` all write into it. The container runs as uid 1001 (`nextjs`), so the host directory must be writable by it or every write returns `READ_ONLY_MOUNT`.
 - Keep it a dedicated directory, never `$HOME` or a project checkout — the jail confines the agent to the mount, and the mount is therefore the security boundary.
 - Add `:ro` to the mount for a read-only deployment: it is the strongest guarantee available, because it blocks writes at the kernel regardless of which agents hold the write-side tools. Those tools then fail their calls with `READ_ONLY_MOUNT` rather than being hidden.

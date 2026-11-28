@@ -44,6 +44,7 @@ const createSchema = z
   .object({
     name: nonEmptyString,
     description: optionalTrimmedString.optional(),
+    note: z.string().max(4000).nullable().optional(),
     type: z.enum(["sse", "http", "stdio"]),
     url: optionalTrimmedString.optional(),
     headers: z.record(z.string(), z.string()).nullable().optional(),
@@ -99,6 +100,7 @@ export const POST = withEditor(ROUTE, async ({ req, session }) => {
     .values({
       name: body.name,
       description: body.description ?? null,
+      note: body.note?.trim() ? body.note.trim() : null,
       type: body.type,
       url: body.type === "stdio" ? (body.url ?? "") : body.url!,
       headers: body.headers ?? null,

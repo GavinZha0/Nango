@@ -1,9 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
+let mockHostFileRoot: string | null = null;
+
+vi.mock("@/lib/host-files/jail.server", () => ({
+  getHostFileRoot: () => mockHostFileRoot,
+}));
+
 import {
+  ensurePlaywrightOutputDir,
   resolvePlaywrightOutputDir,
   sanitizePlaywrightFilename,
   readPlaywrightScreenshot,
@@ -12,33 +19,40 @@ import { GET } from "@/app/api/media/playwright-files/route";
 import { createMockRequest } from "tests/unit/helpers";
 
 describe("Playwright Storage Server", () => {
-  let tmpDir: string;
-  const originalEnv = process.env.PLAYWRIGHT_OUTPUT_DIR;
+  let tmpRoot: string;
+  let pwDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-test-"));
-    process.env.PLAYWRIGHT_OUTPUT_DIR = tmpDir;
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-root-"));
+    pwDir = path.join(tmpRoot, "playwright");
+    fs.mkdirSync(pwDir, { recursive: true });
+    mockHostFileRoot = tmpRoot;
   });
 
   afterEach(() => {
-    process.env.PLAYWRIGHT_OUTPUT_DIR = originalEnv;
+    mockHostFileRoot = null;
     try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     } catch {
       // Ignore cleanup error
     }
   });
 
   describe("resolvePlaywrightOutputDir", () => {
-    it("returns environment variable path when configured", () => {
-      expect(resolvePlaywrightOutputDir()).toBe(path.resolve(tmpDir));
+    it("resolves <host.file.root>/playwright when host.file.root is configured", () => {
+      expect(resolvePlaywrightOutputDir()).toBe(path.join(path.resolve(tmpRoot), "playwright"));
     });
 
-    it("falls back to default path when env is unset", () => {
-      delete process.env.PLAYWRIGHT_OUTPUT_DIR;
-      expect(resolvePlaywrightOutputDir()).toBe(
-        path.join(process.cwd(), ".cache", "playwright"),
-      );
+    it("returns null when host.file.root is unconfigured", () => {
+      mockHostFileRoot = null;
+      expect(resolvePlaywrightOutputDir()).toBeNull();
+    });
+
+    it("creates the playwright subdirectory in ensurePlaywrightOutputDir", () => {
+      fs.rmSync(pwDir, { recursive: true, force: true });
+      const created = ensurePlaywrightOutputDir();
+      expect(created).toBe(path.join(path.resolve(tmpRoot), "playwright"));
+      expect(fs.existsSync(pwDir)).toBe(true);
     });
   });
 
@@ -62,8 +76,8 @@ describe("Playwright Storage Server", () => {
   });
 
   describe("readPlaywrightScreenshot", () => {
-    it("reads existing PNG screenshot", async () => {
-      const filePath = path.join(tmpDir, "shot1.png");
+    it("reads existing PNG screenshot from <host.file.root>/playwright", async () => {
+      const filePath = path.join(pwDir, "shot1.png");
       const dummyData = Buffer.from("fake-png-data");
       fs.writeFileSync(filePath, dummyData);
 
@@ -75,7 +89,7 @@ describe("Playwright Storage Server", () => {
     });
 
     it("probes extension automatically for extensionless filenames", async () => {
-      const filePath = path.join(tmpDir, "mypage.webp");
+      const filePath = path.join(pwDir, "mypage.webp");
       const dummyData = Buffer.from("fake-webp-data");
       fs.writeFileSync(filePath, dummyData);
 
@@ -86,9 +100,10 @@ describe("Playwright Storage Server", () => {
       expect(res?.buffer.equals(dummyData)).toBe(true);
     });
 
-    it("returns null for non-existent files", async () => {
-      const res = await readPlaywrightScreenshot("non-existent.png");
-      expect(res).toBeNull();
+    it("returns null for non-existent files or unconfigured root", async () => {
+      expect(await readPlaywrightScreenshot("non-existent.png")).toBeNull();
+      mockHostFileRoot = null;
+      expect(await readPlaywrightScreenshot("shot1.png")).toBeNull();
     });
   });
 
@@ -101,6 +116,17 @@ describe("Playwright Storage Server", () => {
       expect(json.error).toBe("MISSING_PARAM");
     });
 
+    it("returns 404 ROOT_NOT_CONFIGURED when host.file.root is unset", async () => {
+      mockHostFileRoot = null;
+      const req = createMockRequest("/api/media/playwright-files", {
+        searchParams: { file: "missing.png" },
+      });
+      const res = await GET(req);
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error).toBe("ROOT_NOT_CONFIGURED");
+    });
+
     it("returns 404 when file does not exist", async () => {
       const req = createMockRequest("/api/media/playwright-files", {
         searchParams: { file: "missing.png" },
@@ -109,10 +135,11 @@ describe("Playwright Storage Server", () => {
       expect(res.status).toBe(404);
       const json = await res.json();
       expect(json.error).toBe("FILE_NOT_FOUND");
+      expect(json.message).not.toContain("docker-compose.yaml");
     });
 
     it("returns 200 with image stream and caching headers for valid file", async () => {
-      const filePath = path.join(tmpDir, "test.png");
+      const filePath = path.join(pwDir, "test.png");
       fs.writeFileSync(filePath, Buffer.from("test-content"));
 
       const req = createMockRequest("/api/media/playwright-files", {

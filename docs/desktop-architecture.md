@@ -16,7 +16,7 @@ The desktop architecture is defined by seven core decisions:
 | :--- | :--- | :--- | :--- |
 | **D1** | **MCP Protocol Extension** | Full first-class support for **`stdio` MCP Servers** alongside `sse` and `http`. Gated behind `isStdioMcpAllowed()` (default enabled when `NANGO_DESKTOP=1`, default disabled in Docker). | Enables launching headless/headed automation processes (e.g. `npx -y @playwright/mcp@latest`), `uvx` tools, and native utilities on the host machine without exposing remote execution risks in shared server containers. |
 | **D2** | **Data Sources & DuckDB 2.0** | Native integration with `@duckdb/node-api@2.0.0-r.1`, supporting dual modes: **In-process embedded (`:memory:`)** and optional **Quack protocol remote server (`CONNECT remote_db`)**. | No custom HTTP proxy needed. In-process mode handles zero-config local extractions to Parquet, while Quack mode supports distributed compute pushdown and cache sharing with external execution sandboxes. Bundled offline extensions prevent runtime download failures. |
-| **D3** | **Local File Access** | **Native pure-JavaScript `host-files` engine** with path jail, line/byte pagination, and streaming download protection. Pre-configured to point to `<Documents>/NangoWorkspace`. | Preserves prompt budget controls, reads/writes without symlink breakout risks, and provides a native operating system folder-selection dialog (`dialog:selectFolder`) exposed safely over `contextBridge`. |
+| **D3** | **Local File Access** | **Native pure-JavaScript `host-files` engine** with path jail, line/byte pagination, and streaming download protection. Pre-configured to point to `<Documents>/nango_space`. | Preserves prompt budget controls, reads/writes without symlink breakout risks, and provides a native operating system folder-selection dialog (`dialog:selectFolder`) exposed safely over `contextBridge`. |
 | **D4** | **Database (PostgreSQL 18)** | **Bundled portable PostgreSQL 18 binary** managed by an embedded lifecycle supervisor (`PostgresManager`), with seamless support for external PostgreSQL URLs. | 100% schema parity with Docker: retains all Drizzle ORM schemas, `uuidv7()`, `pg_advisory_lock`, and 30+ database migrations without code modifications or SQL compatibility shims. |
 | **D5** | **Runtime Process Isolation** | **Bundled standalone Node.js 24 LTS binary** dedicated to executing database migrations (`docker/migrate.mjs`) and the Next.js standalone server (`server.js`). | Decouples server execution from Electron's internal Node runtime, eliminating V8 ABI drift, engine version mismatches, and N-API native module incompatibilities with `@duckdb/node-api`. |
 | **D6** | **Zero-Loss Standalone Packaging** | Packaging `.next/standalone` as an uncompressed archive (`desktop/resources/standalone.tar`) with a **two-pass runtime self-extractor and junction materializer** (`standalone-extractor.ts`). | Completely bypasses `electron-builder`'s hardcoded root `node_modules` exclusion filter. Materializes 700+ `.pnpm` directory symlinks as Windows NTFS Junctions without requiring administrator elevation or Windows Developer Mode. |
@@ -71,7 +71,7 @@ flowchart TD
     end
 
     subgraph LocalHost["Local Host Resources"]
-        WorkspaceDir["Workspace Directory<br/>(Default: Documents/NangoWorkspace)"]
+        WorkspaceDir["Workspace Directory<br/>(Default: Documents/nango_space)"]
         StdioProcs["Local Stdio MCP Process Tree<br/>(e.g., npx @playwright/mcp controlling native Chrome)"]
     end
 
@@ -197,7 +197,7 @@ Implemented in [`desktop/postgres-manager.ts`](file:///d:/AI/nango/desktop/postg
 ### 4.6 Native Host File Integration & Workspace Folder
 
 1. **Documents Redirection Support**:
-   - Resolves `<app.getPath("documents")>/NangoWorkspace` dynamically, accommodating Windows OneDrive folder redirection.
+   - Resolves `<app.getPath("documents")>/nango_space` dynamically, accommodating Windows OneDrive folder redirection.
    - Creates the directory on startup and seeds `host.file.root` into `system_config` if not already set.
 2. **Native Folder Picker IPC**:
    - Securely exposed via `preload.ts` (`contextBridge.exposeInMainWorld("nangoDesktop", { selectFolder: ... })`).

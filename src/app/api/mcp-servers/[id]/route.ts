@@ -37,6 +37,7 @@ const updateSchema = z
   .object({
     name: nonEmptyString.optional(),
     description: optionalTrimmedString.optional(),
+    note: z.string().max(4000).nullable().optional(),
     type: z.enum(["sse", "http", "stdio"]).optional(),
     url: z.string().trim().optional(),
     headers: z.record(z.string(), z.string()).nullable().optional(),
@@ -87,6 +88,7 @@ export const PATCH = withEditor<{ id: string }>(
     const editsContent =
       body.name !== undefined
       || body.description !== undefined
+      || body.note !== undefined
       || body.type !== undefined
       || body.url !== undefined
       || body.headers !== undefined
@@ -155,6 +157,9 @@ export const PATCH = withEditor<{ id: string }>(
     };
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
+    if (body.note !== undefined) {
+      updates.note = body.note?.trim() ? body.note.trim() : null;
+    }
     if (body.type !== undefined) updates.type = body.type;
     if (body.url !== undefined) updates.url = body.url;
     if (body.headers !== undefined) updates.headers = body.headers;

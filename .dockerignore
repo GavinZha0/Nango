@@ -18,7 +18,7 @@ node_modules
 dist
 build
 out
-shared_folder
+nango_space
 
 # Logs
 *.log

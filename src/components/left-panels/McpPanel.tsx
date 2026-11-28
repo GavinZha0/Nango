@@ -40,6 +40,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,6 +80,7 @@ interface McpServerRow {
   name: string;
   group: string | null;
   description: string | null;
+  note?: string | null;
   type: string;
   url: string;
   headers: Record<string, string> | null;
@@ -136,6 +138,7 @@ interface ServerFormState {
   cwd: string;
   credentialId: string;
   credentialEnvName: string;
+  note: string;
   headers: HeaderEntry[];
   envEntries: HeaderEntry[];
   error: string;
@@ -194,6 +197,7 @@ function initialFormState(editing?: McpServerRow, prefill?: McpMarketItem): Serv
       cwd: "",
       credentialId: "",
       credentialEnvName: prefill.credentialEnvName ?? "",
+      note: prefill.setupHint ?? "",
       headers: [],
       envEntries: headersToEntries(prefill.env ?? null),
       error: "",
@@ -210,6 +214,7 @@ function initialFormState(editing?: McpServerRow, prefill?: McpMarketItem): Serv
     cwd: editing?.cwd ?? "",
     credentialId: editing?.credentialId ?? "",
     credentialEnvName: editing?.credentialEnvName ?? "",
+    note: editing?.note ?? "",
     headers: headersToEntries(editing?.headers ?? null),
     envEntries: headersToEntries(editing?.env ?? null),
     error: "",
@@ -238,6 +243,7 @@ function ServerFormDialog({
   const isEdit = Boolean(editing);
   const [form, setForm] = useState<ServerFormState>(initialFormState(editing, prefill));
   const [submitting, setSubmitting] = useState(false);
+  const [browserWarning, setBrowserWarning] = useState<string | null>(null);
 
   // Reset form when dialog opens/closes or editing/prefill target changes.
   // Use a ref to detect prop changes without triggering the lint rule.
@@ -246,7 +252,47 @@ function ServerFormDialog({
   if (formKey !== lastKey) {
     setLastKey(formKey);
     setForm(initialFormState(editing, prefill));
+    setBrowserWarning(null);
   }
+
+  // One-shot local Chrome/Edge detection when installing browser-based MCPs
+  // from the market so `--browser` defaults to an installed browser.
+  useEffect(() => {
+    if (
+      !open
+      || isEdit
+      || (prefill?.id !== "playwright" && prefill?.id !== "chrome-devtools")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetch("/api/mcp-servers/browser-env")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { detected?: string[]; recommendedBrowser?: string | null } | null) => {
+        if (cancelled || !data) return;
+        if (prefill?.id === "playwright" && data.recommendedBrowser === "msedge") {
+          setForm((prev) => {
+            if (!prev.args.includes("--browser chrome")) return prev;
+            return {
+              ...prev,
+              args: prev.args.replace("--browser chrome", "--browser msedge"),
+            };
+          });
+        } else if (data.recommendedBrowser === null) {
+          setBrowserWarning(
+            "Neither Chrome nor Edge was detected in standard paths on this host. Install one or update --browser in Arguments.",
+          );
+        }
+      })
+      .catch(() => {
+        // Ignore probe errors; user can still edit Arguments directly
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isEdit, prefill?.id]);
 
   function setField<K extends keyof ServerFormState>(key: K, value: ServerFormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -324,6 +370,7 @@ function ServerFormDialog({
 
     setSubmitting(true);
     try {
+      const trimmedNote = form.note.trim() || null;
       const body: Record<string, unknown> =
         form.type === "stdio"
           ? {
@@ -336,6 +383,7 @@ function ServerFormDialog({
               env: entriesToHeaders(form.envEntries),
               credentialId: form.credentialId || null,
               credentialEnvName: form.credentialEnvName.trim() || null,
+              note: trimmedNote,
               group: finalGroup,
             }
           : {
@@ -344,6 +392,7 @@ function ServerFormDialog({
               url: form.url.trim(),
               credentialId: form.credentialId || null,
               headers: entriesToHeaders(form.headers),
+              note: trimmedNote,
               group: finalGroup,
             };
 
@@ -387,9 +436,9 @@ function ServerFormDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-3 py-2">
-          {!isEdit && prefill?.setupHint && (
-            <p className="rounded-md border border-border/60 bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
-              {prefill.setupHint}
+          {browserWarning && (
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
+              {browserWarning}
             </p>
           )}
           {/* Name */}
@@ -706,6 +755,23 @@ function ServerFormDialog({
               )}
             </div>
           )}
+
+          {/* Setup Tips / Note */}
+          <div className="space-y-1">
+            <Label htmlFor="mcp-note" className="text-xs text-muted-foreground">
+              Setup Tips / Note
+            </Label>
+            <Textarea
+              id="mcp-note"
+              data-testid="mcp-note-input"
+              value={form.note}
+              onChange={(e) => setField("note", e.target.value)}
+              rows={4}
+              maxLength={4000}
+              className="text-xs leading-relaxed resize-y"
+              placeholder="Optional configuration tips or mode flags for future reference"
+            />
+          </div>
 
           {form.error && <p className="text-sm text-destructive">{form.error}</p>}
 

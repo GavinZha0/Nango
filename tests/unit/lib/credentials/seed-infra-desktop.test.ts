@@ -64,9 +64,9 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
   });
 
   it("honours NANGO_DEFAULT_HOST_FILE_ROOT and NANGO_DEFAULT_CACHE_ROOT in config defaults and resolveCacheRoot", () => {
-    expect(resolveDefaultConfigValue("host.file.root")).toBe("/shared_folder");
+    expect(resolveDefaultConfigValue("host.file.root")).toBe("/nango_space");
 
-    const customWorkspace = path.resolve("/tmp/NangoWorkspace");
+    const customWorkspace = path.resolve("/tmp/nango_space");
     const customCache = path.resolve("/tmp/NangoCache");
     process.env.NANGO_DEFAULT_HOST_FILE_ROOT = customWorkspace;
     process.env.NANGO_DEFAULT_CACHE_ROOT = customCache;
@@ -76,9 +76,11 @@ describe("Desktop runtime path & infrastructure seed resolution", () => {
     expect(resolveCacheRoot()).toBe(customCache);
   });
 
-  it("honours NANGO_PLAYWRIGHT_STORAGE_DIR in resolvePlaywrightOutputDir", () => {
-    const customPwDir = path.resolve("/tmp/NangoPlaywright");
-    process.env.NANGO_PLAYWRIGHT_STORAGE_DIR = customPwDir;
-    expect(resolvePlaywrightOutputDir()).toBe(customPwDir);
+  it("derives resolvePlaywrightOutputDir from host.file.root (<root>/playwright)", () => {
+    const customWorkspace = path.resolve("/tmp/nango_space");
+    process.env.NANGO_DEFAULT_HOST_FILE_ROOT = customWorkspace;
+    expect(resolvePlaywrightOutputDir()).toBe(
+      path.join(customWorkspace, "playwright"),
+    );
   });
 });

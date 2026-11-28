@@ -3,7 +3,7 @@
  * supervisor for Nango Desktop.
  *
  * Responsibilities:
- * - Ensure all writable desktop directories exist under `userData` and `Documents/NangoWorkspace`
+ * - Ensure all writable desktop directories exist under `userData` and `Documents/nango_space`
  * - Assemble the desktop environment variables (explicitly overriding auth, DB, and loopback proxy bypass)
  * - Execute `docker/migrate.mjs` idempotently before booting Next.js
  * - Supervise `.next/standalone/server.js` with readiness probing and exponential backoff crash recovery
@@ -26,8 +26,8 @@ const SERVER_LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 export interface DesktopWritableDirs {
   workspaceDir: string;
+  playwrightOutputDir: string;
   datasourceCacheDir: string;
-  playwrightStorageDir: string;
   logsDir: string;
 }
 
@@ -39,19 +39,19 @@ export function ensureDesktopWritableDirs(input: {
   userDataDir: string;
   workspaceDir: string;
 }): DesktopWritableDirs {
+  const playwrightOutputDir = path.join(input.workspaceDir, "playwright");
   const datasourceCacheDir = path.join(input.userDataDir, "cache", "datasource");
-  const playwrightStorageDir = path.join(input.userDataDir, "cache", "playwright");
   const logsDir = path.join(input.userDataDir, "logs");
 
   fs.mkdirSync(input.workspaceDir, { recursive: true });
+  fs.mkdirSync(playwrightOutputDir, { recursive: true });
   fs.mkdirSync(datasourceCacheDir, { recursive: true });
-  fs.mkdirSync(playwrightStorageDir, { recursive: true });
   fs.mkdirSync(logsDir, { recursive: true });
 
   return {
     workspaceDir: input.workspaceDir,
+    playwrightOutputDir,
     datasourceCacheDir,
-    playwrightStorageDir,
     logsDir,
   };
 }
@@ -129,11 +129,6 @@ export function buildDesktopServerEnv(
     input.userDataDir,
     "cache",
     "datasource",
-  );
-  env.NANGO_PLAYWRIGHT_STORAGE_DIR = path.join(
-    input.userDataDir,
-    "cache",
-    "playwright",
   );
 
   env.NANGO_BUNDLED_NODE_EXE = input.bundledNodeExe;

@@ -13,7 +13,7 @@ Nango can give agents a narrow, jail-confined view of one directory on the machi
 
 ### Goals
 
-- **One operator-chosen directory**, nothing else. The jail is `host.file.root`, defaulted to the `/shared_folder` mountpoint that `docker-compose.yaml` ships.
+- **One operator-chosen directory**, nothing else. The jail is `host.file.root`, defaulted to the `/nango_space` mountpoint that `docker-compose.yaml` ships.
 - **Per-agent read/write split.** `read_file`, `write_file` and `download_file` are separate catalog toggles, so an admin can give an agent eyes without hands. `create_folder` and `edit_file` are not toggles: they are mounted automatically beside a write-side tool.
 - **Text files in and out.** `read_file` / `write_file` / `edit_file` are UTF-8 only, no binary. Anything that arrives as bytes — a `.dsc`, an archive — comes through `download_file` and stays on disk.
 - **Hard containment enforced in code**, independent of the OS mount: path neutralization, symlink refusal, and a `realpath` containment check.
@@ -33,7 +33,7 @@ Nango can give agents a narrow, jail-confined view of one directory on the machi
 
 | Key | Default | Meaning |
 |---|---|---|
-| `host.file.root` | `/shared_folder` | The one directory the tools may touch, as a **container** path. Empty or unreachable makes every call fail with `ROOT_NOT_CONFIGURED`. |
+| `host.file.root` | `/nango_space` | The one directory the tools may touch, as a **container** path. Empty or unreachable makes every call fail with `ROOT_NOT_CONFIGURED`. |
 | `host.file.read_max_bytes` | 1048576 | Bytes `read_file` may return per call. Files above it are streamed in line windows rather than buffered whole. |
 | `host.file.write_max_bytes` | 1048576 | Bytes `write_file` accepts as one complete file body. |
 
@@ -49,16 +49,16 @@ would accept nothing while the tool stayed mounted.
 
 All of these live in Admin → Config (`docs/config.md` §9, `host` and `download` groups); they are DB rows seeded at boot, not environment variables. The root is read per call, so changing it takes effect without a restart.
 
-`host.file.root` is a path **the Node process can see**. Under Docker that is the container-side mountpoint, not the host directory — which is why the default is `/shared_folder` and the shipped compose file mounts the project's `./shared_folder` there:
+`host.file.root` is a path **the Node process can see**. Under Docker that is the container-side mountpoint, not the host directory — which is why the default is `/nango_space` and the shipped compose file mounts the project's `./nango_space` there:
 
 ```yaml
 # docker-compose.yaml → nango-app.volumes
-- ./shared_folder:/shared_folder      # shipped read-write; append :ro to deny all writes
+- ./nango_space:/nango_space      # shipped read-write; append :ro to deny all writes
 # Admin → Config → host.file.root
-/shared_folder
+/nango_space
 ```
 
-Bare `pnpm dev` on a machine where `/shared_folder` does not exist simply produces `ROOT_NOT_CONFIGURED`; nothing else in Nango depends on it.
+Bare `pnpm dev` on a machine where `/nango_space` does not exist simply produces `ROOT_NOT_CONFIGURED`; nothing else in Nango depends on it.
 
 Two operational notes:
 
@@ -77,7 +77,7 @@ Two operational notes:
 
 - Every tool reads `host.file.root` per execution (`getHostFileRoot()`); an empty or unreachable root returns `ROOT_NOT_CONFIGURED`.
 - `EROFS`/`EACCES`/`EPERM` on a read-only volume returns `READ_ONLY_MOUNT`.
-- Both messages name the operator's fix sites — the container's `shared_folder` mount and the `host.file.root` config — and tell the agent to report rather than retry. That is the whole teaching mechanism: a misconfigured deployment costs one failed call, not a disabled checkbox and a save-time rejection path.
+- Both messages name the operator's fix sites — the container's `nango_space` mount and the `host.file.root` config — and tell the agent to report rather than retry. That is the whole teaching mechanism: a misconfigured deployment costs one failed call, not a disabled checkbox and a save-time rejection path.
 
 The accepted trade-off: an agent can hold `write_file` against a `:ro` mount and pay one approval prompt before the call fails. `:ro` remains the strongest guarantee in the design because no binding can override it.
 

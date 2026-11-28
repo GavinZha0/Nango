@@ -6,10 +6,20 @@
     "description": "Browser automation and web testing via local Chrome or Edge.",
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@playwright/mcp@latest", "--browser", "chrome"],
+    "args": [
+      "-y",
+      "@playwright/mcp@latest",
+      "--browser",
+      "chrome",
+      "--caps",
+      "vision,pdf",
+      "--viewport-size",
+      "1920x1080",
+      "--ignore-https-errors"
+    ],
     "env": {},
     "credentialEnvName": null,
-    "setupHint": "Requires Chrome installed locally (or change --browser chrome to msedge)."
+    "setupHint": "Screenshots & PDFs are automatically saved to <host.file.root>/playwright (no manual --output-dir needed).\nModes (edit Arguments as needed):\n1. Headed (default): --browser chrome (or msedge) — visible local browser window.\n2. Headless isolated (recommended for Web Auto): append --headless --isolated.\n3. Attach to an existing browser: replace --browser ... with --cdp-endpoint http://127.0.0.1:9222 (launch Chrome with --remote-debugging-port=9222) or --extension."
   },
   {
     "id": "chrome-devtools",

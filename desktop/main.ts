@@ -271,7 +271,7 @@ export class DesktopAppCoordinator {
     try {
       const userDataDir = app.getPath("userData");
       const documentsDir = app.getPath("documents");
-      const workspaceDir = path.join(documentsDir, "NangoWorkspace");
+      const workspaceDir = path.join(documentsDir, "nango_space");
       const logsDir = path.join(userDataDir, "logs");
       const pgDataDir =
         process.env.NANGO_PGDATA_DIR?.trim() || path.join(userDataDir, "pgdata");

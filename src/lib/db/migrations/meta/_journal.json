@@ -85,6 +85,13 @@
       "when": 1795818633308,
       "tag": "0011_add_thread_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795837257478,
+      "tag": "0012_mcp_server_note",
+      "breakpoints": true
     }
   ]
 }

@@ -13,7 +13,12 @@ import { McpServerTable } from "@/lib/db/schema";
 
 import { buildMcpHeaders } from "./admin-client.server";
 import { McpProviderPool, type McpServerConfig } from "./provider-pool";
-import { buildMcpStdioEnv, isStdioMcpAllowed } from "./stdio-spawn.server";
+import {
+  applyPlaywrightStdioDefaults,
+  buildMcpStdioEnv,
+  isPlaywrightMcpStdio,
+  isStdioMcpAllowed,
+} from "./stdio-spawn.server";
 
 /**
  * Resolve an MCP server's config from DB, materializing auth headers.
@@ -68,15 +73,21 @@ async function loadMcpServerConfig(
       credentialId: row.credentialId,
       credentialEnvName: row.credentialEnvName,
     });
+    const command = row.command.trim();
+    const aligned = applyPlaywrightStdioDefaults({
+      command,
+      args: row.args ?? undefined,
+      cwd: row.cwd ?? undefined,
+    });
     return {
       serverId: row.id,
       label: row.name ?? row.id,
       type: "stdio",
       url: "",
-      command: row.command.trim(),
-      args: row.args ?? undefined,
+      command,
+      args: aligned.args,
       env: Object.keys(env).length > 0 ? env : undefined,
-      cwd: row.cwd ?? undefined,
+      cwd: aligned.cwd,
     };
   }
 
@@ -117,3 +128,24 @@ export const mcpProviderPool: McpProviderPool =
 
 export { McpProviderPool } from "./provider-pool";
 export type { McpServerConfig } from "./provider-pool";
+
+/**
+ * Evict active Playwright stdio MCP providers from the pool (e.g. after
+ * `host.file.root` changes) so the next invocation spawns with the updated
+ * `--output-dir` and `cwd`.
+ */
+export async function evictPlaywrightStdioProviders(): Promise<void> {
+  const rows = await db
+    .select({
+      id: McpServerTable.id,
+      command: McpServerTable.command,
+      args: McpServerTable.args,
+    })
+    .from(McpServerTable)
+    .where(and(eq(McpServerTable.type, "stdio"), eq(McpServerTable.enabled, true)));
+
+  const targets = rows.filter(
+    (r) => r.command && isPlaywrightMcpStdio(r.command, r.args),
+  );
+  await Promise.allSettled(targets.map((r) => mcpProviderPool.evict(r.id)));
+}

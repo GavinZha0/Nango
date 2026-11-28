@@ -288,7 +288,7 @@ function readOnly(): DownloadKernelResult {
     "READ_ONLY_MOUNT",
     "No write permission for the download destination — the shared folder is " +
       "mounted read-only. Tell the user rather than retrying: an admin must " +
-      "drop the `:ro` flag from the shared_folder volume.",
+      "drop the `:ro` flag from the nango_space volume.",
   );
 }
 

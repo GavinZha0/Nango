@@ -92,7 +92,7 @@ function rootUnreachable(root: string): JailPathErr {
     message:
       `Cannot reach the host-file root "${root}". The folder is not mounted ` +
       "into the container (or host.file.root points somewhere else). Ask the " +
-      "user to check the shared_folder volume in docker-compose.yaml and the " +
+      "user to check the nango_space volume in docker-compose.yaml and the " +
       "`host.file.root` setting in Admin → Config — do not retry.",
   };
 }

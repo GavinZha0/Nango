@@ -236,15 +236,16 @@ describe("desktop/server-manager helpers", () => {
   });
 
   it("creates writable directories and builds complete desktop server environment", () => {
-    const workspaceDir = path.join(tmpUserDir, "NangoWorkspace");
+    const workspaceDir = path.join(tmpUserDir, "nango_space");
     const dirs = ensureDesktopWritableDirs({
       userDataDir: tmpUserDir,
       workspaceDir,
     });
 
     expect(fs.existsSync(dirs.workspaceDir)).toBe(true);
+    expect(fs.existsSync(dirs.playwrightOutputDir)).toBe(true);
+    expect(dirs.playwrightOutputDir).toBe(path.join(workspaceDir, "playwright"));
     expect(fs.existsSync(dirs.datasourceCacheDir)).toBe(true);
-    expect(fs.existsSync(dirs.playwrightStorageDir)).toBe(true);
     expect(fs.existsSync(dirs.logsDir)).toBe(true);
 
     const secrets = generateDesktopSecrets();
@@ -275,7 +276,7 @@ describe("desktop/server-manager helpers", () => {
     expect(env.CREDENTIAL_ENCRYPTION_ACTIVE_KEY_ID).toBe("k1");
     expect(env.NANGO_DEFAULT_HOST_FILE_ROOT).toBe(workspaceDir);
     expect(env.NANGO_DEFAULT_CACHE_ROOT).toBe(dirs.datasourceCacheDir);
-    expect(env.NANGO_PLAYWRIGHT_STORAGE_DIR).toBe(dirs.playwrightStorageDir);
+    expect(env.NANGO_PLAYWRIGHT_STORAGE_DIR).toBeUndefined();
     expect(env.NANGO_BUNDLED_NODE_EXE).toBe("/resources/node/bin/node");
     expect(env.NANGO_BUNDLED_NODE_BIN_DIR).toBe("/resources/node/bin");
     expect(env.NANGO_DUCKDB_EXTENSION_DIR).toBe("/resources/duckdb-extensions");
@@ -295,7 +296,7 @@ describe("desktop/preload, tray & main coordinator", () => {
   it("exposes window.nangoDesktop via contextBridge and routes selectFolder IPC", async () => {
     const exposed: Record<string, unknown> = {};
     const invokeMock = vi.fn(async (channel: string) => {
-      if (channel === IPC_CHANNELS.SELECT_FOLDER) return "D:\\NangoWorkspace";
+      if (channel === IPC_CHANNELS.SELECT_FOLDER) return "D:\\nango_space";
       if (channel === IPC_CHANNELS.GET_APP_VERSION) return "1.0.0";
       return null;
     });
@@ -310,7 +311,7 @@ describe("desktop/preload, tray & main coordinator", () => {
     );
 
     expect(exposed.nangoDesktop).toBeDefined();
-    expect(await bridge.selectFolder()).toBe("D:\\NangoWorkspace");
+    expect(await bridge.selectFolder()).toBe("D:\\nango_space");
     expect(await bridge.getAppVersion()).toBe("1.0.0");
   });
 

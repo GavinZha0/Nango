@@ -15,13 +15,12 @@ services:
       - "${APP_PORT:-9300}:9300"
     volumes:
       - .cache/datasource:/app/.cache/datasource:U
-      - .cache/playwright:/app/.cache/playwright:ro
       # Host-file tools (read_file / write_file / create_folder /
-      # download_file). `host.file.root` defaults to the CONTAINER path
-      # below — the app never sees host paths. This mount is read-write so
-      # writes and downloads land; the host directory must be writable by
-      # uid 1001 (the `nextjs` user).
-      - ./shared_folder:/shared_folder
+      # download_file) and Playwright screenshots (<host.file.root>/playwright).
+      # `host.file.root` defaults to the CONTAINER path below. This mount is
+      # read-write so writes and downloads land; the host directory must be
+      # writable by uid 1001 (the `nextjs` user).
+      - ./nango_space:/nango_space
     environment:
       NO_HTTPS: ${NO_HTTPS:-1}
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
@@ -150,7 +149,7 @@ services:
     ports:
       - "8931:8931"
     volumes:
-      - .cache/playwright:/app/.output:U
+      - ./nango_space/playwright:/app/.output:U
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8931/health || exit 1"]
       interval: 15s

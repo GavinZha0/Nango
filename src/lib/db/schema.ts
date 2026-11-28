@@ -718,6 +718,9 @@ export const McpServerTable = pgTable("mcp_server", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
+  /** Persistent setup tips / configuration notes shown in the MCP edit dialog
+   *  (seeded from market `setupHint` on install; user-editable). */
+  note: text("note"),
   type: text("type").notNull(),         // "sse" | "http" | "stdio"
   url: text("url").notNull().default(""),
   /** Non-sensitive request headers forwarded to the MCP server,

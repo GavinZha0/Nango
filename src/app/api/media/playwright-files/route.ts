@@ -21,6 +21,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const searchDir = resolvePlaywrightOutputDir();
+  if (!searchDir) {
+    return NextResponse.json(
+      {
+        error: "ROOT_NOT_CONFIGURED",
+        file,
+        message:
+          "Playwright screenshot storage is unavailable because `host.file.root` is not configured in Admin → Config.",
+      },
+      { status: 404 },
+    );
+  }
+
   const result = await readPlaywrightScreenshot(file);
 
   if (!result) {
@@ -28,9 +41,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       {
         error: "FILE_NOT_FOUND",
         file,
-        searchDir: resolvePlaywrightOutputDir(),
-        message:
-          "Screenshot file not found on disk. Please verify that '.cache/playwright' is mounted in docker-compose.yaml.",
+        searchDir,
+        message: `Screenshot file not found under "${searchDir}". Verify \`host.file.root\` and Playwright MCP's output directory.`,
       },
       { status: 404 },
     );

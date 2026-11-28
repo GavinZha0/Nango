@@ -15,6 +15,7 @@ import { ConfigTable } from "@/lib/db/schema";
 import { ApiError, withAdmin } from "@/lib/http/route-handlers";
 import { parseBody } from "@/lib/http/validation";
 import { updateConfig, deleteConfig, CONFIG_DEFAULTS_MAP } from "@/lib/config";
+import { evictPlaywrightStdioProviders } from "@/lib/mcp";
 
 const ROUTE = "/api/admin/config/[key]";
 
@@ -71,6 +72,10 @@ export const PATCH = withAdmin<Params>(ROUTE, async ({ req, params, session }) =
       .update(ConfigTable)
       .set({ description: body.description })
       .where(eq(ConfigTable.key, key));
+  }
+
+  if (key === "host.file.root") {
+    await evictPlaywrightStdioProviders().catch(() => {});
   }
 
   const [row] = await db
